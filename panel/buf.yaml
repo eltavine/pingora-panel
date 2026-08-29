@@ -1,0 +1,13 @@
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+  except:
+    # The repository layout and service name are part of the public Panel contract.
+    - PACKAGE_DIRECTORY_MATCH
+    - SERVICE_SUFFIX
+breaking:
+  use:
+    - FILE

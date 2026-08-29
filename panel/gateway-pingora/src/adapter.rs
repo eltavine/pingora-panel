@@ -1,0 +1,314 @@
+use crate::{ADAPTER_VERSION, PINGORA_PACKAGE_VERSION};
+use async_trait::async_trait;
+use panel_engine::{
+    AbortReceipt, ActivateRequest, ActivationReceipt, EngineCapabilities, EngineCapability,
+    FakeGatewayEngine, GatewayEngine, GatewayStatus, PrepareReceipt, PrepareRequest, PrepareToken,
+};
+use panel_errors::{Diagnostic, ErrorCode, PanelError, Result, ValidationReport};
+use panel_ir::{LoadBalancingPolicy, RouteAction, RouteMatcher, RuntimeSnapshot};
+use pingora_core::upstreams::peer::HttpPeer;
+use pingora_http::RequestHeader;
+use pingora_load_balancing::Backend;
+use std::{collections::BTreeSet, net::SocketAddr};
+
+pub struct PingoraGatewayAdapter {
+    engine: FakeGatewayEngine,
+}
+
+impl Default for PingoraGatewayAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PingoraGatewayAdapter {
+    pub fn new() -> Self {
+        Self {
+            engine: FakeGatewayEngine::new(Self::supported_capabilities()),
+        }
+    }
+
+    pub fn pingora_package_version(&self) -> &'static str {
+        PINGORA_PACKAGE_VERSION
+    }
+
+    pub fn adapter_version(&self) -> &'static str {
+        ADAPTER_VERSION
+    }
+
+    fn supported_capabilities() -> BTreeSet<EngineCapability> {
+        [
+            EngineCapability::new("route.host", "1"),
+            EngineCapability::new("route.path-prefix", "1"),
+            EngineCapability::new("upstream.http", "1"),
+            EngineCapability::new("upstream.https", "1"),
+            EngineCapability::new("activation.cas", "1"),
+        ]
+        .into_iter()
+        .collect()
+    }
+
+    fn validate_supported_ir(snapshot: &RuntimeSnapshot) -> Result<ValidationReport> {
+        let mut unsupported = Vec::new();
+        if !snapshot.listeners.is_empty() {
+            unsupported.push("listeners");
+        }
+        if !snapshot.tls_profiles.is_empty() {
+            unsupported.push("tls_profiles");
+        }
+        if !snapshot.header_policies.is_empty() {
+            unsupported.push("header_policies");
+        }
+        if !snapshot.static_content.is_empty() {
+            unsupported.push("static_content");
+        }
+        if !snapshot.cache_policies.is_empty() {
+            unsupported.push("cache_policies");
+        }
+        if !snapshot.security_policies.is_empty() {
+            unsupported.push("security_policies");
+        }
+        if !snapshot.lua_policies.is_empty() {
+            unsupported.push("lua_policies");
+        }
+        for route in &snapshot.routes {
+            if !matches!(
+                route.matcher,
+                RouteMatcher::Host { .. }
+                    | RouteMatcher::PathPrefix { .. }
+                    | RouteMatcher::HostPathPrefix { .. }
+            ) {
+                unsupported.push("route matcher");
+            }
+            if !matches!(route.action, RouteAction::Proxy { .. }) {
+                unsupported.push("route action");
+            }
+            if route.retry_policy.is_some()
+                || route.header_policy_id.is_some()
+                || route.cache_policy_id.is_some()
+                || route.security_policy_id.is_some()
+                || route.lua_policy_id.is_some()
+            {
+                unsupported.push("route policy");
+            }
+        }
+        for pool in &snapshot.upstream_pools {
+            if !matches!(pool.load_balancing, LoadBalancingPolicy::RoundRobin) {
+                unsupported.push("load balancing policy");
+            }
+            if pool.retry_policy.attempts != 0 {
+                unsupported.push("upstream retry policy");
+            }
+            if pool.endpoints.is_empty() {
+                return Ok(ValidationReport::from_diagnostics(vec![Diagnostic::error(
+                    ErrorCode::VALIDATION_FAILED,
+                    format!("upstream pool {} has no endpoints", pool.id),
+                )]));
+            }
+            for endpoint in &pool.endpoints {
+                if endpoint.weight == 0 {
+                    return Ok(ValidationReport::from_diagnostics(vec![Diagnostic::error(
+                        ErrorCode::VALIDATION_FAILED,
+                        format!(
+                            "upstream endpoint {} must have a positive weight",
+                            endpoint.id
+                        ),
+                    )]));
+                }
+                let _peer = PrivatePeer::try_from(endpoint)?;
+            }
+        }
+        if !unsupported.is_empty() {
+            unsupported.sort_unstable();
+            unsupported.dedup();
+            return Err(PanelError::unsupported_capability(format!(
+                "Pingora adapter does not support IR nodes: {}",
+                unsupported.join(", ")
+            )));
+        }
+        Ok(ValidationReport::valid())
+    }
+}
+
+/// All direct interaction with Pingora values remains behind this private descriptor.
+struct PrivatePeer {
+    _peer: HttpPeer,
+    _backend: Backend,
+    _header_probe: RequestHeader,
+}
+
+impl TryFrom<&panel_ir::UpstreamEndpoint> for PrivatePeer {
+    type Error = PanelError;
+
+    fn try_from(endpoint: &panel_ir::UpstreamEndpoint) -> Result<Self> {
+        let socket_text = if endpoint.address.host().contains(':') {
+            format!("[{}]:{}", endpoint.address.host(), endpoint.address.port())
+        } else {
+            format!("{}:{}", endpoint.address.host(), endpoint.address.port())
+        };
+        let socket: SocketAddr = socket_text.parse().map_err(|_| {
+            PanelError::invalid_argument(format!(
+                "upstream {} must use an IP literal during the initial adapter stage",
+                endpoint.id
+            ))
+        })?;
+        let sni = endpoint
+            .sni
+            .clone()
+            .unwrap_or_else(|| endpoint.address.host().to_string());
+        let peer = HttpPeer::new(socket, endpoint.address.tls(), sni);
+        let backend = Backend::new_with_weight(&socket.to_string(), endpoint.weight as usize)
+            .map_err(|error| {
+                PanelError::invalid_argument(format!(
+                    "invalid Pingora backend for {}: {error}",
+                    endpoint.id
+                ))
+            })?;
+        let header_probe = RequestHeader::build("GET", b"/", None).map_err(|error| {
+            PanelError::internal(format!("Pingora HTTP header mapping failed: {error}"))
+        })?;
+        Ok(Self {
+            _peer: peer,
+            _backend: backend,
+            _header_probe: header_probe,
+        })
+    }
+}
+
+#[async_trait]
+impl GatewayEngine for PingoraGatewayAdapter {
+    async fn capabilities(&self) -> Result<EngineCapabilities> {
+        let mut capabilities = self.engine.capabilities().await?;
+        capabilities.build_version = PINGORA_PACKAGE_VERSION.into();
+        capabilities.adapter_version = ADAPTER_VERSION.into();
+        Ok(capabilities)
+    }
+
+    async fn validate(&self, snapshot: RuntimeSnapshot) -> Result<ValidationReport> {
+        let base = self.engine.validate(snapshot.clone()).await?;
+        if !base.valid {
+            return Ok(base);
+        }
+        Self::validate_supported_ir(&snapshot)
+    }
+
+    async fn prepare(&self, request: PrepareRequest) -> Result<PrepareReceipt> {
+        let report = self.validate(request.snapshot.clone()).await?;
+        if !report.valid {
+            return Err(PanelError::new(
+                ErrorCode::VALIDATION_FAILED,
+                "snapshot validation failed",
+            )
+            .with_diagnostics(report.diagnostics));
+        }
+        let mut receipt = self.engine.prepare(request).await?;
+        receipt.adapter_version = ADAPTER_VERSION.into();
+        Ok(receipt)
+    }
+
+    async fn activate(&self, request: ActivateRequest) -> Result<ActivationReceipt> {
+        let mut receipt = self.engine.activate(request).await?;
+        receipt.adapter_version = ADAPTER_VERSION.into();
+        Ok(receipt)
+    }
+
+    async fn abort(&self, token: PrepareToken) -> Result<AbortReceipt> {
+        let mut receipt = self.engine.abort(token).await?;
+        receipt.adapter_version = ADAPTER_VERSION.into();
+        Ok(receipt)
+    }
+
+    async fn status(&self) -> Result<GatewayStatus> {
+        let mut status = self.engine.status().await?;
+        status.adapter_version = ADAPTER_VERSION.into();
+        Ok(status)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use panel_domain::{EndpointAddress, EndpointId, RevisionId, UpstreamPoolId};
+    use panel_engine::PrepareRequest;
+    use panel_ir::{
+        CachePolicy, CapabilityRequirement, RetryPolicy, UpstreamEndpoint, UpstreamPoolSpec,
+    };
+
+    fn mapped_snapshot(tls: bool) -> RuntimeSnapshot {
+        let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+        snapshot.upstream_pools.push(UpstreamPoolSpec {
+            id: UpstreamPoolId::new("primary").unwrap(),
+            name: "primary".into(),
+            endpoints: vec![UpstreamEndpoint {
+                id: EndpointId::new("local").unwrap(),
+                address: EndpointAddress::new("127.0.0.1", if tls { 443 } else { 80 }, tls)
+                    .unwrap(),
+                sni: tls.then(|| "example.com".into()),
+                weight: 1,
+            }],
+            load_balancing: LoadBalancingPolicy::RoundRobin,
+            retry_policy: RetryPolicy {
+                attempts: 0,
+                per_try_timeout_ms: 0,
+                retry_statuses: BTreeSet::new(),
+            },
+        });
+        snapshot
+            .required_capabilities
+            .push(CapabilityRequirement::new(
+                if tls {
+                    "upstream.https"
+                } else {
+                    "upstream.http"
+                },
+                "1",
+            ));
+        snapshot.refresh_content_hash();
+        snapshot
+    }
+
+    #[tokio::test]
+    async fn maps_http_and_https_peers_without_listener() {
+        let adapter = PingoraGatewayAdapter::new();
+        assert!(
+            adapter
+                .validate(mapped_snapshot(false))
+                .await
+                .unwrap()
+                .valid
+        );
+        assert!(adapter.validate(mapped_snapshot(true)).await.unwrap().valid);
+    }
+
+    #[tokio::test]
+    async fn unsupported_nodes_fail_explicitly() {
+        let adapter = PingoraGatewayAdapter::new();
+        let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+        snapshot.cache_policies.push(CachePolicy {
+            id: "cache".into(),
+            enabled: true,
+            ttl_seconds: 60,
+            vary_headers: BTreeSet::new(),
+        });
+        snapshot.refresh_content_hash();
+        let error = adapter.validate(snapshot).await.unwrap_err();
+        assert_eq!(error.code.as_str(), ErrorCode::UNSUPPORTED_CAPABILITY);
+    }
+
+    #[tokio::test]
+    async fn version_and_capabilities_are_reported() {
+        let adapter = PingoraGatewayAdapter::new();
+        let capabilities = adapter.capabilities().await.unwrap();
+        assert_eq!(capabilities.build_version, "0.8.0");
+        assert_eq!(adapter.pingora_package_version(), "0.8.0");
+        assert!(capabilities
+            .capabilities
+            .contains(&EngineCapability::new("activation.cas", "1")));
+        assert!(adapter
+            .prepare(PrepareRequest {
+                snapshot: mapped_snapshot(false)
+            })
+            .await
+            .is_ok());
+    }
+}

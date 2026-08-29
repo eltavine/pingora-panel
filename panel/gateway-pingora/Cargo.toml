@@ -1,0 +1,28 @@
+[package]
+name = "gateway-pingora"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+panel-domain = { path = "../panel-domain" }
+panel-engine = { path = "../panel-engine" }
+panel-errors = { path = "../panel-errors" }
+panel-ir = { path = "../panel-ir" }
+pingora-core = { version = "=0.8.0", path = "../../pingora-core", default-features = false }
+pingora-http = { version = "=0.8.0", path = "../../pingora-http", default-features = false }
+pingora-load-balancing = { version = "=0.8.0", path = "../../pingora-load-balancing", default-features = false }
+pingora-proxy = { version = "=0.8.0", path = "../../pingora-proxy", default-features = false }
+
+[dev-dependencies]
+tokio.workspace = true
+
+[features]
+default = []
+# Reserved gates: enabling these does not silently add runtime support.
+tls = []
+cache = []
+lua = []

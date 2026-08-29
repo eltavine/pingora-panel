@@ -1,0 +1,166 @@
+syntax = "proto3";
+
+package pingora.panel.gateway.v1;
+
+import "common/v1/common.proto";
+
+service GatewayEngine {
+  rpc GetCapabilities(GetCapabilitiesRequest) returns (GetCapabilitiesResponse);
+  rpc Validate(ValidateRequest) returns (ValidateResponse);
+  rpc Prepare(PrepareRequest) returns (PrepareResponse);
+  rpc Activate(ActivateRequest) returns (ActivateResponse);
+  rpc Abort(AbortRequest) returns (AbortResponse);
+  rpc Status(StatusRequest) returns (StatusResponse);
+}
+
+message GetCapabilitiesRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+}
+
+message GetCapabilitiesResponse {
+  .pingora.panel.common.v1.Version version = 1;
+  repeated .pingora.panel.common.v1.Capability capabilities = 2;
+  .pingora.panel.common.v1.Error error = 3;
+}
+
+message RuntimeSnapshot {
+  string schema_version = 1;
+  uint64 revision_id = 2;
+  .pingora.panel.common.v1.ContentHash content_hash = 3;
+  repeated ListenerRef listeners = 4;
+  repeated SiteSpec sites = 5;
+  repeated RouteSpec routes = 6;
+  repeated UpstreamPoolSpec upstream_pools = 7;
+  repeated TlsProfile tls_profiles = 8;
+  repeated HeaderPolicy header_policies = 9;
+  repeated StaticContentPolicy static_content = 10;
+  repeated CachePolicy cache_policies = 11;
+  repeated SecurityPolicy security_policies = 12;
+  repeated LuaPolicy lua_policies = 13;
+  repeated .pingora.panel.common.v1.Capability required_capabilities = 14;
+}
+
+message ListenerRef {
+  string id = 1;
+  string address = 2;
+  bool tls = 3;
+}
+
+message SiteSpec {
+  string id = 1;
+  string name = 2;
+  bool enabled = 3;
+}
+
+message RouteSpec {
+  string id = 1;
+  string site_id = 2;
+  uint32 priority = 3;
+  bool enabled = 4;
+  RouteMatcher matcher = 5;
+  RouteAction action = 6;
+}
+
+message RouteMatcher {
+  oneof kind {
+    string host = 1;
+    string path_prefix = 2;
+    string exact_path = 3;
+    string glob = 4;
+    string regex = 5;
+  }
+}
+
+message RouteAction {
+  oneof kind {
+    string upstream_pool_id = 1;
+    string static_content_id = 2;
+    string redirect_url = 3;
+    uint32 return_status = 4;
+  }
+}
+
+message UpstreamPoolSpec {
+  string id = 1;
+  string name = 2;
+  repeated UpstreamEndpoint endpoints = 3;
+  string load_balancing_policy = 4;
+  string retry_policy = 5;
+}
+
+message UpstreamEndpoint {
+  string id = 1;
+  string address = 2;
+  uint32 port = 3;
+  bool tls = 4;
+  string sni = 5;
+  uint32 weight = 6;
+}
+
+message TlsProfile { string id = 1; string certificate_ref = 2; }
+message HeaderPolicy { string id = 1; map<string, string> set = 2; repeated string remove = 3; }
+message StaticContentPolicy { string id = 1; string root = 2; bool spa_fallback = 3; }
+message CachePolicy { string id = 1; bool enabled = 2; uint64 ttl_seconds = 3; }
+message SecurityPolicy { string id = 1; repeated string allowed_cidrs = 2; uint64 request_rate = 3; }
+message LuaPolicy { string id = 1; string script_ref = 2; repeated string capabilities = 3; }
+
+message ValidateRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  RuntimeSnapshot snapshot = 2;
+}
+
+message ValidateResponse {
+  .pingora.panel.common.v1.Version version = 1;
+  bool valid = 2;
+  repeated .pingora.panel.common.v1.Diagnostic diagnostics = 3;
+  .pingora.panel.common.v1.Error error = 4;
+}
+
+message PrepareRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  RuntimeSnapshot snapshot = 2;
+}
+
+message PrepareResponse {
+  .pingora.panel.common.v1.Version version = 1;
+  string prepare_token = 2;
+  uint64 revision_id = 3;
+  .pingora.panel.common.v1.ContentHash content_hash = 4;
+  repeated .pingora.panel.common.v1.Diagnostic diagnostics = 5;
+  .pingora.panel.common.v1.Error error = 6;
+}
+
+message ActivateRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string prepare_token = 2;
+  .pingora.panel.common.v1.ContentHash expected_active_hash = 3;
+}
+
+message ActivateResponse {
+  .pingora.panel.common.v1.Version version = 1;
+  uint64 revision_id = 2;
+  .pingora.panel.common.v1.ContentHash active_hash = 3;
+  .pingora.panel.common.v1.ContentHash previous_active_hash = 4;
+  .pingora.panel.common.v1.Error error = 5;
+}
+
+message AbortRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string prepare_token = 2;
+}
+
+message AbortResponse {
+  .pingora.panel.common.v1.Version version = 1;
+  bool aborted = 2;
+  .pingora.panel.common.v1.Error error = 3;
+}
+
+message StatusRequest { .pingora.panel.common.v1.RequestContext context = 1; }
+
+message StatusResponse {
+  .pingora.panel.common.v1.Version version = 1;
+  .pingora.panel.common.v1.HealthStatus health = 2;
+  uint64 active_revision_id = 3;
+  .pingora.panel.common.v1.ContentHash active_hash = 4;
+  .pingora.panel.common.v1.Error error = 5;
+}

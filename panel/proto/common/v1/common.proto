@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package pingora.panel.common.v1;
+
+message Version {
+  string product = 1;
+  string component = 2;
+  string build = 3;
+  string schema = 4;
+  string protocol = 5;
+  string capability_set = 6;
+}
+
+message ContentHash {
+  string algorithm = 1;
+  string value = 2;
+}
+
+message Capability {
+  string name = 1;
+  string version = 2;
+}
+
+message RequestContext {
+  string request_id = 1;
+  string correlation_id = 2;
+  string actor = 3;
+  string deadline = 4;
+  string idempotency_key = 5;
+  string schema_version = 6;
+}
+
+enum DiagnosticSeverity {
+  DIAGNOSTIC_SEVERITY_UNSPECIFIED = 0;
+  DIAGNOSTIC_SEVERITY_INFO = 1;
+  DIAGNOSTIC_SEVERITY_WARNING = 2;
+  DIAGNOSTIC_SEVERITY_ERROR = 3;
+}
+
+message Diagnostic {
+  string code = 1;
+  DiagnosticSeverity severity = 2;
+  string message = 3;
+  string source_span = 4;
+  string resource_id = 5;
+  string help = 6;
+}
+
+message Error {
+  string code = 1;
+  string message = 2;
+  bool retryable = 3;
+  repeated Diagnostic diagnostics = 4;
+}
+
+message HealthStatus {
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    STATE_STARTING = 1;
+    STATE_READY = 2;
+    STATE_DEGRADED = 3;
+    STATE_NOT_READY = 4;
+  }
+
+  State state = 1;
+  Version version = 2;
+  string message = 3;
+}

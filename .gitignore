@@ -1,5 +1,7 @@
 Cargo.lock
+!panel/Cargo.lock
 /target
+panel/target
 **/*.rs.bk
 dhat-heap.json
 .vscode
