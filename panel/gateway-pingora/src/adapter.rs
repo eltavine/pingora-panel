@@ -1,18 +1,25 @@
 use crate::{ADAPTER_VERSION, PINGORA_PACKAGE_VERSION};
+use arc_swap::ArcSwapOption;
 use async_trait::async_trait;
-use panel_engine::{
-    AbortReceipt, ActivateRequest, ActivationReceipt, EngineCapabilities, EngineCapability,
-    FakeGatewayEngine, GatewayEngine, GatewayStatus, PrepareReceipt, PrepareRequest, PrepareToken,
-};
+use panel_engine::{validate_engine_ir, DataPlaneAdapter, EngineCapabilities, EngineCapability};
 use panel_errors::{Diagnostic, ErrorCode, PanelError, Result, ValidationReport};
 use panel_ir::{LoadBalancingPolicy, RouteAction, RouteMatcher, RuntimeSnapshot};
 use pingora_core::upstreams::peer::HttpPeer;
 use pingora_http::RequestHeader;
 use pingora_load_balancing::Backend;
-use std::{collections::BTreeSet, net::SocketAddr};
+use std::{collections::BTreeSet, net::SocketAddr, sync::Arc};
 
 pub struct PingoraGatewayAdapter {
-    engine: FakeGatewayEngine,
+    active: ArcSwapOption<PreparedPingoraSnapshot>,
+}
+
+/// Opaque immutable artifact built entirely before activation.
+///
+/// Its fields remain private so no upstream Pingora value can cross the adapter
+/// boundary even though the associated type is visible to the generic runtime.
+pub struct PreparedPingoraSnapshot {
+    snapshot: RuntimeSnapshot,
+    _peers: Vec<PrivatePeer>,
 }
 
 impl Default for PingoraGatewayAdapter {
@@ -24,7 +31,7 @@ impl Default for PingoraGatewayAdapter {
 impl PingoraGatewayAdapter {
     pub fn new() -> Self {
         Self {
-            engine: FakeGatewayEngine::new(Self::supported_capabilities()),
+            active: ArcSwapOption::empty(),
         }
     }
 
@@ -34,6 +41,12 @@ impl PingoraGatewayAdapter {
 
     pub fn adapter_version(&self) -> &'static str {
         ADAPTER_VERSION
+    }
+
+    pub fn active_snapshot(&self) -> Option<RuntimeSnapshot> {
+        self.active
+            .load_full()
+            .map(|prepared| prepared.snapshot.clone())
     }
 
     fn supported_capabilities() -> BTreeSet<EngineCapability> {
@@ -128,6 +141,19 @@ impl PingoraGatewayAdapter {
         }
         Ok(ValidationReport::valid())
     }
+
+    fn compile(snapshot: RuntimeSnapshot) -> Result<PreparedPingoraSnapshot> {
+        let peers = snapshot
+            .upstream_pools
+            .iter()
+            .flat_map(|pool| pool.endpoints.iter())
+            .map(PrivatePeer::try_from)
+            .collect::<Result<Vec<_>>>()?;
+        Ok(PreparedPingoraSnapshot {
+            snapshot,
+            _peers: peers,
+        })
+    }
 }
 
 /// All direct interaction with Pingora values remains behind this private descriptor.
@@ -176,24 +202,29 @@ impl TryFrom<&panel_ir::UpstreamEndpoint> for PrivatePeer {
 }
 
 #[async_trait]
-impl GatewayEngine for PingoraGatewayAdapter {
+impl DataPlaneAdapter for PingoraGatewayAdapter {
+    type Prepared = PreparedPingoraSnapshot;
+
     async fn capabilities(&self) -> Result<EngineCapabilities> {
-        let mut capabilities = self.engine.capabilities().await?;
-        capabilities.build_version = PINGORA_PACKAGE_VERSION.into();
-        capabilities.adapter_version = ADAPTER_VERSION.into();
-        Ok(capabilities)
+        Ok(EngineCapabilities {
+            protocol_version: "pingora.panel.gateway.v1".into(),
+            build_version: PINGORA_PACKAGE_VERSION.into(),
+            schema_version: panel_ir::IR_SCHEMA_VERSION.into(),
+            adapter_version: ADAPTER_VERSION.into(),
+            capabilities: Self::supported_capabilities(),
+        })
     }
 
-    async fn validate(&self, snapshot: RuntimeSnapshot) -> Result<ValidationReport> {
-        let base = self.engine.validate(snapshot.clone()).await?;
+    async fn validate(&self, snapshot: &RuntimeSnapshot) -> Result<ValidationReport> {
+        let base = validate_engine_ir(snapshot, &Self::supported_capabilities())?;
         if !base.valid {
             return Ok(base);
         }
-        Self::validate_supported_ir(&snapshot)
+        Self::validate_supported_ir(snapshot)
     }
 
-    async fn prepare(&self, request: PrepareRequest) -> Result<PrepareReceipt> {
-        let report = self.validate(request.snapshot.clone()).await?;
+    async fn prepare(&self, snapshot: RuntimeSnapshot) -> Result<Self::Prepared> {
+        let report = self.validate(&snapshot).await?;
         if !report.valid {
             return Err(PanelError::new(
                 ErrorCode::VALIDATION_FAILED,
@@ -201,27 +232,11 @@ impl GatewayEngine for PingoraGatewayAdapter {
             )
             .with_diagnostics(report.diagnostics));
         }
-        let mut receipt = self.engine.prepare(request).await?;
-        receipt.adapter_version = ADAPTER_VERSION.into();
-        Ok(receipt)
+        Self::compile(snapshot)
     }
 
-    async fn activate(&self, request: ActivateRequest) -> Result<ActivationReceipt> {
-        let mut receipt = self.engine.activate(request).await?;
-        receipt.adapter_version = ADAPTER_VERSION.into();
-        Ok(receipt)
-    }
-
-    async fn abort(&self, token: PrepareToken) -> Result<AbortReceipt> {
-        let mut receipt = self.engine.abort(token).await?;
-        receipt.adapter_version = ADAPTER_VERSION.into();
-        Ok(receipt)
-    }
-
-    async fn status(&self) -> Result<GatewayStatus> {
-        let mut status = self.engine.status().await?;
-        status.adapter_version = ADAPTER_VERSION.into();
-        Ok(status)
+    fn activate(&self, prepared: Arc<Self::Prepared>) {
+        self.active.store(Some(prepared));
     }
 }
 
@@ -229,7 +244,6 @@ impl GatewayEngine for PingoraGatewayAdapter {
 mod tests {
     use super::*;
     use panel_domain::{EndpointAddress, EndpointId, RevisionId, UpstreamPoolId};
-    use panel_engine::PrepareRequest;
     use panel_ir::{
         CachePolicy, CapabilityRequirement, RetryPolicy, UpstreamEndpoint, UpstreamPoolSpec,
     };
@@ -272,12 +286,18 @@ mod tests {
         let adapter = PingoraGatewayAdapter::new();
         assert!(
             adapter
-                .validate(mapped_snapshot(false))
+                .validate(&mapped_snapshot(false))
                 .await
                 .unwrap()
                 .valid
         );
-        assert!(adapter.validate(mapped_snapshot(true)).await.unwrap().valid);
+        assert!(
+            adapter
+                .validate(&mapped_snapshot(true))
+                .await
+                .unwrap()
+                .valid
+        );
     }
 
     #[tokio::test]
@@ -291,7 +311,7 @@ mod tests {
             vary_headers: BTreeSet::new(),
         });
         snapshot.refresh_content_hash();
-        let error = adapter.validate(snapshot).await.unwrap_err();
+        let error = adapter.validate(&snapshot).await.unwrap_err();
         assert_eq!(error.code.as_str(), ErrorCode::UNSUPPORTED_CAPABILITY);
     }
 
@@ -304,11 +324,8 @@ mod tests {
         assert!(capabilities
             .capabilities
             .contains(&EngineCapability::new("activation.cas", "1")));
-        assert!(adapter
-            .prepare(PrepareRequest {
-                snapshot: mapped_snapshot(false)
-            })
-            .await
-            .is_ok());
+        let prepared = Arc::new(adapter.prepare(mapped_snapshot(false)).await.unwrap());
+        adapter.activate(prepared);
+        assert!(adapter.active_snapshot().is_some());
     }
 }

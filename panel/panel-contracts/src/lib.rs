@@ -101,6 +101,7 @@ mod tests {
                 value: "00".repeat(32),
             }),
             error: None,
+            prepared_count: 0,
         };
         let decoded =
             gateway::v1::StatusResponse::decode(original.encode_to_vec().as_slice()).unwrap();

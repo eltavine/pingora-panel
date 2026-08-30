@@ -44,13 +44,17 @@ message ListenerRef {
   string id = 1;
   string address = 2;
   bool tls = 3;
+  string tls_profile_id = 4;
 }
 
 message SiteSpec {
   string id = 1;
   string name = 2;
   bool enabled = 3;
+  repeated DomainSpec domains = 4;
 }
+
+message DomainSpec { string host = 1; string tls_profile_id = 2; }
 
 message RouteSpec {
   string id = 1;
@@ -59,6 +63,11 @@ message RouteSpec {
   bool enabled = 4;
   RouteMatcher matcher = 5;
   RouteAction action = 6;
+  RetryPolicy retry_policy_v1 = 7;
+  string header_policy_id = 8;
+  string cache_policy_id = 9;
+  string security_policy_id = 10;
+  string lua_policy_id = 11;
 }
 
 message RouteMatcher {
@@ -68,8 +77,11 @@ message RouteMatcher {
     string exact_path = 3;
     string glob = 4;
     string regex = 5;
+    HostPathPrefixMatcher host_path_prefix = 6;
   }
 }
+
+message HostPathPrefixMatcher { string host = 1; string path = 2; }
 
 message RouteAction {
   oneof kind {
@@ -77,8 +89,13 @@ message RouteAction {
     string static_content_id = 2;
     string redirect_url = 3;
     uint32 return_status = 4;
+    RedirectAction redirect = 5;
+    RespondAction respond = 6;
   }
 }
+
+message RedirectAction { string location = 1; uint32 status = 2; }
+message RespondAction { uint32 status = 1; string body = 2; bool has_body = 3; }
 
 message UpstreamPoolSpec {
   string id = 1;
@@ -86,6 +103,8 @@ message UpstreamPoolSpec {
   repeated UpstreamEndpoint endpoints = 3;
   string load_balancing_policy = 4;
   string retry_policy = 5;
+  LoadBalancingPolicy load_balancing_v1 = 6;
+  RetryPolicy retry_policy_v1 = 7;
 }
 
 message UpstreamEndpoint {
@@ -97,12 +116,68 @@ message UpstreamEndpoint {
   uint32 weight = 6;
 }
 
-message TlsProfile { string id = 1; string certificate_ref = 2; }
-message HeaderPolicy { string id = 1; map<string, string> set = 2; repeated string remove = 3; }
-message StaticContentPolicy { string id = 1; string root = 2; bool spa_fallback = 3; }
-message CachePolicy { string id = 1; bool enabled = 2; uint64 ttl_seconds = 3; }
-message SecurityPolicy { string id = 1; repeated string allowed_cidrs = 2; uint64 request_rate = 3; }
-message LuaPolicy { string id = 1; string script_ref = 2; repeated string capabilities = 3; }
+message LoadBalancingPolicy {
+  oneof kind {
+    bool round_robin = 1;
+    bool random = 2;
+    string consistent_hash_key = 3;
+  }
+}
+
+message RetryPolicy {
+  uint32 attempts = 1;
+  uint64 per_try_timeout_ms = 2;
+  repeated uint32 retry_statuses = 3;
+}
+
+message TlsProfile {
+  string id = 1;
+  string certificate_ref = 2;
+  string private_key_secret_id = 3;
+  string min_protocol = 4;
+  repeated string alpn = 5;
+}
+
+message HeaderPolicy {
+  string id = 1;
+  map<string, string> set = 2;
+  repeated string remove = 3;
+  map<string, string> request_set = 4;
+  repeated string request_remove = 5;
+  map<string, string> response_set = 6;
+  repeated string response_remove = 7;
+}
+
+message StaticContentPolicy {
+  string id = 1;
+  string root = 2;
+  bool spa_fallback = 3;
+  repeated string index_files = 4;
+}
+
+message CachePolicy {
+  string id = 1;
+  bool enabled = 2;
+  uint64 ttl_seconds = 3;
+  repeated string vary_headers = 4;
+}
+
+message SecurityPolicy {
+  string id = 1;
+  repeated string allowed_cidrs = 2;
+  uint64 request_rate = 3;
+  repeated string denied_cidrs = 4;
+  bool has_request_rate = 5;
+}
+
+message LuaPolicy {
+  string id = 1;
+  string script_ref = 2;
+  repeated string capabilities = 3;
+  uint64 instruction_limit = 4;
+  uint64 timeout_ms = 5;
+  uint64 memory_limit_bytes = 6;
+}
 
 message ValidateRequest {
   .pingora.panel.common.v1.RequestContext context = 1;
@@ -163,4 +238,5 @@ message StatusResponse {
   uint64 active_revision_id = 3;
   .pingora.panel.common.v1.ContentHash active_hash = 4;
   .pingora.panel.common.v1.Error error = 5;
+  uint64 prepared_count = 6;
 }

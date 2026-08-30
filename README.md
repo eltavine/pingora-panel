@@ -1,84 +1,38 @@
-# Pingora
+# Pingora Panel
 
-![Pingora banner image](./docs/assets/pingora_banner.png)
+[![Panel Build](https://github.com/eltavine/pingora-panel/actions/workflows/panel.yml/badge.svg)](https://github.com/eltavine/pingora-panel/actions/workflows/panel.yml)
+[![Security Audit](https://github.com/eltavine/pingora-panel/actions/workflows/audit.yml/badge.svg)](https://github.com/eltavine/pingora-panel/actions/workflows/audit.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-## What is Pingora
-Pingora is a Rust framework to [build fast, reliable and programmable networked systems](https://blog.cloudflare.com/pingora-open-source).
+Pingora Panel 是一个面向团队运维的单节点网站网关控制平台。项目计划以 Pingora 为数据面，以版本化 DSL 为规范配置源，通过同一组 REST API 为 Web GUI 与 `ppanel` CLI 提供站点、路由、上游、TLS、配置审批、原子发布、回滚、审计和可观测能力。
 
-Pingora is battle tested as it has been serving more than 40 million Internet requests per second for [more than a few years](https://blog.cloudflare.com/how-we-built-pingora-the-proxy-that-connects-cloudflare-to-the-internet).
+## 当前状态
 
-## Feature highlights
-* Async Rust: fast and reliable
-* HTTP 1/2 end to end proxy
-* TLS over OpenSSL, BoringSSL, s2n-tls, or rustls(experimental).
-* gRPC and websocket proxying
-* Graceful reload
-* Customizable load balancing and failover strategies
-* Support for a variety of observability tools
+**In Progress / durable gateway foundation。** `panel/` 独立 workspace 已提供 Proto-first 契约、稳定错误模型、领域值对象、Engine-neutral IR、`GatewayEngine`/`SnapshotStore` ports、内存 `FakeGatewayEngine`、Pingora 0.8.0 数据面适配器、独立 durable runtime、原子文件快照存储、Tonic gRPC transport、标准 gRPC Health 和 `gatewayd` 组合根。Prepare/Activate/CAS、持久 Activation Receipt、Last Known Good 重启恢复、v1 磁盘格式 Golden Fixture、真实 TCP gRPC 黑盒闭环以及适配器依赖隔离已有自动化测试。控制服务、PostgreSQL、NATS、REST API、`ppanel` CLI、Web GUI 和生产 listener 尚未实现；产品功能只有在满足规格验收条件后才会依次标记为 `In Progress`、`Implemented` 和 `Verified`。
 
-## Reasons to use Pingora
-* **Security** is your top priority: Pingora is a more memory safe alternative for services that are written in C/C++
-* Your service is **performance-sensitive**: Pingora is fast and efficient
-* Your service requires extensive **customization**: The APIs Pingora proxy framework provides are highly programmable
+完整产品边界、架构、接口、685 项功能目录、版本路线图和 1.0 质量门禁见 [PRODUCT_SPEC.md](PRODUCT_SPEC.md)。该文件是产品需求的唯一权威来源。
 
-# Getting started
+Initial foundation 构建：
 
-See our [quick starting guide](./docs/quick_start.md) to see how easy it is to build a load balancer.
+```text
+cargo fmt --manifest-path panel/Cargo.toml --all -- --check
+cargo check --manifest-path panel/Cargo.toml --workspace --locked
+cargo test --manifest-path panel/Cargo.toml --workspace --locked
+cargo clippy --manifest-path panel/Cargo.toml --workspace --all-targets --all-features -- -D warnings
+```
 
-Our [user guide](./docs/user_guide/index.md) covers more topics such as how to configure and run Pingora servers, as well as how to build custom HTTP servers and proxy logic on top of Pingora's framework.
+Proto 使用 `panel/proto` 作为唯一输入，Rust 文件在构建时动态生成到 `OUT_DIR`，不会提交生成物。Buf lint/breaking、边界守卫和 Pingora 适配器 smoke test 由独立的 `.github/workflows/panel.yml` 执行。
 
-API docs are also available for all the crates.
+本地启动内部 Gateway gRPC 服务：
 
-# Notable crates in this workspace
-* Pingora: the "public facing" crate to build networked systems and proxies
-* Pingora-core: this crate defines the protocols, functionalities and basic traits
-* Pingora-foundations: Foundations telemetry integration for Pingora services
-* Pingora-proxy: the logic and APIs to build HTTP proxies
-* Pingora-error: the common error type used across Pingora crates
-* Pingora-http: the HTTP header definitions and APIs
-* Pingora-openssl & pingora-boringssl: SSL related extensions and APIs
-* Pingora-ketama: the [Ketama](https://github.com/RJ/ketama) consistent algorithm
-* Pingora-limits: efficient counting algorithms
-* Pingora-load-balancing: load balancing algorithm extensions for pingora-proxy
-* Pingora-memory-cache: Async in-memory caching with cache lock to prevent cache stampede
-* Pingora-s2n: SSL extensions and APIs related to s2n-tls
-* Pingora-timeout: A more efficient async timer system
-* TinyUfo: The caching algorithm behind pingora-memory-cache
+```text
+PINGORA_PANEL_STATE_DIR=/var/lib/pingora-panel/gateway \
+PINGORA_PANEL_GATEWAY_ADDR=127.0.0.1:50051 \
+cargo run --manifest-path panel/Cargo.toml --package gatewayd
+```
 
-Note that Pingora proxy integration with caching should be considered experimental, and as such APIs related to caching are currently highly volatile.
+具体 crate 依赖方向、激活顺序和扩展规则见 [`panel/README.md`](panel/README.md)。
 
-# System requirements
+## Pingora 上游归属
 
-## Systems
-Linux is our tier 1 environment and main focus.
-
-We will try our best for most code to compile for Unix environments. This is for developers and users to have an easier time developing with Pingora in Unix-like environments like macOS (though some features might be missing)
-
-Windows support is preliminary by community's best effort only.
-
-Both x86_64 and aarch64 architectures will be supported.
-
-## Rust version
-
-Pingora keeps a rolling MSRV (minimum supported Rust version) policy of 6 months. This means we will accept PRs that upgrade the MSRV as long as the new Rust version used is at least 6 months old. However, we generally will not bump the highest MSRV across the workspace without a sufficiently compelling reason.
-
-Our current MSRV is 1.85.
-
-Currently not all crates enforce `rust-version` as it is possible to use some crates on lower versions.
-
-## Build Requirements
-
-Some of the crates in this repository have dependencies on additional tools and
-libraries that must be satisfied in order to build them:
-
-* Make sure that [Clang] is installed on your system (for boringssl)
-* Make sure that [Perl 5] is installed on your system (for openssl)
-
-[Clang]:https://clang.llvm.org/
-[Perl 5]:https://www.perl.org/
-
-# Contributing
-Please see our [contribution guidelines](./.github/CONTRIBUTING.md).
-
-# License
-This project is Licensed under [Apache License, Version 2.0](./LICENSE).
+本仓库保留并基于 Cloudflare 的 [Pingora](https://github.com/cloudflare/pingora) 开源项目进行开发。Pingora 是用于构建可编程网络系统与代理服务的 Rust 框架，其上游代码采用 [Apache License 2.0](LICENSE)。Pingora Panel 将通过独立适配器隔离上游 API，保留原始版权、许可和修改记录；项目与 Cloudflare 不存在官方隶属或背书关系。

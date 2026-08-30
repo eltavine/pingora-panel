@@ -7,7 +7,17 @@ metadata="$(cargo metadata --manifest-path "$manifest" --format-version 1 --lock
 failed=0
 
 workspace_members="$(jq -r '.workspace_members[]' <<<"$metadata")"
-for expected in panel-contracts panel-errors panel-domain panel-ir panel-engine gateway-pingora; do
+for expected in \
+  panel-contracts \
+  panel-errors \
+  panel-domain \
+  panel-ir \
+  panel-engine \
+  panel-gateway-runtime \
+  snapshot-store-fs \
+  gateway-pingora \
+  gateway-grpc \
+  gatewayd; do
   if ! grep -q "/panel/$expected#" <<<"$workspace_members"; then
     printf 'workspace violation: expected member %s is missing\n' "$expected" >&2
     failed=1
@@ -45,7 +55,7 @@ for package in "${!direct_dependencies[@]}"; do
   done
 done
 
-protected=(panel-errors panel-domain panel-ir panel-engine)
+protected=(panel-errors panel-domain panel-ir panel-engine panel-gateway-runtime)
 for package in "${protected[@]}"; do
   for dependency in ${direct_dependencies[$package]-}; do
     case "$dependency" in
@@ -56,6 +66,34 @@ for package in "${protected[@]}"; do
         ;;
     esac
   done
+done
+
+assert_no_dependency() {
+  local package="$1"
+  shift
+  local forbidden
+  for forbidden in "$@"; do
+    if [[ " ${direct_dependencies[$package]-} " == *" $forbidden "* ]]; then
+      printf 'boundary violation: %s must not depend on %s\n' "$package" "$forbidden" >&2
+      report_path "$package" "$forbidden"
+      failed=1
+    fi
+  done
+}
+
+# Application orchestration sees only ports. Concrete transport, storage and engine
+# adapters meet exclusively in the gatewayd composition root.
+assert_no_dependency panel-gateway-runtime \
+  panel-contracts gateway-grpc gateway-pingora snapshot-store-fs
+assert_no_dependency snapshot-store-fs \
+  panel-contracts gateway-grpc gateway-pingora panel-gateway-runtime
+assert_no_dependency gateway-grpc \
+  gateway-pingora panel-gateway-runtime snapshot-store-fs
+assert_no_dependency gateway-pingora \
+  panel-contracts gateway-grpc panel-gateway-runtime snapshot-store-fs
+
+for package in panel-errors panel-domain panel-ir panel-engine panel-gateway-runtime snapshot-store-fs gateway-grpc gateway-pingora; do
+  assert_no_dependency "$package" gatewayd
 done
 
 for package in panel-domain panel-ir panel-engine; do

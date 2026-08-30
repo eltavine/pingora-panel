@@ -18,6 +18,7 @@ impl ErrorCode {
     pub const PREPARE_FAILED: &'static str = "PREPARE_FAILED";
     pub const ACTIVATE_FAILED: &'static str = "ACTIVATE_FAILED";
     pub const STORAGE_UNAVAILABLE: &'static str = "STORAGE_UNAVAILABLE";
+    pub const CORRUPT_STATE: &'static str = "CORRUPT_STATE";
     pub const INTERNAL: &'static str = "INTERNAL";
 
     pub fn new(value: impl Into<String>) -> Self {
@@ -224,7 +225,11 @@ impl PanelError {
     }
 
     pub fn storage_unavailable(message: impl Into<String>) -> Self {
-        Self::new(ErrorCode::STORAGE_UNAVAILABLE, message)
+        Self::new(ErrorCode::STORAGE_UNAVAILABLE, message).retryable(true)
+    }
+
+    pub fn corrupt_state(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::CORRUPT_STATE, message)
     }
 
     pub fn internal(message: impl Into<String>) -> Self {

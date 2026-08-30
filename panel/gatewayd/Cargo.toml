@@ -1,0 +1,25 @@
+[package]
+name = "gatewayd"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+gateway-grpc = { path = "../gateway-grpc" }
+gateway-pingora = { path = "../gateway-pingora" }
+panel-contracts = { path = "../panel-contracts" }
+panel-engine = { path = "../panel-engine" }
+panel-errors = { path = "../panel-errors" }
+panel-gateway-runtime = { path = "../panel-gateway-runtime" }
+snapshot-store-fs = { path = "../snapshot-store-fs" }
+tokio.workspace = true
+tonic.workspace = true
+tonic-health.workspace = true
+
+[dev-dependencies]
+panel-domain = { path = "../panel-domain" }
+panel-ir = { path = "../panel-ir" }
+tokio-stream.workspace = true
+uuid.workspace = true

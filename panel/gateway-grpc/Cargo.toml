@@ -1,0 +1,18 @@
+[package]
+name = "gateway-grpc"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+panel-contracts = { path = "../panel-contracts" }
+panel-domain = { path = "../panel-domain" }
+panel-engine = { path = "../panel-engine" }
+panel-errors = { path = "../panel-errors" }
+panel-ir = { path = "../panel-ir" }
+tonic.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

@@ -159,6 +159,49 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
+name = "axum"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "31b698c5f9a010f6573133b09e0de5408834d0c82f8d7475a89fc1867a71cd90"
+dependencies = [
+ "axum-core",
+ "bytes",
+ "futures-util",
+ "http",
+ "http-body",
+ "http-body-util",
+ "itoa",
+ "matchit",
+ "memchr",
+ "mime",
+ "percent-encoding",
+ "pin-project-lite",
+ "serde_core",
+ "sync_wrapper",
+ "tower",
+ "tower-layer",
+ "tower-service",
+]
+
+[[package]]
+name = "axum-core"
+version = "0.5.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08c78f31d7b1291f7ee735c1c6780ccde7785daae9a9206026862dab7d8792d1"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "http",
+ "http-body",
+ "http-body-util",
+ "mime",
+ "pin-project-lite",
+ "sync_wrapper",
+ "tower-layer",
+ "tower-service",
+]
+
+[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -641,9 +684,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "gateway-grpc"
+version = "0.1.0"
+dependencies = [
+ "panel-contracts",
+ "panel-domain",
+ "panel-engine",
+ "panel-errors",
+ "panel-ir",
+ "tokio",
+ "tonic",
+]
+
+[[package]]
 name = "gateway-pingora"
 version = "0.1.0"
 dependencies = [
+ "arc-swap",
  "async-trait",
  "panel-domain",
  "panel-engine",
@@ -654,6 +711,26 @@ dependencies = [
  "pingora-load-balancing",
  "pingora-proxy",
  "tokio",
+]
+
+[[package]]
+name = "gatewayd"
+version = "0.1.0"
+dependencies = [
+ "gateway-grpc",
+ "gateway-pingora",
+ "panel-contracts",
+ "panel-domain",
+ "panel-engine",
+ "panel-errors",
+ "panel-gateway-runtime",
+ "panel-ir",
+ "snapshot-store-fs",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tonic-health",
+ "uuid",
 ]
 
 [[package]]
@@ -978,6 +1055,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "matchit"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -991,6 +1074,12 @@ checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
 dependencies = [
  "autocfg",
 ]
+
+[[package]]
+name = "mime"
+version = "0.3.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
 name = "miniz_oxide"
@@ -1110,6 +1199,19 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "panel-gateway-runtime"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "panel-domain",
+ "panel-engine",
+ "panel-errors",
+ "panel-ir",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -1852,6 +1954,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
+name = "snapshot-store-fs"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "panel-domain",
+ "panel-engine",
+ "panel-errors",
+ "panel-ir",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "socket2"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2021,6 +2138,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -2055,6 +2173,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac2a5518c70fa84342385732db33fb3f44bc4cc748936eb5833d2df34d6445ef"
 dependencies = [
  "async-trait",
+ "axum",
  "base64",
  "bytes",
  "h2",
@@ -2086,6 +2205,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "tonic-health"
+version = "0.14.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fcfab99db777fba2802f0dfa861d1628d1ae916fb199d29819941f139ae85082"
+dependencies = [
+ "prost",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tonic-prost",
 ]
 
 [[package]]

@@ -2,6 +2,8 @@
 
 pub mod fake;
 pub mod ports;
+mod validation;
 
 pub use fake::FakeGatewayEngine;
 pub use ports::*;
+pub use validation::validate_engine_ir;

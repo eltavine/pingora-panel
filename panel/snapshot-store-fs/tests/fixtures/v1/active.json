@@ -1,0 +1,31 @@
+{
+  "format_version": 1,
+  "payload": {
+    "envelope": {
+      "snapshot": {
+        "schema_version": "pingora.panel.ir/v1alpha1",
+        "revision_id": 41,
+        "content_hash": "766d68b0accced7c5d5835cc6f988fb69fe7eb80ae5847045943d1ab8dcc7dd6",
+        "listeners": [],
+        "sites": [],
+        "routes": [],
+        "upstream_pools": [],
+        "tls_profiles": [],
+        "header_policies": [],
+        "static_content": [],
+        "cache_policies": [],
+        "security_policies": [],
+        "lua_policies": [],
+        "required_capabilities": []
+      }
+    },
+    "receipt": {
+      "revision_id": 41,
+      "content_hash": "766d68b0accced7c5d5835cc6f988fb69fe7eb80ae5847045943d1ab8dcc7dd6",
+      "adapter_version": "golden-adapter-v1",
+      "schema_version": "pingora.panel.ir/v1alpha1",
+      "prepare_token": "golden-prepare-token-v1",
+      "previous_active_hash": null
+    }
+  }
+}

@@ -3,7 +3,7 @@ use panel_domain::{ContentHash, RevisionId};
 use panel_errors::{Result, ValidationReport};
 use panel_ir::RuntimeSnapshot;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::Arc};
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct EngineCapability {
@@ -45,6 +45,18 @@ impl PrepareToken {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SnapshotEnvelope {
     pub snapshot: RuntimeSnapshot,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PreparedSnapshotRecord {
+    pub envelope: SnapshotEnvelope,
+    pub receipt: PrepareReceipt,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ActiveSnapshotRecord {
+    pub envelope: SnapshotEnvelope,
+    pub receipt: ActivationReceipt,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -91,6 +103,7 @@ pub struct AbortReceipt {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct GatewayStatus {
     pub ready: bool,
+    pub message: Option<String>,
     pub active_revision_id: Option<RevisionId>,
     pub active_hash: Option<ContentHash>,
     pub prepared_count: usize,
@@ -108,9 +121,27 @@ pub trait GatewayEngine: Send + Sync {
     async fn status(&self) -> Result<GatewayStatus>;
 }
 
+/// Engine-specific snapshot compiler and atomic data-plane switch.
+///
+/// `prepare` may fail and must perform every fallible engine operation. `activate`
+/// is intentionally infallible: implementations publish a fully prepared immutable
+/// value with a single in-memory pointer swap. This lets the durable runtime persist
+/// the activation record before exposing the new snapshot to traffic.
+#[async_trait]
+pub trait DataPlaneAdapter: Send + Sync {
+    type Prepared: Send + Sync + 'static;
+
+    async fn capabilities(&self) -> Result<EngineCapabilities>;
+    async fn validate(&self, snapshot: &RuntimeSnapshot) -> Result<ValidationReport>;
+    async fn prepare(&self, snapshot: RuntimeSnapshot) -> Result<Self::Prepared>;
+    fn activate(&self, prepared: Arc<Self::Prepared>);
+}
+
 #[async_trait]
 pub trait SnapshotStore: Send + Sync {
-    async fn load_last_known_good(&self) -> Result<Option<SnapshotEnvelope>>;
-    async fn save_prepared(&self, snapshot: SnapshotEnvelope) -> Result<()>;
-    async fn save_activation_receipt(&self, receipt: ActivationReceipt) -> Result<()>;
+    async fn load_active(&self) -> Result<Option<ActiveSnapshotRecord>>;
+    async fn load_prepared(&self) -> Result<Vec<PreparedSnapshotRecord>>;
+    async fn save_prepared(&self, record: PreparedSnapshotRecord) -> Result<()>;
+    async fn delete_prepared(&self, token: &PrepareToken) -> Result<()>;
+    async fn commit_activation(&self, record: ActiveSnapshotRecord) -> Result<()>;
 }
