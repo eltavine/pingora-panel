@@ -1,4 +1,6 @@
-use crate::{LoopbackOnlyManagementBindPolicy, ManagementBindPolicy, ShutdownPolicy};
+use crate::{
+    GatewayResourceLimits, LoopbackOnlyManagementBindPolicy, ManagementBindPolicy, ShutdownPolicy,
+};
 use panel_errors::{PanelError, Result};
 use std::{
     ffi::{OsStr, OsString},
@@ -24,6 +26,7 @@ pub struct GatewaydConfig {
     state_directory: PathBuf,
     worker_count: GatewayWorkerCount,
     shutdown_policy: ShutdownPolicy,
+    resource_limits: GatewayResourceLimits,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -90,12 +93,14 @@ impl GatewaydConfig {
             .map(|value| parse_shutdown_policy(&value))
             .transpose()?
             .unwrap_or_default();
+        let resource_limits = GatewayResourceLimits::from_lookup(&mut lookup)?;
 
         Ok(Self {
             listen_address,
             state_directory,
             worker_count,
             shutdown_policy,
+            resource_limits,
         })
     }
 
@@ -113,6 +118,10 @@ impl GatewaydConfig {
 
     pub fn shutdown_policy(&self) -> ShutdownPolicy {
         self.shutdown_policy
+    }
+
+    pub fn resource_limits(&self) -> GatewayResourceLimits {
+        self.resource_limits
     }
 }
 

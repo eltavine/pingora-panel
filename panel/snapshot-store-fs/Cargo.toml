@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 async-trait.workspace = true
+libc.workspace = true
 panel-domain = { path = "../panel-domain" }
 panel-engine = { path = "../panel-engine" }
 panel-errors = { path = "../panel-errors" }

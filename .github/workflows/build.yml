@@ -19,7 +19,7 @@ jobs:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: "recursive"
 
@@ -65,7 +65,7 @@ jobs:
           "$HOME/.local/openresty/bin/openresty" -V
 
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30
         with:
           toolchain: ${{ matrix.toolchain }}
           components: rustfmt, clippy
@@ -98,8 +98,8 @@ jobs:
 
       - name: Run cargo audit
         run: |
-          [[ ${{ matrix.toolchain }} != 1.97.1 ]] || (cargo install --locked cargo-audit && cargo generate-lockfile --ignore-rust-version && cargo audit)
+          [[ ${{ matrix.toolchain }} != 1.97.1 ]] || (cargo install --locked --version 0.22.2 cargo-audit && cargo generate-lockfile --ignore-rust-version && cargo audit)
 
       - name: Run cargo machete
         run: |
-          [[ ${{ matrix.toolchain }} != 1.97.1 ]] || (cargo install cargo-machete --version 0.7.0 && cargo machete)
+          [[ ${{ matrix.toolchain }} != 1.97.1 ]] || (cargo install --locked --version 0.7.0 cargo-machete && cargo machete)

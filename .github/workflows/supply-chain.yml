@@ -1,0 +1,31 @@
+name: Supply-chain guards
+
+on:
+  push:
+    paths:
+      - ".github/dependabot.yml"
+      - ".github/scripts/check-github-actions-pinned.sh"
+      - ".github/scripts/check-ci-tools-pinned.sh"
+      - ".github/workflows/**"
+  pull_request:
+    paths:
+      - ".github/dependabot.yml"
+      - ".github/scripts/check-github-actions-pinned.sh"
+      - ".github/scripts/check-ci-tools-pinned.sh"
+      - ".github/workflows/**"
+
+permissions:
+  contents: read
+
+jobs:
+  immutable-actions:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Reject mutable Action references
+        run: bash .github/scripts/check-github-actions-pinned.sh
+
+      - name: Reject mutable CI tool installations
+        run: bash .github/scripts/check-ci-tools-pinned.sh

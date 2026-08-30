@@ -19,6 +19,8 @@ impl ErrorCode {
     pub const ACTIVATE_FAILED: &'static str = "ACTIVATE_FAILED";
     pub const STORAGE_UNAVAILABLE: &'static str = "STORAGE_UNAVAILABLE";
     pub const CORRUPT_STATE: &'static str = "CORRUPT_STATE";
+    pub const RESOURCE_EXHAUSTED: &'static str = "RESOURCE_EXHAUSTED";
+    pub const DEADLINE_EXCEEDED: &'static str = "DEADLINE_EXCEEDED";
     pub const INTERNAL: &'static str = "INTERNAL";
 
     pub fn new(value: impl Into<String>) -> Self {
@@ -230,6 +232,14 @@ impl PanelError {
 
     pub fn corrupt_state(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::CORRUPT_STATE, message)
+    }
+
+    pub fn resource_exhausted(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::RESOURCE_EXHAUSTED, message).retryable(true)
+    }
+
+    pub fn deadline_exceeded(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::DEADLINE_EXCEEDED, message).retryable(true)
     }
 
     pub fn internal(message: impl Into<String>) -> Self {

@@ -1,11 +1,8 @@
-use gateway_grpc::encode_snapshot;
+use gateway_grpc::{encode_snapshot, GatewayTransportPolicy};
 use gatewayd::{build_gateway_services, gateway_service_name};
 use panel_contracts::{
     common::v1 as common,
-    gateway::v1::{
-        self as wire, gateway_engine_client::GatewayEngineClient,
-        gateway_engine_server::GatewayEngineServer,
-    },
+    gateway::v1::{self as wire, gateway_engine_client::GatewayEngineClient},
 };
 use panel_domain::RevisionId;
 use panel_ir::RuntimeSnapshot;
@@ -40,6 +37,13 @@ struct RunningGateway {
 
 impl RunningGateway {
     async fn start(state_directory: PathBuf) -> Self {
+        Self::start_with_transport_policy(state_directory, GatewayTransportPolicy::default()).await
+    }
+
+    async fn start_with_transport_policy(
+        state_directory: PathBuf,
+        transport_policy: GatewayTransportPolicy,
+    ) -> Self {
         let services = build_gateway_services(state_directory).await.unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -47,7 +51,9 @@ impl RunningGateway {
         let (shutdown, shutdown_requested) = oneshot::channel();
         let task = tokio::spawn(async move {
             Server::builder()
-                .add_service(GatewayEngineServer::new(services.gateway))
+                .concurrency_limit_per_connection(transport_policy.max_concurrent_requests())
+                .timeout(transport_policy.request_timeout())
+                .add_service(transport_policy.gateway_server(services.gateway))
                 .add_service(services.health)
                 .serve_with_incoming_shutdown(incoming, async {
                     let _ = shutdown_requested.await;
@@ -80,6 +86,28 @@ impl RunningGateway {
         self.shutdown.send(()).unwrap();
         self.task.await.unwrap().unwrap();
     }
+}
+
+#[tokio::test]
+async fn configured_transport_rejects_oversized_messages_before_dispatch() {
+    let state = TemporaryDirectory::new();
+    let policy =
+        GatewayTransportPolicy::new(1024, 1024, 2, std::time::Duration::from_secs(1)).unwrap();
+    let gateway = RunningGateway::start_with_transport_policy(state.0.clone(), policy).await;
+    let mut client = gateway.client().await;
+    let mut snapshot = encode_snapshot(&RuntimeSnapshot::empty(RevisionId::new(1)));
+    snapshot.schema_version = "x".repeat(4096);
+
+    let error = client
+        .validate(wire::ValidateRequest {
+            context: Some(context("oversized", None)),
+            snapshot: Some(snapshot),
+        })
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code(), tonic::Code::OutOfRange);
+    gateway.stop().await;
 }
 
 fn context(request_id: &str, idempotency_key: Option<&str>) -> common::RequestContext {

@@ -20,7 +20,7 @@ jobs:
       issues: write # for rustsec/audit-check to create issues
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Generate Cargo.lock
         # https://github.com/rustsec/audit-check/issues/27
@@ -28,6 +28,6 @@ jobs:
 
       - name: Audit Check
         # https://github.com/rustsec/audit-check/issues/2
-        uses: rustsec/audit-check@master
+        uses: rustsec/audit-check@e9159ac5f7d7d873ce074ca134da2f445c0a4a61 # v1.3.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}

@@ -1,6 +1,7 @@
-use gatewayd::{serve_gatewayd, GatewaydConfig, GatewaydError};
+use gatewayd::{initialize_observability, serve_gatewayd, GatewaydConfig, GatewaydError};
 
 fn main() -> Result<(), GatewaydError> {
+    initialize_observability();
     let config = GatewaydConfig::from_environment()?;
     let executor = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(config.worker_count().get() as usize)

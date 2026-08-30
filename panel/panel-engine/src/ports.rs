@@ -159,6 +159,22 @@ pub trait DataPlaneAdapter: Send + Sync {
 pub trait SnapshotStore: Send + Sync {
     async fn load_active(&self) -> Result<Option<ActiveSnapshotRecord>>;
     async fn load_prepared(&self) -> Result<Vec<PreparedSnapshotRecord>>;
+
+    /// Load no more than `limit` prepared records.
+    ///
+    /// The default preserves source compatibility for existing adapters. Stores
+    /// that can reject an oversized collection before materializing every record
+    /// should override this method.
+    async fn load_prepared_bounded(&self, limit: usize) -> Result<Vec<PreparedSnapshotRecord>> {
+        let records = self.load_prepared().await?;
+        if records.len() > limit {
+            return Err(panel_errors::PanelError::resource_exhausted(format!(
+                "snapshot store contains more than {limit} prepared records"
+            )));
+        }
+        Ok(records)
+    }
+
     async fn save_prepared(&self, record: PreparedSnapshotRecord) -> Result<()>;
     async fn delete_prepared(&self, token: &PrepareToken) -> Result<()>;
     async fn commit_activation(&self, record: ActiveSnapshotRecord) -> Result<()>;

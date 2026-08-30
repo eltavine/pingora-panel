@@ -1,40 +1,93 @@
 //! Atomic filesystem adapter for the transport-neutral `SnapshotStore` port.
 
+mod codec;
+mod lease;
+
+pub use codec::{
+    JsonSnapshotRecordCodecV1, SnapshotRecordCodec, SnapshotRecordCodecRegistry,
+    JSON_SNAPSHOT_RECORD_FORMAT_V1,
+};
+pub use lease::StateDirectoryLease;
+
 use async_trait::async_trait;
 use panel_domain::ContentHash;
 use panel_engine::{ActiveSnapshotRecord, PrepareToken, PreparedSnapshotRecord, SnapshotStore};
-use panel_errors::{ErrorCode, PanelError, Result};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+#[cfg(test)]
+use panel_errors::ErrorCode;
+use panel_errors::{PanelError, Result};
+use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 use uuid::Uuid;
 
-const STORE_FORMAT_VERSION: u32 = 1;
 const ACTIVE_FILE_NAME: &str = "active.json";
 const PREPARED_DIRECTORY_NAME: &str = "prepared";
 const MAX_RECORD_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_PREPARED_RECORD_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_PREPARED_DIRECTORY_ENTRIES: usize = 4096;
 
 #[derive(Clone, Debug)]
 pub struct FileSnapshotStore {
     root: PathBuf,
-}
-
-#[derive(Serialize, Deserialize)]
-struct DiskRecord<T> {
-    format_version: u32,
-    payload: T,
+    lease: Option<Arc<StateDirectoryLease>>,
+    codecs: Arc<SnapshotRecordCodecRegistry>,
 }
 
 impl FileSnapshotStore {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            lease: None,
+            codecs: Arc::new(SnapshotRecordCodecRegistry::default()),
+        }
+    }
+
+    pub fn with_codec_registry(
+        root: impl Into<PathBuf>,
+        codecs: Arc<SnapshotRecordCodecRegistry>,
+    ) -> Self {
+        Self {
+            root: root.into(),
+            lease: None,
+            codecs,
+        }
+    }
+
+    /// Open a store with process-lifetime exclusive ownership of its directory.
+    ///
+    /// `new` remains available for offline tooling and backwards compatibility;
+    /// long-running gateway compositions should use this constructor.
+    pub async fn open_exclusive(root: impl Into<PathBuf>) -> Result<Self> {
+        Self::open_exclusive_with_codec_registry(
+            root,
+            Arc::new(SnapshotRecordCodecRegistry::default()),
+        )
+        .await
+    }
+
+    pub async fn open_exclusive_with_codec_registry(
+        root: impl Into<PathBuf>,
+        codecs: Arc<SnapshotRecordCodecRegistry>,
+    ) -> Result<Self> {
+        let root = root.into();
+        let lease = Arc::new(StateDirectoryLease::acquire(root.clone()).await?);
+        Ok(Self {
+            root,
+            lease: Some(lease),
+            codecs,
+        })
     }
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    pub fn has_exclusive_lease(&self) -> bool {
+        self.lease.is_some()
     }
 
     fn active_path(root: &Path) -> PathBuf {
@@ -66,9 +119,10 @@ impl FileSnapshotStore {
 impl SnapshotStore for FileSnapshotStore {
     async fn load_active(&self) -> Result<Option<ActiveSnapshotRecord>> {
         let root = self.root.clone();
+        let codecs = Arc::clone(&self.codecs);
         Self::run_blocking(move || {
             let path = Self::active_path(&root);
-            let Some(record) = read_record::<ActiveSnapshotRecord>(&path)? else {
+            let Some(record) = read_record::<ActiveSnapshotRecord>(&path, codecs.as_ref())? else {
                 return Ok(None);
             };
             validate_active_record(&record)?;
@@ -79,54 +133,23 @@ impl SnapshotStore for FileSnapshotStore {
 
     async fn load_prepared(&self) -> Result<Vec<PreparedSnapshotRecord>> {
         let root = self.root.clone();
-        Self::run_blocking(move || {
-            let directory = Self::prepared_directory(&root);
-            if !directory.exists() {
-                return Ok(Vec::new());
-            }
-            ensure_directory(&directory)?;
-            let mut paths = fs::read_dir(&directory)
-                .map_err(|error| storage_error("read prepared directory", &directory, error))?
-                .map(|entry| {
-                    entry
-                        .map(|value| value.path())
-                        .map_err(|error| storage_error("read prepared entry", &directory, error))
-                })
-                .collect::<Result<Vec<_>>>()?;
-            paths.sort();
+        let codecs = Arc::clone(&self.codecs);
+        Self::run_blocking(move || load_prepared_records(&root, usize::MAX, codecs.as_ref())).await
+    }
 
-            let mut records = Vec::new();
-            for path in paths {
-                if path.extension().and_then(|value| value.to_str()) != Some("json") {
-                    continue;
-                }
-                let record = read_record::<PreparedSnapshotRecord>(&path)?.ok_or_else(|| {
-                    PanelError::corrupt_state(format!(
-                        "prepared snapshot disappeared while loading {}",
-                        path.display()
-                    ))
-                })?;
-                validate_prepared_record(&record)?;
-                let expected = Self::prepared_path(&root, &record.receipt.prepare_token);
-                if path != expected {
-                    return Err(PanelError::corrupt_state(format!(
-                        "prepared snapshot filename does not match its token: {}",
-                        path.display()
-                    )));
-                }
-                records.push(record);
-            }
-            Ok(records)
-        })
-        .await
+    async fn load_prepared_bounded(&self, limit: usize) -> Result<Vec<PreparedSnapshotRecord>> {
+        let root = self.root.clone();
+        let codecs = Arc::clone(&self.codecs);
+        Self::run_blocking(move || load_prepared_records(&root, limit, codecs.as_ref())).await
     }
 
     async fn save_prepared(&self, record: PreparedSnapshotRecord) -> Result<()> {
         let root = self.root.clone();
+        let codecs = Arc::clone(&self.codecs);
         Self::run_blocking(move || {
             validate_prepared_record(&record)?;
             let path = Self::prepared_path(&root, &record.receipt.prepare_token);
-            atomic_write_record(&path, &record)
+            atomic_write_record(&path, &record, codecs.as_ref())
         })
         .await
     }
@@ -147,12 +170,80 @@ impl SnapshotStore for FileSnapshotStore {
 
     async fn commit_activation(&self, record: ActiveSnapshotRecord) -> Result<()> {
         let root = self.root.clone();
+        let codecs = Arc::clone(&self.codecs);
         Self::run_blocking(move || {
             validate_active_record(&record)?;
-            atomic_write_record(&Self::active_path(&root), &record)
+            atomic_write_record(&Self::active_path(&root), &record, codecs.as_ref())
         })
         .await
     }
+}
+
+fn load_prepared_records(
+    root: &Path,
+    limit: usize,
+    codecs: &SnapshotRecordCodecRegistry,
+) -> Result<Vec<PreparedSnapshotRecord>> {
+    let directory = FileSnapshotStore::prepared_directory(root);
+    if !directory.exists() {
+        return Ok(Vec::new());
+    }
+    ensure_directory(&directory)?;
+    let entries = fs::read_dir(&directory)
+        .map_err(|error| storage_error("read prepared directory", &directory, error))?;
+    let mut paths = Vec::with_capacity(limit.min(64));
+    for (index, entry) in entries.enumerate() {
+        if index >= MAX_PREPARED_DIRECTORY_ENTRIES {
+            return Err(PanelError::resource_exhausted(format!(
+                "prepared directory exceeds the {MAX_PREPARED_DIRECTORY_ENTRIES} entry scan limit"
+            )));
+        }
+        let path = entry
+            .map_err(|error| storage_error("read prepared entry", &directory, error))?
+            .path();
+        if path.extension().and_then(|value| value.to_str()) != Some("json") {
+            continue;
+        }
+        if paths.len() >= limit {
+            return Err(PanelError::resource_exhausted(format!(
+                "snapshot store contains more than {limit} prepared records"
+            )));
+        }
+        paths.push(path);
+    }
+    let total_bytes = paths.iter().try_fold(0_u64, |total, path| {
+        let metadata = fs::symlink_metadata(path)
+            .map_err(|error| storage_error("read prepared snapshot metadata", path, error))?;
+        total.checked_add(metadata.len()).ok_or_else(|| {
+            PanelError::resource_exhausted("prepared snapshot aggregate size overflow")
+        })
+    })?;
+    if total_bytes > MAX_PREPARED_RECORD_BYTES {
+        return Err(PanelError::resource_exhausted(format!(
+            "prepared snapshot records exceed the {MAX_PREPARED_RECORD_BYTES} byte aggregate limit"
+        )));
+    }
+    paths.sort();
+
+    let mut records = Vec::with_capacity(paths.len());
+    for path in paths {
+        let record = read_record::<PreparedSnapshotRecord>(&path, codecs)?.ok_or_else(|| {
+            PanelError::corrupt_state(format!(
+                "prepared snapshot disappeared while loading {}",
+                path.display()
+            ))
+        })?;
+        validate_prepared_record(&record)?;
+        let expected = FileSnapshotStore::prepared_path(root, &record.receipt.prepare_token);
+        if path != expected {
+            return Err(PanelError::corrupt_state(format!(
+                "prepared snapshot filename does not match its token: {}",
+                path.display()
+            )));
+        }
+        records.push(record);
+    }
+    Ok(records)
 }
 
 fn validate_prepared_record(record: &PreparedSnapshotRecord) -> Result<()> {
@@ -183,7 +274,10 @@ fn validate_active_record(record: &ActiveSnapshotRecord) -> Result<()> {
     Ok(())
 }
 
-fn read_record<T: DeserializeOwned>(path: &Path) -> Result<Option<T>> {
+fn read_record<T: DeserializeOwned>(
+    path: &Path,
+    codecs: &SnapshotRecordCodecRegistry,
+) -> Result<Option<T>> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(value) => value,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -208,40 +302,27 @@ fn read_record<T: DeserializeOwned>(path: &Path) -> Result<Option<T>> {
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
     file.read_to_end(&mut bytes)
         .map_err(|error| storage_error("read snapshot record", path, error))?;
-    let disk: DiskRecord<T> = serde_json::from_slice(&bytes).map_err(|error| {
-        PanelError::corrupt_state(format!("invalid snapshot record at {}", path.display()))
-            .with_source(error)
-    })?;
-    if disk.format_version != STORE_FORMAT_VERSION {
-        return Err(PanelError::new(
-            ErrorCode::UNSUPPORTED_CAPABILITY,
-            format!(
-                "snapshot store format {} is not supported (expected {})",
-                disk.format_version, STORE_FORMAT_VERSION
-            ),
-        ));
-    }
-    Ok(Some(disk.payload))
+    codecs.decode(&bytes).map(Some)
 }
 
-fn atomic_write_record<T: Serialize>(path: &Path, payload: &T) -> Result<()> {
+fn atomic_write_record<T: Serialize>(
+    path: &Path,
+    payload: &T,
+    codecs: &SnapshotRecordCodecRegistry,
+) -> Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| PanelError::invalid_argument("snapshot path has no parent directory"))?;
     ensure_directory(parent)?;
-    let bytes = serde_json::to_vec(&DiskRecord {
-        format_version: STORE_FORMAT_VERSION,
-        payload,
-    })
-    .map_err(|error| PanelError::internal("serialize snapshot record").with_source(error))?;
+    let bytes = codecs.encode(payload)?;
     if bytes.len() as u64 > MAX_RECORD_BYTES {
         return Err(PanelError::invalid_argument(format!(
-            "snapshot record exceeds the {} byte limit",
-            MAX_RECORD_BYTES
+            "snapshot record exceeds the {MAX_RECORD_BYTES} byte limit"
         )));
     }
 
-    let temporary = parent.join(format!(".snapshot-{}.tmp", Uuid::new_v4()));
+    let temporary_id = Uuid::new_v4();
+    let temporary = parent.join(format!(".snapshot-{temporary_id}.tmp"));
     let write_result = (|| {
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
@@ -309,6 +390,26 @@ mod tests {
     };
     use panel_ir::RuntimeSnapshot;
 
+    struct JsonSnapshotRecordCodecV2;
+
+    impl SnapshotRecordCodec for JsonSnapshotRecordCodecV2 {
+        fn format_version(&self) -> u32 {
+            2
+        }
+
+        fn encode_payload(&self, payload: &[u8]) -> Result<Vec<u8>> {
+            let mut record = br#"{"format_version":2,"payload":"#.to_vec();
+            record.extend_from_slice(payload);
+            record.push(b'}');
+            Ok(record)
+        }
+
+        fn decode_payload(&self, record: &[u8]) -> Result<Vec<u8>> {
+            let record: serde_json::Value = serde_json::from_slice(record).unwrap();
+            Ok(serde_json::to_vec(&record["payload"]).unwrap())
+        }
+    }
+
     struct TemporaryDirectory(PathBuf);
 
     impl TemporaryDirectory {
@@ -370,6 +471,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn injected_codec_registry_changes_format_without_store_changes() {
+        let temporary = TemporaryDirectory::new();
+        let codecs = SnapshotRecordCodecRegistry::new(Arc::new(JsonSnapshotRecordCodecV2))
+            .unwrap()
+            .with_reader(Arc::new(JsonSnapshotRecordCodecV1))
+            .unwrap();
+        let store = FileSnapshotStore::with_codec_registry(&temporary.0, Arc::new(codecs));
+        let prepared = prepared_record(1);
+
+        store.save_prepared(prepared.clone()).await.unwrap();
+
+        let path = FileSnapshotStore::prepared_path(&temporary.0, &prepared.receipt.prepare_token);
+        let bytes = fs::read(path).unwrap();
+        assert!(String::from_utf8(bytes)
+            .unwrap()
+            .contains(r#""format_version":2"#));
+        assert_eq!(store.load_prepared().await.unwrap(), [prepared]);
+    }
+
+    #[tokio::test]
     async fn corrupt_active_record_is_rejected_without_deletion() {
         let temporary = TemporaryDirectory::new();
         fs::create_dir_all(&temporary.0).unwrap();
@@ -380,5 +501,54 @@ mod tests {
         let error = store.load_active().await.unwrap_err();
         assert_eq!(error.code.as_str(), ErrorCode::CORRUPT_STATE);
         assert!(active_path.exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn exclusive_store_rejects_a_second_owner_until_release() {
+        let temporary = TemporaryDirectory::new();
+        let first = FileSnapshotStore::open_exclusive(&temporary.0)
+            .await
+            .unwrap();
+        assert!(first.has_exclusive_lease());
+
+        let error = FileSnapshotStore::open_exclusive(&temporary.0)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code.as_str(), ErrorCode::PRECONDITION_FAILED);
+
+        drop(first);
+        assert!(FileSnapshotStore::open_exclusive(&temporary.0)
+            .await
+            .unwrap()
+            .has_exclusive_lease());
+    }
+
+    #[tokio::test]
+    async fn bounded_load_rejects_before_materializing_excess_records() {
+        let temporary = TemporaryDirectory::new();
+        let store = FileSnapshotStore::new(&temporary.0);
+        store.save_prepared(prepared_record(1)).await.unwrap();
+        store.save_prepared(prepared_record(2)).await.unwrap();
+
+        let error = store.load_prepared_bounded(1).await.unwrap_err();
+        assert_eq!(error.code.as_str(), ErrorCode::RESOURCE_EXHAUSTED);
+    }
+
+    #[tokio::test]
+    async fn prepared_directory_scan_has_an_independent_entry_ceiling() {
+        let temporary = TemporaryDirectory::new();
+        let directory = FileSnapshotStore::prepared_directory(&temporary.0);
+        fs::create_dir_all(&directory).unwrap();
+        for index in 0..=MAX_PREPARED_DIRECTORY_ENTRIES {
+            fs::write(directory.join(format!("ignored-{index}.tmp")), []).unwrap();
+        }
+
+        let store = FileSnapshotStore::new(&temporary.0);
+        let error = store
+            .load_prepared_bounded(MAX_PREPARED_DIRECTORY_ENTRIES)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code.as_str(), ErrorCode::RESOURCE_EXHAUSTED);
     }
 }
