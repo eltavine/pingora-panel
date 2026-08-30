@@ -8,7 +8,7 @@ Pingora Panel 是一个面向团队运维的单节点网站网关控制平台。
 
 ## 当前状态
 
-**In Progress / durable gateway foundation。** `panel/` 独立 workspace 已提供 Proto-first 契约、稳定错误模型、领域值对象、Engine-neutral IR、`GatewayEngine`/`SnapshotStore` ports、内存 `FakeGatewayEngine`、Pingora 0.8.0 数据面适配器、独立 durable runtime、原子文件快照存储、Tonic gRPC transport、标准 gRPC Health 和 `gatewayd` 组合根。Prepare/Activate/CAS、持久 Activation Receipt、Last Known Good 重启恢复、v1 磁盘格式 Golden Fixture、真实 TCP gRPC 黑盒闭环以及适配器依赖隔离已有自动化测试。控制服务、PostgreSQL、NATS、REST API、`ppanel` CLI、Web GUI 和生产 listener 尚未实现；产品功能只有在满足规格验收条件后才会依次标记为 `In Progress`、`Implemented` 和 `Verified`。
+**In Progress / durable gateway foundation。** `panel/` 独立 workspace 已提供 Proto-first 契约、稳定错误模型、领域值对象、Engine-neutral IR、`GatewayEngine`/`SnapshotStore` ports、内存 `FakeGatewayEngine`、Pingora 0.8.0 数据面适配器、独立 durable runtime、原子文件快照存储、Tonic gRPC transport、标准 gRPC Health 和 `gatewayd` 组合根。Prepare/Activate/CAS、持久 Activation Receipt、Last Known Good 重启恢复、v1 磁盘格式 Golden Fixture、真实 TCP gRPC 黑盒闭环、进程级 SIGTERM/同端口重启、版本/uptime/worker 状态以及适配器依赖隔离已有自动化测试。Proto breaking 门禁分别使用 PR 目标分支和 push 前一提交作为基线，避免默认分支自比较。控制服务、PostgreSQL、NATS、REST API、`ppanel` CLI、Web GUI 和生产 listener 尚未实现；产品功能只有在满足规格验收条件后才会依次标记为 `In Progress`、`Implemented` 和 `Verified`。
 
 完整产品边界、架构、接口、685 项功能目录、版本路线图和 1.0 质量门禁见 [PRODUCT_SPEC.md](PRODUCT_SPEC.md)。该文件是产品需求的唯一权威来源。
 
@@ -28,6 +28,7 @@ Proto 使用 `panel/proto` 作为唯一输入，Rust 文件在构建时动态生
 ```text
 PINGORA_PANEL_STATE_DIR=/var/lib/pingora-panel/gateway \
 PINGORA_PANEL_GATEWAY_ADDR=127.0.0.1:50051 \
+PINGORA_PANEL_WORKERS=4 \
 cargo run --manifest-path panel/Cargo.toml --package gatewayd
 ```
 

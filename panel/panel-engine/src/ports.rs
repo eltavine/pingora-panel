@@ -111,6 +111,24 @@ pub struct GatewayStatus {
     pub schema_version: String,
 }
 
+/// Process facts exposed alongside engine status without coupling the engine to
+/// clocks, environment variables, executors, or a particular transport.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GatewayRuntimeInfo {
+    pub gateway_version: String,
+    pub started_at_unix_seconds: u64,
+    pub uptime_seconds: u64,
+    pub worker_count: u32,
+}
+
+/// Read-only driven port for process metadata.
+///
+/// Composition roots provide the implementation. Application runtimes and data
+/// plane adapters therefore remain unaware of operating-system process details.
+pub trait GatewayRuntimeInfoProvider: Send + Sync {
+    fn snapshot(&self) -> GatewayRuntimeInfo;
+}
+
 #[async_trait]
 pub trait GatewayEngine: Send + Sync {
     async fn capabilities(&self) -> Result<EngineCapabilities>;

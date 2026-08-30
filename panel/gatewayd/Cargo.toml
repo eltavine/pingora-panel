@@ -17,8 +17,10 @@ snapshot-store-fs = { path = "../snapshot-store-fs" }
 tokio.workspace = true
 tonic.workspace = true
 tonic-health.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
+libc.workspace = true
 panel-domain = { path = "../panel-domain" }
 panel-ir = { path = "../panel-ir" }
 tokio-stream.workspace = true

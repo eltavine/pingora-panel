@@ -102,6 +102,14 @@ mod tests {
             }),
             error: None,
             prepared_count: 0,
+            runtime: Some(gateway::v1::GatewayRuntimeInfo {
+                gateway_version: "0.1.0".into(),
+                data_plane_version: "0.8.0".into(),
+                adapter_version: "pingora-v1".into(),
+                started_at_unix_seconds: 1_787_800_000,
+                uptime_seconds: 42,
+                worker_count: 4,
+            }),
         };
         let decoded =
             gateway::v1::StatusResponse::decode(original.encode_to_vec().as_slice()).unwrap();

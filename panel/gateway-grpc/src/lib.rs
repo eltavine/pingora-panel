@@ -7,7 +7,8 @@ pub use codec::{decode_snapshot, encode_snapshot};
 use panel_contracts::{common::v1 as common, gateway::v1 as wire};
 use panel_domain::ContentHash;
 use panel_engine::{
-    ActivateRequest, EngineCapabilities, GatewayEngine, PrepareRequest, PrepareToken,
+    ActivateRequest, EngineCapabilities, GatewayEngine, GatewayRuntimeInfo,
+    GatewayRuntimeInfoProvider, PrepareRequest, PrepareToken,
 };
 use panel_errors::{PanelError, Result};
 use std::sync::Arc;
@@ -15,19 +16,34 @@ use tonic::{Request, Response, Status};
 
 pub struct GatewayGrpcService<E: GatewayEngine + ?Sized> {
     engine: Arc<E>,
+    runtime_info: Option<Arc<dyn GatewayRuntimeInfoProvider>>,
 }
 
 impl<E: GatewayEngine + ?Sized> Clone for GatewayGrpcService<E> {
     fn clone(&self) -> Self {
         Self {
             engine: Arc::clone(&self.engine),
+            runtime_info: self.runtime_info.as_ref().map(Arc::clone),
         }
     }
 }
 
 impl<E: GatewayEngine + ?Sized> GatewayGrpcService<E> {
     pub fn new(engine: Arc<E>) -> Self {
-        Self { engine }
+        Self {
+            engine,
+            runtime_info: None,
+        }
+    }
+
+    pub fn with_runtime_info(
+        engine: Arc<E>,
+        runtime_info: Arc<dyn GatewayRuntimeInfoProvider>,
+    ) -> Self {
+        Self {
+            engine,
+            runtime_info: Some(runtime_info),
+        }
     }
 }
 
@@ -244,6 +260,11 @@ where
                     active_hash: status.active_hash.as_ref().map(codec::encode_hash),
                     error: None,
                     prepared_count: status.prepared_count as u64,
+                    runtime: self.runtime_info.as_ref().and_then(|provider| {
+                        capabilities.as_ref().map(|capabilities| {
+                            encode_runtime_info(provider.snapshot(), capabilities)
+                        })
+                    }),
                 }
             }
             Err(error) => status_error_response(error),
@@ -295,6 +316,20 @@ fn version(capabilities: &EngineCapabilities) -> common::Version {
     }
 }
 
+fn encode_runtime_info(
+    runtime: GatewayRuntimeInfo,
+    capabilities: &EngineCapabilities,
+) -> wire::GatewayRuntimeInfo {
+    wire::GatewayRuntimeInfo {
+        gateway_version: runtime.gateway_version,
+        data_plane_version: capabilities.build_version.clone(),
+        adapter_version: capabilities.adapter_version.clone(),
+        started_at_unix_seconds: runtime.started_at_unix_seconds,
+        uptime_seconds: runtime.uptime_seconds,
+        worker_count: runtime.worker_count,
+    }
+}
+
 fn validation_error_response(error: PanelError) -> wire::ValidateResponse {
     wire::ValidateResponse {
         version: None,
@@ -337,6 +372,7 @@ fn status_error_response(error: PanelError) -> wire::StatusResponse {
         active_hash: None,
         error: Some((&error).into()),
         prepared_count: 0,
+        runtime: None,
     }
 }
 
@@ -345,7 +381,7 @@ mod tests {
     use super::*;
     use panel_contracts::gateway::v1::gateway_engine_server::GatewayEngine as GatewayEngineService;
     use panel_domain::RevisionId;
-    use panel_engine::FakeGatewayEngine;
+    use panel_engine::{FakeGatewayEngine, GatewayRuntimeInfo};
     use panel_ir::RuntimeSnapshot;
 
     fn context(mutation: bool) -> common::RequestContext {
@@ -360,6 +396,19 @@ mod tests {
                 String::new()
             },
             schema_version: panel_contracts::PROTOCOL_VERSION.into(),
+        }
+    }
+
+    struct FixedRuntimeInfo;
+
+    impl GatewayRuntimeInfoProvider for FixedRuntimeInfo {
+        fn snapshot(&self) -> GatewayRuntimeInfo {
+            GatewayRuntimeInfo {
+                gateway_version: "1.2.3".into(),
+                started_at_unix_seconds: 1_787_800_000,
+                uptime_seconds: 42,
+                worker_count: 4,
+            }
         }
     }
 
@@ -409,5 +458,27 @@ mod tests {
             response.error.unwrap().code,
             panel_errors::ErrorCode::INVALID_ARGUMENT
         );
+    }
+
+    #[tokio::test]
+    async fn status_combines_engine_and_process_information() {
+        let engine = Arc::new(FakeGatewayEngine::with_default_capabilities());
+        let service = GatewayGrpcService::with_runtime_info(engine, Arc::new(FixedRuntimeInfo));
+
+        let response = service
+            .status(Request::new(wire::StatusRequest {
+                context: Some(context(false)),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        let runtime = response.runtime.unwrap();
+
+        assert_eq!(runtime.gateway_version, "1.2.3");
+        assert_eq!(runtime.data_plane_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(runtime.adapter_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(runtime.started_at_unix_seconds, 1_787_800_000);
+        assert_eq!(runtime.uptime_seconds, 42);
+        assert_eq!(runtime.worker_count, 4);
     }
 }

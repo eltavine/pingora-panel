@@ -171,8 +171,14 @@ async fn generated_client_applies_and_restores_a_snapshot_over_tcp() {
     assert!(status.error.is_none());
     assert_eq!(status.active_revision_id, 1);
     assert_eq!(status.prepared_count, 0);
+    let runtime = status.runtime.as_ref().unwrap();
+    assert_eq!(runtime.gateway_version, env!("CARGO_PKG_VERSION"));
+    assert_eq!(runtime.data_plane_version, "0.8.0");
+    assert!(!runtime.adapter_version.is_empty());
+    assert_ne!(runtime.started_at_unix_seconds, 0);
+    assert_eq!(runtime.worker_count, 1);
     assert_eq!(
-        status.health.unwrap().state,
+        status.health.as_ref().unwrap().state,
         common::health_status::State::Ready as i32
     );
     drop(client);

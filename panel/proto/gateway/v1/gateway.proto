@@ -232,6 +232,15 @@ message AbortResponse {
 
 message StatusRequest { .pingora.panel.common.v1.RequestContext context = 1; }
 
+message GatewayRuntimeInfo {
+  string gateway_version = 1;
+  string data_plane_version = 2;
+  string adapter_version = 3;
+  uint64 started_at_unix_seconds = 4;
+  uint64 uptime_seconds = 5;
+  uint32 worker_count = 6;
+}
+
 message StatusResponse {
   .pingora.panel.common.v1.Version version = 1;
   .pingora.panel.common.v1.HealthStatus health = 2;
@@ -239,4 +248,5 @@ message StatusResponse {
   .pingora.panel.common.v1.ContentHash active_hash = 4;
   .pingora.panel.common.v1.Error error = 5;
   uint64 prepared_count = 6;
+  GatewayRuntimeInfo runtime = 7;
 }

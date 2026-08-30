@@ -719,6 +719,7 @@ version = "0.1.0"
 dependencies = [
  "gateway-grpc",
  "gateway-pingora",
+ "libc",
  "panel-contracts",
  "panel-domain",
  "panel-engine",
@@ -726,6 +727,7 @@ dependencies = [
  "panel-gateway-runtime",
  "panel-ir",
  "snapshot-store-fs",
+ "thiserror",
  "tokio",
  "tokio-stream",
  "tonic",
