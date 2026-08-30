@@ -6,12 +6,16 @@ on:
       - "panel/**"
       - ".github/scripts/check-panel-boundaries.sh"
       - ".github/scripts/check-panel-proto-breaking.sh"
+      - ".github/scripts/resolve-panel-proto-baseline.sh"
+      - ".github/scripts/test-panel-proto-breaking.sh"
       - ".github/workflows/panel.yml"
   pull_request:
     paths:
       - "panel/**"
       - ".github/scripts/check-panel-boundaries.sh"
       - ".github/scripts/check-panel-proto-breaking.sh"
+      - ".github/scripts/resolve-panel-proto-baseline.sh"
+      - ".github/scripts/test-panel-proto-breaking.sh"
       - ".github/workflows/panel.yml"
 
 permissions:
@@ -76,6 +80,9 @@ jobs:
         working-directory: panel
         run: buf lint
 
+      - name: Self-test Protobuf compatibility guard
+        run: bash .github/scripts/test-panel-proto-breaking.sh
+
       - name: Resolve Protobuf compatibility baseline
         id: proto-baseline
         env:
@@ -83,11 +90,9 @@ jobs:
           PULL_REQUEST_BASE: ${{ github.base_ref }}
           PUSH_BEFORE: ${{ github.event.before }}
         run: |
-          if [[ "$EVENT_NAME" == "pull_request" ]]; then
-            printf 'ref=origin/%s\n' "$PULL_REQUEST_BASE" >> "$GITHUB_OUTPUT"
-          else
-            printf 'ref=%s\n' "$PUSH_BEFORE" >> "$GITHUB_OUTPUT"
-          fi
+          baseline_ref="$(bash .github/scripts/resolve-panel-proto-baseline.sh \
+            "$EVENT_NAME" "$PUSH_BEFORE" "$PULL_REQUEST_BASE")"
+          printf 'ref=%s\n' "$baseline_ref" >> "$GITHUB_OUTPUT"
 
       - name: Check breaking changes against the previous contract
         run: bash .github/scripts/check-panel-proto-breaking.sh "${{ steps.proto-baseline.outputs.ref }}"

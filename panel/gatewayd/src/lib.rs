@@ -4,11 +4,18 @@
 //! configuration parsing and concrete adapter wiring so production and black-box
 //! tests use the same dependency graph.
 
+mod bind_policy;
 mod config;
 mod runtime_info;
+mod shutdown;
 
-pub use config::{GatewaydConfig, GATEWAY_ADDRESS_ENV, STATE_DIRECTORY_ENV, WORKER_COUNT_ENV};
+pub use bind_policy::{LoopbackOnlyManagementBindPolicy, ManagementBindPolicy};
+pub use config::{
+    GatewayWorkerCount, GatewaydConfig, DRAIN_TIMEOUT_MILLIS_ENV, GATEWAY_ADDRESS_ENV,
+    MAX_GATEWAY_WORKERS, STATE_DIRECTORY_ENV, WORKER_COUNT_ENV,
+};
 pub use runtime_info::ProcessRuntimeInfo;
+pub use shutdown::{ReadinessGate, ShutdownCoordinator, ShutdownPolicy, TonicHealthReadinessGate};
 
 use gateway_grpc::GatewayGrpcService;
 use gateway_pingora::PingoraGatewayAdapter;
@@ -92,18 +99,23 @@ pub async fn serve_gatewayd(
 ) -> std::result::Result<(), GatewaydError> {
     let runtime_info = Arc::new(ProcessRuntimeInfo::new(
         env!("CARGO_PKG_VERSION"),
-        config.worker_count(),
+        config.worker_count().as_non_zero(),
     ));
     let services = build_gateway_services_with_runtime_info(
         config.state_directory().to_path_buf(),
         runtime_info,
     )
     .await?;
+    let readiness = Arc::new(TonicHealthReadinessGate::new(
+        services.health_reporter.clone(),
+        ["", gateway_service_name()],
+    ));
+    let shutdown_coordinator = ShutdownCoordinator::new(readiness, config.shutdown_policy());
 
     Server::builder()
         .add_service(GatewayEngineServer::new(services.gateway))
         .add_service(services.health)
-        .serve_with_shutdown(config.listen_address(), shutdown)
+        .serve_with_shutdown(config.listen_address(), shutdown_coordinator.run(shutdown))
         .await?;
     Ok(())
 }

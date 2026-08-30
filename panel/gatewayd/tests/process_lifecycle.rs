@@ -1,6 +1,8 @@
 #![cfg(unix)]
 
-use gatewayd::{GATEWAY_ADDRESS_ENV, STATE_DIRECTORY_ENV, WORKER_COUNT_ENV};
+use gatewayd::{
+    DRAIN_TIMEOUT_MILLIS_ENV, GATEWAY_ADDRESS_ENV, STATE_DIRECTORY_ENV, WORKER_COUNT_ENV,
+};
 use panel_contracts::{
     common::v1 as common,
     gateway::v1::{gateway_engine_client::GatewayEngineClient, StatusRequest},
@@ -46,6 +48,7 @@ impl GatewayProcess {
             .env(GATEWAY_ADDRESS_ENV, address.to_string())
             .env(STATE_DIRECTORY_ENV, state_directory)
             .env(WORKER_COUNT_ENV, "2")
+            .env(DRAIN_TIMEOUT_MILLIS_ENV, "300")
             .spawn()
             .unwrap();
         Self { child }
@@ -112,6 +115,27 @@ async fn wait_until_serving(address: SocketAddr) -> Channel {
     }
 }
 
+async fn wait_until_not_serving(health: &mut HealthClient<Channel>) {
+    let deadline = Instant::now() + SHUTDOWN_TIMEOUT;
+    loop {
+        if let Ok(response) = health
+            .check(HealthCheckRequest {
+                service: String::new(),
+            })
+            .await
+        {
+            if response.into_inner().status == ServingStatus::NotServing as i32 {
+                return;
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "gatewayd did not withdraw readiness before shutdown"
+        );
+        sleep(Duration::from_millis(10)).await;
+    }
+}
+
 fn context(request_id: &str) -> common::RequestContext {
     common::RequestContext {
         request_id: request_id.into(),
@@ -130,6 +154,7 @@ async fn sigterm_exits_cleanly_and_the_same_address_can_restart() {
     let mut first = GatewayProcess::spawn(address, &state.0);
     let channel = wait_until_serving(address).await;
     let mut client = GatewayEngineClient::new(channel.clone());
+    let mut health = HealthClient::new(channel.clone());
 
     let status = client
         .status(StatusRequest {
@@ -144,9 +169,11 @@ async fn sigterm_exits_cleanly_and_the_same_address_can_restart() {
     assert_eq!(runtime.worker_count, 2);
     assert_ne!(runtime.started_at_unix_seconds, 0);
 
+    first.terminate();
+    wait_until_not_serving(&mut health).await;
+    drop(health);
     drop(client);
     drop(channel);
-    first.terminate();
     assert!(first.wait_for_exit().await.success());
 
     let mut restarted = GatewayProcess::spawn(address, &state.0);
