@@ -4,6 +4,7 @@ set -euo pipefail
 event_name="${1:-}"
 push_before="${2:-}"
 pull_request_base="${3:-}"
+default_branch="${4:-}"
 
 case "$event_name" in
   pull_request)
@@ -18,7 +19,15 @@ case "$event_name" in
       printf 'push requires the immutable before SHA\n' >&2
       exit 2
     fi
-    printf '%s\n' "$push_before"
+    if [[ "$push_before" =~ ^0+$ ]]; then
+      if [[ -z "$default_branch" ]]; then
+        printf 'a newly created ref requires the repository default branch\n' >&2
+        exit 2
+      fi
+      printf 'origin/%s\n' "$default_branch"
+    else
+      printf '%s\n' "$push_before"
+    fi
     ;;
   *)
     printf 'unsupported event for compatibility baseline resolution: %s\n' "$event_name" >&2

@@ -3,23 +3,31 @@ name: panel
 on:
   push:
     paths:
+      - ".cargo/config.toml"
+      - ".rustfmt.toml"
       - "panel/**"
+      - ".github/scripts/check-cargo-machete-workspace.sh"
       - ".github/scripts/check-panel-boundaries.sh"
       - ".github/scripts/check-panel-proto-breaking.sh"
       - ".github/scripts/check-panel-rust-api-breaking.sh"
       - ".github/scripts/resolve-panel-compat-baseline.sh"
       - ".github/scripts/resolve-panel-proto-baseline.sh"
+      - ".github/scripts/test-panel-compat-baseline.sh"
       - ".github/scripts/test-panel-proto-breaking.sh"
       - ".github/scripts/test-panel-rust-api-breaking.sh"
       - ".github/workflows/panel.yml"
   pull_request:
     paths:
+      - ".cargo/config.toml"
+      - ".rustfmt.toml"
       - "panel/**"
+      - ".github/scripts/check-cargo-machete-workspace.sh"
       - ".github/scripts/check-panel-boundaries.sh"
       - ".github/scripts/check-panel-proto-breaking.sh"
       - ".github/scripts/check-panel-rust-api-breaking.sh"
       - ".github/scripts/resolve-panel-compat-baseline.sh"
       - ".github/scripts/resolve-panel-proto-baseline.sh"
+      - ".github/scripts/test-panel-compat-baseline.sh"
       - ".github/scripts/test-panel-proto-breaking.sh"
       - ".github/scripts/test-panel-rust-api-breaking.sh"
       - ".github/workflows/panel.yml"
@@ -27,10 +35,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   rust:
     name: Rust ${{ matrix.toolchain }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -71,11 +84,15 @@ jobs:
   protobuf:
     name: Protobuf contracts
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+
+      - name: Self-test compatibility baseline resolution
+        run: bash .github/scripts/test-panel-compat-baseline.sh
 
       - name: Install Buf 1.47.2
         uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
@@ -96,12 +113,13 @@ jobs:
       - name: Resolve Protobuf compatibility baseline
         id: proto-baseline
         env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           EVENT_NAME: ${{ github.event_name }}
           PULL_REQUEST_BASE: ${{ github.base_ref }}
           PUSH_BEFORE: ${{ github.event.before }}
         run: |
           baseline_ref="$(bash .github/scripts/resolve-panel-proto-baseline.sh \
-            "$EVENT_NAME" "$PUSH_BEFORE" "$PULL_REQUEST_BASE")"
+            "$EVENT_NAME" "$PUSH_BEFORE" "$PULL_REQUEST_BASE" "$DEFAULT_BRANCH")"
           printf 'ref=%s\n' "$baseline_ref" >> "$GITHUB_OUTPUT"
 
       - name: Check breaking changes against the previous contract
@@ -110,11 +128,15 @@ jobs:
   rust-api:
     name: Rust public API compatibility
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+
+      - name: Self-test compatibility baseline resolution
+        run: bash .github/scripts/test-panel-compat-baseline.sh
 
       - name: Install build dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential cmake --no-install-recommends
@@ -133,13 +155,65 @@ jobs:
       - name: Resolve Rust API compatibility baseline
         id: rust-api-baseline
         env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           EVENT_NAME: ${{ github.event_name }}
           PULL_REQUEST_BASE: ${{ github.base_ref }}
           PUSH_BEFORE: ${{ github.event.before }}
         run: |
           baseline_ref="$(bash .github/scripts/resolve-panel-compat-baseline.sh \
-            "$EVENT_NAME" "$PUSH_BEFORE" "$PULL_REQUEST_BASE")"
+            "$EVENT_NAME" "$PUSH_BEFORE" "$PULL_REQUEST_BASE" "$DEFAULT_BRANCH")"
           printf 'ref=%s\n' "$baseline_ref" >> "$GITHUB_OUTPUT"
 
       - name: Reject Rust public API breaking changes
         run: bash .github/scripts/check-panel-rust-api-breaking.sh "${{ steps.rust-api-baseline.outputs.ref }}"
+
+  dependency-hygiene:
+    name: Dependency hygiene
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq --no-install-recommends
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30
+        with:
+          toolchain: stable
+
+      - name: Install cargo-machete 0.7.0
+        run: cargo install --locked --version 0.7.0 cargo-machete
+
+      - name: Reject unused Panel dependencies
+        run: bash .github/scripts/check-cargo-machete-workspace.sh panel/Cargo.toml
+
+  snapshot-store-portability:
+    name: Snapshot store (${{ matrix.target }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-apple-darwin
+          - x86_64-pc-windows-msvc
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install stable Rust target
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Check snapshot store portability
+        run: >-
+          cargo check
+          --manifest-path panel/Cargo.toml
+          --package snapshot-store-fs
+          --all-targets
+          --locked
+          --target ${{ matrix.target }}

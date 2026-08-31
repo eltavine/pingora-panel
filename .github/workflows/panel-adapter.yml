@@ -1,0 +1,75 @@
+name: Panel adapter compatibility
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".cargo/config.toml"
+      - "Cargo.toml"
+      - "pingora*/**"
+      - "tinyufo/**"
+      - ".github/workflows/panel-adapter.yml"
+  pull_request:
+    paths:
+      - ".cargo/config.toml"
+      - "Cargo.toml"
+      - "pingora*/**"
+      - "tinyufo/**"
+      - ".github/workflows/panel-adapter.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gateway-pingora:
+    name: Gateway Pingora adapter and composition root
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake --no-install-recommends
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30
+        with:
+          toolchain: stable
+          components: clippy
+
+      - name: Check adapter and composition root
+        run: >-
+          cargo check
+          --manifest-path panel/Cargo.toml
+          --package gateway-pingora
+          --package gatewayd
+          --all-targets
+          --all-features
+          --locked
+
+      - name: Test adapter and composition root
+        run: >-
+          cargo test
+          --manifest-path panel/Cargo.toml
+          --package gateway-pingora
+          --package gatewayd
+          --all-features
+          --locked
+
+      - name: Lint adapter and composition root
+        env:
+          CLIPPY_CONF_DIR: ${{ github.workspace }}/panel
+        run: >-
+          cargo clippy
+          --manifest-path panel/Cargo.toml
+          --package gateway-pingora
+          --package gatewayd
+          --all-targets
+          --all-features
+          --locked
+          -- -D warnings

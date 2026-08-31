@@ -19,6 +19,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   security-audit:
     name: Audit ${{ matrix.workspace }} workspace
@@ -27,6 +31,7 @@ jobs:
       contents: read # for actions/checkout to fetch code
       issues: write # for rustsec/audit-check to create issues
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:

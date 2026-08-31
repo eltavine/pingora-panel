@@ -1,4 +1,4 @@
-use crate::failure_latch::BackgroundTaskFailureLatch;
+use crate::failure_latch::FirstValueLatch;
 use futures_util::{stream::FuturesUnordered, FutureExt, StreamExt};
 use panel_errors::{PanelError, Result as PanelResult};
 use std::{
@@ -10,6 +10,8 @@ use std::{
     time::Duration,
 };
 use tokio::{sync::watch, task::JoinHandle};
+
+type BackgroundTaskFailureLatch = FirstValueLatch<BackgroundTaskFailure>;
 
 pub const DEFAULT_BACKGROUND_TASK_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 pub const MAX_BACKGROUND_TASK_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(300);
@@ -309,12 +311,12 @@ impl BackgroundTaskSupervisor {
                 Ok(ManagedTaskCompletion::Expected) => Ok(()),
                 Ok(ManagedTaskCompletion::UnexpectedExit) => {
                     let failure = BackgroundTaskFailure::unexpected_exit(task_name);
-                    failure_sender.report(failure.clone());
+                    failure_sender.try_set(failure.clone());
                     Err(failure)
                 }
                 Err(panic) => {
                     let failure = BackgroundTaskFailure::panicked(task_name, panic);
-                    failure_sender.report(failure.clone());
+                    failure_sender.try_set(failure.clone());
                     Err(failure)
                 }
             }
@@ -350,7 +352,7 @@ impl BackgroundTaskSupervisor {
                 )),
             };
             if let Some(failure) = failure {
-                self.inner.failure.report(failure.clone());
+                self.inner.failure.try_set(failure.clone());
                 first_error.get_or_insert_with(|| BackgroundTaskError::from_failure(failure));
             }
         }
@@ -389,7 +391,7 @@ impl BackgroundTaskSupervisor {
                     Err(error) => Some(BackgroundTaskFailure::cancelled(name, error.to_string())),
                 };
                 if let Some(failure) = failure {
-                    self.inner.failure.report(failure.clone());
+                    self.inner.failure.try_set(failure.clone());
                     first_error.get_or_insert_with(|| BackgroundTaskError::from_failure(failure));
                 }
             }
@@ -412,7 +414,7 @@ impl BackgroundTaskSupervisor {
             // next yields or returns.
             drop(pending);
             let failure = BackgroundTaskFailure::timed_out(&pending_names, policy.total_timeout());
-            self.inner.failure.report(failure.clone());
+            self.inner.failure.try_set(failure.clone());
             let root_cause = self.inner.failure.latest().unwrap_or(failure);
             return Err(BackgroundTaskError::from_failure(root_cause));
         }
@@ -460,7 +462,10 @@ impl Drop for BackgroundTaskSupervisorInner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
     use std::time::Instant;
 
     #[tokio::test]
@@ -597,17 +602,5 @@ mod tests {
             MAX_BACKGROUND_TASK_SHUTDOWN_TIMEOUT + Duration::from_millis(1)
         )
         .is_err());
-    }
-
-    #[test]
-    fn failure_latch_preserves_the_first_reported_root_cause() {
-        let latch = BackgroundTaskFailureLatch::new();
-        let receiver = latch.subscribe();
-        let first = BackgroundTaskFailure::unexpected_exit("first-task".into());
-        let later = BackgroundTaskFailure::panicked("later-task".into(), Box::new("later panic"));
-
-        assert!(latch.report(first.clone()));
-        assert!(!latch.report(later));
-        assert_eq!(receiver.borrow().as_ref(), Some(&first));
     }
 }

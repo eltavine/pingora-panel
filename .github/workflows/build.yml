@@ -1,6 +1,36 @@
-on: [push, pull_request]
-
 name: build
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".cargo/**"
+      - ".rustfmt.toml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "clippy.toml"
+      - "pingora*/**"
+      - "tinyufo/**"
+      - ".github/scripts/check-cargo-machete-workspace.sh"
+      - ".github/workflows/build.yml"
+  pull_request:
+    paths:
+      - ".cargo/**"
+      - ".rustfmt.toml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "clippy.toml"
+      - "pingora*/**"
+      - "tinyufo/**"
+      - ".github/scripts/check-cargo-machete-workspace.sh"
+      - ".github/workflows/build.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   OPENRESTY_VERSION: 1.27.1.2
@@ -8,11 +38,27 @@ env:
 
 jobs:
   pingora:
+    name: Pingora (${{ matrix.profile }} / ${{ matrix.toolchain }})
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        # nightly, msrv, and latest stable
-        toolchain: [nightly, 1.85.0, 1.97.1]
+        include:
+          - profile: canary
+            toolchain: nightly
+            build_openresty: true
+            run_tests: true
+            run_quality: false
+          - profile: msrv
+            toolchain: 1.85.0
+            build_openresty: false
+            run_tests: false
+            run_quality: false
+          - profile: stable
+            toolchain: stable
+            build_openresty: true
+            run_tests: true
+            run_quality: true
     runs-on: ubuntu-24.04
     # Only run on "pull_request" event for external PRs. This is to avoid
     # duplicate builds for PRs created from internal branches.
@@ -26,10 +72,10 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt update
-          sudo apt install -y cmake libclang-dev ca-certificates curl --no-install-recommends
+          sudo apt install -y cmake libclang-dev ca-certificates curl jq --no-install-recommends
 
       - name: Cache OpenResty
-        if: matrix.toolchain != '1.85.0'
+        if: matrix.build_openresty
         id: cache-openresty
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
@@ -37,7 +83,7 @@ jobs:
           key: openresty-${{ runner.os }}-${{ runner.arch }}-${{ env.OPENRESTY_VERSION }}-${{ env.OPENRESTY_SHA256 }}-v1
 
       - name: Build OpenResty
-        if: matrix.toolchain != '1.85.0' && steps.cache-openresty.outputs.cache-hit != 'true'
+        if: matrix.build_openresty && steps.cache-openresty.outputs.cache-hit != 'true'
         run: |
           sudo apt install -y build-essential libpcre2-dev libssl-dev zlib1g-dev --no-install-recommends
 
@@ -58,7 +104,7 @@ jobs:
           make install
 
       - name: Add OpenResty to PATH
-        if: matrix.toolchain != '1.85.0'
+        if: matrix.build_openresty
         run: |
           test -x "$HOME/.local/openresty/bin/openresty"
           echo "$HOME/.local/openresty/bin" >> "$GITHUB_PATH"
@@ -75,7 +121,7 @@ jobs:
 
       - name: Run cargo check
         run: |
-          if [[ ${{ matrix.toolchain }} == 1.85.0 ]]; then
+          if [[ '${{ matrix.profile }}' == 'msrv' ]]; then
             # pingora-foundations follows Foundations' higher MSRV and is covered by the other toolchains in this matrix.
             cargo check --workspace --exclude pingora-foundations
           else
@@ -83,23 +129,28 @@ jobs:
           fi
 
       - name: Run cargo test
-        if: matrix.toolchain != '1.85.0'
+        if: matrix.run_tests
         run: cargo test --verbose --lib --bins --tests --no-fail-fast
 
       # Need to run doc tests separately.
       # (https://github.com/rust-lang/cargo/issues/6669)
       - name: Run cargo doc test
-        if: matrix.toolchain != '1.85.0'
+        if: matrix.run_tests
         run: cargo test --verbose --doc
 
       - name: Run cargo clippy
-        run: |
-          [[ ${{ matrix.toolchain }} != 1.97.1 ]] || cargo clippy --all-targets --all -- --allow=unknown-lints --deny=warnings
+        if: matrix.run_quality
+        run: cargo clippy --all-targets --all -- --allow=unknown-lints --deny=warnings
 
       - name: Run cargo audit
+        if: matrix.run_quality
         run: |
-          [[ ${{ matrix.toolchain }} != 1.97.1 ]] || (cargo install --locked --version 0.22.2 cargo-audit && cargo generate-lockfile --ignore-rust-version && cargo audit)
+          cargo install --locked --version 0.22.2 cargo-audit
+          cargo generate-lockfile --ignore-rust-version
+          cargo audit
 
       - name: Run cargo machete
+        if: matrix.run_quality
         run: |
-          [[ ${{ matrix.toolchain }} != 1.97.1 ]] || (cargo install --locked --version 0.7.0 cargo-machete && cargo machete)
+          cargo install --locked --version 0.7.0 cargo-machete
+          bash .github/scripts/check-cargo-machete-workspace.sh Cargo.toml

@@ -23,22 +23,6 @@ assert_breaking_rejected() {
   fi
 }
 
-assert_equal \
-  "origin/main" \
-  "$(bash "$script_dir/resolve-panel-compat-baseline.sh" pull_request ignored main)" \
-  "pull request baseline"
-assert_equal \
-  "0123456789abcdef" \
-  "$(bash "$script_dir/resolve-panel-compat-baseline.sh" push 0123456789abcdef ignored)" \
-  "push baseline"
-
-set +e
-bash "$script_dir/resolve-panel-compat-baseline.sh" schedule ignored ignored \
-  >/dev/null 2>&1
-resolver_status=$?
-set -e
-assert_equal "2" "$resolver_status" "unsupported event"
-
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/pingora-panel-rust-api-test.XXXXXX")"
 trap 'rm -rf -- "$test_root"' EXIT
 test_repo="$test_root/repository"

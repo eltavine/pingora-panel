@@ -16,3 +16,7 @@ tonic-prost.workspace = true
 [build-dependencies]
 protoc-bin-vendored = "=3.2.0"
 tonic-prost-build.workspace = true
+
+[package.metadata.cargo-machete]
+# Generated service stubs included by tonic::include_proto! reference this runtime codec.
+ignored = ["tonic-prost"]

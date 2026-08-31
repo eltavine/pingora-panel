@@ -16,7 +16,6 @@ panel-ir = { path = "../panel-ir" }
 pingora-core = { version = "=0.8.0", path = "../../pingora-core", default-features = false }
 pingora-http = { version = "=0.8.0", path = "../../pingora-http", default-features = false }
 pingora-load-balancing = { version = "=0.8.0", path = "../../pingora-load-balancing", default-features = false }
-pingora-proxy = { version = "=0.8.0", path = "../../pingora-proxy", default-features = false }
 
 [dev-dependencies]
 tokio.workspace = true
