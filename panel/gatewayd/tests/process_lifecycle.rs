@@ -194,6 +194,10 @@ async fn sigterm_exits_cleanly_and_the_same_address_can_restart() {
     assert_eq!(runtime.data_plane_version, "0.8.0");
     assert_eq!(runtime.worker_count, 2);
     assert_ne!(runtime.started_at_unix_seconds, 0);
+    let event_delivery = status.event_delivery.unwrap();
+    assert_eq!(event_delivery.queue_full_events, 0);
+    assert_eq!(event_delivery.disconnected_events, 0);
+    assert_eq!(event_delivery.consumer_panics, 0);
 
     first.terminate();
     wait_until_not_serving(&mut health).await;

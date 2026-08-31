@@ -241,6 +241,12 @@ message GatewayRuntimeInfo {
   uint32 worker_count = 6;
 }
 
+message EventDeliveryHealth {
+  uint64 queue_full_events = 1;
+  uint64 disconnected_events = 2;
+  uint64 consumer_panics = 3;
+}
+
 message StatusResponse {
   .pingora.panel.common.v1.Version version = 1;
   .pingora.panel.common.v1.HealthStatus health = 2;
@@ -249,4 +255,5 @@ message StatusResponse {
   .pingora.panel.common.v1.Error error = 5;
   uint64 prepared_count = 6;
   GatewayRuntimeInfo runtime = 7;
+  EventDeliveryHealth event_delivery = 8;
 }

@@ -110,6 +110,11 @@ mod tests {
                 uptime_seconds: 42,
                 worker_count: 4,
             }),
+            event_delivery: Some(gateway::v1::EventDeliveryHealth {
+                queue_full_events: 2,
+                disconnected_events: 3,
+                consumer_panics: 5,
+            }),
         };
         let decoded =
             gateway::v1::StatusResponse::decode(original.encode_to_vec().as_slice()).unwrap();

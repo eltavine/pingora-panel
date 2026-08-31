@@ -1,12 +1,15 @@
 use panel_domain::RevisionId;
 use panel_engine::SnapshotStore;
 use panel_errors::ErrorCode;
-use snapshot_store_fs::FileSnapshotStore;
+use snapshot_store_fs::{FileSnapshotStore, SnapshotRecordCodecRegistry};
 use std::{fs, path::PathBuf};
 use uuid::Uuid;
 
 const GOLDEN_ACTIVE: &[u8] = include_bytes!("fixtures/v1/active.json");
+const GOLDEN_POPULATED_ACTIVE: &[u8] = include_bytes!("fixtures/v1/populated-active.json");
 const GOLDEN_HASH: &str = "766d68b0accced7c5d5835cc6f988fb69fe7eb80ae5847045943d1ab8dcc7dd6";
+const GOLDEN_POPULATED_HASH: &str =
+    "468572ac2602868989cb7ca5fcc424d7744f2980d8a92b91694d585b03d9443f";
 
 struct TemporaryDirectory(PathBuf);
 
@@ -45,6 +48,36 @@ async fn committed_v1_fixture_remains_readable() {
         active.receipt.prepare_token.as_str(),
         "golden-prepare-token-v1"
     );
+}
+
+#[tokio::test]
+async fn populated_v1_fixture_locks_nested_ir_and_canonical_hash() {
+    let temporary = TemporaryDirectory::new();
+    temporary.write_active(GOLDEN_POPULATED_ACTIVE);
+    let store = FileSnapshotStore::new(&temporary.0);
+
+    let active = store.load_active().await.unwrap().unwrap();
+    let snapshot = &active.envelope.snapshot;
+    assert_eq!(snapshot.content_hash.as_str(), GOLDEN_POPULATED_HASH);
+    assert_eq!(snapshot.content_hash(), snapshot.content_hash);
+    assert_eq!(snapshot.listeners.len(), 1);
+    assert_eq!(snapshot.sites[0].id.as_str(), "site-main");
+    assert_eq!(snapshot.routes[0].id.as_str(), "route-api");
+    assert_eq!(snapshot.upstream_pools[0].id.as_str(), "pool-api");
+    assert_eq!(snapshot.upstream_pools[0].endpoints[0].weight, 10);
+    assert_eq!(snapshot.tls_profiles[0].id, "tls-main");
+    assert_eq!(snapshot.header_policies[0].id, "headers-main");
+    assert_eq!(snapshot.static_content[0].id, "static-main");
+    assert_eq!(snapshot.cache_policies[0].id, "cache-api");
+    assert_eq!(snapshot.security_policies[0].id, "security-api");
+    assert_eq!(snapshot.lua_policies[0].id, "lua-auth");
+
+    let reencoded = SnapshotRecordCodecRegistry::default()
+        .encode(&active)
+        .unwrap();
+    let fixture_value: serde_json::Value = serde_json::from_slice(GOLDEN_POPULATED_ACTIVE).unwrap();
+    let reencoded_value: serde_json::Value = serde_json::from_slice(&reencoded).unwrap();
+    assert_eq!(reencoded_value, fixture_value);
 }
 
 #[tokio::test]

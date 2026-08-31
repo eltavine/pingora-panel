@@ -1,5 +1,6 @@
 use crate::{
-    GatewayResourceLimits, LoopbackOnlyManagementBindPolicy, ManagementBindPolicy, ShutdownPolicy,
+    BackgroundTaskShutdownPolicy, GatewayResourceLimits, LoopbackOnlyManagementBindPolicy,
+    ManagementBindPolicy, ShutdownPolicy,
 };
 use panel_errors::{PanelError, Result};
 use std::{
@@ -14,6 +15,8 @@ pub const GATEWAY_ADDRESS_ENV: &str = "PINGORA_PANEL_GATEWAY_ADDR";
 pub const STATE_DIRECTORY_ENV: &str = "PINGORA_PANEL_STATE_DIR";
 pub const WORKER_COUNT_ENV: &str = "PINGORA_PANEL_WORKERS";
 pub const DRAIN_TIMEOUT_MILLIS_ENV: &str = "PINGORA_PANEL_DRAIN_TIMEOUT_MS";
+pub const BACKGROUND_TASK_SHUTDOWN_TIMEOUT_MILLIS_ENV: &str =
+    "PINGORA_PANEL_BACKGROUND_TASK_SHUTDOWN_TIMEOUT_MS";
 
 pub const MAX_GATEWAY_WORKERS: u32 = 256;
 
@@ -26,6 +29,7 @@ pub struct GatewaydConfig {
     state_directory: PathBuf,
     worker_count: GatewayWorkerCount,
     shutdown_policy: ShutdownPolicy,
+    background_task_shutdown_policy: BackgroundTaskShutdownPolicy,
     resource_limits: GatewayResourceLimits,
 }
 
@@ -93,6 +97,10 @@ impl GatewaydConfig {
             .map(|value| parse_shutdown_policy(&value))
             .transpose()?
             .unwrap_or_default();
+        let background_task_shutdown_policy = lookup(BACKGROUND_TASK_SHUTDOWN_TIMEOUT_MILLIS_ENV)
+            .map(|value| parse_background_task_shutdown_policy(&value))
+            .transpose()?
+            .unwrap_or_default();
         let resource_limits = GatewayResourceLimits::from_lookup(&mut lookup)?;
 
         Ok(Self {
@@ -100,6 +108,7 @@ impl GatewaydConfig {
             state_directory,
             worker_count,
             shutdown_policy,
+            background_task_shutdown_policy,
             resource_limits,
         })
     }
@@ -118,6 +127,10 @@ impl GatewaydConfig {
 
     pub fn shutdown_policy(&self) -> ShutdownPolicy {
         self.shutdown_policy
+    }
+
+    pub fn background_task_shutdown_policy(&self) -> BackgroundTaskShutdownPolicy {
+        self.background_task_shutdown_policy
     }
 
     pub fn resource_limits(&self) -> GatewayResourceLimits {
@@ -158,6 +171,20 @@ fn parse_shutdown_policy(value: &OsStr) -> Result<ShutdownPolicy> {
     ShutdownPolicy::new(Duration::from_millis(milliseconds))
 }
 
+fn parse_background_task_shutdown_policy(value: &OsStr) -> Result<BackgroundTaskShutdownPolicy> {
+    let value = value.to_str().ok_or_else(|| {
+        PanelError::invalid_argument(format!(
+            "{BACKGROUND_TASK_SHUTDOWN_TIMEOUT_MILLIS_ENV} must be valid UTF-8"
+        ))
+    })?;
+    let milliseconds = value.parse().map_err(|error| {
+        PanelError::invalid_argument(format!(
+            "{BACKGROUND_TASK_SHUTDOWN_TIMEOUT_MILLIS_ENV} must be an unsigned integer: {error}"
+        ))
+    })?;
+    BackgroundTaskShutdownPolicy::new(Duration::from_millis(milliseconds))
+}
+
 fn default_worker_count() -> GatewayWorkerCount {
     let available = std::thread::available_parallelism()
         .map(|count| count.get())
@@ -188,6 +215,10 @@ mod tests {
             (STATE_DIRECTORY_ENV, OsString::from("/tmp/gateway-state")),
             (WORKER_COUNT_ENV, OsString::from("3")),
             (DRAIN_TIMEOUT_MILLIS_ENV, OsString::from("250")),
+            (
+                BACKGROUND_TASK_SHUTDOWN_TIMEOUT_MILLIS_ENV,
+                OsString::from("750"),
+            ),
         ]);
         let config = GatewaydConfig::from_lookup(|key| values.get(key).cloned()).unwrap();
 
@@ -197,6 +228,10 @@ mod tests {
         assert_eq!(
             config.shutdown_policy().drain_timeout(),
             Duration::from_millis(250)
+        );
+        assert_eq!(
+            config.background_task_shutdown_policy().total_timeout(),
+            Duration::from_millis(750)
         );
     }
 

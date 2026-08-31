@@ -129,6 +129,55 @@ pub trait GatewayRuntimeInfoProvider: Send + Sync {
     fn snapshot(&self) -> GatewayRuntimeInfo;
 }
 
+/// Transport-neutral counters describing loss or isolation in the gateway event
+/// delivery path. Private fields keep additive evolution source-compatible.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct GatewayEventDeliveryDiagnostics {
+    queue_full_events: u64,
+    disconnected_events: u64,
+    consumer_panics: u64,
+}
+
+impl GatewayEventDeliveryDiagnostics {
+    pub const fn new(
+        queue_full_events: u64,
+        disconnected_events: u64,
+        consumer_panics: u64,
+    ) -> Self {
+        Self {
+            queue_full_events,
+            disconnected_events,
+            consumer_panics,
+        }
+    }
+
+    pub const fn queue_full_events(self) -> u64 {
+        self.queue_full_events
+    }
+
+    pub const fn disconnected_events(self) -> u64 {
+        self.disconnected_events
+    }
+
+    pub const fn dropped_events(self) -> u64 {
+        self.queue_full_events
+            .saturating_add(self.disconnected_events)
+    }
+
+    pub const fn consumer_panics(self) -> u64 {
+        self.consumer_panics
+    }
+}
+
+/// Read-only driven port for event-delivery diagnostics.
+///
+/// Transports depend on this stable projection rather than a queue, metrics
+/// implementation, or runtime adapter.
+pub trait GatewayEventDeliveryDiagnosticsProvider: Send + Sync {
+    fn snapshot(&self) -> GatewayEventDeliveryDiagnostics;
+}
+
 #[async_trait]
 pub trait GatewayEngine: Send + Sync {
     async fn capabilities(&self) -> Result<EngineCapabilities>;

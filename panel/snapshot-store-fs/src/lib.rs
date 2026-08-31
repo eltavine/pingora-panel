@@ -2,6 +2,8 @@
 
 mod codec;
 mod lease;
+mod record_file;
+mod record_reader;
 
 pub use codec::{
     JsonSnapshotRecordCodecV1, SnapshotRecordCodec, SnapshotRecordCodecRegistry,
@@ -15,10 +17,12 @@ use panel_engine::{ActiveSnapshotRecord, PrepareToken, PreparedSnapshotRecord, S
 #[cfg(test)]
 use panel_errors::ErrorCode;
 use panel_errors::{PanelError, Result};
+use record_file::{open_regular_record, RecordFileOpenError};
+use record_reader::{BoundedRecordReadError, BoundedRecordReader, RecordCollectionBudget};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
-    io::{Read, Write},
+    io::Write,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -125,8 +129,8 @@ impl SnapshotStore for FileSnapshotStore {
             let Some(record) = read_record::<ActiveSnapshotRecord>(&path, codecs.as_ref())? else {
                 return Ok(None);
             };
-            validate_active_record(&record)?;
-            Ok(Some(record))
+            validate_active_record(&record.value)?;
+            Ok(Some(record.value))
         })
         .await
     }
@@ -211,6 +215,9 @@ fn load_prepared_records(
         }
         paths.push(path);
     }
+    // This metadata pass is an early rejection only. A second budget below is
+    // charged from actual stream lengths so concurrent growth cannot bypass the
+    // aggregate memory boundary.
     let total_bytes = paths.iter().try_fold(0_u64, |total, path| {
         let metadata = fs::symlink_metadata(path)
             .map_err(|error| storage_error("read prepared snapshot metadata", path, error))?;
@@ -226,13 +233,23 @@ fn load_prepared_records(
     paths.sort();
 
     let mut records = Vec::with_capacity(paths.len());
+    let mut actual_bytes = RecordCollectionBudget::new(MAX_PREPARED_RECORD_BYTES);
     for path in paths {
-        let record = read_record::<PreparedSnapshotRecord>(&path, codecs)?.ok_or_else(|| {
+        let decoded = read_record::<PreparedSnapshotRecord>(&path, codecs)?.ok_or_else(|| {
             PanelError::corrupt_state(format!(
                 "prepared snapshot disappeared while loading {}",
                 path.display()
             ))
         })?;
+        actual_bytes
+            .consume(decoded.encoded_bytes)
+            .map_err(|error| {
+                PanelError::resource_exhausted(format!(
+                    "prepared snapshot records exceed the {} byte aggregate limit",
+                    error.max_bytes
+                ))
+            })?;
+        let record = decoded.value;
         validate_prepared_record(&record)?;
         let expected = FileSnapshotStore::prepared_path(root, &record.receipt.prepare_token);
         if path != expected {
@@ -274,22 +291,29 @@ fn validate_active_record(record: &ActiveSnapshotRecord) -> Result<()> {
     Ok(())
 }
 
+struct DecodedRecord<T> {
+    value: T,
+    encoded_bytes: u64,
+}
+
 fn read_record<T: DeserializeOwned>(
     path: &Path,
     codecs: &SnapshotRecordCodecRegistry,
-) -> Result<Option<T>> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(value) => value,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(storage_error("read snapshot metadata", path, error)),
+) -> Result<Option<DecodedRecord<T>>> {
+    let opened = match open_regular_record(path) {
+        Ok(Some(opened)) => opened,
+        Ok(None) => return Ok(None),
+        Err(RecordFileOpenError::NotRegular) => {
+            return Err(PanelError::corrupt_state(format!(
+                "snapshot record is not a regular file: {}",
+                path.display()
+            )));
+        }
+        Err(RecordFileOpenError::Io(error)) => {
+            return Err(storage_error("open snapshot record", path, error));
+        }
     };
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err(PanelError::corrupt_state(format!(
-            "snapshot record is not a regular file: {}",
-            path.display()
-        )));
-    }
-    if metadata.len() > MAX_RECORD_BYTES {
+    if opened.length_hint > MAX_RECORD_BYTES {
         return Err(PanelError::corrupt_state(format!(
             "snapshot record exceeds the {} byte limit: {}",
             MAX_RECORD_BYTES,
@@ -297,12 +321,26 @@ fn read_record<T: DeserializeOwned>(
         )));
     }
 
-    let mut file =
-        File::open(path).map_err(|error| storage_error("open snapshot record", path, error))?;
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.read_to_end(&mut bytes)
-        .map_err(|error| storage_error("read snapshot record", path, error))?;
-    codecs.decode(&bytes).map(Some)
+    let bytes =
+        match BoundedRecordReader::new(MAX_RECORD_BYTES).read(opened.file, opened.length_hint) {
+            Ok(bytes) => bytes,
+            Err(BoundedRecordReadError::Io(error)) => {
+                return Err(storage_error("read snapshot record", path, error));
+            }
+            Err(BoundedRecordReadError::LimitExceeded { max_bytes }) => {
+                return Err(PanelError::corrupt_state(format!(
+                    "snapshot record exceeds the {max_bytes} byte limit: {}",
+                    path.display()
+                )));
+            }
+        };
+    let encoded_bytes = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+    codecs.decode(&bytes).map(|value| {
+        Some(DecodedRecord {
+            value,
+            encoded_bytes,
+        })
+    })
 }
 
 fn atomic_write_record<T: Serialize>(
@@ -501,6 +539,25 @@ mod tests {
         let error = store.load_active().await.unwrap_err();
         assert_eq!(error.code.as_str(), ErrorCode::CORRUPT_STATE);
         assert!(active_path.exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn active_record_symlink_is_rejected_without_following_its_target() {
+        use std::os::unix::fs::symlink;
+
+        let temporary = TemporaryDirectory::new();
+        fs::create_dir_all(&temporary.0).unwrap();
+        let target_path = temporary.0.join("outside-record.json");
+        let target_contents = b"target must remain untouched";
+        fs::write(&target_path, target_contents).unwrap();
+        symlink(&target_path, temporary.0.join(ACTIVE_FILE_NAME)).unwrap();
+        let store = FileSnapshotStore::new(&temporary.0);
+
+        let error = store.load_active().await.unwrap_err();
+
+        assert_eq!(error.code.as_str(), ErrorCode::CORRUPT_STATE);
+        assert_eq!(fs::read(target_path).unwrap(), target_contents);
     }
 
     #[cfg(unix)]

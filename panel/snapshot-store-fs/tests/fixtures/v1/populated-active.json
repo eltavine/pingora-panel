@@ -1,0 +1,146 @@
+{
+  "format_version": 1,
+  "payload": {
+    "envelope": {
+      "snapshot": {
+        "cache_policies": [
+          {
+            "enabled": true,
+            "id": "cache-api",
+            "ttl_seconds": 60,
+            "vary_headers": ["accept-encoding", "authorization"]
+          }
+        ],
+        "content_hash": "468572ac2602868989cb7ca5fcc424d7744f2980d8a92b91694d585b03d9443f",
+        "header_policies": [
+          {
+            "id": "headers-main",
+            "request_remove": ["x-internal"],
+            "request_set": { "x-panel": "enabled" },
+            "response_remove": ["server"],
+            "response_set": { "x-content-type-options": "nosniff" }
+          }
+        ],
+        "listeners": [
+          {
+            "address": "0.0.0.0:443",
+            "id": "listener-https",
+            "tls_profile_id": "tls-main"
+          }
+        ],
+        "lua_policies": [
+          {
+            "capabilities": ["request.headers.read", "response.headers.write"],
+            "id": "lua-auth",
+            "instruction_limit": 100000,
+            "memory_limit_bytes": 1048576,
+            "script_secret_id": "script-auth-v1",
+            "timeout_ms": 25
+          }
+        ],
+        "required_capabilities": [
+          { "name": "route.host", "version": "1" },
+          { "name": "upstream.https", "version": "1" }
+        ],
+        "revision_id": 42,
+        "routes": [
+          {
+            "action": {
+              "kind": "proxy",
+              "upstream_pool_id": "pool-api"
+            },
+            "cache_policy_id": "cache-api",
+            "enabled": true,
+            "header_policy_id": "headers-main",
+            "id": "route-api",
+            "lua_policy_id": "lua-auth",
+            "matcher": {
+              "host": "api.example.com",
+              "kind": "host_path_prefix",
+              "path": "/v1"
+            },
+            "priority": 10,
+            "retry_policy": {
+              "attempts": 2,
+              "per_try_timeout_ms": 750,
+              "retry_statuses": [502, 503]
+            },
+            "security_policy_id": "security-api",
+            "site_id": "site-main"
+          }
+        ],
+        "schema_version": "pingora.panel.ir/v1alpha1",
+        "security_policies": [
+          {
+            "allowed_cidrs": ["10.0.0.0/8"],
+            "denied_cidrs": ["10.66.0.0/16"],
+            "id": "security-api",
+            "request_rate_per_second": 100
+          }
+        ],
+        "sites": [
+          {
+            "domains": [
+              {
+                "host": "example.com",
+                "tls_profile_id": "tls-main"
+              }
+            ],
+            "enabled": true,
+            "id": "site-main",
+            "name": "Main Site"
+          }
+        ],
+        "static_content": [
+          {
+            "id": "static-main",
+            "index_files": ["index.html", "index.htm"],
+            "root": "/srv/panel",
+            "spa_fallback": true
+          }
+        ],
+        "tls_profiles": [
+          {
+            "alpn": ["h2", "http/1.1"],
+            "certificate_secret_id": "secret-cert-main",
+            "id": "tls-main",
+            "min_protocol": "TLSv1.2",
+            "private_key_secret_id": "secret-key-main"
+          }
+        ],
+        "upstream_pools": [
+          {
+            "endpoints": [
+              {
+                "address": {
+                  "host": "192.0.2.10",
+                  "port": 8443,
+                  "tls": true
+                },
+                "id": "origin-a",
+                "sni": "origin.example.com",
+                "weight": 10
+              }
+            ],
+            "id": "pool-api",
+            "load_balancing": "round_robin",
+            "name": "API Origins",
+            "retry_policy": {
+              "attempts": 2,
+              "per_try_timeout_ms": 750,
+              "retry_statuses": [502, 503]
+            }
+          }
+        ]
+      }
+    },
+    "receipt": {
+      "adapter_version": "golden-adapter-v1",
+      "content_hash": "468572ac2602868989cb7ca5fcc424d7744f2980d8a92b91694d585b03d9443f",
+      "prepare_token": "golden-populated-token-v1",
+      "previous_active_hash": "a2fecc9f8c94f988b5506640b721660523f9719a2fb0c9499a306a2e0ad5e8cb",
+      "revision_id": 42,
+      "schema_version": "pingora.panel.ir/v1alpha1"
+    }
+  }
+}

@@ -12,21 +12,26 @@ mod observability;
 mod resource_limits;
 mod runtime_info;
 mod shutdown;
+mod shutdown_trigger;
 
 pub use background_tasks::{
     BackgroundTaskError, BackgroundTaskFailure, BackgroundTaskFailureKind,
-    BackgroundTaskFailureMonitor, BackgroundTaskShutdown, BackgroundTaskSupervisor,
+    BackgroundTaskFailureMonitor, BackgroundTaskShutdown, BackgroundTaskShutdownPolicy,
+    BackgroundTaskSupervisor, DEFAULT_BACKGROUND_TASK_SHUTDOWN_TIMEOUT,
+    MAX_BACKGROUND_TASK_SHUTDOWN_TIMEOUT,
 };
 pub use bind_policy::{LoopbackOnlyManagementBindPolicy, ManagementBindPolicy};
 pub use config::{
-    GatewayWorkerCount, GatewaydConfig, DRAIN_TIMEOUT_MILLIS_ENV, GATEWAY_ADDRESS_ENV,
-    MAX_GATEWAY_WORKERS, STATE_DIRECTORY_ENV, WORKER_COUNT_ENV,
+    GatewayWorkerCount, GatewaydConfig, BACKGROUND_TASK_SHUTDOWN_TIMEOUT_MILLIS_ENV,
+    DRAIN_TIMEOUT_MILLIS_ENV, GATEWAY_ADDRESS_ENV, MAX_GATEWAY_WORKERS, STATE_DIRECTORY_ENV,
+    WORKER_COUNT_ENV,
 };
 pub use health::{RuntimeHealthState, RuntimeReadiness, TonicHealthSynchronizer};
 pub use observability::{initialize_observability, TracingGatewayEventSink};
 pub use resource_limits::*;
 pub use runtime_info::ProcessRuntimeInfo;
 pub use shutdown::{ReadinessGate, ShutdownCoordinator, ShutdownPolicy, TonicHealthReadinessGate};
+pub use shutdown_trigger::{ShutdownArbiter, ShutdownReason, ShutdownTrigger};
 
 use gateway_grpc::{
     DeadlineRequirement, GatewayGrpcService, GatewayRequestPolicy, GatewayTransportPolicy,
@@ -42,12 +47,8 @@ use panel_gateway_runtime::{
     PreparedSnapshotAdmissionPolicy, PreparedSnapshotBudget,
 };
 use snapshot_store_fs::FileSnapshotStore;
-use std::{
-    future::Future,
-    num::NonZeroU32,
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
+use std::{future::Future, num::NonZeroU32, path::PathBuf, sync::Arc};
+use tokio::sync::oneshot;
 use tonic::server::NamedService;
 use tonic::transport::Server;
 use tonic_health::{
@@ -256,6 +257,7 @@ pub async fn build_gateway_runtime_with_options(
                 options.transport_policy,
             )
             .with_event_sink(Arc::clone(&events))
+            .with_event_delivery_diagnostics(Arc::new(event_delivery.clone()))
             .with_lifetime_dependency(task_lifetime),
             health,
             health_reporter,
@@ -298,22 +300,12 @@ pub async fn serve_gatewayd(
         event_delivery,
     } = runtime;
     let mut failure_monitor = background_tasks.failure_monitor();
-    let observed_failure = Arc::new(Mutex::new(None));
-    let observed_failure_from_shutdown = Arc::clone(&observed_failure);
+    let (trigger_sender, trigger_receiver) = oneshot::channel();
     let shutdown_reason = async move {
-        tokio::select! {
-            _ = shutdown => "process_signal".to_owned(),
-            failure = failure_monitor.next() => {
-                if let Some(failure) = failure {
-                    *observed_failure_from_shutdown
-                        .lock()
-                        .expect("background failure mutex poisoned") = Some(failure);
-                    "background_task_failure".to_owned()
-                } else {
-                    "background_task_monitor_closed".to_owned()
-                }
-            }
-        }
+        let trigger = ShutdownArbiter::wait(shutdown, failure_monitor.next()).await;
+        let reason = trigger.reason();
+        let _ = trigger_sender.send(trigger);
+        reason
     };
     let readiness = Arc::new(TonicHealthReadinessGate::new(
         services.health_reporter.clone(),
@@ -334,10 +326,12 @@ pub async fn serve_gatewayd(
         .add_service(services.health)
         .serve_with_shutdown(
             config.listen_address(),
-            shutdown_coordinator.run_with_reason(shutdown_reason),
+            shutdown_coordinator.run_with_shutdown_reason(shutdown_reason),
         )
         .await;
-    let background_result = background_tasks.shutdown_and_join().await;
+    let background_result = background_tasks
+        .shutdown_and_join_with_policy(config.background_task_shutdown_policy())
+        .await;
     let delivery = event_delivery.snapshot();
     tracing::info!(
         event = "event_delivery_stopped",
@@ -346,10 +340,9 @@ pub async fn serve_gatewayd(
         consumer_panics = delivery.consumer_panics(),
         "gateway event delivery stopped"
     );
-    if let Some(failure) = observed_failure
-        .lock()
-        .expect("background failure mutex poisoned")
-        .take()
+    if let Ok(Some(failure)) = trigger_receiver
+        .await
+        .map(ShutdownTrigger::into_background_failure)
     {
         return Err(BackgroundTaskError::from_failure(failure).into());
     }

@@ -1,8 +1,9 @@
 //! Runtime event-delivery adapters around the stable `panel-engine` port.
 
 pub use panel_engine::{
-    GatewayEvent, GatewayEventSink, GatewayOperation, GatewayRequestMetadata,
-    GatewayRequestOperation, GatewayRequestOutcome, NoopGatewayEventSink,
+    GatewayEvent, GatewayEventDeliveryDiagnostics, GatewayEventDeliveryDiagnosticsProvider,
+    GatewayEventSink, GatewayOperation, GatewayRequestMetadata, GatewayRequestOperation,
+    GatewayRequestOutcome, NoopGatewayEventSink,
 };
 use panel_errors::{PanelError, Result};
 use std::{
@@ -79,6 +80,17 @@ impl GatewayEventDeliveryMonitor {
 
     fn record_consumer_panic(&self) {
         self.stats.consumer_panics.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+impl GatewayEventDeliveryDiagnosticsProvider for GatewayEventDeliveryMonitor {
+    fn snapshot(&self) -> GatewayEventDeliveryDiagnostics {
+        let snapshot = GatewayEventDeliveryMonitor::snapshot(self);
+        GatewayEventDeliveryDiagnostics::new(
+            snapshot.queue_full_events(),
+            snapshot.disconnected_events(),
+            snapshot.consumer_panics(),
+        )
     }
 }
 
@@ -288,5 +300,19 @@ mod tests {
         assert_eq!(recording.0.lock().unwrap().len(), 2);
         sink.emit(&event());
         assert_eq!(sink.delivery_monitor().snapshot().disconnected_events(), 1);
+    }
+
+    #[test]
+    fn diagnostics_provider_projects_the_monitor_without_exposing_queue_types() {
+        let monitor = GatewayEventDeliveryMonitor::new();
+        monitor.record_queue_full();
+        monitor.record_disconnected();
+        monitor.record_consumer_panic();
+
+        let diagnostics = GatewayEventDeliveryDiagnosticsProvider::snapshot(&monitor);
+        assert_eq!(diagnostics.queue_full_events(), 1);
+        assert_eq!(diagnostics.disconnected_events(), 1);
+        assert_eq!(diagnostics.dropped_events(), 2);
+        assert_eq!(diagnostics.consumer_panics(), 1);
     }
 }

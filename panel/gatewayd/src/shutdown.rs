@@ -1,3 +1,4 @@
+use crate::ShutdownReason;
 use panel_errors::{PanelError, Result};
 use panel_gateway_runtime::{GatewayEvent, GatewayEventSink, NoopGatewayEventSink};
 use std::{future::Future, sync::Arc, time::Duration};
@@ -76,7 +77,22 @@ pub struct ShutdownCoordinator {
     readiness: Arc<dyn ReadinessGate>,
     policy: ShutdownPolicy,
     events: Arc<dyn GatewayEventSink>,
-    reason: String,
+    reason: ShutdownEventReason,
+}
+
+#[derive(Clone)]
+enum ShutdownEventReason {
+    Typed(ShutdownReason),
+    Custom(String),
+}
+
+impl ShutdownEventReason {
+    fn into_string(self) -> String {
+        match self {
+            Self::Typed(reason) => reason.as_str().to_owned(),
+            Self::Custom(reason) => reason,
+        }
+    }
 }
 
 impl ShutdownCoordinator {
@@ -85,7 +101,7 @@ impl ShutdownCoordinator {
             readiness,
             policy,
             events: Arc::new(NoopGatewayEventSink),
-            reason: "shutdown_requested".into(),
+            reason: ShutdownEventReason::Typed(ShutdownReason::ShutdownRequested),
         }
     }
 
@@ -95,7 +111,12 @@ impl ShutdownCoordinator {
     }
 
     pub fn with_reason(mut self, reason: impl Into<String>) -> Self {
-        self.reason = reason.into();
+        self.reason = ShutdownEventReason::Custom(reason.into());
+        self
+    }
+
+    pub fn with_shutdown_reason(mut self, reason: ShutdownReason) -> Self {
+        self.reason = ShutdownEventReason::Typed(reason);
         self
     }
 
@@ -107,14 +128,19 @@ impl ShutdownCoordinator {
 
     pub async fn run_with_reason(self, signal: impl Future<Output = String>) {
         let reason = signal.await;
-        self.complete(reason).await;
+        self.complete(ShutdownEventReason::Custom(reason)).await;
     }
 
-    async fn complete(self, reason: String) {
+    pub async fn run_with_shutdown_reason(self, signal: impl Future<Output = ShutdownReason>) {
+        let reason = signal.await;
+        self.complete(ShutdownEventReason::Typed(reason)).await;
+    }
+
+    async fn complete(self, reason: ShutdownEventReason) {
         self.events.emit(&GatewayEvent::ShutdownStarted {
             drain_millis: u64::try_from(self.policy.drain_timeout().as_millis())
                 .unwrap_or(u64::MAX),
-            reason,
+            reason: reason.into_string(),
         });
         self.readiness.withdraw().await;
         tokio::time::sleep(self.policy.drain_timeout()).await;
@@ -192,5 +218,26 @@ mod tests {
                 if reason == "background_task_failure"
         ));
         assert!(readiness.0.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn typed_shutdown_reason_is_converted_only_at_the_event_boundary() {
+        let readiness = Arc::new(RecordingReadinessGate(AtomicBool::new(false)));
+        let events = Arc::new(RecordingEventSink::default());
+        let coordinator = ShutdownCoordinator::new(
+            Arc::clone(&readiness) as Arc<dyn ReadinessGate>,
+            ShutdownPolicy::new(Duration::ZERO).unwrap(),
+        )
+        .with_event_sink(Arc::clone(&events) as Arc<dyn GatewayEventSink>);
+
+        coordinator
+            .run_with_shutdown_reason(async { ShutdownReason::BackgroundTaskFailure })
+            .await;
+
+        assert!(matches!(
+            &events.0.lock().unwrap()[0],
+            GatewayEvent::ShutdownStarted { reason, .. }
+                if reason == ShutdownReason::BackgroundTaskFailure.as_str()
+        ));
     }
 }

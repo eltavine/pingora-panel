@@ -8,6 +8,7 @@ mod prepared_policy;
 
 pub use events::{
     BufferedGatewayEventReceiver, BufferedGatewayEventSink, FanoutGatewayEventSink, GatewayEvent,
+    GatewayEventDeliveryDiagnostics, GatewayEventDeliveryDiagnosticsProvider,
     GatewayEventDeliveryMonitor, GatewayEventDeliverySnapshot, GatewayEventSink, GatewayOperation,
     GatewayRequestMetadata, GatewayRequestOperation, GatewayRequestOutcome, NoopGatewayEventSink,
 };

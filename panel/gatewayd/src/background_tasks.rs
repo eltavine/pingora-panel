@@ -1,11 +1,51 @@
-use futures_util::FutureExt;
+use futures_util::{stream::FuturesUnordered, FutureExt, StreamExt};
+use panel_errors::{PanelError, Result as PanelResult};
 use std::{
     any::Any,
+    collections::BTreeMap,
     future::Future,
     panic::AssertUnwindSafe,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 use tokio::{sync::watch, task::JoinHandle};
+
+pub const DEFAULT_BACKGROUND_TASK_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+pub const MAX_BACKGROUND_TASK_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(300);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BackgroundTaskShutdownPolicy {
+    total_timeout: Duration,
+}
+
+impl BackgroundTaskShutdownPolicy {
+    pub fn new(total_timeout: Duration) -> PanelResult<Self> {
+        if total_timeout.is_zero() {
+            return Err(PanelError::invalid_argument(
+                "background task shutdown timeout must be non-zero",
+            ));
+        }
+        if total_timeout > MAX_BACKGROUND_TASK_SHUTDOWN_TIMEOUT {
+            return Err(PanelError::invalid_argument(format!(
+                "background task shutdown timeout must not exceed {} milliseconds",
+                MAX_BACKGROUND_TASK_SHUTDOWN_TIMEOUT.as_millis()
+            )));
+        }
+        Ok(Self { total_timeout })
+    }
+
+    pub fn total_timeout(self) -> Duration {
+        self.total_timeout
+    }
+}
+
+impl Default for BackgroundTaskShutdownPolicy {
+    fn default() -> Self {
+        Self {
+            total_timeout: DEFAULT_BACKGROUND_TASK_SHUTDOWN_TIMEOUT,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct BackgroundTaskSupervisor {
@@ -35,6 +75,7 @@ pub enum BackgroundTaskFailureKind {
     Panicked,
     Cancelled,
     UnexpectedExit,
+    TimedOut,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -84,6 +125,26 @@ impl BackgroundTaskFailure {
             task_name,
             kind: BackgroundTaskFailureKind::UnexpectedExit,
             detail: "critical task exited before shutdown was requested".into(),
+        }
+    }
+
+    fn timed_out(task_names: &[String], timeout: Duration) -> Self {
+        let task_name = task_names
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "background-task-supervisor".into());
+        let pending = if task_names.is_empty() {
+            "unknown".into()
+        } else {
+            task_names.join(", ")
+        };
+        Self {
+            task_name,
+            kind: BackgroundTaskFailureKind::TimedOut,
+            detail: format!(
+                "shutdown exceeded {} milliseconds; pending tasks: {pending}",
+                timeout.as_millis()
+            ),
         }
     }
 }
@@ -277,16 +338,7 @@ impl BackgroundTaskSupervisor {
     }
 
     pub async fn shutdown_and_join(&self) -> Result<(), BackgroundTaskError> {
-        let tasks = {
-            let mut registry = self
-                .inner
-                .registry
-                .lock()
-                .expect("background task registry mutex poisoned");
-            registry.shutting_down = true;
-            let _ = self.inner.shutdown.send(true);
-            std::mem::take(&mut registry.tasks)
-        };
+        let tasks = self.begin_shutdown();
         let mut first_error = None;
         for task in tasks {
             let failure = match task.handle.await {
@@ -302,6 +354,73 @@ impl BackgroundTaskSupervisor {
             }
         }
         first_error.map_or(Ok(()), Err)
+    }
+
+    /// Cooperatively stops every registered task within one shared time budget.
+    ///
+    /// The legacy `shutdown_and_join` method remains unbounded for source and
+    /// behavior compatibility. Production compositions should select an explicit
+    /// policy and use this method so one extension cannot stall process exit.
+    pub async fn shutdown_and_join_with_policy(
+        &self,
+        policy: BackgroundTaskShutdownPolicy,
+    ) -> Result<(), BackgroundTaskError> {
+        let tasks = self.begin_shutdown();
+        let mut pending = FuturesUnordered::new();
+        let mut aborts = BTreeMap::new();
+        for (id, task) in tasks.into_iter().enumerate() {
+            aborts.insert(id, (task.name.clone(), task.handle.abort_handle()));
+            pending.push(async move { (id, task.name, task.handle.await) });
+        }
+
+        let mut first_error = None;
+        let joined = tokio::time::timeout(policy.total_timeout(), async {
+            while let Some((id, name, result)) = pending.next().await {
+                aborts.remove(&id);
+                let failure = match result {
+                    Ok(Ok(())) => None,
+                    Ok(Err(failure)) => Some(failure),
+                    Err(error) => Some(BackgroundTaskFailure::cancelled(name, error.to_string())),
+                };
+                if let Some(failure) = failure {
+                    first_error.get_or_insert_with(|| BackgroundTaskError::from_failure(failure));
+                }
+            }
+        })
+        .await;
+
+        if joined.is_err() {
+            let pending_names = aborts
+                .values()
+                .map(|(name, _)| name.clone())
+                .collect::<Vec<_>>();
+            for (_, abort) in aborts.values() {
+                abort.abort();
+            }
+            // Dropping the join futures after requesting cancellation is
+            // intentional. Tokio cancellation is cooperative: awaiting an
+            // aborted task that is currently executing blocking or otherwise
+            // non-yielding code would turn this total budget back into an
+            // unbounded wait. The detached task will be reaped by Tokio when it
+            // next yields or returns.
+            drop(pending);
+            let failure = BackgroundTaskFailure::timed_out(&pending_names, policy.total_timeout());
+            self.inner.failure.send_replace(Some(failure.clone()));
+            return Err(BackgroundTaskError::from_failure(failure));
+        }
+
+        first_error.map_or(Ok(()), Err)
+    }
+
+    fn begin_shutdown(&self) -> Vec<ManagedBackgroundTask> {
+        let mut registry = self
+            .inner
+            .registry
+            .lock()
+            .expect("background task registry mutex poisoned");
+        registry.shutting_down = true;
+        let _ = self.inner.shutdown.send(true);
+        std::mem::take(&mut registry.tasks)
     }
 }
 
@@ -329,6 +448,7 @@ impl Drop for BackgroundTaskSupervisorInner {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Instant;
 
     #[tokio::test]
     async fn shutdown_cancels_and_joins_registered_tasks() {
@@ -385,5 +505,58 @@ mod tests {
         assert_eq!(failure.task_name(), "short-lived-critical-task");
         assert_eq!(failure.kind(), BackgroundTaskFailureKind::UnexpectedExit);
         assert!(supervisor.shutdown_and_join().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn bounded_shutdown_aborts_a_non_cooperative_task() {
+        let supervisor = BackgroundTaskSupervisor::new();
+        supervisor.spawn_cooperative_critical("stuck-extension", |shutdown| async move {
+            shutdown.requested().await;
+            std::future::pending::<()>().await;
+        });
+        let policy = BackgroundTaskShutdownPolicy::new(Duration::from_millis(10)).unwrap();
+
+        let error = supervisor
+            .shutdown_and_join_with_policy(policy)
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.failure().kind(), BackgroundTaskFailureKind::TimedOut);
+        assert_eq!(error.failure().task_name(), "stuck-extension");
+        assert!(error.failure().detail().contains("stuck-extension"));
+        assert_eq!(supervisor.task_count(), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn shutdown_timeout_is_a_real_total_budget_for_non_yielding_code() {
+        let supervisor = BackgroundTaskSupervisor::new();
+        supervisor.spawn_cooperative_critical("blocking-extension", |shutdown| async move {
+            shutdown.requested().await;
+            std::thread::sleep(Duration::from_millis(400));
+        });
+        let policy = BackgroundTaskShutdownPolicy::new(Duration::from_millis(20)).unwrap();
+        let started = Instant::now();
+
+        let error = supervisor
+            .shutdown_and_join_with_policy(policy)
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.failure().kind(), BackgroundTaskFailureKind::TimedOut);
+        assert!(
+            started.elapsed() < Duration::from_millis(150),
+            "shutdown exceeded its total budget: {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn shutdown_budget_is_non_zero_and_bounded() {
+        assert!(BackgroundTaskShutdownPolicy::new(Duration::ZERO).is_err());
+        assert!(BackgroundTaskShutdownPolicy::new(MAX_BACKGROUND_TASK_SHUTDOWN_TIMEOUT).is_ok());
+        assert!(BackgroundTaskShutdownPolicy::new(
+            MAX_BACKGROUND_TASK_SHUTDOWN_TIMEOUT + Duration::from_millis(1)
+        )
+        .is_err());
     }
 }

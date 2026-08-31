@@ -9,12 +9,14 @@ pub use policy::*;
 use panel_contracts::{common::v1 as common, gateway::v1 as wire};
 use panel_domain::ContentHash;
 use panel_engine::{
-    ActivateRequest, EngineCapabilities, GatewayEngine, GatewayEvent, GatewayEventSink,
+    ActivateRequest, EngineCapabilities, GatewayEngine, GatewayEvent,
+    GatewayEventDeliveryDiagnostics, GatewayEventDeliveryDiagnosticsProvider, GatewayEventSink,
     GatewayRequestMetadata, GatewayRequestOperation, GatewayRequestOutcome, GatewayRuntimeInfo,
     GatewayRuntimeInfoProvider, NoopGatewayEventSink, PrepareRequest, PrepareToken,
 };
 use panel_errors::{ErrorCode, PanelError, Result};
 use std::{
+    future::Future,
     panic::{catch_unwind, AssertUnwindSafe},
     sync::Arc,
     time::Instant,
@@ -24,6 +26,7 @@ use tonic::{Request, Response, Status};
 pub struct GatewayGrpcService<E: GatewayEngine + ?Sized> {
     engine: Arc<E>,
     runtime_info: Option<Arc<dyn GatewayRuntimeInfoProvider>>,
+    event_delivery_diagnostics: Option<Arc<dyn GatewayEventDeliveryDiagnosticsProvider>>,
     request_policy: Arc<dyn GatewayRequestPolicy>,
     transport_policy: GatewayTransportPolicy,
     events: Arc<dyn GatewayEventSink>,
@@ -35,6 +38,7 @@ impl<E: GatewayEngine + ?Sized> Clone for GatewayGrpcService<E> {
         Self {
             engine: Arc::clone(&self.engine),
             runtime_info: self.runtime_info.as_ref().map(Arc::clone),
+            event_delivery_diagnostics: self.event_delivery_diagnostics.as_ref().map(Arc::clone),
             request_policy: Arc::clone(&self.request_policy),
             transport_policy: self.transport_policy,
             events: Arc::clone(&self.events),
@@ -48,6 +52,7 @@ impl<E: GatewayEngine + ?Sized> GatewayGrpcService<E> {
         Self {
             engine,
             runtime_info: None,
+            event_delivery_diagnostics: None,
             request_policy: Arc::new(StandardGatewayRequestPolicy::default()),
             transport_policy: GatewayTransportPolicy::default(),
             events: Arc::new(NoopGatewayEventSink),
@@ -62,6 +67,7 @@ impl<E: GatewayEngine + ?Sized> GatewayGrpcService<E> {
         Self {
             engine,
             runtime_info: Some(runtime_info),
+            event_delivery_diagnostics: None,
             request_policy: Arc::new(StandardGatewayRequestPolicy::default()),
             transport_policy: GatewayTransportPolicy::default(),
             events: Arc::new(NoopGatewayEventSink),
@@ -78,6 +84,7 @@ impl<E: GatewayEngine + ?Sized> GatewayGrpcService<E> {
         Self {
             engine,
             runtime_info,
+            event_delivery_diagnostics: None,
             request_policy,
             transport_policy,
             events: Arc::new(NoopGatewayEventSink),
@@ -90,6 +97,14 @@ impl<E: GatewayEngine + ?Sized> GatewayGrpcService<E> {
         self
     }
 
+    pub fn with_event_delivery_diagnostics(
+        mut self,
+        diagnostics: Arc<dyn GatewayEventDeliveryDiagnosticsProvider>,
+    ) -> Self {
+        self.event_delivery_diagnostics = Some(diagnostics);
+        self
+    }
+
     /// Retain a composition-owned dependency for exactly as long as this service
     /// remains reachable without exposing it through the transport contract.
     pub fn with_lifetime_dependency(mut self, dependency: Arc<dyn Send + Sync>) -> Self {
@@ -99,6 +114,23 @@ impl<E: GatewayEngine + ?Sized> GatewayGrpcService<E> {
 
     pub fn transport_policy(&self) -> GatewayTransportPolicy {
         self.transport_policy
+    }
+
+    async fn execute_with_capabilities<T>(
+        &self,
+        budget: RequestExecutionBudget,
+        operation: impl Future<Output = Result<T>>,
+    ) -> Result<(T, Option<EngineCapabilities>)> {
+        budget
+            .execute(async {
+                // Resolve optional response enrichment before a mutation. If
+                // capability discovery stalls, the request expires without
+                // first committing a side effect and then losing its response.
+                let capabilities = self.engine.capabilities().await.ok();
+                let value = operation.await?;
+                Ok((value, capabilities))
+            })
+            .await
     }
 }
 
@@ -171,14 +203,12 @@ where
                     .map(|snapshot| (budget, snapshot))
             });
         let response = match snapshot {
-            Ok((budget, snapshot)) => match budget.execute(self.engine.validate(snapshot)).await {
-                Ok(report) => wire::ValidateResponse {
-                    version: self
-                        .engine
-                        .capabilities()
-                        .await
-                        .ok()
-                        .map(|value| version(&value)),
+            Ok((budget, snapshot)) => match self
+                .execute_with_capabilities(budget, self.engine.validate(snapshot))
+                .await
+            {
+                Ok((report, capabilities)) => wire::ValidateResponse {
+                    version: capabilities.as_ref().map(version),
                     valid: report.valid,
                     diagnostics: report.diagnostics.iter().map(Into::into).collect(),
                     error: None,
@@ -212,17 +242,12 @@ where
                     .map(|snapshot| (budget, snapshot))
             });
         let response = match snapshot {
-            Ok((budget, snapshot)) => match budget
-                .execute(self.engine.prepare(PrepareRequest { snapshot }))
+            Ok((budget, snapshot)) => match self
+                .execute_with_capabilities(budget, self.engine.prepare(PrepareRequest { snapshot }))
                 .await
             {
-                Ok(receipt) => wire::PrepareResponse {
-                    version: self
-                        .engine
-                        .capabilities()
-                        .await
-                        .ok()
-                        .map(|value| version(&value)),
+                Ok((receipt, capabilities)) => wire::PrepareResponse {
+                    version: capabilities.as_ref().map(version),
                     prepare_token: receipt.prepare_token.as_str().into(),
                     revision_id: receipt.revision_id.get(),
                     content_hash: Some(codec::encode_hash(&receipt.content_hash)),
@@ -264,14 +289,12 @@ where
                 ))
             });
         let response = match parsed {
-            Ok((budget, request)) => match budget.execute(self.engine.activate(request)).await {
-                Ok(receipt) => wire::ActivateResponse {
-                    version: self
-                        .engine
-                        .capabilities()
-                        .await
-                        .ok()
-                        .map(|value| version(&value)),
+            Ok((budget, request)) => match self
+                .execute_with_capabilities(budget, self.engine.activate(request))
+                .await
+            {
+                Ok((receipt, capabilities)) => wire::ActivateResponse {
+                    version: capabilities.as_ref().map(version),
                     revision_id: receipt.revision_id.get(),
                     active_hash: Some(codec::encode_hash(&receipt.content_hash)),
                     previous_active_hash: receipt
@@ -309,14 +332,12 @@ where
                 }
             });
         let response = match parsed {
-            Ok((budget, token)) => match budget.execute(self.engine.abort(token)).await {
-                Ok(_) => wire::AbortResponse {
-                    version: self
-                        .engine
-                        .capabilities()
-                        .await
-                        .ok()
-                        .map(|value| version(&value)),
+            Ok((budget, token)) => match self
+                .execute_with_capabilities(budget, self.engine.abort(token))
+                .await
+            {
+                Ok((_, capabilities)) => wire::AbortResponse {
+                    version: capabilities.as_ref().map(version),
                     aborted: true,
                     error: None,
                 },
@@ -346,13 +367,15 @@ where
             GatewayRequestOperation::Status,
             request.context.as_ref(),
         );
-        let response = match self
+        let mut response = match self
             .request_policy
             .validate(request.context.as_ref(), RequestClass::ReadOnly)
         {
-            Ok(budget) => match budget.execute(self.engine.status()).await {
-                Ok(status) => {
-                    let capabilities = self.engine.capabilities().await.ok();
+            Ok(budget) => match self
+                .execute_with_capabilities(budget, self.engine.status())
+                .await
+            {
+                Ok((status, capabilities)) => {
                     let state = if status.ready {
                         common::health_status::State::Ready
                     } else {
@@ -378,16 +401,23 @@ where
                         error: None,
                         prepared_count: status.prepared_count as u64,
                         runtime: self.runtime_info.as_ref().and_then(|provider| {
-                            capabilities.as_ref().map(|capabilities| {
-                                encode_runtime_info(provider.snapshot(), capabilities)
+                            capabilities.as_ref().and_then(|capabilities| {
+                                snapshot_safely(|| provider.snapshot())
+                                    .map(|runtime| encode_runtime_info(runtime, capabilities))
                             })
                         }),
+                        event_delivery: None,
                     }
                 }
                 Err(error) => status_error_response(error),
             },
             Err(error) => status_error_response(error),
         };
+        response.event_delivery = self
+            .event_delivery_diagnostics
+            .as_ref()
+            .and_then(|provider| snapshot_safely(|| provider.snapshot()))
+            .map(encode_event_delivery_diagnostics);
         scope.complete(response.error.as_ref());
         Ok(Response::new(response))
     }
@@ -454,6 +484,10 @@ fn emit_safely(events: &dyn GatewayEventSink, event: &GatewayEvent) {
     let _ = catch_unwind(AssertUnwindSafe(|| events.emit(event)));
 }
 
+fn snapshot_safely<T>(snapshot: impl FnOnce() -> T) -> Option<T> {
+    catch_unwind(AssertUnwindSafe(snapshot)).ok()
+}
+
 fn decode_optional_hash(value: Option<common::ContentHash>) -> Result<Option<ContentHash>> {
     value.map(|hash| codec::decode_hash(Some(hash))).transpose()
 }
@@ -485,6 +519,16 @@ fn encode_runtime_info(
         started_at_unix_seconds: runtime.started_at_unix_seconds,
         uptime_seconds: runtime.uptime_seconds,
         worker_count: runtime.worker_count,
+    }
+}
+
+fn encode_event_delivery_diagnostics(
+    diagnostics: GatewayEventDeliveryDiagnostics,
+) -> wire::EventDeliveryHealth {
+    wire::EventDeliveryHealth {
+        queue_full_events: diagnostics.queue_full_events(),
+        disconnected_events: diagnostics.disconnected_events(),
+        consumer_panics: diagnostics.consumer_panics(),
     }
 }
 
@@ -531,6 +575,7 @@ fn status_error_response(error: PanelError) -> wire::StatusResponse {
         error: Some((&error).into()),
         prepared_count: 0,
         runtime: None,
+        event_delivery: None,
     }
 }
 
@@ -539,9 +584,14 @@ mod tests {
     use super::*;
     use panel_contracts::gateway::v1::gateway_engine_server::GatewayEngine as GatewayEngineService;
     use panel_domain::RevisionId;
-    use panel_engine::{FakeGatewayEngine, GatewayRuntimeInfo};
+    use panel_engine::{
+        AbortReceipt, ActivationReceipt, FakeGatewayEngine, GatewayEventDeliveryDiagnostics,
+        GatewayRuntimeInfo, GatewayStatus, PrepareReceipt,
+    };
+    use panel_errors::ValidationReport;
     use panel_ir::RuntimeSnapshot;
     use std::sync::Mutex;
+    use std::time::Duration;
 
     #[derive(Default)]
     struct RecordingEventSink(Mutex<Vec<GatewayEvent>>);
@@ -577,6 +627,61 @@ mod tests {
                 uptime_seconds: 42,
                 worker_count: 4,
             }
+        }
+    }
+
+    struct FixedEventDeliveryDiagnostics;
+
+    impl GatewayEventDeliveryDiagnosticsProvider for FixedEventDeliveryDiagnostics {
+        fn snapshot(&self) -> GatewayEventDeliveryDiagnostics {
+            GatewayEventDeliveryDiagnostics::new(2, 3, 5)
+        }
+    }
+
+    struct PanickingRuntimeInfo;
+
+    impl GatewayRuntimeInfoProvider for PanickingRuntimeInfo {
+        fn snapshot(&self) -> GatewayRuntimeInfo {
+            panic!("injected runtime-info panic")
+        }
+    }
+
+    struct PanickingEventDeliveryDiagnostics;
+
+    impl GatewayEventDeliveryDiagnosticsProvider for PanickingEventDeliveryDiagnostics {
+        fn snapshot(&self) -> GatewayEventDeliveryDiagnostics {
+            panic!("injected event-diagnostics panic")
+        }
+    }
+
+    struct HangingCapabilitiesEngine {
+        inner: FakeGatewayEngine,
+    }
+
+    #[tonic::async_trait]
+    impl GatewayEngine for HangingCapabilitiesEngine {
+        async fn capabilities(&self) -> Result<EngineCapabilities> {
+            std::future::pending().await
+        }
+
+        async fn validate(&self, snapshot: RuntimeSnapshot) -> Result<ValidationReport> {
+            self.inner.validate(snapshot).await
+        }
+
+        async fn prepare(&self, request: PrepareRequest) -> Result<PrepareReceipt> {
+            self.inner.prepare(request).await
+        }
+
+        async fn activate(&self, request: ActivateRequest) -> Result<ActivationReceipt> {
+            self.inner.activate(request).await
+        }
+
+        async fn abort(&self, token: PrepareToken) -> Result<AbortReceipt> {
+            self.inner.abort(token).await
+        }
+
+        async fn status(&self) -> Result<GatewayStatus> {
+            self.inner.status().await
         }
     }
 
@@ -671,7 +776,8 @@ mod tests {
     #[tokio::test]
     async fn status_combines_engine_and_process_information() {
         let engine = Arc::new(FakeGatewayEngine::with_default_capabilities());
-        let service = GatewayGrpcService::with_runtime_info(engine, Arc::new(FixedRuntimeInfo));
+        let service = GatewayGrpcService::with_runtime_info(engine, Arc::new(FixedRuntimeInfo))
+            .with_event_delivery_diagnostics(Arc::new(FixedEventDeliveryDiagnostics));
 
         let response = service
             .status(Request::new(wire::StatusRequest {
@@ -688,5 +794,64 @@ mod tests {
         assert_eq!(runtime.started_at_unix_seconds, 1_787_800_000);
         assert_eq!(runtime.uptime_seconds, 42);
         assert_eq!(runtime.worker_count, 4);
+        let event_delivery = response.event_delivery.unwrap();
+        assert_eq!(event_delivery.queue_full_events, 2);
+        assert_eq!(event_delivery.disconnected_events, 3);
+        assert_eq!(event_delivery.consumer_panics, 5);
+    }
+
+    #[tokio::test]
+    async fn status_deadline_covers_capability_enrichment() {
+        let engine = Arc::new(HangingCapabilitiesEngine {
+            inner: FakeGatewayEngine::with_default_capabilities(),
+        });
+        let request_policy = Arc::new(
+            StandardGatewayRequestPolicy::new(
+                Duration::from_millis(10),
+                DeadlineRequirement::Optional,
+            )
+            .unwrap(),
+        );
+        let service = GatewayGrpcService::with_dependencies(
+            engine,
+            None,
+            request_policy,
+            GatewayTransportPolicy::default(),
+        );
+
+        let response = tokio::time::timeout(
+            Duration::from_millis(200),
+            service.status(Request::new(wire::StatusRequest {
+                context: Some(context(false)),
+            })),
+        )
+        .await
+        .expect("Status must honor its execution budget")
+        .unwrap()
+        .into_inner();
+
+        assert_eq!(
+            response.error.unwrap().code,
+            panel_errors::ErrorCode::DEADLINE_EXCEEDED
+        );
+    }
+
+    #[tokio::test]
+    async fn status_isolates_panicking_diagnostics_providers() {
+        let engine = Arc::new(FakeGatewayEngine::with_default_capabilities());
+        let service = GatewayGrpcService::with_runtime_info(engine, Arc::new(PanickingRuntimeInfo))
+            .with_event_delivery_diagnostics(Arc::new(PanickingEventDeliveryDiagnostics));
+
+        let response = service
+            .status(Request::new(wire::StatusRequest {
+                context: Some(context(false)),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(response.error.is_none());
+        assert!(response.runtime.is_none());
+        assert!(response.event_delivery.is_none());
     }
 }

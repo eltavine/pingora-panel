@@ -6,16 +6,22 @@ on:
       - "panel/**"
       - ".github/scripts/check-panel-boundaries.sh"
       - ".github/scripts/check-panel-proto-breaking.sh"
+      - ".github/scripts/check-panel-rust-api-breaking.sh"
+      - ".github/scripts/resolve-panel-compat-baseline.sh"
       - ".github/scripts/resolve-panel-proto-baseline.sh"
       - ".github/scripts/test-panel-proto-breaking.sh"
+      - ".github/scripts/test-panel-rust-api-breaking.sh"
       - ".github/workflows/panel.yml"
   pull_request:
     paths:
       - "panel/**"
       - ".github/scripts/check-panel-boundaries.sh"
       - ".github/scripts/check-panel-proto-breaking.sh"
+      - ".github/scripts/check-panel-rust-api-breaking.sh"
+      - ".github/scripts/resolve-panel-compat-baseline.sh"
       - ".github/scripts/resolve-panel-proto-baseline.sh"
       - ".github/scripts/test-panel-proto-breaking.sh"
+      - ".github/scripts/test-panel-rust-api-breaking.sh"
       - ".github/workflows/panel.yml"
 
 permissions:
@@ -54,7 +60,7 @@ jobs:
       - name: Run Clippy
         env:
           CLIPPY_CONF_DIR: ${{ github.workspace }}/panel
-        run: cargo clippy --manifest-path panel/Cargo.toml --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --manifest-path panel/Cargo.toml --workspace --all-targets --all-features --locked -- -D warnings
 
       - name: Check dependency boundaries
         run: .github/scripts/check-panel-boundaries.sh
@@ -96,3 +102,40 @@ jobs:
 
       - name: Check breaking changes against the previous contract
         run: bash .github/scripts/check-panel-proto-breaking.sh "${{ steps.proto-baseline.outputs.ref }}"
+
+  rust-api:
+    name: Rust public API compatibility
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake --no-install-recommends
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30
+        with:
+          toolchain: stable
+
+      - name: Install cargo-semver-checks 0.50.0
+        run: cargo install --locked --version 0.50.0 cargo-semver-checks
+
+      - name: Self-test Rust API compatibility guard
+        run: bash .github/scripts/test-panel-rust-api-breaking.sh
+
+      - name: Resolve Rust API compatibility baseline
+        id: rust-api-baseline
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PULL_REQUEST_BASE: ${{ github.base_ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          baseline_ref="$(bash .github/scripts/resolve-panel-compat-baseline.sh \
+            "$EVENT_NAME" "$PUSH_BEFORE" "$PULL_REQUEST_BASE")"
+          printf 'ref=%s\n' "$baseline_ref" >> "$GITHUB_OUTPUT"
+
+      - name: Reject Rust public API breaking changes
+        run: bash .github/scripts/check-panel-rust-api-breaking.sh "${{ steps.rust-api-baseline.outputs.ref }}"
