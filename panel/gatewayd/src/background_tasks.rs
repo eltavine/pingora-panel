@@ -1,3 +1,4 @@
+use crate::failure_latch::BackgroundTaskFailureLatch;
 use futures_util::{stream::FuturesUnordered, FutureExt, StreamExt};
 use panel_errors::{PanelError, Result as PanelResult};
 use std::{
@@ -54,7 +55,7 @@ pub struct BackgroundTaskSupervisor {
 
 struct BackgroundTaskSupervisorInner {
     shutdown: watch::Sender<bool>,
-    failure: watch::Sender<Option<BackgroundTaskFailure>>,
+    failure: BackgroundTaskFailureLatch,
     registry: Mutex<BackgroundTaskRegistry>,
 }
 
@@ -218,11 +219,10 @@ impl BackgroundTaskFailureMonitor {
 impl BackgroundTaskSupervisor {
     pub fn new() -> Self {
         let (shutdown, _) = watch::channel(false);
-        let (failure, _) = watch::channel(None);
         Self {
             inner: Arc::new(BackgroundTaskSupervisorInner {
                 shutdown,
-                failure,
+                failure: BackgroundTaskFailureLatch::new(),
                 registry: Mutex::new(BackgroundTaskRegistry::default()),
             }),
         }
@@ -309,12 +309,12 @@ impl BackgroundTaskSupervisor {
                 Ok(ManagedTaskCompletion::Expected) => Ok(()),
                 Ok(ManagedTaskCompletion::UnexpectedExit) => {
                     let failure = BackgroundTaskFailure::unexpected_exit(task_name);
-                    failure_sender.send_replace(Some(failure.clone()));
+                    failure_sender.report(failure.clone());
                     Err(failure)
                 }
                 Err(panic) => {
                     let failure = BackgroundTaskFailure::panicked(task_name, panic);
-                    failure_sender.send_replace(Some(failure.clone()));
+                    failure_sender.report(failure.clone());
                     Err(failure)
                 }
             }
@@ -350,10 +350,16 @@ impl BackgroundTaskSupervisor {
                 )),
             };
             if let Some(failure) = failure {
+                self.inner.failure.report(failure.clone());
                 first_error.get_or_insert_with(|| BackgroundTaskError::from_failure(failure));
             }
         }
-        first_error.map_or(Ok(()), Err)
+        self.inner
+            .failure
+            .latest()
+            .map(BackgroundTaskError::from_failure)
+            .or(first_error)
+            .map_or(Ok(()), Err)
     }
 
     /// Cooperatively stops every registered task within one shared time budget.
@@ -383,6 +389,7 @@ impl BackgroundTaskSupervisor {
                     Err(error) => Some(BackgroundTaskFailure::cancelled(name, error.to_string())),
                 };
                 if let Some(failure) = failure {
+                    self.inner.failure.report(failure.clone());
                     first_error.get_or_insert_with(|| BackgroundTaskError::from_failure(failure));
                 }
             }
@@ -405,11 +412,17 @@ impl BackgroundTaskSupervisor {
             // next yields or returns.
             drop(pending);
             let failure = BackgroundTaskFailure::timed_out(&pending_names, policy.total_timeout());
-            self.inner.failure.send_replace(Some(failure.clone()));
-            return Err(BackgroundTaskError::from_failure(failure));
+            self.inner.failure.report(failure.clone());
+            let root_cause = self.inner.failure.latest().unwrap_or(failure);
+            return Err(BackgroundTaskError::from_failure(root_cause));
         }
 
-        first_error.map_or(Ok(()), Err)
+        self.inner
+            .failure
+            .latest()
+            .map(BackgroundTaskError::from_failure)
+            .or(first_error)
+            .map_or(Ok(()), Err)
     }
 
     fn begin_shutdown(&self) -> Vec<ManagedBackgroundTask> {
@@ -527,6 +540,32 @@ mod tests {
         assert_eq!(supervisor.task_count(), 0);
     }
 
+    #[tokio::test]
+    async fn shutdown_timeout_cannot_replace_the_failure_that_triggered_shutdown() {
+        let supervisor = BackgroundTaskSupervisor::new();
+        let mut monitor = supervisor.failure_monitor();
+        supervisor.spawn_critical("initiating-failure", async {});
+        supervisor.spawn_cooperative_critical("stuck-during-shutdown", |shutdown| async move {
+            shutdown.requested().await;
+            std::future::pending::<()>().await;
+        });
+        let initiating_failure = monitor.next().await.unwrap();
+
+        let error = supervisor
+            .shutdown_and_join_with_policy(
+                BackgroundTaskShutdownPolicy::new(Duration::from_millis(10)).unwrap(),
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.failure(), &initiating_failure);
+        assert_eq!(error.failure().task_name(), "initiating-failure");
+        assert_eq!(
+            error.failure().kind(),
+            BackgroundTaskFailureKind::UnexpectedExit
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn shutdown_timeout_is_a_real_total_budget_for_non_yielding_code() {
         let supervisor = BackgroundTaskSupervisor::new();
@@ -558,5 +597,17 @@ mod tests {
             MAX_BACKGROUND_TASK_SHUTDOWN_TIMEOUT + Duration::from_millis(1)
         )
         .is_err());
+    }
+
+    #[test]
+    fn failure_latch_preserves_the_first_reported_root_cause() {
+        let latch = BackgroundTaskFailureLatch::new();
+        let receiver = latch.subscribe();
+        let first = BackgroundTaskFailure::unexpected_exit("first-task".into());
+        let later = BackgroundTaskFailure::panicked("later-task".into(), Box::new("later panic"));
+
+        assert!(latch.report(first.clone()));
+        assert!(!latch.report(later));
+        assert_eq!(receiver.borrow().as_ref(), Some(&first));
     }
 }

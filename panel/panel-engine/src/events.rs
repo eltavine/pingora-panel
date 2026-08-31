@@ -1,5 +1,9 @@
 use panel_domain::RevisionId;
 use panel_errors::ErrorCode;
+use std::{
+    panic::{catch_unwind, AssertUnwindSafe},
+    sync::Arc,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -102,9 +106,85 @@ pub trait GatewayEventSink: Send + Sync {
     fn emit(&self, event: &GatewayEvent);
 }
 
+/// Optional observer kept separate from the panic boundary so metrics remain
+/// an adapter concern rather than a requirement of the stable event port.
+pub trait GatewayEventPanicObserver: Send + Sync {
+    fn event_sink_panicked(&self);
+}
+
+/// Universal non-unwinding boundary for injected event sinks.
+///
+/// This type lives beside the port so every transport, runtime, and composition
+/// layer can apply the same safety contract without depending on one another.
+#[derive(Clone)]
+pub struct PanicIsolatedGatewayEventSink {
+    inner: Arc<dyn GatewayEventSink>,
+    observer: Option<Arc<dyn GatewayEventPanicObserver>>,
+}
+
+impl PanicIsolatedGatewayEventSink {
+    pub fn new(inner: Arc<dyn GatewayEventSink>) -> Self {
+        Self {
+            inner,
+            observer: None,
+        }
+    }
+
+    pub fn with_observer(
+        inner: Arc<dyn GatewayEventSink>,
+        observer: Arc<dyn GatewayEventPanicObserver>,
+    ) -> Self {
+        Self {
+            inner,
+            observer: Some(observer),
+        }
+    }
+}
+
+impl GatewayEventSink for PanicIsolatedGatewayEventSink {
+    fn emit(&self, event: &GatewayEvent) {
+        if catch_unwind(AssertUnwindSafe(|| self.inner.emit(event))).is_err() {
+            if let Some(observer) = &self.observer {
+                let _ = catch_unwind(AssertUnwindSafe(|| observer.event_sink_panicked()));
+            }
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct NoopGatewayEventSink;
 
 impl GatewayEventSink for NoopGatewayEventSink {
     fn emit(&self, _event: &GatewayEvent) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct PanickingSink;
+
+    impl GatewayEventSink for PanickingSink {
+        fn emit(&self, _event: &GatewayEvent) {
+            panic!("injected event panic");
+        }
+    }
+
+    struct PanickingObserver;
+
+    impl GatewayEventPanicObserver for PanickingObserver {
+        fn event_sink_panicked(&self) {
+            panic!("injected observer panic");
+        }
+    }
+
+    #[test]
+    fn panic_boundary_also_isolates_a_panicking_observer() {
+        let sink = PanicIsolatedGatewayEventSink::with_observer(
+            Arc::new(PanickingSink),
+            Arc::new(PanickingObserver),
+        );
+
+        sink.emit(&GatewayEvent::ShutdownCompleted);
+    }
 }

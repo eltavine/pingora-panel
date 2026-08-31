@@ -4,6 +4,7 @@ mod codec;
 mod lease;
 mod record_file;
 mod record_reader;
+mod state_directory;
 
 pub use codec::{
     JsonSnapshotRecordCodecV1, SnapshotRecordCodec, SnapshotRecordCodecRegistry,
@@ -20,8 +21,9 @@ use panel_errors::{PanelError, Result};
 use record_file::{open_regular_record, RecordFileOpenError};
 use record_reader::{BoundedRecordReadError, BoundedRecordReader, RecordCollectionBudget};
 use serde::{de::DeserializeOwned, Serialize};
+use state_directory::{StateDirectoryHandle, StateDirectoryOpenError};
 use std::{
-    fs::{self, File, OpenOptions},
+    ffi::OsStr,
     io::Write,
     path::{Path, PathBuf},
     sync::Arc,
@@ -94,17 +96,19 @@ impl FileSnapshotStore {
         self.lease.is_some()
     }
 
-    fn active_path(root: &Path) -> PathBuf {
-        root.join(ACTIVE_FILE_NAME)
-    }
-
+    #[cfg(test)]
     fn prepared_directory(root: &Path) -> PathBuf {
         root.join(PREPARED_DIRECTORY_NAME)
     }
 
+    #[cfg(test)]
     fn prepared_path(root: &Path, token: &PrepareToken) -> PathBuf {
+        Self::prepared_directory(root).join(Self::prepared_file_name(token))
+    }
+
+    fn prepared_file_name(token: &PrepareToken) -> String {
         let safe_name = ContentHash::from_bytes(token.as_str().as_bytes());
-        Self::prepared_directory(root).join(format!("{}.json", safe_name.as_str()))
+        format!("{}.json", safe_name.as_str())
     }
 
     async fn run_blocking<T>(operation: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T>
@@ -123,10 +127,18 @@ impl FileSnapshotStore {
 impl SnapshotStore for FileSnapshotStore {
     async fn load_active(&self) -> Result<Option<ActiveSnapshotRecord>> {
         let root = self.root.clone();
+        let lease = self.lease.clone();
         let codecs = Arc::clone(&self.codecs);
         Self::run_blocking(move || {
-            let path = Self::active_path(&root);
-            let Some(record) = read_record::<ActiveSnapshotRecord>(&path, codecs.as_ref())? else {
+            let Some(directory) = operation_directory(&root, lease.as_ref(), false)? else {
+                return Ok(None);
+            };
+            let Some(record) = read_record::<ActiveSnapshotRecord>(
+                directory.as_ref(),
+                OsStr::new(ACTIVE_FILE_NAME),
+                codecs.as_ref(),
+            )?
+            else {
                 return Ok(None);
             };
             validate_active_record(&record.value)?;
@@ -137,34 +149,88 @@ impl SnapshotStore for FileSnapshotStore {
 
     async fn load_prepared(&self) -> Result<Vec<PreparedSnapshotRecord>> {
         let root = self.root.clone();
+        let lease = self.lease.clone();
         let codecs = Arc::clone(&self.codecs);
-        Self::run_blocking(move || load_prepared_records(&root, usize::MAX, codecs.as_ref())).await
+        Self::run_blocking(move || {
+            let Some(directory) = operation_directory(&root, lease.as_ref(), false)? else {
+                return Ok(Vec::new());
+            };
+            let Some(prepared) = open_child_directory(
+                directory.as_ref(),
+                OsStr::new(PREPARED_DIRECTORY_NAME),
+                false,
+            )?
+            else {
+                return Ok(Vec::new());
+            };
+            load_prepared_records(&prepared, usize::MAX, codecs.as_ref())
+        })
+        .await
     }
 
     async fn load_prepared_bounded(&self, limit: usize) -> Result<Vec<PreparedSnapshotRecord>> {
         let root = self.root.clone();
+        let lease = self.lease.clone();
         let codecs = Arc::clone(&self.codecs);
-        Self::run_blocking(move || load_prepared_records(&root, limit, codecs.as_ref())).await
+        Self::run_blocking(move || {
+            let Some(directory) = operation_directory(&root, lease.as_ref(), false)? else {
+                return Ok(Vec::new());
+            };
+            let Some(prepared) = open_child_directory(
+                directory.as_ref(),
+                OsStr::new(PREPARED_DIRECTORY_NAME),
+                false,
+            )?
+            else {
+                return Ok(Vec::new());
+            };
+            load_prepared_records(&prepared, limit, codecs.as_ref())
+        })
+        .await
     }
 
     async fn save_prepared(&self, record: PreparedSnapshotRecord) -> Result<()> {
         let root = self.root.clone();
+        let lease = self.lease.clone();
         let codecs = Arc::clone(&self.codecs);
         Self::run_blocking(move || {
             validate_prepared_record(&record)?;
-            let path = Self::prepared_path(&root, &record.receipt.prepare_token);
-            atomic_write_record(&path, &record, codecs.as_ref())
+            let directory = operation_directory(&root, lease.as_ref(), true)?
+                .expect("creating the state directory returns a handle");
+            let prepared = open_child_directory(
+                directory.as_ref(),
+                OsStr::new(PREPARED_DIRECTORY_NAME),
+                true,
+            )?
+            .expect("creating the prepared directory returns a handle");
+            let name = Self::prepared_file_name(&record.receipt.prepare_token);
+            atomic_write_record(&prepared, OsStr::new(&name), &record, codecs.as_ref())
         })
         .await
     }
 
     async fn delete_prepared(&self, token: &PrepareToken) -> Result<()> {
         let root = self.root.clone();
+        let lease = self.lease.clone();
         let token = token.clone();
         Self::run_blocking(move || {
-            let path = Self::prepared_path(&root, &token);
-            match fs::remove_file(&path) {
-                Ok(()) => sync_directory(path.parent().expect("prepared path has a parent")),
+            let Some(directory) = operation_directory(&root, lease.as_ref(), false)? else {
+                return Ok(());
+            };
+            let Some(prepared) = open_child_directory(
+                directory.as_ref(),
+                OsStr::new(PREPARED_DIRECTORY_NAME),
+                false,
+            )?
+            else {
+                return Ok(());
+            };
+            let name = Self::prepared_file_name(&token);
+            let path = prepared.path_for(OsStr::new(&name));
+            match prepared.remove_file(OsStr::new(&name)) {
+                Ok(()) => prepared.sync().map_err(|error| {
+                    storage_error("sync prepared directory", prepared.path(), error)
+                }),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
                 Err(error) => Err(storage_error("delete prepared snapshot", &path, error)),
             }
@@ -174,73 +240,92 @@ impl SnapshotStore for FileSnapshotStore {
 
     async fn commit_activation(&self, record: ActiveSnapshotRecord) -> Result<()> {
         let root = self.root.clone();
+        let lease = self.lease.clone();
         let codecs = Arc::clone(&self.codecs);
         Self::run_blocking(move || {
             validate_active_record(&record)?;
-            atomic_write_record(&Self::active_path(&root), &record, codecs.as_ref())
+            let directory = operation_directory(&root, lease.as_ref(), true)?
+                .expect("creating the state directory returns a handle");
+            atomic_write_record(
+                directory.as_ref(),
+                OsStr::new(ACTIVE_FILE_NAME),
+                &record,
+                codecs.as_ref(),
+            )
         })
         .await
     }
 }
 
-fn load_prepared_records(
+fn operation_directory(
     root: &Path,
+    lease: Option<&Arc<StateDirectoryLease>>,
+    create: bool,
+) -> Result<Option<Arc<StateDirectoryHandle>>> {
+    if let Some(lease) = lease {
+        return Ok(Some(lease.directory()));
+    }
+    StateDirectoryHandle::open_root(root, create)
+        .map(|directory| directory.map(Arc::new))
+        .map_err(|error| state_directory_open_error("open snapshot directory", root, error))
+}
+
+fn open_child_directory(
+    parent: &StateDirectoryHandle,
+    name: &OsStr,
+    create: bool,
+) -> Result<Option<StateDirectoryHandle>> {
+    parent.open_child_directory(name, create).map_err(|error| {
+        state_directory_open_error(
+            "open snapshot child directory",
+            &parent.path_for(name),
+            error,
+        )
+    })
+}
+
+fn load_prepared_records(
+    directory: &StateDirectoryHandle,
     limit: usize,
     codecs: &SnapshotRecordCodecRegistry,
 ) -> Result<Vec<PreparedSnapshotRecord>> {
-    let directory = FileSnapshotStore::prepared_directory(root);
-    if !directory.exists() {
-        return Ok(Vec::new());
+    let entries = directory
+        .read_entry_names(MAX_PREPARED_DIRECTORY_ENTRIES.saturating_add(1))
+        .map_err(|error| storage_error("read prepared directory", directory.path(), error))?;
+    if entries.len() > MAX_PREPARED_DIRECTORY_ENTRIES {
+        return Err(PanelError::resource_exhausted(format!(
+            "prepared directory exceeds the {MAX_PREPARED_DIRECTORY_ENTRIES} entry scan limit"
+        )));
     }
-    ensure_directory(&directory)?;
-    let entries = fs::read_dir(&directory)
-        .map_err(|error| storage_error("read prepared directory", &directory, error))?;
-    let mut paths = Vec::with_capacity(limit.min(64));
-    for (index, entry) in entries.enumerate() {
-        if index >= MAX_PREPARED_DIRECTORY_ENTRIES {
-            return Err(PanelError::resource_exhausted(format!(
-                "prepared directory exceeds the {MAX_PREPARED_DIRECTORY_ENTRIES} entry scan limit"
-            )));
-        }
-        let path = entry
-            .map_err(|error| storage_error("read prepared entry", &directory, error))?
-            .path();
-        if path.extension().and_then(|value| value.to_str()) != Some("json") {
+    let mut names = Vec::with_capacity(limit.min(64));
+    for name in entries {
+        if Path::new(&name)
+            .extension()
+            .and_then(|value| value.to_str())
+            != Some("json")
+        {
             continue;
         }
-        if paths.len() >= limit {
+        if names.len() >= limit {
             return Err(PanelError::resource_exhausted(format!(
                 "snapshot store contains more than {limit} prepared records"
             )));
         }
-        paths.push(path);
+        names.push(name);
     }
-    // This metadata pass is an early rejection only. A second budget below is
-    // charged from actual stream lengths so concurrent growth cannot bypass the
-    // aggregate memory boundary.
-    let total_bytes = paths.iter().try_fold(0_u64, |total, path| {
-        let metadata = fs::symlink_metadata(path)
-            .map_err(|error| storage_error("read prepared snapshot metadata", path, error))?;
-        total.checked_add(metadata.len()).ok_or_else(|| {
-            PanelError::resource_exhausted("prepared snapshot aggregate size overflow")
-        })
-    })?;
-    if total_bytes > MAX_PREPARED_RECORD_BYTES {
-        return Err(PanelError::resource_exhausted(format!(
-            "prepared snapshot records exceed the {MAX_PREPARED_RECORD_BYTES} byte aggregate limit"
-        )));
-    }
-    paths.sort();
+    names.sort();
 
-    let mut records = Vec::with_capacity(paths.len());
+    let mut records = Vec::with_capacity(names.len());
     let mut actual_bytes = RecordCollectionBudget::new(MAX_PREPARED_RECORD_BYTES);
-    for path in paths {
-        let decoded = read_record::<PreparedSnapshotRecord>(&path, codecs)?.ok_or_else(|| {
-            PanelError::corrupt_state(format!(
-                "prepared snapshot disappeared while loading {}",
-                path.display()
-            ))
-        })?;
+    for name in names {
+        let path = directory.path_for(&name);
+        let decoded =
+            read_record::<PreparedSnapshotRecord>(directory, &name, codecs)?.ok_or_else(|| {
+                PanelError::corrupt_state(format!(
+                    "prepared snapshot disappeared while loading {}",
+                    path.display()
+                ))
+            })?;
         actual_bytes
             .consume(decoded.encoded_bytes)
             .map_err(|error| {
@@ -251,8 +336,8 @@ fn load_prepared_records(
             })?;
         let record = decoded.value;
         validate_prepared_record(&record)?;
-        let expected = FileSnapshotStore::prepared_path(root, &record.receipt.prepare_token);
-        if path != expected {
+        let expected = FileSnapshotStore::prepared_file_name(&record.receipt.prepare_token);
+        if name != OsStr::new(&expected) {
             return Err(PanelError::corrupt_state(format!(
                 "prepared snapshot filename does not match its token: {}",
                 path.display()
@@ -297,10 +382,12 @@ struct DecodedRecord<T> {
 }
 
 fn read_record<T: DeserializeOwned>(
-    path: &Path,
+    directory: &StateDirectoryHandle,
+    name: &OsStr,
     codecs: &SnapshotRecordCodecRegistry,
 ) -> Result<Option<DecodedRecord<T>>> {
-    let opened = match open_regular_record(path) {
+    let path = directory.path_for(name);
+    let opened = match open_regular_record(directory, name) {
         Ok(Some(opened)) => opened,
         Ok(None) => return Ok(None),
         Err(RecordFileOpenError::NotRegular) => {
@@ -310,7 +397,7 @@ fn read_record<T: DeserializeOwned>(
             )));
         }
         Err(RecordFileOpenError::Io(error)) => {
-            return Err(storage_error("open snapshot record", path, error));
+            return Err(storage_error("open snapshot record", &path, error));
         }
     };
     if opened.length_hint > MAX_RECORD_BYTES {
@@ -325,7 +412,7 @@ fn read_record<T: DeserializeOwned>(
         match BoundedRecordReader::new(MAX_RECORD_BYTES).read(opened.file, opened.length_hint) {
             Ok(bytes) => bytes,
             Err(BoundedRecordReadError::Io(error)) => {
-                return Err(storage_error("read snapshot record", path, error));
+                return Err(storage_error("read snapshot record", &path, error));
             }
             Err(BoundedRecordReadError::LimitExceeded { max_bytes }) => {
                 return Err(PanelError::corrupt_state(format!(
@@ -344,14 +431,12 @@ fn read_record<T: DeserializeOwned>(
 }
 
 fn atomic_write_record<T: Serialize>(
-    path: &Path,
+    directory: &StateDirectoryHandle,
+    name: &OsStr,
     payload: &T,
     codecs: &SnapshotRecordCodecRegistry,
 ) -> Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| PanelError::invalid_argument("snapshot path has no parent directory"))?;
-    ensure_directory(parent)?;
+    let path = directory.path_for(name);
     let bytes = codecs.encode(payload)?;
     if bytes.len() as u64 > MAX_RECORD_BYTES {
         return Err(PanelError::invalid_argument(format!(
@@ -360,59 +445,42 @@ fn atomic_write_record<T: Serialize>(
     }
 
     let temporary_id = Uuid::new_v4();
-    let temporary = parent.join(format!(".snapshot-{temporary_id}.tmp"));
+    let temporary_name = format!(".snapshot-{temporary_id}.tmp");
+    let temporary = directory.path_for(OsStr::new(&temporary_name));
     let write_result = (|| {
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut file = options
-            .open(&temporary)
+        let mut file = directory
+            .create_new_file(OsStr::new(&temporary_name))
             .map_err(|error| storage_error("create temporary snapshot", &temporary, error))?;
         file.write_all(&bytes)
             .map_err(|error| storage_error("write temporary snapshot", &temporary, error))?;
         file.sync_all()
             .map_err(|error| storage_error("sync temporary snapshot", &temporary, error))?;
-        fs::rename(&temporary, path)
-            .map_err(|error| storage_error("activate snapshot record", path, error))?;
-        sync_directory(parent)
+        directory
+            .rename_file(OsStr::new(&temporary_name), name)
+            .map_err(|error| storage_error("activate snapshot record", &path, error))?;
+        directory
+            .sync()
+            .map_err(|error| storage_error("sync snapshot directory", directory.path(), error))
     })();
 
     if write_result.is_err() {
-        let _ = fs::remove_file(&temporary);
+        let _ = directory.remove_file(OsStr::new(&temporary_name));
     }
     write_result
 }
 
-fn sync_directory(path: &Path) -> Result<()> {
-    let directory =
-        File::open(path).map_err(|error| storage_error("open snapshot directory", path, error))?;
-    directory
-        .sync_all()
-        .map_err(|error| storage_error("sync snapshot directory", path, error))
-}
-
-fn ensure_directory(path: &Path) -> Result<()> {
-    fs::create_dir_all(path)
-        .map_err(|error| storage_error("create snapshot directory", path, error))?;
-    let metadata = fs::symlink_metadata(path)
-        .map_err(|error| storage_error("read snapshot directory metadata", path, error))?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(PanelError::corrupt_state(format!(
+fn state_directory_open_error(
+    operation: &str,
+    path: &Path,
+    error: StateDirectoryOpenError,
+) -> PanelError {
+    match error {
+        StateDirectoryOpenError::NotDirectory => PanelError::corrupt_state(format!(
             "snapshot directory is not a regular directory: {}",
             path.display()
-        )));
+        )),
+        StateDirectoryOpenError::Io(error) => storage_error(operation, path, error),
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-            .map_err(|error| storage_error("secure snapshot directory", path, error))?;
-    }
-    Ok(())
 }
 
 fn storage_error(operation: &str, path: &Path, error: std::io::Error) -> PanelError {
@@ -427,6 +495,7 @@ mod tests {
         ActivationReceipt, PrepareReceipt, PreparedSnapshotRecord, SnapshotEnvelope,
     };
     use panel_ir::RuntimeSnapshot;
+    use std::fs;
 
     struct JsonSnapshotRecordCodecV2;
 
@@ -476,6 +545,22 @@ mod tests {
                 previous_active_hash: None,
             },
             envelope: SnapshotEnvelope { snapshot },
+        }
+    }
+
+    #[cfg(unix)]
+    fn active_record(revision: u64) -> ActiveSnapshotRecord {
+        let prepared = prepared_record(revision);
+        ActiveSnapshotRecord {
+            envelope: prepared.envelope,
+            receipt: ActivationReceipt {
+                revision_id: prepared.receipt.revision_id,
+                content_hash: prepared.receipt.content_hash,
+                adapter_version: prepared.receipt.adapter_version,
+                schema_version: prepared.receipt.schema_version,
+                prepare_token: prepared.receipt.prepare_token,
+                previous_active_hash: None,
+            },
         }
     }
 
@@ -562,6 +647,28 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn active_record_fifo_is_rejected_without_blocking_the_worker() {
+        use std::{ffi::CString, os::unix::ffi::OsStrExt, time::Duration};
+
+        let temporary = TemporaryDirectory::new();
+        fs::create_dir_all(&temporary.0).unwrap();
+        let active_path = temporary.0.join(ACTIVE_FILE_NAME);
+        let active_path = CString::new(active_path.as_os_str().as_bytes()).unwrap();
+        // SAFETY: the path is a valid, NUL-terminated C string and the mode is
+        // restricted to the owning test process.
+        assert_eq!(unsafe { libc::mkfifo(active_path.as_ptr(), 0o600) }, 0);
+        let store = FileSnapshotStore::new(&temporary.0);
+
+        let error = tokio::time::timeout(Duration::from_millis(200), store.load_active())
+            .await
+            .expect("opening a FIFO must remain non-blocking")
+            .unwrap_err();
+
+        assert_eq!(error.code.as_str(), ErrorCode::CORRUPT_STATE);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn exclusive_store_rejects_a_second_owner_until_release() {
         let temporary = TemporaryDirectory::new();
         let first = FileSnapshotStore::open_exclusive(&temporary.0)
@@ -579,6 +686,47 @@ mod tests {
             .await
             .unwrap()
             .has_exclusive_lease());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn exclusive_store_remains_anchored_when_its_root_path_is_replaced() {
+        let temporary = TemporaryDirectory::new();
+        fs::create_dir_all(&temporary.0).unwrap();
+        let configured_root = temporary.0.join("state");
+        let anchored_root = temporary.0.join("renamed-state");
+        let store = FileSnapshotStore::open_exclusive(&configured_root)
+            .await
+            .unwrap();
+        fs::rename(&configured_root, &anchored_root).unwrap();
+        fs::create_dir(&configured_root).unwrap();
+        let active = active_record(7);
+
+        store.commit_activation(active.clone()).await.unwrap();
+
+        assert_eq!(store.load_active().await.unwrap(), Some(active));
+        assert!(anchored_root.join(ACTIVE_FILE_NAME).is_file());
+        assert!(!configured_root.join(ACTIVE_FILE_NAME).exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn prepared_scan_remains_anchored_when_its_root_path_is_replaced() {
+        let temporary = TemporaryDirectory::new();
+        fs::create_dir_all(&temporary.0).unwrap();
+        let configured_root = temporary.0.join("state");
+        let anchored_root = temporary.0.join("renamed-state");
+        let store = FileSnapshotStore::open_exclusive(&configured_root)
+            .await
+            .unwrap();
+        let prepared = prepared_record(9);
+        store.save_prepared(prepared.clone()).await.unwrap();
+        fs::rename(&configured_root, &anchored_root).unwrap();
+        fs::create_dir(&configured_root).unwrap();
+
+        assert_eq!(store.load_prepared().await.unwrap(), vec![prepared]);
+        assert!(anchored_root.join(PREPARED_DIRECTORY_NAME).is_dir());
+        assert!(!configured_root.join(PREPARED_DIRECTORY_NAME).exists());
     }
 
     #[tokio::test]

@@ -1,5 +1,7 @@
 use std::io::{self, Read};
 
+const DEFAULT_RECORD_INITIAL_CAPACITY_BYTES: u64 = 1024 * 1024;
+
 #[derive(Debug)]
 pub(crate) enum BoundedRecordReadError {
     Io(io::Error),
@@ -45,11 +47,21 @@ impl RecordCollectionBudget {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct BoundedRecordReader {
     max_bytes: u64,
+    max_initial_capacity_bytes: u64,
 }
 
 impl BoundedRecordReader {
     pub(crate) const fn new(max_bytes: u64) -> Self {
-        Self { max_bytes }
+        Self {
+            max_bytes,
+            max_initial_capacity_bytes: DEFAULT_RECORD_INITIAL_CAPACITY_BYTES,
+        }
+    }
+
+    #[cfg(test)]
+    const fn with_initial_capacity_limit(mut self, max_initial_capacity_bytes: u64) -> Self {
+        self.max_initial_capacity_bytes = max_initial_capacity_bytes;
+        self
     }
 
     pub(crate) fn read(
@@ -57,7 +69,12 @@ impl BoundedRecordReader {
         reader: impl Read,
         capacity_hint: u64,
     ) -> Result<Vec<u8>, BoundedRecordReadError> {
-        let capacity = usize::try_from(capacity_hint.min(self.max_bytes)).unwrap_or(usize::MAX);
+        let capacity = usize::try_from(
+            capacity_hint
+                .min(self.max_bytes)
+                .min(self.max_initial_capacity_bytes),
+        )
+        .unwrap_or(usize::MAX);
         let mut bytes = Vec::with_capacity(capacity);
         let mut limited = reader.take(self.max_bytes.saturating_add(1));
         limited
@@ -107,5 +124,14 @@ mod tests {
         let mut overflow = RecordCollectionBudget::new(u64::MAX);
         overflow.consume(u64::MAX).unwrap();
         assert!(overflow.consume(1).is_err());
+    }
+
+    #[test]
+    fn untrusted_metadata_cannot_force_maximum_upfront_allocation() {
+        let reader = BoundedRecordReader::new(1024).with_initial_capacity_limit(8);
+        let bytes = reader.read(Cursor::new(b"tiny"), 1024).unwrap();
+
+        assert_eq!(bytes, b"tiny");
+        assert!(bytes.capacity() < 1024);
     }
 }

@@ -1,8 +1,13 @@
+use crate::state_directory::StateDirectoryHandle;
 use panel_errors::{PanelError, Result};
-use std::path::{Path, PathBuf};
 #[cfg(unix)]
-use std::{fs::File, fs::OpenOptions, io::Write};
+use std::{ffi::OsStr, fs::File, io::Write};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
+#[cfg(unix)]
 const LEASE_FILE_NAME: &str = ".gateway.lock";
 
 /// Process-lifetime exclusive ownership of a snapshot state directory.
@@ -13,6 +18,7 @@ const LEASE_FILE_NAME: &str = ".gateway.lock";
 pub struct StateDirectoryLease {
     #[cfg(unix)]
     file: File,
+    directory: Arc<StateDirectoryHandle>,
     path: PathBuf,
 }
 
@@ -28,21 +34,23 @@ impl StateDirectoryLease {
         &self.path
     }
 
+    pub(crate) fn directory(&self) -> Arc<StateDirectoryHandle> {
+        Arc::clone(&self.directory)
+    }
+
     #[cfg(unix)]
     fn acquire_blocking(root: &Path) -> Result<Self> {
-        use std::os::{fd::AsRawFd, unix::fs::OpenOptionsExt};
+        use std::os::fd::AsRawFd;
 
-        super::ensure_directory(root)?;
+        let directory = StateDirectoryHandle::open_root(root, true)
+            .map_err(|error| {
+                super::state_directory_open_error("open state directory", root, error)
+            })?
+            .expect("creating the state directory returns a handle");
+        let directory = Arc::new(directory);
         let path = root.join(LEASE_FILE_NAME);
-        let mut options = OpenOptions::new();
-        options
-            .read(true)
-            .write(true)
-            .create(true)
-            .mode(0o600)
-            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
-        let mut file = options
-            .open(&path)
+        let mut file = directory
+            .open_lock_file(OsStr::new(LEASE_FILE_NAME))
             .map_err(|error| super::storage_error("open state directory lease", &path, error))?;
         let metadata = file.metadata().map_err(|error| {
             super::storage_error("read state directory lease metadata", &path, error)
@@ -77,7 +85,11 @@ impl StateDirectoryLease {
             .and_then(|()| file.sync_all())
             .map_err(|error| super::storage_error("write state directory lease", &path, error))?;
 
-        Ok(Self { file, path })
+        Ok(Self {
+            file,
+            directory,
+            path,
+        })
     }
 
     #[cfg(not(unix))]

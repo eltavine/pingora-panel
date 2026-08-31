@@ -9,8 +9,9 @@ mod prepared_policy;
 pub use events::{
     BufferedGatewayEventReceiver, BufferedGatewayEventSink, FanoutGatewayEventSink, GatewayEvent,
     GatewayEventDeliveryDiagnostics, GatewayEventDeliveryDiagnosticsProvider,
-    GatewayEventDeliveryMonitor, GatewayEventDeliverySnapshot, GatewayEventSink, GatewayOperation,
-    GatewayRequestMetadata, GatewayRequestOperation, GatewayRequestOutcome, NoopGatewayEventSink,
+    GatewayEventDeliveryMonitor, GatewayEventDeliverySnapshot, GatewayEventPanicObserver,
+    GatewayEventSink, GatewayOperation, GatewayRequestMetadata, GatewayRequestOperation,
+    GatewayRequestOutcome, NoopGatewayEventSink, PanicIsolatedGatewayEventSink,
 };
 pub use prepared_policy::{
     PreparedSnapshotAdmissionPolicy, PreparedSnapshotBudget, PreparedSnapshotUsage,
@@ -78,7 +79,7 @@ impl DurableGatewayEngineOptions {
     ) -> Self {
         Self {
             prepared_policy,
-            events,
+            events: Arc::new(PanicIsolatedGatewayEventSink::new(events)),
         }
     }
 
@@ -91,7 +92,7 @@ impl DurableGatewayEngineOptions {
     }
 
     pub fn with_event_sink(mut self, events: Arc<dyn GatewayEventSink>) -> Self {
-        self.events = events;
+        self.events = Arc::new(PanicIsolatedGatewayEventSink::new(events));
         self
     }
 }
@@ -716,6 +717,27 @@ mod tests {
         fn emit(&self, event: &GatewayEvent) {
             self.0.lock().unwrap().push(event.clone());
         }
+    }
+
+    struct PanickingEventSink;
+
+    impl GatewayEventSink for PanickingEventSink {
+        fn emit(&self, _event: &GatewayEvent) {
+            panic!("injected event sink panic");
+        }
+    }
+
+    #[tokio::test]
+    async fn directly_injected_event_sink_cannot_unwind_from_restore() {
+        let engine = DurableGatewayEngine::restore_with_options(
+            Arc::new(TestAdapter::new()),
+            Arc::new(MemoryStore::default()),
+            DurableGatewayEngineOptions::default().with_event_sink(Arc::new(PanickingEventSink)),
+        )
+        .await
+        .expect("event delivery is isolated from runtime restoration");
+
+        assert!(engine.status().await.unwrap().ready);
     }
 
     #[tokio::test]

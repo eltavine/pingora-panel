@@ -1,8 +1,5 @@
-use std::{
-    fs::{File, OpenOptions},
-    io,
-    path::Path,
-};
+use crate::state_directory::StateDirectoryHandle;
+use std::{ffi::OsStr, fs::File, io};
 
 pub(crate) struct OpenedRecordFile {
     pub(crate) file: File,
@@ -21,33 +18,17 @@ pub(crate) enum RecordFileOpenError {
 /// while `O_NONBLOCK` prevents a swapped FIFO or device from stalling the worker
 /// before descriptor metadata can be validated.
 pub(crate) fn open_regular_record(
-    path: &Path,
+    directory: &StateDirectoryHandle,
+    name: &OsStr,
 ) -> Result<Option<OpenedRecordFile>, RecordFileOpenError> {
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK);
-    }
-
-    #[cfg(not(unix))]
-    {
-        let metadata = match std::fs::symlink_metadata(path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(RecordFileOpenError::Io(error)),
-        };
-        if metadata.file_type().is_symlink() || !metadata.is_file() {
-            return Err(RecordFileOpenError::NotRegular);
-        }
-    }
-
-    let file = match options.open(path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+    let file = match directory.open_readonly_record(name) {
+        Ok(Some(file)) => file,
+        Ok(None) => return Ok(None),
         #[cfg(unix)]
         Err(error) if error.raw_os_error() == Some(libc::ELOOP) => {
+            return Err(RecordFileOpenError::NotRegular);
+        }
+        Err(error) if error.kind() == io::ErrorKind::InvalidData => {
             return Err(RecordFileOpenError::NotRegular);
         }
         Err(error) => return Err(RecordFileOpenError::Io(error)),

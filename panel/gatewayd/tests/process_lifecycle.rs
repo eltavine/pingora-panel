@@ -3,8 +3,8 @@
 use gateway_grpc::encode_snapshot;
 use gatewayd::{
     DEADLINE_REQUIREMENT_ENV, DRAIN_TIMEOUT_MILLIS_ENV, GATEWAY_ADDRESS_ENV,
-    GRPC_MAX_DECODING_MESSAGE_BYTES_ENV, MAX_PREPARED_SNAPSHOTS_ENV, STATE_DIRECTORY_ENV,
-    WORKER_COUNT_ENV,
+    GRPC_MAX_DECODING_MESSAGE_BYTES_ENV, MAX_PREPARED_SNAPSHOTS_ENV, MAX_REQUEST_ID_BYTES_ENV,
+    STATE_DIRECTORY_ENV, WORKER_COUNT_ENV,
 };
 use panel_contracts::{
     common::v1 as common,
@@ -242,6 +242,7 @@ async fn production_environment_enforces_composed_resource_policies() {
             (DEADLINE_REQUIREMENT_ENV, "mutations"),
             (GRPC_MAX_DECODING_MESSAGE_BYTES_ENV, "1024"),
             (MAX_PREPARED_SNAPSHOTS_ENV, "1"),
+            (MAX_REQUEST_ID_BYTES_ENV, "32"),
         ],
     );
     let channel = wait_until_serving(address).await;
@@ -255,6 +256,19 @@ async fn production_environment_enforces_composed_resource_policies() {
         .unwrap()
         .into_inner();
     assert!(status.error.is_none());
+
+    let oversized_request_id = "x".repeat(33);
+    let oversized_metadata = client
+        .status(StatusRequest {
+            context: Some(context(&oversized_request_id)),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(
+        oversized_metadata.error.unwrap().code,
+        panel_errors::ErrorCode::RESOURCE_EXHAUSTED
+    );
 
     let missing_deadline = client
         .prepare(PrepareRequest {

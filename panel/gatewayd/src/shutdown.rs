@@ -1,6 +1,8 @@
 use crate::ShutdownReason;
 use panel_errors::{PanelError, Result};
-use panel_gateway_runtime::{GatewayEvent, GatewayEventSink, NoopGatewayEventSink};
+use panel_gateway_runtime::{
+    GatewayEvent, GatewayEventSink, NoopGatewayEventSink, PanicIsolatedGatewayEventSink,
+};
 use std::{future::Future, sync::Arc, time::Duration};
 use tonic_health::{server::HealthReporter, ServingStatus};
 
@@ -106,7 +108,7 @@ impl ShutdownCoordinator {
     }
 
     pub fn with_event_sink(mut self, events: Arc<dyn GatewayEventSink>) -> Self {
-        self.events = events;
+        self.events = Arc::new(PanicIsolatedGatewayEventSink::new(events));
         self
     }
 
@@ -174,6 +176,14 @@ mod tests {
         }
     }
 
+    struct PanickingEventSink;
+
+    impl GatewayEventSink for PanickingEventSink {
+        fn emit(&self, _event: &GatewayEvent) {
+            panic!("injected shutdown event panic");
+        }
+    }
+
     #[test]
     fn drain_timeout_is_bounded() {
         assert!(ShutdownPolicy::new(Duration::ZERO).is_ok());
@@ -192,6 +202,20 @@ mod tests {
             Arc::clone(&readiness) as Arc<dyn ReadinessGate>,
             ShutdownPolicy::new(Duration::ZERO).unwrap(),
         );
+
+        coordinator.run(async {}).await;
+
+        assert!(readiness.0.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn panicking_event_sink_cannot_block_readiness_withdrawal() {
+        let readiness = Arc::new(RecordingReadinessGate(AtomicBool::new(false)));
+        let coordinator = ShutdownCoordinator::new(
+            Arc::clone(&readiness) as Arc<dyn ReadinessGate>,
+            ShutdownPolicy::new(Duration::ZERO).unwrap(),
+        )
+        .with_event_sink(Arc::new(PanickingEventSink));
 
         coordinator.run(async {}).await;
 

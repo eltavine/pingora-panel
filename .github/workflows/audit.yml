@@ -1,11 +1,18 @@
 name: Security Audit
 
 on:
+  workflow_dispatch:
   push:
     branches:
-      - master
+      - main
     paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
       - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - ".cargo/audit.toml"
+      - "**/.cargo/audit.toml"
+      - ".github/workflows/audit.yml"
   schedule:
     - cron: "0 2 * * *" # run at 2 AM UTC
 
@@ -14,20 +21,33 @@ permissions:
 
 jobs:
   security-audit:
+    name: Audit ${{ matrix.workspace }} workspace
     permissions:
       checks: write # for rustsec/audit-check to create check
       contents: read # for actions/checkout to fetch code
       issues: write # for rustsec/audit-check to create issues
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - workspace: upstream
+            directory: .
+            generate_lockfile: true
+          - workspace: panel
+            directory: panel
+            generate_lockfile: false
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Generate Cargo.lock
+        if: matrix.generate_lockfile
         # https://github.com/rustsec/audit-check/issues/27
         run: cargo generate-lockfile --ignore-rust-version
 
-      - name: Audit Check
+      - name: Audit workspace
         # https://github.com/rustsec/audit-check/issues/2
-        uses: rustsec/audit-check@e9159ac5f7d7d873ce074ca134da2f445c0a4a61 # v1.3.2
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: ${{ matrix.directory }}

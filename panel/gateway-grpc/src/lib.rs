@@ -12,7 +12,8 @@ use panel_engine::{
     ActivateRequest, EngineCapabilities, GatewayEngine, GatewayEvent,
     GatewayEventDeliveryDiagnostics, GatewayEventDeliveryDiagnosticsProvider, GatewayEventSink,
     GatewayRequestMetadata, GatewayRequestOperation, GatewayRequestOutcome, GatewayRuntimeInfo,
-    GatewayRuntimeInfoProvider, NoopGatewayEventSink, PrepareRequest, PrepareToken,
+    GatewayRuntimeInfoProvider, NoopGatewayEventSink, PanicIsolatedGatewayEventSink,
+    PrepareRequest, PrepareToken,
 };
 use panel_errors::{ErrorCode, PanelError, Result};
 use std::{
@@ -29,6 +30,7 @@ pub struct GatewayGrpcService<E: GatewayEngine + ?Sized> {
     event_delivery_diagnostics: Option<Arc<dyn GatewayEventDeliveryDiagnosticsProvider>>,
     request_policy: Arc<dyn GatewayRequestPolicy>,
     transport_policy: GatewayTransportPolicy,
+    event_metadata_limits: GatewayRequestMetadataLimits,
     events: Arc<dyn GatewayEventSink>,
     lifetime_dependencies: Vec<Arc<dyn Send + Sync>>,
 }
@@ -41,6 +43,7 @@ impl<E: GatewayEngine + ?Sized> Clone for GatewayGrpcService<E> {
             event_delivery_diagnostics: self.event_delivery_diagnostics.as_ref().map(Arc::clone),
             request_policy: Arc::clone(&self.request_policy),
             transport_policy: self.transport_policy,
+            event_metadata_limits: self.event_metadata_limits,
             events: Arc::clone(&self.events),
             lifetime_dependencies: self.lifetime_dependencies.clone(),
         }
@@ -55,6 +58,7 @@ impl<E: GatewayEngine + ?Sized> GatewayGrpcService<E> {
             event_delivery_diagnostics: None,
             request_policy: Arc::new(StandardGatewayRequestPolicy::default()),
             transport_policy: GatewayTransportPolicy::default(),
+            event_metadata_limits: GatewayRequestMetadataLimits::default(),
             events: Arc::new(NoopGatewayEventSink),
             lifetime_dependencies: Vec::new(),
         }
@@ -70,6 +74,7 @@ impl<E: GatewayEngine + ?Sized> GatewayGrpcService<E> {
             event_delivery_diagnostics: None,
             request_policy: Arc::new(StandardGatewayRequestPolicy::default()),
             transport_policy: GatewayTransportPolicy::default(),
+            event_metadata_limits: GatewayRequestMetadataLimits::default(),
             events: Arc::new(NoopGatewayEventSink),
             lifetime_dependencies: Vec::new(),
         }
@@ -87,13 +92,19 @@ impl<E: GatewayEngine + ?Sized> GatewayGrpcService<E> {
             event_delivery_diagnostics: None,
             request_policy,
             transport_policy,
+            event_metadata_limits: GatewayRequestMetadataLimits::default(),
             events: Arc::new(NoopGatewayEventSink),
             lifetime_dependencies: Vec::new(),
         }
     }
 
     pub fn with_event_sink(mut self, events: Arc<dyn GatewayEventSink>) -> Self {
-        self.events = events;
+        self.events = Arc::new(PanicIsolatedGatewayEventSink::new(events));
+        self
+    }
+
+    pub fn with_event_metadata_limits(mut self, limits: GatewayRequestMetadataLimits) -> Self {
+        self.event_metadata_limits = limits;
         self
     }
 
@@ -148,6 +159,7 @@ where
             Arc::clone(&self.events),
             GatewayRequestOperation::GetCapabilities,
             request.context.as_ref(),
+            self.event_metadata_limits,
         );
         let response = match self
             .request_policy
@@ -191,6 +203,7 @@ where
             Arc::clone(&self.events),
             GatewayRequestOperation::Validate,
             request.context.as_ref(),
+            self.event_metadata_limits,
         );
         let snapshot = self
             .request_policy
@@ -230,6 +243,7 @@ where
             Arc::clone(&self.events),
             GatewayRequestOperation::Prepare,
             request.context.as_ref(),
+            self.event_metadata_limits,
         );
         let snapshot = self
             .request_policy
@@ -271,6 +285,7 @@ where
             Arc::clone(&self.events),
             GatewayRequestOperation::Activate,
             request.context.as_ref(),
+            self.event_metadata_limits,
         );
         let parsed = self
             .request_policy
@@ -320,6 +335,7 @@ where
             Arc::clone(&self.events),
             GatewayRequestOperation::Abort,
             request.context.as_ref(),
+            self.event_metadata_limits,
         );
         let parsed = self
             .request_policy
@@ -366,6 +382,7 @@ where
             Arc::clone(&self.events),
             GatewayRequestOperation::Status,
             request.context.as_ref(),
+            self.event_metadata_limits,
         );
         let mut response = match self
             .request_policy
@@ -435,24 +452,13 @@ impl RequestEventScope {
         events: Arc<dyn GatewayEventSink>,
         operation: GatewayRequestOperation,
         context: Option<&common::RequestContext>,
+        limits: GatewayRequestMetadataLimits,
     ) -> Self {
-        let metadata = context.map_or_else(
-            || GatewayRequestMetadata::new("", "", ""),
-            |context| {
-                GatewayRequestMetadata::new(
-                    context.request_id.clone(),
-                    context.correlation_id.clone(),
-                    context.actor.clone(),
-                )
-            },
-        );
-        emit_safely(
-            events.as_ref(),
-            &GatewayEvent::RequestStarted {
-                operation,
-                metadata: metadata.clone(),
-            },
-        );
+        let metadata = policy::project_gateway_event_metadata(context, limits);
+        events.emit(&GatewayEvent::RequestStarted {
+            operation,
+            metadata: metadata.clone(),
+        });
         Self {
             events,
             operation,
@@ -467,21 +473,14 @@ impl RequestEventScope {
                 error_code: ErrorCode::new(error.code.clone()),
             }
         });
-        emit_safely(
-            self.events.as_ref(),
-            &GatewayEvent::RequestCompleted {
-                operation: self.operation,
-                metadata: self.metadata,
-                outcome,
-                elapsed_micros: u64::try_from(self.started_at.elapsed().as_micros())
-                    .unwrap_or(u64::MAX),
-            },
-        );
+        self.events.emit(&GatewayEvent::RequestCompleted {
+            operation: self.operation,
+            metadata: self.metadata,
+            outcome,
+            elapsed_micros: u64::try_from(self.started_at.elapsed().as_micros())
+                .unwrap_or(u64::MAX),
+        });
     }
-}
-
-fn emit_safely(events: &dyn GatewayEventSink, event: &GatewayEvent) {
-    let _ = catch_unwind(AssertUnwindSafe(|| events.emit(event)));
 }
 
 fn snapshot_safely<T>(snapshot: impl FnOnce() -> T) -> Option<T> {
@@ -599,6 +598,14 @@ mod tests {
     impl GatewayEventSink for RecordingEventSink {
         fn emit(&self, event: &GatewayEvent) {
             self.0.lock().unwrap().push(event.clone());
+        }
+    }
+
+    struct PanickingEventSink;
+
+    impl GatewayEventSink for PanickingEventSink {
+        fn emit(&self, _event: &GatewayEvent) {
+            panic!("injected gRPC event sink panic");
         }
     }
 
@@ -750,6 +757,81 @@ mod tests {
                 ..
             } if error_code.as_str() == panel_errors::ErrorCode::INVALID_ARGUMENT
         ));
+    }
+
+    #[tokio::test]
+    async fn rejected_oversized_metadata_is_redacted_before_event_projection() {
+        let engine = Arc::new(FakeGatewayEngine::with_default_capabilities());
+        let events = Arc::new(RecordingEventSink::default());
+        let service = GatewayGrpcService::new(engine)
+            .with_event_sink(Arc::clone(&events) as Arc<dyn GatewayEventSink>);
+        let mut oversized = context(false);
+        oversized.request_id = "x".repeat(DEFAULT_MAX_REQUEST_ID_BYTES + 1);
+
+        let response = service
+            .get_capabilities(Request::new(wire::GetCapabilitiesRequest {
+                context: Some(oversized),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(
+            response.error.unwrap().code,
+            panel_errors::ErrorCode::RESOURCE_EXHAUSTED
+        );
+        let events = events.0.lock().unwrap();
+        assert!(matches!(
+            &events[0],
+            GatewayEvent::RequestStarted { metadata, .. }
+                if metadata.request_id.is_empty()
+                    && metadata.correlation_id == "correlation-1"
+                    && metadata.actor == "operator@example.com"
+        ));
+    }
+
+    #[tokio::test]
+    async fn event_projection_honors_its_independent_injected_limits() {
+        let events = Arc::new(RecordingEventSink::default());
+        let limits = GatewayRequestMetadataLimits::new(4, 64, 64, 64, 64, 64).unwrap();
+        let service =
+            GatewayGrpcService::new(Arc::new(FakeGatewayEngine::with_default_capabilities()))
+                .with_event_sink(Arc::clone(&events) as Arc<dyn GatewayEventSink>)
+                .with_event_metadata_limits(limits);
+        let mut accepted = context(false);
+        accepted.request_id = "12345".into();
+
+        let response = service
+            .get_capabilities(Request::new(wire::GetCapabilitiesRequest {
+                context: Some(accepted),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(response.error.is_none());
+        let events = events.0.lock().unwrap();
+        assert!(matches!(
+            &events[0],
+            GatewayEvent::RequestStarted { metadata, .. } if metadata.request_id.is_empty()
+        ));
+    }
+
+    #[tokio::test]
+    async fn directly_injected_panicking_event_sink_cannot_unwind_from_transport() {
+        let service =
+            GatewayGrpcService::new(Arc::new(FakeGatewayEngine::with_default_capabilities()))
+                .with_event_sink(Arc::new(PanickingEventSink));
+
+        let response = service
+            .get_capabilities(Request::new(wire::GetCapabilitiesRequest {
+                context: Some(context(false)),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(response.error.is_none());
     }
 
     #[tokio::test]

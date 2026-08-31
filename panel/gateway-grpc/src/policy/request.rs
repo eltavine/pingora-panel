@@ -1,12 +1,21 @@
 use super::DEFAULT_REQUEST_TIMEOUT;
 use chrono::DateTime;
 use panel_contracts::common::v1 as common;
+use panel_engine::GatewayRequestMetadata;
 use panel_errors::{PanelError, Result};
 use std::{
     future::Future,
+    num::NonZeroUsize,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+
+pub const DEFAULT_MAX_REQUEST_ID_BYTES: usize = 128;
+pub const DEFAULT_MAX_CORRELATION_ID_BYTES: usize = 128;
+pub const DEFAULT_MAX_ACTOR_BYTES: usize = 320;
+pub const DEFAULT_MAX_DEADLINE_BYTES: usize = 64;
+pub const DEFAULT_MAX_IDEMPOTENCY_KEY_BYTES: usize = 256;
+pub const DEFAULT_MAX_SCHEMA_VERSION_BYTES: usize = 64;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -21,6 +30,85 @@ pub enum DeadlineRequirement {
     Optional,
     Mutations,
     All,
+}
+
+/// Resource limits for transport metadata copied into policies and events.
+///
+/// Private fields and stable accessors allow future metadata fields to acquire
+/// independent defaults without exposing a constructible public struct layout.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GatewayRequestMetadataLimits {
+    request_id_bytes: NonZeroUsize,
+    correlation_id_bytes: NonZeroUsize,
+    actor_bytes: NonZeroUsize,
+    deadline_bytes: NonZeroUsize,
+    idempotency_key_bytes: NonZeroUsize,
+    schema_version_bytes: NonZeroUsize,
+}
+
+impl GatewayRequestMetadataLimits {
+    pub fn new(
+        request_id_bytes: usize,
+        correlation_id_bytes: usize,
+        actor_bytes: usize,
+        deadline_bytes: usize,
+        idempotency_key_bytes: usize,
+        schema_version_bytes: usize,
+    ) -> Result<Self> {
+        let non_zero = |value, field| {
+            NonZeroUsize::new(value).ok_or_else(|| {
+                PanelError::invalid_argument(format!(
+                    "gateway request metadata limit for {field} must be non-zero"
+                ))
+            })
+        };
+        Ok(Self {
+            request_id_bytes: non_zero(request_id_bytes, "request_id")?,
+            correlation_id_bytes: non_zero(correlation_id_bytes, "correlation_id")?,
+            actor_bytes: non_zero(actor_bytes, "actor")?,
+            deadline_bytes: non_zero(deadline_bytes, "deadline")?,
+            idempotency_key_bytes: non_zero(idempotency_key_bytes, "idempotency_key")?,
+            schema_version_bytes: non_zero(schema_version_bytes, "schema_version")?,
+        })
+    }
+
+    pub fn request_id_bytes(self) -> usize {
+        self.request_id_bytes.get()
+    }
+
+    pub fn correlation_id_bytes(self) -> usize {
+        self.correlation_id_bytes.get()
+    }
+
+    pub fn actor_bytes(self) -> usize {
+        self.actor_bytes.get()
+    }
+
+    pub fn deadline_bytes(self) -> usize {
+        self.deadline_bytes.get()
+    }
+
+    pub fn idempotency_key_bytes(self) -> usize {
+        self.idempotency_key_bytes.get()
+    }
+
+    pub fn schema_version_bytes(self) -> usize {
+        self.schema_version_bytes.get()
+    }
+}
+
+impl Default for GatewayRequestMetadataLimits {
+    fn default() -> Self {
+        Self::new(
+            DEFAULT_MAX_REQUEST_ID_BYTES,
+            DEFAULT_MAX_CORRELATION_ID_BYTES,
+            DEFAULT_MAX_ACTOR_BYTES,
+            DEFAULT_MAX_DEADLINE_BYTES,
+            DEFAULT_MAX_IDEMPOTENCY_KEY_BYTES,
+            DEFAULT_MAX_SCHEMA_VERSION_BYTES,
+        )
+        .expect("default gateway request metadata limits are non-zero")
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -128,6 +216,90 @@ impl GatewayRequestRule for RequiredRequestIdentityRule {
             return Err(PanelError::invalid_argument("actor is required"));
         }
         Ok(())
+    }
+}
+
+pub struct BoundedGatewayRequestMetadataRule {
+    limits: GatewayRequestMetadataLimits,
+}
+
+impl BoundedGatewayRequestMetadataRule {
+    pub fn new(limits: GatewayRequestMetadataLimits) -> Self {
+        Self { limits }
+    }
+
+    pub fn limits(&self) -> GatewayRequestMetadataLimits {
+        self.limits
+    }
+}
+
+impl Default for BoundedGatewayRequestMetadataRule {
+    fn default() -> Self {
+        Self::new(GatewayRequestMetadataLimits::default())
+    }
+}
+
+impl GatewayRequestRule for BoundedGatewayRequestMetadataRule {
+    fn validate(&self, request: RequestPolicyContext<'_>) -> Result<()> {
+        let context = request.request_context();
+        validate_metadata_field(
+            "request_id",
+            &context.request_id,
+            self.limits.request_id_bytes(),
+        )?;
+        validate_metadata_field(
+            "correlation_id",
+            &context.correlation_id,
+            self.limits.correlation_id_bytes(),
+        )?;
+        validate_metadata_field("actor", &context.actor, self.limits.actor_bytes())?;
+        validate_metadata_field("deadline", &context.deadline, self.limits.deadline_bytes())?;
+        validate_metadata_field(
+            "idempotency_key",
+            &context.idempotency_key,
+            self.limits.idempotency_key_bytes(),
+        )?;
+        validate_metadata_field(
+            "schema_version",
+            &context.schema_version,
+            self.limits.schema_version_bytes(),
+        )
+    }
+}
+
+fn validate_metadata_field(name: &str, value: &str, max_bytes: usize) -> Result<()> {
+    if value.len() > max_bytes {
+        return Err(PanelError::resource_exhausted(format!(
+            "{name} exceeds the {max_bytes} byte request metadata limit"
+        )));
+    }
+    if value.chars().any(char::is_control) {
+        return Err(PanelError::invalid_argument(format!(
+            "{name} must not contain control characters"
+        )));
+    }
+    Ok(())
+}
+
+pub(crate) fn project_gateway_event_metadata(
+    context: Option<&common::RequestContext>,
+    limits: GatewayRequestMetadataLimits,
+) -> GatewayRequestMetadata {
+    let Some(context) = context else {
+        return GatewayRequestMetadata::new("", "", "");
+    };
+    GatewayRequestMetadata::new(
+        project_metadata_field(&context.request_id, limits.request_id_bytes()),
+        project_metadata_field(&context.correlation_id, limits.correlation_id_bytes()),
+        project_metadata_field(&context.actor, limits.actor_bytes()),
+    )
+}
+
+fn project_metadata_field(value: &str, max_bytes: usize) -> String {
+    if value.len() <= max_bytes && !value.chars().any(char::is_control) {
+        value.to_owned()
+    } else {
+        String::new()
     }
 }
 
@@ -274,10 +446,23 @@ impl StandardGatewayRequestPolicy {
         maximum_duration: Duration,
         deadline_requirement: DeadlineRequirement,
     ) -> Result<Self> {
-        Self::with_clock(
+        Self::with_metadata_limits(
+            maximum_duration,
+            deadline_requirement,
+            GatewayRequestMetadataLimits::default(),
+        )
+    }
+
+    pub fn with_metadata_limits(
+        maximum_duration: Duration,
+        deadline_requirement: DeadlineRequirement,
+        metadata_limits: GatewayRequestMetadataLimits,
+    ) -> Result<Self> {
+        Self::with_clock_and_metadata_limits(
             maximum_duration,
             deadline_requirement,
             Arc::new(SystemDeadlineClock),
+            metadata_limits,
         )
     }
 
@@ -285,6 +470,20 @@ impl StandardGatewayRequestPolicy {
         maximum_duration: Duration,
         deadline_requirement: DeadlineRequirement,
         clock: Arc<dyn DeadlineClock>,
+    ) -> Result<Self> {
+        Self::with_clock_and_metadata_limits(
+            maximum_duration,
+            deadline_requirement,
+            clock,
+            GatewayRequestMetadataLimits::default(),
+        )
+    }
+
+    pub fn with_clock_and_metadata_limits(
+        maximum_duration: Duration,
+        deadline_requirement: DeadlineRequirement,
+        clock: Arc<dyn DeadlineClock>,
+        metadata_limits: GatewayRequestMetadataLimits,
     ) -> Result<Self> {
         let budget_policy = Arc::new(DeadlineRequestBudgetPolicy::with_clock(
             maximum_duration,
@@ -297,6 +496,9 @@ impl StandardGatewayRequestPolicy {
         Ok(Self {
             inner: CompositeGatewayRequestPolicy::new(budget_policy)
                 .with_rule(Arc::new(RequiredRequestIdentityRule))
+                .with_rule(Arc::new(BoundedGatewayRequestMetadataRule::new(
+                    metadata_limits,
+                )))
                 .with_rule(protocol_rule)
                 .with_rule(Arc::new(MutationIdempotencyRule)),
         })
@@ -412,6 +614,66 @@ mod tests {
         assert_eq!(
             error.code.as_str(),
             panel_errors::ErrorCode::PRECONDITION_FAILED
+        );
+    }
+
+    #[test]
+    fn standard_policy_bounds_metadata_before_it_is_copied_into_events() {
+        let policy = StandardGatewayRequestPolicy::default();
+        let mut oversized = context("");
+        oversized.request_id = "x".repeat(DEFAULT_MAX_REQUEST_ID_BYTES + 1);
+
+        let error = policy
+            .validate(Some(&oversized), RequestClass::ReadOnly)
+            .unwrap_err();
+
+        assert_eq!(
+            error.code.as_str(),
+            panel_errors::ErrorCode::RESOURCE_EXHAUSTED
+        );
+    }
+
+    #[test]
+    fn metadata_rule_rejects_control_characters_and_accepts_custom_limits() {
+        let limits = GatewayRequestMetadataLimits::new(16, 16, 16, 32, 16, 16).unwrap();
+        let rule = BoundedGatewayRequestMetadataRule::new(limits);
+        let mut invalid = context("");
+        invalid.correlation_id = "line\nbreak".into();
+
+        let error = rule
+            .validate(RequestPolicyContext {
+                context: &invalid,
+                class: RequestClass::ReadOnly,
+            })
+            .unwrap_err();
+
+        assert_eq!(
+            error.code.as_str(),
+            panel_errors::ErrorCode::INVALID_ARGUMENT
+        );
+        assert_eq!(rule.limits(), limits);
+        assert!(GatewayRequestMetadataLimits::new(0, 1, 1, 1, 1, 1).is_err());
+    }
+
+    #[test]
+    fn standard_policy_accepts_injected_metadata_limits() {
+        let limits = GatewayRequestMetadataLimits::new(4, 64, 64, 64, 64, 64).unwrap();
+        let policy = StandardGatewayRequestPolicy::with_metadata_limits(
+            Duration::from_secs(1),
+            DeadlineRequirement::Optional,
+            limits,
+        )
+        .unwrap();
+        let mut oversized = context("");
+        oversized.request_id = "12345".into();
+
+        let error = policy
+            .validate(Some(&oversized), RequestClass::ReadOnly)
+            .unwrap_err();
+
+        assert_eq!(
+            error.code.as_str(),
+            panel_errors::ErrorCode::RESOURCE_EXHAUSTED
         );
     }
 }

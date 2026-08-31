@@ -7,6 +7,7 @@
 mod background_tasks;
 mod bind_policy;
 mod config;
+mod failure_latch;
 mod health;
 mod observability;
 mod resource_limits;
@@ -34,8 +35,8 @@ pub use shutdown::{ReadinessGate, ShutdownCoordinator, ShutdownPolicy, TonicHeal
 pub use shutdown_trigger::{ShutdownArbiter, ShutdownReason, ShutdownTrigger};
 
 use gateway_grpc::{
-    DeadlineRequirement, GatewayGrpcService, GatewayRequestPolicy, GatewayTransportPolicy,
-    StandardGatewayRequestPolicy,
+    DeadlineRequirement, GatewayGrpcService, GatewayRequestMetadataLimits, GatewayRequestPolicy,
+    GatewayTransportPolicy, StandardGatewayRequestPolicy,
 };
 use gateway_pingora::PingoraGatewayAdapter;
 use panel_contracts::gateway::v1::gateway_engine_server::GatewayEngineServer;
@@ -79,6 +80,7 @@ pub struct GatewaydServiceOptions {
     transport_policy: GatewayTransportPolicy,
     prepared_policy: Arc<dyn PreparedSnapshotAdmissionPolicy>,
     request_policy: Option<Arc<dyn GatewayRequestPolicy>>,
+    request_metadata_limits: GatewayRequestMetadataLimits,
     event_sinks: Vec<Arc<dyn GatewayEventSink>>,
     event_buffer_capacity: usize,
 }
@@ -102,6 +104,14 @@ impl GatewaydServiceOptions {
         self
     }
 
+    pub fn with_request_metadata_limits(
+        mut self,
+        request_metadata_limits: GatewayRequestMetadataLimits,
+    ) -> Self {
+        self.request_metadata_limits = request_metadata_limits;
+        self
+    }
+
     pub fn with_event_sink(mut self, event_sink: Arc<dyn GatewayEventSink>) -> Self {
         self.event_sinks.push(event_sink);
         self
@@ -119,6 +129,7 @@ impl Default for GatewaydServiceOptions {
             transport_policy: GatewayTransportPolicy::default(),
             prepared_policy: Arc::new(PreparedSnapshotBudget::default()),
             request_policy: None,
+            request_metadata_limits: GatewayRequestMetadataLimits::default(),
             event_sinks: Vec::new(),
             event_buffer_capacity: DEFAULT_EVENT_BUFFER_CAPACITY,
         }
@@ -237,11 +248,13 @@ pub async fn build_gateway_runtime_with_options(
     );
     background_tasks.spawn_critical("tonic-health-synchronizer", health_sync.run());
 
+    let request_metadata_limits = options.request_metadata_limits;
     let request_policy = options.request_policy.unwrap_or_else(|| {
         Arc::new(
-            StandardGatewayRequestPolicy::new(
+            StandardGatewayRequestPolicy::with_metadata_limits(
                 options.transport_policy.request_timeout(),
                 DeadlineRequirement::Optional,
+                request_metadata_limits,
             )
             .expect("default transport policy has a non-zero timeout"),
         )
@@ -257,6 +270,7 @@ pub async fn build_gateway_runtime_with_options(
                 options.transport_policy,
             )
             .with_event_sink(Arc::clone(&events))
+            .with_event_metadata_limits(request_metadata_limits)
             .with_event_delivery_diagnostics(Arc::new(event_delivery.clone()))
             .with_lifetime_dependency(task_lifetime),
             health,
@@ -278,9 +292,10 @@ pub async fn serve_gatewayd(
     ));
     let resource_limits = config.resource_limits();
     let tracing_events: Arc<dyn GatewayEventSink> = Arc::new(TracingGatewayEventSink);
-    let request_policy = Arc::new(StandardGatewayRequestPolicy::new(
+    let request_policy = Arc::new(StandardGatewayRequestPolicy::with_metadata_limits(
         resource_limits.transport_policy().request_timeout(),
         resource_limits.deadline_requirement(),
+        resource_limits.request_metadata_limits(),
     )?);
     let runtime = build_gateway_runtime_with_options(
         config.state_directory().to_path_buf(),
@@ -289,6 +304,7 @@ pub async fn serve_gatewayd(
             .with_transport_policy(resource_limits.transport_policy())
             .with_prepared_policy(Arc::new(resource_limits.prepared_snapshot_budget()))
             .with_request_policy(request_policy)
+            .with_request_metadata_limits(resource_limits.request_metadata_limits())
             .with_event_buffer_capacity(resource_limits.event_buffer_capacity())
             .with_event_sink(tracing_events),
     )
@@ -360,8 +376,13 @@ pub async fn build_gateway_transport(
 #[cfg(test)]
 mod composition_tests {
     use super::*;
+    use panel_contracts::{
+        common::v1 as common,
+        gateway::v1::{self as wire, gateway_engine_server::GatewayEngine as GatewayEngineService},
+    };
     use panel_engine::NoopGatewayEventSink;
     use std::fs;
+    use tonic::Request;
     use uuid::Uuid;
 
     struct TemporaryDirectory(PathBuf);
@@ -419,5 +440,41 @@ mod composition_tests {
             panel_errors::ErrorCode::INVALID_ARGUMENT
         );
         assert!(!temporary.0.exists());
+    }
+
+    #[tokio::test]
+    async fn composition_applies_injected_request_metadata_limits() {
+        let temporary = TemporaryDirectory::new();
+        let limits = GatewayRequestMetadataLimits::new(4, 64, 64, 64, 64, 64).unwrap();
+        let runtime = build_gateway_runtime_with_options(
+            &temporary.0,
+            runtime_info(),
+            GatewaydServiceOptions::default().with_request_metadata_limits(limits),
+        )
+        .await
+        .unwrap();
+
+        let response = runtime
+            .services
+            .gateway
+            .get_capabilities(Request::new(wire::GetCapabilitiesRequest {
+                context: Some(common::RequestContext {
+                    request_id: "12345".into(),
+                    correlation_id: "test".into(),
+                    actor: "test".into(),
+                    deadline: String::new(),
+                    idempotency_key: String::new(),
+                    schema_version: panel_contracts::PROTOCOL_VERSION.into(),
+                }),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(
+            response.error.unwrap().code,
+            panel_errors::ErrorCode::RESOURCE_EXHAUSTED
+        );
+        runtime.background_tasks.shutdown_and_join().await.unwrap();
     }
 }

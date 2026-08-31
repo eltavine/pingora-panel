@@ -1,4 +1,4 @@
-use panel_domain::RevisionId;
+use panel_domain::{ContentHash, RevisionId};
 use panel_engine::SnapshotStore;
 use panel_errors::ErrorCode;
 use snapshot_store_fs::{FileSnapshotStore, SnapshotRecordCodecRegistry};
@@ -10,6 +10,10 @@ const GOLDEN_POPULATED_ACTIVE: &[u8] = include_bytes!("fixtures/v1/populated-act
 const GOLDEN_HASH: &str = "766d68b0accced7c5d5835cc6f988fb69fe7eb80ae5847045943d1ab8dcc7dd6";
 const GOLDEN_POPULATED_HASH: &str =
     "468572ac2602868989cb7ca5fcc424d7744f2980d8a92b91694d585b03d9443f";
+const GOLDEN_ACTIVE_BYTES_HASH: &str =
+    "aa9bae170a50088a823f5a6dc07714221b12d459a5d7f6e7c1a278232d994173";
+const GOLDEN_POPULATED_ACTIVE_BYTES_HASH: &str =
+    "c0947262b28f45e9e94277224f052cdf6724b045e9d9c2a0b554058d1fe010a9";
 
 struct TemporaryDirectory(PathBuf);
 
@@ -31,6 +35,18 @@ impl Drop for TemporaryDirectory {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
     }
+}
+
+#[test]
+fn committed_v1_fixture_bytes_are_immutable() {
+    assert_eq!(
+        ContentHash::from_bytes(GOLDEN_ACTIVE).as_str(),
+        GOLDEN_ACTIVE_BYTES_HASH
+    );
+    assert_eq!(
+        ContentHash::from_bytes(GOLDEN_POPULATED_ACTIVE).as_str(),
+        GOLDEN_POPULATED_ACTIVE_BYTES_HASH
+    );
 }
 
 #[tokio::test]

@@ -86,6 +86,10 @@ jobs:
         working-directory: panel
         run: buf lint
 
+      - name: Check contract formatting
+        working-directory: panel
+        run: buf format --diff --exit-code
+
       - name: Self-test Protobuf compatibility guard
         run: bash .github/scripts/test-panel-proto-breaking.sh
 

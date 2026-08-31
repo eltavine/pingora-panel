@@ -1,7 +1,9 @@
 use gateway_grpc::{
-    DeadlineRequirement, GatewayTransportPolicy, DEFAULT_MAX_CONCURRENT_REQUESTS,
-    DEFAULT_MAX_DECODING_MESSAGE_BYTES, DEFAULT_MAX_ENCODING_MESSAGE_BYTES,
-    DEFAULT_REQUEST_TIMEOUT,
+    DeadlineRequirement, GatewayRequestMetadataLimits, GatewayTransportPolicy,
+    DEFAULT_MAX_ACTOR_BYTES, DEFAULT_MAX_CONCURRENT_REQUESTS, DEFAULT_MAX_CORRELATION_ID_BYTES,
+    DEFAULT_MAX_DEADLINE_BYTES, DEFAULT_MAX_DECODING_MESSAGE_BYTES,
+    DEFAULT_MAX_ENCODING_MESSAGE_BYTES, DEFAULT_MAX_IDEMPOTENCY_KEY_BYTES,
+    DEFAULT_MAX_REQUEST_ID_BYTES, DEFAULT_MAX_SCHEMA_VERSION_BYTES, DEFAULT_REQUEST_TIMEOUT,
 };
 use panel_errors::{PanelError, Result};
 use panel_gateway_runtime::{
@@ -21,6 +23,12 @@ pub const MAX_PREPARED_SNAPSHOTS_ENV: &str = "PINGORA_PANEL_MAX_PREPARED_SNAPSHO
 pub const MAX_PREPARED_SNAPSHOT_BYTES_ENV: &str = "PINGORA_PANEL_MAX_PREPARED_SNAPSHOT_BYTES";
 pub const MAX_TOTAL_PREPARED_BYTES_ENV: &str = "PINGORA_PANEL_MAX_TOTAL_PREPARED_BYTES";
 pub const EVENT_BUFFER_CAPACITY_ENV: &str = "PINGORA_PANEL_EVENT_BUFFER_CAPACITY";
+pub const MAX_REQUEST_ID_BYTES_ENV: &str = "PINGORA_PANEL_MAX_REQUEST_ID_BYTES";
+pub const MAX_CORRELATION_ID_BYTES_ENV: &str = "PINGORA_PANEL_MAX_CORRELATION_ID_BYTES";
+pub const MAX_ACTOR_BYTES_ENV: &str = "PINGORA_PANEL_MAX_ACTOR_BYTES";
+pub const MAX_DEADLINE_BYTES_ENV: &str = "PINGORA_PANEL_MAX_DEADLINE_BYTES";
+pub const MAX_IDEMPOTENCY_KEY_BYTES_ENV: &str = "PINGORA_PANEL_MAX_IDEMPOTENCY_KEY_BYTES";
+pub const MAX_SCHEMA_VERSION_BYTES_ENV: &str = "PINGORA_PANEL_MAX_SCHEMA_VERSION_BYTES";
 
 pub const DEFAULT_EVENT_BUFFER_CAPACITY: usize = 1024;
 
@@ -30,6 +38,7 @@ pub struct GatewayResourceLimits {
     prepared: PreparedSnapshotBudget,
     deadline_requirement: DeadlineRequirement,
     event_buffer_capacity: NonZeroUsize,
+    request_metadata: GatewayRequestMetadataLimits,
 }
 
 impl GatewayResourceLimits {
@@ -49,7 +58,16 @@ impl GatewayResourceLimits {
             prepared,
             deadline_requirement,
             event_buffer_capacity,
+            request_metadata: GatewayRequestMetadataLimits::default(),
         })
+    }
+
+    pub fn with_request_metadata_limits(
+        mut self,
+        request_metadata: GatewayRequestMetadataLimits,
+    ) -> Self {
+        self.request_metadata = request_metadata;
+        self
     }
 
     pub fn from_lookup(mut lookup: impl FnMut(&str) -> Option<std::ffi::OsString>) -> Result<Self> {
@@ -106,12 +124,15 @@ impl GatewayResourceLimits {
         )?
         .unwrap_or(DEFAULT_EVENT_BUFFER_CAPACITY);
 
-        Self::new(
+        let request_metadata = parse_request_metadata_limits(&mut lookup)?;
+
+        Ok(Self::new(
             transport,
             prepared,
             deadline_requirement,
             event_buffer_capacity,
-        )
+        )?
+        .with_request_metadata_limits(request_metadata))
     }
 
     pub fn transport_policy(self) -> GatewayTransportPolicy {
@@ -129,6 +150,10 @@ impl GatewayResourceLimits {
     pub fn event_buffer_capacity(self) -> usize {
         self.event_buffer_capacity.get()
     }
+
+    pub fn request_metadata_limits(self) -> GatewayRequestMetadataLimits {
+        self.request_metadata
+    }
 }
 
 impl Default for GatewayResourceLimits {
@@ -145,6 +170,31 @@ impl Default for GatewayResourceLimits {
 
 fn parse_optional_usize(value: Option<&OsStr>, name: &str) -> Result<Option<usize>> {
     value.map(|value| parse_number(value, name)).transpose()
+}
+
+fn parse_request_metadata_limits(
+    lookup: &mut impl FnMut(&str) -> Option<std::ffi::OsString>,
+) -> Result<GatewayRequestMetadataLimits> {
+    let mut limit = |name, default| {
+        parse_optional_usize(lookup(name).as_deref(), name).map(|value| value.unwrap_or(default))
+    };
+    GatewayRequestMetadataLimits::new(
+        limit(MAX_REQUEST_ID_BYTES_ENV, DEFAULT_MAX_REQUEST_ID_BYTES)?,
+        limit(
+            MAX_CORRELATION_ID_BYTES_ENV,
+            DEFAULT_MAX_CORRELATION_ID_BYTES,
+        )?,
+        limit(MAX_ACTOR_BYTES_ENV, DEFAULT_MAX_ACTOR_BYTES)?,
+        limit(MAX_DEADLINE_BYTES_ENV, DEFAULT_MAX_DEADLINE_BYTES)?,
+        limit(
+            MAX_IDEMPOTENCY_KEY_BYTES_ENV,
+            DEFAULT_MAX_IDEMPOTENCY_KEY_BYTES,
+        )?,
+        limit(
+            MAX_SCHEMA_VERSION_BYTES_ENV,
+            DEFAULT_MAX_SCHEMA_VERSION_BYTES,
+        )?,
+    )
 }
 
 fn parse_optional_u64(value: Option<&OsStr>, name: &str) -> Result<Option<u64>> {
@@ -195,6 +245,12 @@ mod tests {
             (MAX_TOTAL_PREPARED_BYTES_ENV, "8192"),
             (DEADLINE_REQUIREMENT_ENV, "mutations"),
             (EVENT_BUFFER_CAPACITY_ENV, "32"),
+            (MAX_REQUEST_ID_BYTES_ENV, "17"),
+            (MAX_CORRELATION_ID_BYTES_ENV, "18"),
+            (MAX_ACTOR_BYTES_ENV, "19"),
+            (MAX_DEADLINE_BYTES_ENV, "20"),
+            (MAX_IDEMPOTENCY_KEY_BYTES_ENV, "21"),
+            (MAX_SCHEMA_VERSION_BYTES_ENV, "22"),
         ]);
         let limits = GatewayResourceLimits::from_lookup(|key| {
             values.get(key).map(|value| OsString::from(*value))
@@ -216,6 +272,13 @@ mod tests {
             DeadlineRequirement::Mutations
         );
         assert_eq!(limits.event_buffer_capacity(), 32);
+        let metadata = limits.request_metadata_limits();
+        assert_eq!(metadata.request_id_bytes(), 17);
+        assert_eq!(metadata.correlation_id_bytes(), 18);
+        assert_eq!(metadata.actor_bytes(), 19);
+        assert_eq!(metadata.deadline_bytes(), 20);
+        assert_eq!(metadata.idempotency_key_bytes(), 21);
+        assert_eq!(metadata.schema_version_bytes(), 22);
     }
 
     #[test]
@@ -226,6 +289,10 @@ mod tests {
         .is_err());
         assert!(GatewayResourceLimits::from_lookup(|key| {
             (key == DEADLINE_REQUIREMENT_ENV).then(|| OsString::from("sometimes"))
+        })
+        .is_err());
+        assert!(GatewayResourceLimits::from_lookup(|key| {
+            (key == MAX_REQUEST_ID_BYTES_ENV).then(|| OsString::from("0"))
         })
         .is_err());
     }

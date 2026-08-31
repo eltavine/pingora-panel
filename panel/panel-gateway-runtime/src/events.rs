@@ -2,13 +2,13 @@
 
 pub use panel_engine::{
     GatewayEvent, GatewayEventDeliveryDiagnostics, GatewayEventDeliveryDiagnosticsProvider,
-    GatewayEventSink, GatewayOperation, GatewayRequestMetadata, GatewayRequestOperation,
-    GatewayRequestOutcome, NoopGatewayEventSink,
+    GatewayEventPanicObserver, GatewayEventSink, GatewayOperation, GatewayRequestMetadata,
+    GatewayRequestOperation, GatewayRequestOutcome, NoopGatewayEventSink,
+    PanicIsolatedGatewayEventSink,
 };
 use panel_errors::{PanelError, Result};
 use std::{
     future::Future,
-    panic::{catch_unwind, AssertUnwindSafe},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -83,6 +83,12 @@ impl GatewayEventDeliveryMonitor {
     }
 }
 
+impl GatewayEventPanicObserver for GatewayEventDeliveryMonitor {
+    fn event_sink_panicked(&self) {
+        self.record_consumer_panic();
+    }
+}
+
 impl GatewayEventDeliveryDiagnosticsProvider for GatewayEventDeliveryMonitor {
     fn snapshot(&self) -> GatewayEventDeliveryDiagnostics {
         let snapshot = GatewayEventDeliveryMonitor::snapshot(self);
@@ -97,7 +103,7 @@ impl GatewayEventDeliveryDiagnosticsProvider for GatewayEventDeliveryMonitor {
 /// Panic-isolated fan-out adapter. One extension cannot prevent later consumers
 /// from seeing an event or unwind into a gateway transaction.
 pub struct FanoutGatewayEventSink {
-    sinks: Vec<Arc<dyn GatewayEventSink>>,
+    sinks: Vec<PanicIsolatedGatewayEventSink>,
     monitor: GatewayEventDeliveryMonitor,
 }
 
@@ -110,8 +116,14 @@ impl FanoutGatewayEventSink {
         sinks: impl IntoIterator<Item = Arc<dyn GatewayEventSink>>,
         monitor: GatewayEventDeliveryMonitor,
     ) -> Self {
+        let observer: Arc<dyn GatewayEventPanicObserver> = Arc::new(monitor.clone());
         Self {
-            sinks: sinks.into_iter().collect(),
+            sinks: sinks
+                .into_iter()
+                .map(|sink| {
+                    PanicIsolatedGatewayEventSink::with_observer(sink, Arc::clone(&observer))
+                })
+                .collect(),
             monitor,
         }
     }
@@ -128,9 +140,7 @@ impl FanoutGatewayEventSink {
 impl GatewayEventSink for FanoutGatewayEventSink {
     fn emit(&self, event: &GatewayEvent) {
         for sink in &self.sinks {
-            if catch_unwind(AssertUnwindSafe(|| sink.emit(event))).is_err() {
-                self.monitor.record_consumer_panic();
-            }
+            sink.emit(event);
         }
     }
 }
@@ -194,6 +204,7 @@ pub struct BufferedGatewayEventReceiver {
 
 impl BufferedGatewayEventReceiver {
     pub async fn run(mut self, downstream: Arc<dyn GatewayEventSink>) {
+        let downstream = self.isolate(downstream);
         while let Some(event) = self.receiver.recv().await {
             self.deliver(downstream.as_ref(), &event);
         }
@@ -204,6 +215,7 @@ impl BufferedGatewayEventReceiver {
         downstream: Arc<dyn GatewayEventSink>,
         shutdown: impl Future<Output = ()>,
     ) {
+        let downstream = self.isolate(downstream);
         tokio::pin!(shutdown);
         loop {
             tokio::select! {
@@ -222,10 +234,15 @@ impl BufferedGatewayEventReceiver {
         }
     }
 
+    fn isolate(&self, downstream: Arc<dyn GatewayEventSink>) -> Arc<dyn GatewayEventSink> {
+        Arc::new(PanicIsolatedGatewayEventSink::with_observer(
+            downstream,
+            Arc::new(self.monitor.clone()),
+        ))
+    }
+
     fn deliver(&self, downstream: &dyn GatewayEventSink, event: &GatewayEvent) {
-        if catch_unwind(AssertUnwindSafe(|| downstream.emit(event))).is_err() {
-            self.monitor.record_consumer_panic();
-        }
+        downstream.emit(event);
     }
 }
 
@@ -267,6 +284,19 @@ mod tests {
 
         assert_eq!(fanout.consumer_panics(), 1);
         assert_eq!(recording.0.lock().unwrap().as_slice(), &[event()]);
+    }
+
+    #[test]
+    fn decorator_isolates_a_directly_injected_sink() {
+        let monitor = GatewayEventDeliveryMonitor::new();
+        let sink = PanicIsolatedGatewayEventSink::with_observer(
+            Arc::new(PanickingSink),
+            Arc::new(monitor.clone()),
+        );
+
+        sink.emit(&event());
+
+        assert_eq!(monitor.snapshot().consumer_panics(), 1);
     }
 
     #[tokio::test]

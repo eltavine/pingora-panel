@@ -54,7 +54,10 @@ message SiteSpec {
   repeated DomainSpec domains = 4;
 }
 
-message DomainSpec { string host = 1; string tls_profile_id = 2; }
+message DomainSpec {
+  string host = 1;
+  string tls_profile_id = 2;
+}
 
 message RouteSpec {
   string id = 1;
@@ -81,7 +84,10 @@ message RouteMatcher {
   }
 }
 
-message HostPathPrefixMatcher { string host = 1; string path = 2; }
+message HostPathPrefixMatcher {
+  string host = 1;
+  string path = 2;
+}
 
 message RouteAction {
   oneof kind {
@@ -94,8 +100,15 @@ message RouteAction {
   }
 }
 
-message RedirectAction { string location = 1; uint32 status = 2; }
-message RespondAction { uint32 status = 1; string body = 2; bool has_body = 3; }
+message RedirectAction {
+  string location = 1;
+  uint32 status = 2;
+}
+message RespondAction {
+  uint32 status = 1;
+  string body = 2;
+  bool has_body = 3;
+}
 
 message UpstreamPoolSpec {
   string id = 1;
@@ -230,7 +243,9 @@ message AbortResponse {
   .pingora.panel.common.v1.Error error = 3;
 }
 
-message StatusRequest { .pingora.panel.common.v1.RequestContext context = 1; }
+message StatusRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+}
 
 message GatewayRuntimeInfo {
   string gateway_version = 1;
