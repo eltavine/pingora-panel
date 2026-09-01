@@ -7,6 +7,13 @@ pull_request_base="${3:-}"
 default_branch="${4:-}"
 
 case "$event_name" in
+  workflow_dispatch)
+    if [[ -z "$default_branch" ]]; then
+      printf 'workflow_dispatch requires the repository default branch\n' >&2
+      exit 2
+    fi
+    printf 'origin/%s\n' "$default_branch"
+    ;;
   pull_request)
     if [[ -z "$pull_request_base" ]]; then
       printf 'pull_request requires a base branch\n' >&2

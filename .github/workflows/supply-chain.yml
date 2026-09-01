@@ -4,22 +4,36 @@ on:
   push:
     paths:
       - ".github/dependabot.yml"
+      - ".github/actions/**"
       - ".github/scripts/check-github-actions-pinned.sh"
       - ".github/scripts/check-ci-tools-pinned.sh"
+      - ".github/scripts/check-workflow-path-filters.py"
+      - ".github/scripts/test-ci-tools-pinned.sh"
+      - ".github/scripts/test-workflow-path-filters.py"
       - ".github/workflows/**"
   pull_request:
     paths:
       - ".github/dependabot.yml"
+      - ".github/actions/**"
       - ".github/scripts/check-github-actions-pinned.sh"
       - ".github/scripts/check-ci-tools-pinned.sh"
+      - ".github/scripts/check-workflow-path-filters.py"
+      - ".github/scripts/test-ci-tools-pinned.sh"
+      - ".github/scripts/test-workflow-path-filters.py"
       - ".github/workflows/**"
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  immutable-actions:
+  immutable-references:
+    name: Immutable external references
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -27,5 +41,42 @@ jobs:
       - name: Reject mutable Action references
         run: bash .github/scripts/check-github-actions-pinned.sh
 
+      - name: Self-test CI tool pinning guard
+        run: bash .github/scripts/test-ci-tools-pinned.sh
+
       - name: Reject mutable CI tool installations
         run: bash .github/scripts/check-ci-tools-pinned.sh
+
+  path-filter-contract:
+    name: Workflow path-filter contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Self-test workflow path-filter guard
+        run: python3 .github/scripts/test-workflow-path-filters.py
+
+      - name: Verify workflow path-filter coverage
+        run: python3 .github/scripts/check-workflow-path-filters.py
+
+  workflow-lint:
+    name: GitHub Actions syntax and semantics
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Go 1.24.13
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: "1.24.13"
+          cache: false
+
+      - name: Install actionlint 1.7.12
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
+      - name: Lint GitHub Actions workflows
+        run: actionlint -color

@@ -36,6 +36,10 @@ for resolver in \
     "$(bash "$resolver" pull_request ignored main ignored)" \
     "$resolver_name pull request baseline"
   assert_equal \
+    "origin/trunk" \
+    "$(bash "$resolver" workflow_dispatch ignored ignored trunk)" \
+    "$resolver_name manual baseline"
+  assert_equal \
     "0123456789abcdef" \
     "$(bash "$resolver" push 0123456789abcdef ignored ignored)" \
     "$resolver_name existing ref baseline"
@@ -49,6 +53,10 @@ for resolver in \
     2 \
     "$resolver_name pull request without base branch" \
     bash "$resolver" pull_request ignored "" ignored
+  assert_status \
+    2 \
+    "$resolver_name manual run without default branch" \
+    bash "$resolver" workflow_dispatch ignored ignored ""
   assert_status \
     2 \
     "$resolver_name push without before SHA" \

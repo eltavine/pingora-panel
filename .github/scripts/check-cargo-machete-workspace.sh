@@ -26,16 +26,23 @@ workspace_metadata="$(
     --no-deps \
     --locked
 )"
-package_manifests="$(jq -er '.packages[].manifest_path' <<<"$workspace_metadata")"
+package_manifests="$(
+  jq -r '
+    .workspace_members as $members
+    | .packages[]
+    | select(.id as $id | $members | index($id))
+    | .manifest_path
+  ' <<<"$workspace_metadata"
+)"
+
+if [[ -z "$package_manifests" ]]; then
+  printf 'workspace has no package members: %s\n' "$workspace_manifest" >&2
+  exit 2
+fi
 
 declare -a package_directories=()
 while IFS= read -r package_manifest; do
   package_directories+=("$(dirname "$package_manifest")")
 done <<<"$package_manifests"
-
-if [[ ${#package_directories[@]} -eq 0 ]]; then
-  printf 'workspace has no package members: %s\n' "$workspace_manifest" >&2
-  exit 2
-fi
 
 cargo machete --skip-target-dir "${package_directories[@]}"

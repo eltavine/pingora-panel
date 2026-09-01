@@ -1,6 +1,7 @@
 name: panel
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - ".cargo/config.toml"
@@ -8,11 +9,15 @@ on:
       - "panel/**"
       - ".github/scripts/check-cargo-machete-workspace.sh"
       - ".github/scripts/check-panel-boundaries.sh"
+      - ".github/scripts/check-panel-pingora-version.sh"
       - ".github/scripts/check-panel-proto-breaking.sh"
       - ".github/scripts/check-panel-rust-api-breaking.sh"
       - ".github/scripts/resolve-panel-compat-baseline.sh"
       - ".github/scripts/resolve-panel-proto-baseline.sh"
       - ".github/scripts/test-panel-compat-baseline.sh"
+      - ".github/scripts/test-panel-boundaries.sh"
+      - ".github/scripts/test-panel-pingora-version.sh"
+      - ".github/scripts/test-cargo-machete-workspace.sh"
       - ".github/scripts/test-panel-proto-breaking.sh"
       - ".github/scripts/test-panel-rust-api-breaking.sh"
       - ".github/workflows/panel.yml"
@@ -23,11 +28,15 @@ on:
       - "panel/**"
       - ".github/scripts/check-cargo-machete-workspace.sh"
       - ".github/scripts/check-panel-boundaries.sh"
+      - ".github/scripts/check-panel-pingora-version.sh"
       - ".github/scripts/check-panel-proto-breaking.sh"
       - ".github/scripts/check-panel-rust-api-breaking.sh"
       - ".github/scripts/resolve-panel-compat-baseline.sh"
       - ".github/scripts/resolve-panel-proto-baseline.sh"
       - ".github/scripts/test-panel-compat-baseline.sh"
+      - ".github/scripts/test-panel-boundaries.sh"
+      - ".github/scripts/test-panel-pingora-version.sh"
+      - ".github/scripts/test-cargo-machete-workspace.sh"
       - ".github/scripts/test-panel-proto-breaking.sh"
       - ".github/scripts/test-panel-rust-api-breaking.sh"
       - ".github/workflows/panel.yml"
@@ -53,7 +62,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y build-essential cmake jq --no-install-recommends
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake --no-install-recommends
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30
@@ -74,9 +83,6 @@ jobs:
         env:
           CLIPPY_CONF_DIR: ${{ github.workspace }}/panel
         run: cargo clippy --manifest-path panel/Cargo.toml --workspace --all-targets --all-features --locked -- -D warnings
-
-      - name: Check dependency boundaries
-        run: .github/scripts/check-panel-boundaries.sh
 
       - name: Compile Pingora adapter
         run: cargo check --manifest-path panel/Cargo.toml --package gateway-pingora --locked
@@ -167,8 +173,8 @@ jobs:
       - name: Reject Rust public API breaking changes
         run: bash .github/scripts/check-panel-rust-api-breaking.sh "${{ steps.rust-api-baseline.outputs.ref }}"
 
-  dependency-hygiene:
-    name: Dependency hygiene
+  architecture-contracts:
+    name: Architecture contracts
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -182,6 +188,37 @@ jobs:
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30
         with:
           toolchain: stable
+
+      - name: Self-test Panel dependency boundaries
+        run: bash .github/scripts/test-panel-boundaries.sh
+
+      - name: Verify Panel dependency boundaries
+        run: bash .github/scripts/check-panel-boundaries.sh
+
+      - name: Self-test Pingora version coherence
+        run: bash .github/scripts/test-panel-pingora-version.sh
+
+      - name: Verify Pingora version coherence
+        run: bash .github/scripts/check-panel-pingora-version.sh
+
+  dependency-hygiene:
+    name: Dependency hygiene
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq --no-install-recommends
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30
+        with:
+          toolchain: stable
+
+      - name: Self-test workspace dependency scanner
+        run: bash .github/scripts/test-cargo-machete-workspace.sh
 
       - name: Install cargo-machete 0.7.0
         run: cargo install --locked --version 0.7.0 cargo-machete
