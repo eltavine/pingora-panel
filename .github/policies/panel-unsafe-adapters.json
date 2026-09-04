@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "max_adapters": 2,
+  "adapters": [
+    {
+      "package": "snapshot-store-fs",
+      "owner": "pingora-panel-platform",
+      "reason": "Durable snapshot publication needs openat, mkdirat, renameat, unlinkat, and flock against a held directory descriptor. The standard library exposes no anchored equivalent, so the store cannot be made immune to path substitution without libc calls. Every unsafe block is documented and the crate proves it through forbid(clippy::undocumented_unsafe_blocks) and forbid(unsafe_op_in_unsafe_fn).",
+      "expires_on": "2027-03-01"
+    }
+  ]
+}

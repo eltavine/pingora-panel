@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 fn main() {
     let protoc = protoc_bin_vendored::protoc_bin_path().expect("vendored protoc must be available");
     std::env::set_var("PROTOC", protoc);

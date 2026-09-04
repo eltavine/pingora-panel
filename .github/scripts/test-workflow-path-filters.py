@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import runpy
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -108,11 +109,30 @@ def assert_rejected(
         root = Path(directory)
         write_fixture(root, patterns, filter_name=filter_name)
         result = run_checker(root)
-        if result.returncode == 0:
-            raise AssertionError(f"{scenario} was not rejected")
+        # Exactly 1: a missing path filter is a verdict, and must not be
+        # reported with the code reserved for reaching no verdict at all.
+        if result.returncode != 1:
+            raise AssertionError(
+                f"{scenario} expected exit 1, got {result.returncode}: {result.stderr}"
+            )
         if expected not in result.stderr:
             raise AssertionError(
                 f"{scenario} did not report {expected!r}: {result.stderr}"
+            )
+
+
+def assert_failed_closed(scenario: str, damage) -> None:
+    """A workflow the guard cannot read must never look like coverage."""
+    with tempfile.TemporaryDirectory(prefix="workflow-paths-") as directory:
+        root = Path(directory)
+        write_fixture(
+            root, [".github/scripts/check-example.sh", ".github/workflows/check.yml"]
+        )
+        damage(root)
+        result = run_checker(root)
+        if result.returncode != 2:
+            raise AssertionError(
+                f"{scenario} expected exit 2, got {result.returncode}: {result.stderr}"
             )
 
 
@@ -123,12 +143,32 @@ def main() -> None:
     )
     assert_accepted([".github/**"], "wildcard path filter")
     assert_accepted(["docs/**"], "unrelated ignored path", filter_name="paths-ignore")
+    with tempfile.TemporaryDirectory(prefix="workflow-paths-empty-") as directory:
+        root = Path(directory)
+        (root / ".github/workflows").mkdir(parents=True)
+        result = run_checker(root)
+        if result.returncode == 0:
+            raise AssertionError("empty workflow directory was not rejected")
     with tempfile.TemporaryDirectory(prefix="workflow-paths-") as directory:
         root = Path(directory)
         write_fixture(root, [".github/**"], block_scalar="|+")
         result = run_checker(root)
         if result.returncode != 0:
             raise AssertionError(f"block scalar modifiers were rejected: {result.stderr}")
+    with tempfile.TemporaryDirectory(prefix="workflow-paths-") as directory:
+        root = Path(directory)
+        write_fixture(root, [".github/**"])
+        workflow = root / ".github/workflows/check.yml"
+        workflow.write_text(
+            workflow.read_text(encoding="utf-8")
+            .replace("on:\n", '"on":\n', 1)
+            .replace("  push:\n", "  'push':\n", 1)
+            .replace("    paths:\n", '    "paths":\n', 1),
+            encoding="utf-8",
+        )
+        result = run_checker(root)
+        if result.returncode != 0:
+            raise AssertionError(f"quoted path-filter keys were rejected: {result.stderr}")
     with tempfile.TemporaryDirectory(prefix="workflow-paths-") as directory:
         root = Path(directory)
         write_fixture(root, [".github/**"], inline_paths=True)
@@ -142,6 +182,25 @@ def main() -> None:
         "does not cover .github/scripts/check-example.sh",
         "missing local dependency",
     )
+    with tempfile.TemporaryDirectory(prefix="workflow-paths-") as directory:
+        root = Path(directory)
+        write_fixture(root, [".github/workflows/check.yml"])
+        workflow = root / ".github/workflows/check.yml"
+        workflow.write_text(
+            workflow.read_text(encoding="utf-8").replace(
+                "      - name: Run local guard\n        run: >-\n",
+                "      - run: >-\n",
+            ),
+            encoding="utf-8",
+        )
+        result = run_checker(root)
+        if (
+            result.returncode != 1
+            or "does not cover .github/scripts/check-example.sh" not in result.stderr
+        ):
+            raise AssertionError(
+                f"compact run step dependency was not enforced: {result.stderr}"
+            )
     assert_rejected(
         [".github/scripts/check-example.sh"],
         "does not cover .github/workflows/check.yml",
@@ -176,6 +235,26 @@ def main() -> None:
         result = run_checker(root)
         if result.returncode != 0:
             raise AssertionError(f"covered local action was rejected: {result.stderr}")
+    with tempfile.TemporaryDirectory(prefix="workflow-paths-") as directory:
+        root = Path(directory)
+        write_fixture(
+            root,
+            [".github/workflows/check.yml"],
+            local_action=True,
+        )
+        workflow = root / ".github/workflows/check.yml"
+        workflow.write_text(
+            workflow.read_text(encoding="utf-8").replace(
+                "      - uses: ./.github/actions/example\n",
+                "      - { name: Local, \"uses\": ./.github/actions/example }\n",
+            ),
+            encoding="utf-8",
+        )
+        result = run_checker(root)
+        if result.returncode == 0 or ".github/actions/example/action.yml" not in result.stderr:
+            raise AssertionError(
+                f"flow-style local Action dependency was not enforced: {result.stderr}"
+            )
 
     glob_contracts = (
         ("README.md", ["**/README.md"], True, "zero-directory double star"),
@@ -186,6 +265,15 @@ def main() -> None:
         ("page.jsxx", ["*.jsx?"], False, "optional character upper bound"),
         ("release/v1.20", ["release/v[0-9].[0-9]+"], True, "class repetition"),
     )
+    assert_failed_closed(
+        "a workflow that is not valid UTF-8",
+        lambda root: (root / ".github/workflows/check.yml").write_bytes(b"on:\n\xff\xfe"),
+    )
+    assert_failed_closed(
+        "an absent workflow directory",
+        lambda root: shutil.rmtree(root / ".github/workflows"),
+    )
+
     for path, patterns, expected, scenario in glob_contracts:
         actual = path_is_included(path, patterns)
         if actual is not expected:

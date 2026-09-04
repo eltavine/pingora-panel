@@ -5,17 +5,18 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+publish.workspace = true
 
 [dependencies]
 arc-swap.workspace = true
 async-trait.workspace = true
-panel-domain = { path = "../panel-domain" }
-panel-engine = { path = "../panel-engine" }
-panel-errors = { path = "../panel-errors" }
-panel-ir = { path = "../panel-ir" }
-pingora-core = { version = "=0.8.0", path = "../../pingora-core", default-features = false }
-pingora-http = { version = "=0.8.0", path = "../../pingora-http", default-features = false }
-pingora-load-balancing = { version = "=0.8.0", path = "../../pingora-load-balancing", default-features = false }
+panel-domain.workspace = true
+panel-engine.workspace = true
+panel-errors.workspace = true
+panel-ir.workspace = true
+pingora-core.workspace = true
+pingora-http.workspace = true
+pingora-load-balancing.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true

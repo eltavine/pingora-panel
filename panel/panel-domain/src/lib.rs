@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! Domain value objects. This crate deliberately has no transport or engine dependency.
 
 use serde::{Deserialize, Serialize};

@@ -1,0 +1,16 @@
+{"schema":"io.github.eltavine.pingora-panel/revision-transition-outcome","version":1,"from":"draft","transition":"validation_succeeded","to":"validated"}
+{"schema":"io.github.eltavine.pingora-panel/revision-transition-outcome","version":1,"from":"draft","transition":"validation_failed","to":"failed"}
+{"schema":"io.github.eltavine.pingora-panel/revision-transition-outcome","version":1,"from":"validated","transition":"approval_required","to":"awaiting_approval"}
+{"schema":"io.github.eltavine.pingora-panel/revision-transition-outcome","version":1,"from":"validated","transition":"approval_not_required","to":"approved"}
+{"schema":"io.github.eltavine.pingora-panel/revision-transition-outcome","version":1,"from":"awaiting_approval","transition":"approval_granted","to":"approved"}
+{"schema":"io.github.eltavine.pingora-panel/revision-transition-outcome","version":1,"from":"awaiting_approval","transition":"approval_rejected","to":"rejected"}
+{"schema":"io.github.eltavine.pingora-panel/revision-transition-outcome","version":1,"from":"awaiting_approval","transition":"approval_expired","to":"rejected"}
+{"schema":"io.github.eltavine.pingora-panel/revision-transition-outcome","version":1,"from":"approved","transition":"preparation_started","to":"preparing"}
+{"schema":"io.github.eltavine.pingora-panel/revision-transition-outcome","version":1,"from":"preparing","transition":"preparation_succeeded","to":"prepared"}
+{"schema":"io.github.eltavine.pingora-panel/revision-transition-outcome","version":1,"from":"preparing","transition":"preparation_failed","to":"failed"}
+{"schema":"io.github.eltavine.pingora-panel/revision-transition-outcome","version":1,"from":"prepared","transition":"activation_started","to":"activating"}
+{"schema":"io.github.eltavine.pingora-panel/revision-transition-outcome","version":1,"from":"activating","transition":"activation_succeeded","to":"active"}
+{"schema":"io.github.eltavine.pingora-panel/revision-transition-outcome","version":1,"from":"activating","transition":"activation_outcome_unknown","to":"reconciling"}
+{"schema":"io.github.eltavine.pingora-panel/revision-transition-outcome","version":1,"from":"reconciling","transition":"gateway_confirmed_revision","to":"active"}
+{"schema":"io.github.eltavine.pingora-panel/revision-transition-outcome","version":1,"from":"reconciling","transition":"gateway_confirmed_previous_revision","to":"failed"}
+{"schema":"io.github.eltavine.pingora-panel/revision-transition-outcome","version":1,"from":"active","transition":"later_revision_activated","to":"superseded"}

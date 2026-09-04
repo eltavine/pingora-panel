@@ -9,3 +9,5 @@ dhat-heap.json
 .cover
 bleeper.user.toml
 .DS_Store
+# The policy guards import a shared package from .github/scripts.
+__pycache__/

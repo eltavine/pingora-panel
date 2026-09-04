@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use gateway_pingora::PingoraGatewayAdapter;
 use panel_domain::RevisionId;
 use panel_engine::{ActivateRequest, GatewayEngine, PrepareRequest};

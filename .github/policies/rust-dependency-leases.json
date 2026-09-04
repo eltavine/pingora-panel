@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "workspaces": {
+    "Cargo.toml": {
+      "enforcement": "ceilings",
+      "ceilings": {
+        "duplicates": {
+          "max_findings": 55,
+          "owner": "pingora-panel-platform",
+          "reason": "The vendored Pingora tree carries inherited duplicate crates that re-resolve on every run because its lockfile is untracked. The ceiling sits just above the observed count so ordinary resolution churn passes while a dependency change that materially widens duplication fails.",
+          "expires_on": "2027-03-01"
+        },
+        "unmaintained": {
+          "max_findings": 5,
+          "owner": "pingora-panel-security",
+          "reason": "Upstream retains a small number of unmaintained proc-macro and TLS helper crates with no released replacements. The ceiling fails as soon as another one appears.",
+          "expires_on": "2027-03-01"
+        },
+        "yanked": {
+          "max_findings": 1,
+          "owner": "pingora-panel-security",
+          "reason": "Fresh resolution normally avoids yanked releases entirely, but a transitive constraint can pin one. At most a single yanked crate may be tolerated before the build fails.",
+          "expires_on": "2027-03-01"
+        }
+      }
+    },
+    "panel/Cargo.toml": {
+      "enforcement": "identity",
+      "duplicates": [
+        {
+          "crate": "foldhash",
+          "versions": [
+            "0.1.5",
+            "0.2.0"
+          ],
+          "owner": "pingora-panel-platform",
+          "reason": "Inherited transitive duplicate with no unified release line: 0.1.5 via hashbrown; 0.2.0 via hashbrown.",
+          "expires_on": "2027-03-01"
+        },
+        {
+          "crate": "getrandom",
+          "versions": [
+            "0.2.17",
+            "0.3.4",
+            "0.4.3"
+          ],
+          "owner": "pingora-panel-platform",
+          "reason": "Inherited transitive duplicate with no unified release line: 0.2.17 via const-random-macro, rand_core; 0.3.4 via ahash, uuid; 0.4.3 via jobserver, tempfile.",
+          "expires_on": "2027-03-01"
+        },
+        {
+          "crate": "hashbrown",
+          "versions": [
+            "0.14.5",
+            "0.15.5",
+            "0.17.1"
+          ],
+          "owner": "pingora-panel-platform",
+          "reason": "Inherited transitive duplicate with no unified release line: 0.14.5 via dashmap; 0.15.5 via petgraph; 0.17.1 via indexmap, lru.",
+          "expires_on": "2027-03-01"
+        },
+        {
+          "crate": "petgraph",
+          "versions": [
+            "0.7.1",
+            "0.8.3"
+          ],
+          "owner": "pingora-panel-platform",
+          "reason": "Inherited transitive duplicate with no unified release line: 0.7.1 via daggy; 0.8.3 via prost-build.",
+          "expires_on": "2027-03-01"
+        },
+        {
+          "crate": "syn",
+          "versions": [
+            "1.0.109",
+            "2.0.119",
+            "3.0.4"
+          ],
+          "owner": "pingora-panel-platform",
+          "reason": "Inherited transitive duplicate with no unified release line: 1.0.109 via derivative; 2.0.119 via pin-project-internal, prettyplease, prost-build; 3.0.4 via async-trait, clap_derive, futures-macro.",
+          "expires_on": "2027-03-01"
+        },
+        {
+          "crate": "windows-sys",
+          "versions": [
+            "0.59.0",
+            "0.61.2"
+          ],
+          "owner": "pingora-panel-platform",
+          "reason": "Inherited transitive duplicate with no unified release line: 0.59.0 via pingora-core; 0.61.2 via anstyle-query, anstyle-wincon, errno.",
+          "expires_on": "2027-03-01"
+        }
+      ],
+      "unmaintained": [
+        {
+          "advisory_id": "RUSTSEC-2024-0388",
+          "crate": "derivative",
+          "versions": [
+            "2.2.0"
+          ],
+          "owner": "pingora-panel-security",
+          "reason": "The derivative proc-macro is unmaintained upstream; it reaches the build only through Pingora's own dependencies, which have no derive_more migration released yet.",
+          "expires_on": "2027-03-01"
+        }
+      ]
+    }
+  }
+}

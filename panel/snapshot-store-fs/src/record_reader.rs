@@ -37,6 +37,10 @@ impl RecordCollectionBudget {
             })?;
         Ok(())
     }
+
+    pub(crate) const fn consumed_bytes(self) -> u64 {
+        self.consumed_bytes
+    }
 }
 
 /// Reads the actual byte stream through a hard cap.

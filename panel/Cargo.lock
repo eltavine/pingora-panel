@@ -669,7 +669,6 @@ dependencies = [
  "futures-util",
  "gateway-grpc",
  "gateway-pingora",
- "libc",
  "panel-contracts",
  "panel-domain",
  "panel-engine",
@@ -1113,6 +1112,19 @@ name = "openssl-probe"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e"
+
+[[package]]
+name = "panel-config-domain"
+version = "0.1.0"
+
+[[package]]
+name = "panel-config-state-codec"
+version = "0.1.0"
+dependencies = [
+ "panel-config-domain",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "panel-contracts"

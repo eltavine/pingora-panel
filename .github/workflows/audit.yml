@@ -10,8 +10,45 @@ on:
       - "Cargo.lock"
       - "**/Cargo.toml"
       - "**/Cargo.lock"
+      - ".cargo/config.toml"
+      - "**/.cargo/config.toml"
       - ".cargo/audit.toml"
       - "**/.cargo/audit.toml"
+      - "deny.toml"
+      - ".github/policies/rust-advisory-exceptions.json"
+      - ".github/policies/rust-dependency-leases.json"
+      - ".github/scripts/check-rust-advisory-policy.py"
+      - ".github/scripts/test-rust-advisory-policy.py"
+      - ".github/scripts/check-rust-advisory-scope.py"
+      - ".github/scripts/test-rust-advisory-scope.py"
+      - ".github/scripts/check-rust-dependency-leases.py"
+      - ".github/scripts/emit-cargo-deny-report.py"
+      - ".github/scripts/test-cargo-deny-report.py"
+      - ".github/scripts/test-rust-dependency-leases.py"
+      - ".github/scripts/policy/**"
+      - ".github/workflows/audit.yml"
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - ".cargo/config.toml"
+      - "**/.cargo/config.toml"
+      - ".cargo/audit.toml"
+      - "**/.cargo/audit.toml"
+      - "deny.toml"
+      - ".github/policies/rust-advisory-exceptions.json"
+      - ".github/policies/rust-dependency-leases.json"
+      - ".github/scripts/check-rust-advisory-policy.py"
+      - ".github/scripts/test-rust-advisory-policy.py"
+      - ".github/scripts/check-rust-advisory-scope.py"
+      - ".github/scripts/test-rust-advisory-scope.py"
+      - ".github/scripts/check-rust-dependency-leases.py"
+      - ".github/scripts/emit-cargo-deny-report.py"
+      - ".github/scripts/test-cargo-deny-report.py"
+      - ".github/scripts/test-rust-dependency-leases.py"
+      - ".github/scripts/policy/**"
       - ".github/workflows/audit.yml"
   schedule:
     - cron: "0 2 * * *" # run at 2 AM UTC
@@ -24,13 +61,116 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  advisory-policy:
+    name: Synchronized Rust advisory policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Self-test advisory policy synchronization
+        run: python3 .github/scripts/test-rust-advisory-policy.py
+
+      - name: Verify advisory exceptions remain synchronized
+        run: python3 .github/scripts/check-rust-advisory-policy.py
+
+  dependency-policy:
+    name: Advisory and dependency policy (${{ matrix.workspace }})
+    needs: advisory-policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - workspace: upstream
+            manifest: Cargo.toml
+          - workspace: panel
+            manifest: panel/Cargo.toml
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Check licenses, sources, and dependency bans
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1 / cargo-deny 0.20.2
+        with:
+          manifest-path: ${{ matrix.manifest }}
+          rust-version: "1.88.0"
+          command: check
+          # Match cargo-audit semantics: informational maintenance notices and
+          # yanked releases stay visible here and are held to account by
+          # check-rust-dependency-leases.py, while vulnerabilities and
+          # unsoundness remain blocking.
+          command-arguments: >-
+            advisories licenses bans sources --warn unmaintained --warn yanked
+          log-level: warn
+
+  dependency-leases:
+    name: Leased dependency findings (${{ matrix.workspace }})
+    needs: advisory-policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - workspace: upstream
+            manifest: Cargo.toml
+          - workspace: panel
+            manifest: panel/Cargo.toml
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install pinned Rust
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30
+        with:
+          toolchain: 1.98.0
+
+      - name: Install cargo-deny 0.20.2
+        run: cargo install --locked --version 0.20.2 cargo-deny
+
+      - name: Self-test dependency lease guard
+        run: python3 .github/scripts/test-rust-dependency-leases.py
+
+      - name: Self-test advisory scope guard
+        run: python3 .github/scripts/test-rust-advisory-scope.py
+
+      - name: Self-test shared cargo-deny report
+        run: python3 .github/scripts/test-cargo-deny-report.py
+
+      # Produced once and read by both guards below. The upstream lockfile is
+      # not committed, so two independent runs could resolve different graphs
+      # and leave the two guards disagreeing about the same commit.
+      - name: Produce the shared cargo-deny report
+        run: >-
+          python3 .github/scripts/emit-cargo-deny-report.py
+          ${{ matrix.manifest }} "${{ runner.temp }}/cargo-deny.jsonl"
+
+      # Duplicate, unmaintained, and yanked findings are all reported as
+      # warnings by cargo-deny, so this guard is what makes an unleased or
+      # drifted finding fail the build.
+      - name: Verify every leasable finding is leased
+        run: >-
+          python3 .github/scripts/check-rust-dependency-leases.py
+          ${{ matrix.manifest }} --report "${{ runner.temp }}/cargo-deny.jsonl"
+
+      # The ignore lists are shared by both workspaces, so this proves each
+      # exception is applied exactly where the registry claims it.
+      - name: Verify advisory exceptions apply only where they are claimed
+        run: >-
+          python3 .github/scripts/check-rust-advisory-scope.py
+          ${{ matrix.manifest }} --report "${{ runner.temp }}/cargo-deny.jsonl"
+
   security-audit:
     name: Audit ${{ matrix.workspace }} workspace
+    if: github.event_name != 'pull_request'
     permissions:
       checks: write # for rustsec/audit-check to create check
       contents: read # for actions/checkout to fetch code
       issues: write # for rustsec/audit-check to create issues
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false

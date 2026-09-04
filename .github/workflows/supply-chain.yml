@@ -3,23 +3,77 @@ name: Supply-chain guards
 on:
   push:
     paths:
+      - "**/*.sh"
       - ".github/dependabot.yml"
       - ".github/actions/**"
+      - ".github/policies/rust-toolchains.json"
+      - ".github/scripts/check-rust-toolchains-pinned.py"
+      - ".github/scripts/check-rust-msrv-tested.py"
+      - ".github/scripts/test-rust-msrv-tested.py"
+      - ".github/policies/rust-msrv.json"
+      - "panel/Cargo.toml"
       - ".github/scripts/check-github-actions-pinned.sh"
       - ".github/scripts/check-ci-tools-pinned.sh"
+      - ".github/scripts/check-ci-tools-pinned.py"
+      - ".github/scripts/check-local-actions.py"
+      - ".github/scripts/check-dependabot-coverage.py"
+      - ".github/scripts/check-go-toolchain-compatibility.py"
+      - ".github/scripts/check-workflow-execution-policy.py"
+      - ".github/scripts/check-workflow-runners-pinned.py"
       - ".github/scripts/check-workflow-path-filters.py"
+      - ".github/scripts/install-shellcheck.sh"
+      - ".github/scripts/test-github-actions-pinned.sh"
       - ".github/scripts/test-ci-tools-pinned.sh"
+      - ".github/scripts/test-local-actions.py"
+      - ".github/scripts/test-dependabot-coverage.py"
+      - ".github/scripts/test-policy-primitives.py"
+      - ".github/scripts/check-guard-coverage.py"
+      - ".github/policies/**"
+      - ".github/scripts/test-guard-coverage.py"
+      - ".github/scripts/test-go-toolchain-compatibility.py"
+      - ".github/scripts/test-rust-toolchains-pinned.py"
+      - ".github/scripts/test-workflow-execution-policy.py"
+      - ".github/scripts/test-workflow-runners-pinned.py"
       - ".github/scripts/test-workflow-path-filters.py"
+      - ".github/policies/workflow-execution.json"
+      - ".github/scripts/policy/**"
       - ".github/workflows/**"
   pull_request:
     paths:
+      - "**/*.sh"
       - ".github/dependabot.yml"
       - ".github/actions/**"
+      - ".github/policies/rust-toolchains.json"
+      - ".github/scripts/check-rust-toolchains-pinned.py"
+      - ".github/scripts/check-rust-msrv-tested.py"
+      - ".github/scripts/test-rust-msrv-tested.py"
+      - ".github/policies/rust-msrv.json"
+      - "panel/Cargo.toml"
       - ".github/scripts/check-github-actions-pinned.sh"
       - ".github/scripts/check-ci-tools-pinned.sh"
+      - ".github/scripts/check-ci-tools-pinned.py"
+      - ".github/scripts/check-local-actions.py"
+      - ".github/scripts/check-dependabot-coverage.py"
+      - ".github/scripts/check-go-toolchain-compatibility.py"
+      - ".github/scripts/check-workflow-execution-policy.py"
+      - ".github/scripts/check-workflow-runners-pinned.py"
       - ".github/scripts/check-workflow-path-filters.py"
+      - ".github/scripts/install-shellcheck.sh"
+      - ".github/scripts/test-github-actions-pinned.sh"
       - ".github/scripts/test-ci-tools-pinned.sh"
+      - ".github/scripts/test-local-actions.py"
+      - ".github/scripts/test-dependabot-coverage.py"
+      - ".github/scripts/test-policy-primitives.py"
+      - ".github/scripts/check-guard-coverage.py"
+      - ".github/policies/**"
+      - ".github/scripts/test-guard-coverage.py"
+      - ".github/scripts/test-go-toolchain-compatibility.py"
+      - ".github/scripts/test-rust-toolchains-pinned.py"
+      - ".github/scripts/test-workflow-execution-policy.py"
+      - ".github/scripts/test-workflow-runners-pinned.py"
       - ".github/scripts/test-workflow-path-filters.py"
+      - ".github/policies/workflow-execution.json"
+      - ".github/scripts/policy/**"
       - ".github/workflows/**"
 
 permissions:
@@ -38,6 +92,9 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      - name: Self-test Action pinning guard
+        run: bash .github/scripts/test-github-actions-pinned.sh
+
       - name: Reject mutable Action references
         run: bash .github/scripts/check-github-actions-pinned.sh
 
@@ -46,6 +103,43 @@ jobs:
 
       - name: Reject mutable CI tool installations
         run: bash .github/scripts/check-ci-tools-pinned.sh
+
+      - name: Self-test local Action reference guard
+        run: python3 .github/scripts/test-local-actions.py
+
+      - name: Reject unverifiable local Action references
+        run: python3 .github/scripts/check-local-actions.py
+
+  policy-primitives:
+    name: Policy primitive contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Self-test shared policy primitives
+        run: python3 .github/scripts/test-policy-primitives.py
+
+      - name: Self-test guard coverage meta-guard
+        run: python3 .github/scripts/test-guard-coverage.py
+
+      - name: Verify every guard and shared module is tested and run
+        run: python3 .github/scripts/check-guard-coverage.py
+
+  dependency-update-coverage:
+    name: Dependabot ecosystem coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Self-test Dependabot coverage guard
+        run: python3 .github/scripts/test-dependabot-coverage.py
+
+      - name: Verify every discovered ecosystem receives updates
+        run: python3 .github/scripts/check-dependabot-coverage.py
 
   path-filter-contract:
     name: Workflow path-filter contract
@@ -61,6 +155,70 @@ jobs:
       - name: Verify workflow path-filter coverage
         run: python3 .github/scripts/check-workflow-path-filters.py
 
+  runner-contract:
+    name: Version-pinned hosted runner labels
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Self-test runner label guard
+        run: python3 .github/scripts/test-workflow-runners-pinned.py
+
+      - name: Reject floating hosted runner labels
+        run: python3 .github/scripts/check-workflow-runners-pinned.py
+
+  workflow-execution-contract:
+    name: Workflow execution safety
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Self-test workflow execution policy
+        run: python3 .github/scripts/test-workflow-execution-policy.py
+
+      - name: Verify workflow execution policy
+        run: python3 .github/scripts/check-workflow-execution-policy.py
+
+  rust-toolchain-contract:
+    name: Exact Rust toolchains and explicit canaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Self-test Rust toolchain policy
+        run: python3 .github/scripts/test-rust-toolchains-pinned.py
+
+      - name: Reject implicit Rust toolchain drift
+        run: python3 .github/scripts/check-rust-toolchains-pinned.py
+
+      - name: Self-test Rust MSRV policy
+        run: python3 .github/scripts/test-rust-msrv-tested.py
+
+      - name: Verify the declared minimum Rust version is compiled
+        run: python3 .github/scripts/check-rust-msrv-tested.py
+
+  shellcheck:
+    name: Shell script static analysis
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install checksum-verified ShellCheck 0.11.0
+        run: |
+          bash .github/scripts/install-shellcheck.sh "$RUNNER_TEMP/shellcheck-bin"
+          printf '%s\n' "$RUNNER_TEMP/shellcheck-bin" >> "$GITHUB_PATH"
+
+      - name: Analyze tracked shell scripts
+        run: git ls-files -z '*.sh' | xargs -0 --no-run-if-empty shellcheck --severity=warning --
+
   workflow-lint:
     name: GitHub Actions syntax and semantics
     runs-on: ubuntu-24.04
@@ -69,11 +227,19 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Install Go 1.24.13
+      - name: Install Go 1.25.13
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: "1.24.13"
+          go-version: "1.25.13"
           cache: false
+
+      - name: Self-test Go toolchain compatibility guard
+        run: python3 .github/scripts/test-go-toolchain-compatibility.py
+
+      - name: Verify actionlint toolchain compatibility
+        run: >-
+          python3 .github/scripts/check-go-toolchain-compatibility.py
+          github.com/rhysd/actionlint@v1.7.12
 
       - name: Install actionlint 1.7.12
         run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12

@@ -1,0 +1,24 @@
+# Historical upstream test/example private keys. These are exact Gitleaks
+# fingerprints, so a key added by any other commit or at any other location
+# remains a blocking finding.
+6ebc829148637b851e7820445f145da29b5932aa:pingora-core/examples/keys/client-ca/key.pem:private-key:1
+6ebc829148637b851e7820445f145da29b5932aa:pingora-core/examples/keys/clients/invalid-key.pem:private-key:1
+6ebc829148637b851e7820445f145da29b5932aa:pingora-core/examples/keys/clients/key-1.pem:private-key:1
+6ebc829148637b851e7820445f145da29b5932aa:pingora-core/examples/keys/clients/key-2.pem:private-key:1
+6ebc829148637b851e7820445f145da29b5932aa:pingora-core/examples/keys/server/key.pem:private-key:1
+bf9ef27e812771af18d04c3a8f0b0cdb57eaae3f:pingora-core/tests/certs/server.key:private-key:1
+8797329225018c4d0ab990166dd020338ae292dc:pingora-core/tests/keys/key.pem:private-key:1
+8797329225018c4d0ab990166dd020338ae292dc:pingora-proxy/tests/keys/key.pem:private-key:1
+8797329225018c4d0ab990166dd020338ae292dc:pingora-proxy/tests/utils/conf/keys/ca1.key.pem:private-key:1
+8797329225018c4d0ab990166dd020338ae292dc:pingora-proxy/tests/utils/conf/keys/curve_test.384.key.pem:private-key:1
+8797329225018c4d0ab990166dd020338ae292dc:pingora-proxy/tests/utils/conf/keys/curve_test.521.key.pem:private-key:1
+8797329225018c4d0ab990166dd020338ae292dc:pingora-proxy/tests/utils/conf/keys/intermediate.key:private-key:1
+8797329225018c4d0ab990166dd020338ae292dc:pingora-proxy/tests/utils/conf/keys/key.pem:private-key:1
+8797329225018c4d0ab990166dd020338ae292dc:pingora-proxy/tests/utils/conf/keys/leaf.key:private-key:1
+8797329225018c4d0ab990166dd020338ae292dc:pingora-proxy/tests/utils/conf/keys/leaf2.key:private-key:1
+f69219d7bade726326ca29dab9ffb9234a596551:pingora-proxy/tests/utils/conf/keys/leaf2.key:private-key:1
+8797329225018c4d0ab990166dd020338ae292dc:pingora-proxy/tests/utils/conf/keys/root.key:private-key:1
+
+# Historical false positive: a Panel contract test fixture named an
+# idempotency-key field; the exact committed value is not a credential.
+665fd57a7143bce3a37cdac9a9f8ac6f8f7e03c3:panel/panel-contracts/src/lib.rs:generic-api-key:74

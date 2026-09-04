@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "members": {
+    "gateway-grpc": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-contracts",
+        "panel-domain",
+        "panel-engine",
+        "panel-errors",
+        "panel-ir"
+      ]
+    },
+    "gateway-pingora": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-domain",
+        "panel-engine",
+        "panel-errors",
+        "panel-ir"
+      ]
+    },
+    "gatewayd": {
+      "catalog": false,
+      "allowed_workspace_dependencies": [
+        "gateway-grpc",
+        "gateway-pingora",
+        "panel-contracts",
+        "panel-domain",
+        "panel-engine",
+        "panel-errors",
+        "panel-gateway-runtime",
+        "panel-ir",
+        "snapshot-store-fs"
+      ]
+    },
+    "panel-config-domain": {
+      "catalog": true,
+      "allowed_workspace_dependencies": []
+    },
+    "panel-config-state-codec": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-config-domain"
+      ]
+    },
+    "panel-contracts": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-errors"
+      ]
+    },
+    "panel-domain": {
+      "catalog": true,
+      "allowed_workspace_dependencies": []
+    },
+    "panel-engine": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-domain",
+        "panel-errors",
+        "panel-ir"
+      ]
+    },
+    "panel-errors": {
+      "catalog": true,
+      "allowed_workspace_dependencies": []
+    },
+    "panel-gateway-runtime": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-domain",
+        "panel-engine",
+        "panel-errors",
+        "panel-ir"
+      ]
+    },
+    "panel-ir": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-domain"
+      ]
+    },
+    "snapshot-store-fs": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-domain",
+        "panel-engine",
+        "panel-errors",
+        "panel-ir"
+      ]
+    }
+  },
+  "rules": {
+    "dependency_free_members": [
+      "panel-config-domain"
+    ],
+    "pingora_dependency_owner": "gateway-pingora",
+    "engine_transport_storage_neutral_members": [
+      "panel-config-domain",
+      "panel-domain",
+      "panel-engine",
+      "panel-errors",
+      "panel-gateway-runtime",
+      "panel-ir"
+    ],
+    "forbidden_neutral_dependencies": [
+      "async-nats",
+      "axum",
+      "nats",
+      "pingora",
+      "pingora-*",
+      "prost",
+      "sqlx",
+      "tonic",
+      "tonic-prost"
+    ]
+  }
+}

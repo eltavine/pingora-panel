@@ -31,6 +31,7 @@ mkdir -p \
   "$test_repo/panel/panel-contracts/src" \
   "$test_repo/panel/stable-api/src"
 cp "$script_dir/check-panel-rust-api-breaking.sh" "$test_repo/.github/scripts/"
+cp "$script_dir/list-workspace-package-names.py" "$test_repo/.github/scripts/"
 
 cat >"$test_repo/panel/Cargo.toml" <<'EOF'
 [workspace]
@@ -43,6 +44,7 @@ cat >"$test_repo/panel/panel-contracts/Cargo.toml" <<'EOF'
 name = "panel-contracts"
 version = "0.1.0"
 edition = "2021"
+publish = false
 EOF
 
 cat >"$test_repo/panel/panel-contracts/src/lib.rs" <<'EOF'
@@ -57,6 +59,7 @@ cat >"$test_repo/panel/stable-api/Cargo.toml" <<'EOF'
 name = "stable-api"
 version = "0.1.0"
 edition = "2021"
+publish = false
 
 [features]
 default = []
@@ -85,6 +88,7 @@ EOF
 git -C "$test_repo" init --quiet
 git -C "$test_repo" config user.name "Rust API Compatibility Test"
 git -C "$test_repo" config user.email "rust-api-test@example.invalid"
+cargo generate-lockfile --manifest-path "$test_repo/panel/Cargo.toml" --quiet
 git -C "$test_repo" add panel
 git -C "$test_repo" commit --quiet -m "test: establish Rust API baseline"
 baseline_ref="$(git -C "$test_repo" rev-parse HEAD)"
@@ -107,6 +111,26 @@ pub fn additive_api() -> &'static str {
 EOF
 bash "$test_repo/.github/scripts/check-panel-rust-api-breaking.sh" "$baseline_ref" >/dev/null
 
+# A newly introduced package has no baseline API and is therefore an additive
+# workspace bootstrap, not a breaking change in existing packages.
+mkdir -p "$test_repo/panel/new-api/src"
+cat >"$test_repo/panel/new-api/Cargo.toml" <<'EOF'
+[package]
+name = "new-api"
+version = "0.1.0"
+edition = "2021"
+publish = false
+EOF
+cat >"$test_repo/panel/new-api/src/lib.rs" <<'EOF'
+pub struct NewlyIntroducedValue;
+EOF
+sed -i.bak \
+  's/members = \["panel-contracts", "stable-api"\]/members = ["panel-contracts", "stable-api", "new-api"]/' \
+  "$test_repo/panel/Cargo.toml"
+rm -f -- "$test_repo/panel/Cargo.toml.bak"
+cargo generate-lockfile --manifest-path "$test_repo/panel/Cargo.toml" --quiet
+bash "$test_repo/.github/scripts/check-panel-rust-api-breaking.sh" "$baseline_ref" >/dev/null
+
 cat >"$test_repo/panel/panel-contracts/src/lib.rs" <<'EOF'
 // Simulate a source-breaking generated change. Buf, not this Rust API guard,
 // owns compatibility for the generated transport crate.
@@ -124,5 +148,12 @@ git -C "$test_repo" show "$baseline_ref:panel/stable-api/src/lib.rs" \
 sed -i.bak '/    pub fn value/,/    }/d' "$test_repo/panel/stable-api/src/lib.rs"
 rm -f -- "$test_repo/panel/stable-api/src/lib.rs.bak"
 assert_breaking_rejected "removed public method"
+
+sed -i.bak \
+  's/members = \["panel-contracts", "stable-api", "new-api"\]/members = ["panel-contracts", "new-api"]/' \
+  "$test_repo/panel/Cargo.toml"
+rm -f -- "$test_repo/panel/Cargo.toml.bak"
+cargo generate-lockfile --manifest-path "$test_repo/panel/Cargo.toml" --quiet
+assert_breaking_rejected "removed workspace package"
 
 printf 'Panel Rust API compatibility guard self-test passed.\n'

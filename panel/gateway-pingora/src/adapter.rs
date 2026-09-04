@@ -315,6 +315,30 @@ mod tests {
         assert_eq!(error.code.as_str(), ErrorCode::UNSUPPORTED_CAPABILITY);
     }
 
+    /// Reserved feature gates must never widen the advertised capability set,
+    /// so the adapter reports exactly these capabilities under every selection.
+    #[tokio::test]
+    async fn reserved_feature_gates_do_not_widen_advertised_capabilities() {
+        let advertised = PingoraGatewayAdapter::new()
+            .capabilities()
+            .await
+            .unwrap()
+            .capabilities;
+
+        assert_eq!(
+            advertised,
+            [
+                EngineCapability::new("activation.cas", "1"),
+                EngineCapability::new("route.host", "1"),
+                EngineCapability::new("route.path-prefix", "1"),
+                EngineCapability::new("upstream.http", "1"),
+                EngineCapability::new("upstream.https", "1"),
+            ]
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+        );
+    }
+
     #[tokio::test]
     async fn version_and_capabilities_are_reported() {
         let adapter = PingoraGatewayAdapter::new();

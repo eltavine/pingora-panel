@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use panel_domain::{ContentHash, RevisionId};
 use panel_engine::SnapshotStore;
 use panel_errors::ErrorCode;

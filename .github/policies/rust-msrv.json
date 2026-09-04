@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "workspaces": [
+    {
+      "manifest": "panel/Cargo.toml",
+      "marker": "panel-msrv"
+    }
+  ]
+}

@@ -5,16 +5,17 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+publish.workspace = true
 
 [dependencies]
-gateway-grpc = { path = "../gateway-grpc" }
-gateway-pingora = { path = "../gateway-pingora" }
+gateway-grpc.workspace = true
+gateway-pingora.workspace = true
 futures-util.workspace = true
-panel-contracts = { path = "../panel-contracts" }
-panel-engine = { path = "../panel-engine" }
-panel-errors = { path = "../panel-errors" }
-panel-gateway-runtime = { path = "../panel-gateway-runtime" }
-snapshot-store-fs = { path = "../snapshot-store-fs" }
+panel-contracts.workspace = true
+panel-engine.workspace = true
+panel-errors.workspace = true
+panel-gateway-runtime.workspace = true
+snapshot-store-fs.workspace = true
 tokio.workspace = true
 tonic.workspace = true
 tonic-health.workspace = true
@@ -23,8 +24,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
-libc.workspace = true
-panel-domain = { path = "../panel-domain" }
-panel-ir = { path = "../panel-ir" }
+panel-domain.workspace = true
+panel-ir.workspace = true
 tokio-stream.workspace = true
 uuid.workspace = true

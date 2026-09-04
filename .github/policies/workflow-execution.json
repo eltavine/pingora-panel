@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "max_job_timeout_minutes": 60,
+  "workflows": {
+    ".github/workflows/audit.yml": {
+      "cancel_in_progress": true,
+      "permissions": {
+        "contents": "read"
+      },
+      "job_permissions": {
+        "security-audit": {
+          "owner": "pingora-panel-security",
+          "reason": "rustsec/audit-check publishes a check run and files advisory issues on scheduled and push runs.",
+          "expires_on": "2027-03-01",
+          "permissions": {
+            "checks": "write",
+            "contents": "read",
+            "issues": "write"
+          }
+        }
+      }
+    },
+    ".github/workflows/build.yml": {
+      "cancel_in_progress": true,
+      "permissions": {
+        "contents": "read"
+      }
+    },
+    ".github/workflows/docs.yml": {
+      "cancel_in_progress": true,
+      "permissions": {
+        "contents": "read"
+      }
+    },
+    ".github/workflows/mark-stale.yaml": {
+      "cancel_in_progress": false,
+      "permissions": {
+        "issues": "write",
+        "pull-requests": "write"
+      }
+    },
+    ".github/workflows/panel-adapter.yml": {
+      "cancel_in_progress": true,
+      "permissions": {
+        "contents": "read"
+      }
+    },
+    ".github/workflows/panel.yml": {
+      "cancel_in_progress": true,
+      "permissions": {
+        "contents": "read"
+      }
+    },
+    ".github/workflows/secret-scan.yml": {
+      "cancel_in_progress": true,
+      "permissions": {
+        "contents": "read"
+      }
+    },
+    ".github/workflows/semgrep.yml": {
+      "cancel_in_progress": true,
+      "permissions": {
+        "contents": "read"
+      }
+    },
+    ".github/workflows/supply-chain.yml": {
+      "cancel_in_progress": true,
+      "permissions": {
+        "contents": "read"
+      }
+    }
+  }
+}

@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! Generated wire contracts for Pingora Panel internal services.
 //!
 //! This crate intentionally contains no domain logic. Convert generated values at

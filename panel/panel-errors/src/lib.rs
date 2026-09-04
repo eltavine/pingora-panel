@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! Stable, transport-neutral error values shared by Panel layers.
 
 use serde::{ser::SerializeStruct, Deserialize, Serialize};

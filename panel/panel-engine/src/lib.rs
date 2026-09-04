@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! Stable gateway ports and an in-memory contract implementation.
 
 mod events;

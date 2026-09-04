@@ -1,6 +1,11 @@
 use panel_errors::{ErrorCode, PanelError, Result};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{collections::BTreeMap, fmt, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    panic::{catch_unwind, AssertUnwindSafe},
+    sync::Arc,
+};
 
 pub const JSON_SNAPSHOT_RECORD_FORMAT_V1: u32 = 1;
 
@@ -26,6 +31,7 @@ struct DiskRecordHeader {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct OwnedDiskRecord {
     format_version: u32,
     payload: serde_json::Value,
@@ -64,20 +70,29 @@ impl SnapshotRecordCodec for JsonSnapshotRecordCodecV1 {
 
 pub struct SnapshotRecordCodecRegistry {
     writer: Arc<dyn SnapshotRecordCodec>,
+    writer_version: u32,
     readers: BTreeMap<u32, Arc<dyn SnapshotRecordCodec>>,
 }
 
 impl SnapshotRecordCodecRegistry {
     pub fn new(writer: Arc<dyn SnapshotRecordCodec>) -> Result<Self> {
-        let version = writer.format_version();
+        let version = contain_codec_panic("snapshot writer panicked during registration", || {
+            writer.format_version()
+        })?;
         validate_format_version(version)?;
         let mut readers = BTreeMap::new();
         readers.insert(version, Arc::clone(&writer));
-        Ok(Self { writer, readers })
+        Ok(Self {
+            writer,
+            writer_version: version,
+            readers,
+        })
     }
 
     pub fn with_reader(mut self, reader: Arc<dyn SnapshotRecordCodec>) -> Result<Self> {
-        let version = reader.format_version();
+        let version = contain_codec_panic("snapshot reader panicked during registration", || {
+            reader.format_version()
+        })?;
         validate_format_version(version)?;
         if self.readers.insert(version, reader).is_some() {
             return Err(PanelError::conflict(format!(
@@ -88,7 +103,7 @@ impl SnapshotRecordCodecRegistry {
     }
 
     pub fn writer_version(&self) -> u32 {
-        self.writer.format_version()
+        self.writer_version
     }
 
     pub fn readable_versions(&self) -> impl Iterator<Item = u32> + '_ {
@@ -99,7 +114,20 @@ impl SnapshotRecordCodecRegistry {
         let payload = serde_json::to_vec(payload).map_err(|error| {
             PanelError::internal("serialize snapshot payload").with_source(error)
         })?;
-        self.writer.encode_payload(&payload)
+        let record = contain_codec_panic("snapshot record codec panicked while encoding", || {
+            self.writer.encode_payload(&payload)
+        })??;
+        let header: DiskRecordHeader = serde_json::from_slice(&record).map_err(|error| {
+            PanelError::internal("snapshot record codec produced an invalid envelope")
+                .with_source(error)
+        })?;
+        if header.format_version != self.writer_version {
+            return Err(PanelError::internal(format!(
+                "snapshot record codec declared version {} but encoded version {}",
+                self.writer_version, header.format_version
+            )));
+        }
+        Ok(record)
     }
 
     pub fn decode<T: DeserializeOwned>(&self, record: &[u8]) -> Result<T> {
@@ -113,11 +141,18 @@ impl SnapshotRecordCodecRegistry {
                 format!("snapshot store format {version} is not supported"),
             )
         })?;
-        let payload = codec.decode_payload(record)?;
+        let payload =
+            contain_codec_panic("snapshot record codec panicked while decoding", || {
+                codec.decode_payload(record)
+            })??;
         serde_json::from_slice(&payload).map_err(|error| {
             PanelError::corrupt_state("invalid snapshot record payload").with_source(error)
         })
     }
+}
+
+fn contain_codec_panic<T>(message: &'static str, operation: impl FnOnce() -> T) -> Result<T> {
+    catch_unwind(AssertUnwindSafe(operation)).map_err(|_| PanelError::internal(message))
 }
 
 fn validate_format_version(version: u32) -> Result<()> {
@@ -152,6 +187,7 @@ impl fmt::Debug for SnapshotRecordCodecRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
 
     struct JsonSnapshotRecordCodecV2;
 
@@ -175,6 +211,76 @@ mod tests {
         }
     }
 
+    struct MutableVersionCodec {
+        next_version: AtomicU32,
+        encoded_version: u32,
+    }
+
+    enum PanicPoint {
+        Registration,
+        Encode,
+        Decode,
+    }
+
+    struct PanickingCodec(PanicPoint);
+
+    impl SnapshotRecordCodec for PanickingCodec {
+        fn format_version(&self) -> u32 {
+            if matches!(self.0, PanicPoint::Registration) {
+                panic!("registration panic");
+            }
+            9
+        }
+
+        fn encode_payload(&self, payload: &[u8]) -> Result<Vec<u8>> {
+            if matches!(self.0, PanicPoint::Encode) {
+                panic!("encode panic");
+            }
+            let payload: serde_json::Value = serde_json::from_slice(payload).unwrap();
+            Ok(serde_json::to_vec(&serde_json::json!({
+                "format_version": 9,
+                "payload": payload,
+            }))
+            .unwrap())
+        }
+
+        fn decode_payload(&self, _record: &[u8]) -> Result<Vec<u8>> {
+            if matches!(self.0, PanicPoint::Decode) {
+                panic!("decode panic");
+            }
+            Ok(br#""decoded""#.to_vec())
+        }
+    }
+
+    impl MutableVersionCodec {
+        fn new(initial_version: u32, encoded_version: u32) -> Self {
+            Self {
+                next_version: AtomicU32::new(initial_version),
+                encoded_version,
+            }
+        }
+    }
+
+    impl SnapshotRecordCodec for MutableVersionCodec {
+        fn format_version(&self) -> u32 {
+            self.next_version.fetch_add(1, Ordering::Relaxed)
+        }
+
+        fn encode_payload(&self, payload: &[u8]) -> Result<Vec<u8>> {
+            let payload: serde_json::Value = serde_json::from_slice(payload).unwrap();
+            Ok(serde_json::to_vec(&serde_json::json!({
+                "format_version": self.encoded_version,
+                "payload": payload,
+            }))
+            .unwrap())
+        }
+
+        fn decode_payload(&self, record: &[u8]) -> Result<Vec<u8>> {
+            let disk: OwnedDiskRecord = serde_json::from_slice(record).unwrap();
+            Ok(serde_json::to_vec(&disk.payload).unwrap())
+        }
+    }
+
     #[test]
     fn default_codec_preserves_the_v1_envelope() {
         let registry = SnapshotRecordCodecRegistry::default();
@@ -185,6 +291,25 @@ mod tests {
             r#"{"format_version":1,"payload":["value"]}"#
         );
         assert_eq!(registry.decode::<Vec<String>>(&encoded).unwrap(), ["value"]);
+    }
+
+    #[test]
+    fn version_one_rejects_unknown_and_duplicate_envelope_fields() {
+        let registry = SnapshotRecordCodecRegistry::default();
+
+        let unknown = registry
+            .decode::<serde_json::Value>(
+                br#"{"format_version":1,"payload":null,"unexpected":true}"#,
+            )
+            .unwrap_err();
+        let duplicate = registry
+            .decode::<serde_json::Value>(
+                br#"{"format_version":1,"format_version":1,"payload":null}"#,
+            )
+            .unwrap_err();
+
+        assert_eq!(unknown.code.as_str(), ErrorCode::CORRUPT_STATE);
+        assert_eq!(duplicate.code.as_str(), ErrorCode::CORRUPT_STATE);
     }
 
     #[test]
@@ -209,5 +334,49 @@ mod tests {
             .with_reader(Arc::new(JsonSnapshotRecordCodecV1))
             .unwrap_err();
         assert_eq!(error.code.as_str(), ErrorCode::CONFLICT);
+    }
+
+    #[test]
+    fn writer_version_is_the_immutable_registration_identity() {
+        let registry =
+            SnapshotRecordCodecRegistry::new(Arc::new(MutableVersionCodec::new(7, 7))).unwrap();
+
+        assert_eq!(registry.writer_version(), 7);
+        assert_eq!(registry.writer_version(), 7);
+        assert_eq!(registry.readable_versions().collect::<Vec<_>>(), [7]);
+        assert!(registry.encode(&"value").is_ok());
+    }
+
+    #[test]
+    fn writer_output_cannot_escape_its_registered_version() {
+        let registry =
+            SnapshotRecordCodecRegistry::new(Arc::new(MutableVersionCodec::new(7, 8))).unwrap();
+
+        let error = registry.encode(&"value").unwrap_err();
+        assert_eq!(error.code.as_str(), ErrorCode::INTERNAL);
+        assert_eq!(
+            error.message,
+            "snapshot record codec declared version 7 but encoded version 8"
+        );
+    }
+
+    #[test]
+    fn codec_panics_are_contained_at_every_extension_boundary() {
+        let registration =
+            SnapshotRecordCodecRegistry::new(Arc::new(PanickingCodec(PanicPoint::Registration)))
+                .unwrap_err();
+        assert_eq!(registration.code.as_str(), ErrorCode::INTERNAL);
+
+        let encoder =
+            SnapshotRecordCodecRegistry::new(Arc::new(PanickingCodec(PanicPoint::Encode))).unwrap();
+        let encoding = encoder.encode(&"value").unwrap_err();
+        assert_eq!(encoding.code.as_str(), ErrorCode::INTERNAL);
+
+        let decoder =
+            SnapshotRecordCodecRegistry::new(Arc::new(PanickingCodec(PanicPoint::Decode))).unwrap();
+        let decoding = decoder
+            .decode::<String>(br#"{"format_version":9,"payload":"value"}"#)
+            .unwrap_err();
+        assert_eq!(decoding.code.as_str(), ErrorCode::INTERNAL);
     }
 }

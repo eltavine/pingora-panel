@@ -1,0 +1,37 @@
+{
+  "schema_version": 2,
+  "exceptions": [
+    {
+      "advisory_id": "RUSTSEC-2026-0098",
+      "workspaces": ["Cargo.toml"],
+      "expires_on": "2027-02-01",
+      "owner": "pingora-panel-security",
+      "reason": "No patched rustls-webpki 0.101.x release exists for the inherited legacy Rustls chain.",
+      "scope": "Optional worker-s3 dependency path through aws-sdk-s3-transfer-manager; CRL parsing is not used."
+    },
+    {
+      "advisory_id": "RUSTSEC-2026-0099",
+      "workspaces": ["Cargo.toml"],
+      "expires_on": "2027-02-01",
+      "owner": "pingora-panel-security",
+      "reason": "No patched rustls-webpki 0.101.x release exists for the inherited legacy Rustls chain.",
+      "scope": "Optional worker-s3 dependency path through aws-sdk-s3-transfer-manager; certificate verification is TLS-client-only."
+    },
+    {
+      "advisory_id": "RUSTSEC-2026-0104",
+      "workspaces": ["Cargo.toml"],
+      "expires_on": "2027-02-01",
+      "owner": "pingora-panel-security",
+      "reason": "No patched rustls-webpki 0.101.x release exists for the inherited legacy Rustls chain.",
+      "scope": "Optional worker-s3 dependency path through aws-sdk-s3-transfer-manager; CRL parsing is not used."
+    },
+    {
+      "advisory_id": "RUSTSEC-2026-0258",
+      "workspaces": ["Cargo.toml"],
+      "expires_on": "2027-02-01",
+      "owner": "pingora-panel-security",
+      "reason": "The affected h2 0.3.27 release is retained only by the optional legacy worker-s3 dependency chain.",
+      "scope": "worker-s3 is disabled by default; deployments enabling it remain in the documented affected scope."
+    }
+  ]
+}

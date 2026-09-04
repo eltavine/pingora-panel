@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! `gatewayd` composition factory.
 //!
 //! The binary owns executor startup and OS signal selection. This library owns

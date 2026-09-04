@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "exact_versions": [
+    "1.85.0",
+    "1.88.0",
+    "1.98.0"
+  ],
+  "floating_allowances": [
+    {
+      "marker": "panel-canary",
+      "value": "nightly",
+      "workflow": ".github/workflows/panel.yml"
+    },
+    {
+      "marker": "upstream-canary",
+      "value": "nightly",
+      "workflow": ".github/workflows/build.yml"
+    }
+  ]
+}

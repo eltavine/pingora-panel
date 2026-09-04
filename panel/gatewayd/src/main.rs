@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use gatewayd::{initialize_observability, serve_gatewayd, GatewaydConfig, GatewaydError};
 
 fn main() -> Result<(), GatewaydError> {

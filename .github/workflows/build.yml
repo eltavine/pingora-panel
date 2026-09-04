@@ -45,7 +45,7 @@ jobs:
       matrix:
         include:
           - profile: canary
-            toolchain: nightly
+            toolchain: nightly # rust-toolchain-policy: upstream-canary
             build_openresty: true
             run_tests: true
             run_quality: false
@@ -55,7 +55,7 @@ jobs:
             run_tests: false
             run_quality: false
           - profile: stable
-            toolchain: stable
+            toolchain: 1.98.0
             build_openresty: true
             run_tests: true
             run_quality: true

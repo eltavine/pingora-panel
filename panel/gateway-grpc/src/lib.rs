@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! Tonic transport adapter for the stable `GatewayEngine` application port.
 
 mod codec;

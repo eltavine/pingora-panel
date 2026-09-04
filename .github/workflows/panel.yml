@@ -7,16 +7,28 @@ on:
       - ".cargo/config.toml"
       - ".rustfmt.toml"
       - "panel/**"
+      - ".github/policies/panel-boundaries.json"
       - ".github/scripts/check-cargo-machete-workspace.sh"
       - ".github/scripts/check-panel-boundaries.sh"
       - ".github/scripts/check-panel-pingora-version.sh"
+      - ".github/scripts/check-panel-package-policy.sh"
+      - ".github/scripts/check-panel-unsafe-policy.py"
+      - ".github/policies/panel-unsafe-adapters.json"
+      - ".github/scripts/check-panel-enum-exhaustiveness.py"
+      - ".github/policies/panel-exhaustive-enums.json"
+      - ".github/scripts/check-panel-workspace-dependencies.py"
       - ".github/scripts/check-panel-proto-breaking.sh"
       - ".github/scripts/check-panel-rust-api-breaking.sh"
+      - ".github/scripts/list-workspace-package-names.py"
       - ".github/scripts/resolve-panel-compat-baseline.sh"
       - ".github/scripts/resolve-panel-proto-baseline.sh"
       - ".github/scripts/test-panel-compat-baseline.sh"
       - ".github/scripts/test-panel-boundaries.sh"
       - ".github/scripts/test-panel-pingora-version.sh"
+      - ".github/scripts/test-panel-package-policy.sh"
+      - ".github/scripts/test-panel-unsafe-policy.py"
+      - ".github/scripts/test-panel-enum-exhaustiveness.py"
+      - ".github/scripts/test-panel-workspace-dependencies.py"
       - ".github/scripts/test-cargo-machete-workspace.sh"
       - ".github/scripts/test-panel-proto-breaking.sh"
       - ".github/scripts/test-panel-rust-api-breaking.sh"
@@ -26,16 +38,28 @@ on:
       - ".cargo/config.toml"
       - ".rustfmt.toml"
       - "panel/**"
+      - ".github/policies/panel-boundaries.json"
       - ".github/scripts/check-cargo-machete-workspace.sh"
       - ".github/scripts/check-panel-boundaries.sh"
       - ".github/scripts/check-panel-pingora-version.sh"
+      - ".github/scripts/check-panel-package-policy.sh"
+      - ".github/scripts/check-panel-unsafe-policy.py"
+      - ".github/policies/panel-unsafe-adapters.json"
+      - ".github/scripts/check-panel-enum-exhaustiveness.py"
+      - ".github/policies/panel-exhaustive-enums.json"
+      - ".github/scripts/check-panel-workspace-dependencies.py"
       - ".github/scripts/check-panel-proto-breaking.sh"
       - ".github/scripts/check-panel-rust-api-breaking.sh"
+      - ".github/scripts/list-workspace-package-names.py"
       - ".github/scripts/resolve-panel-compat-baseline.sh"
       - ".github/scripts/resolve-panel-proto-baseline.sh"
       - ".github/scripts/test-panel-compat-baseline.sh"
       - ".github/scripts/test-panel-boundaries.sh"
       - ".github/scripts/test-panel-pingora-version.sh"
+      - ".github/scripts/test-panel-package-policy.sh"
+      - ".github/scripts/test-panel-unsafe-policy.py"
+      - ".github/scripts/test-panel-enum-exhaustiveness.py"
+      - ".github/scripts/test-panel-workspace-dependencies.py"
       - ".github/scripts/test-cargo-machete-workspace.sh"
       - ".github/scripts/test-panel-proto-breaking.sh"
       - ".github/scripts/test-panel-rust-api-breaking.sh"
@@ -50,13 +74,19 @@ concurrency:
 
 jobs:
   rust:
-    name: Rust ${{ matrix.toolchain }}
+    name: Rust ${{ matrix.profile }} / ${{ matrix.toolchain }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        toolchain: ["1.88.0", stable, nightly]
+        include:
+          - profile: msrv
+            toolchain: 1.88.0 # rust-msrv-policy: panel-msrv
+          - profile: stable
+            toolchain: 1.98.0
+          - profile: canary
+            toolchain: nightly # rust-toolchain-policy: panel-canary
     steps:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -77,7 +107,7 @@ jobs:
         run: cargo check --manifest-path panel/Cargo.toml --workspace --locked
 
       - name: Run contract tests
-        run: cargo test --manifest-path panel/Cargo.toml --workspace --locked
+        run: cargo test --manifest-path panel/Cargo.toml --workspace --all-features --locked
 
       - name: Run Clippy
         env:
@@ -86,6 +116,49 @@ jobs:
 
       - name: Compile Pingora adapter
         run: cargo check --manifest-path panel/Cargo.toml --package gateway-pingora --locked
+
+  feature-matrix:
+    name: Panel features (${{ matrix.selection }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - selection: default
+            arguments: ""
+          - selection: no-default
+            arguments: "--no-default-features"
+          - selection: tls
+            arguments: "--no-default-features --features tls"
+          - selection: cache
+            arguments: "--no-default-features --features cache"
+          - selection: lua
+            arguments: "--no-default-features --features lua"
+          - selection: all
+            arguments: "--all-features"
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake --no-install-recommends
+
+      - name: Install pinned Rust
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30
+        with:
+          toolchain: 1.98.0
+
+      # Feature gates are reserved capability declarations, so the capability
+      # contract must execute under every selection rather than merely compile.
+      - name: Test the Pingora adapter feature selection
+        run: >-
+          cargo test
+          --manifest-path panel/Cargo.toml
+          --package gateway-pingora
+          --all-targets
+          --locked
+          ${{ matrix.arguments }}
 
   protobuf:
     name: Protobuf contracts
@@ -147,10 +220,10 @@ jobs:
       - name: Install build dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential cmake --no-install-recommends
 
-      - name: Install stable Rust
+      - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30
         with:
-          toolchain: stable
+          toolchain: 1.98.0
 
       - name: Install cargo-semver-checks 0.50.0
         run: cargo install --locked --version 0.50.0 cargo-semver-checks
@@ -184,10 +257,16 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq --no-install-recommends
 
-      - name: Install stable Rust
+      - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30
         with:
-          toolchain: stable
+          toolchain: 1.98.0
+
+      - name: Self-test Panel workspace dependency catalog
+        run: python3 .github/scripts/test-panel-workspace-dependencies.py
+
+      - name: Verify Panel workspace dependency catalog
+        run: python3 .github/scripts/check-panel-workspace-dependencies.py
 
       - name: Self-test Panel dependency boundaries
         run: bash .github/scripts/test-panel-boundaries.sh
@@ -201,6 +280,24 @@ jobs:
       - name: Verify Pingora version coherence
         run: bash .github/scripts/check-panel-pingora-version.sh
 
+      - name: Self-test Panel package policy
+        run: bash .github/scripts/test-panel-package-policy.sh
+
+      - name: Verify Panel packages are private
+        run: bash .github/scripts/check-panel-package-policy.sh
+
+      - name: Self-test Panel unsafe isolation policy
+        run: python3 .github/scripts/test-panel-unsafe-policy.py
+
+      - name: Verify Panel unsafe isolation policy
+        run: python3 .github/scripts/check-panel-unsafe-policy.py
+
+      - name: Self-test public enum exhaustiveness decisions
+        run: python3 .github/scripts/test-panel-enum-exhaustiveness.py
+
+      - name: Verify every public enum has an exhaustiveness decision
+        run: python3 .github/scripts/check-panel-enum-exhaustiveness.py
+
   dependency-hygiene:
     name: Dependency hygiene
     runs-on: ubuntu-24.04
@@ -212,10 +309,10 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq --no-install-recommends
 
-      - name: Install stable Rust
+      - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30
         with:
-          toolchain: stable
+          toolchain: 1.98.0
 
       - name: Self-test workspace dependency scanner
         run: bash .github/scripts/test-cargo-machete-workspace.sh
@@ -240,10 +337,10 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Install stable Rust target
+      - name: Install pinned Rust target
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30
         with:
-          toolchain: stable
+          toolchain: 1.98.0
           targets: ${{ matrix.target }}
 
       - name: Check snapshot store portability

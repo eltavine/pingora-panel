@@ -1,4 +1,5 @@
 #![cfg(unix)]
+#![forbid(unsafe_code)]
 
 use gateway_grpc::encode_snapshot;
 use gatewayd::{
@@ -73,10 +74,16 @@ impl GatewayProcess {
     }
 
     fn terminate(&mut self) {
-        // SAFETY: the child ID comes from a live process owned by this guard, and
-        // SIGTERM does not dereference memory in either process.
-        let result = unsafe { libc::kill(self.child.id() as libc::pid_t, libc::SIGTERM) };
-        assert_eq!(result, 0, "failed to send SIGTERM to gatewayd");
+        let status = Command::new("kill")
+            .arg("-TERM")
+            .arg(self.child.id().to_string())
+            .status()
+            .expect("failed to invoke kill for gatewayd");
+        assert!(status.success(), "failed to send SIGTERM to gatewayd");
+    }
+
+    fn kill_forcefully(&mut self) {
+        self.child.kill().expect("failed to SIGKILL gatewayd");
     }
 
     async fn wait_for_exit(&mut self) -> ExitStatus {
@@ -228,6 +235,25 @@ async fn a_second_process_cannot_share_the_state_directory() {
     drop(channel);
     first.terminate();
     assert!(first.wait_for_exit().await.success());
+}
+
+#[tokio::test]
+async fn sigkill_releases_the_state_directory_lease_for_restart() {
+    let state = TemporaryDirectory::new();
+    let first_address = reserve_address();
+    let restart_address = reserve_address();
+    let mut first = GatewayProcess::spawn(first_address, &state.0);
+    let channel = wait_until_serving(first_address).await;
+
+    first.kill_forcefully();
+    drop(channel);
+    assert!(!first.wait_for_exit().await.success());
+
+    let mut restarted = GatewayProcess::spawn(restart_address, &state.0);
+    let restarted_channel = wait_until_serving(restart_address).await;
+    drop(restarted_channel);
+    restarted.terminate();
+    assert!(restarted.wait_for_exit().await.success());
 }
 
 #[tokio::test]

@@ -227,13 +227,8 @@ impl StateDirectoryHandle {
     }
 
     #[cfg(unix)]
-    pub(crate) fn open_lock_file(&self, name: &OsStr) -> io::Result<File> {
-        validate_name(name)?;
-        self.open_at(
-            name,
-            libc::O_RDWR | libc::O_CREAT | libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK,
-            0o600,
-        )
+    pub(crate) fn clone_directory_file(&self) -> io::Result<File> {
+        self.file.try_clone()
     }
 
     pub(crate) fn rename_file(&self, source: &OsStr, destination: &OsStr) -> io::Result<()> {

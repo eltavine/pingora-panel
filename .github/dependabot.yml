@@ -5,3 +5,17 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+
+  # One entry per Cargo workspace root. check-dependabot-coverage.py fails the
+  # build when a workspace is added without a matching entry here.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: cargo
+    directory: /panel
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

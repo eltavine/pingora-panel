@@ -5,12 +5,13 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+publish.workspace = true
 
 [dependencies]
 async-trait.workspace = true
-panel-domain = { path = "../panel-domain" }
-panel-engine = { path = "../panel-engine" }
-panel-errors = { path = "../panel-errors" }
-panel-ir = { path = "../panel-ir" }
+panel-domain.workspace = true
+panel-engine.workspace = true
+panel-errors.workspace = true
+panel-ir.workspace = true
 tokio.workspace = true
 uuid.workspace = true

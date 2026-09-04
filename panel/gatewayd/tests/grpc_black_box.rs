@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use gateway_grpc::{encode_snapshot, GatewayTransportPolicy};
 use gatewayd::{build_gateway_services, gateway_service_name};
 use panel_contracts::{

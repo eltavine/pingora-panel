@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "exhaustive_enums": [
+    {
+      "package": "gatewayd",
+      "name": "GatewaydError",
+      "owner": "pingora-panel-platform",
+      "reason": "This enum was already exhaustive in the public API. Keeping it exhaustive preserves downstream matches; future operations that need extensible errors should introduce a new opaque or non-exhaustive error type without changing this contract."
+    },
+    {
+      "package": "gatewayd",
+      "name": "RuntimeReadiness",
+      "owner": "pingora-panel-platform",
+      "reason": "This enum was already exhaustive in the public API. Keeping it exhaustive preserves downstream readiness matches; an extensible successor must be introduced additively."
+    },
+    {
+      "package": "panel-domain",
+      "name": "DomainError",
+      "owner": "pingora-panel-platform",
+      "reason": "This enum was already exhaustive in the public API. Keeping it exhaustive preserves downstream matches; new extensible domain operations should expose a new opaque or non-exhaustive error type."
+    },
+    {
+      "package": "panel-errors",
+      "name": "DiagnosticSeverity",
+      "owner": "pingora-panel-platform",
+      "reason": "panel-contracts maps every severity onto the protobuf enum. A new severity must fail to compile there rather than be silently reported as an existing one."
+    },
+    {
+      "package": "panel-ir",
+      "name": "RouteMatcher",
+      "owner": "pingora-panel-platform",
+      "reason": "gateway-grpc encodes every matcher onto the wire. A new matcher must fail to compile there rather than make a route silently unserialisable."
+    },
+    {
+      "package": "panel-ir",
+      "name": "RouteAction",
+      "owner": "pingora-panel-platform",
+      "reason": "gateway-grpc encodes every action onto the wire. A new action must fail to compile there rather than make a route silently unserialisable."
+    },
+    {
+      "package": "panel-ir",
+      "name": "LoadBalancingPolicy",
+      "owner": "pingora-panel-platform",
+      "reason": "gateway-grpc encodes every policy onto the wire, and gateway-pingora maps it onto a Pingora selector. A new policy must fail to compile in both rather than fall back to an unintended one."
+    }
+  ]
+}

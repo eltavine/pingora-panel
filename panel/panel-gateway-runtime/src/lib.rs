@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! Durable gateway use-case orchestration.
 //!
 //! This crate owns no transport, filesystem, or Pingora types. Those details enter

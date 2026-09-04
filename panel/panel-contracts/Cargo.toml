@@ -5,10 +5,11 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+publish.workspace = true
 build = "build.rs"
 
 [dependencies]
-panel-errors = { path = "../panel-errors" }
+panel-errors.workspace = true
 prost.workspace = true
 tonic.workspace = true
 tonic-prost.workspace = true

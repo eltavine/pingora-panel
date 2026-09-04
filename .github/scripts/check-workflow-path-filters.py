@@ -1,30 +1,52 @@
 #!/usr/bin/env python3
-"""Verify that path-filtered workflows cover their local executable dependencies."""
+"""Verify that path-filtered workflows cover their local executable dependencies.
+
+A workflow that filters on paths but omits a script it runs will skip its own
+checks whenever only that script changes, which is exactly when they matter.
+
+Exit 1 lists the uncovered dependencies. Exit 2 means a workflow could not be
+read at all, so no coverage claim was formed either way.
+"""
 
 from __future__ import annotations
 
-import argparse
 import ast
 import re
-import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+from policy import PolicyError, ci_yaml, cli
 
 
 LOCAL_REFERENCE = re.compile(r"\.github/scripts/[A-Za-z0-9_./-]+")
 LOCAL_USE = re.compile(
-    r"^\s*(?:-\s*)?uses:\s*['\"]?(\./[A-Za-z0-9_./-]+)", re.MULTILINE
+    r"(?:^\s*(?:-\s*)?|[{,]\s*)['\"]?uses['\"]?\s*:\s*"
+    r"['\"]?(\./[A-Za-z0-9_./-]+)",
+    re.MULTILINE,
 )
 EVENT = re.compile(r"([A-Za-z_][A-Za-z0-9_-]*):")
-RUN = re.compile(r"^(\s*)run:\s*(.*)$")
-BLOCK_SCALAR = re.compile(r"[|>](?:[1-9][+-]?|[+-][1-9]?)?")
 PATH_FILTER_KEYS = ("paths", "paths-ignore")
+SIMPLE_MAPPING = re.compile(
+    r'(?:(?P<double>"[A-Za-z_][A-Za-z0-9_-]*")|'
+    r"(?P<single>'[A-Za-z_][A-Za-z0-9_-]*')|"
+    r"(?P<plain>[A-Za-z_][A-Za-z0-9_-]*)):\s*(?P<value>.*)"
+)
 
 
 @dataclass
 class EventPathFilter:
     kind: str
     patterns: list[str]
+
+
+def mapping_entry(text: str) -> tuple[str, str] | None:
+    """Read one plain or simply quoted YAML mapping entry."""
+    match = SIMPLE_MAPPING.fullmatch(text)
+    if match is None:
+        return None
+    raw_key = match.group("double") or match.group("single") or match.group("plain")
+    key = raw_key[1:-1] if raw_key[:1] in {'"', "'"} else raw_key
+    return key, match.group("value").strip()
 
 
 def parse_scalar(value: str) -> str:
@@ -42,6 +64,7 @@ def parse_path_filters(text: str) -> dict[str, EventPathFilter]:
     inside_on = False
     current_event: str | None = None
     current_filter: EventPathFilter | None = None
+    on_blocks = 0
 
     for raw_line in text.splitlines():
         stripped = raw_line.strip()
@@ -50,34 +73,38 @@ def parse_path_filters(text: str) -> dict[str, EventPathFilter]:
         indent = len(raw_line) - len(raw_line.lstrip())
 
         if indent == 0:
-            if stripped.startswith("on:") and stripped != "on:" and "paths" in stripped:
+            entry = mapping_entry(stripped)
+            key, value = entry if entry is not None else (None, None)
+            if key == "on" and value and "paths" in value:
                 raise ValueError("inline on.paths syntax is unsupported; use block syntax")
-            inside_on = stripped == "on:"
+            if key == "on":
+                on_blocks += 1
+                if on_blocks > 1:
+                    raise ValueError("workflow defines multiple top-level on mappings")
+            inside_on = key == "on" and not value
             current_event = None
             current_filter = None
             continue
         if not inside_on:
             continue
         if indent == 2:
-            match = EVENT.fullmatch(stripped)
-            if match is None and "paths" in stripped:
+            entry = mapping_entry(stripped)
+            key, value = entry if entry is not None else (None, None)
+            if entry is None and "paths" in stripped:
                 raise ValueError("inline event paths syntax is unsupported; use block syntax")
-            current_event = match.group(1) if match else None
+            if value and "paths" in value:
+                raise ValueError("inline event paths syntax is unsupported; use block syntax")
+            current_event = key if entry is not None and not value else None
             current_filter = None
             continue
         if indent == 4 and current_event is not None:
-            filter_kind = next(
-                (
-                    key
-                    for key in PATH_FILTER_KEYS
-                    if stripped.startswith(f"{key}:")
-                ),
-                None,
-            )
+            entry = mapping_entry(stripped)
+            key, value = entry if entry is not None else (None, None)
+            filter_kind = key if key in PATH_FILTER_KEYS else None
             if filter_kind is None:
                 current_filter = None
                 continue
-            if stripped != f"{filter_kind}:":
+            if value:
                 raise ValueError(
                     f"inline {filter_kind} syntax is unsupported; use a block list"
                 )
@@ -105,37 +132,6 @@ def parse_path_filters(text: str) -> dict[str, EventPathFilter]:
             raise ValueError(f"{event}.paths requires at least one positive pattern")
 
     return filters
-
-
-def parse_run_blocks(text: str) -> str:
-    lines = text.splitlines()
-    commands: list[str] = []
-    index = 0
-    while index < len(lines):
-        match = RUN.match(lines[index])
-        if match is None:
-            index += 1
-            continue
-
-        run_indent = len(match.group(1))
-        value = match.group(2).strip()
-        if BLOCK_SCALAR.fullmatch(value) is None:
-            commands.append(value)
-            index += 1
-            continue
-
-        index += 1
-        block: list[str] = []
-        while index < len(lines):
-            line = lines[index]
-            if line.strip():
-                indent = len(line) - len(line.lstrip())
-                if indent <= run_indent:
-                    break
-            block.append(line)
-            index += 1
-        commands.extend(block)
-    return "\n".join(commands)
 
 
 def glob_regex(pattern: str) -> re.Pattern[str]:
@@ -205,6 +201,8 @@ def check_workflows(repo_root: Path, workflow_root: Path) -> list[str]:
         for path in workflow_root.iterdir()
         if path.is_file() and path.suffix in {".yml", ".yaml"}
     )
+    if not workflows:
+        return [f"{workflow_root}: workflow directory contains no YAML files"]
     for workflow in workflows:
         workflow_path = workflow.relative_to(repo_root).as_posix()
         text = workflow.read_text(encoding="utf-8")
@@ -216,9 +214,11 @@ def check_workflows(repo_root: Path, workflow_root: Path) -> list[str]:
         if not path_filters:
             continue
 
-        references = set(LOCAL_REFERENCE.findall(parse_run_blocks(text)))
+        references = set(LOCAL_REFERENCE.findall(ci_yaml.active_run_text(text)))
+        uncommented = "\n".join(ci_yaml.strip_comment(line) for line in text.splitlines())
         references.update(
-            match.group(1).removeprefix("./") for match in LOCAL_USE.finditer(text)
+            match.group(1).removeprefix("./")
+            for match in LOCAL_USE.finditer(uncommented)
         )
         dependencies = {workflow_path}
         for reference in sorted(references):
@@ -275,29 +275,26 @@ def check_workflows(repo_root: Path, workflow_root: Path) -> list[str]:
     return errors
 
 
-def main() -> int:
-    default_repo = Path(__file__).resolve().parents[2]
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--repo-root", type=Path, default=default_repo)
-    parser.add_argument("--workflow-root", type=Path)
-    arguments = parser.parse_args()
+def main(argv: list[str] | None = None) -> int:
+    entry = cli.Entrypoint("Workflow path-filter coverage", __doc__, dated=False)
+    entry.add_repo_root()
+    entry.parser.add_argument("--workflow-root", type=Path)
+    arguments = entry.parse(argv)
 
-    repo_root = arguments.repo_root.resolve()
-    workflow_root = (
-        arguments.workflow_root.resolve()
-        if arguments.workflow_root
-        else repo_root / ".github/workflows"
-    )
-    if not workflow_root.is_dir():
-        parser.error(f"workflow directory does not exist: {workflow_root}")
+    try:
+        repo_root = arguments.repo_root.resolve()
+        workflow_root = (
+            arguments.workflow_root.resolve()
+            if arguments.workflow_root
+            else repo_root / ".github/workflows"
+        )
+        if not workflow_root.is_dir():
+            raise PolicyError(f"workflow directory does not exist: {workflow_root}")
+        failures = check_workflows(repo_root, workflow_root)
+    except cli.FAILING as error:
+        return entry.failed_closed(error)
 
-    errors = check_workflows(repo_root, workflow_root)
-    if errors:
-        for error in errors:
-            print(error, file=sys.stderr)
-        return 1
-    print("Workflow path-filter coverage verified.")
-    return 0
+    return entry.report(failures, "Workflow path-filter coverage verified")
 
 
 if __name__ == "__main__":

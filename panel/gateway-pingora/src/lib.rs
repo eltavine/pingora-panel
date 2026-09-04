@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! Pingora 0.8 adapter for the stable Panel engine port.
 //!
 //! The implementation module is private so upstream Pingora types cannot become part

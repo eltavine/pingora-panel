@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! Versioned engine-neutral runtime representation.
 //!
 //! Collections which affect canonical output use `BTreeMap`/`BTreeSet`. The declared
