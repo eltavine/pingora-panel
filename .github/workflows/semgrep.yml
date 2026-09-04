@@ -19,6 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
+          persist-credentials: false
           fetch-depth: 1
       - id: cache-semgrep
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5

@@ -22,3 +22,7 @@ f69219d7bade726326ca29dab9ffb9234a596551:pingora-proxy/tests/utils/conf/keys/lea
 # Historical false positive: a Panel contract test fixture named an
 # idempotency-key field; the exact committed value is not a credential.
 665fd57a7143bce3a37cdac9a9f8ac6f8f7e03c3:panel/panel-contracts/src/lib.rs:generic-api-key:74
+
+# Synthetic entropy used to prove that the Gitleaks CI self-test rejects and
+# redacts a finding. It is generated test material, not a credential.
+331b184bdecc5f1a41fce0e9ea9406bc6bc0a47b:.github/scripts/test-gitleaks-secret-scan.sh:generic-api-key:28

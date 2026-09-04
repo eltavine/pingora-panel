@@ -68,6 +68,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Self-test advisory policy synchronization
         run: python3 .github/scripts/test-rust-advisory-policy.py
@@ -91,6 +93,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Check licenses, sources, and dependency bans
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1 / cargo-deny 0.20.2
@@ -122,6 +126,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30
@@ -184,6 +190,8 @@ jobs:
             generate_lockfile: false
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Generate Cargo.lock
         if: matrix.generate_lockfile

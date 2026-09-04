@@ -39,7 +39,19 @@ if [[ "$scan_status" -ne 23 ]]; then
   printf 'synthetic secret was not rejected with the configured exit code\n' >&2
   exit 1
 fi
-if rg --fixed-strings --quiet "$fake_secret" "$test_root/output"; then
+if ! command -v python3 >/dev/null 2>&1; then
+  printf 'Python 3 is required to verify redacted scanner output\n' >&2
+  exit 2
+fi
+if python3 - "$fake_secret" "$test_root/output" <<'PY'
+from pathlib import Path
+import sys
+
+secret = sys.argv[1].encode()
+output = Path(sys.argv[2]).read_bytes()
+raise SystemExit(0 if secret in output else 1)
+PY
+then
   printf 'redacted scanner output exposed the synthetic secret\n' >&2
   exit 1
 fi

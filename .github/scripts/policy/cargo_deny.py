@@ -145,6 +145,9 @@ def unmatched_advisory_finding(code: str) -> Callable[[Mapping[str, object]], Fi
 
 
 DUPLICATE = FindingKind("duplicate", "duplicates", crate_finding("duplicate"))
+VULNERABILITY = FindingKind(
+    "vulnerability", "blocking-vulnerabilities", advisory_crate_finding("vulnerability")
+)
 UNMAINTAINED = FindingKind(
     "unmaintained", "unmaintained", advisory_crate_finding("unmaintained")
 )
@@ -182,6 +185,11 @@ INVALIDATING: Mapping[str, str] = {
 #: union is declared here rather than inferred from whoever happens to run.
 KNOWN: tuple[FindingKind, ...] = (
     DUPLICATE,
+    # Vulnerabilities are classified so the shared report remains usable, but
+    # are intentionally not leased by check-rust-dependency-leases.py. The
+    # cargo-deny action is their blocking policy and permits only synchronized,
+    # explicitly scoped advisory exceptions.
+    VULNERABILITY,
     UNMAINTAINED,
     YANKED,
     ADVISORY_NOT_DETECTED,
@@ -324,6 +332,7 @@ __all__ = [
     "KNOWN",
     "TOLERATED",
     "UNMAINTAINED",
+    "VULNERABILITY",
     "YANKED",
     "advisory_crate_finding",
     "crate_finding",

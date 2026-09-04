@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use panel_domain::{ContentHash, RevisionId};
-use panel_errors::{Result, ValidationReport};
+use panel_errors::{PanelError, Result, ValidationReport};
 use panel_ir::RuntimeSnapshot;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, sync::Arc};
@@ -57,6 +57,19 @@ pub struct PreparedSnapshotRecord {
 pub struct ActiveSnapshotRecord {
     pub envelope: SnapshotEnvelope,
     pub receipt: ActivationReceipt,
+}
+
+/// Result of publishing an activation record to durable storage.
+///
+/// `DurabilityUnknown` means the record has already replaced the previous
+/// value in the current filesystem namespace, but synchronizing the directory
+/// failed. Callers must reconcile their in-memory state with the published
+/// record instead of treating this as a pre-commit failure.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum ActivationCommitOutcome {
+    Committed,
+    DurabilityUnknown(PanelError),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -227,4 +240,17 @@ pub trait SnapshotStore: Send + Sync {
     async fn save_prepared(&self, record: PreparedSnapshotRecord) -> Result<()>;
     async fn delete_prepared(&self, token: &PrepareToken) -> Result<()>;
     async fn commit_activation(&self, record: ActiveSnapshotRecord) -> Result<()>;
+
+    /// Commit an activation while preserving an ambiguous post-publication
+    /// durability outcome.
+    ///
+    /// The default keeps existing adapters source-compatible: stores without a
+    /// richer durability model report a successful commit as `Committed`.
+    async fn commit_activation_with_outcome(
+        &self,
+        record: ActiveSnapshotRecord,
+    ) -> Result<ActivationCommitOutcome> {
+        self.commit_activation(record).await?;
+        Ok(ActivationCommitOutcome::Committed)
+    }
 }

@@ -90,6 +90,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install build dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential cmake --no-install-recommends
@@ -140,6 +142,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install build dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential cmake --no-install-recommends
@@ -168,6 +172,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Self-test compatibility baseline resolution
@@ -202,7 +207,9 @@ jobs:
           printf 'ref=%s\n' "$baseline_ref" >> "$GITHUB_OUTPUT"
 
       - name: Check breaking changes against the previous contract
-        run: bash .github/scripts/check-panel-proto-breaking.sh "${{ steps.proto-baseline.outputs.ref }}"
+        env:
+          BASELINE_REF: ${{ steps.proto-baseline.outputs.ref }}
+        run: bash .github/scripts/check-panel-proto-breaking.sh "$BASELINE_REF"
 
   rust-api:
     name: Rust public API compatibility
@@ -212,6 +219,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Self-test compatibility baseline resolution
@@ -244,7 +252,9 @@ jobs:
           printf 'ref=%s\n' "$baseline_ref" >> "$GITHUB_OUTPUT"
 
       - name: Reject Rust public API breaking changes
-        run: bash .github/scripts/check-panel-rust-api-breaking.sh "${{ steps.rust-api-baseline.outputs.ref }}"
+        env:
+          BASELINE_REF: ${{ steps.rust-api-baseline.outputs.ref }}
+        run: bash .github/scripts/check-panel-rust-api-breaking.sh "$BASELINE_REF"
 
   architecture-contracts:
     name: Architecture contracts
@@ -253,6 +263,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq --no-install-recommends
@@ -305,6 +317,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq --no-install-recommends
@@ -336,6 +350,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install pinned Rust target
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30

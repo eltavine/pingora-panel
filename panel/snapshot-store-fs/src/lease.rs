@@ -17,16 +17,6 @@ const LEASE_FILE_NAME: &str = ".gateway.lock";
 #[cfg(unix)]
 const LEASE_TEMPORARY_PREFIX: TemporaryPrefix = TemporaryPrefix::new(".gateway-lock-");
 
-/// Directory entries inspected when reclaiming abandoned lease temporaries.
-///
-/// Bounded for the same reason every other directory scan in this crate is: a
-/// state directory that has been filled with entries must not be able to make
-/// lease acquisition consume unbounded memory. Each crash abandons at most one
-/// temporary, so this ceiling is far above any honest backlog, and a directory
-/// holding more is drained across successive acquisitions.
-#[cfg(unix)]
-const LEASE_RECLAIM_ENTRY_CEILING: usize = 4096;
-
 /// Process-lifetime exclusive ownership of a snapshot state directory.
 ///
 /// The operating system locks the open directory inode, so crashes cannot leave
@@ -95,7 +85,7 @@ impl StateDirectoryLease {
         // The exclusive lock is held from here on, so any diagnostic
         // temporary still present was abandoned by a dead owner.
         AtomicFilePublisher::new(&directory, LEASE_TEMPORARY_PREFIX)
-            .reclaim_abandoned(LEASE_RECLAIM_ENTRY_CEILING)
+            .reclaim_abandoned()
             .map_err(|error| lease_publish_error(&path, error))?;
         replace_diagnostic_file(&directory, &path)?;
 
@@ -120,6 +110,8 @@ fn replace_diagnostic_file(directory: &StateDirectoryHandle, path: &Path) -> Res
     let contents = format!("pid={}\n", std::process::id());
     AtomicFilePublisher::new(directory, LEASE_TEMPORARY_PREFIX)
         .publish_bytes(OsStr::new(LEASE_FILE_NAME), contents.as_bytes())
+        .map_err(|error| lease_publish_error(path, error))?
+        .into_result()
         .map_err(|error| lease_publish_error(path, error))
 }
 

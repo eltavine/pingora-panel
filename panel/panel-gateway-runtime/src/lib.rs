@@ -23,9 +23,10 @@ pub use prepared_policy::{
 
 use async_trait::async_trait;
 use panel_engine::{
-    AbortReceipt, ActivateRequest, ActivationReceipt, ActiveSnapshotRecord, DataPlaneAdapter,
-    EngineCapabilities, GatewayEngine, GatewayStatus, PrepareReceipt, PrepareRequest, PrepareToken,
-    PreparedSnapshotRecord, SnapshotEnvelope, SnapshotStore,
+    AbortReceipt, ActivateRequest, ActivationCommitOutcome, ActivationReceipt,
+    ActiveSnapshotRecord, DataPlaneAdapter, EngineCapabilities, GatewayEngine, GatewayStatus,
+    PrepareReceipt, PrepareRequest, PrepareToken, PreparedSnapshotRecord, SnapshotEnvelope,
+    SnapshotStore,
 };
 use panel_errors::{ErrorCode, PanelError, Result, ValidationReport};
 use panel_ir::RuntimeSnapshot;
@@ -377,17 +378,33 @@ where
         let artifact = Arc::clone(&prepared.artifact);
 
         // The durable record is committed before the infallible data-plane pointer
-        // swap. This task is detached from the request future so cancellation cannot
-        // strand a committed receipt behind an old in-memory pointer.
-        if let Err(error) = store.commit_activation(active.clone()).await {
-            Self::mark_degraded(
-                &mut state,
-                events.as_ref(),
-                GatewayOperation::CommitActivation,
-                &error,
-            );
-            return Err(error);
-        }
+        // swap. `activate` runs this transaction in a detached task, so request
+        // cancellation cannot strand a committed receipt behind an old pointer.
+        let durability_unknown = match store.commit_activation_with_outcome(active.clone()).await {
+            Ok(ActivationCommitOutcome::Committed) => None,
+            Ok(ActivationCommitOutcome::DurabilityUnknown(error)) => Some(error),
+            Ok(_) => {
+                let error = PanelError::internal(
+                    "snapshot store returned an unsupported activation commit outcome",
+                );
+                Self::mark_degraded(
+                    &mut state,
+                    events.as_ref(),
+                    GatewayOperation::CommitActivation,
+                    &error,
+                );
+                return Err(error);
+            }
+            Err(error) => {
+                Self::mark_degraded(
+                    &mut state,
+                    events.as_ref(),
+                    GatewayOperation::CommitActivation,
+                    &error,
+                );
+                return Err(error);
+            }
+        };
         adapter.activate(artifact);
         state.active = Some(active);
         let removed = state
@@ -399,6 +416,20 @@ where
             revision_id: receipt.revision_id,
             prepared_count: state.prepared.len(),
         });
+
+        // The rename already made this activation visible to readers. Keep the
+        // data plane and in-memory state aligned with that namespace, then stop
+        // mutations and report the outcome as unknown until recovery verifies
+        // whichever record survived a crash.
+        if let Some(error) = durability_unknown {
+            Self::mark_degraded(
+                &mut state,
+                events.as_ref(),
+                GatewayOperation::CommitActivation,
+                &error,
+            );
+            return Err(error);
+        }
 
         // If cleanup fails the activation is intentionally reported as unknown.
         // Retrying the same token returns the persisted receipt idempotently.
@@ -651,6 +682,7 @@ mod tests {
         active: Option<ActiveSnapshotRecord>,
         prepared: HashMap<PrepareToken, PreparedSnapshotRecord>,
         fail_commit: bool,
+        commit_durability_unknown: bool,
         pause_commit: bool,
         load_error: Option<PanelError>,
     }
@@ -691,9 +723,26 @@ mod tests {
         }
 
         async fn commit_activation(&self, record: ActiveSnapshotRecord) -> Result<()> {
-            let (fail_commit, pause_commit) = {
+            match self.commit_activation_with_outcome(record).await? {
+                ActivationCommitOutcome::Committed => Ok(()),
+                ActivationCommitOutcome::DurabilityUnknown(error) => Err(error),
+                _ => Err(PanelError::internal(
+                    "snapshot store returned an unsupported activation commit outcome",
+                )),
+            }
+        }
+
+        async fn commit_activation_with_outcome(
+            &self,
+            record: ActiveSnapshotRecord,
+        ) -> Result<ActivationCommitOutcome> {
+            let (fail_commit, pause_commit, commit_durability_unknown) = {
                 let state = self.state.lock().await;
-                (state.fail_commit, state.pause_commit)
+                (
+                    state.fail_commit,
+                    state.pause_commit,
+                    state.commit_durability_unknown,
+                )
             };
             if fail_commit {
                 return Err(PanelError::storage_unavailable("injected failure"));
@@ -704,7 +753,13 @@ mod tests {
             }
             let mut state = self.state.lock().await;
             state.active = Some(record);
-            Ok(())
+            if commit_durability_unknown {
+                Ok(ActivationCommitOutcome::DurabilityUnknown(
+                    PanelError::commit_outcome_unknown("injected directory sync failure"),
+                ))
+            } else {
+                Ok(ActivationCommitOutcome::Committed)
+            }
         }
     }
 
@@ -780,6 +835,55 @@ mod tests {
                 operation: GatewayOperation::CommitActivation,
                 ..
             }
+        )));
+    }
+
+    #[tokio::test]
+    async fn unknown_commit_outcome_reconciles_the_current_namespace() {
+        let adapter = Arc::new(TestAdapter::new());
+        let store = Arc::new(MemoryStore::default());
+        let events = Arc::new(RecordingEventSink::default());
+        let engine = DurableGatewayEngine::restore_with_options(
+            Arc::clone(&adapter),
+            Arc::clone(&store),
+            DurableGatewayEngineOptions::default()
+                .with_event_sink(Arc::clone(&events) as Arc<dyn GatewayEventSink>),
+        )
+        .await
+        .unwrap();
+        let prepared = engine
+            .prepare(PrepareRequest {
+                snapshot: snapshot(1),
+            })
+            .await
+            .unwrap();
+        store.state.lock().await.commit_durability_unknown = true;
+
+        let error = engine
+            .activate(ActivateRequest {
+                prepare_token: prepared.prepare_token,
+                expected_active_hash: None,
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code.as_str(), ErrorCode::COMMIT_OUTCOME_UNKNOWN);
+        let published_hash = store
+            .state
+            .lock()
+            .await
+            .active
+            .as_ref()
+            .map(|record| record.envelope.snapshot.content_hash.clone());
+        assert_eq!(adapter.active_hash(), published_hash);
+        assert_eq!(engine.status().await.unwrap().active_hash, published_hash);
+        assert!(!engine.status().await.unwrap().ready);
+        assert!(events.0.lock().unwrap().iter().any(|event| matches!(
+            event,
+            GatewayEvent::Degraded {
+                operation: GatewayOperation::CommitActivation,
+                error_code,
+            } if error_code.as_str() == ErrorCode::COMMIT_OUTCOME_UNKNOWN
         )));
     }
 

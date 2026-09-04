@@ -22,9 +22,15 @@ pub use limits::{
 };
 
 use async_trait::async_trait;
-use atomic_file::{AtomicFilePublisher, AtomicPublishError, AtomicPublishStage, TemporaryPrefix};
+use atomic_file::{
+    AtomicFilePublisher, AtomicPublishError, AtomicPublishOutcome, AtomicPublishStage,
+    TemporaryPrefix,
+};
 use panel_domain::ContentHash;
-use panel_engine::{ActiveSnapshotRecord, PrepareToken, PreparedSnapshotRecord, SnapshotStore};
+use panel_engine::{
+    ActivationCommitOutcome, ActiveSnapshotRecord, PrepareToken, PreparedSnapshotRecord,
+    SnapshotStore,
+};
 #[cfg(test)]
 use panel_errors::ErrorCode;
 use panel_errors::{PanelError, Result};
@@ -172,15 +178,10 @@ impl FileSnapshotStore {
         usable_limits(limits)?;
         let root = root.into();
         let lease = Arc::new(StateDirectoryLease::acquire(root.clone()).await?);
-        // The scan is bounded by the same ceiling that bounds reading prepared
-        // records, so a directory stuffed with entries cannot make opening
-        // consume unbounded memory. Orphans dominate any oversized directory, so
-        // a bounded pass still drains them across successive opens.
-        Self::reclaim_abandoned_temporaries(
-            Arc::clone(&lease),
-            limits.max_prepared_directory_entries(),
-        )
-        .await?;
+        // Reclamation streams to EOF without retaining entry names. This keeps
+        // memory bounded while guaranteeing that an orphan beyond the normal
+        // prepared-entry ceiling cannot permanently prevent startup.
+        Self::reclaim_abandoned_temporaries(Arc::clone(&lease)).await?;
         Ok(Self {
             root,
             lease: Some(lease),
@@ -199,19 +200,16 @@ impl FileSnapshotStore {
     ///
     /// Reclamation runs once at open rather than on every write, so the steady
     /// state costs nothing.
-    async fn reclaim_abandoned_temporaries(
-        lease: Arc<StateDirectoryLease>,
-        max_entries: usize,
-    ) -> Result<()> {
+    async fn reclaim_abandoned_temporaries(lease: Arc<StateDirectoryLease>) -> Result<()> {
         Self::run_blocking(move || {
             let directory = lease.directory();
-            reclaim_temporaries(directory.as_ref(), max_entries)?;
+            reclaim_temporaries(directory.as_ref())?;
             if let Some(prepared) = open_child_directory(
                 directory.as_ref(),
                 OsStr::new(PREPARED_DIRECTORY_NAME),
                 false,
             )? {
-                reclaim_temporaries(&prepared, max_entries)?;
+                reclaim_temporaries(&prepared)?;
             }
             Ok(())
         })
@@ -355,7 +353,9 @@ impl SnapshotStore for FileSnapshotStore {
             let name = OsStr::new(&name);
             let bytes = encode_record(&record, codecs.as_ref(), limits.max_record_bytes())?;
             ensure_prepared_write_capacity(&prepared, name, bytes.len(), limits)?;
-            publish_record(&prepared, name, &bytes)
+            publish_record(&prepared, name, &bytes)?
+                .into_result()
+                .map_err(snapshot_outcome_unknown)
         })
         .await
     }
@@ -392,6 +392,19 @@ impl SnapshotStore for FileSnapshotStore {
     }
 
     async fn commit_activation(&self, record: ActiveSnapshotRecord) -> Result<()> {
+        match self.commit_activation_with_outcome(record).await? {
+            ActivationCommitOutcome::Committed => Ok(()),
+            ActivationCommitOutcome::DurabilityUnknown(error) => Err(error),
+            _ => Err(PanelError::internal(
+                "snapshot store returned an unsupported activation commit outcome",
+            )),
+        }
+    }
+
+    async fn commit_activation_with_outcome(
+        &self,
+        record: ActiveSnapshotRecord,
+    ) -> Result<ActivationCommitOutcome> {
         let root = self.root.clone();
         let lease = self.lease.clone();
         let codecs = Arc::clone(&self.codecs);
@@ -402,13 +415,19 @@ impl SnapshotStore for FileSnapshotStore {
             validate_active_record(&record)?;
             let directory = operation_directory(&root, lease.as_ref(), true)?
                 .expect("creating the state directory returns a handle");
-            atomic_write_record(
+            let outcome = atomic_write_record(
                 directory.as_ref(),
                 OsStr::new(ACTIVE_FILE_NAME),
                 &record,
                 codecs.as_ref(),
                 limits.max_record_bytes(),
-            )
+            )?;
+            Ok(match outcome {
+                AtomicPublishOutcome::Committed => ActivationCommitOutcome::Committed,
+                AtomicPublishOutcome::DurabilityUnknown(error) => {
+                    ActivationCommitOutcome::DurabilityUnknown(snapshot_outcome_unknown(error))
+                }
+            })
         })
         .await
     }
@@ -549,7 +568,9 @@ fn read_record<T: DeserializeOwned>(
     else {
         return Ok(None);
     };
-    codecs.decode(&bytes).map(Some)
+    codecs
+        .decode_with_max_payload_bytes(&bytes, max_record_bytes)
+        .map(Some)
 }
 
 fn read_record_bytes(
@@ -660,8 +681,7 @@ fn ensure_prepared_write_capacity(
     let projected = budget
         .consumed_bytes()
         .saturating_sub(replaced_bytes)
-        .checked_add(new_record_bytes)
-        .unwrap_or(u64::MAX);
+        .saturating_add(new_record_bytes);
     if projected > limits.max_prepared_record_bytes() {
         return Err(PanelError::resource_exhausted(format!(
             "prepared snapshot records would exceed the {} byte aggregate limit",
@@ -677,7 +697,7 @@ fn atomic_write_record<T: Serialize>(
     payload: &T,
     codecs: &SnapshotRecordCodecRegistry,
     max_record_bytes: u64,
-) -> Result<()> {
+) -> Result<AtomicPublishOutcome> {
     let bytes = encode_record(payload, codecs, max_record_bytes)?;
     publish_record(directory, name, &bytes)
 }
@@ -698,10 +718,24 @@ fn encode_record<T: Serialize>(
     Ok(bytes)
 }
 
-fn publish_record(directory: &StateDirectoryHandle, name: &OsStr, bytes: &[u8]) -> Result<()> {
+fn publish_record(
+    directory: &StateDirectoryHandle,
+    name: &OsStr,
+    bytes: &[u8],
+) -> Result<AtomicPublishOutcome> {
     AtomicFilePublisher::new(directory, SNAPSHOT_TEMPORARY_PREFIX)
         .publish_bytes(name, bytes)
         .map_err(snapshot_publish_error)
+}
+
+fn snapshot_outcome_unknown(error: AtomicPublishError) -> PanelError {
+    let (stage, path, source) = error.into_parts();
+    debug_assert_eq!(stage, AtomicPublishStage::SyncDirectory);
+    PanelError::commit_outcome_unknown(format!(
+        "snapshot record is visible, but its crash durability is unknown because {} could not be synchronized",
+        path.display()
+    ))
+    .with_source(source)
 }
 
 /// Rejects a limit set whose ceilings contradict each other.
@@ -715,9 +749,9 @@ fn usable_limits(limits: SnapshotStoreLimits) -> Result<()> {
     })
 }
 
-fn reclaim_temporaries(directory: &StateDirectoryHandle, max_entries: usize) -> Result<()> {
+fn reclaim_temporaries(directory: &StateDirectoryHandle) -> Result<()> {
     AtomicFilePublisher::new(directory, SNAPSHOT_TEMPORARY_PREFIX)
-        .reclaim_abandoned(max_entries)
+        .reclaim_abandoned()
         .map(|_reclaimed| ())
         .map_err(snapshot_publish_error)
 }

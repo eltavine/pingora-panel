@@ -46,6 +46,12 @@ DUPLICATE = diagnostic(
         {"Krate": {"name": "libc", "version": "0.2.101"}},
     ],
 )
+VULNERABILITY = diagnostic(
+    "vulnerability",
+    "error",
+    advisory={"id": "RUSTSEC-2099-0001"},
+    graphs=[{"Krate": {"name": "example", "version": "1.0.0"}}],
+)
 
 
 def write_fake_cargo(directory: Path) -> Path:
@@ -133,6 +139,16 @@ def main() -> int:
             ),
             0,
             "a complete report from a failing run",
+        )
+        expect(
+            emit(
+                binaries,
+                "\n".join([VULNERABILITY, SUMMARY]) + "\n",
+                root / "blocking-vulnerability.jsonl",
+                status="1",
+            ),
+            0,
+            "a classified vulnerability blocked by cargo-deny",
         )
 
         # No summary means cargo-deny died before evaluating the graph. Both

@@ -452,6 +452,30 @@ def check_yaml_comment_scanning() -> None:
     if quoted_run != ("cargo install tool",):
         raise AssertionError(f"quoted run key disappeared: {quoted_run}")
 
+    rejects(
+        "a flow-style run mapping",
+        lambda: ci_yaml.run_blocks(
+            "jobs:\n  check:\n    steps: [{ run: 'cargo install mutable' }]\n"
+        ),
+    )
+    rejects(
+        "a multiline flow-style run mapping",
+        lambda: ci_yaml.run_blocks(
+            "jobs:\n  check:\n    steps: [\n      {\n        run: cargo install mutable\n      }\n    ]\n"
+        ),
+    )
+    rejects(
+        "a run command supplied through a YAML alias",
+        lambda: ci_yaml.run_blocks(
+            "command: &installer cargo install mutable\nsteps:\n  - run: *installer\n"
+        ),
+    )
+    inert_flow_text = ci_yaml.run_blocks(
+        'jobs:\n  check:\n    name: "display { run: inert }"\n    steps:\n      - run: echo ok\n'
+    )
+    if inert_flow_text != ("echo ok",):
+        raise AssertionError(f"quoted flow-like text changed run extraction: {inert_flow_text}")
+
     substitutions = ci_yaml.shell_substitutions(
         'echo "$(cargo install tool)" `go install example.com/tool@latest`'
     )
@@ -528,6 +552,10 @@ def check_cargo_deny_report() -> None:
     accepts(
         "a code this guard does not interpret",
         lambda: parse(diagnostic("advisory-not-detected"), summary),
+    )
+    accepts(
+        "a classified blocking vulnerability owned by cargo-deny",
+        lambda: parse(diagnostic("vulnerability", severity="error"), summary),
     )
 
     # cargo-deny warns and exits successfully when it cannot reach an index,

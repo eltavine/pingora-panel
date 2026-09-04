@@ -12,7 +12,6 @@ on:
       - ".github/scripts/test-rust-msrv-tested.py"
       - ".github/policies/rust-msrv.json"
       - "panel/Cargo.toml"
-      - ".github/scripts/check-github-actions-pinned.sh"
       - ".github/scripts/check-ci-tools-pinned.sh"
       - ".github/scripts/check-ci-tools-pinned.py"
       - ".github/scripts/check-local-actions.py"
@@ -22,7 +21,6 @@ on:
       - ".github/scripts/check-workflow-runners-pinned.py"
       - ".github/scripts/check-workflow-path-filters.py"
       - ".github/scripts/install-shellcheck.sh"
-      - ".github/scripts/test-github-actions-pinned.sh"
       - ".github/scripts/test-ci-tools-pinned.sh"
       - ".github/scripts/test-local-actions.py"
       - ".github/scripts/test-dependabot-coverage.py"
@@ -49,7 +47,6 @@ on:
       - ".github/scripts/test-rust-msrv-tested.py"
       - ".github/policies/rust-msrv.json"
       - "panel/Cargo.toml"
-      - ".github/scripts/check-github-actions-pinned.sh"
       - ".github/scripts/check-ci-tools-pinned.sh"
       - ".github/scripts/check-ci-tools-pinned.py"
       - ".github/scripts/check-local-actions.py"
@@ -59,7 +56,6 @@ on:
       - ".github/scripts/check-workflow-runners-pinned.py"
       - ".github/scripts/check-workflow-path-filters.py"
       - ".github/scripts/install-shellcheck.sh"
-      - ".github/scripts/test-github-actions-pinned.sh"
       - ".github/scripts/test-ci-tools-pinned.sh"
       - ".github/scripts/test-local-actions.py"
       - ".github/scripts/test-dependabot-coverage.py"
@@ -84,19 +80,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  immutable-references:
-    name: Immutable external references
+  workflow-security:
+    name: Workflow security analysis
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
-      - name: Self-test Action pinning guard
-        run: bash .github/scripts/test-github-actions-pinned.sh
-
-      - name: Reject mutable Action references
-        run: bash .github/scripts/check-github-actions-pinned.sh
+      - name: Audit workflows with zizmor
+        uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2
+        with:
+          advanced-security: false
+          annotations: true
+          online-audits: false
+          version: 1.29.0
+          inputs: .github/workflows
 
       - name: Self-test CI tool pinning guard
         run: bash .github/scripts/test-ci-tools-pinned.sh
@@ -117,6 +118,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Self-test shared policy primitives
         run: python3 .github/scripts/test-policy-primitives.py
@@ -134,6 +137,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Self-test Dependabot coverage guard
         run: python3 .github/scripts/test-dependabot-coverage.py
@@ -148,6 +153,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Self-test workflow path-filter guard
         run: python3 .github/scripts/test-workflow-path-filters.py
@@ -162,6 +169,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Self-test runner label guard
         run: python3 .github/scripts/test-workflow-runners-pinned.py
@@ -176,6 +185,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Self-test workflow execution policy
         run: python3 .github/scripts/test-workflow-execution-policy.py
@@ -190,6 +201,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Self-test Rust toolchain policy
         run: python3 .github/scripts/test-rust-toolchains-pinned.py
@@ -210,6 +223,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install checksum-verified ShellCheck 0.11.0
         run: |
@@ -226,6 +241,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install Go 1.25.13
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7

@@ -19,6 +19,7 @@ impl ErrorCode {
     pub const UNSUPPORTED_CAPABILITY: &'static str = "UNSUPPORTED_CAPABILITY";
     pub const PREPARE_FAILED: &'static str = "PREPARE_FAILED";
     pub const ACTIVATE_FAILED: &'static str = "ACTIVATE_FAILED";
+    pub const COMMIT_OUTCOME_UNKNOWN: &'static str = "COMMIT_OUTCOME_UNKNOWN";
     pub const STORAGE_UNAVAILABLE: &'static str = "STORAGE_UNAVAILABLE";
     pub const CORRUPT_STATE: &'static str = "CORRUPT_STATE";
     pub const RESOURCE_EXHAUSTED: &'static str = "RESOURCE_EXHAUSTED";
@@ -226,6 +227,12 @@ impl PanelError {
 
     pub fn activate_failed(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::ACTIVATE_FAILED, message)
+    }
+
+    /// Reports that publication reached the atomic namespace replacement, but
+    /// the containing directory could not be synchronized.
+    pub fn commit_outcome_unknown(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::COMMIT_OUTCOME_UNKNOWN, message).retryable(true)
     }
 
     pub fn storage_unavailable(message: impl Into<String>) -> Self {

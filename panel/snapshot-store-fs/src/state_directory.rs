@@ -177,6 +177,27 @@ impl StateDirectoryHandle {
         }
     }
 
+    /// Visits every entry without retaining the directory contents in memory.
+    ///
+    /// This is reserved for crash reclamation while the caller holds exclusive
+    /// ownership of the directory. Capacity checks should keep using
+    /// `read_entry_names`, whose entry ceiling also bounds their work.
+    pub(crate) fn visit_entry_names(&self, mut visitor: impl FnMut(&OsStr)) -> io::Result<()> {
+        #[cfg(any(target_os = "linux", target_vendor = "apple"))]
+        {
+            self.visit_entry_names_from_descriptor(&mut visitor)
+        }
+        #[cfg(all(unix, not(target_os = "linux"), not(target_vendor = "apple")))]
+        {
+            let anchored_path = PathBuf::from(format!("/dev/fd/{}", self.file.as_raw_fd()));
+            visit_entry_names_from_path(&anchored_path, visitor)
+        }
+        #[cfg(not(unix))]
+        {
+            visit_entry_names_from_path(&self.logical_path, visitor)
+        }
+    }
+
     pub(crate) fn open_readonly_record(&self, name: &OsStr) -> io::Result<Option<File>> {
         validate_name(name)?;
         #[cfg(unix)]
@@ -354,6 +375,54 @@ impl StateDirectoryHandle {
         }
         Ok(names)
     }
+
+    #[cfg(any(target_os = "linux", target_vendor = "apple"))]
+    fn visit_entry_names_from_descriptor(
+        &self,
+        visitor: &mut impl FnMut(&OsStr),
+    ) -> io::Result<()> {
+        let descriptor = self
+            .open_at(
+                OsStr::new("."),
+                libc::O_RDONLY
+                    | libc::O_CLOEXEC
+                    | libc::O_DIRECTORY
+                    | libc::O_NOFOLLOW
+                    | libc::O_NONBLOCK,
+                0,
+            )?
+            .into_raw_fd();
+        // SAFETY: ownership of the newly opened descriptor transfers to the
+        // directory stream on success. No other File retains this descriptor.
+        let stream = unsafe { libc::fdopendir(descriptor) };
+        if stream.is_null() {
+            let error = io::Error::last_os_error();
+            // SAFETY: fdopendir did not take ownership when it returned null.
+            let _ = unsafe { libc::close(descriptor) };
+            return Err(error);
+        }
+        let stream = OwnedDirectoryStream(stream);
+        loop {
+            clear_errno();
+            // SAFETY: the stream remains owned and open for this call. readdir's
+            // returned entry is consumed before the next call mutates its buffer.
+            let entry = unsafe { libc::readdir(stream.0) };
+            if entry.is_null() {
+                let error = current_errno();
+                return if error == 0 {
+                    Ok(())
+                } else {
+                    Err(io::Error::from_raw_os_error(error))
+                };
+            }
+            // SAFETY: POSIX requires d_name to be NUL-terminated for a successful
+            // readdir call and the entry remains valid until the next call.
+            let bytes = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) }.to_bytes();
+            if bytes != b"." && bytes != b".." {
+                visitor(OsStr::from_bytes(bytes));
+            }
+        }
+    }
 }
 
 #[cfg(any(
@@ -365,6 +434,18 @@ fn read_entry_names_from_path(path: &Path, max_entries: usize) -> io::Result<Vec
         .take(max_entries)
         .map(|entry| entry.map(|entry| entry.file_name()))
         .collect()
+}
+
+#[cfg(any(
+    not(unix),
+    all(unix, not(target_os = "linux"), not(target_vendor = "apple"))
+))]
+fn visit_entry_names_from_path(path: &Path, mut visitor: impl FnMut(&OsStr)) -> io::Result<()> {
+    for entry in fs::read_dir(path)? {
+        let name = entry?.file_name();
+        visitor(&name);
+    }
+    Ok(())
 }
 
 #[cfg(any(target_os = "linux", target_vendor = "apple"))]

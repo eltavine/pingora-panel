@@ -1,8 +1,11 @@
-"""Minimal, quote-aware scanning of CI YAML without a YAML dependency.
+"""Small, quote-aware extraction of shell declarations from CI YAML.
 
-Three guards need to read `uses:` and `run:` declarations out of workflow files
-on a runner that has only the standard library. Sharing the scanner keeps their
-notion of "what is a comment" and "what is one logical line" identical.
+Workflow syntax and security are delegated to actionlint and zizmor. The
+remaining policy guards need only the active ``run:`` source so they can enforce
+repository-specific installer and toolchain rules on a standard-library-only
+runner. Sharing this narrow extraction keeps their notion of comments,
+continuations, and scalar folding identical without reimplementing a YAML
+validator.
 """
 
 from __future__ import annotations
@@ -18,6 +21,9 @@ _RUN_KEY = r'(?:run|"run"|\'run\')'
 _RUN_PREFIX = re.compile(rf"(?:-\s*)?{_RUN_KEY}\s*:\s*(.*)$")
 _RUN_DECLARATION = re.compile(rf"^(\s*)(?:-\s*)?{_RUN_KEY}\s*:\s*(.*)$")
 _BLOCK_SCALAR = re.compile(r"[|>](?:[1-9][+-]?|[+-][1-9]?)?")
+_FLOW_START = re.compile(
+    r"^\s*(?:-\s*)?(?:(?:[\"']?[A-Za-z0-9_-]+[\"']?)\s*:\s*)?[\[{]"
+)
 
 
 def strip_comment(line: str) -> str:
@@ -51,6 +57,53 @@ def strip_comment(line: str) -> str:
     return line
 
 
+def _flow_run_key(line: str, initial_depth: int) -> tuple[bool, int]:
+    """Report a ``run`` key inside a YAML flow collection.
+
+    The policy parser intentionally supports a restricted block-style subset
+    instead of attempting to implement YAML. Flow collections containing shell
+    are therefore rejected rather than silently omitted. Quote tracking keeps
+    command or display text such as ``name: "{ run: inert }"`` inert.
+    """
+    code = strip_comment(line)
+    if initial_depth == 0 and _FLOW_START.match(code) is None:
+        return False, 0
+    depth = initial_depth
+    index = 0
+    single_quoted = False
+    double_quoted = False
+    while index < len(code):
+        character = code[index]
+        if not single_quoted and not double_quoted and depth > 0:
+            match = re.match(r'(?:run|"run"|\'run\')\s*:', code[index:])
+            if match is not None:
+                return True, depth
+        if character == "\\" and double_quoted:
+            index += 2
+            continue
+        if character == "'" and not double_quoted:
+            single_quoted = not single_quoted
+            index += 1
+            continue
+        if character == '"' and not single_quoted:
+            double_quoted = not double_quoted
+            index += 1
+            continue
+        if single_quoted or double_quoted:
+            index += 1
+            continue
+        if character in "[{":
+            depth += 1
+            index += 1
+            continue
+        if character in "]}":
+            depth = max(0, depth - 1)
+            index += 1
+            continue
+        index += 1
+    return False, depth
+
+
 @dataclass(frozen=True)
 class LogicalLine:
     """One backslash-joined logical line, tagged with where it started."""
@@ -72,7 +125,13 @@ def run_blocks(text: str) -> tuple[str, ...]:
     lines = text.splitlines()
     commands: list[str] = []
     index = 0
+    flow_depth = 0
     while index < len(lines):
+        flow_run, flow_depth = _flow_run_key(lines[index], flow_depth)
+        if flow_run:
+            raise PolicyError(
+                "flow-style YAML containing run is unsupported; use a block-style run mapping"
+            )
         match = _RUN_DECLARATION.match(lines[index])
         if match is None:
             index += 1
@@ -80,6 +139,10 @@ def run_blocks(text: str) -> tuple[str, ...]:
 
         run_indent = len(match.group(1))
         value = match.group(2).strip()
+        if value.startswith(("&", "*", "!")):
+            raise PolicyError(
+                "YAML anchors, aliases, and tags are unsupported for run values"
+            )
         scalar = _BLOCK_SCALAR.fullmatch(value)
         if scalar is None:
             commands.append(value)

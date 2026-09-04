@@ -131,6 +131,19 @@ impl SnapshotRecordCodecRegistry {
     }
 
     pub fn decode<T: DeserializeOwned>(&self, record: &[u8]) -> Result<T> {
+        self.decode_with_max_payload_bytes(record, u64::MAX)
+    }
+
+    /// Decodes a record while bounding the bytes produced by a versioned
+    /// reader before deserialization. The bound is deliberately applied after
+    /// the reader returns: a future codec may legitimately expand a compact
+    /// representation, but it must not be able to bypass the store's resource
+    /// policy through that expansion.
+    pub fn decode_with_max_payload_bytes<T: DeserializeOwned>(
+        &self,
+        record: &[u8],
+        max_payload_bytes: u64,
+    ) -> Result<T> {
         let header: DiskRecordHeader = serde_json::from_slice(record).map_err(|error| {
             PanelError::corrupt_state("invalid snapshot record envelope").with_source(error)
         })?;
@@ -145,6 +158,12 @@ impl SnapshotRecordCodecRegistry {
             contain_codec_panic("snapshot record codec panicked while decoding", || {
                 codec.decode_payload(record)
             })??;
+        let payload_bytes = u64::try_from(payload.len()).unwrap_or(u64::MAX);
+        if payload_bytes > max_payload_bytes {
+            return Err(PanelError::resource_exhausted(format!(
+                "decoded snapshot payload exceeds the {max_payload_bytes} byte limit"
+            )));
+        }
         serde_json::from_slice(&payload).map_err(|error| {
             PanelError::corrupt_state("invalid snapshot record payload").with_source(error)
         })
@@ -291,6 +310,18 @@ mod tests {
             r#"{"format_version":1,"payload":["value"]}"#
         );
         assert_eq!(registry.decode::<Vec<String>>(&encoded).unwrap(), ["value"]);
+    }
+
+    #[test]
+    fn bounded_decode_rejects_reader_output_over_the_resource_limit() {
+        let registry = SnapshotRecordCodecRegistry::default();
+        let encoded = registry.encode(&vec!["value"]).unwrap();
+
+        let error = registry
+            .decode_with_max_payload_bytes::<Vec<String>>(&encoded, 1)
+            .unwrap_err();
+
+        assert_eq!(error.code.as_str(), ErrorCode::RESOURCE_EXHAUSTED);
     }
 
     #[test]

@@ -33,6 +33,14 @@
       "fingerprints": [
         "665fd57a7143bce3a37cdac9a9f8ac6f8f7e03c3:panel/panel-contracts/src/lib.rs:generic-api-key:74"
       ]
+    },
+    {
+      "owner": "pingora-panel-security",
+      "reason": "False positive: this exact synthetic high-entropy string is committed solely to prove that the Gitleaks CI self-test detects a finding and redacts its value; it is not a credential.",
+      "expires_on": "2027-03-01",
+      "fingerprints": [
+        "331b184bdecc5f1a41fce0e9ea9406bc6bc0a47b:.github/scripts/test-gitleaks-secret-scan.sh:generic-api-key:28"
+      ]
     }
   ]
 }

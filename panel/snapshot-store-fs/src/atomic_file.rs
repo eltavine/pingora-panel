@@ -28,6 +28,23 @@ pub(crate) struct AtomicPublishError {
     source: io::Error,
 }
 
+/// Whether atomic publication is durably committed or visible with unknown
+/// crash durability.
+#[derive(Debug)]
+pub(crate) enum AtomicPublishOutcome {
+    Committed,
+    DurabilityUnknown(AtomicPublishError),
+}
+
+impl AtomicPublishOutcome {
+    pub(crate) fn into_result(self) -> Result<(), AtomicPublishError> {
+        match self {
+            Self::Committed => Ok(()),
+            Self::DurabilityUnknown(error) => Err(error),
+        }
+    }
+}
+
 impl AtomicPublishError {
     pub(crate) fn into_parts(self) -> (AtomicPublishStage, PathBuf, io::Error) {
         (self.stage, self.path, self.source)
@@ -118,21 +135,29 @@ impl<'a> AtomicFilePublisher<'a> {
     ///
     /// Individual removal failures are tolerated, because reclaiming is
     /// opportunistic and must never keep a healthy store from opening.
-    pub(crate) fn reclaim_abandoned(
-        &self,
-        max_entries: usize,
-    ) -> Result<usize, AtomicPublishError> {
-        let names = self
-            .directory
-            .read_entry_names(max_entries)
-            .map_err(|source| {
-                publish_error(AtomicPublishStage::Reclaim, self.directory.path(), source)
-            })?;
-        let reclaimed = names
-            .iter()
-            .filter(|name| self.temporary_prefix.claims(name))
-            .filter(|name| self.directory.remove_file(name).is_ok())
-            .count();
+    pub(crate) fn reclaim_abandoned(&self) -> Result<usize, AtomicPublishError> {
+        let mut reclaimed = 0;
+        loop {
+            let mut reclaimed_this_pass = 0;
+            self.directory
+                .visit_entry_names(|name| {
+                    if self.temporary_prefix.claims(name)
+                        && self.directory.remove_file(name).is_ok()
+                    {
+                        reclaimed_this_pass += 1;
+                    }
+                })
+                .map_err(|source| {
+                    publish_error(AtomicPublishStage::Reclaim, self.directory.path(), source)
+                })?;
+            reclaimed += reclaimed_this_pass;
+            // Mutation during readdir can make enumeration order
+            // implementation-defined. Re-open after every productive pass so
+            // no orphan skipped by an unlink can survive indefinitely.
+            if reclaimed_this_pass == 0 {
+                break;
+            }
+        }
         if reclaimed > 0 {
             self.directory.sync().map_err(|source| {
                 publish_error(
@@ -149,7 +174,7 @@ impl<'a> AtomicFilePublisher<'a> {
         &self,
         destination: &OsStr,
         contents: &[u8],
-    ) -> Result<(), AtomicPublishError> {
+    ) -> Result<AtomicPublishOutcome, AtomicPublishError> {
         self.publish_with(destination, |file| file.write_all(contents))
     }
 
@@ -157,7 +182,16 @@ impl<'a> AtomicFilePublisher<'a> {
         &self,
         destination: &OsStr,
         write: impl FnOnce(&mut File) -> io::Result<()>,
-    ) -> Result<(), AtomicPublishError> {
+    ) -> Result<AtomicPublishOutcome, AtomicPublishError> {
+        self.publish_with_directory_sync(destination, write, || self.directory.sync())
+    }
+
+    fn publish_with_directory_sync(
+        &self,
+        destination: &OsStr,
+        write: impl FnOnce(&mut File) -> io::Result<()>,
+        sync_directory: impl FnOnce() -> io::Result<()>,
+    ) -> Result<AtomicPublishOutcome, AtomicPublishError> {
         let temporary_name = self.temporary_prefix.name_for(Uuid::new_v4());
         let temporary_name = OsStr::new(&temporary_name);
         let temporary_path = self.directory.path_for(temporary_name);
@@ -180,13 +214,14 @@ impl<'a> AtomicFilePublisher<'a> {
                 .map_err(|source| {
                     publish_error(AtomicPublishStage::Activate, &destination_path, source)
                 })?;
-            self.directory.sync().map_err(|source| {
-                publish_error(
+            match sync_directory() {
+                Ok(()) => Ok(AtomicPublishOutcome::Committed),
+                Err(source) => Ok(AtomicPublishOutcome::DurabilityUnknown(publish_error(
                     AtomicPublishStage::SyncDirectory,
                     self.directory.path(),
                     source,
-                )
-            })
+                ))),
+            }
         })();
 
         if result.is_err() {
@@ -250,6 +285,32 @@ mod tests {
     }
 
     #[test]
+    fn directory_sync_failure_reports_unknown_after_replacement() {
+        let temporary = TemporaryDirectory::new();
+        let directory = temporary.open();
+        fs::write(temporary.0.join("record"), b"old contents").unwrap();
+        let publisher = AtomicFilePublisher::new(&directory, TemporaryPrefix::new(".failure-"));
+
+        let outcome = publisher
+            .publish_with_directory_sync(
+                OsStr::new("record"),
+                |file| file.write_all(b"new contents"),
+                || Err(io::Error::other("injected directory sync failure")),
+            )
+            .unwrap();
+
+        let AtomicPublishOutcome::DurabilityUnknown(error) = outcome else {
+            panic!("directory sync failure must preserve the ambiguous outcome");
+        };
+        assert_eq!(error.stage, AtomicPublishStage::SyncDirectory);
+        assert_eq!(
+            fs::read(temporary.0.join("record")).unwrap(),
+            b"new contents"
+        );
+        assert_eq!(fs::read_dir(&temporary.0).unwrap().count(), 1);
+    }
+
+    #[test]
     fn activation_failure_removes_the_unpublished_temporary_file() {
         let temporary = TemporaryDirectory::new();
         let directory = temporary.open();
@@ -283,7 +344,7 @@ mod tests {
         }
 
         let reclaimed = AtomicFilePublisher::new(&directory, prefix)
-            .reclaim_abandoned(usize::MAX)
+            .reclaim_abandoned()
             .unwrap();
 
         assert_eq!(reclaimed, 2);
@@ -311,7 +372,7 @@ mod tests {
         fs::write(temporary.0.join("active.json"), b"{}").unwrap();
 
         let reclaimed = AtomicFilePublisher::new(&directory, TemporaryPrefix::new(".record-"))
-            .reclaim_abandoned(usize::MAX)
+            .reclaim_abandoned()
             .unwrap();
 
         assert_eq!(reclaimed, 0);
@@ -330,11 +391,31 @@ mod tests {
         assert!(temporary.0.join(&abandoned).exists());
 
         let reclaimed = AtomicFilePublisher::new(&directory, prefix)
-            .reclaim_abandoned(usize::MAX)
+            .reclaim_abandoned()
             .unwrap();
 
         assert_eq!(reclaimed, 1);
         assert!(!temporary.0.join(&abandoned).exists());
+    }
+
+    #[test]
+    fn reclaiming_scans_past_the_normal_entry_budget() {
+        let temporary = TemporaryDirectory::new();
+        let directory = temporary.open();
+        let prefix = TemporaryPrefix::new(".record-");
+        for index in 0..128 {
+            fs::write(temporary.0.join(format!("record-{index:03}.json")), b"{}").unwrap();
+        }
+        let abandoned = prefix.name_for(Uuid::new_v4());
+        directory.create_new_file(OsStr::new(&abandoned)).unwrap();
+
+        let reclaimed = AtomicFilePublisher::new(&directory, prefix)
+            .reclaim_abandoned()
+            .unwrap();
+
+        assert_eq!(reclaimed, 1);
+        assert!(!temporary.0.join(abandoned).exists());
+        assert_eq!(fs::read_dir(&temporary.0).unwrap().count(), 128);
     }
 
     #[cfg(unix)]
@@ -348,6 +429,8 @@ mod tests {
 
         AtomicFilePublisher::new(&directory, TemporaryPrefix::new(".record-"))
             .publish_bytes(OsStr::new("record"), b"new contents")
+            .unwrap()
+            .into_result()
             .unwrap();
 
         assert_eq!(fs::read(external).unwrap(), b"external contents");
@@ -370,6 +453,8 @@ mod tests {
 
         AtomicFilePublisher::new(&directory, TemporaryPrefix::new(".record-"))
             .publish_bytes(OsStr::new("record"), b"new contents")
+            .unwrap()
+            .into_result()
             .unwrap();
 
         assert_eq!(fs::read(external).unwrap(), b"external contents");
