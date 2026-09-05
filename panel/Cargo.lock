@@ -666,6 +666,7 @@ dependencies = [
 name = "gatewayd"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "futures-util",
  "gateway-grpc",
  "gateway-pingora",
@@ -1177,7 +1178,6 @@ dependencies = [
  "panel-engine",
  "panel-errors",
  "panel-ir",
- "snapshot-store-fs",
  "tokio",
  "tokio-util",
  "uuid",

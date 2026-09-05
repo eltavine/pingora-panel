@@ -12,19 +12,22 @@ All notable changes to this project will be documented in this file.
 ### Reliability
 
 * Run prepare and abort mutations in request-independent tasks, preventing client cancellation from leaving durable and in-memory state out of sync.
-* Serialize durable mutations through a supervised `TaskTracker` executor and drain in-flight transactions during gateway shutdown.
+* Bound durable mutation admission with validated semaphore capacity, serialize admitted transactions, and drain them through a supervised `TaskTracker` during gateway shutdown.
 * Keep read-only status requests responsive while prepare, activate, or abort is waiting on storage I/O.
 * Make connector timeout tests deterministic and apply connection deadlines to custom L4 connectors.
 * Add an adapter-neutral recovery diagnostics monitor for completed recoveries, degraded transitions, and unknown activation commit outcomes.
 * Expose recovery counters through an additive gRPC status field backed by the stable engine diagnostics port.
 * Keep codec registration additive and migration-safe through explicit reader-version compatibility tests.
 * Add committed v2 snapshot fixtures, downgrade rejection, and v1-to-v2 reopen migration coverage.
+* Verify activate cancellation and unknown commit recovery against the real filesystem store, including idempotent retry after restart.
+* Assert recovery diagnostics through the generated gRPC client in healthy, restored, and corrupt-LKG processes.
 
 ### CI
 
 * Keep one cargo-deny report per workspace and reuse it across policy guards for deterministic dependency findings.
 * Add a self-tested contract that keeps cargo-deny and shared-report dependency resolution on the same approved Rust toolchain.
-* Prepare the untracked upstream lockfile with the patched `time` floor before every upstream security lane runs.
+* Resolve the untracked upstream lockfile with the patched `time` floor before every upstream security lane runs.
+* Add a hermetic resolver self-test covering patched, no-op, invalid-manifest, and Cargo-failure paths.
 
 ## [0.8.0](https://github.com/cloudflare/pingora/compare/0.7.0...0.8.0) - 2026-03-02
 

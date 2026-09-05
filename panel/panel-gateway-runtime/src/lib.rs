@@ -18,7 +18,10 @@ pub use events::{
     GatewayRequestOperation, GatewayRequestOutcome, NoopGatewayEventSink,
     PanicIsolatedGatewayEventSink,
 };
-pub use mutation::GatewayMutationExecutor;
+pub use mutation::{
+    GatewayMutationCapacity, GatewayMutationExecutor, DEFAULT_MAX_PENDING_MUTATIONS,
+    MAX_PENDING_MUTATIONS,
+};
 pub use prepared_policy::{
     PreparedSnapshotAdmissionPolicy, PreparedSnapshotBudget, PreparedSnapshotUsage,
     DEFAULT_MAX_OUTSTANDING_PREPARES, DEFAULT_MAX_PREPARED_SNAPSHOT_BYTES,
@@ -639,7 +642,7 @@ where
                 Arc::clone(&self.prepared_policy),
                 Arc::clone(&self.events),
                 request,
-            ))
+            ))?
             .await
             .map_err(|error| PanelError::internal("prepare task failed").with_source(error))?
     }
@@ -652,7 +655,7 @@ where
                 Arc::clone(&self.state),
                 Arc::clone(&self.events),
                 request,
-            ))
+            ))?
             .await
             .map_err(|error| PanelError::internal("activation task failed").with_source(error))?
     }
@@ -664,7 +667,7 @@ where
                 Arc::clone(&self.state),
                 Arc::clone(&self.events),
                 token,
-            ))
+            ))?
             .await
             .map_err(|error| PanelError::internal("abort task failed").with_source(error))?
     }

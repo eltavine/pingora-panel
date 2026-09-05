@@ -201,6 +201,10 @@ async fn generated_client_applies_and_restores_a_snapshot_over_tcp() {
     assert!(status.error.is_none());
     assert_eq!(status.active_revision_id, 1);
     assert_eq!(status.prepared_count, 0);
+    let recovery = status.recovery.as_ref().unwrap();
+    assert_eq!(recovery.recovery_completed, 1);
+    assert_eq!(recovery.degraded_events, 0);
+    assert_eq!(recovery.unknown_commit_outcomes, 0);
     let runtime = status.runtime.as_ref().unwrap();
     assert_eq!(runtime.gateway_version, env!("CARGO_PKG_VERSION"));
     assert_eq!(runtime.data_plane_version, "0.8.0");
@@ -226,6 +230,10 @@ async fn generated_client_applies_and_restores_a_snapshot_over_tcp() {
     assert!(restored.error.is_none());
     assert_eq!(restored.active_revision_id, 1);
     assert_eq!(restored.active_hash, activated.active_hash);
+    let recovery = restored.recovery.as_ref().unwrap();
+    assert_eq!(recovery.recovery_completed, 1);
+    assert_eq!(recovery.degraded_events, 0);
+    assert_eq!(recovery.unknown_commit_outcomes, 0);
     assert_eq!(
         restored.health.unwrap().state,
         common::health_status::State::Ready as i32
@@ -261,6 +269,10 @@ async fn corrupt_lkg_reports_not_serving_while_status_remains_available() {
         .unwrap()
         .into_inner();
     assert!(status.error.is_none());
+    let recovery = status.recovery.as_ref().unwrap();
+    assert_eq!(recovery.recovery_completed, 1);
+    assert_eq!(recovery.degraded_events, 1);
+    assert_eq!(recovery.unknown_commit_outcomes, 0);
     assert_eq!(
         status.health.unwrap().state,
         common::health_status::State::NotReady as i32

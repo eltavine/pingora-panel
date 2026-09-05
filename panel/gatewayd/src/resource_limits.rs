@@ -7,8 +7,8 @@ use gateway_grpc::{
 };
 use panel_errors::{PanelError, Result};
 use panel_gateway_runtime::{
-    PreparedSnapshotBudget, DEFAULT_MAX_OUTSTANDING_PREPARES, DEFAULT_MAX_PREPARED_SNAPSHOT_BYTES,
-    DEFAULT_MAX_TOTAL_PREPARED_BYTES,
+    GatewayMutationCapacity, PreparedSnapshotBudget, DEFAULT_MAX_OUTSTANDING_PREPARES,
+    DEFAULT_MAX_PREPARED_SNAPSHOT_BYTES, DEFAULT_MAX_TOTAL_PREPARED_BYTES,
 };
 use std::{ffi::OsStr, num::NonZeroUsize, time::Duration};
 
@@ -23,6 +23,7 @@ pub const MAX_PREPARED_SNAPSHOTS_ENV: &str = "PINGORA_PANEL_MAX_PREPARED_SNAPSHO
 pub const MAX_PREPARED_SNAPSHOT_BYTES_ENV: &str = "PINGORA_PANEL_MAX_PREPARED_SNAPSHOT_BYTES";
 pub const MAX_TOTAL_PREPARED_BYTES_ENV: &str = "PINGORA_PANEL_MAX_TOTAL_PREPARED_BYTES";
 pub const EVENT_BUFFER_CAPACITY_ENV: &str = "PINGORA_PANEL_EVENT_BUFFER_CAPACITY";
+pub const MUTATION_CAPACITY_ENV: &str = "PINGORA_PANEL_MAX_PENDING_MUTATIONS";
 pub const MAX_REQUEST_ID_BYTES_ENV: &str = "PINGORA_PANEL_MAX_REQUEST_ID_BYTES";
 pub const MAX_CORRELATION_ID_BYTES_ENV: &str = "PINGORA_PANEL_MAX_CORRELATION_ID_BYTES";
 pub const MAX_ACTOR_BYTES_ENV: &str = "PINGORA_PANEL_MAX_ACTOR_BYTES";
@@ -38,6 +39,7 @@ pub struct GatewayResourceLimits {
     prepared: PreparedSnapshotBudget,
     deadline_requirement: DeadlineRequirement,
     event_buffer_capacity: NonZeroUsize,
+    mutation_capacity: GatewayMutationCapacity,
     request_metadata: GatewayRequestMetadataLimits,
 }
 
@@ -58,6 +60,7 @@ impl GatewayResourceLimits {
             prepared,
             deadline_requirement,
             event_buffer_capacity,
+            mutation_capacity: GatewayMutationCapacity::default(),
             request_metadata: GatewayRequestMetadataLimits::default(),
         })
     }
@@ -67,6 +70,11 @@ impl GatewayResourceLimits {
         request_metadata: GatewayRequestMetadataLimits,
     ) -> Self {
         self.request_metadata = request_metadata;
+        self
+    }
+
+    pub fn with_mutation_capacity(mut self, mutation_capacity: GatewayMutationCapacity) -> Self {
+        self.mutation_capacity = mutation_capacity;
         self
     }
 
@@ -123,6 +131,13 @@ impl GatewayResourceLimits {
             EVENT_BUFFER_CAPACITY_ENV,
         )?
         .unwrap_or(DEFAULT_EVENT_BUFFER_CAPACITY);
+        let mutation_capacity = GatewayMutationCapacity::new(
+            parse_optional_usize(
+                lookup(MUTATION_CAPACITY_ENV).as_deref(),
+                MUTATION_CAPACITY_ENV,
+            )?
+            .unwrap_or_else(|| GatewayMutationCapacity::default().get()),
+        )?;
 
         let request_metadata = parse_request_metadata_limits(&mut lookup)?;
 
@@ -132,6 +147,7 @@ impl GatewayResourceLimits {
             deadline_requirement,
             event_buffer_capacity,
         )?
+        .with_mutation_capacity(mutation_capacity)
         .with_request_metadata_limits(request_metadata))
     }
 
@@ -149,6 +165,10 @@ impl GatewayResourceLimits {
 
     pub fn event_buffer_capacity(self) -> usize {
         self.event_buffer_capacity.get()
+    }
+
+    pub fn mutation_capacity(self) -> GatewayMutationCapacity {
+        self.mutation_capacity
     }
 
     pub fn request_metadata_limits(self) -> GatewayRequestMetadataLimits {
@@ -245,6 +265,7 @@ mod tests {
             (MAX_TOTAL_PREPARED_BYTES_ENV, "8192"),
             (DEADLINE_REQUIREMENT_ENV, "mutations"),
             (EVENT_BUFFER_CAPACITY_ENV, "32"),
+            (MUTATION_CAPACITY_ENV, "11"),
             (MAX_REQUEST_ID_BYTES_ENV, "17"),
             (MAX_CORRELATION_ID_BYTES_ENV, "18"),
             (MAX_ACTOR_BYTES_ENV, "19"),
@@ -272,6 +293,7 @@ mod tests {
             DeadlineRequirement::Mutations
         );
         assert_eq!(limits.event_buffer_capacity(), 32);
+        assert_eq!(limits.mutation_capacity().get(), 11);
         let metadata = limits.request_metadata_limits();
         assert_eq!(metadata.request_id_bytes(), 17);
         assert_eq!(metadata.correlation_id_bytes(), 18);
@@ -293,6 +315,10 @@ mod tests {
         .is_err());
         assert!(GatewayResourceLimits::from_lookup(|key| {
             (key == MAX_REQUEST_ID_BYTES_ENV).then(|| OsString::from("0"))
+        })
+        .is_err());
+        assert!(GatewayResourceLimits::from_lookup(|key| {
+            (key == MUTATION_CAPACITY_ENV).then(|| OsString::from("0"))
         })
         .is_err());
     }

@@ -47,8 +47,8 @@ use panel_errors::Result;
 use panel_gateway_runtime::{
     BufferedGatewayEventSink, DurableGatewayEngine, DurableGatewayEngineOptions,
     FanoutGatewayEventSink, GatewayEvent, GatewayEventDeliveryMonitor, GatewayEventSink,
-    GatewayMutationExecutor, GatewayRecoveryMonitor, PreparedSnapshotAdmissionPolicy,
-    PreparedSnapshotBudget,
+    GatewayMutationCapacity, GatewayMutationExecutor, GatewayRecoveryMonitor,
+    PreparedSnapshotAdmissionPolicy, PreparedSnapshotBudget,
 };
 use snapshot_store_fs::FileSnapshotStore;
 use std::{future::Future, num::NonZeroU32, path::PathBuf, sync::Arc};
@@ -88,6 +88,7 @@ pub struct GatewaydServiceOptions {
     request_metadata_limits: GatewayRequestMetadataLimits,
     event_sinks: Vec<Arc<dyn GatewayEventSink>>,
     event_buffer_capacity: usize,
+    mutation_capacity: GatewayMutationCapacity,
 }
 
 impl GatewaydServiceOptions {
@@ -126,6 +127,11 @@ impl GatewaydServiceOptions {
         self.event_buffer_capacity = capacity;
         self
     }
+
+    pub fn with_mutation_capacity(mut self, capacity: GatewayMutationCapacity) -> Self {
+        self.mutation_capacity = capacity;
+        self
+    }
 }
 
 impl Default for GatewaydServiceOptions {
@@ -137,6 +143,7 @@ impl Default for GatewaydServiceOptions {
             request_metadata_limits: GatewayRequestMetadataLimits::default(),
             event_sinks: Vec::new(),
             event_buffer_capacity: DEFAULT_EVENT_BUFFER_CAPACITY,
+            mutation_capacity: GatewayMutationCapacity::default(),
         }
     }
 }
@@ -201,8 +208,8 @@ pub async fn build_gateway_runtime_with_options(
             "gateway event buffer capacity must be non-zero",
         ));
     }
+    let mutations = GatewayMutationExecutor::with_capacity(options.mutation_capacity);
     let background_tasks = BackgroundTaskSupervisor::new();
-    let mutations = GatewayMutationExecutor::new();
     let mutations_for_shutdown = mutations.clone();
     background_tasks.spawn_cooperative_critical(
         "gateway-mutation-drain",
@@ -327,6 +334,7 @@ pub async fn serve_gatewayd(
             .with_request_policy(request_policy)
             .with_request_metadata_limits(resource_limits.request_metadata_limits())
             .with_event_buffer_capacity(resource_limits.event_buffer_capacity())
+            .with_mutation_capacity(resource_limits.mutation_capacity())
             .with_event_sink(tracing_events),
     )
     .await?;
@@ -447,6 +455,10 @@ mod composition_tests {
 
         assert_eq!(runtime.background_tasks.task_count(), 3);
         assert_eq!(runtime.mutations.pending_tasks(), 0);
+        assert_eq!(
+            runtime.mutations.capacity(),
+            GatewayMutationCapacity::default().get()
+        );
         let status = runtime
             .services
             .gateway

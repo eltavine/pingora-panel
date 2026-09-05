@@ -27,7 +27,8 @@ on:
       - ".github/scripts/test-rust-dependency-leases.py"
       - ".github/scripts/check-security-resolver-contract.py"
       - ".github/scripts/test-security-resolver-contract.py"
-      - ".github/scripts/prepare-security-lockfile.sh"
+      - ".github/scripts/test-security-lockfile-resolver.py"
+      - ".github/scripts/resolve-security-lockfile.sh"
       - ".github/scripts/policy/**"
       - ".github/workflows/audit.yml"
   pull_request:
@@ -53,7 +54,8 @@ on:
       - ".github/scripts/test-rust-dependency-leases.py"
       - ".github/scripts/check-security-resolver-contract.py"
       - ".github/scripts/test-security-resolver-contract.py"
-      - ".github/scripts/prepare-security-lockfile.sh"
+      - ".github/scripts/test-security-lockfile-resolver.py"
+      - ".github/scripts/resolve-security-lockfile.sh"
       - ".github/scripts/policy/**"
       - ".github/workflows/audit.yml"
   schedule:
@@ -89,6 +91,9 @@ jobs:
       - name: Verify security resolver consistency
         run: python3 .github/scripts/check-security-resolver-contract.py
 
+      - name: Self-test security lockfile resolution
+        run: python3 .github/scripts/test-security-lockfile-resolver.py
+
   dependency-policy:
     name: Advisory and dependency policy (${{ matrix.workspace }})
     needs: advisory-policy
@@ -119,7 +124,7 @@ jobs:
 
       - name: Pin patched time release in upstream resolution
         if: matrix.workspace == 'upstream'
-        run: bash .github/scripts/prepare-security-lockfile.sh
+        run: bash .github/scripts/resolve-security-lockfile.sh
 
       - name: Check licenses, sources, and dependency bans
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1 / cargo-deny 0.20.2
@@ -164,7 +169,7 @@ jobs:
 
       - name: Pin patched time release in upstream resolution
         if: matrix.workspace == 'upstream'
-        run: bash .github/scripts/prepare-security-lockfile.sh
+        run: bash .github/scripts/resolve-security-lockfile.sh
 
       - name: Install cargo-deny 0.20.2
         run: cargo install --locked --version 0.20.2 cargo-deny
@@ -233,7 +238,7 @@ jobs:
 
       - name: Prepare security Cargo.lock
         if: matrix.generate_lockfile
-        run: bash .github/scripts/prepare-security-lockfile.sh
+        run: bash .github/scripts/resolve-security-lockfile.sh
 
       - name: Audit workspace
         # https://github.com/rustsec/audit-check/issues/2
