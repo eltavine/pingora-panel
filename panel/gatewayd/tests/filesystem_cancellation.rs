@@ -17,11 +17,13 @@ use snapshot_store_fs::FileSnapshotStore;
 use std::{
     collections::BTreeSet,
     fs,
+    future::Future,
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    time::Duration,
 };
 use tokio::sync::Notify;
 use uuid::Uuid;
@@ -167,6 +169,20 @@ fn snapshot(revision: u64) -> RuntimeSnapshot {
     RuntimeSnapshot::empty(RevisionId::new(revision))
 }
 
+async fn wait_until<F, Fut>(message: &'static str, mut condition: F)
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = bool>,
+{
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while !condition().await {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect(message);
+}
+
 #[tokio::test]
 async fn cancelled_prepare_finishes_the_filesystem_transaction() {
     let temporary = TemporaryDirectory::new();
@@ -192,12 +208,18 @@ async fn cancelled_prepare_finishes_the_filesystem_transaction() {
     request.abort();
     store.continue_save.notify_one();
 
-    for _ in 0..100 {
-        if store.inner.load_prepared().await.unwrap().len() == 1 {
-            break;
-        }
-        tokio::task::yield_now().await;
-    }
+    wait_until(
+        "detached prepare must complete after request cancellation",
+        || {
+            let store = Arc::clone(&store);
+            let engine = Arc::clone(&engine);
+            async move {
+                store.inner.load_prepared().await.unwrap().len() == 1
+                    && engine.status().await.unwrap().prepared_count == 1
+            }
+        },
+    )
+    .await;
     assert_eq!(store.inner.load_prepared().await.unwrap().len(), 1);
     assert_eq!(engine.status().await.unwrap().prepared_count, 1);
 }
@@ -228,12 +250,18 @@ async fn cancelled_abort_finishes_the_filesystem_transaction() {
     request.abort();
     store.continue_delete.notify_one();
 
-    for _ in 0..100 {
-        if store.inner.load_prepared().await.unwrap().is_empty() {
-            break;
-        }
-        tokio::task::yield_now().await;
-    }
+    wait_until(
+        "detached abort must complete after request cancellation",
+        || {
+            let store = Arc::clone(&store);
+            let engine = Arc::clone(&engine);
+            async move {
+                store.inner.load_prepared().await.unwrap().is_empty()
+                    && engine.status().await.unwrap().prepared_count == 0
+            }
+        },
+    )
+    .await;
     assert!(store.inner.load_prepared().await.unwrap().is_empty());
     assert_eq!(engine.status().await.unwrap().prepared_count, 0);
 }
@@ -271,16 +299,21 @@ async fn cancelled_activate_finishes_the_filesystem_transaction() {
     request.abort();
     store.continue_commit.notify_one();
 
-    tokio::time::timeout(std::time::Duration::from_secs(1), async {
-        loop {
-            if store.inner.load_active().await.unwrap().is_some() {
-                break;
+    wait_until(
+        "detached activation must complete after request cancellation",
+        || {
+            let store = Arc::clone(&store);
+            let engine = Arc::clone(&engine);
+            async move {
+                let status = engine.status().await.unwrap();
+                store.inner.load_active().await.unwrap().is_some()
+                    && store.inner.load_prepared().await.unwrap().is_empty()
+                    && status.active_revision_id == Some(RevisionId::new(1))
+                    && status.prepared_count == 0
             }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("detached activation must complete after request cancellation");
+        },
+    )
+    .await;
 
     let status = engine.status().await.unwrap();
     assert_eq!(status.active_revision_id, Some(RevisionId::new(1)));
