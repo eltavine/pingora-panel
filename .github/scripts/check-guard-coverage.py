@@ -45,6 +45,7 @@ ROLES: dict[str, tuple[str, bool, bool]] = {
     "test-": ("self-test", False, True),
     "install-": ("installer", False, True),
     "resolve-": ("baseline resolver", False, True),
+    "run-": ("workflow runner", False, True),
     "list-": ("helper", False, False),
 }
 

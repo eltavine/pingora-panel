@@ -4,6 +4,7 @@
 //! state mutex. Read-only status calls therefore never wait on storage I/O,
 //! while request cancellation cannot cancel an admitted durable mutation.
 
+use crate::mutation_lifecycle::MutationLifecycle;
 use panel_errors::{PanelError, Result};
 use std::{
     future::Future,
@@ -45,11 +46,6 @@ impl Default for GatewayMutationCapacity {
         Self::new(DEFAULT_MAX_PENDING_MUTATIONS)
             .expect("default gateway mutation capacity is valid")
     }
-}
-
-#[derive(Default)]
-struct MutationLifecycle {
-    closed: bool,
 }
 
 struct GatewayMutationExecutorInner {
@@ -104,16 +100,15 @@ impl GatewayMutationExecutor {
     }
 
     pub fn is_closed(&self) -> bool {
-        self.lifecycle().closed
+        self.lifecycle().is_closed()
     }
 
     /// Atomically stop admission before allowing the tracker to drain.
     pub fn close(&self) -> bool {
         let mut lifecycle = self.lifecycle();
-        if lifecycle.closed {
+        if !lifecycle.close() {
             return false;
         }
-        lifecycle.closed = true;
         self.inner.admission.close();
         self.inner.tasks.close();
         true
@@ -131,7 +126,7 @@ impl GatewayMutationExecutor {
         T: Send + 'static,
     {
         let lifecycle = self.lifecycle();
-        if lifecycle.closed {
+        if lifecycle.is_closed() {
             return Err(PanelError::precondition_failed(
                 "gateway mutation executor is closed",
             ));

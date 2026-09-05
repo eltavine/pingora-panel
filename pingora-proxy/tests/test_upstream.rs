@@ -14,7 +14,7 @@
 
 mod utils;
 
-use utils::server_utils::init;
+use utils::server_utils::{init, CLIENT_BIND_IP};
 use utils::websocket::{WS_ECHO, WS_ECHO_RAW};
 
 use bytes::Bytes;
@@ -42,7 +42,7 @@ async fn test_ip_binding() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let headers = res.headers();
-    assert_eq!(headers["x-client-ip"], "127.0.0.2");
+    assert_eq!(headers["x-client-ip"], CLIENT_BIND_IP);
 }
 
 #[tokio::test]

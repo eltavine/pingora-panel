@@ -56,6 +56,11 @@ use std::time::{Duration, SystemTime};
 
 pub struct ExampleProxyHttps {}
 
+/// Address configured for Pingora's outbound source binding in the integration
+/// harness. `127.0.0.2` is not available on every supported developer host,
+/// while `127.0.0.1` is portable across Linux and macOS loopback stacks.
+pub const CLIENT_BIND_IP: &str = "127.0.0.1";
+
 pub const TEST_PSK_IDENTITY: &str = "test-psk-identity";
 pub const TEST_PSK_SECRET: &str = "i2Wx8jrYVi5Vt7HSL/fsk003+PnmfcFuwWMsUyQvcZ4=";
 

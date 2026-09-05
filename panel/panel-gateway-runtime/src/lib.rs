@@ -1,4 +1,8 @@
 #![forbid(unsafe_code)]
+// `loom` is injected by the dedicated model-checking lane with RUSTFLAGS;
+// keeping it out of the public feature surface avoids coupling production
+// builds to a test-only dependency.
+#![allow(unexpected_cfgs)]
 
 //! Durable gateway use-case orchestration.
 //!
@@ -7,6 +11,7 @@
 
 mod events;
 mod mutation;
+mod mutation_lifecycle;
 mod prepared_policy;
 
 pub use events::{

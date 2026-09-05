@@ -38,9 +38,9 @@ panel-engine = { version = "=0.1.0", path = "panel-engine" }
 panel-errors = { version = "=0.1.0", path = "panel-errors" }
 panel-gateway-runtime = { version = "=0.1.0", path = "panel-gateway-runtime" }
 panel-ir = { version = "=0.1.0", path = "panel-ir" }
-pingora-core = { version = "=0.8.0", path = "../pingora-core", default-features = false }
-pingora-http = { version = "=0.8.0", path = "../pingora-http", default-features = false }
-pingora-load-balancing = { version = "=0.8.0", path = "../pingora-load-balancing", default-features = false }
+pingora-core = { version = "=0.8.1", path = "../pingora-core", default-features = false }
+pingora-http = { version = "=0.8.1", path = "../pingora-http", default-features = false }
+pingora-load-balancing = { version = "=0.8.1", path = "../pingora-load-balancing", default-features = false }
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.145"
 sha2 = "=0.10.9"

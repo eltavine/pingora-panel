@@ -1,0 +1,30 @@
+[package]
+name = "panel-fuzz"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+resolver = "2"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+panel-config-state-codec = { path = "../panel/panel-config-state-codec" }
+snapshot-store-fs = { path = "../panel/snapshot-store-fs" }
+
+[[bin]]
+name = "revision_documents"
+path = "fuzz_targets/revision_documents.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "snapshot_records"
+path = "fuzz_targets/snapshot_records.rs"
+test = false
+doc = false
+bench = false

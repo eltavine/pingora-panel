@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[dev-dependencies]
+proptest = "=1.11.0"
+
 [dependencies]
 panel-config-domain.workspace = true
 serde.workspace = true

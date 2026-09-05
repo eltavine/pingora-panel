@@ -1,0 +1,49 @@
+name: panel coverage
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "13 5 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  panel:
+    name: Panel LLVM coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake --no-install-recommends
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30
+        with:
+          toolchain: 1.98.0
+          components: llvm-tools-preview
+
+      - name: Install cargo-llvm-cov 0.9.0
+        uses: taiki-e/install-action@7b8d4719ee4aaa279bdf55df38dacb9ebfe12a6c # v2.87.6
+        with:
+          tool: cargo-llvm-cov@0.9.0
+
+      # Keep this as a reporting lane rather than a brittle percentage gate:
+      # the summary makes coverage drift visible while the test suite evolves.
+      - name: Measure panel coverage
+        run: >-
+          cargo llvm-cov
+          --manifest-path panel/Cargo.toml
+          --workspace
+          --all-features
+          --locked
+          --summary-only | tee "$GITHUB_STEP_SUMMARY"

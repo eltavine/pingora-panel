@@ -26,7 +26,19 @@
         "contents": "read"
       }
     },
+    ".github/workflows/coverage.yml": {
+      "cancel_in_progress": true,
+      "permissions": {
+        "contents": "read"
+      }
+    },
     ".github/workflows/docs.yml": {
+      "cancel_in_progress": true,
+      "permissions": {
+        "contents": "read"
+      }
+    },
+    ".github/workflows/fuzz.yml": {
       "cancel_in_progress": true,
       "permissions": {
         "contents": "read"
@@ -46,6 +58,12 @@
       }
     },
     ".github/workflows/panel.yml": {
+      "cancel_in_progress": true,
+      "permissions": {
+        "contents": "read"
+      }
+    },
+    ".github/workflows/pingora-upstream-canary.yml": {
       "cancel_in_progress": true,
       "permissions": {
         "contents": "read"

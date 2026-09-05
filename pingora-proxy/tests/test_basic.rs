@@ -28,7 +28,7 @@ use tokio::net::{TcpListener, TcpStream};
 
 use utils::server_utils::{
     downstream_cache_warn_log_calls, init, reset_suppress_proxy_warn_log_calls,
-    suppress_proxy_warn_log_calls,
+    suppress_proxy_warn_log_calls, CLIENT_BIND_IP,
 };
 
 fn is_specified_port(port: u16) -> bool {
@@ -69,7 +69,7 @@ async fn test_simple_proxy() {
         .unwrap()
         .parse::<std::net::SocketAddr>()
         .unwrap();
-    assert_eq!(sockaddr.ip().to_string(), "127.0.0.2");
+    assert_eq!(sockaddr.ip().to_string(), CLIENT_BIND_IP);
     assert!(is_specified_port(sockaddr.port()));
 
     let body = res.text().await.unwrap();
@@ -112,7 +112,7 @@ async fn test_h2_to_h1() {
         .unwrap()
         .parse::<std::net::SocketAddr>()
         .unwrap();
-    assert_eq!(sockaddr.ip().to_string(), "127.0.0.2");
+    assert_eq!(sockaddr.ip().to_string(), CLIENT_BIND_IP);
     assert!(is_specified_port(sockaddr.port()));
 
     let body = res.text().await.unwrap();
@@ -155,7 +155,7 @@ async fn test_h2_to_h2() {
         .unwrap()
         .parse::<std::net::SocketAddr>()
         .unwrap();
-    assert_eq!(sockaddr.ip().to_string(), "127.0.0.2");
+    assert_eq!(sockaddr.ip().to_string(), CLIENT_BIND_IP);
     assert!(is_specified_port(sockaddr.port()));
 
     let body = res.text().await.unwrap();
@@ -326,7 +326,7 @@ async fn test_simple_proxy_uds() {
         .unwrap()
         .parse::<std::net::SocketAddr>()
         .unwrap();
-    assert_eq!(sockaddr.ip().to_string(), "127.0.0.2");
+    assert_eq!(sockaddr.ip().to_string(), CLIENT_BIND_IP);
     assert!(is_specified_port(sockaddr.port()));
 
     let body = http_body_util::BodyExt::collect(body)

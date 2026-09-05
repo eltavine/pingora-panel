@@ -207,7 +207,7 @@ async fn generated_client_applies_and_restores_a_snapshot_over_tcp() {
     assert_eq!(recovery.unknown_commit_outcomes, 0);
     let runtime = status.runtime.as_ref().unwrap();
     assert_eq!(runtime.gateway_version, env!("CARGO_PKG_VERSION"));
-    assert_eq!(runtime.data_plane_version, "0.8.0");
+    assert_eq!(runtime.data_plane_version, "0.8.1");
     assert!(!runtime.adapter_version.is_empty());
     assert_ne!(runtime.started_at_unix_seconds, 0);
     assert_eq!(runtime.worker_count, 1);

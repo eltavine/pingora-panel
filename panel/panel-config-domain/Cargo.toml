@@ -6,3 +6,6 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish.workspace = true
+
+[dev-dependencies]
+proptest = "=1.11.0"

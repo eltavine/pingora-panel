@@ -376,6 +376,44 @@ impl Error for RevisionTransitionError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    proptest::proptest! {
+        #[test]
+        fn transition_table_is_total_for_known_values(
+            status_index in 0usize..RevisionStatus::KNOWN.len(),
+            transition_index in 0usize..RevisionTransition::KNOWN.len(),
+        ) {
+            let state = RevisionState::rehydrate(RevisionStatus::KNOWN[status_index]);
+            let transition = RevisionTransition::KNOWN[transition_index];
+            let expected = state.transition_target(transition);
+            let actual = state.transition_with_outcome(transition);
+            prop_assert_eq!(actual.as_ref().ok().map(|outcome| outcome.to_status()), expected);
+            prop_assert_eq!(actual.is_ok(), expected.is_some());
+            match actual {
+                Ok(outcome) => {
+                    prop_assert_eq!(outcome.from_status(), state.status());
+                    prop_assert_eq!(outcome.applied_transition(), transition);
+                    prop_assert_eq!(
+                        outcome.next_state(),
+                        RevisionState::rehydrate(outcome.to_status())
+                    );
+                }
+                Err(error) => {
+                    prop_assert_eq!(error.from_status(), state.status());
+                    prop_assert_eq!(error.attempted_transition(), transition);
+                }
+            }
+        }
+
+        #[test]
+        fn terminal_states_have_no_outgoing_transitions(status_index in 0usize..RevisionStatus::KNOWN.len()) {
+            let state = RevisionState::rehydrate(RevisionStatus::KNOWN[status_index]);
+            if state.status().is_terminal() {
+                prop_assert_eq!(state.allowed_transitions().count(), 0);
+            }
+        }
+    }
 
     const LEGAL: [(RevisionStatus, RevisionTransition, RevisionStatus); 16] = [
         (

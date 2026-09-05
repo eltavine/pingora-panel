@@ -1,6 +1,10 @@
 Cargo.lock
 !panel/Cargo.lock
+!fuzz/Cargo.lock
 /target
+fuzz/artifacts/
+fuzz/corpus/
+fuzz/target/
 panel/target
 **/*.rs.bk
 dhat-heap.json

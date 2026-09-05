@@ -19,16 +19,16 @@ create_package() {
 create_fixture() {
   local root="$1"
   local mode="$2"
-  local http_version="0.8.0"
-  local http_requirement='=0.8.0'
-  local reported_version="0.8.0"
+  local http_version="0.8.1"
+  local http_requirement='=0.8.1'
+  local reported_version="0.8.1"
   local core_path='../../dependencies/pingora-core'
 
   if [[ "$mode" == divergent ]]; then
     http_version="0.9.0"
     http_requirement='=0.9.0'
   elif [[ "$mode" == unpinned ]]; then
-    http_requirement='0.8.0'
+    http_requirement='0.8.1'
   elif [[ "$mode" == constant-drift ]]; then
     reported_version="0.9.0"
   elif [[ "$mode" == redirected ]]; then
@@ -38,22 +38,22 @@ create_fixture() {
   mkdir -p "$root/panel/gateway-pingora/src" "$root/dependencies"
   printf '[workspace]\nresolver = "2"\nmembers = ["gateway-pingora"]\n' \
     >"$root/panel/Cargo.toml"
-  create_package "$root/dependencies" pingora 0.8.0
-  create_package "$root/dependencies" pingora-core 0.8.0
+  create_package "$root/dependencies" pingora 0.8.1
+  create_package "$root/dependencies" pingora-core 0.8.1
   create_package "$root/dependencies" pingora-http "$http_version"
-  create_package "$root/dependencies" pingora-load-balancing 0.8.0
+  create_package "$root/dependencies" pingora-load-balancing 0.8.1
   if [[ "$mode" == redirected ]]; then
-    create_package "$root/redirected" pingora-core 0.8.0
+    create_package "$root/redirected" pingora-core 0.8.1
   fi
 
   {
     printf '[package]\nname = "gateway-pingora"\nversion = "0.1.0"\nedition = "2021"\n'
     printf '\n[dependencies]\n'
-    printf 'pingora = { version = "=0.8.0", path = "../../dependencies/pingora" }\n'
-    printf 'pingora-core = { version = "=0.8.0", path = "%s" }\n' "$core_path"
+    printf 'pingora = { version = "=0.8.1", path = "../../dependencies/pingora" }\n'
+    printf 'pingora-core = { version = "=0.8.1", path = "%s" }\n' "$core_path"
     printf 'pingora-http = { version = "%s", path = "../../dependencies/pingora-http" }\n' \
       "$http_requirement"
-    printf 'pingora-load-balancing = { version = "=0.8.0", path = "../../dependencies/pingora-load-balancing" }\n'
+    printf 'pingora-load-balancing = { version = "=0.8.1", path = "../../dependencies/pingora-load-balancing" }\n'
   } >"$root/panel/gateway-pingora/Cargo.toml"
   printf 'pub const PINGORA_PACKAGE_VERSION: &str = "%s";\n' \
     "$reported_version" >"$root/panel/gateway-pingora/src/lib.rs"

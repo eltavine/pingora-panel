@@ -343,8 +343,8 @@ mod tests {
     async fn version_and_capabilities_are_reported() {
         let adapter = PingoraGatewayAdapter::new();
         let capabilities = adapter.capabilities().await.unwrap();
-        assert_eq!(capabilities.build_version, "0.8.0");
-        assert_eq!(adapter.pingora_package_version(), "0.8.0");
+        assert_eq!(capabilities.build_version, "0.8.1");
+        assert_eq!(adapter.pingora_package_version(), "0.8.1");
         assert!(capabilities
             .capabilities
             .contains(&EngineCapability::new("activation.cas", "1")));

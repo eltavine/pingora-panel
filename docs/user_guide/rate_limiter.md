@@ -6,7 +6,7 @@ Pingora provides a crate `pingora-limits` which provides a simple and easy to us
    ```toml
    async-trait="0.1"
    pingora = { version = "0.8", features = [ "lb", "openssl" ] }
-   pingora-limits = "0.8.0"
+   pingora-limits = "0.8.1"
    once_cell = "1.19.0"
    ```
 2. Declare a global rate limiter map to store the rate limiter for each client. In this example, we use `appid`.

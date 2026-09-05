@@ -120,25 +120,9 @@ jobs:
         run: cargo check --manifest-path panel/Cargo.toml --package gateway-pingora --locked
 
   feature-matrix:
-    name: Panel features (${{ matrix.selection }})
+    name: Panel feature powerset
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - selection: default
-            arguments: ""
-          - selection: no-default
-            arguments: "--no-default-features"
-          - selection: tls
-            arguments: "--no-default-features --features tls"
-          - selection: cache
-            arguments: "--no-default-features --features cache"
-          - selection: lua
-            arguments: "--no-default-features --features lua"
-          - selection: all
-            arguments: "--all-features"
     steps:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -153,16 +137,19 @@ jobs:
         with:
           toolchain: 1.98.0
 
-      # Feature gates are reserved capability declarations, so the capability
-      # contract must execute under every selection rather than merely compile.
-      - name: Test the Pingora adapter feature selection
+      - name: Install cargo-hack 0.6.45
+        run: cargo install --locked --version 0.6.45 cargo-hack
+
+      # cargo-hack discovers new feature declarations automatically and tests
+      # the complete powerset instead of requiring a hand-maintained matrix.
+      - name: Test the Pingora adapter feature powerset
         run: >-
-          cargo test
+          cargo hack test
           --manifest-path panel/Cargo.toml
           --package gateway-pingora
           --all-targets
           --locked
-          ${{ matrix.arguments }}
+          --feature-powerset
 
   protobuf:
     name: Protobuf contracts

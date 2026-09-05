@@ -1,5 +1,7 @@
 ---
 version: 1
 client_bind_to_ipv4:
-    - 127.0.0.2
+    # Loopback aliases are not guaranteed on macOS and other local runners.
+    # Keep the binding explicit while using the portable loopback address.
+    - 127.0.0.1
 ca_file: tests/keys/server.crt

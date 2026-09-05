@@ -15,6 +15,11 @@
       "marker": "upstream-canary",
       "value": "nightly",
       "workflow": ".github/workflows/build.yml"
+    },
+    {
+      "marker": "fuzz-canary",
+      "value": "nightly",
+      "workflow": ".github/workflows/fuzz.yml"
     }
   ]
 }

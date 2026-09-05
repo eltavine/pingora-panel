@@ -10,4 +10,4 @@ mod adapter;
 pub use adapter::{PingoraGatewayAdapter, PreparedPingoraSnapshot};
 
 pub const ADAPTER_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const PINGORA_PACKAGE_VERSION: &str = "0.8.0";
+pub const PINGORA_PACKAGE_VERSION: &str = "0.8.1";

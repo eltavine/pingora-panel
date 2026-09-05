@@ -1,0 +1,42 @@
+name: Decoder fuzzing
+
+on:
+  schedule:
+    - cron: '47 4 * * 6'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - revision_documents
+          - snapshot_records
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install pinned nightly Rust
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30
+        with:
+          toolchain: nightly # rust-toolchain-policy: fuzz-canary
+
+      - name: Install cargo-fuzz 0.13.2
+        run: cargo install --locked --version 0.13.2 cargo-fuzz
+
+      - name: Run bounded fuzz target
+        working-directory: fuzz
+        run: cargo fuzz run ${{ matrix.target }} -- -max_total_time=60 -print_final_stats=1

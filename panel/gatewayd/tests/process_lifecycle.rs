@@ -198,7 +198,7 @@ async fn sigterm_exits_cleanly_and_the_same_address_can_restart() {
         .into_inner();
     let runtime = status.runtime.unwrap();
     assert_eq!(runtime.gateway_version, env!("CARGO_PKG_VERSION"));
-    assert_eq!(runtime.data_plane_version, "0.8.0");
+    assert_eq!(runtime.data_plane_version, "0.8.1");
     assert_eq!(runtime.worker_count, 2);
     assert_ne!(runtime.started_at_unix_seconds, 0);
     let event_delivery = status.event_delivery.unwrap();
