@@ -117,6 +117,11 @@ mod tests {
                 disconnected_events: 3,
                 consumer_panics: 5,
             }),
+            recovery: Some(gateway::v1::RecoveryHealth {
+                recovery_completed: 7,
+                degraded_events: 11,
+                unknown_commit_outcomes: 13,
+            }),
         };
         let decoded =
             gateway::v1::StatusResponse::decode(original.encode_to_vec().as_slice()).unwrap();

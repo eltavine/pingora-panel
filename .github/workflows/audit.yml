@@ -25,6 +25,9 @@ on:
       - ".github/scripts/emit-cargo-deny-report.py"
       - ".github/scripts/test-cargo-deny-report.py"
       - ".github/scripts/test-rust-dependency-leases.py"
+      - ".github/scripts/check-security-resolver-contract.py"
+      - ".github/scripts/test-security-resolver-contract.py"
+      - ".github/scripts/prepare-security-lockfile.sh"
       - ".github/scripts/policy/**"
       - ".github/workflows/audit.yml"
   pull_request:
@@ -48,6 +51,9 @@ on:
       - ".github/scripts/emit-cargo-deny-report.py"
       - ".github/scripts/test-cargo-deny-report.py"
       - ".github/scripts/test-rust-dependency-leases.py"
+      - ".github/scripts/check-security-resolver-contract.py"
+      - ".github/scripts/test-security-resolver-contract.py"
+      - ".github/scripts/prepare-security-lockfile.sh"
       - ".github/scripts/policy/**"
       - ".github/workflows/audit.yml"
   schedule:
@@ -77,6 +83,12 @@ jobs:
       - name: Verify advisory exceptions remain synchronized
         run: python3 .github/scripts/check-rust-advisory-policy.py
 
+      - name: Self-test security resolver contract
+        run: python3 .github/scripts/test-security-resolver-contract.py
+
+      - name: Verify security resolver consistency
+        run: python3 .github/scripts/check-security-resolver-contract.py
+
   dependency-policy:
     name: Advisory and dependency policy (${{ matrix.workspace }})
     needs: advisory-policy
@@ -95,6 +107,19 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+
+      # The upstream workspace intentionally does not commit Cargo.lock.
+      # Resolve it with the approved current Cargo before cargo-deny runs so
+      # a stale registry selection cannot retain a vulnerable `time` release.
+      - name: Install resolver toolchain
+        if: matrix.workspace == 'upstream'
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30
+        with:
+          toolchain: 1.98.0
+
+      - name: Pin patched time release in upstream resolution
+        if: matrix.workspace == 'upstream'
+        run: bash .github/scripts/prepare-security-lockfile.sh
 
       - name: Check licenses, sources, and dependency bans
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1 / cargo-deny 0.20.2
@@ -136,6 +161,10 @@ jobs:
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30
         with:
           toolchain: 1.98.0
+
+      - name: Pin patched time release in upstream resolution
+        if: matrix.workspace == 'upstream'
+        run: bash .github/scripts/prepare-security-lockfile.sh
 
       - name: Install cargo-deny 0.20.2
         run: cargo install --locked --version 0.20.2 cargo-deny
@@ -196,10 +225,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Generate Cargo.lock
+      - name: Install resolver toolchain
         if: matrix.generate_lockfile
-        # https://github.com/rustsec/audit-check/issues/27
-        run: cargo generate-lockfile --ignore-rust-version
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30
+        with:
+          toolchain: 1.98.0
+
+      - name: Prepare security Cargo.lock
+        if: matrix.generate_lockfile
+        run: bash .github/scripts/prepare-security-lockfile.sh
 
       - name: Audit workspace
         # https://github.com/rustsec/audit-check/issues/2

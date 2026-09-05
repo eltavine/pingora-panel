@@ -14,4 +14,8 @@ panel-engine.workspace = true
 panel-errors.workspace = true
 panel-ir.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+snapshot-store-fs.workspace = true

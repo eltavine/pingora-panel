@@ -2,9 +2,9 @@
 
 pub use panel_engine::{
     GatewayEvent, GatewayEventDeliveryDiagnostics, GatewayEventDeliveryDiagnosticsProvider,
-    GatewayEventPanicObserver, GatewayEventSink, GatewayOperation, GatewayRequestMetadata,
-    GatewayRequestOperation, GatewayRequestOutcome, NoopGatewayEventSink,
-    PanicIsolatedGatewayEventSink,
+    GatewayEventPanicObserver, GatewayEventSink, GatewayOperation, GatewayRecoveryDiagnostics,
+    GatewayRecoveryDiagnosticsProvider, GatewayRequestMetadata, GatewayRequestOperation,
+    GatewayRequestOutcome, NoopGatewayEventSink, PanicIsolatedGatewayEventSink,
 };
 use panel_errors::{ErrorCode, PanelError, Result};
 use std::{
@@ -100,36 +100,6 @@ impl GatewayEventDeliveryDiagnosticsProvider for GatewayEventDeliveryMonitor {
     }
 }
 
-/// Compact recovery counters kept independent from any metrics backend.
-///
-/// Applications can project this provider into Prometheus, OpenTelemetry, or
-/// another mature backend without coupling the engine to one telemetry stack.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-#[non_exhaustive]
-pub struct GatewayRecoveryDiagnostics {
-    recovery_completed: u64,
-    degraded_events: u64,
-    unknown_commit_outcomes: u64,
-}
-
-impl GatewayRecoveryDiagnostics {
-    pub fn recovery_completed(self) -> u64 {
-        self.recovery_completed
-    }
-
-    pub fn degraded_events(self) -> u64 {
-        self.degraded_events
-    }
-
-    pub fn unknown_commit_outcomes(self) -> u64 {
-        self.unknown_commit_outcomes
-    }
-}
-
-pub trait GatewayRecoveryDiagnosticsProvider: Send + Sync {
-    fn recovery_snapshot(&self) -> GatewayRecoveryDiagnostics;
-}
-
 #[derive(Default)]
 struct GatewayRecoveryStats {
     recovery_completed: AtomicU64,
@@ -150,11 +120,11 @@ impl GatewayRecoveryMonitor {
     }
 
     pub fn snapshot(&self) -> GatewayRecoveryDiagnostics {
-        GatewayRecoveryDiagnostics {
-            recovery_completed: self.stats.recovery_completed.load(Ordering::Relaxed),
-            degraded_events: self.stats.degraded_events.load(Ordering::Relaxed),
-            unknown_commit_outcomes: self.stats.unknown_commit_outcomes.load(Ordering::Relaxed),
-        }
+        GatewayRecoveryDiagnostics::new(
+            self.stats.recovery_completed.load(Ordering::Relaxed),
+            self.stats.degraded_events.load(Ordering::Relaxed),
+            self.stats.unknown_commit_outcomes.load(Ordering::Relaxed),
+        )
     }
 }
 
@@ -168,7 +138,9 @@ impl GatewayEventSink for GatewayRecoveryMonitor {
     fn emit(&self, event: &GatewayEvent) {
         match event {
             GatewayEvent::RecoveryCompleted { .. } => {
-                self.stats.recovery_completed.fetch_add(1, Ordering::Relaxed);
+                self.stats
+                    .recovery_completed
+                    .fetch_add(1, Ordering::Relaxed);
             }
             GatewayEvent::Degraded {
                 operation: GatewayOperation::CommitActivation,

@@ -47,8 +47,8 @@ use panel_errors::Result;
 use panel_gateway_runtime::{
     BufferedGatewayEventSink, DurableGatewayEngine, DurableGatewayEngineOptions,
     FanoutGatewayEventSink, GatewayEvent, GatewayEventDeliveryMonitor, GatewayEventSink,
-    GatewayRecoveryMonitor,
-    PreparedSnapshotAdmissionPolicy, PreparedSnapshotBudget,
+    GatewayMutationExecutor, GatewayRecoveryMonitor, PreparedSnapshotAdmissionPolicy,
+    PreparedSnapshotBudget,
 };
 use snapshot_store_fs::FileSnapshotStore;
 use std::{future::Future, num::NonZeroU32, path::PathBuf, sync::Arc};
@@ -78,6 +78,7 @@ pub struct GatewaydRuntime {
     pub events: Arc<dyn GatewayEventSink>,
     pub event_delivery: GatewayEventDeliveryMonitor,
     pub recovery: GatewayRecoveryMonitor,
+    pub mutations: GatewayMutationExecutor,
 }
 
 pub struct GatewaydServiceOptions {
@@ -201,6 +202,16 @@ pub async fn build_gateway_runtime_with_options(
         ));
     }
     let background_tasks = BackgroundTaskSupervisor::new();
+    let mutations = GatewayMutationExecutor::new();
+    let mutations_for_shutdown = mutations.clone();
+    background_tasks.spawn_cooperative_critical(
+        "gateway-mutation-drain",
+        move |shutdown| async move {
+            shutdown.requested().await;
+            mutations_for_shutdown.close();
+            mutations_for_shutdown.wait().await;
+        },
+    );
     let adapter = Arc::new(PingoraGatewayAdapter::new());
     let store = Arc::new(FileSnapshotStore::open_exclusive(state_directory).await?);
     let health_state = Arc::new(RuntimeHealthState::new());
@@ -232,7 +243,8 @@ pub async fn build_gateway_runtime_with_options(
             store,
             DurableGatewayEngineOptions::default()
                 .with_prepared_policy(options.prepared_policy)
-                .with_event_sink(Arc::clone(&events)),
+                .with_event_sink(Arc::clone(&events))
+                .with_mutation_executor(mutations.clone()),
         )
         .await?,
     );
@@ -278,6 +290,7 @@ pub async fn build_gateway_runtime_with_options(
             .with_event_sink(Arc::clone(&events))
             .with_event_metadata_limits(request_metadata_limits)
             .with_event_delivery_diagnostics(Arc::new(event_delivery.clone()))
+            .with_recovery_diagnostics(Arc::new(recovery.clone()))
             .with_lifetime_dependency(task_lifetime),
             health,
             health_reporter,
@@ -286,6 +299,7 @@ pub async fn build_gateway_runtime_with_options(
         events,
         event_delivery,
         recovery,
+        mutations,
     })
 }
 
@@ -322,6 +336,7 @@ pub async fn serve_gatewayd(
         events,
         event_delivery,
         recovery,
+        mutations: _,
     } = runtime;
     let mut failure_monitor = background_tasks.failure_monitor();
     let (trigger_sender, trigger_receiver) = oneshot::channel();
@@ -430,7 +445,25 @@ mod composition_tests {
         .await
         .unwrap();
 
-        assert_eq!(runtime.background_tasks.task_count(), 2);
+        assert_eq!(runtime.background_tasks.task_count(), 3);
+        assert_eq!(runtime.mutations.pending_tasks(), 0);
+        let status = runtime
+            .services
+            .gateway
+            .status(Request::new(wire::StatusRequest {
+                context: Some(common::RequestContext {
+                    request_id: "status".into(),
+                    correlation_id: "composition".into(),
+                    actor: "test".into(),
+                    deadline: String::new(),
+                    idempotency_key: String::new(),
+                    schema_version: panel_contracts::PROTOCOL_VERSION.into(),
+                }),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(status.recovery.unwrap().recovery_completed, 1);
         runtime.background_tasks.shutdown_and_join().await.unwrap();
         assert_eq!(runtime.background_tasks.task_count(), 0);
         let delivery = runtime.event_delivery.snapshot();

@@ -13,9 +13,9 @@ use panel_domain::ContentHash;
 use panel_engine::{
     ActivateRequest, EngineCapabilities, GatewayEngine, GatewayEvent,
     GatewayEventDeliveryDiagnostics, GatewayEventDeliveryDiagnosticsProvider, GatewayEventSink,
-    GatewayRequestMetadata, GatewayRequestOperation, GatewayRequestOutcome, GatewayRuntimeInfo,
-    GatewayRuntimeInfoProvider, NoopGatewayEventSink, PanicIsolatedGatewayEventSink,
-    PrepareRequest, PrepareToken,
+    GatewayRecoveryDiagnostics, GatewayRecoveryDiagnosticsProvider, GatewayRequestMetadata,
+    GatewayRequestOperation, GatewayRequestOutcome, GatewayRuntimeInfo, GatewayRuntimeInfoProvider,
+    NoopGatewayEventSink, PanicIsolatedGatewayEventSink, PrepareRequest, PrepareToken,
 };
 use panel_errors::{ErrorCode, PanelError, Result};
 use std::{
@@ -30,6 +30,7 @@ pub struct GatewayGrpcService<E: GatewayEngine + ?Sized> {
     engine: Arc<E>,
     runtime_info: Option<Arc<dyn GatewayRuntimeInfoProvider>>,
     event_delivery_diagnostics: Option<Arc<dyn GatewayEventDeliveryDiagnosticsProvider>>,
+    recovery_diagnostics: Option<Arc<dyn GatewayRecoveryDiagnosticsProvider>>,
     request_policy: Arc<dyn GatewayRequestPolicy>,
     transport_policy: GatewayTransportPolicy,
     event_metadata_limits: GatewayRequestMetadataLimits,
@@ -43,6 +44,7 @@ impl<E: GatewayEngine + ?Sized> Clone for GatewayGrpcService<E> {
             engine: Arc::clone(&self.engine),
             runtime_info: self.runtime_info.as_ref().map(Arc::clone),
             event_delivery_diagnostics: self.event_delivery_diagnostics.as_ref().map(Arc::clone),
+            recovery_diagnostics: self.recovery_diagnostics.as_ref().map(Arc::clone),
             request_policy: Arc::clone(&self.request_policy),
             transport_policy: self.transport_policy,
             event_metadata_limits: self.event_metadata_limits,
@@ -58,6 +60,7 @@ impl<E: GatewayEngine + ?Sized> GatewayGrpcService<E> {
             engine,
             runtime_info: None,
             event_delivery_diagnostics: None,
+            recovery_diagnostics: None,
             request_policy: Arc::new(StandardGatewayRequestPolicy::default()),
             transport_policy: GatewayTransportPolicy::default(),
             event_metadata_limits: GatewayRequestMetadataLimits::default(),
@@ -74,6 +77,7 @@ impl<E: GatewayEngine + ?Sized> GatewayGrpcService<E> {
             engine,
             runtime_info: Some(runtime_info),
             event_delivery_diagnostics: None,
+            recovery_diagnostics: None,
             request_policy: Arc::new(StandardGatewayRequestPolicy::default()),
             transport_policy: GatewayTransportPolicy::default(),
             event_metadata_limits: GatewayRequestMetadataLimits::default(),
@@ -92,6 +96,7 @@ impl<E: GatewayEngine + ?Sized> GatewayGrpcService<E> {
             engine,
             runtime_info,
             event_delivery_diagnostics: None,
+            recovery_diagnostics: None,
             request_policy,
             transport_policy,
             event_metadata_limits: GatewayRequestMetadataLimits::default(),
@@ -115,6 +120,14 @@ impl<E: GatewayEngine + ?Sized> GatewayGrpcService<E> {
         diagnostics: Arc<dyn GatewayEventDeliveryDiagnosticsProvider>,
     ) -> Self {
         self.event_delivery_diagnostics = Some(diagnostics);
+        self
+    }
+
+    pub fn with_recovery_diagnostics(
+        mut self,
+        diagnostics: Arc<dyn GatewayRecoveryDiagnosticsProvider>,
+    ) -> Self {
+        self.recovery_diagnostics = Some(diagnostics);
         self
     }
 
@@ -426,6 +439,7 @@ where
                             })
                         }),
                         event_delivery: None,
+                        recovery: None,
                     }
                 }
                 Err(error) => status_error_response(error),
@@ -437,6 +451,11 @@ where
             .as_ref()
             .and_then(|provider| snapshot_safely(|| provider.snapshot()))
             .map(encode_event_delivery_diagnostics);
+        response.recovery = self
+            .recovery_diagnostics
+            .as_ref()
+            .and_then(|provider| snapshot_safely(|| provider.recovery_snapshot()))
+            .map(encode_recovery_diagnostics);
         scope.complete(response.error.as_ref());
         Ok(Response::new(response))
     }
@@ -533,6 +552,14 @@ fn encode_event_delivery_diagnostics(
     }
 }
 
+fn encode_recovery_diagnostics(diagnostics: GatewayRecoveryDiagnostics) -> wire::RecoveryHealth {
+    wire::RecoveryHealth {
+        recovery_completed: diagnostics.recovery_completed(),
+        degraded_events: diagnostics.degraded_events(),
+        unknown_commit_outcomes: diagnostics.unknown_commit_outcomes(),
+    }
+}
+
 fn validation_error_response(error: PanelError) -> wire::ValidateResponse {
     wire::ValidateResponse {
         version: None,
@@ -577,6 +604,7 @@ fn status_error_response(error: PanelError) -> wire::StatusResponse {
         prepared_count: 0,
         runtime: None,
         event_delivery: None,
+        recovery: None,
     }
 }
 
@@ -647,6 +675,14 @@ mod tests {
         }
     }
 
+    struct FixedRecoveryDiagnostics;
+
+    impl GatewayRecoveryDiagnosticsProvider for FixedRecoveryDiagnostics {
+        fn recovery_snapshot(&self) -> GatewayRecoveryDiagnostics {
+            GatewayRecoveryDiagnostics::new(7, 11, 13)
+        }
+    }
+
     struct PanickingRuntimeInfo;
 
     impl GatewayRuntimeInfoProvider for PanickingRuntimeInfo {
@@ -660,6 +696,14 @@ mod tests {
     impl GatewayEventDeliveryDiagnosticsProvider for PanickingEventDeliveryDiagnostics {
         fn snapshot(&self) -> GatewayEventDeliveryDiagnostics {
             panic!("injected event-diagnostics panic")
+        }
+    }
+
+    struct PanickingRecoveryDiagnostics;
+
+    impl GatewayRecoveryDiagnosticsProvider for PanickingRecoveryDiagnostics {
+        fn recovery_snapshot(&self) -> GatewayRecoveryDiagnostics {
+            panic!("injected recovery-diagnostics panic")
         }
     }
 
@@ -861,7 +905,8 @@ mod tests {
     async fn status_combines_engine_and_process_information() {
         let engine = Arc::new(FakeGatewayEngine::with_default_capabilities());
         let service = GatewayGrpcService::with_runtime_info(engine, Arc::new(FixedRuntimeInfo))
-            .with_event_delivery_diagnostics(Arc::new(FixedEventDeliveryDiagnostics));
+            .with_event_delivery_diagnostics(Arc::new(FixedEventDeliveryDiagnostics))
+            .with_recovery_diagnostics(Arc::new(FixedRecoveryDiagnostics));
 
         let response = service
             .status(Request::new(wire::StatusRequest {
@@ -882,6 +927,10 @@ mod tests {
         assert_eq!(event_delivery.queue_full_events, 2);
         assert_eq!(event_delivery.disconnected_events, 3);
         assert_eq!(event_delivery.consumer_panics, 5);
+        let recovery = response.recovery.unwrap();
+        assert_eq!(recovery.recovery_completed, 7);
+        assert_eq!(recovery.degraded_events, 11);
+        assert_eq!(recovery.unknown_commit_outcomes, 13);
     }
 
     #[tokio::test]
@@ -924,7 +973,8 @@ mod tests {
     async fn status_isolates_panicking_diagnostics_providers() {
         let engine = Arc::new(FakeGatewayEngine::with_default_capabilities());
         let service = GatewayGrpcService::with_runtime_info(engine, Arc::new(PanickingRuntimeInfo))
-            .with_event_delivery_diagnostics(Arc::new(PanickingEventDeliveryDiagnostics));
+            .with_event_delivery_diagnostics(Arc::new(PanickingEventDeliveryDiagnostics))
+            .with_recovery_diagnostics(Arc::new(PanickingRecoveryDiagnostics));
 
         let response = service
             .status(Request::new(wire::StatusRequest {
@@ -937,5 +987,6 @@ mod tests {
         assert!(response.error.is_none());
         assert!(response.runtime.is_none());
         assert!(response.event_delivery.is_none());
+        assert!(response.recovery.is_none());
     }
 }

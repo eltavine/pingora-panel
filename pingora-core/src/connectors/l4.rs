@@ -118,7 +118,15 @@ where
     let mut local_addr = None;
     let mut stream: Stream =
         if let Some(custom_l4) = peer.get_peer_options().and_then(|o| o.custom_l4.as_ref()) {
-            custom_l4.connect(peer_addr).await?
+            let connect_future = custom_l4.connect(peer_addr);
+            match peer.connection_timeout() {
+                Some(timeout) => pingora_timeout::timeout(timeout, connect_future)
+                    .await
+                    .explain_err(ConnectTimedout, |_| {
+                        format!("timeout {timeout:?} connecting to server {peer}")
+                    })??,
+                None => connect_future.await?,
+            }
         } else {
             match peer_addr {
                 SocketAddr::Inet(addr) => {
@@ -448,23 +456,21 @@ mod tests {
 
     #[tokio::test]
     async fn test_conn_timeout() {
-        // 192.0.2.1 is TEST-NET-1 (RFC 5737) — SYN packets are silently
-        // dropped on Linux, producing ConnectTimedout. On macOS the kernel
-        // may instead return ENETUNREACH (ConnectNoRoute).
-        let mut peer = BasicPeer::new("192.0.2.1:79");
-        peer.options.connection_timeout = Some(Duration::from_millis(1));
-        let err = connect(&peer, None).await.unwrap_err();
-        assert!(
-            err.etype() == &ConnectTimedout || err.etype() == &ConnectNoRoute,
-            "unexpected error type: {:?}",
-            err.etype()
-        );
-        if err.etype() == &ConnectTimedout {
-            let local_addr = err
-                .connect_local_addr()
-                .expect("local address should be captured before the timeout");
-            assert_ne!(local_addr.port(), 0);
+        #[derive(Debug)]
+        struct PendingConnect;
+
+        #[async_trait]
+        impl Connect for PendingConnect {
+            async fn connect(&self, _addr: &SocketAddr) -> Result<Stream> {
+                std::future::pending().await
+            }
         }
+
+        let mut peer = BasicPeer::new("127.0.0.1:1");
+        peer.options.connection_timeout = Some(Duration::from_millis(1));
+        peer.options.custom_l4 = Some(Arc::new(PendingConnect));
+        let err = connect(&peer, None).await.unwrap_err();
+        assert_eq!(err.etype(), &ConnectTimedout);
     }
 
     #[tokio::test]

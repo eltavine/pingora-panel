@@ -12,8 +12,8 @@ mod record_reader;
 mod state_directory;
 
 pub use codec::{
-    JsonSnapshotRecordCodecV1, SnapshotRecordCodec, SnapshotRecordCodecRegistry,
-    JSON_SNAPSHOT_RECORD_FORMAT_V1,
+    JsonSnapshotRecordCodecV1, JsonSnapshotRecordCodecV2, SnapshotRecordCodec,
+    SnapshotRecordCodecRegistry, JSON_SNAPSHOT_RECORD_FORMAT_V1, JSON_SNAPSHOT_RECORD_FORMAT_V2,
 };
 pub use lease::StateDirectoryLease;
 pub use limits::{

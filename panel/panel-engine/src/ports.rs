@@ -191,6 +191,47 @@ pub trait GatewayEventDeliveryDiagnosticsProvider: Send + Sync {
     fn snapshot(&self) -> GatewayEventDeliveryDiagnostics;
 }
 
+/// Transport-neutral recovery counters. Private fields and a constructor keep
+/// additive evolution source-compatible across runtime and transport adapters.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct GatewayRecoveryDiagnostics {
+    recovery_completed: u64,
+    degraded_events: u64,
+    unknown_commit_outcomes: u64,
+}
+
+impl GatewayRecoveryDiagnostics {
+    pub const fn new(
+        recovery_completed: u64,
+        degraded_events: u64,
+        unknown_commit_outcomes: u64,
+    ) -> Self {
+        Self {
+            recovery_completed,
+            degraded_events,
+            unknown_commit_outcomes,
+        }
+    }
+
+    pub const fn recovery_completed(self) -> u64 {
+        self.recovery_completed
+    }
+
+    pub const fn degraded_events(self) -> u64 {
+        self.degraded_events
+    }
+
+    pub const fn unknown_commit_outcomes(self) -> u64 {
+        self.unknown_commit_outcomes
+    }
+}
+
+/// Read-only driven port for recovery diagnostics.
+pub trait GatewayRecoveryDiagnosticsProvider: Send + Sync {
+    fn recovery_snapshot(&self) -> GatewayRecoveryDiagnostics;
+}
+
 #[async_trait]
 pub trait GatewayEngine: Send + Sync {
     async fn capabilities(&self) -> Result<EngineCapabilities>;

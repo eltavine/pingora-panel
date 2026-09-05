@@ -1177,7 +1177,9 @@ dependencies = [
  "panel-engine",
  "panel-errors",
  "panel-ir",
+ "snapshot-store-fs",
  "tokio",
+ "tokio-util",
  "uuid",
 ]
 
@@ -2020,6 +2022,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "libc",
  "pin-project-lite",
  "tokio",

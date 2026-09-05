@@ -8,6 +8,7 @@ use std::{
 };
 
 pub const JSON_SNAPSHOT_RECORD_FORMAT_V1: u32 = 1;
+pub const JSON_SNAPSHOT_RECORD_FORMAT_V2: u32 = 2;
 
 /// Version-specific snapshot envelope codec.
 ///
@@ -24,6 +25,9 @@ pub trait SnapshotRecordCodec: Send + Sync {
 
 #[derive(Default)]
 pub struct JsonSnapshotRecordCodecV1;
+
+#[derive(Default)]
+pub struct JsonSnapshotRecordCodecV2;
 
 #[derive(Deserialize)]
 struct DiskRecordHeader {
@@ -65,6 +69,37 @@ impl SnapshotRecordCodec for JsonSnapshotRecordCodecV1 {
         }
         serde_json::to_vec(&disk.payload)
             .map_err(|error| PanelError::internal("decode v1 snapshot payload").with_source(error))
+    }
+}
+
+impl SnapshotRecordCodec for JsonSnapshotRecordCodecV2 {
+    fn format_version(&self) -> u32 {
+        JSON_SNAPSHOT_RECORD_FORMAT_V2
+    }
+
+    fn encode_payload(&self, payload: &[u8]) -> Result<Vec<u8>> {
+        serde_json::from_slice::<serde_json::Value>(payload).map_err(|error| {
+            PanelError::internal("serialize v2 snapshot payload").with_source(error)
+        })?;
+        let mut record =
+            format!("{{\"format_version\":{JSON_SNAPSHOT_RECORD_FORMAT_V2},\"payload\":")
+                .into_bytes();
+        record.extend_from_slice(payload);
+        record.push(b'}');
+        Ok(record)
+    }
+
+    fn decode_payload(&self, record: &[u8]) -> Result<Vec<u8>> {
+        let disk: OwnedDiskRecord = serde_json::from_slice(record).map_err(|error| {
+            PanelError::corrupt_state("invalid v2 snapshot record").with_source(error)
+        })?;
+        if disk.format_version != JSON_SNAPSHOT_RECORD_FORMAT_V2 {
+            return Err(PanelError::corrupt_state(
+                "v2 snapshot codec received a different format version",
+            ));
+        }
+        serde_json::to_vec(&disk.payload)
+            .map_err(|error| PanelError::internal("decode v2 snapshot payload").with_source(error))
     }
 }
 
@@ -207,28 +242,6 @@ impl fmt::Debug for SnapshotRecordCodecRegistry {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU32, Ordering};
-
-    struct JsonSnapshotRecordCodecV2;
-
-    impl SnapshotRecordCodec for JsonSnapshotRecordCodecV2 {
-        fn format_version(&self) -> u32 {
-            2
-        }
-
-        fn encode_payload(&self, payload: &[u8]) -> Result<Vec<u8>> {
-            let value: serde_json::Value = serde_json::from_slice(payload).unwrap();
-            Ok(serde_json::to_vec(&serde_json::json!({
-                "format_version": 2,
-                "payload": value,
-            }))
-            .unwrap())
-        }
-
-        fn decode_payload(&self, record: &[u8]) -> Result<Vec<u8>> {
-            let disk: OwnedDiskRecord = serde_json::from_slice(record).unwrap();
-            Ok(serde_json::to_vec(&disk.payload).unwrap())
-        }
-    }
 
     struct MutableVersionCodec {
         next_version: AtomicU32,

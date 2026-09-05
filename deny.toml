@@ -60,7 +60,7 @@ external-default-features = "allow"
 # temporarily stale. cargo-deny owns version-range enforcement here, so no
 # repository-specific dependency scanner is needed.
 deny = [
-    { crate = "time@<0.3.47", reason = "RUSTSEC-2026-0009 is fixed in time 0.3.47 and later" },
+    { crate = "time:<0.3.47", reason = "RUSTSEC-2026-0009 is fixed in time 0.3.47 and later" },
 ]
 
 [sources]

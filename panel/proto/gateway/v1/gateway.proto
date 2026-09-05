@@ -262,6 +262,12 @@ message EventDeliveryHealth {
   uint64 consumer_panics = 3;
 }
 
+message RecoveryHealth {
+  uint64 recovery_completed = 1;
+  uint64 degraded_events = 2;
+  uint64 unknown_commit_outcomes = 3;
+}
+
 message StatusResponse {
   .pingora.panel.common.v1.Version version = 1;
   .pingora.panel.common.v1.HealthStatus health = 2;
@@ -271,4 +277,5 @@ message StatusResponse {
   uint64 prepared_count = 6;
   GatewayRuntimeInfo runtime = 7;
   EventDeliveryHealth event_delivery = 8;
+  RecoveryHealth recovery = 9;
 }

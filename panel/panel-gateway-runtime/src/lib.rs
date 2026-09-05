@@ -6,16 +6,19 @@
 //! through `SnapshotStore` and `DataPlaneAdapter` ports at the composition root.
 
 mod events;
+mod mutation;
 mod prepared_policy;
 
 pub use events::{
     BufferedGatewayEventReceiver, BufferedGatewayEventSink, FanoutGatewayEventSink, GatewayEvent,
     GatewayEventDeliveryDiagnostics, GatewayEventDeliveryDiagnosticsProvider,
     GatewayEventDeliveryMonitor, GatewayEventDeliverySnapshot, GatewayEventPanicObserver,
-    GatewayRecoveryDiagnostics, GatewayRecoveryDiagnosticsProvider, GatewayRecoveryMonitor,
-    GatewayEventSink, GatewayOperation, GatewayRequestMetadata, GatewayRequestOperation,
-    GatewayRequestOutcome, NoopGatewayEventSink, PanicIsolatedGatewayEventSink,
+    GatewayEventSink, GatewayOperation, GatewayRecoveryDiagnostics,
+    GatewayRecoveryDiagnosticsProvider, GatewayRecoveryMonitor, GatewayRequestMetadata,
+    GatewayRequestOperation, GatewayRequestOutcome, NoopGatewayEventSink,
+    PanicIsolatedGatewayEventSink,
 };
+pub use mutation::GatewayMutationExecutor;
 pub use prepared_policy::{
     PreparedSnapshotAdmissionPolicy, PreparedSnapshotBudget, PreparedSnapshotUsage,
     DEFAULT_MAX_OUTSTANDING_PREPARES, DEFAULT_MAX_PREPARED_SNAPSHOT_BYTES,
@@ -69,11 +72,13 @@ where
     state: Arc<Mutex<RuntimeState<A::Prepared>>>,
     prepared_policy: Arc<dyn PreparedSnapshotAdmissionPolicy>,
     events: Arc<dyn GatewayEventSink>,
+    mutations: GatewayMutationExecutor,
 }
 
 pub struct DurableGatewayEngineOptions {
     prepared_policy: Arc<dyn PreparedSnapshotAdmissionPolicy>,
     events: Arc<dyn GatewayEventSink>,
+    mutations: GatewayMutationExecutor,
 }
 
 impl DurableGatewayEngineOptions {
@@ -84,6 +89,7 @@ impl DurableGatewayEngineOptions {
         Self {
             prepared_policy,
             events: Arc::new(PanicIsolatedGatewayEventSink::new(events)),
+            mutations: GatewayMutationExecutor::new(),
         }
     }
 
@@ -99,6 +105,11 @@ impl DurableGatewayEngineOptions {
         self.events = Arc::new(PanicIsolatedGatewayEventSink::new(events));
         self
     }
+
+    pub fn with_mutation_executor(mut self, mutations: GatewayMutationExecutor) -> Self {
+        self.mutations = mutations;
+        self
+    }
 }
 
 impl Default for DurableGatewayEngineOptions {
@@ -106,6 +117,7 @@ impl Default for DurableGatewayEngineOptions {
         Self {
             prepared_policy: Arc::new(PreparedSnapshotBudget::default()),
             events: Arc::new(NoopGatewayEventSink),
+            mutations: GatewayMutationExecutor::new(),
         }
     }
 }
@@ -265,6 +277,7 @@ where
             state: Arc::new(Mutex::new(state)),
             prepared_policy: options.prepared_policy,
             events: options.events,
+            mutations: options.mutations,
         })
     }
 
@@ -335,43 +348,46 @@ where
         }
         let artifact = Arc::new(adapter.prepare(request.snapshot.clone()).await?);
         let capabilities = adapter.capabilities().await?;
-        let mut state = state.lock().await;
-        Self::ensure_mutations_allowed(&state)?;
-        Self::ensure_prepare_is_new(&state, &request.snapshot)?;
-        prepared_policy.admit(
-            PreparedSnapshotUsage {
-                outstanding: state.prepared.len(),
-                total_bytes: state.prepared_bytes,
-            },
-            &request.snapshot,
-        )?;
-        let accounted_bytes = request.snapshot.canonical_bytes().len();
-        let prepared_bytes = state
-            .prepared_bytes
-            .checked_add(accounted_bytes)
-            .ok_or_else(|| {
-                PanelError::resource_exhausted("prepared snapshot aggregate size overflow")
-            })?;
-
-        let token = PrepareToken::new(Uuid::new_v4().to_string());
-        let receipt = PrepareReceipt {
-            revision_id: request.snapshot.revision_id,
-            content_hash: request.snapshot.content_hash.clone(),
-            adapter_version: capabilities.adapter_version,
-            schema_version: request.snapshot.schema_version.clone(),
-            prepare_token: token.clone(),
-            previous_active_hash: state
-                .active
-                .as_ref()
-                .map(|item| item.envelope.snapshot.content_hash.clone()),
-        };
-        let record = PreparedSnapshotRecord {
-            envelope: SnapshotEnvelope {
-                snapshot: request.snapshot,
-            },
-            receipt: receipt.clone(),
+        let (token, receipt, record, accounted_bytes, prepared_bytes) = {
+            let state = state.lock().await;
+            Self::ensure_mutations_allowed(&state)?;
+            Self::ensure_prepare_is_new(&state, &request.snapshot)?;
+            prepared_policy.admit(
+                PreparedSnapshotUsage {
+                    outstanding: state.prepared.len(),
+                    total_bytes: state.prepared_bytes,
+                },
+                &request.snapshot,
+            )?;
+            let accounted_bytes = request.snapshot.canonical_bytes().len();
+            let prepared_bytes = state
+                .prepared_bytes
+                .checked_add(accounted_bytes)
+                .ok_or_else(|| {
+                    PanelError::resource_exhausted("prepared snapshot aggregate size overflow")
+                })?;
+            let token = PrepareToken::new(Uuid::new_v4().to_string());
+            let receipt = PrepareReceipt {
+                revision_id: request.snapshot.revision_id,
+                content_hash: request.snapshot.content_hash.clone(),
+                adapter_version: capabilities.adapter_version,
+                schema_version: request.snapshot.schema_version.clone(),
+                prepare_token: token.clone(),
+                previous_active_hash: state
+                    .active
+                    .as_ref()
+                    .map(|item| item.envelope.snapshot.content_hash.clone()),
+            };
+            let record = PreparedSnapshotRecord {
+                envelope: SnapshotEnvelope {
+                    snapshot: request.snapshot,
+                },
+                receipt: receipt.clone(),
+            };
+            (token, receipt, record, accounted_bytes, prepared_bytes)
         };
         if let Err(error) = store.save_prepared(record.clone()).await {
+            let mut state = state.lock().await;
             Self::mark_degraded(
                 &mut state,
                 events.as_ref(),
@@ -380,6 +396,7 @@ where
             );
             return Err(error);
         }
+        let mut state = state.lock().await;
         state.prepared_bytes = prepared_bytes;
         state.prepared.insert(
             token,
@@ -402,15 +419,31 @@ where
         events: Arc<dyn GatewayEventSink>,
         token: PrepareToken,
     ) -> Result<AbortReceipt> {
-        let mut state = state.lock().await;
-        Self::ensure_mutations_allowed(&state)?;
-        let record = state
-            .prepared
-            .get(&token)
-            .ok_or_else(|| PanelError::new(ErrorCode::NOT_FOUND, "prepare token was not found"))?
-            .record
-            .clone();
+        let receipt = {
+            let state = state.lock().await;
+            Self::ensure_mutations_allowed(&state)?;
+            let record = state
+                .prepared
+                .get(&token)
+                .ok_or_else(|| {
+                    PanelError::new(ErrorCode::NOT_FOUND, "prepare token was not found")
+                })?
+                .record
+                .clone();
+            AbortReceipt {
+                revision_id: record.envelope.snapshot.revision_id,
+                content_hash: record.envelope.snapshot.content_hash,
+                adapter_version: record.receipt.adapter_version,
+                schema_version: record.envelope.snapshot.schema_version,
+                prepare_token: token.clone(),
+                previous_active_hash: state
+                    .active
+                    .as_ref()
+                    .map(|item| item.envelope.snapshot.content_hash.clone()),
+            }
+        };
         if let Err(error) = store.delete_prepared(&token).await {
+            let mut state = state.lock().await;
             Self::mark_degraded(
                 &mut state,
                 events.as_ref(),
@@ -419,22 +452,12 @@ where
             );
             return Err(error);
         }
+        let mut state = state.lock().await;
         let removed = state
             .prepared
             .remove(&token)
             .expect("aborted prepare token remains present while state is locked");
         state.prepared_bytes = state.prepared_bytes.saturating_sub(removed.accounted_bytes);
-        let receipt = AbortReceipt {
-            revision_id: record.envelope.snapshot.revision_id,
-            content_hash: record.envelope.snapshot.content_hash,
-            adapter_version: record.receipt.adapter_version,
-            schema_version: record.envelope.snapshot.schema_version,
-            prepare_token: token,
-            previous_active_hash: state
-                .active
-                .as_ref()
-                .map(|item| item.envelope.snapshot.content_hash.clone()),
-        };
         events.emit(&GatewayEvent::Aborted {
             revision_id: receipt.revision_id,
             prepared_count: state.prepared.len(),
@@ -449,63 +472,73 @@ where
         events: Arc<dyn GatewayEventSink>,
         request: ActivateRequest,
     ) -> Result<ActivationReceipt> {
-        let mut state = state.lock().await;
-        Self::ensure_mutations_allowed(&state)?;
-
-        if let Some(active) = &state.active {
-            if active.receipt.prepare_token == request.prepare_token {
-                if active.receipt.previous_active_hash == request.expected_active_hash {
-                    let receipt = active.receipt.clone();
-                    if let Err(error) = store.delete_prepared(&request.prepare_token).await {
-                        Self::mark_degraded(
-                            &mut state,
-                            events.as_ref(),
-                            GatewayOperation::DeletePrepared,
-                            &error,
-                        );
-                        return Err(error);
+        let retry_receipt = {
+            let state = state.lock().await;
+            Self::ensure_mutations_allowed(&state)?;
+            if let Some(active) = &state.active {
+                if active.receipt.prepare_token == request.prepare_token {
+                    if active.receipt.previous_active_hash == request.expected_active_hash {
+                        Some(active.receipt.clone())
+                    } else {
+                        return Err(PanelError::conflict(
+                            "idempotent activation retry used a different expected active hash",
+                        ));
                     }
-                    return Ok(receipt);
+                } else {
+                    None
                 }
+            } else {
+                None
+            }
+        };
+        if let Some(receipt) = retry_receipt {
+            if let Err(error) = store.delete_prepared(&request.prepare_token).await {
+                let mut state = state.lock().await;
+                Self::mark_degraded(
+                    &mut state,
+                    events.as_ref(),
+                    GatewayOperation::DeletePrepared,
+                    &error,
+                );
+                return Err(error);
+            }
+            return Ok(receipt);
+        }
+
+        let (receipt, active, artifact) = {
+            let state = state.lock().await;
+            let current_hash = state
+                .active
+                .as_ref()
+                .map(|item| item.envelope.snapshot.content_hash.clone());
+            if current_hash != request.expected_active_hash {
                 return Err(PanelError::conflict(
-                    "idempotent activation retry used a different expected active hash",
+                    "expected active hash does not match current active hash",
                 ));
             }
-        }
-
-        let current_hash = state
-            .active
-            .as_ref()
-            .map(|item| item.envelope.snapshot.content_hash.clone());
-        if current_hash != request.expected_active_hash {
-            return Err(PanelError::conflict(
-                "expected active hash does not match current active hash",
-            ));
-        }
-
-        let prepared = state
-            .prepared
-            .get(&request.prepare_token)
-            .ok_or_else(|| PanelError::new(ErrorCode::NOT_FOUND, "prepare token was not found"))?;
-        if state.active.as_ref().is_some_and(|active| {
-            prepared.record.envelope.snapshot.revision_id <= active.envelope.snapshot.revision_id
-        }) {
-            return Err(PanelError::conflict("prepared revision is stale"));
-        }
-
-        let receipt = ActivationReceipt {
-            revision_id: prepared.record.envelope.snapshot.revision_id,
-            content_hash: prepared.record.envelope.snapshot.content_hash.clone(),
-            adapter_version: prepared.record.receipt.adapter_version.clone(),
-            schema_version: prepared.record.envelope.snapshot.schema_version.clone(),
-            prepare_token: request.prepare_token.clone(),
-            previous_active_hash: current_hash,
+            let prepared = state.prepared.get(&request.prepare_token).ok_or_else(|| {
+                PanelError::new(ErrorCode::NOT_FOUND, "prepare token was not found")
+            })?;
+            if state.active.as_ref().is_some_and(|active| {
+                prepared.record.envelope.snapshot.revision_id
+                    <= active.envelope.snapshot.revision_id
+            }) {
+                return Err(PanelError::conflict("prepared revision is stale"));
+            }
+            let receipt = ActivationReceipt {
+                revision_id: prepared.record.envelope.snapshot.revision_id,
+                content_hash: prepared.record.envelope.snapshot.content_hash.clone(),
+                adapter_version: prepared.record.receipt.adapter_version.clone(),
+                schema_version: prepared.record.envelope.snapshot.schema_version.clone(),
+                prepare_token: request.prepare_token.clone(),
+                previous_active_hash: current_hash,
+            };
+            let active = ActiveSnapshotRecord {
+                envelope: prepared.record.envelope.clone(),
+                receipt: receipt.clone(),
+            };
+            (receipt, active, Arc::clone(&prepared.artifact))
         };
-        let active = ActiveSnapshotRecord {
-            envelope: prepared.record.envelope.clone(),
-            receipt: receipt.clone(),
-        };
-        let artifact = Arc::clone(&prepared.artifact);
 
         // The durable record is committed before the infallible data-plane pointer
         // swap. `activate` runs this transaction in a detached task, so request
@@ -517,6 +550,7 @@ where
                 let error = PanelError::internal(
                     "snapshot store returned an unsupported activation commit outcome",
                 );
+                let mut state = state.lock().await;
                 Self::mark_degraded(
                     &mut state,
                     events.as_ref(),
@@ -526,6 +560,7 @@ where
                 return Err(error);
             }
             Err(error) => {
+                let mut state = state.lock().await;
                 Self::mark_degraded(
                     &mut state,
                     events.as_ref(),
@@ -536,15 +571,18 @@ where
             }
         };
         adapter.activate(artifact);
-        state.active = Some(active);
-        let removed = state
+        let mut runtime_state = state.lock().await;
+        runtime_state.active = Some(active);
+        let removed = runtime_state
             .prepared
             .remove(&request.prepare_token)
             .expect("activated prepare token remains present while state is locked");
-        state.prepared_bytes = state.prepared_bytes.saturating_sub(removed.accounted_bytes);
+        runtime_state.prepared_bytes = runtime_state
+            .prepared_bytes
+            .saturating_sub(removed.accounted_bytes);
         events.emit(&GatewayEvent::Activated {
             revision_id: receipt.revision_id,
-            prepared_count: state.prepared.len(),
+            prepared_count: runtime_state.prepared.len(),
         });
 
         // The rename already made this activation visible to readers. Keep the
@@ -553,17 +591,19 @@ where
         // whichever record survived a crash.
         if let Some(error) = durability_unknown {
             Self::mark_degraded(
-                &mut state,
+                &mut runtime_state,
                 events.as_ref(),
                 GatewayOperation::CommitActivation,
                 &error,
             );
             return Err(error);
         }
+        drop(runtime_state);
 
         // If cleanup fails the activation is intentionally reported as unknown.
         // Retrying the same token returns the persisted receipt idempotently.
         if let Err(error) = store.delete_prepared(&request.prepare_token).await {
+            let mut state = state.lock().await;
             Self::mark_degraded(
                 &mut state,
                 events.as_ref(),
@@ -591,39 +631,42 @@ where
     }
 
     async fn prepare(&self, request: PrepareRequest) -> Result<PrepareReceipt> {
-        tokio::spawn(Self::prepare_transaction(
-            Arc::clone(&self.adapter),
-            Arc::clone(&self.store),
-            Arc::clone(&self.state),
-            Arc::clone(&self.prepared_policy),
-            Arc::clone(&self.events),
-            request,
-        ))
-        .await
-        .map_err(|error| PanelError::internal("prepare task failed").with_source(error))?
+        self.mutations
+            .spawn(Self::prepare_transaction(
+                Arc::clone(&self.adapter),
+                Arc::clone(&self.store),
+                Arc::clone(&self.state),
+                Arc::clone(&self.prepared_policy),
+                Arc::clone(&self.events),
+                request,
+            ))
+            .await
+            .map_err(|error| PanelError::internal("prepare task failed").with_source(error))?
     }
 
     async fn activate(&self, request: ActivateRequest) -> Result<ActivationReceipt> {
-        tokio::spawn(Self::activate_transaction(
-            Arc::clone(&self.adapter),
-            Arc::clone(&self.store),
-            Arc::clone(&self.state),
-            Arc::clone(&self.events),
-            request,
-        ))
-        .await
-        .map_err(|error| PanelError::internal("activation task failed").with_source(error))?
+        self.mutations
+            .spawn(Self::activate_transaction(
+                Arc::clone(&self.adapter),
+                Arc::clone(&self.store),
+                Arc::clone(&self.state),
+                Arc::clone(&self.events),
+                request,
+            ))
+            .await
+            .map_err(|error| PanelError::internal("activation task failed").with_source(error))?
     }
 
     async fn abort(&self, token: PrepareToken) -> Result<AbortReceipt> {
-        tokio::spawn(Self::abort_transaction(
-            Arc::clone(&self.store),
-            Arc::clone(&self.state),
-            Arc::clone(&self.events),
-            token,
-        ))
-        .await
-        .map_err(|error| PanelError::internal("abort task failed").with_source(error))?
+        self.mutations
+            .spawn(Self::abort_transaction(
+                Arc::clone(&self.store),
+                Arc::clone(&self.state),
+                Arc::clone(&self.events),
+                token,
+            ))
+            .await
+            .map_err(|error| PanelError::internal("abort task failed").with_source(error))?
     }
 
     async fn status(&self) -> Result<GatewayStatus> {
@@ -658,7 +701,11 @@ mod tests {
     use panel_ir::{RuntimeSnapshot, IR_SCHEMA_VERSION};
     use std::{
         collections::BTreeSet,
-        sync::{atomic::{AtomicBool, Ordering}, Mutex as StdMutex, RwLock},
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Mutex as StdMutex, RwLock,
+        },
+        time::Duration,
     };
     use tokio::sync::Notify;
 
@@ -1121,6 +1168,12 @@ mod tests {
             })
         };
         store.commit_started.notified().await;
+        let status = tokio::time::timeout(Duration::from_millis(100), engine.status())
+            .await
+            .expect("status must not wait on activation storage I/O")
+            .unwrap();
+        assert!(status.active_hash.is_none());
+        assert_eq!(status.prepared_count, 1);
         activation.abort();
         store.continue_commit.notify_one();
 
@@ -1156,6 +1209,11 @@ mod tests {
             })
         };
         store.save_started.notified().await;
+        let status = tokio::time::timeout(Duration::from_millis(100), engine.status())
+            .await
+            .expect("status must not wait on prepare storage I/O")
+            .unwrap();
+        assert_eq!(status.prepared_count, 0);
         prepare.abort();
         store.continue_save.notify_one();
 
@@ -1191,6 +1249,11 @@ mod tests {
             tokio::spawn(async move { engine.abort(token).await })
         };
         store.delete_started.notified().await;
+        let status = tokio::time::timeout(Duration::from_millis(100), engine.status())
+            .await
+            .expect("status must not wait on abort storage I/O")
+            .unwrap();
+        assert_eq!(status.prepared_count, 1);
         abort.abort();
         store.continue_delete.notify_one();
 

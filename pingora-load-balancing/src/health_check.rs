@@ -411,21 +411,26 @@ mod test {
     use crate::{discovery, Backends, SocketAddr};
     use async_trait::async_trait;
     use http::Extensions;
+    use tokio::io::AsyncWriteExt;
 
     #[tokio::test]
     async fn test_tcp_check() {
         let tcp_check = TcpHealthCheck::default();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let accept = tokio::spawn(async move { listener.accept().await.unwrap() });
 
         let backend = Backend {
-            addr: SocketAddr::Inet("1.1.1.1:80".parse().unwrap()),
+            addr: SocketAddr::Inet(address),
             weight: 1,
             ext: Extensions::new(),
         };
 
         assert!(tcp_check.check(&backend).await.is_ok());
+        accept.await.unwrap();
 
         let backend = Backend {
-            addr: SocketAddr::Inet("1.1.1.1:79".parse().unwrap()),
+            addr: SocketAddr::Inet("127.0.0.1:0".parse().unwrap()),
             weight: 1,
             ext: Extensions::new(),
         };
@@ -474,8 +479,22 @@ mod test {
             }
         }));
 
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                stream
+                    .write_all(
+                        b"HTTP/1.1 301 Moved Permanently\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    )
+                    .await
+                    .unwrap();
+            }
+        });
+
         let backend = Backend {
-            addr: SocketAddr::Inet("1.1.1.1:80".parse().unwrap()),
+            addr: SocketAddr::Inet(address),
             weight: 1,
             ext: Extensions::new(),
         };
@@ -483,6 +502,7 @@ mod test {
         http_check.check(&backend).await.unwrap();
 
         assert!(http_check.check(&backend).await.is_ok());
+        server.await.unwrap();
     }
 
     #[tokio::test]
