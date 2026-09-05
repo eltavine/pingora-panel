@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] - 2026-09-05
+
+### Security
+
+* Align all cargo-deny policy lanes on the pinned Rust 1.98 resolver toolchain so security fixes are not hidden by MSRV fallback resolution.
+* Deny `time` releases older than 0.3.47, the first release containing the fix for RUSTSEC-2026-0009.
+
+### Reliability
+
+* Run prepare and abort mutations in request-independent tasks, preventing client cancellation from leaving durable and in-memory state out of sync.
+* Add an adapter-neutral recovery diagnostics monitor for completed recoveries, degraded transitions, and unknown activation commit outcomes.
+* Keep codec registration additive and migration-safe through explicit reader-version compatibility tests.
+
+### CI
+
+* Keep one cargo-deny report per workspace and reuse it across policy guards for deterministic dependency findings.
+
 ## [0.8.0](https://github.com/cloudflare/pingora/compare/0.7.0...0.8.0) - 2026-03-02
 
 

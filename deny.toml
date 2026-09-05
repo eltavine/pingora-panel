@@ -56,6 +56,13 @@ highlight = "all"
 workspace-default-features = "allow"
 external-default-features = "allow"
 
+# Keep the minimum patched release explicit even if an advisory database is
+# temporarily stale. cargo-deny owns version-range enforcement here, so no
+# repository-specific dependency scanner is needed.
+deny = [
+    { crate = "time@<0.3.47", reason = "RUSTSEC-2026-0009 is fixed in time 0.3.47 and later" },
+]
+
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"

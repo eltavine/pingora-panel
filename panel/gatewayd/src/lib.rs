@@ -47,6 +47,7 @@ use panel_errors::Result;
 use panel_gateway_runtime::{
     BufferedGatewayEventSink, DurableGatewayEngine, DurableGatewayEngineOptions,
     FanoutGatewayEventSink, GatewayEvent, GatewayEventDeliveryMonitor, GatewayEventSink,
+    GatewayRecoveryMonitor,
     PreparedSnapshotAdmissionPolicy, PreparedSnapshotBudget,
 };
 use snapshot_store_fs::FileSnapshotStore;
@@ -76,6 +77,7 @@ pub struct GatewaydRuntime {
     pub background_tasks: BackgroundTaskSupervisor,
     pub events: Arc<dyn GatewayEventSink>,
     pub event_delivery: GatewayEventDeliveryMonitor,
+    pub recovery: GatewayRecoveryMonitor,
 }
 
 pub struct GatewaydServiceOptions {
@@ -203,7 +205,9 @@ pub async fn build_gateway_runtime_with_options(
     let store = Arc::new(FileSnapshotStore::open_exclusive(state_directory).await?);
     let health_state = Arc::new(RuntimeHealthState::new());
     let event_delivery = GatewayEventDeliveryMonitor::new();
+    let recovery = GatewayRecoveryMonitor::new();
     let mut direct_sinks = vec![Arc::clone(&health_state) as Arc<dyn GatewayEventSink>];
+    direct_sinks.push(Arc::new(recovery.clone()) as Arc<dyn GatewayEventSink>);
     if !options.event_sinks.is_empty() {
         let downstream: Arc<dyn GatewayEventSink> = Arc::new(FanoutGatewayEventSink::with_monitor(
             options.event_sinks,
@@ -281,6 +285,7 @@ pub async fn build_gateway_runtime_with_options(
         background_tasks,
         events,
         event_delivery,
+        recovery,
     })
 }
 
@@ -316,6 +321,7 @@ pub async fn serve_gatewayd(
         background_tasks,
         events,
         event_delivery,
+        recovery,
     } = runtime;
     let mut failure_monitor = background_tasks.failure_monitor();
     let (trigger_sender, trigger_receiver) = oneshot::channel();
@@ -351,12 +357,20 @@ pub async fn serve_gatewayd(
         .shutdown_and_join_with_policy(config.background_task_shutdown_policy())
         .await;
     let delivery = event_delivery.snapshot();
+    let recovery_snapshot = recovery.snapshot();
     tracing::info!(
         event = "event_delivery_stopped",
         queue_full_events = delivery.queue_full_events(),
         disconnected_events = delivery.disconnected_events(),
         consumer_panics = delivery.consumer_panics(),
         "gateway event delivery stopped"
+    );
+    tracing::info!(
+        event = "gateway_recovery_summary",
+        recovery_completed = recovery_snapshot.recovery_completed(),
+        degraded_events = recovery_snapshot.degraded_events(),
+        unknown_commit_outcomes = recovery_snapshot.unknown_commit_outcomes(),
+        "gateway recovery summary"
     );
     if let Ok(Some(failure)) = trigger_receiver
         .await

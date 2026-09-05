@@ -12,6 +12,7 @@ pub use events::{
     BufferedGatewayEventReceiver, BufferedGatewayEventSink, FanoutGatewayEventSink, GatewayEvent,
     GatewayEventDeliveryDiagnostics, GatewayEventDeliveryDiagnosticsProvider,
     GatewayEventDeliveryMonitor, GatewayEventDeliverySnapshot, GatewayEventPanicObserver,
+    GatewayRecoveryDiagnostics, GatewayRecoveryDiagnosticsProvider, GatewayRecoveryMonitor,
     GatewayEventSink, GatewayOperation, GatewayRequestMetadata, GatewayRequestOperation,
     GatewayRequestOutcome, NoopGatewayEventSink, PanicIsolatedGatewayEventSink,
 };
@@ -312,6 +313,135 @@ where
         Ok(())
     }
 
+    async fn prepare_transaction(
+        adapter: Arc<A>,
+        store: Arc<S>,
+        state: Arc<Mutex<RuntimeState<A::Prepared>>>,
+        prepared_policy: Arc<dyn PreparedSnapshotAdmissionPolicy>,
+        events: Arc<dyn GatewayEventSink>,
+        request: PrepareRequest,
+    ) -> Result<PrepareReceipt> {
+        {
+            let state = state.lock().await;
+            Self::ensure_mutations_allowed(&state)?;
+            Self::ensure_prepare_is_new(&state, &request.snapshot)?;
+            prepared_policy.admit(
+                PreparedSnapshotUsage {
+                    outstanding: state.prepared.len(),
+                    total_bytes: state.prepared_bytes,
+                },
+                &request.snapshot,
+            )?;
+        }
+        let artifact = Arc::new(adapter.prepare(request.snapshot.clone()).await?);
+        let capabilities = adapter.capabilities().await?;
+        let mut state = state.lock().await;
+        Self::ensure_mutations_allowed(&state)?;
+        Self::ensure_prepare_is_new(&state, &request.snapshot)?;
+        prepared_policy.admit(
+            PreparedSnapshotUsage {
+                outstanding: state.prepared.len(),
+                total_bytes: state.prepared_bytes,
+            },
+            &request.snapshot,
+        )?;
+        let accounted_bytes = request.snapshot.canonical_bytes().len();
+        let prepared_bytes = state
+            .prepared_bytes
+            .checked_add(accounted_bytes)
+            .ok_or_else(|| {
+                PanelError::resource_exhausted("prepared snapshot aggregate size overflow")
+            })?;
+
+        let token = PrepareToken::new(Uuid::new_v4().to_string());
+        let receipt = PrepareReceipt {
+            revision_id: request.snapshot.revision_id,
+            content_hash: request.snapshot.content_hash.clone(),
+            adapter_version: capabilities.adapter_version,
+            schema_version: request.snapshot.schema_version.clone(),
+            prepare_token: token.clone(),
+            previous_active_hash: state
+                .active
+                .as_ref()
+                .map(|item| item.envelope.snapshot.content_hash.clone()),
+        };
+        let record = PreparedSnapshotRecord {
+            envelope: SnapshotEnvelope {
+                snapshot: request.snapshot,
+            },
+            receipt: receipt.clone(),
+        };
+        if let Err(error) = store.save_prepared(record.clone()).await {
+            Self::mark_degraded(
+                &mut state,
+                events.as_ref(),
+                GatewayOperation::SavePrepared,
+                &error,
+            );
+            return Err(error);
+        }
+        state.prepared_bytes = prepared_bytes;
+        state.prepared.insert(
+            token,
+            PreparedEntry {
+                record,
+                artifact,
+                accounted_bytes,
+            },
+        );
+        events.emit(&GatewayEvent::Prepared {
+            revision_id: receipt.revision_id,
+            prepared_count: state.prepared.len(),
+        });
+        Ok(receipt)
+    }
+
+    async fn abort_transaction(
+        store: Arc<S>,
+        state: Arc<Mutex<RuntimeState<A::Prepared>>>,
+        events: Arc<dyn GatewayEventSink>,
+        token: PrepareToken,
+    ) -> Result<AbortReceipt> {
+        let mut state = state.lock().await;
+        Self::ensure_mutations_allowed(&state)?;
+        let record = state
+            .prepared
+            .get(&token)
+            .ok_or_else(|| PanelError::new(ErrorCode::NOT_FOUND, "prepare token was not found"))?
+            .record
+            .clone();
+        if let Err(error) = store.delete_prepared(&token).await {
+            Self::mark_degraded(
+                &mut state,
+                events.as_ref(),
+                GatewayOperation::DeletePrepared,
+                &error,
+            );
+            return Err(error);
+        }
+        let removed = state
+            .prepared
+            .remove(&token)
+            .expect("aborted prepare token remains present while state is locked");
+        state.prepared_bytes = state.prepared_bytes.saturating_sub(removed.accounted_bytes);
+        let receipt = AbortReceipt {
+            revision_id: record.envelope.snapshot.revision_id,
+            content_hash: record.envelope.snapshot.content_hash,
+            adapter_version: record.receipt.adapter_version,
+            schema_version: record.envelope.snapshot.schema_version,
+            prepare_token: token,
+            previous_active_hash: state
+                .active
+                .as_ref()
+                .map(|item| item.envelope.snapshot.content_hash.clone()),
+        };
+        events.emit(&GatewayEvent::Aborted {
+            revision_id: receipt.revision_id,
+            prepared_count: state.prepared.len(),
+        });
+        Ok(receipt)
+    }
+
     async fn activate_transaction(
         adapter: Arc<A>,
         store: Arc<S>,
@@ -461,79 +591,16 @@ where
     }
 
     async fn prepare(&self, request: PrepareRequest) -> Result<PrepareReceipt> {
-        {
-            let state = self.state.lock().await;
-            Self::ensure_mutations_allowed(&state)?;
-            Self::ensure_prepare_is_new(&state, &request.snapshot)?;
-            self.prepared_policy.admit(
-                PreparedSnapshotUsage {
-                    outstanding: state.prepared.len(),
-                    total_bytes: state.prepared_bytes,
-                },
-                &request.snapshot,
-            )?;
-        }
-        let artifact = Arc::new(self.adapter.prepare(request.snapshot.clone()).await?);
-        let capabilities = self.adapter.capabilities().await?;
-        let mut state = self.state.lock().await;
-        Self::ensure_mutations_allowed(&state)?;
-        Self::ensure_prepare_is_new(&state, &request.snapshot)?;
-        self.prepared_policy.admit(
-            PreparedSnapshotUsage {
-                outstanding: state.prepared.len(),
-                total_bytes: state.prepared_bytes,
-            },
-            &request.snapshot,
-        )?;
-        let accounted_bytes = request.snapshot.canonical_bytes().len();
-        let prepared_bytes = state
-            .prepared_bytes
-            .checked_add(accounted_bytes)
-            .ok_or_else(|| {
-                PanelError::resource_exhausted("prepared snapshot aggregate size overflow")
-            })?;
-
-        let token = PrepareToken::new(Uuid::new_v4().to_string());
-        let receipt = PrepareReceipt {
-            revision_id: request.snapshot.revision_id,
-            content_hash: request.snapshot.content_hash.clone(),
-            adapter_version: capabilities.adapter_version,
-            schema_version: request.snapshot.schema_version.clone(),
-            prepare_token: token.clone(),
-            previous_active_hash: state
-                .active
-                .as_ref()
-                .map(|item| item.envelope.snapshot.content_hash.clone()),
-        };
-        let record = PreparedSnapshotRecord {
-            envelope: SnapshotEnvelope {
-                snapshot: request.snapshot,
-            },
-            receipt: receipt.clone(),
-        };
-        if let Err(error) = self.store.save_prepared(record.clone()).await {
-            Self::mark_degraded(
-                &mut state,
-                self.events.as_ref(),
-                GatewayOperation::SavePrepared,
-                &error,
-            );
-            return Err(error);
-        }
-        state.prepared_bytes = prepared_bytes;
-        state.prepared.insert(
-            token,
-            PreparedEntry {
-                record,
-                artifact,
-                accounted_bytes,
-            },
-        );
-        self.events.emit(&GatewayEvent::Prepared {
-            revision_id: receipt.revision_id,
-            prepared_count: state.prepared.len(),
-        });
-        Ok(receipt)
+        tokio::spawn(Self::prepare_transaction(
+            Arc::clone(&self.adapter),
+            Arc::clone(&self.store),
+            Arc::clone(&self.state),
+            Arc::clone(&self.prepared_policy),
+            Arc::clone(&self.events),
+            request,
+        ))
+        .await
+        .map_err(|error| PanelError::internal("prepare task failed").with_source(error))?
     }
 
     async fn activate(&self, request: ActivateRequest) -> Result<ActivationReceipt> {
@@ -549,44 +616,14 @@ where
     }
 
     async fn abort(&self, token: PrepareToken) -> Result<AbortReceipt> {
-        let mut state = self.state.lock().await;
-        Self::ensure_mutations_allowed(&state)?;
-        let record = state
-            .prepared
-            .get(&token)
-            .ok_or_else(|| PanelError::new(ErrorCode::NOT_FOUND, "prepare token was not found"))?
-            .record
-            .clone();
-        if let Err(error) = self.store.delete_prepared(&token).await {
-            Self::mark_degraded(
-                &mut state,
-                self.events.as_ref(),
-                GatewayOperation::DeletePrepared,
-                &error,
-            );
-            return Err(error);
-        }
-        let removed = state
-            .prepared
-            .remove(&token)
-            .expect("aborted prepare token remains present while state is locked");
-        state.prepared_bytes = state.prepared_bytes.saturating_sub(removed.accounted_bytes);
-        let receipt = AbortReceipt {
-            revision_id: record.envelope.snapshot.revision_id,
-            content_hash: record.envelope.snapshot.content_hash,
-            adapter_version: record.receipt.adapter_version,
-            schema_version: record.envelope.snapshot.schema_version,
-            prepare_token: token,
-            previous_active_hash: state
-                .active
-                .as_ref()
-                .map(|item| item.envelope.snapshot.content_hash.clone()),
-        };
-        self.events.emit(&GatewayEvent::Aborted {
-            revision_id: receipt.revision_id,
-            prepared_count: state.prepared.len(),
-        });
-        Ok(receipt)
+        tokio::spawn(Self::abort_transaction(
+            Arc::clone(&self.store),
+            Arc::clone(&self.state),
+            Arc::clone(&self.events),
+            token,
+        ))
+        .await
+        .map_err(|error| PanelError::internal("abort task failed").with_source(error))?
     }
 
     async fn status(&self) -> Result<GatewayStatus> {
@@ -621,7 +658,7 @@ mod tests {
     use panel_ir::{RuntimeSnapshot, IR_SCHEMA_VERSION};
     use std::{
         collections::BTreeSet,
-        sync::{Mutex as StdMutex, RwLock},
+        sync::{atomic::{AtomicBool, Ordering}, Mutex as StdMutex, RwLock},
     };
     use tokio::sync::Notify;
 
@@ -692,6 +729,12 @@ mod tests {
         state: Mutex<MemoryStoreState>,
         commit_started: Notify,
         continue_commit: Notify,
+        save_started: Notify,
+        continue_save: Notify,
+        delete_started: Notify,
+        continue_delete: Notify,
+        pause_save: AtomicBool,
+        pause_delete: AtomicBool,
     }
 
     #[async_trait]
@@ -709,6 +752,11 @@ mod tests {
         }
 
         async fn save_prepared(&self, record: PreparedSnapshotRecord) -> Result<()> {
+            let pause_save = self.pause_save.load(Ordering::Acquire);
+            if pause_save {
+                self.save_started.notify_one();
+                self.continue_save.notified().await;
+            }
             self.state
                 .lock()
                 .await
@@ -718,6 +766,11 @@ mod tests {
         }
 
         async fn delete_prepared(&self, token: &PrepareToken) -> Result<()> {
+            let pause_delete = self.pause_delete.load(Ordering::Acquire);
+            if pause_delete {
+                self.delete_started.notify_one();
+                self.continue_delete.notified().await;
+            }
             self.state.lock().await.prepared.remove(token);
             Ok(())
         }
@@ -1080,5 +1133,74 @@ mod tests {
         assert!(engine.status().await.unwrap().active_hash.is_some());
         assert!(adapter.active_hash().is_some());
         assert!(store.state.lock().await.active.is_some());
+    }
+
+    #[tokio::test]
+    async fn request_cancellation_cannot_strand_a_persisted_prepare() {
+        let adapter = Arc::new(TestAdapter::new());
+        let store = Arc::new(MemoryStore::default());
+        store.pause_save.store(true, Ordering::Release);
+        let engine = Arc::new(
+            DurableGatewayEngine::restore(Arc::clone(&adapter), Arc::clone(&store))
+                .await
+                .unwrap(),
+        );
+        let prepare = {
+            let engine = Arc::clone(&engine);
+            tokio::spawn(async move {
+                engine
+                    .prepare(PrepareRequest {
+                        snapshot: snapshot(1),
+                    })
+                    .await
+            })
+        };
+        store.save_started.notified().await;
+        prepare.abort();
+        store.continue_save.notify_one();
+
+        for _ in 0..100 {
+            if !store.state.lock().await.prepared.is_empty() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(store.state.lock().await.prepared.len(), 1);
+        assert_eq!(engine.status().await.unwrap().prepared_count, 1);
+    }
+
+    #[tokio::test]
+    async fn request_cancellation_cannot_strand_a_deleted_prepare() {
+        let adapter = Arc::new(TestAdapter::new());
+        let store = Arc::new(MemoryStore::default());
+        let engine = Arc::new(
+            DurableGatewayEngine::restore(Arc::clone(&adapter), Arc::clone(&store))
+                .await
+                .unwrap(),
+        );
+        let prepared = engine
+            .prepare(PrepareRequest {
+                snapshot: snapshot(1),
+            })
+            .await
+            .unwrap();
+        store.pause_delete.store(true, Ordering::Release);
+        let abort = {
+            let engine = Arc::clone(&engine);
+            let token = prepared.prepare_token.clone();
+            tokio::spawn(async move { engine.abort(token).await })
+        };
+        store.delete_started.notified().await;
+        abort.abort();
+        store.continue_delete.notify_one();
+
+        for _ in 0..100 {
+            if store.state.lock().await.prepared.is_empty() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(store.state.lock().await.prepared.is_empty());
+        assert_eq!(engine.status().await.unwrap().prepared_count, 0);
     }
 }

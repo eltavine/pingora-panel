@@ -6,7 +6,7 @@ pub use panel_engine::{
     GatewayRequestOperation, GatewayRequestOutcome, NoopGatewayEventSink,
     PanicIsolatedGatewayEventSink,
 };
-use panel_errors::{PanelError, Result};
+use panel_errors::{ErrorCode, PanelError, Result};
 use std::{
     future::Future,
     sync::{
@@ -97,6 +97,95 @@ impl GatewayEventDeliveryDiagnosticsProvider for GatewayEventDeliveryMonitor {
             snapshot.disconnected_events(),
             snapshot.consumer_panics(),
         )
+    }
+}
+
+/// Compact recovery counters kept independent from any metrics backend.
+///
+/// Applications can project this provider into Prometheus, OpenTelemetry, or
+/// another mature backend without coupling the engine to one telemetry stack.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct GatewayRecoveryDiagnostics {
+    recovery_completed: u64,
+    degraded_events: u64,
+    unknown_commit_outcomes: u64,
+}
+
+impl GatewayRecoveryDiagnostics {
+    pub fn recovery_completed(self) -> u64 {
+        self.recovery_completed
+    }
+
+    pub fn degraded_events(self) -> u64 {
+        self.degraded_events
+    }
+
+    pub fn unknown_commit_outcomes(self) -> u64 {
+        self.unknown_commit_outcomes
+    }
+}
+
+pub trait GatewayRecoveryDiagnosticsProvider: Send + Sync {
+    fn recovery_snapshot(&self) -> GatewayRecoveryDiagnostics;
+}
+
+#[derive(Default)]
+struct GatewayRecoveryStats {
+    recovery_completed: AtomicU64,
+    degraded_events: AtomicU64,
+    unknown_commit_outcomes: AtomicU64,
+}
+
+/// Event-driven recovery monitor. It is deliberately a sink so it can be
+/// composed through the existing fan-out boundary and replaced by an adapter.
+#[derive(Clone, Default)]
+pub struct GatewayRecoveryMonitor {
+    stats: Arc<GatewayRecoveryStats>,
+}
+
+impl GatewayRecoveryMonitor {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn snapshot(&self) -> GatewayRecoveryDiagnostics {
+        GatewayRecoveryDiagnostics {
+            recovery_completed: self.stats.recovery_completed.load(Ordering::Relaxed),
+            degraded_events: self.stats.degraded_events.load(Ordering::Relaxed),
+            unknown_commit_outcomes: self.stats.unknown_commit_outcomes.load(Ordering::Relaxed),
+        }
+    }
+}
+
+impl GatewayRecoveryDiagnosticsProvider for GatewayRecoveryMonitor {
+    fn recovery_snapshot(&self) -> GatewayRecoveryDiagnostics {
+        self.snapshot()
+    }
+}
+
+impl GatewayEventSink for GatewayRecoveryMonitor {
+    fn emit(&self, event: &GatewayEvent) {
+        match event {
+            GatewayEvent::RecoveryCompleted { .. } => {
+                self.stats.recovery_completed.fetch_add(1, Ordering::Relaxed);
+            }
+            GatewayEvent::Degraded {
+                operation: GatewayOperation::CommitActivation,
+                error_code,
+            } => {
+                self.stats.degraded_events.fetch_add(1, Ordering::Relaxed);
+                if error_code.as_str() == ErrorCode::COMMIT_OUTCOME_UNKNOWN {
+                    self.stats
+                        .unknown_commit_outcomes
+                        .fetch_add(1, Ordering::Relaxed);
+                }
+            }
+            GatewayEvent::Degraded { .. } => {
+                self.stats.degraded_events.fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -270,6 +359,33 @@ mod tests {
 
     fn event() -> GatewayEvent {
         GatewayEvent::ShutdownCompleted
+    }
+
+    #[test]
+    fn recovery_monitor_projects_stable_counters() {
+        let monitor = GatewayRecoveryMonitor::new();
+        monitor.emit(&GatewayEvent::RecoveryCompleted {
+            ready: true,
+            active_revision_id: None,
+            prepared_count: 0,
+        });
+        monitor.emit(&GatewayEvent::Degraded {
+            operation: GatewayOperation::CommitActivation,
+            error_code: ErrorCode::COMMIT_OUTCOME_UNKNOWN.into(),
+        });
+        monitor.emit(&GatewayEvent::Degraded {
+            operation: GatewayOperation::RestorePrepared,
+            error_code: ErrorCode::CORRUPT_STATE.into(),
+        });
+
+        let snapshot = monitor.snapshot();
+        assert_eq!(snapshot.recovery_completed(), 1);
+        assert_eq!(snapshot.degraded_events(), 2);
+        assert_eq!(snapshot.unknown_commit_outcomes(), 1);
+        assert_eq!(
+            GatewayRecoveryDiagnosticsProvider::recovery_snapshot(&monitor),
+            snapshot
+        );
     }
 
     #[test]
