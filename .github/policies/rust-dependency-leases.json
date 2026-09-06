@@ -74,10 +74,10 @@
           "versions": [
             "1.0.109",
             "2.0.119",
-            "3.0.4"
+            "3.0.5"
           ],
           "owner": "pingora-panel-platform",
-          "reason": "Inherited transitive duplicate with no unified release line: 1.0.109 via derivative; 2.0.119 via pin-project-internal, prettyplease, prost-build; 3.0.4 via async-trait, clap_derive, futures-macro.",
+          "reason": "Inherited transitive duplicate with no unified release line: 1.0.109 via derivative; 2.0.119 via pin-project-internal, prettyplease, prost-build; 3.0.5 via async-trait, clap_derive, futures-macro.",
           "expires_on": "2027-03-01"
         },
         {
