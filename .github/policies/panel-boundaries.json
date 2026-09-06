@@ -44,6 +44,14 @@
         "panel-config-domain"
       ]
     },
+    "panel-application": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-domain",
+        "panel-errors",
+        "panel-ir"
+      ]
+    },
     "panel-contracts": {
       "catalog": true,
       "allowed_workspace_dependencies": [
@@ -98,6 +106,7 @@
     "pingora_dependency_owner": "gateway-pingora",
     "engine_transport_storage_neutral_members": [
       "panel-config-domain",
+      "panel-application",
       "panel-domain",
       "panel-engine",
       "panel-errors",

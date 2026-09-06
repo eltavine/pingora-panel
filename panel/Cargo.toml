@@ -6,6 +6,7 @@ members = [
     "panel-domain",
     "panel-config-domain",
     "panel-config-state-codec",
+    "panel-application",
     "panel-ir",
     "panel-engine",
     "panel-gateway-runtime",
@@ -33,6 +34,7 @@ prost = "=0.14.4"
 panel-contracts = { version = "=0.1.0", path = "panel-contracts" }
 panel-config-domain = { version = "=0.1.0", path = "panel-config-domain" }
 panel-config-state-codec = { version = "=0.1.0", path = "panel-config-state-codec" }
+panel-application = { version = "=0.1.0", path = "panel-application" }
 panel-domain = { version = "=0.1.0", path = "panel-domain" }
 panel-engine = { version = "=0.1.0", path = "panel-engine" }
 panel-errors = { version = "=0.1.0", path = "panel-errors" }

@@ -1141,6 +1141,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e"
 
 [[package]]
+name = "panel-application"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "panel-domain",
+ "panel-errors",
+ "panel-ir",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "panel-config-domain"
 version = "0.1.0"
 dependencies = [

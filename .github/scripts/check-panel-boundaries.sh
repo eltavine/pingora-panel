@@ -143,6 +143,7 @@ done < <(
 )
 
 declare -A direct_dependencies
+declare -A all_dependencies
 while IFS=$'\t' read -r package dependency requirement dependency_path; do
   direct_dependencies["$package"]+=" $dependency"
   if [[ -n "${workspace_member_set[$dependency]-}" ]]; then
@@ -175,7 +176,22 @@ done < <(
     | select(.id as $id | $members | index($id))
     | .name as $package
     | .dependencies[]
+    | select((.kind // "normal") == "normal")
     | [$package, .name, .req, (.path // "")]
+    | @tsv
+  ' <<<"$metadata"
+)
+
+while IFS=$'\t' read -r package dependency; do
+  all_dependencies["$package"]+=" $dependency"
+done < <(
+  jq -r '
+    .workspace_members as $members
+    | .packages[]
+    | select(.id as $id | $members | index($id))
+    | .name as $package
+    | .dependencies[]
+    | [$package, .name]
     | @tsv
   ' <<<"$metadata"
 )
@@ -227,6 +243,21 @@ for package in "${!direct_dependencies[@]}"; do
   done
 done
 
+# Development and build dependencies do not participate in the normal runtime
+# allowlist, but they still may not smuggle transport, storage, or Pingora
+# implementations into a neutral crate.
+for package in "${!all_dependencies[@]}"; do
+  for dependency in ${all_dependencies[$package]}; do
+    if [[ ("$dependency" == pingora || "$dependency" == pingora-*) \
+      && "$package" != "$pingora_dependency_owner" ]]; then
+      printf 'boundary violation: only %s may depend on %s\n' \
+        "$pingora_dependency_owner" "$dependency" >&2
+      report_path "$package" "$dependency"
+      failed=1
+    fi
+  done
+done
+
 protected=()
 while IFS= read -r package; do
   protected+=("$package")
@@ -238,7 +269,7 @@ while IFS= read -r dependency; do
 done < <(jq -r '.rules.forbidden_neutral_dependencies[]' "$policy")
 
 for package in "${protected[@]}"; do
-  for dependency in ${direct_dependencies[$package]-}; do
+  for dependency in ${all_dependencies[$package]-}; do
     for forbidden_dependency in "${forbidden_neutral_dependencies[@]}"; do
       # Policy entries intentionally support globs such as pingora-*.
       # shellcheck disable=SC2053

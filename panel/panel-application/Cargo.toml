@@ -1,0 +1,18 @@
+[package]
+name = "panel-application"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+panel-domain.workspace = true
+panel-errors.workspace = true
+panel-ir.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
