@@ -1,0 +1,16 @@
+[package]
+name = "panel-persistence-memory"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+panel-application.workspace = true
+panel-domain.workspace = true
+panel-errors.workspace = true
+tokio.workspace = true
+

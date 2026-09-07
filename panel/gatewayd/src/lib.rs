@@ -31,7 +31,10 @@ pub use config::{
     WORKER_COUNT_ENV,
 };
 pub use health::{RuntimeHealthState, RuntimeReadiness, TonicHealthSynchronizer};
-pub use management::{management_router, management_router_with_config, EngineGatewayPort};
+pub use management::{
+    bind_management_listener, management_router, management_router_with_config, serve_management,
+    EngineGatewayPort,
+};
 pub use observability::{initialize_observability, TracingGatewayEventSink};
 pub use resource_limits::*;
 pub use runtime_info::ProcessRuntimeInfo;

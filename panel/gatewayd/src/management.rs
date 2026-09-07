@@ -3,16 +3,20 @@ use chrono::DateTime;
 use panel_api::{router_with_config, ApiConfig, ApiState};
 use panel_application::{
     ActivatedDeployment, CommandContext, ConfigCompiler, GatewayPort, GatewayService,
-    IdempotencyRepository, IdempotentGatewayUseCases, PreparedDeployment,
+    GatewayStatus as ApplicationGatewayStatus, IdempotencyRepository, IdempotentGatewayUseCases,
+    PreparedDeployment,
 };
 use panel_domain::ContentHash;
 use panel_engine::{ActivateRequest, GatewayEngine, PrepareRequest, PrepareToken};
 use panel_errors::{Result, ValidationReport};
 use panel_ir::RuntimeSnapshot;
 use std::{
+    future::Future,
+    net::SocketAddr,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+use tokio::net::TcpListener;
 
 /// Adapts the engine port to the application-owned gateway port.
 ///
@@ -63,6 +67,19 @@ where
             receipt.revision_id,
             receipt.content_hash,
             receipt.previous_active_hash,
+        ))
+    }
+
+    async fn status(&self) -> Result<ApplicationGatewayStatus> {
+        let status = self.engine.status().await?;
+        Ok(ApplicationGatewayStatus::new(
+            status.ready,
+            status.message,
+            status.active_revision_id,
+            status.active_hash,
+            status.prepared_count,
+            status.adapter_version,
+            status.schema_version,
         ))
     }
 
@@ -172,10 +189,40 @@ where
     router_with_config(ApiState::new(use_cases), api_config)
 }
 
+/// Binds a management listener after applying the explicit exposure policy.
+///
+/// Binding is kept separate from router construction so callers can run the
+/// same HTTP graph in tests, embedded processes, or a dedicated supervisor.
+pub async fn bind_management_listener(
+    address: SocketAddr,
+    bind_policy: &dyn crate::ManagementBindPolicy,
+) -> Result<TcpListener> {
+    bind_policy.validate(address)?;
+    TcpListener::bind(address)
+        .await
+        .map_err(|error| panel_errors::PanelError::internal(error.to_string()))
+}
+
+/// Serves a management router with graceful shutdown on an injected listener.
+///
+/// The listener is intentionally supplied by the composition root, keeping
+/// authentication, bind policy and process lifecycle independent from the
+/// transport-neutral HTTP adapter.
+pub async fn serve_management(
+    listener: TcpListener,
+    router: axum::Router,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> std::io::Result<()> {
+    axum::serve(listener, router)
+        .with_graceful_shutdown(shutdown)
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use panel_application::{IdempotencyKey, RequestDeadline, RequestId};
+    use tokio::sync::oneshot;
 
     fn context(deadline: &str) -> CommandContext {
         CommandContext::new(
@@ -195,5 +242,54 @@ mod tests {
             error.code.as_str(),
             panel_errors::ErrorCode::DEADLINE_EXCEEDED
         );
+    }
+
+    #[tokio::test]
+    async fn listener_binding_applies_exposure_policy_before_socket_creation() {
+        let error = bind_management_listener(
+            "192.0.2.10:0".parse().unwrap(),
+            &crate::LoopbackOnlyManagementBindPolicy,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error.code.as_str(),
+            panel_errors::ErrorCode::INVALID_ARGUMENT
+        );
+
+        let listener = bind_management_listener(
+            "127.0.0.1:0".parse().unwrap(),
+            &crate::LoopbackOnlyManagementBindPolicy,
+        )
+        .await
+        .unwrap();
+        assert!(listener.local_addr().unwrap().ip().is_loopback());
+    }
+
+    #[tokio::test]
+    async fn management_server_uses_injected_listener_and_graceful_shutdown() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let router = axum::Router::new().route(
+            "/healthz",
+            axum::routing::get(|| async { axum::http::StatusCode::NO_CONTENT }),
+        );
+        let (shutdown_sender, shutdown_receiver) = oneshot::channel();
+        let task = tokio::spawn(serve_management(listener, router, async move {
+            let _ = shutdown_receiver.await;
+        }));
+
+        let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+        use tokio::io::AsyncWriteExt;
+        stream
+            .write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        use tokio::io::AsyncReadExt;
+        let mut response = Vec::new();
+        stream.read_to_end(&mut response).await.unwrap();
+        assert!(response.starts_with(b"HTTP/1.1 204"));
+        shutdown_sender.send(()).unwrap();
+        task.await.unwrap().unwrap();
     }
 }

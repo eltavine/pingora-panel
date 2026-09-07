@@ -8,6 +8,7 @@ members = [
     "panel-config-domain",
     "panel-config-state-codec",
     "panel-application",
+    "panel-persistence-memory",
     "panel-config-json",
     "panel-ir",
     "panel-engine",
@@ -42,6 +43,7 @@ panel-config-state-codec = { version = "=0.1.0", path = "panel-config-state-code
 panel-config-json = { version = "=0.1.0", path = "panel-config-json" }
 panel-api = { version = "=0.1.0", path = "panel-api" }
 panel-application = { version = "=0.1.0", path = "panel-application" }
+panel-persistence-memory = { version = "=0.1.0", path = "panel-persistence-memory" }
 panel-domain = { version = "=0.1.0", path = "panel-domain" }
 panel-engine = { version = "=0.1.0", path = "panel-engine" }
 panel-errors = { version = "=0.1.0", path = "panel-errors" }

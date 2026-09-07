@@ -5,8 +5,8 @@ use axum::{
     http::{header, Request, StatusCode},
 };
 use panel_application::{
-    ActivatedDeployment, ConfigCompiler, ConfigDocument, ContentHash, GatewayPort, GatewayService,
-    PreparedDeployment,
+    ActivatedDeployment, ConfigCompiler, ConfigDocument, ContentHash, DeploymentOutcome,
+    GatewayPort, GatewayService, GatewayStatus, IdempotencyRecord, PreparedDeployment,
 };
 use panel_domain::RevisionId;
 use panel_errors::{PanelError, Result, ValidationReport};
@@ -54,6 +54,18 @@ impl GatewayPort for FakeGateway {
             RevisionId::new(1),
             ContentHash::from_bytes(b"active"),
             None,
+        ))
+    }
+
+    async fn status(&self) -> Result<GatewayStatus> {
+        Ok(GatewayStatus::new(
+            true,
+            Some("ready".into()),
+            Some(RevisionId::new(1)),
+            Some(ContentHash::from_bytes(b"active")),
+            0,
+            "fake",
+            panel_ir::IR_SCHEMA_VERSION,
         ))
     }
 }
@@ -131,6 +143,51 @@ async fn openapi_is_exposed_from_the_same_router() {
         .unwrap();
     let response = app().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn status_flows_through_the_application_port() {
+    let request = Request::builder()
+        .uri("/api/v1/gateway/status")
+        .body(Body::empty())
+        .unwrap();
+    let response = app().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 4 * 1024)
+        .await
+        .unwrap();
+    let body = String::from_utf8_lossy(&body);
+    assert!(body.contains("\"ready\":true"));
+    assert!(body.contains("\"adapter_version\":\"fake\""));
+}
+
+#[tokio::test]
+async fn unconfigured_receipt_repository_is_an_explicit_capability_error() {
+    let request = Request::builder()
+        .uri("/api/v1/gateway/receipts/missing-key")
+        .body(Body::empty())
+        .unwrap();
+    let response = app().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = axum::body::to_bytes(response.into_body(), 4 * 1024)
+        .await
+        .unwrap();
+    assert!(String::from_utf8_lossy(&body).contains("receipt queries are not configured"));
+}
+
+#[test]
+fn receipt_projection_is_a_stable_public_union() {
+    let deployment =
+        ActivatedDeployment::new(RevisionId::new(7), ContentHash::from_bytes(b"active"), None);
+    let record = IdempotencyRecord::new(
+        ContentHash::from_bytes(b"request"),
+        DeploymentOutcome::Succeeded(deployment),
+    );
+    let response = crate::IdempotencyReceiptResponse::from(record);
+    let value = serde_json::to_value(response).unwrap();
+    assert_eq!(value["outcome"]["status"], "succeeded");
+    assert_eq!(value["outcome"]["revision_id"], 7);
+    assert!(value["outcome"].get("prepare_token").is_none());
 }
 
 #[tokio::test]

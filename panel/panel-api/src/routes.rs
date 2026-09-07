@@ -1,14 +1,16 @@
 use crate::{
     error::ApiError, request_context::command_context, ActivateRequest, ActivatedResponse,
-    PreparedResponse, ProblemDetails, SnapshotEnvelope, ValidationResponse,
+    GatewayStatusResponse, IdempotencyReceiptPendingResponse, IdempotencyReceiptResponse,
+    PreparedResponse, ProblemDetails, ReceiptOutcomeResponse, SnapshotEnvelope, ValidationResponse,
 };
 use axum::{
-    extract::{rejection::JsonRejection, DefaultBodyLimit, Json, State},
-    http::{HeaderMap, HeaderName},
+    extract::{rejection::JsonRejection, DefaultBodyLimit, Json, Path, State},
+    http::{HeaderMap, HeaderName, StatusCode},
+    response::{IntoResponse, Response},
     routing::{get, post},
     Router,
 };
-use panel_application::{ConfigDocument, ContentHash, GatewayUseCases};
+use panel_application::{ConfigDocument, ContentHash, GatewayUseCases, IdempotencyKey};
 use panel_errors::PanelError;
 use std::sync::Arc;
 use tower_http::{
@@ -72,13 +74,17 @@ impl<U> ApiState<U> {
 #[derive(OpenApi)]
 #[openapi(
     info(title = "Pingora Panel API", version = "v1"),
-    paths(validate, prepare, activate, openapi),
+    paths(validate, prepare, activate, status, receipt, openapi),
     components(schemas(
         SnapshotEnvelope,
         ActivateRequest,
         ValidationResponse,
         PreparedResponse,
         ActivatedResponse,
+        GatewayStatusResponse,
+        IdempotencyReceiptPendingResponse,
+        IdempotencyReceiptResponse,
+        ReceiptOutcomeResponse,
         ProblemDetails
     ))
 )]
@@ -101,12 +107,77 @@ where
         .route("/api/v1/gateway/validate", post(validate::<U>))
         .route("/api/v1/gateway/prepare", post(prepare::<U>))
         .route("/api/v1/gateway/activate", post(activate::<U>))
+        .route("/api/v1/gateway/status", get(status::<U>))
+        .route("/api/v1/gateway/receipts/{key}", get(receipt::<U>))
         .route("/api/v1/openapi.json", get(openapi))
         .layer(DefaultBodyLimit::max(config.max_body_bytes()))
         .layer(PropagateRequestIdLayer::new(request_id_header.clone()))
         .layer(TraceLayer::new_for_http())
         .layer(SetRequestIdLayer::new(request_id_header, MakeRequestUuid))
         .with_state(state)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/gateway/status",
+    responses((status = 200, body = GatewayStatusResponse))
+)]
+async fn status<U>(
+    State(state): State<ApiState<U>>,
+) -> Result<Json<GatewayStatusResponse>, ApiError>
+where
+    U: GatewayUseCases,
+{
+    state
+        .use_cases
+        .status()
+        .await
+        .map(GatewayStatusResponse::from)
+        .map(Json)
+        .map_err(Into::into)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/gateway/receipts/{key}",
+    params(("key" = String, Path, description = "Idempotency key")),
+    responses(
+        (status = 200, body = IdempotencyReceiptResponse),
+        (status = 202, body = IdempotencyReceiptPendingResponse),
+        (status = 404, body = ProblemDetails)
+    )
+)]
+async fn receipt<U>(
+    State(state): State<ApiState<U>>,
+    Path(key): Path<String>,
+) -> Result<Response, ApiError>
+where
+    U: GatewayUseCases,
+{
+    let key = IdempotencyKey::new(key).map_err(ApiError::new)?;
+    let lookup = state
+        .use_cases
+        .activation_receipt(&key)
+        .await
+        .map_err(ApiError::new)?;
+    match lookup {
+        panel_application::IdempotencyLookup::Missing => Err(ApiError::new(PanelError::not_found(
+            "activation receipt not found",
+        ))),
+        panel_application::IdempotencyLookup::InProgress => Ok((
+            StatusCode::ACCEPTED,
+            Json(IdempotencyReceiptPendingResponse {
+                status: "in_progress".into(),
+            }),
+        )
+            .into_response()),
+        panel_application::IdempotencyLookup::Completed(record) => {
+            Ok(Json(IdempotencyReceiptResponse::from(record)).into_response())
+        }
+        _ => Err(ApiError::new(PanelError::unsupported_capability(
+            "unknown activation receipt state",
+        ))),
+    }
 }
 
 #[utoipa::path(

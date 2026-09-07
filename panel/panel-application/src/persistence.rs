@@ -43,6 +43,18 @@ pub enum IdempotencyClaim {
     Conflict,
 }
 
+/// Read-only state exposed by an idempotency repository.
+///
+/// The enum is non-exhaustive so persistence implementations can add lease or
+/// reconciliation states without forcing a source-breaking change on clients.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum IdempotencyLookup {
+    Missing,
+    InProgress,
+    Completed(IdempotencyRecord),
+}
+
 /// Atomic idempotency boundary. Implementations must make `claim`
 /// linearizable so concurrent retries cannot execute a mutation twice.
 #[async_trait]
@@ -61,6 +73,16 @@ pub trait IdempotencyRepository: Send + Sync {
 
     /// Releases a claim only when the gateway failed before commit.
     async fn abort(&self, key: &IdempotencyKey, request_hash: &ContentHash) -> Result<()>;
+
+    /// Reads a receipt without changing claim state.
+    ///
+    /// Adapters may override this when they support operational receipt
+    /// queries. The default keeps existing implementations source-compatible.
+    async fn lookup(&self, _key: &IdempotencyKey) -> Result<IdempotencyLookup> {
+        Err(panel_errors::PanelError::unsupported_capability(
+            "idempotency receipt queries are not configured",
+        ))
+    }
 }
 
 /// Persistence port for versioned configuration revisions.

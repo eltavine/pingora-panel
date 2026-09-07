@@ -118,6 +118,14 @@
         "panel-domain"
       ]
     },
+    "panel-persistence-memory": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-application",
+        "panel-domain",
+        "panel-errors"
+      ]
+    },
     "snapshot-store-fs": {
       "catalog": true,
       "allowed_workspace_dependencies": [

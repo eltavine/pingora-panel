@@ -1,5 +1,5 @@
-use crate::CommandContext;
-use crate::{IdempotencyClaim, IdempotencyRecord, IdempotencyRepository};
+use crate::{CommandContext, IdempotencyKey};
+use crate::{IdempotencyClaim, IdempotencyLookup, IdempotencyRecord, IdempotencyRepository};
 use async_trait::async_trait;
 use panel_domain::{ContentHash, RevisionId};
 use panel_errors::{PanelError, Result, ValidationReport};
@@ -110,6 +110,70 @@ pub struct ActivatedDeployment {
     pub previous_active_hash: Option<ContentHash>,
 }
 
+/// Transport-neutral gateway status projection used by REST and CLI adapters.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct GatewayStatus {
+    ready: bool,
+    message: Option<String>,
+    active_revision_id: Option<RevisionId>,
+    active_hash: Option<ContentHash>,
+    prepared_count: usize,
+    adapter_version: String,
+    schema_version: String,
+}
+
+impl GatewayStatus {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        ready: bool,
+        message: Option<String>,
+        active_revision_id: Option<RevisionId>,
+        active_hash: Option<ContentHash>,
+        prepared_count: usize,
+        adapter_version: impl Into<String>,
+        schema_version: impl Into<String>,
+    ) -> Self {
+        Self {
+            ready,
+            message,
+            active_revision_id,
+            active_hash,
+            prepared_count,
+            adapter_version: adapter_version.into(),
+            schema_version: schema_version.into(),
+        }
+    }
+
+    pub fn ready(&self) -> bool {
+        self.ready
+    }
+
+    pub fn message(&self) -> Option<&str> {
+        self.message.as_deref()
+    }
+
+    pub fn active_revision_id(&self) -> Option<RevisionId> {
+        self.active_revision_id
+    }
+
+    pub fn active_hash(&self) -> Option<&ContentHash> {
+        self.active_hash.as_ref()
+    }
+
+    pub fn prepared_count(&self) -> usize {
+        self.prepared_count
+    }
+
+    pub fn adapter_version(&self) -> &str {
+        &self.adapter_version
+    }
+
+    pub fn schema_version(&self) -> &str {
+        &self.schema_version
+    }
+}
+
 impl ActivatedDeployment {
     pub fn new(
         revision_id: RevisionId,
@@ -158,6 +222,12 @@ pub trait GatewayPort: Send + Sync {
         expected_active_hash: Option<ContentHash>,
     ) -> Result<ActivatedDeployment>;
 
+    async fn status(&self) -> Result<GatewayStatus> {
+        Err(PanelError::unsupported_capability(
+            "gateway status is not configured",
+        ))
+    }
+
     async fn prepare_with_context(
         &self,
         _context: CommandContext,
@@ -193,6 +263,18 @@ pub trait GatewayUseCases: Send + Sync {
         prepare_token: String,
         expected_active_hash: Option<ContentHash>,
     ) -> Result<ActivatedDeployment>;
+
+    async fn status(&self) -> Result<GatewayStatus> {
+        Err(PanelError::unsupported_capability(
+            "gateway status is not configured",
+        ))
+    }
+
+    async fn activation_receipt(&self, _key: &IdempotencyKey) -> Result<IdempotencyLookup> {
+        Err(PanelError::unsupported_capability(
+            "activation receipt queries are not configured",
+        ))
+    }
 }
 
 /// Application decorator that makes activation retries replay a durable
@@ -296,6 +378,14 @@ impl GatewayUseCases for IdempotentGatewayUseCases {
         }
         Ok(deployment)
     }
+
+    async fn status(&self) -> Result<GatewayStatus> {
+        self.inner.status().await
+    }
+
+    async fn activation_receipt(&self, key: &IdempotencyKey) -> Result<IdempotencyLookup> {
+        self.repository.lookup(key).await
+    }
 }
 
 /// Default application workflow over independently replaceable ports.
@@ -335,6 +425,10 @@ impl GatewayUseCases for GatewayService {
         self.gateway
             .activate_with_context(context, prepare_token, expected_active_hash)
             .await
+    }
+
+    async fn status(&self) -> Result<GatewayStatus> {
+        self.gateway.status().await
     }
 }
 
