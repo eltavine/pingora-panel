@@ -5,12 +5,14 @@ use crate::{
 };
 use axum::{
     extract::{rejection::JsonRejection, DefaultBodyLimit, Json, Path, State},
-    http::{HeaderMap, HeaderName, StatusCode},
+    http::{header, HeaderMap, HeaderName, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
     Router,
 };
-use panel_application::{ConfigDocument, ContentHash, GatewayUseCases, IdempotencyKey};
+use panel_application::{
+    ConfigDocument, ContentHash, GatewayUseCases, IdempotencyKey, IdempotencyLookup,
+};
 use panel_errors::PanelError;
 use std::sync::Arc;
 use tower_http::{
@@ -120,7 +122,10 @@ where
 #[utoipa::path(
     get,
     path = "/api/v1/gateway/status",
-    responses((status = 200, body = GatewayStatusResponse))
+    responses(
+        (status = 200, body = GatewayStatusResponse),
+        (status = 422, body = ProblemDetails)
+    )
 )]
 async fn status<U>(
     State(state): State<ApiState<U>>,
@@ -144,7 +149,9 @@ where
     responses(
         (status = 200, body = IdempotencyReceiptResponse),
         (status = 202, body = IdempotencyReceiptPendingResponse),
-        (status = 404, body = ProblemDetails)
+        (status = 400, body = ProblemDetails),
+        (status = 404, body = ProblemDetails),
+        (status = 422, body = ProblemDetails)
     )
 )]
 async fn receipt<U>(
@@ -160,18 +167,23 @@ where
         .activation_receipt(&key)
         .await
         .map_err(ApiError::new)?;
+    project_receipt(lookup)
+}
+
+fn project_receipt(lookup: IdempotencyLookup) -> Result<Response, ApiError> {
     match lookup {
-        panel_application::IdempotencyLookup::Missing => Err(ApiError::new(PanelError::not_found(
+        IdempotencyLookup::Missing => Err(ApiError::new(PanelError::not_found(
             "activation receipt not found",
         ))),
-        panel_application::IdempotencyLookup::InProgress => Ok((
+        IdempotencyLookup::InProgress => Ok((
             StatusCode::ACCEPTED,
+            [(header::RETRY_AFTER, "1")],
             Json(IdempotencyReceiptPendingResponse {
                 status: "in_progress".into(),
             }),
         )
             .into_response()),
-        panel_application::IdempotencyLookup::Completed(record) => {
+        IdempotencyLookup::Completed(record) => {
             Ok(Json(IdempotencyReceiptResponse::from(record)).into_response())
         }
         _ => Err(ApiError::new(PanelError::unsupported_capability(

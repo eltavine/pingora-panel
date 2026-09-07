@@ -681,9 +681,13 @@ dependencies = [
  "panel-application",
  "panel-contracts",
  "panel-domain",
+ "panel-engine",
  "panel-errors",
  "panel-ir",
+ "tokio",
+ "tokio-stream",
  "tonic",
+ "uuid",
 ]
 
 [[package]]

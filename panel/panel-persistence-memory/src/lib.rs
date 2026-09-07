@@ -163,4 +163,84 @@ mod tests {
             IdempotencyClaim::Conflict
         );
     }
+
+    #[tokio::test]
+    async fn concurrent_identical_claims_have_one_linearization_winner() {
+        let repository = MemoryIdempotencyRepository::new();
+        let key = key("idem-concurrent");
+        let request_hash = hash(b"same-request");
+        let mut tasks = Vec::new();
+        for _ in 0..100 {
+            let repository = repository.clone();
+            let key = key.clone();
+            let request_hash = request_hash.clone();
+            tasks.push(tokio::spawn(async move {
+                repository.claim(&key, &request_hash).await.unwrap()
+            }));
+        }
+
+        let mut acquired = 0;
+        let mut in_progress = 0;
+        for task in tasks {
+            match task.await.unwrap() {
+                IdempotencyClaim::Acquired => acquired += 1,
+                IdempotencyClaim::InProgress => in_progress += 1,
+                other => panic!("unexpected claim result: {other:?}"),
+            }
+        }
+        assert_eq!((acquired, in_progress), (1, 99));
+    }
+
+    #[tokio::test]
+    async fn concurrent_different_claims_have_one_winner_and_conflicts() {
+        let repository = MemoryIdempotencyRepository::new();
+        let key = key("idem-conflicting-concurrent");
+        let mut tasks = Vec::new();
+        for index in 0..100 {
+            let repository = repository.clone();
+            let key = key.clone();
+            tasks.push(tokio::spawn(async move {
+                let request_hash = hash(format!("request-{index}").as_bytes());
+                repository.claim(&key, &request_hash).await.unwrap()
+            }));
+        }
+
+        let mut acquired = 0;
+        let mut conflicts = 0;
+        for task in tasks {
+            match task.await.unwrap() {
+                IdempotencyClaim::Acquired => acquired += 1,
+                IdempotencyClaim::Conflict => conflicts += 1,
+                other => panic!("unexpected claim result: {other:?}"),
+            }
+        }
+        assert_eq!((acquired, conflicts), (1, 99));
+    }
+
+    #[tokio::test]
+    async fn invalid_completion_and_abort_cannot_mutate_another_claim() {
+        let repository = MemoryIdempotencyRepository::new();
+        let key = key("idem-transition");
+        let request_hash = hash(b"request");
+        repository.claim(&key, &request_hash).await.unwrap();
+
+        let wrong_hash = hash(b"wrong");
+        assert!(repository
+            .complete(&key, record(wrong_hash.clone()))
+            .await
+            .is_err());
+        repository.abort(&key, &wrong_hash).await.unwrap();
+        assert_eq!(
+            repository.lookup(&key).await.unwrap(),
+            IdempotencyLookup::InProgress
+        );
+
+        let receipt = record(request_hash);
+        repository.complete(&key, receipt.clone()).await.unwrap();
+        repository.complete(&key, receipt.clone()).await.unwrap();
+        assert_eq!(
+            repository.lookup(&key).await.unwrap(),
+            IdempotencyLookup::Completed(receipt)
+        );
+    }
 }

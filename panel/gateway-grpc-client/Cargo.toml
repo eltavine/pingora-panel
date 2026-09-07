@@ -16,3 +16,9 @@ panel-domain.workspace = true
 panel-errors.workspace = true
 panel-ir.workspace = true
 tonic.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+panel-engine.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true

@@ -5,8 +5,9 @@ use axum::{
     http::{header, Request, StatusCode},
 };
 use panel_application::{
-    ActivatedDeployment, ConfigCompiler, ConfigDocument, ContentHash, DeploymentOutcome,
-    GatewayPort, GatewayService, GatewayStatus, IdempotencyRecord, PreparedDeployment,
+    ActivatedDeployment, CommandContext, ConfigCompiler, ConfigDocument, ContentHash,
+    DeploymentOutcome, GatewayPort, GatewayService, GatewayStatus, GatewayUseCases, IdempotencyKey,
+    IdempotencyLookup, IdempotencyRecord, PreparedDeployment,
 };
 use panel_domain::RevisionId;
 use panel_errors::{PanelError, Result, ValidationReport};
@@ -34,6 +35,43 @@ impl ConfigCompiler for IdentityCompiler {
 }
 
 struct FakeGateway;
+
+#[derive(Clone)]
+struct ReceiptUseCases {
+    lookup: IdempotencyLookup,
+}
+
+#[async_trait]
+impl GatewayUseCases for ReceiptUseCases {
+    async fn validate(&self, _document: ConfigDocument) -> Result<ValidationReport> {
+        Ok(ValidationReport::valid())
+    }
+
+    async fn prepare(
+        &self,
+        _context: CommandContext,
+        _document: ConfigDocument,
+    ) -> Result<PreparedDeployment> {
+        Err(PanelError::unsupported_capability(
+            "not used in receipt test",
+        ))
+    }
+
+    async fn activate(
+        &self,
+        _context: CommandContext,
+        _prepare_token: String,
+        _expected_active_hash: Option<ContentHash>,
+    ) -> Result<ActivatedDeployment> {
+        Err(PanelError::unsupported_capability(
+            "not used in receipt test",
+        ))
+    }
+
+    async fn activation_receipt(&self, _key: &IdempotencyKey) -> Result<IdempotencyLookup> {
+        Ok(self.lookup.clone())
+    }
+}
 
 #[async_trait]
 impl GatewayPort for FakeGateway {
@@ -84,6 +122,21 @@ fn app_with_config(config: ApiConfig) -> axum::Router {
             Arc::new(IdentityCompiler),
         ))),
         config,
+    )
+}
+
+fn receipt_app(lookup: IdempotencyLookup) -> axum::Router {
+    router(ApiState::new(Arc::new(ReceiptUseCases { lookup })))
+}
+
+fn completed_receipt() -> IdempotencyRecord {
+    IdempotencyRecord::new(
+        ContentHash::from_bytes(b"request"),
+        DeploymentOutcome::Succeeded(ActivatedDeployment::new(
+            RevisionId::new(7),
+            ContentHash::from_bytes(b"active"),
+            None,
+        )),
     )
 }
 
@@ -173,6 +226,70 @@ async fn unconfigured_receipt_repository_is_an_explicit_capability_error() {
         .await
         .unwrap();
     assert!(String::from_utf8_lossy(&body).contains("receipt queries are not configured"));
+}
+
+#[tokio::test]
+async fn receipt_route_projects_missing_in_progress_and_completed_states() {
+    let missing = receipt_app(IdempotencyLookup::Missing)
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/gateway/receipts/key")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+    let pending = receipt_app(IdempotencyLookup::InProgress)
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/gateway/receipts/key")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(pending.status(), StatusCode::ACCEPTED);
+    assert_eq!(pending.headers()[header::RETRY_AFTER], "1");
+    let pending_body = axum::body::to_bytes(pending.into_body(), 4 * 1024)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&pending_body).unwrap()["status"],
+        "in_progress"
+    );
+
+    let completed = receipt_app(IdempotencyLookup::Completed(completed_receipt()))
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/gateway/receipts/key")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(completed.status(), StatusCode::OK);
+    let completed_body = axum::body::to_bytes(completed.into_body(), 4 * 1024)
+        .await
+        .unwrap();
+    let completed_json: serde_json::Value = serde_json::from_slice(&completed_body).unwrap();
+    assert_eq!(completed_json["outcome"]["status"], "succeeded");
+    assert_eq!(completed_json["outcome"]["revision_id"], 7);
+    assert!(completed_json["outcome"].get("prepare_token").is_none());
+}
+
+#[tokio::test]
+async fn receipt_route_rejects_invalid_idempotency_keys_before_lookup() {
+    let request = Request::builder()
+        .uri(format!("/api/v1/gateway/receipts/{}", "x".repeat(257)))
+        .body(Body::empty())
+        .unwrap();
+    let response = receipt_app(IdempotencyLookup::Missing)
+        .oneshot(request)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[test]

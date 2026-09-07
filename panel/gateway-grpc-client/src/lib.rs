@@ -22,8 +22,11 @@ use tonic::{
     transport::{Channel, Endpoint},
     Code, Status,
 };
+use uuid::Uuid;
 
-const CONTEXT_SCHEMA_VERSION: &str = "v1";
+const CONTEXT_SCHEMA_VERSION: &str = panel_contracts::PROTOCOL_VERSION;
+
+mod status;
 
 pub struct GatewayGrpcClient {
     channel: Channel,
@@ -165,6 +168,18 @@ fn context(value: &CommandContext) -> common::RequestContext {
     }
 }
 
+fn read_only_context(operation: &str) -> common::RequestContext {
+    let request_id = format!("gateway-grpc-client-{operation}-{}", Uuid::new_v4());
+    common::RequestContext {
+        request_id: request_id.clone(),
+        correlation_id: request_id,
+        actor: "gateway-grpc-client".into(),
+        deadline: String::new(),
+        idempotency_key: String::new(),
+        schema_version: CONTEXT_SCHEMA_VERSION.into(),
+    }
+}
+
 fn diagnostic(value: common::Diagnostic) -> Diagnostic {
     let severity = match common::DiagnosticSeverity::try_from(value.severity)
         .unwrap_or(common::DiagnosticSeverity::Error)
@@ -240,7 +255,7 @@ fn hash(value: Option<common::ContentHash>) -> Result<ContentHash> {
 impl GatewayPort for GatewayGrpcClient {
     async fn validate(&self, snapshot: RuntimeSnapshot) -> Result<ValidationReport> {
         let request = wire::ValidateRequest {
-            context: None,
+            context: Some(read_only_context("validate")),
             snapshot: Some(encode_snapshot(&snapshot)),
         };
         let mut client = self.client();
@@ -306,7 +321,9 @@ impl GatewayPort for GatewayGrpcClient {
     }
 
     async fn status(&self) -> Result<GatewayStatus> {
-        let request = wire::StatusRequest { context: None };
+        let request = wire::StatusRequest {
+            context: Some(read_only_context("status")),
+        };
         let mut client = self.client();
         let response = client
             .status(self.request(request))
@@ -314,32 +331,7 @@ impl GatewayPort for GatewayGrpcClient {
             .map_err(status_error)?
             .into_inner();
         response_error(response.error.clone())?;
-        let active_hash = response
-            .active_hash
-            .map(|value| hash(Some(value)))
-            .transpose()?;
-        let ready = response.health.as_ref().is_some_and(|health| {
-            common::health_status::State::try_from(health.state)
-                .is_ok_and(|state| state == common::health_status::State::Ready)
-        });
-        Ok(GatewayStatus::new(
-            ready,
-            response.error.map(|error| error.message),
-            (response.active_revision_id != 0)
-                .then(|| RevisionId::new(response.active_revision_id)),
-            active_hash,
-            response.prepared_count as usize,
-            response
-                .version
-                .as_ref()
-                .map(|version| version.build.clone())
-                .unwrap_or_default(),
-            response
-                .version
-                .as_ref()
-                .map(|version| version.schema.clone())
-                .unwrap_or_default(),
-        ))
+        status::decode(response, hash)
     }
 
     async fn prepare_with_context(

@@ -543,6 +543,19 @@ mod tests {
         .unwrap()
     }
 
+    #[test]
+    fn activation_request_hash_preserves_the_legacy_receipt_encoding() {
+        let expected_hash = ContentHash::from_bytes(b"active");
+        assert_eq!(
+            activation_request_hash("prepare-1", Some(&expected_hash)),
+            ContentHash::from_bytes(format!("prepare-1\0{expected_hash}").as_bytes())
+        );
+        assert_eq!(
+            activation_request_hash("prepare-1", None),
+            ContentHash::from_bytes(b"prepare-1\0")
+        );
+    }
+
     #[tokio::test]
     async fn activation_replays_receipt_and_rejects_hash_reuse() {
         let gateway = Arc::new(FakeUseCases {
