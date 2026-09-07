@@ -55,8 +55,8 @@ impl RunningGateway {
             Server::builder()
                 .concurrency_limit_per_connection(transport_policy.max_concurrent_requests())
                 .timeout(transport_policy.request_timeout())
-                .add_service(transport_policy.gateway_server(services.gateway))
-                .add_service(services.health)
+                .add_service(transport_policy.gateway_server(services.gateway()))
+                .add_service(services.health())
                 .serve_with_incoming_shutdown(incoming, async {
                     let _ = shutdown_requested.await;
                 })

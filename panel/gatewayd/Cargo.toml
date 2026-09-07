@@ -8,13 +8,20 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+async-trait.workspace = true
+axum.workspace = true
+chrono.workspace = true
 gateway-grpc.workspace = true
 gateway-pingora.workspace = true
+panel-api.workspace = true
+panel-application.workspace = true
+panel-domain.workspace = true
 futures-util.workspace = true
 panel-contracts.workspace = true
 panel-engine.workspace = true
 panel-errors.workspace = true
 panel-gateway-runtime.workspace = true
+panel-ir.workspace = true
 snapshot-store-fs.workspace = true
 tokio.workspace = true
 tonic.workspace = true
@@ -24,8 +31,5 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
-async-trait.workspace = true
-panel-domain.workspace = true
-panel-ir.workspace = true
 tokio-stream.workspace = true
 uuid.workspace = true

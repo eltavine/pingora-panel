@@ -24,6 +24,8 @@ impl ErrorCode {
     pub const CORRUPT_STATE: &'static str = "CORRUPT_STATE";
     pub const RESOURCE_EXHAUSTED: &'static str = "RESOURCE_EXHAUSTED";
     pub const DEADLINE_EXCEEDED: &'static str = "DEADLINE_EXCEEDED";
+    pub const UNAUTHENTICATED: &'static str = "UNAUTHENTICATED";
+    pub const PERMISSION_DENIED: &'static str = "PERMISSION_DENIED";
     pub const INTERNAL: &'static str = "INTERNAL";
 
     pub fn new(value: impl Into<String>) -> Self {
@@ -249,6 +251,14 @@ impl PanelError {
 
     pub fn deadline_exceeded(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::DEADLINE_EXCEEDED, message).retryable(true)
+    }
+
+    pub fn unauthenticated(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::UNAUTHENTICATED, message)
+    }
+
+    pub fn permission_denied(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::PERMISSION_DENIED, message)
     }
 
     pub fn internal(message: impl Into<String>) -> Self {

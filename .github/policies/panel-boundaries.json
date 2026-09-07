@@ -11,6 +11,17 @@
         "panel-ir"
       ]
     },
+    "gateway-grpc-client": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "gateway-grpc",
+        "panel-application",
+        "panel-contracts",
+        "panel-domain",
+        "panel-errors",
+        "panel-ir"
+      ]
+    },
     "gateway-pingora": {
       "catalog": true,
       "allowed_workspace_dependencies": [
@@ -25,6 +36,9 @@
       "allowed_workspace_dependencies": [
         "gateway-grpc",
         "gateway-pingora",
+        "panel-api",
+        "panel-application",
+        "panel-config-json",
         "panel-contracts",
         "panel-domain",
         "panel-engine",
@@ -34,9 +48,24 @@
         "snapshot-store-fs"
       ]
     },
+    "panel-api": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-application",
+        "panel-errors"
+      ]
+    },
     "panel-config-domain": {
       "catalog": true,
       "allowed_workspace_dependencies": []
+    },
+    "panel-config-json": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-application",
+        "panel-errors",
+        "panel-ir"
+      ]
     },
     "panel-config-state-codec": {
       "catalog": true,

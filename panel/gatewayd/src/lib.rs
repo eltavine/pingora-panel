@@ -11,6 +11,7 @@ mod bind_policy;
 mod config;
 mod failure_latch;
 mod health;
+mod management;
 mod observability;
 mod resource_limits;
 mod runtime_info;
@@ -30,6 +31,7 @@ pub use config::{
     WORKER_COUNT_ENV,
 };
 pub use health::{RuntimeHealthState, RuntimeReadiness, TonicHealthSynchronizer};
+pub use management::{management_router, management_router_with_config, EngineGatewayPort};
 pub use observability::{initialize_observability, TracingGatewayEventSink};
 pub use resource_limits::*;
 pub use runtime_info::ProcessRuntimeInfo;
@@ -42,7 +44,7 @@ use gateway_grpc::{
 };
 use gateway_pingora::PingoraGatewayAdapter;
 use panel_contracts::gateway::v1::gateway_engine_server::GatewayEngineServer;
-use panel_engine::GatewayRuntimeInfoProvider;
+use panel_engine::{GatewayEngine, GatewayRuntimeInfoProvider};
 use panel_errors::Result;
 use panel_gateway_runtime::{
     BufferedGatewayEventSink, DurableGatewayEngine, DurableGatewayEngineOptions,
@@ -65,20 +67,59 @@ pub type GatewaydEngine = DurableGatewayEngine<PingoraGatewayAdapter, FileSnapsh
 pub type GatewaydTransport = GatewayGrpcService<GatewaydEngine>;
 pub type GatewaydHealth = HealthServer<HealthService>;
 
+/// Transport services assembled by the gateway composition root.
+///
+/// The concrete service fields are intentionally private. Consumers obtain
+/// owned transport values through the accessors below instead of binding to
+/// this struct's layout. This keeps adding another endpoint (for example
+/// metrics or an admin transport) additive for downstream crates.
+#[non_exhaustive]
 pub struct GatewaydServices {
-    pub gateway: GatewaydTransport,
-    pub health: GatewaydHealth,
-    pub health_reporter: HealthReporter,
+    gateway: GatewaydTransport,
+    health_reporter: HealthReporter,
+}
+
+impl GatewaydServices {
+    /// Returns a transport service ready to pass to a tonic server builder.
+    ///
+    /// The service is cheap to clone because its state is reference counted.
+    pub fn gateway(&self) -> GatewaydTransport {
+        self.gateway.clone()
+    }
+
+    /// Creates the standard gRPC health transport backed by the shared
+    /// reporter. A fresh server wrapper is returned so callers can move it
+    /// into their tonic server without taking ownership of this service set.
+    pub fn health(&self) -> GatewaydHealth {
+        HealthServer::new(HealthService::from_health_reporter(
+            self.health_reporter.clone(),
+        ))
+    }
+
+    /// Returns a handle for updating health/readiness state.
+    pub fn health_reporter(&self) -> HealthReporter {
+        self.health_reporter.clone()
+    }
 }
 
 #[non_exhaustive]
 pub struct GatewaydRuntime {
     pub services: GatewaydServices,
+    /// Shared engine kept private so concrete Pingora/storage types do not
+    /// become part of the public runtime API.
+    engine: Arc<GatewaydEngine>,
     pub background_tasks: BackgroundTaskSupervisor,
     pub events: Arc<dyn GatewayEventSink>,
     pub event_delivery: GatewayEventDeliveryMonitor,
     pub recovery: GatewayRecoveryMonitor,
     pub mutations: GatewayMutationExecutor,
+}
+
+impl GatewaydRuntime {
+    /// Returns the engine through the stable application-facing trait.
+    pub fn engine(&self) -> Arc<dyn GatewayEngine> {
+        Arc::clone(&self.engine) as Arc<dyn GatewayEngine>
+    }
 }
 
 pub struct GatewaydServiceOptions {
@@ -265,7 +306,6 @@ pub async fn build_gateway_runtime_with_options(
     health_reporter
         .set_service_status(gateway_service_name(), serving_status)
         .await;
-    let health = HealthServer::new(HealthService::from_health_reporter(health_reporter.clone()));
     let health_sync = TonicHealthSynchronizer::new(
         health_state.subscribe(),
         health_reporter.clone(),
@@ -287,6 +327,7 @@ pub async fn build_gateway_runtime_with_options(
 
     let task_lifetime: Arc<dyn Send + Sync> = Arc::new(background_tasks.clone());
     Ok(GatewaydRuntime {
+        engine: Arc::clone(&engine),
         services: GatewaydServices {
             gateway: GatewayGrpcService::with_dependencies(
                 engine,
@@ -299,7 +340,6 @@ pub async fn build_gateway_runtime_with_options(
             .with_event_delivery_diagnostics(Arc::new(event_delivery.clone()))
             .with_recovery_diagnostics(Arc::new(recovery.clone()))
             .with_lifetime_dependency(task_lifetime),
-            health,
             health_reporter,
         },
         background_tasks,
@@ -340,6 +380,7 @@ pub async fn serve_gatewayd(
     .await?;
     let GatewaydRuntime {
         services,
+        engine: _,
         background_tasks,
         events,
         event_delivery,
@@ -355,7 +396,7 @@ pub async fn serve_gatewayd(
         reason
     };
     let readiness = Arc::new(TonicHealthReadinessGate::new(
-        services.health_reporter.clone(),
+        services.health_reporter(),
         ["", gateway_service_name()],
     ));
     let shutdown_coordinator = ShutdownCoordinator::new(readiness, config.shutdown_policy())
@@ -364,13 +405,13 @@ pub async fn serve_gatewayd(
         listen_address: config.listen_address().to_string(),
         worker_count: config.worker_count().get(),
     });
-    let transport_policy = services.gateway.transport_policy();
+    let transport_policy = services.gateway().transport_policy();
 
     let transport_result = Server::builder()
         .concurrency_limit_per_connection(transport_policy.max_concurrent_requests())
         .timeout(transport_policy.request_timeout())
-        .add_service(transport_policy.gateway_server(services.gateway))
-        .add_service(services.health)
+        .add_service(transport_policy.gateway_server(services.gateway()))
+        .add_service(services.health())
         .serve_with_shutdown(
             config.listen_address(),
             shutdown_coordinator.run_with_shutdown_reason(shutdown_reason),
@@ -409,7 +450,7 @@ pub async fn serve_gatewayd(
 pub async fn build_gateway_transport(
     state_directory: impl Into<PathBuf>,
 ) -> Result<GatewaydTransport> {
-    Ok(build_gateway_services(state_directory).await?.gateway)
+    Ok(build_gateway_services(state_directory).await?.gateway())
 }
 
 #[cfg(test)]
@@ -461,7 +502,7 @@ mod composition_tests {
         );
         let status = runtime
             .services
-            .gateway
+            .gateway()
             .status(Request::new(wire::StatusRequest {
                 context: Some(common::RequestContext {
                     request_id: "status".into(),
@@ -517,7 +558,7 @@ mod composition_tests {
 
         let response = runtime
             .services
-            .gateway
+            .gateway()
             .get_capabilities(Request::new(wire::GetCapabilitiesRequest {
                 context: Some(common::RequestContext {
                     request_id: "12345".into(),
@@ -537,5 +578,31 @@ mod composition_tests {
             panel_errors::ErrorCode::RESOURCE_EXHAUSTED
         );
         runtime.background_tasks.shutdown_and_join().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn service_accessors_are_reusable_without_consuming_the_service_set() {
+        let temporary = TemporaryDirectory::new();
+        let services = build_gateway_services_with_runtime_info(&temporary.0, runtime_info())
+            .await
+            .unwrap();
+
+        let first_gateway = services.gateway();
+        let second_gateway = services.gateway();
+        assert_eq!(
+            first_gateway.transport_policy(),
+            second_gateway.transport_policy()
+        );
+
+        let reporter = services.health_reporter();
+        reporter
+            .set_service_status("accessor-test", ServingStatus::Serving)
+            .await;
+        let _first_health = services.health();
+        let _second_health = services.health();
+        services
+            .health_reporter()
+            .set_service_status("accessor-test", ServingStatus::NotServing)
+            .await;
     }
 }

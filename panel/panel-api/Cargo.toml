@@ -1,5 +1,5 @@
 [package]
-name = "panel-application"
+name = "panel-api"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
@@ -8,13 +8,17 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
-async-trait.workspace = true
-chrono.workspace = true
-panel-domain.workspace = true
+axum.workspace = true
+panel-application.workspace = true
 panel-errors.workspace = true
-panel-ir.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+tower-http.workspace = true
+utoipa.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
+async-trait.workspace = true
+panel-domain.workspace = true
+panel-ir.workspace = true
 tokio.workspace = true
+tower = "=0.5.3"
