@@ -66,9 +66,9 @@ pub trait ConfigCompiler: Send + Sync {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PreparedDeployment {
-    revision_id: RevisionId,
-    content_hash: ContentHash,
-    prepare_token: String,
+    pub revision_id: RevisionId,
+    pub content_hash: ContentHash,
+    pub prepare_token: String,
 }
 
 impl PreparedDeployment {
@@ -105,9 +105,9 @@ impl PreparedDeployment {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ActivatedDeployment {
-    revision_id: RevisionId,
-    content_hash: ContentHash,
-    previous_active_hash: Option<ContentHash>,
+    pub revision_id: RevisionId,
+    pub content_hash: ContentHash,
+    pub previous_active_hash: Option<ContentHash>,
 }
 
 impl ActivatedDeployment {
@@ -150,18 +150,30 @@ pub enum DeploymentOutcome {
 pub trait GatewayPort: Send + Sync {
     async fn validate(&self, snapshot: RuntimeSnapshot) -> Result<ValidationReport>;
 
-    async fn prepare(
-        &self,
-        context: CommandContext,
-        snapshot: RuntimeSnapshot,
-    ) -> Result<PreparedDeployment>;
+    async fn prepare(&self, snapshot: RuntimeSnapshot) -> Result<PreparedDeployment>;
 
     async fn activate(
         &self,
-        context: CommandContext,
         prepare_token: String,
         expected_active_hash: Option<ContentHash>,
     ) -> Result<ActivatedDeployment>;
+
+    async fn prepare_with_context(
+        &self,
+        _context: CommandContext,
+        snapshot: RuntimeSnapshot,
+    ) -> Result<PreparedDeployment> {
+        self.prepare(snapshot).await
+    }
+
+    async fn activate_with_context(
+        &self,
+        _context: CommandContext,
+        prepare_token: String,
+        expected_active_hash: Option<ContentHash>,
+    ) -> Result<ActivatedDeployment> {
+        self.activate(prepare_token, expected_active_hash).await
+    }
 }
 
 /// Stable use-case facade consumed by HTTP, CLI and worker adapters.
@@ -311,7 +323,7 @@ impl GatewayUseCases for GatewayService {
         document: ConfigDocument,
     ) -> Result<PreparedDeployment> {
         let snapshot = self.compiler.compile(document).await?;
-        self.gateway.prepare(context, snapshot).await
+        self.gateway.prepare_with_context(context, snapshot).await
     }
 
     async fn activate(
@@ -321,7 +333,7 @@ impl GatewayUseCases for GatewayService {
         expected_active_hash: Option<ContentHash>,
     ) -> Result<ActivatedDeployment> {
         self.gateway
-            .activate(context, prepare_token, expected_active_hash)
+            .activate_with_context(context, prepare_token, expected_active_hash)
             .await
     }
 }

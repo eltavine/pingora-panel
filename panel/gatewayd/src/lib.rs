@@ -69,14 +69,13 @@ pub type GatewaydHealth = HealthServer<HealthService>;
 
 /// Transport services assembled by the gateway composition root.
 ///
-/// The concrete service fields are intentionally private. Consumers obtain
-/// owned transport values through the accessors below instead of binding to
-/// this struct's layout. This keeps adding another endpoint (for example
-/// metrics or an admin transport) additive for downstream crates.
-#[non_exhaustive]
+/// The public fields are retained as a compatibility surface for existing
+/// consumers. New code should prefer the accessors below; future endpoints can
+/// be added there without changing the recommended integration path.
 pub struct GatewaydServices {
-    gateway: GatewaydTransport,
-    health_reporter: HealthReporter,
+    pub gateway: GatewaydTransport,
+    pub health: GatewaydHealth,
+    pub health_reporter: HealthReporter,
 }
 
 impl GatewaydServices {
@@ -340,6 +339,7 @@ pub async fn build_gateway_runtime_with_options(
             .with_event_delivery_diagnostics(Arc::new(event_delivery.clone()))
             .with_recovery_diagnostics(Arc::new(recovery.clone()))
             .with_lifetime_dependency(task_lifetime),
+            health: HealthServer::new(HealthService::from_health_reporter(health_reporter.clone())),
             health_reporter,
         },
         background_tasks,

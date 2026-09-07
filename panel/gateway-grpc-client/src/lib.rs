@@ -255,7 +255,56 @@ impl GatewayPort for GatewayGrpcClient {
         })
     }
 
-    async fn prepare(
+    async fn prepare(&self, snapshot: RuntimeSnapshot) -> Result<PreparedDeployment> {
+        let request = wire::PrepareRequest {
+            context: None,
+            snapshot: Some(encode_snapshot(&snapshot)),
+        };
+        let mut client = self.client();
+        let response = client
+            .prepare(self.request(request))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        PreparedDeployment::new(
+            RevisionId::new(response.revision_id),
+            hash(response.content_hash)?,
+            response.prepare_token,
+        )
+    }
+
+    async fn activate(
+        &self,
+        prepare_token: String,
+        expected_active_hash: Option<ContentHash>,
+    ) -> Result<ActivatedDeployment> {
+        let request = wire::ActivateRequest {
+            context: None,
+            prepare_token,
+            expected_active_hash: expected_active_hash.map(|value| common::ContentHash {
+                algorithm: "sha256".into(),
+                value: value.as_str().into(),
+            }),
+        };
+        let mut client = self.client();
+        let response = client
+            .activate(self.request(request))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        Ok(ActivatedDeployment::new(
+            RevisionId::new(response.revision_id),
+            hash(response.active_hash)?,
+            response
+                .previous_active_hash
+                .map(|value| hash(Some(value)))
+                .transpose()?,
+        ))
+    }
+
+    async fn prepare_with_context(
         &self,
         context_value: CommandContext,
         snapshot: RuntimeSnapshot,
@@ -278,7 +327,7 @@ impl GatewayPort for GatewayGrpcClient {
         )
     }
 
-    async fn activate(
+    async fn activate_with_context(
         &self,
         context_value: CommandContext,
         prepare_token: String,

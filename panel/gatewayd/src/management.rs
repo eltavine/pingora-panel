@@ -38,7 +38,35 @@ where
         self.engine.validate(snapshot).await
     }
 
-    async fn prepare(
+    async fn prepare(&self, snapshot: RuntimeSnapshot) -> Result<PreparedDeployment> {
+        let receipt = self.engine.prepare(PrepareRequest { snapshot }).await?;
+        PreparedDeployment::new(
+            receipt.revision_id,
+            receipt.content_hash,
+            receipt.prepare_token.as_str(),
+        )
+    }
+
+    async fn activate(
+        &self,
+        prepare_token: String,
+        expected_active_hash: Option<ContentHash>,
+    ) -> Result<ActivatedDeployment> {
+        let receipt = self
+            .engine
+            .activate(ActivateRequest {
+                prepare_token: PrepareToken::new(prepare_token),
+                expected_active_hash,
+            })
+            .await?;
+        Ok(ActivatedDeployment::new(
+            receipt.revision_id,
+            receipt.content_hash,
+            receipt.previous_active_hash,
+        ))
+    }
+
+    async fn prepare_with_context(
         &self,
         context: CommandContext,
         snapshot: RuntimeSnapshot,
@@ -59,7 +87,7 @@ where
         )
     }
 
-    async fn activate(
+    async fn activate_with_context(
         &self,
         context: CommandContext,
         prepare_token: String,

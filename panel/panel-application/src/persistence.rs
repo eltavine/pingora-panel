@@ -80,13 +80,13 @@ pub trait RevisionRepository: Send + Sync {
 /// Immutable audit fact emitted by an application command.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AuditFact {
-    event_type: String,
-    event_version: u16,
-    request_id: RequestId,
-    idempotency_key: Option<IdempotencyKey>,
-    revision_id: Option<RevisionId>,
-    content_hash: Option<ContentHash>,
-    outcome: String,
+    pub event_type: String,
+    pub event_version: u16,
+    pub request_id: RequestId,
+    pub idempotency_key: Option<IdempotencyKey>,
+    pub revision_id: Option<RevisionId>,
+    pub content_hash: Option<ContentHash>,
+    pub outcome: String,
 }
 
 impl AuditFact {

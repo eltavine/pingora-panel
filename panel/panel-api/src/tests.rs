@@ -5,8 +5,8 @@ use axum::{
     http::{header, Request, StatusCode},
 };
 use panel_application::{
-    ActivatedDeployment, CommandContext, ConfigCompiler, ConfigDocument, ContentHash, GatewayPort,
-    GatewayService, PreparedDeployment,
+    ActivatedDeployment, ConfigCompiler, ConfigDocument, ContentHash, GatewayPort, GatewayService,
+    PreparedDeployment,
 };
 use panel_domain::RevisionId;
 use panel_errors::{PanelError, Result, ValidationReport};
@@ -41,17 +41,12 @@ impl GatewayPort for FakeGateway {
         Ok(ValidationReport::valid())
     }
 
-    async fn prepare(
-        &self,
-        _context: CommandContext,
-        snapshot: RuntimeSnapshot,
-    ) -> Result<PreparedDeployment> {
+    async fn prepare(&self, snapshot: RuntimeSnapshot) -> Result<PreparedDeployment> {
         PreparedDeployment::new(snapshot.revision_id, snapshot.content_hash, "prepare-1")
     }
 
     async fn activate(
         &self,
-        _context: CommandContext,
         _prepare_token: String,
         _expected_active_hash: Option<ContentHash>,
     ) -> Result<ActivatedDeployment> {
