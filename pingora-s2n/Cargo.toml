@@ -17,5 +17,5 @@ path = "src/lib.rs"
 [dependencies]
 pingora-error = { version = "0.9.0", path = "../pingora-error"}
 ring = "0.17.12"
-s2n-tls = "0.3"
-s2n-tls-tokio = "0.3"
+s2n-tls = "=0.3.38"
+s2n-tls-tokio = "=0.3.38"

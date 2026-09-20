@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module type="EMPTY_MODULE" version="4">
+  <component name="NewModuleRootManager">
+    <content url="file://$MODULE_DIR$">
+      <sourceFolder url="file://$MODULE_DIR$/panel/gateway-grpc-client/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/gateway-grpc-client/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/gateway-grpc/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/gateway-pingora/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/gatewayd/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/gatewayd/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/panel-api/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/panel-application/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/panel-config-domain/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/panel-config-json/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/panel-config-state-codec/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/panel-config-state-codec/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/panel-contracts/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/panel-domain/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/panel-engine/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/panel-errors/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/panel-gateway-runtime/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/panel-gateway-runtime/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/panel-ir/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/panel-persistence-memory/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/snapshot-store-fs/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/snapshot-store-fs/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/snapshot-store-fs/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/panel/gateway-grpc/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/panel/gateway-pingora/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/panel/gatewayd/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/panel/gatewayd/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/panel/panel-contracts/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/panel/panel-domain/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/panel/panel-engine/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/panel/panel-errors/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/panel/panel-gateway-runtime/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/panel/panel-ir/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/panel/snapshot-store-fs/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/panel/snapshot-store-fs/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-boringssl/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-cache/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-cache/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-core/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-core/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-core/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-core/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-error/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-foundations/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-header-serde/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-http/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-ketama/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-ketama/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-ketama/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-ketama/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-limits/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-limits/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-load-balancing/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-lru/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-lru/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-memory-cache/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-openssl/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-pool/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-pool/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-prometheus/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-proxy/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-proxy/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-proxy/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-runtime/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-runtime/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-rustls/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-s2n/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-timeout/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-timeout/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/tinyufo/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/tinyufo/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/panel/gateway-grpc/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/panel/gateway-pingora/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/panel/gatewayd/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/panel/gatewayd/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/panel/panel-contracts/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/panel/panel-domain/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/panel/panel-engine/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/panel/panel-errors/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/panel/panel-gateway-runtime/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/panel/panel-ir/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/panel/snapshot-store-fs/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/panel/snapshot-store-fs/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-boringssl/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-cache/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-cache/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-core/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-core/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-core/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-core/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-error/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-foundations/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-header-serde/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-http/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-ketama/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-ketama/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-ketama/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-ketama/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-limits/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-limits/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-load-balancing/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-lru/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-lru/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-memory-cache/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-openssl/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-pool/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-pool/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-prometheus/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-proxy/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-proxy/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-proxy/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-runtime/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-runtime/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-rustls/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-s2n/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-timeout/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-timeout/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/tinyufo/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/tinyufo/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-boringssl/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-cache/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-cache/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-core/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-core/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-core/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-core/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-error/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-foundations/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-header-serde/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-http/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-ketama/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-ketama/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-ketama/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-ketama/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-limits/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-limits/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-load-balancing/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-lru/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-lru/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-memory-cache/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-openssl/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-pool/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-pool/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-prometheus/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-proxy/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-proxy/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-proxy/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-runtime/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-runtime/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-rustls/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-s2n/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-timeout/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora-timeout/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pingora/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/tinyufo/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/tinyufo/src" isTestSource="false" />
+      <excludeFolder url="file://$MODULE_DIR$/fuzz/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/panel/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/panel/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/local-gateway_grpc-0_1_0-aarch64_apple_darwin-8ada8f4c38fce110/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/local-gateway_pingora-0_1_0-aarch64_apple_darwin-365db69ab64e580f/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/local-gatewayd-0_1_0-aarch64_apple_darwin-ad268eb9b8e2649d/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/local-panel_contracts-0_1_0-aarch64_apple_darwin-7790a31d082dbc23/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/local-panel_domain-0_1_0-aarch64_apple_darwin-15f45c9879d61556/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/local-panel_engine-0_1_0-aarch64_apple_darwin-eec4b4c97022c883/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/local-panel_errors-0_1_0-aarch64_apple_darwin-7a0a9ba121670abb/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/local-panel_gateway_runtime-0_1_0-aarch64_apple_darwin-cdd70da35d4ec297/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/local-panel_ir-0_1_0-aarch64_apple_darwin-b1c53ee4c8fcebf3/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target/semver-checks/git-HEAD/local-snapshot_store_fs-0_1_0-aarch64_apple_darwin-d12275d288632391/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target/semver-checks/local-gateway_grpc-0_1_0-aarch64_apple_darwin-8ada8f4c38fce110/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target/semver-checks/local-gateway_pingora-0_1_0-aarch64_apple_darwin-365db69ab64e580f/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target/semver-checks/local-gatewayd-0_1_0-aarch64_apple_darwin-ad268eb9b8e2649d/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target/semver-checks/local-panel_contracts-0_1_0-aarch64_apple_darwin-7790a31d082dbc23/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target/semver-checks/local-panel_domain-0_1_0-aarch64_apple_darwin-15f45c9879d61556/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target/semver-checks/local-panel_engine-0_1_0-aarch64_apple_darwin-eec4b4c97022c883/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target/semver-checks/local-panel_errors-0_1_0-aarch64_apple_darwin-7a0a9ba121670abb/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target/semver-checks/local-panel_gateway_runtime-0_1_0-aarch64_apple_darwin-cdd70da35d4ec297/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target/semver-checks/local-panel_ir-0_1_0-aarch64_apple_darwin-b1c53ee4c8fcebf3/target" />
+      <excludeFolder url="file://$MODULE_DIR$/panel/target/semver-checks/local-snapshot_store_fs-0_1_0-aarch64_apple_darwin-d12275d288632391/target" />
+      <excludeFolder url="file://$MODULE_DIR$/target" />
+    </content>
+    <orderEntry type="inheritedJdk" />
+    <orderEntry type="sourceFolder" forTests="false" />
+  </component>
+</module>

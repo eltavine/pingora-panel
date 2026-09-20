@@ -1,0 +1,16 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Cargo Clippy - panel workspace" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
+    <option name="command" value="clippy --manifest-path panel/Cargo.toml --workspace --all-targets --all-features --locked -- -D warnings" />
+    <option name="workingDirectory" value="file://$PROJECT_DIR$" />
+    <envs />
+    <option name="emulateTerminal" value="true" />
+    <option name="channel" value="DEFAULT" />
+    <option name="requiredFeatures" value="true" />
+    <option name="allFeatures" value="true" />
+    <option name="withSudo" value="false" />
+    <option name="backtrace" value="SHORT" />
+    <method v="2">
+      <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
+    </method>
+  </configuration>
+</component>

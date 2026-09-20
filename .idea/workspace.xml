@@ -1,0 +1,584 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="ALL" />
+  </component>
+  <component name="CargoProjects">
+    <cargoProject FILE="$PROJECT_DIR$/Cargo.toml">
+      <package file="$PROJECT_DIR$/tinyufo">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/pingora">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/pingora-boringssl">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/pingora-cache">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/pingora-core">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/pingora-error">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/pingora-foundations">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/pingora-header-serde">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/pingora-http">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/pingora-ketama">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/pingora-limits">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/pingora-load-balancing">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/pingora-lru">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/pingora-memory-cache">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/pingora-openssl">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/pingora-pool">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/pingora-prometheus">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/pingora-proxy">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/pingora-runtime">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/pingora-rustls">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/pingora-s2n">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/pingora-timeout">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/fuzz/Cargo.toml">
+      <package file="$PROJECT_DIR$/fuzz">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/gateway-grpc">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/gateway-grpc-client">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/gateway-pingora">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/gatewayd">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/panel-api">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/panel-application">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/panel-config-domain">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/panel-config-json">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/panel-config-state-codec">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/panel-contracts">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/panel-domain">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/panel-engine">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/panel-errors">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/panel-gateway-runtime">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/panel-ir">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/panel-persistence-memory">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/snapshot-store-fs">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/tinyufo">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-boringssl">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-cache">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-core">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-error">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-foundations">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-header-serde">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-http">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-ketama">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-limits">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-load-balancing">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-lru">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-memory-cache">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-openssl">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-pool">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-prometheus">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-proxy">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-runtime">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-rustls">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-s2n">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/pingora-timeout">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/panel/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/panel/gateway-grpc">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/panel/gateway-pingora">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/panel/gatewayd">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/panel/panel-contracts">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/panel/panel-domain">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/panel/panel-engine">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/panel/panel-errors">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/panel/panel-gateway-runtime">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/panel/panel-ir">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/eea93ce8030daa809fa723bec08bc57218ac1bd8/panel/snapshot-store-fs">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/tinyufo">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-boringssl">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-cache">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-core">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-error">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-foundations">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-header-serde">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-http">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-ketama">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-limits">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-load-balancing">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-lru">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-memory-cache">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-openssl">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-pool">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-prometheus">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-proxy">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-runtime">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-rustls">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-s2n">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/pingora-timeout">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/panel/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/panel/gateway-grpc">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/panel/gateway-pingora">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/panel/gatewayd">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/panel/panel-contracts">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/panel/panel-domain">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/panel/panel-engine">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/panel/panel-errors">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/panel/panel-gateway-runtime">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/panel/panel-ir">
+        <feature name="default" enabled="true" />
+      </package>
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/f0d8f8d943e2c096eddc99eef7696eba062a5ea5/panel/snapshot-store-fs">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/local-gateway_grpc-0_1_0-aarch64_apple_darwin-8ada8f4c38fce110/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/local-gateway_grpc-0_1_0-aarch64_apple_darwin-8ada8f4c38fce110">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/local-gateway_pingora-0_1_0-aarch64_apple_darwin-365db69ab64e580f/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/local-gateway_pingora-0_1_0-aarch64_apple_darwin-365db69ab64e580f">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/local-gatewayd-0_1_0-aarch64_apple_darwin-ad268eb9b8e2649d/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/local-gatewayd-0_1_0-aarch64_apple_darwin-ad268eb9b8e2649d">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/local-panel_contracts-0_1_0-aarch64_apple_darwin-7790a31d082dbc23/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/local-panel_contracts-0_1_0-aarch64_apple_darwin-7790a31d082dbc23">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/local-panel_domain-0_1_0-aarch64_apple_darwin-15f45c9879d61556/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/local-panel_domain-0_1_0-aarch64_apple_darwin-15f45c9879d61556">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/local-panel_engine-0_1_0-aarch64_apple_darwin-eec4b4c97022c883/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/local-panel_engine-0_1_0-aarch64_apple_darwin-eec4b4c97022c883">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/local-panel_errors-0_1_0-aarch64_apple_darwin-7a0a9ba121670abb/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/local-panel_errors-0_1_0-aarch64_apple_darwin-7a0a9ba121670abb">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/local-panel_gateway_runtime-0_1_0-aarch64_apple_darwin-cdd70da35d4ec297/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/local-panel_gateway_runtime-0_1_0-aarch64_apple_darwin-cdd70da35d4ec297">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/local-panel_ir-0_1_0-aarch64_apple_darwin-b1c53ee4c8fcebf3/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/local-panel_ir-0_1_0-aarch64_apple_darwin-b1c53ee4c8fcebf3">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/local-snapshot_store_fs-0_1_0-aarch64_apple_darwin-d12275d288632391/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/git-HEAD/local-snapshot_store_fs-0_1_0-aarch64_apple_darwin-d12275d288632391">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/target/semver-checks/local-gateway_grpc-0_1_0-aarch64_apple_darwin-8ada8f4c38fce110/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/local-gateway_grpc-0_1_0-aarch64_apple_darwin-8ada8f4c38fce110">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/target/semver-checks/local-gateway_pingora-0_1_0-aarch64_apple_darwin-365db69ab64e580f/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/local-gateway_pingora-0_1_0-aarch64_apple_darwin-365db69ab64e580f">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/target/semver-checks/local-gatewayd-0_1_0-aarch64_apple_darwin-ad268eb9b8e2649d/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/local-gatewayd-0_1_0-aarch64_apple_darwin-ad268eb9b8e2649d">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/target/semver-checks/local-panel_contracts-0_1_0-aarch64_apple_darwin-7790a31d082dbc23/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/local-panel_contracts-0_1_0-aarch64_apple_darwin-7790a31d082dbc23">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/target/semver-checks/local-panel_domain-0_1_0-aarch64_apple_darwin-15f45c9879d61556/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/local-panel_domain-0_1_0-aarch64_apple_darwin-15f45c9879d61556">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/target/semver-checks/local-panel_engine-0_1_0-aarch64_apple_darwin-eec4b4c97022c883/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/local-panel_engine-0_1_0-aarch64_apple_darwin-eec4b4c97022c883">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/target/semver-checks/local-panel_errors-0_1_0-aarch64_apple_darwin-7a0a9ba121670abb/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/local-panel_errors-0_1_0-aarch64_apple_darwin-7a0a9ba121670abb">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/target/semver-checks/local-panel_gateway_runtime-0_1_0-aarch64_apple_darwin-cdd70da35d4ec297/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/local-panel_gateway_runtime-0_1_0-aarch64_apple_darwin-cdd70da35d4ec297">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/target/semver-checks/local-panel_ir-0_1_0-aarch64_apple_darwin-b1c53ee4c8fcebf3/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/local-panel_ir-0_1_0-aarch64_apple_darwin-b1c53ee4c8fcebf3">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+    <cargoProject FILE="$PROJECT_DIR$/panel/target/semver-checks/local-snapshot_store_fs-0_1_0-aarch64_apple_darwin-d12275d288632391/Cargo.toml">
+      <package file="$PROJECT_DIR$/panel/target/semver-checks/local-snapshot_store_fs-0_1_0-aarch64_apple_darwin-d12275d288632391">
+        <feature name="default" enabled="true" />
+      </package>
+    </cargoProject>
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="2a945bed-1028-4f57-975b-c6ad5b929901" name="更改" comment="">
+      <change beforePath="$PROJECT_DIR$/PRODUCT_SPEC.md" beforeDir="false" afterPath="$PROJECT_DIR$/PRODUCT_SPEC.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/panel/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/panel/README.md" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="ExecutionTargetManager" SELECTED_TARGET="RsBuildProfile:test" />
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="MacroExpansionManager">
+    <option name="directoryName" value="njOpVXn5" />
+  </component>
+  <component name="ProblemsViewState">
+    <option name="selectedTabId" value="QODANA_PROBLEMS_VIEW_TAB" />
+  </component>
+  <component name="ProjectColorInfo"><![CDATA[{
+  "associatedIndex": 4,
+  "fromUser": false
+}]]></component>
+  <component name="ProjectId" id="3J1S4nwPTPdDzitVtzVbRsT9htp" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "Cargo.Test lib::tests.executor": "Run",
+    "Cargo.Test pingora-panel.executor": "Run",
+    "CidrDebugProfileConversion": "true",
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.rust.reset.selective.auto.import": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "codeWithMe.voiceChat.enabledByDefault": "false",
+    "git-widget-placeholder": "main",
+    "last_opened_file_path": "/Users/eltavine/Project/Linux/pingora-panel",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "org.rust.cargo.project.model.PROJECT_DISCOVERY": "true",
+    "org.rust.cargo.project.model.impl.CargoExternalSystemProjectAware.subscribe.first.balloon": "",
+    "org.rust.first.attach.projects": "true",
+    "settings.editor.selected.configurable": "editor.preferences.fonts.default"
+  }
+}]]></component>
+  <component name="QodanaHighlightedReportService">
+    <option name="localRunNotPublishedPersistedInfo">
+      <LocalReportPersistedInfo>
+        <option name="path" value="/private/var/folders/bz/wp780b6s1qq56wqdqf2ft08r0000gn/T/qodana_output/qodana.sarif.json" />
+        <option name="reportGuid" value="7d17ac0d-41db-4855-a705-c43e6c811bfc" />
+        <option name="reportName" value="pingora-panel/qodana/2026-09-08" />
+      </LocalReportPersistedInfo>
+    </option>
+  </component>
+  <component name="QodanaIsSelectedPersistenceService">
+    <option name="selectedOrLoading" value="true" />
+  </component>
+  <component name="QodanaReportsService">
+    <option name="descriptions">
+      <ReportDescription localRun="true" path="/private/var/folders/bz/wp780b6s1qq56wqdqf2ft08r0000gn/T/qodana_output/qodana.sarif.json" reportGuid="7d17ac0d-41db-4855-a705-c43e6c811bfc" reportId="pingora-panel/qodana/2026-09-08" />
+    </option>
+  </component>
+  <component name="RunManager" selected="Cargo.Test pingora-panel">
+    <configuration name="Run trainer" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
+      <option name="command" value="run --package pingora-header-serde --bin trainer" />
+      <option name="workingDirectory" value="file://$PROJECT_DIR$" />
+      <envs />
+      <option name="emulateTerminal" value="true" />
+      <option name="channel" value="DEFAULT" />
+      <option name="requiredFeatures" value="true" />
+      <option name="allFeatures" value="false" />
+      <option name="withSudo" value="false" />
+      <option name="buildTarget" value="REMOTE" />
+      <option name="backtrace" value="SHORT" />
+      <option name="isRedirectInput" value="false" />
+      <option name="redirectInputPath" value="" />
+      <method v="2">
+        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="Test lib::tests" type="CargoCommandRunConfiguration" factoryName="Cargo Command" temporary="true">
+      <option name="command" value="test --package panel-persistence-memory --lib -- tests" />
+      <option name="workingDirectory" value="file://$PROJECT_DIR$/panel" />
+      <envs />
+      <option name="emulateTerminal" value="true" />
+      <option name="channel" value="DEFAULT" />
+      <option name="requiredFeatures" value="true" />
+      <option name="allFeatures" value="false" />
+      <option name="withSudo" value="false" />
+      <option name="buildTarget" value="REMOTE" />
+      <option name="backtrace" value="SHORT" />
+      <option name="isRedirectInput" value="false" />
+      <option name="redirectInputPath" value="" />
+      <method v="2">
+        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="Test pingora-panel" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
+      <option name="buildProfileId" value="test" />
+      <option name="command" value="test --workspace" />
+      <option name="workingDirectory" value="file://$PROJECT_DIR$" />
+      <envs />
+      <option name="emulateTerminal" value="true" />
+      <option name="channel" value="DEFAULT" />
+      <option name="requiredFeatures" value="true" />
+      <option name="allFeatures" value="false" />
+      <option name="withSudo" value="false" />
+      <option name="buildTarget" value="REMOTE" />
+      <option name="backtrace" value="SHORT" />
+      <option name="isRedirectInput" value="false" />
+      <option name="redirectInputPath" value="" />
+      <method v="2">
+        <option name="CARGO.BUILD_TASK_PROVIDER" enabled="true" />
+      </method>
+    </configuration>
+    <recent_temporary>
+      <list>
+        <item itemvalue="Cargo.Test lib::tests" />
+      </list>
+    </recent_temporary>
+  </component>
+  <component name="RustProjectSettings">
+    <option name="toolchainHomeDirectory" value="$USER_HOME$/.cargo/bin" />
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="默认任务">
+      <changelist id="2a945bed-1028-4f57-975b-c6ad5b929901" name="更改" comment="" />
+      <created>1788826893469</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1788826893469</updated>
+    </task>
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+  <component name="XSLT-Support.FileAssociations.UIState">
+    <expand />
+    <select />
+  </component>
+</project>
