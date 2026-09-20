@@ -1399,7 +1399,7 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
 name = "pingora-core"
-version = "0.8.1"
+version = "0.9.0"
 dependencies = [
  "ahash",
  "async-trait",
@@ -1448,11 +1448,11 @@ dependencies = [
 
 [[package]]
 name = "pingora-error"
-version = "0.8.1"
+version = "0.9.0"
 
 [[package]]
 name = "pingora-http"
-version = "0.8.1"
+version = "0.9.0"
 dependencies = [
  "bytes",
  "http",
@@ -1461,14 +1461,14 @@ dependencies = [
 
 [[package]]
 name = "pingora-ketama"
-version = "0.8.1"
+version = "0.9.0"
 dependencies = [
  "crc32fast",
 ]
 
 [[package]]
 name = "pingora-load-balancing"
-version = "0.8.1"
+version = "0.9.0"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -1488,7 +1488,7 @@ dependencies = [
 
 [[package]]
 name = "pingora-pool"
-version = "0.8.1"
+version = "0.9.0"
 dependencies = [
  "crossbeam-queue",
  "dashmap",
@@ -1502,7 +1502,7 @@ dependencies = [
 
 [[package]]
 name = "pingora-runtime"
-version = "0.8.1"
+version = "0.9.0"
 dependencies = [
  "log",
  "once_cell",
@@ -1514,7 +1514,7 @@ dependencies = [
 
 [[package]]
 name = "pingora-timeout"
-version = "0.8.1"
+version = "0.9.0"
 dependencies = [
  "once_cell",
  "parking_lot",

@@ -16,18 +16,18 @@ mod utils;
 
 use bytes::Bytes;
 use h2::client;
-use http::Request;
+use http::{Request, Response};
 use http_body_util::BodyExt;
 use hyper_util::client::legacy::Client;
 #[cfg(unix)]
 use hyperlocal::{UnixClientExt, Uri};
+use pingora_test_utils::http_origin::HttpOrigin;
 use reqwest::{header, StatusCode};
-#[cfg(feature = "patched_http1")]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 use utils::server_utils::{
-    downstream_cache_warn_log_calls, init, reset_suppress_proxy_warn_log_calls,
+    downstream_cache_warn_log_calls, init, init_proxy, reset_suppress_proxy_warn_log_calls,
     suppress_proxy_warn_log_calls, CLIENT_BIND_IP,
 };
 
@@ -48,8 +48,23 @@ async fn test_origin_alive() {
 
 #[tokio::test]
 async fn test_simple_proxy() {
-    init();
-    let res = reqwest::get("http://127.0.0.1:6147").await.unwrap();
+    init_proxy().await;
+    let origin = HttpOrigin::bind(|_request| async {
+        Response::builder()
+            .header(header::CONTENT_LENGTH, "13")
+            .body(Bytes::from_static(b"Hello World!\n"))
+            .unwrap()
+    })
+    .await
+    .unwrap();
+    let origin_addr = origin.addr();
+
+    let res = reqwest::Client::new()
+        .get("http://127.0.0.1:6147")
+        .header("x-port", origin_addr.port().to_string())
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 
     let headers = res.headers();
@@ -63,7 +78,10 @@ async fn test_simple_proxy() {
     assert_eq!(sockaddr.ip().to_string(), "127.0.0.1");
     assert!(is_specified_port(sockaddr.port()));
 
-    assert_eq!(headers["x-upstream-server-addr"], "127.0.0.1:8000");
+    assert_eq!(
+        headers["x-upstream-server-addr"].to_str().unwrap(),
+        origin_addr.to_string()
+    );
     let sockaddr = headers["x-upstream-client-addr"]
         .to_str()
         .unwrap()
@@ -74,6 +92,7 @@ async fn test_simple_proxy() {
 
     let body = res.text().await.unwrap();
     assert_eq!(body, "Hello World!\n");
+    origin.shutdown().await;
 }
 
 #[tokio::test]
@@ -427,9 +446,8 @@ async fn test_dropped_conn_post_empty_body() {
         .await
         .unwrap();
 
-    assert_eq!(res.status(), StatusCode::OK);
-    let body = res.text().await.unwrap();
-    assert_eq!(body, "dog!\n");
+    // Non-idempotent requests are not retried by the default policy.
+    assert_eq!(res.status(), StatusCode::BAD_GATEWAY);
 }
 
 async fn test_dropped_conn_post_body() {
@@ -456,12 +474,11 @@ async fn test_dropped_conn_post_body() {
         .await
         .unwrap();
 
-    assert_eq!(res.status(), StatusCode::OK);
-    let body = res.text().await.unwrap();
-    assert_eq!(body, "cat!\n");
+    // Non-idempotent requests are not retried even when the body was buffered.
+    assert_eq!(res.status(), StatusCode::BAD_GATEWAY);
 }
 
-async fn test_dropped_conn_post_body_over() {
+async fn test_dropped_conn_put_body_over() {
     init();
     let client = reqwest::Client::new();
     let port = "8001"; // special port to avoid unexpected connection reuse from other tests
@@ -479,15 +496,15 @@ async fn test_dropped_conn_post_body_over() {
     }
 
     let res = client
-        .post("http://127.0.0.1:6147/bad_lb")
+        .put("http://127.0.0.1:6147/bad_lb")
         .header("x-port", port)
         .body(large_body)
         .send()
         .await
         .unwrap();
 
-    // 502, body larger than buffer limit
-    assert_eq!(res.status(), StatusCode::from_u16(502).unwrap());
+    // The body is larger than the retry buffer limit.
+    assert_eq!(res.status(), StatusCode::BAD_GATEWAY);
 }
 
 #[tokio::test]
@@ -497,7 +514,7 @@ async fn test_dropped_conn() {
     test_dropped_conn_get().await;
     test_dropped_conn_post_empty_body().await;
     test_dropped_conn_post_body().await;
-    test_dropped_conn_post_body_over().await;
+    test_dropped_conn_put_body_over().await;
 }
 
 // currently not supported with Rustls implementation
@@ -696,13 +713,23 @@ async fn test_upstream_compression() {
 
 #[tokio::test]
 async fn test_downstream_compression() {
-    init();
+    init_proxy().await;
+    let origin = HttpOrigin::bind(|_request| async {
+        Response::builder()
+            .header(header::CONTENT_TYPE, "text/plain")
+            .body(Bytes::from_static(b"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"))
+            .unwrap()
+    })
+    .await
+    .unwrap();
+    let origin_port = origin.addr().port().to_string();
 
     // disable reqwest gzip support to check compression headers and body
     // otherwise reqwest will decompress and strip the headers
     let client = reqwest::ClientBuilder::new().gzip(false).build().unwrap();
     let res = client
         .get("http://127.0.0.1:6147/no_compression")
+        .header("x-port", &origin_port)
         // tell the test proxy to use downstream compression module instead of upstream
         .header("x-downstream-compression", "1")
         .header("accept-encoding", "gzip")
@@ -718,6 +745,7 @@ async fn test_downstream_compression() {
     let client = reqwest::ClientBuilder::new().gzip(true).build().unwrap();
     let res = client
         .get("http://127.0.0.1:6147/no_compression")
+        .header("x-port", &origin_port)
         .header("accept-encoding", "gzip")
         .send()
         .await
@@ -725,15 +753,30 @@ async fn test_downstream_compression() {
     assert_eq!(res.status(), StatusCode::OK);
     let body = res.bytes().await.unwrap();
     assert_eq!(body.as_ref(), &[b'B'; 32]);
+    origin.shutdown().await;
 }
 
 #[tokio::test]
 async fn test_connect_close() {
-    init();
+    init_proxy().await;
+    let origin = HttpOrigin::bind(|_request| async {
+        Response::builder()
+            .header(header::CONTENT_LENGTH, "13")
+            .body(Bytes::from_static(b"Hello World!\n"))
+            .unwrap()
+    })
+    .await
+    .unwrap();
+    let origin_port = origin.addr().port().to_string();
 
     // default keep-alive
     let client = reqwest::ClientBuilder::new().build().unwrap();
-    let res = client.get("http://127.0.0.1:6147").send().await.unwrap();
+    let res = client
+        .get("http://127.0.0.1:6147")
+        .header("x-port", &origin_port)
+        .send()
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let headers = res.headers();
     assert_eq!(headers[header::CONTENT_LENGTH], "13");
@@ -745,6 +788,7 @@ async fn test_connect_close() {
     let client = reqwest::ClientBuilder::new().build().unwrap();
     let res = client
         .get("http://127.0.0.1:6147")
+        .header("x-port", &origin_port)
         .header("connection", "close")
         .send()
         .await
@@ -755,24 +799,27 @@ async fn test_connect_close() {
     assert_eq!(headers[header::CONNECTION], "close");
     let body = res.text().await.unwrap();
     assert_eq!(body, "Hello World!\n");
+    origin.shutdown().await;
 }
 
-// Authority-form CONNECT request targets require patched HTTP/1 parsing until
-// general request-target form support is available.
-#[cfg(feature = "patched_http1")]
 #[tokio::test]
 async fn test_connect_proxying_disallowed_h1() {
     init();
 
-    let mut stream = TcpStream::connect("127.0.0.1:6147").await.unwrap();
-    let request = b"CONNECT pingora.org:443 HTTP/1.1\r\nHost: pingora.org:443\r\n\r\n";
-    stream.write_all(request).await.unwrap();
+    for request in [
+        b"CONNECT pingora.org:443 HTTP/1.1\r\nHost: pingora.org:443\r\n\r\n".as_slice(),
+        b"CONNECT pingora.org:443 HTTP/1.1\r\n\r\n".as_slice(),
+        b"CONNECT /ws?token=a@b.com HTTP/1.1\r\nHost: other.example\r\n\r\n".as_slice(),
+    ] {
+        let mut stream = TcpStream::connect("127.0.0.1:6147").await.unwrap();
+        stream.write_all(request).await.unwrap();
 
-    let mut buf = [0u8; 1024];
-    let read = stream.read(&mut buf).await.unwrap();
-    let resp = std::str::from_utf8(&buf[..read]).unwrap();
-    let status_line = resp.lines().next().unwrap_or("");
-    assert!(status_line.contains(" 405 "));
+        let mut buf = [0u8; 1024];
+        let read = stream.read(&mut buf).await.unwrap();
+        let resp = std::str::from_utf8(&buf[..read]).unwrap();
+        let status_line = resp.lines().next().unwrap_or("");
+        assert!(status_line.contains(" 405 "), "{status_line}");
+    }
 }
 
 #[tokio::test]
@@ -798,7 +845,6 @@ async fn test_connect_proxying_disallowed_h2() {
     }
 }
 
-#[cfg(feature = "patched_http1")]
 #[tokio::test]
 async fn test_connect_proxying_allowed_h1() {
     init();
@@ -830,6 +876,89 @@ async fn test_connect_proxying_allowed_h1() {
     let status_line = resp.lines().next().unwrap_or("");
     assert!(status_line.contains(" 200 "));
     assert!(resp.ends_with("ok"));
+}
+
+#[tokio::test]
+async fn test_connect_proxying_allowed_h1_without_host() {
+    init();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream_addr = listener.local_addr().unwrap();
+
+    tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buf = [0u8; 1024];
+        let _ = socket.read(&mut buf).await.unwrap();
+        socket
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+            .await
+            .unwrap();
+        let _ = socket.shutdown().await;
+    });
+
+    let mut stream = TcpStream::connect("127.0.0.1:6160").await.unwrap();
+    let request = format!(
+        "CONNECT pingora.org:443 HTTP/1.1\r\nX-Port: {}\r\n\r\n",
+        upstream_addr.port()
+    );
+    stream.write_all(request.as_bytes()).await.unwrap();
+
+    let mut buf = vec![0u8; 1024];
+    let read = stream.read(&mut buf).await.unwrap();
+    let resp = std::str::from_utf8(&buf[..read]).unwrap();
+    let status_line = resp.lines().next().unwrap_or("");
+    assert!(status_line.contains(" 200 "));
+    assert!(resp.ends_with("ok"));
+}
+
+/// Read a complete HTTP/1 header block. A single `read()` can return a partial
+/// request line, so responding or asserting on one risks a flaky failure.
+async fn read_h1_head(stream: &mut TcpStream) -> String {
+    let mut head = Vec::new();
+    let mut buf = [0u8; 1024];
+    while !head.windows(4).any(|w| w == b"\r\n\r\n") {
+        let read = stream.read(&mut buf).await.unwrap();
+        assert_ne!(0, read, "connection closed before end of headers");
+        head.extend_from_slice(&buf[..read]);
+    }
+    String::from_utf8_lossy(&head).into_owned()
+}
+
+#[tokio::test]
+async fn test_absolute_form_request_target_h1() {
+    init();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream_addr = listener.local_addr().unwrap();
+    let upstream = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let request = read_h1_head(&mut socket).await;
+        socket
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+            .await
+            .unwrap();
+        let _ = socket.shutdown().await;
+        request
+    });
+
+    let mut stream = TcpStream::connect("127.0.0.1:6147").await.unwrap();
+    let request = format!(
+        "GET http://pingora.org/absolute?q=1 HTTP/1.1\r\nHost: pingora.org\r\nX-Port: {}\r\n\r\n",
+        upstream_addr.port()
+    );
+    stream.write_all(request.as_bytes()).await.unwrap();
+
+    let resp = read_h1_head(&mut stream).await;
+    assert!(resp.lines().next().unwrap().contains(" 200 "));
+
+    // RFC 9112 §3.2.2: absolute-form is accepted inbound and forwarded verbatim.
+    // Rewriting it to origin-form is the proxy layer's call, since only it knows
+    // whether the next hop is an origin server (§3.2.1) or another proxy (§3.2.2).
+    let upstream_request = upstream.await.unwrap();
+    assert_eq!(
+        "GET http://pingora.org/absolute?q=1 HTTP/1.1",
+        upstream_request.lines().next().unwrap()
+    );
 }
 
 #[tokio::test]
