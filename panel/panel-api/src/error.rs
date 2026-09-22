@@ -1,15 +1,17 @@
-use crate::{DiagnosticDetails, ProblemDetails};
+use crate::{
+    error_contract::{status_for, PROBLEM_MEDIA_TYPE},
+    DiagnosticDetails, ProblemDetails,
+};
 use axum::{
     extract::rejection::JsonRejection,
     http::{header, StatusCode},
     response::{IntoResponse, Response},
-    Json,
+    Extension, Json,
 };
-use panel_errors::{ErrorCode, PanelError};
+use panel_errors::PanelError;
 
 pub(crate) struct ApiError {
     source: Box<PanelError>,
-    request_id: Option<String>,
     status_override: Option<StatusCode>,
 }
 
@@ -17,14 +19,8 @@ impl ApiError {
     pub(crate) fn new(source: PanelError) -> Self {
         Self {
             source: Box::new(source),
-            request_id: None,
             status_override: None,
         }
-    }
-
-    pub(crate) fn with_request_id(mut self, request_id: impl Into<String>) -> Self {
-        self.request_id = Some(request_id.into());
-        self
     }
 
     pub(crate) fn from_json(error: JsonRejection) -> Self {
@@ -59,33 +55,34 @@ impl IntoResponse for ApiError {
             detail: source.message,
             code: source.code.to_string(),
             retryable: source.retryable,
-            request_id: self.request_id,
+            request_id: None,
             field_errors: source
                 .diagnostics
                 .into_iter()
                 .map(DiagnosticDetails::from)
                 .collect(),
         };
-        (
-            status,
-            [(header::CONTENT_TYPE, "application/problem+json")],
-            Json(body),
-        )
-            .into_response()
+        // The router middleware supplies request identity and serializes once.
+        // Typed response extensions avoid parsing or buffering response bodies.
+        (status, Extension(PendingProblem(body))).into_response()
     }
 }
 
-fn status_for(code: &str) -> StatusCode {
-    match code {
-        ErrorCode::INVALID_ARGUMENT | ErrorCode::VALIDATION_FAILED => StatusCode::BAD_REQUEST,
-        ErrorCode::CONFLICT => StatusCode::CONFLICT,
-        ErrorCode::PRECONDITION_FAILED => StatusCode::PRECONDITION_FAILED,
-        ErrorCode::UNSUPPORTED_CAPABILITY => StatusCode::UNPROCESSABLE_ENTITY,
-        ErrorCode::NOT_FOUND => StatusCode::NOT_FOUND,
-        ErrorCode::RESOURCE_EXHAUSTED => StatusCode::TOO_MANY_REQUESTS,
-        ErrorCode::DEADLINE_EXCEEDED => StatusCode::REQUEST_TIMEOUT,
-        ErrorCode::UNAUTHENTICATED => StatusCode::UNAUTHORIZED,
-        ErrorCode::PERMISSION_DENIED => StatusCode::FORBIDDEN,
-        _ => StatusCode::INTERNAL_SERVER_ERROR,
+#[derive(Clone)]
+struct PendingProblem(ProblemDetails);
+
+pub(crate) fn render_problem(mut response: Response, request_id: Option<String>) -> Response {
+    if let Some(PendingProblem(mut problem)) = response.extensions_mut().remove::<PendingProblem>()
+    {
+        problem.request_id = request_id;
+        let rendered = Json(problem).into_response();
+        let (parts, body) = rendered.into_parts();
+        response.headers_mut().extend(parts.headers);
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            PROBLEM_MEDIA_TYPE.parse().expect("static media type"),
+        );
+        *response.body_mut() = body;
     }
+    response
 }

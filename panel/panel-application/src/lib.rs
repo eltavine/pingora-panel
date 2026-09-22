@@ -9,13 +9,15 @@
 
 mod context;
 mod gateway;
+mod idempotency;
 mod persistence;
 
 pub use context::{CommandContext, IdempotencyKey, RequestDeadline, RequestId};
 pub use gateway::{
     ActivatedDeployment, ConfigCompiler, ConfigDocument, DeploymentOutcome, GatewayPort,
-    GatewayService, GatewayStatus, GatewayUseCases, IdempotentGatewayUseCases, PreparedDeployment,
+    GatewayService, GatewayStatus, GatewayUseCases, PreparedDeployment,
 };
+pub use idempotency::IdempotentGatewayUseCases;
 pub use panel_domain::ContentHash;
 pub use persistence::{
     AuditEventStore, AuditFact, IdempotencyClaim, IdempotencyLookup, IdempotencyRecord,

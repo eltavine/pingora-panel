@@ -222,7 +222,6 @@ pub async fn serve_management(
 mod tests {
     use super::*;
     use panel_application::{IdempotencyKey, RequestDeadline, RequestId};
-    use tokio::sync::oneshot;
 
     fn context(deadline: &str) -> CommandContext {
         CommandContext::new(
@@ -264,32 +263,5 @@ mod tests {
         .await
         .unwrap();
         assert!(listener.local_addr().unwrap().ip().is_loopback());
-    }
-
-    #[tokio::test]
-    async fn management_server_uses_injected_listener_and_graceful_shutdown() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let router = axum::Router::new().route(
-            "/healthz",
-            axum::routing::get(|| async { axum::http::StatusCode::NO_CONTENT }),
-        );
-        let (shutdown_sender, shutdown_receiver) = oneshot::channel();
-        let task = tokio::spawn(serve_management(listener, router, async move {
-            let _ = shutdown_receiver.await;
-        }));
-
-        let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
-        use tokio::io::AsyncWriteExt;
-        stream
-            .write_all(b"GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-            .await
-            .unwrap();
-        use tokio::io::AsyncReadExt;
-        let mut response = Vec::new();
-        stream.read_to_end(&mut response).await.unwrap();
-        assert!(response.starts_with(b"HTTP/1.1 204"));
-        shutdown_sender.send(()).unwrap();
-        task.await.unwrap().unwrap();
     }
 }

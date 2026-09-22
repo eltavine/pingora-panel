@@ -60,6 +60,8 @@ thiserror = "=2.0.17"
 tokio = { version = "=1.48.0", features = ["fs", "macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = { version = "=0.1.19", features = ["net"] }
 tokio-util = { version = "=0.7.19", features = ["rt"] }
+tower = { version = "=0.5.3", features = ["util"] }
+reqwest = { version = "=0.13.4", default-features = false, features = ["json"] }
 tower-http = { version = "=0.7.1", features = ["request-id", "trace"] }
 utoipa = "=5.5.0"
 tonic = { version = "=0.14.6", default-features = false, features = ["codegen", "router", "transport"] }

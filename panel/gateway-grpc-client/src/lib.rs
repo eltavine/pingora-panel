@@ -26,6 +26,7 @@ use uuid::Uuid;
 
 const CONTEXT_SCHEMA_VERSION: &str = panel_contracts::PROTOCOL_VERSION;
 
+mod activation;
 mod status;
 
 pub struct GatewayGrpcClient {
@@ -309,15 +310,7 @@ impl GatewayPort for GatewayGrpcClient {
             .await
             .map_err(status_error)?
             .into_inner();
-        response_error(response.error)?;
-        Ok(ActivatedDeployment::new(
-            RevisionId::new(response.revision_id),
-            hash(response.active_hash)?,
-            response
-                .previous_active_hash
-                .map(|value| hash(Some(value)))
-                .transpose()?,
-        ))
+        activation::decode(response)
     }
 
     async fn status(&self) -> Result<GatewayStatus> {
@@ -377,15 +370,7 @@ impl GatewayPort for GatewayGrpcClient {
             .await
             .map_err(status_error)?
             .into_inner();
-        response_error(response.error)?;
-        Ok(ActivatedDeployment::new(
-            RevisionId::new(response.revision_id),
-            hash(response.active_hash)?,
-            response
-                .previous_active_hash
-                .map(|value| hash(Some(value)))
-                .transpose()?,
-        ))
+        activation::decode(response)
     }
 }
 

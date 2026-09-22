@@ -1,5 +1,4 @@
-use crate::{CommandContext, IdempotencyKey};
-use crate::{IdempotencyClaim, IdempotencyLookup, IdempotencyRecord, IdempotencyRepository};
+use crate::{CommandContext, IdempotencyKey, IdempotencyLookup};
 use async_trait::async_trait;
 use panel_domain::{ContentHash, RevisionId};
 use panel_errors::{PanelError, Result, ValidationReport};
@@ -216,6 +215,11 @@ pub trait GatewayPort: Send + Sync {
 
     async fn prepare(&self, snapshot: RuntimeSnapshot) -> Result<PreparedDeployment>;
 
+    /// Activates a prepared configuration. Invalid argument, validation,
+    /// conflict, not found, precondition, unsupported capability, and identity
+    /// errors must only describe rejection before commit. Adapters must map
+    /// errors after a possible commit to an uncertain error instead. Timeouts,
+    /// resource, storage, internal, and unknown errors do not prove non-commit.
     async fn activate(
         &self,
         prepare_token: String,
@@ -257,6 +261,8 @@ pub trait GatewayUseCases: Send + Sync {
         document: ConfigDocument,
     ) -> Result<PreparedDeployment>;
 
+    /// Uses the precommit rejection and uncertain outcome contract of
+    /// [`GatewayPort::activate`], including when implemented by a decorator.
     async fn activate(
         &self,
         context: CommandContext,
@@ -274,117 +280,6 @@ pub trait GatewayUseCases: Send + Sync {
         Err(PanelError::unsupported_capability(
             "activation receipt queries are not configured",
         ))
-    }
-}
-
-/// Application decorator that makes activation retries replay a durable
-/// receipt instead of executing the gateway mutation twice.
-pub struct IdempotentGatewayUseCases {
-    inner: Arc<dyn GatewayUseCases>,
-    repository: Arc<dyn IdempotencyRepository>,
-}
-
-impl IdempotentGatewayUseCases {
-    pub fn new(
-        inner: Arc<dyn GatewayUseCases>,
-        repository: Arc<dyn IdempotencyRepository>,
-    ) -> Self {
-        Self { inner, repository }
-    }
-}
-
-fn activation_request_hash(
-    prepare_token: &str,
-    expected_active_hash: Option<&ContentHash>,
-) -> ContentHash {
-    let mut bytes = Vec::with_capacity(prepare_token.len() + 1 + 64);
-    bytes.extend_from_slice(prepare_token.as_bytes());
-    bytes.push(0);
-    if let Some(hash) = expected_active_hash {
-        bytes.extend_from_slice(hash.as_str().as_bytes());
-    }
-    ContentHash::from_bytes(&bytes)
-}
-
-fn replayed_activation(record: IdempotencyRecord) -> Result<ActivatedDeployment> {
-    match record.outcome().clone() {
-        DeploymentOutcome::Succeeded(deployment) => Ok(deployment),
-        _ => Err(PanelError::internal(
-            "idempotency record does not contain a replayable activation receipt",
-        )),
-    }
-}
-
-#[async_trait]
-impl GatewayUseCases for IdempotentGatewayUseCases {
-    async fn validate(&self, document: ConfigDocument) -> Result<ValidationReport> {
-        self.inner.validate(document).await
-    }
-
-    async fn prepare(
-        &self,
-        context: CommandContext,
-        document: ConfigDocument,
-    ) -> Result<PreparedDeployment> {
-        self.inner.prepare(context, document).await
-    }
-
-    async fn activate(
-        &self,
-        context: CommandContext,
-        prepare_token: String,
-        expected_active_hash: Option<ContentHash>,
-    ) -> Result<ActivatedDeployment> {
-        let key = context.idempotency_key().clone();
-        let request_hash = activation_request_hash(&prepare_token, expected_active_hash.as_ref());
-        match self.repository.claim(&key, &request_hash).await? {
-            IdempotencyClaim::Replay(record) => return replayed_activation(record),
-            IdempotencyClaim::InProgress => {
-                return Err(PanelError::resource_exhausted(
-                    "activation with this idempotency key is already in progress",
-                ))
-            }
-            IdempotencyClaim::Conflict => {
-                return Err(PanelError::conflict(
-                    "idempotency key was already used for a different activation request",
-                ))
-            }
-            IdempotencyClaim::Acquired => {}
-        }
-
-        let deployment = match self
-            .inner
-            .activate(context, prepare_token, expected_active_hash)
-            .await
-        {
-            Ok(deployment) => deployment,
-            Err(error) => {
-                let _ = self.repository.abort(&key, &request_hash).await;
-                return Err(error);
-            }
-        };
-        let record = IdempotencyRecord::new(
-            request_hash.clone(),
-            DeploymentOutcome::Succeeded(deployment.clone()),
-        );
-        if let Err(error) = self.repository.complete(&key, record).await {
-            // The gateway has already acknowledged activation, but the durable
-            // replay receipt could not be committed. Do not abort the claim:
-            // doing so could permit a retry to execute the mutation twice.
-            return Err(PanelError::commit_outcome_unknown(
-                "activation succeeded but its idempotency receipt could not be persisted",
-            )
-            .with_source(error));
-        }
-        Ok(deployment)
-    }
-
-    async fn status(&self) -> Result<GatewayStatus> {
-        self.inner.status().await
-    }
-
-    async fn activation_receipt(&self, key: &IdempotencyKey) -> Result<IdempotencyLookup> {
-        self.repository.lookup(key).await
     }
 }
 
@@ -429,214 +324,5 @@ impl GatewayUseCases for GatewayService {
 
     async fn status(&self) -> Result<GatewayStatus> {
         self.gateway.status().await
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{IdempotencyKey, RequestDeadline, RequestId};
-    use std::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Mutex,
-    };
-
-    struct FakeUseCases {
-        activations: AtomicUsize,
-    }
-
-    #[async_trait]
-    impl GatewayUseCases for FakeUseCases {
-        async fn validate(&self, _document: ConfigDocument) -> Result<ValidationReport> {
-            Ok(ValidationReport::valid())
-        }
-
-        async fn prepare(
-            &self,
-            _context: CommandContext,
-            _document: ConfigDocument,
-        ) -> Result<PreparedDeployment> {
-            Err(PanelError::internal("not used in idempotency test"))
-        }
-
-        async fn activate(
-            &self,
-            _context: CommandContext,
-            _prepare_token: String,
-            _expected_active_hash: Option<ContentHash>,
-        ) -> Result<ActivatedDeployment> {
-            self.activations.fetch_add(1, Ordering::SeqCst);
-            Ok(ActivatedDeployment::new(
-                RevisionId::new(1),
-                ContentHash::from_bytes(b"active"),
-                None,
-            ))
-        }
-    }
-
-    struct MemoryIdempotency {
-        value: Mutex<Option<(IdempotencyKey, ContentHash, Option<IdempotencyRecord>)>>,
-        fail_complete: bool,
-    }
-
-    #[async_trait]
-    impl IdempotencyRepository for MemoryIdempotency {
-        async fn claim(
-            &self,
-            key: &IdempotencyKey,
-            request_hash: &ContentHash,
-        ) -> Result<IdempotencyClaim> {
-            let mut value = self.value.lock().unwrap();
-            match value.as_ref() {
-                None => {
-                    *value = Some((key.clone(), request_hash.clone(), None));
-                    Ok(IdempotencyClaim::Acquired)
-                }
-                Some((stored_key, stored_hash, record))
-                    if stored_key == key && stored_hash == request_hash =>
-                {
-                    Ok(record
-                        .clone()
-                        .map_or(IdempotencyClaim::InProgress, IdempotencyClaim::Replay))
-                }
-                Some((stored_key, _, _)) if stored_key == key => Ok(IdempotencyClaim::Conflict),
-                Some(_) => Ok(IdempotencyClaim::Conflict),
-            }
-        }
-
-        async fn complete(&self, key: &IdempotencyKey, record: IdempotencyRecord) -> Result<()> {
-            if self.fail_complete {
-                return Err(PanelError::storage_unavailable(
-                    "test receipt store unavailable",
-                ));
-            }
-            let mut value = self.value.lock().unwrap();
-            if let Some((stored_key, _, stored_record)) = value.as_mut() {
-                if stored_key == key {
-                    *stored_record = Some(record);
-                    return Ok(());
-                }
-            }
-            Err(PanelError::internal("missing idempotency claim"))
-        }
-
-        async fn abort(&self, key: &IdempotencyKey, _request_hash: &ContentHash) -> Result<()> {
-            let mut value = self.value.lock().unwrap();
-            if value
-                .as_ref()
-                .is_some_and(|(stored_key, _, record)| stored_key == key && record.is_none())
-            {
-                *value = None;
-            }
-            Ok(())
-        }
-    }
-
-    fn context(key: &str) -> CommandContext {
-        CommandContext::new(
-            RequestId::new("req-1").unwrap(),
-            RequestId::new("corr-1").unwrap(),
-            "tester",
-            RequestDeadline::new("2099-01-01T00:00:00Z").unwrap(),
-            IdempotencyKey::new(key).unwrap(),
-        )
-        .unwrap()
-    }
-
-    #[test]
-    fn activation_request_hash_preserves_the_legacy_receipt_encoding() {
-        let expected_hash = ContentHash::from_bytes(b"active");
-        assert_eq!(
-            activation_request_hash("prepare-1", Some(&expected_hash)),
-            ContentHash::from_bytes(format!("prepare-1\0{expected_hash}").as_bytes())
-        );
-        assert_eq!(
-            activation_request_hash("prepare-1", None),
-            ContentHash::from_bytes(b"prepare-1\0")
-        );
-    }
-
-    #[tokio::test]
-    async fn activation_replays_receipt_and_rejects_hash_reuse() {
-        let gateway = Arc::new(FakeUseCases {
-            activations: AtomicUsize::new(0),
-        });
-        let repository = Arc::new(MemoryIdempotency {
-            value: Mutex::new(None),
-            fail_complete: false,
-        });
-        let service = IdempotentGatewayUseCases::new(gateway.clone(), repository);
-
-        let first = service
-            .activate(context("idem-1"), "prepare-1".into(), None)
-            .await
-            .unwrap();
-        let second = service
-            .activate(context("idem-1"), "prepare-1".into(), None)
-            .await
-            .unwrap();
-        assert_eq!(first, second);
-        assert_eq!(gateway.activations.load(Ordering::SeqCst), 1);
-
-        let conflict = service
-            .activate(context("idem-1"), "prepare-2".into(), None)
-            .await
-            .unwrap_err();
-        assert_eq!(conflict.code.as_str(), panel_errors::ErrorCode::CONFLICT);
-    }
-
-    #[tokio::test]
-    async fn atomic_claim_blocks_a_concurrent_duplicate_before_gateway_execution() {
-        let repository = MemoryIdempotency {
-            value: Mutex::new(None),
-            fail_complete: false,
-        };
-        let key = IdempotencyKey::new("idem-claim").unwrap();
-        let hash = ContentHash::from_bytes(b"request");
-        assert_eq!(
-            repository.claim(&key, &hash).await.unwrap(),
-            IdempotencyClaim::Acquired
-        );
-        assert_eq!(
-            repository.claim(&key, &hash).await.unwrap(),
-            IdempotencyClaim::InProgress
-        );
-
-        let deployment =
-            ActivatedDeployment::new(RevisionId::new(1), ContentHash::from_bytes(b"active"), None);
-        repository
-            .complete(
-                &key,
-                IdempotencyRecord::new(hash.clone(), DeploymentOutcome::Succeeded(deployment)),
-            )
-            .await
-            .unwrap();
-        assert!(matches!(
-            repository.claim(&key, &hash).await.unwrap(),
-            IdempotencyClaim::Replay(_)
-        ));
-    }
-
-    #[tokio::test]
-    async fn receipt_failure_never_releases_claim_after_gateway_success() {
-        let gateway = Arc::new(FakeUseCases {
-            activations: AtomicUsize::new(0),
-        });
-        let repository = Arc::new(MemoryIdempotency {
-            value: Mutex::new(None),
-            fail_complete: true,
-        });
-        let service = IdempotentGatewayUseCases::new(gateway.clone(), repository);
-
-        let error = service
-            .activate(context("idem-receipt-failure"), "prepare-1".into(), None)
-            .await
-            .unwrap_err();
-        assert_eq!(
-            error.code.as_str(),
-            panel_errors::ErrorCode::COMMIT_OUTCOME_UNKNOWN
-        );
-        assert!(error.retryable);
-        assert_eq!(gateway.activations.load(Ordering::SeqCst), 1);
     }
 }

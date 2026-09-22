@@ -28,6 +28,8 @@ impl TryFrom<SnapshotEnvelope> for ConfigDocument {
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
 pub struct ActivateRequest {
     pub prepare_token: String,
+    /// Current active content hash required by compare-and-swap. Omit or use
+    /// null only for the first activation, when no configuration is active.
     #[serde(default)]
     pub expected_active_hash: Option<String>,
 }
