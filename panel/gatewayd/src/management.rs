@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use chrono::DateTime;
 use panel_api::{router_with_config, ApiConfig, ApiState};
 use panel_application::{
-    ActivatedDeployment, CommandContext, ConfigCompiler, GatewayPort, GatewayService,
+    AbortOutcome, ActivatedDeployment, CommandContext, ConfigCompiler, GatewayPort, GatewayService,
     GatewayStatus as ApplicationGatewayStatus, IdempotencyRepository, IdempotentGatewayUseCases,
     PreparedDeployment,
 };
@@ -70,6 +70,13 @@ where
         ))
     }
 
+    async fn abort(&self, prepare_token: String) -> Result<AbortOutcome> {
+        self.engine
+            .abort(PrepareToken::new(prepare_token))
+            .await
+            .map(|_| AbortOutcome::new(true))
+    }
+
     async fn status(&self) -> Result<ApplicationGatewayStatus> {
         let status = self.engine.status().await?;
         Ok(ApplicationGatewayStatus::new(
@@ -127,6 +134,20 @@ where
             receipt.content_hash,
             receipt.previous_active_hash,
         ))
+    }
+
+    async fn abort_with_context(
+        &self,
+        context: CommandContext,
+        prepare_token: String,
+    ) -> Result<AbortOutcome> {
+        let budget = deadline_budget(&context)?;
+        tokio::time::timeout(budget, self.engine.abort(PrepareToken::new(prepare_token)))
+            .await
+            .map_err(|_| {
+                panel_errors::PanelError::deadline_exceeded("request deadline elapsed during abort")
+            })??;
+        Ok(AbortOutcome::new(true))
     }
 }
 

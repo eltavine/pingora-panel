@@ -19,7 +19,7 @@ pub enum DomainError {
 
 macro_rules! typed_id {
     ($name:ident) => {
-        #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+        #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
         #[serde(transparent)]
         pub struct $name(String);
 
@@ -37,6 +37,15 @@ macro_rules! typed_id {
         impl fmt::Display for $name {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.write_str(&self.0)
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                Self::new(String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
             }
         }
     };
@@ -84,7 +93,7 @@ impl fmt::Display for RevisionId {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
 pub struct ContentHash(String);
 
@@ -115,7 +124,16 @@ impl fmt::Display for ContentHash {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+impl<'de> Deserialize<'de> for ContentHash {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Self::from_hex(String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
 pub struct NormalizedHost(String);
 
@@ -162,7 +180,16 @@ impl fmt::Display for NormalizedHost {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+impl<'de> Deserialize<'de> for NormalizedHost {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Self::new(String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
 pub struct PathPrefix(String);
 
@@ -199,7 +226,16 @@ impl fmt::Display for PathPrefix {
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+impl<'de> Deserialize<'de> for PathPrefix {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Self::new(String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct EndpointAddress {
     host: String,
     port: u16,
@@ -252,6 +288,24 @@ impl EndpointAddress {
     }
 }
 
+impl<'de> Deserialize<'de> for EndpointAddress {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Fields {
+            host: String,
+            port: u16,
+            tls: bool,
+        }
+
+        let fields = Fields::deserialize(deserializer)?;
+        Self::new(fields.host, fields.port, fields.tls).map_err(serde::de::Error::custom)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RevisionRef {
     pub revision_id: RevisionId,
@@ -293,5 +347,23 @@ mod tests {
         assert!(EndpointAddress::new("[::1]", 8080, false).is_ok());
         assert!(EndpointAddress::new("backend.example", 443, true).is_ok());
         assert!(EndpointAddress::new("bad host", 443, true).is_err());
+    }
+
+    #[test]
+    fn deserialization_preserves_value_object_invariants() {
+        assert!(serde_json::from_str::<SiteId>("\"bad id\"").is_err());
+        assert!(serde_json::from_str::<ContentHash>("\"bad\"").is_err());
+        assert!(serde_json::from_str::<NormalizedHost>("\"bad..host\"").is_err());
+        assert!(serde_json::from_str::<PathPrefix>("\"relative\"").is_err());
+        assert!(serde_json::from_str::<EndpointAddress>(
+            r#"{"host":"127.0.0.1","port":0,"tls":false}"#
+        )
+        .is_err());
+        assert_eq!(
+            serde_json::from_str::<NormalizedHost>("\"Example.COM.\"")
+                .unwrap()
+                .as_str(),
+            "example.com"
+        );
     }
 }

@@ -94,7 +94,8 @@ impl ConfigCompiler for JsonRuntimeSnapshotCompiler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use panel_domain::RevisionId;
+    use panel_domain::{NormalizedHost, RevisionId, SiteId};
+    use panel_ir::{DomainSpec, SiteSpec};
 
     fn document(snapshot: &RuntimeSnapshot) -> ConfigDocument {
         ConfigDocument::new(
@@ -143,5 +144,82 @@ mod tests {
                 .as_str(),
             panel_errors::ErrorCode::RESOURCE_EXHAUSTED
         );
+    }
+
+    #[tokio::test]
+    async fn unknown_and_invalid_nested_values_fail_closed() {
+        let compiler = JsonRuntimeSnapshotCompiler::default();
+        let baseline = serde_json::to_value(RuntimeSnapshot::empty(RevisionId::new(1))).unwrap();
+        let compile = |value: serde_json::Value| {
+            ConfigDocument::new(
+                IR_SCHEMA_VERSION,
+                "application/json",
+                serde_json::to_vec(&value).unwrap(),
+            )
+            .unwrap()
+        };
+
+        let mut unknown_top = baseline.clone();
+        unknown_top["listners"] = serde_json::json!([]);
+        assert!(compiler.compile(compile(unknown_top)).await.is_err());
+
+        let mut unknown_site = baseline.clone();
+        unknown_site["sites"] = serde_json::json!([{
+            "id": "site-1", "name": "site", "enabled": true, "domains": [],
+            "enabeld": true
+        }]);
+        assert!(compiler.compile(compile(unknown_site)).await.is_err());
+
+        let mut unknown_domain = baseline.clone();
+        unknown_domain["sites"] = serde_json::json!([{
+            "id": "site-1", "name": "site", "enabled": true,
+            "domains": [{"host": "example.com", "tls_profile_id": null, "hostname": "ignored"}]
+        }]);
+        assert!(compiler.compile(compile(unknown_domain)).await.is_err());
+
+        let mut invalid_site = baseline.clone();
+        invalid_site["sites"] = serde_json::json!([{
+            "id": "bad id", "name": "site", "enabled": true, "domains": []
+        }]);
+        assert!(compiler.compile(compile(invalid_site)).await.is_err());
+
+        let mut invalid_hash = baseline.clone();
+        invalid_hash["content_hash"] = serde_json::json!("not-a-hash");
+        assert!(compiler.compile(compile(invalid_hash)).await.is_err());
+
+        let mut unknown_route = baseline.clone();
+        unknown_route["routes"] = serde_json::json!([{
+            "id": "route-1", "site_id": "site-1", "priority": 0, "enabled": true,
+            "matcher": {"kind": "path_prefix", "path": "/"},
+            "action": {"kind": "static", "policy_id": "static-1"}
+        }]);
+        // Prove that the seed decodes before testing its extra field. A seed
+        // with missing required fields would pass this negative test falsely.
+        assert!(compiler
+            .compile(compile(unknown_route.clone()))
+            .await
+            .is_ok());
+        unknown_route["routes"][0]["extra"] = serde_json::json!("ignored");
+        let error = compiler.compile(compile(unknown_route)).await.unwrap_err();
+        assert!(error.message.contains("unknown field `extra`"), "{error}");
+
+        assert!(compiler.compile(compile(baseline)).await.is_ok());
+
+        let mut canonical = RuntimeSnapshot::empty(RevisionId::new(2));
+        canonical.sites.push(SiteSpec {
+            id: SiteId::new("site-1").unwrap(),
+            name: "site".into(),
+            enabled: true,
+            domains: vec![DomainSpec {
+                host: NormalizedHost::new("example.com").unwrap(),
+                tls_profile_id: None,
+            }],
+        });
+        canonical.refresh_content_hash();
+        let mut wire = serde_json::to_value(&canonical).unwrap();
+        wire["sites"][0]["domains"][0]["host"] = serde_json::json!("Example.COM.");
+        let decoded = compiler.compile(compile(wire)).await.unwrap();
+        assert_eq!(decoded.sites[0].domains[0].host.as_str(), "example.com");
+        assert!(decoded.has_valid_content_hash());
     }
 }

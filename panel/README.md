@@ -14,10 +14,11 @@ panel-config-json -> panel-application + panel-errors + panel-ir
 panel-gateway-runtime -> panel-engine ports
 snapshot-store-fs -> panel-engine::SnapshotStore
 gateway-pingora -> panel-engine::DataPlaneAdapter
-gateway-grpc -> panel-contracts + panel-engine::GatewayEngine
-gateway-grpc-client -> panel-application + panel-contracts + gateway-grpc
+gateway-proto-codec -> panel-contracts + panel-domain + panel-ir
+gateway-grpc -> gateway-proto-codec + panel-engine::GatewayEngine
+gateway-grpc-client -> panel-application + gateway-proto-codec + panel-contracts
 
-gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC adapter + REST/compiler adapters
+gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC/Proto adapters + REST/compiler adapters
 ```
 
 箭头表示左侧 crate 依赖右侧 crate。
@@ -34,7 +35,8 @@ gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC adapter + REST
 | `panel-gateway-runtime` | Prepare/Activate/CAS/LKG orchestration | Tonic, filesystem, Pingora |
 | `snapshot-store-fs` | Versioned JSON records, fsync and atomic rename | Tonic, Pingora, runtime policy |
 | `gateway-pingora` | Compile IR into private Pingora values and atomic `ArcSwap` publication | Proto, filesystem, control-plane policy |
-| `gateway-grpc` | Proto/domain conversion, runtime-info projection and Tonic service | Pingora, filesystem, environment |
+| `gateway-proto-codec` | Shared Proto/IR conversion used by client and server | Engine, server, client, Pingora, filesystem |
+| `gateway-grpc` | Runtime-info projection, request policy and Tonic service | Pingora, filesystem, environment |
 | `gateway-grpc-client` | Tonic client adapter implementing `panel-application::GatewayPort` | HTTP, storage, identity, generated Proto outside this adapter |
 | `gatewayd` | Dependency construction, REST/gRPC adapter composition, bind/readiness policies, environment configuration, process clock, worker executor and standard gRPC Health | Business rules |
 
@@ -80,6 +82,8 @@ for module boundaries and the contract regeneration command.
 
 `.github/scripts/check-panel-proto-breaking.sh` owns Protobuf compatibility enforcement. Pull requests compare against their target branch; default-branch pushes compare against the event's immutable `before` commit rather than the already-updated branch head. A missing predecessor module is treated only as the one-time bootstrap case; an invalid baseline fails closed. `resolve-panel-proto-baseline.sh` isolates event mapping, while `test-panel-proto-breaking.sh` uses a temporary Git repository and real Buf to verify bootstrap, additive evolution, deleted fields, changed types and reused field numbers.
 
+The OpenAPI fixture is also compared across commits by `check-panel-openapi-breaking.sh` using pinned `oasdiff`. The guard allows additive optional fields and rejects endpoint, required-parameter, response, and schema breaks. Both guards keep transport-specific compatibility policy out of the application and engine crates.
+
 `gatewayd` exposes the standard `grpc.health.v1.Health` service for both the overall server name (`""`) and the generated Gateway service name. Readiness comes from `GatewayEngine::status`: healthy or restored LKG state is `SERVING`; corrupt or incompatible startup state is `NOT_SERVING`. On shutdown, `ShutdownCoordinator` calls an abstract `ReadinessGate`, closes mutation admission atomically, waits the bounded drain window, and only then resolves Tonic's graceful-shutdown future. The custom Status RPC remains available for diagnostics and additively projects gateway/data-plane/adapter versions, process start time, monotonic uptime, configured worker count, completed recoveries, degraded transitions, and unknown commit outcomes through stable engine ports.
 
 `GatewaydServices` retains its original public fields for source compatibility with existing integrations. New code should use `gateway()`, `health()`, and `health_reporter()`; these accessors are the supported extension boundary for future transports. A future major release can make the collection fully opaque without changing the transport composition model.
@@ -97,7 +101,7 @@ Until an authenticated transport is composed, `LoopbackOnlyManagementBindPolicy`
 7. Extend Proto additively. Never expose generated Proto or Pingora structs from stable ports.
 8. Evolve IR through a new schema version and explicit migrator; do not silently reinterpret persisted snapshots.
 9. Keep `gatewayd` as a composition root. It may wire dependencies but must not acquire domain rules.
-10. Prefer one canonical port or value type per concept. During internal development, remove superseded APIs instead of maintaining duplicate compatibility layers.
+10. Prefer one canonical port or value type per concept. When moving implementations, keep thin re-exports at established public paths until an explicit breaking release; do not duplicate the implementation or make clients depend on server adapters.
 
 ## Revision lifecycle policy
 

@@ -15,6 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub const IR_SCHEMA_VERSION: &str = "pingora.panel.ir/v1alpha1";
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CapabilityRequirement {
     pub name: String,
     pub version: String,
@@ -30,6 +31,7 @@ impl CapabilityRequirement {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RuntimeSnapshot {
     pub schema_version: String,
     pub revision_id: RevisionId,
@@ -156,6 +158,7 @@ impl RuntimeSnapshot {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ListenerRef {
     pub id: String,
     pub address: String,
@@ -163,6 +166,7 @@ pub struct ListenerRef {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SiteSpec {
     pub id: SiteId,
     pub name: String,
@@ -171,12 +175,14 @@ pub struct SiteSpec {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DomainSpec {
     pub host: NormalizedHost,
     pub tls_profile_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RouteSpec {
     pub id: RouteId,
     pub site_id: SiteId,
@@ -193,6 +199,7 @@ pub struct RouteSpec {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 pub enum RouteMatcher {
     Host {
         host: NormalizedHost,
@@ -217,6 +224,7 @@ pub enum RouteMatcher {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 pub enum RouteAction {
     Proxy { upstream_pool_id: UpstreamPoolId },
     Static { policy_id: String },
@@ -225,6 +233,7 @@ pub enum RouteAction {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UpstreamPoolSpec {
     pub id: UpstreamPoolId,
     pub name: String,
@@ -234,6 +243,7 @@ pub struct UpstreamPoolSpec {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UpstreamEndpoint {
     pub id: EndpointId,
     pub address: EndpointAddress,
@@ -243,6 +253,7 @@ pub struct UpstreamEndpoint {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 pub enum LoadBalancingPolicy {
     RoundRobin,
     Random,
@@ -250,6 +261,7 @@ pub enum LoadBalancingPolicy {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RetryPolicy {
     pub attempts: u32,
     pub per_try_timeout_ms: u64,
@@ -257,6 +269,7 @@ pub struct RetryPolicy {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HeaderPolicy {
     pub id: String,
     pub request_set: BTreeMap<String, String>,
@@ -266,6 +279,7 @@ pub struct HeaderPolicy {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TlsProfile {
     pub id: String,
     pub certificate_secret_id: String,
@@ -275,6 +289,7 @@ pub struct TlsProfile {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StaticContentPolicy {
     pub id: String,
     pub root: String,
@@ -283,6 +298,7 @@ pub struct StaticContentPolicy {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CachePolicy {
     pub id: String,
     pub enabled: bool,
@@ -291,6 +307,7 @@ pub struct CachePolicy {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SecurityPolicy {
     pub id: String,
     pub allowed_cidrs: BTreeSet<String>,
@@ -299,6 +316,7 @@ pub struct SecurityPolicy {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LuaPolicy {
     pub id: String,
     pub script_secret_id: String,

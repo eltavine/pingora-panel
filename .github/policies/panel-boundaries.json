@@ -4,6 +4,7 @@
     "gateway-grpc": {
       "catalog": true,
       "allowed_workspace_dependencies": [
+        "gateway-proto-codec",
         "panel-contracts",
         "panel-domain",
         "panel-engine",
@@ -14,8 +15,17 @@
     "gateway-grpc-client": {
       "catalog": true,
       "allowed_workspace_dependencies": [
-        "gateway-grpc",
+        "gateway-proto-codec",
         "panel-application",
+        "panel-contracts",
+        "panel-domain",
+        "panel-errors",
+        "panel-ir"
+      ]
+    },
+    "gateway-proto-codec": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
         "panel-contracts",
         "panel-domain",
         "panel-errors",
@@ -35,6 +45,7 @@
       "catalog": false,
       "allowed_workspace_dependencies": [
         "gateway-grpc",
+        "gateway-proto-codec",
         "gateway-pingora",
         "panel-api",
         "panel-application",

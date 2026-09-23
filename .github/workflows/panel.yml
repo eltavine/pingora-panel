@@ -18,6 +18,8 @@ on:
       - ".github/policies/panel-exhaustive-enums.json"
       - ".github/scripts/check-panel-workspace-dependencies.py"
       - ".github/scripts/check-panel-proto-breaking.sh"
+      - ".github/scripts/check-panel-openapi-breaking.sh"
+      - ".github/scripts/check-panel-docs.py"
       - ".github/scripts/check-panel-rust-api-breaking.sh"
       - ".github/scripts/list-workspace-package-names.py"
       - ".github/scripts/resolve-panel-compat-baseline.sh"
@@ -31,7 +33,12 @@ on:
       - ".github/scripts/test-panel-workspace-dependencies.py"
       - ".github/scripts/test-cargo-machete-workspace.sh"
       - ".github/scripts/test-panel-proto-breaking.sh"
+      - ".github/scripts/test-panel-openapi-breaking.sh"
+      - ".github/scripts/test-panel-docs.py"
       - ".github/scripts/test-panel-rust-api-breaking.sh"
+      - "README.md"
+      - "PRODUCT_SPEC.md"
+      - "docs/adr/**"
       - ".github/workflows/panel.yml"
   pull_request:
     paths:
@@ -49,6 +56,8 @@ on:
       - ".github/policies/panel-exhaustive-enums.json"
       - ".github/scripts/check-panel-workspace-dependencies.py"
       - ".github/scripts/check-panel-proto-breaking.sh"
+      - ".github/scripts/check-panel-openapi-breaking.sh"
+      - ".github/scripts/check-panel-docs.py"
       - ".github/scripts/check-panel-rust-api-breaking.sh"
       - ".github/scripts/list-workspace-package-names.py"
       - ".github/scripts/resolve-panel-compat-baseline.sh"
@@ -62,7 +71,12 @@ on:
       - ".github/scripts/test-panel-workspace-dependencies.py"
       - ".github/scripts/test-cargo-machete-workspace.sh"
       - ".github/scripts/test-panel-proto-breaking.sh"
+      - ".github/scripts/test-panel-openapi-breaking.sh"
+      - ".github/scripts/test-panel-docs.py"
       - ".github/scripts/test-panel-rust-api-breaking.sh"
+      - "README.md"
+      - "PRODUCT_SPEC.md"
+      - "docs/adr/**"
       - ".github/workflows/panel.yml"
 
 permissions:
@@ -198,6 +212,46 @@ jobs:
           BASELINE_REF: ${{ steps.proto-baseline.outputs.ref }}
         run: bash .github/scripts/check-panel-proto-breaking.sh "$BASELINE_REF"
 
+  openapi:
+    name: OpenAPI compatibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install oasdiff 1.32.1 from verified release
+        run: |
+          curl --fail --location --silent --show-error --retry 3 \
+            --output "$RUNNER_TEMP/oasdiff.tar.gz" \
+            https://github.com/oasdiff/oasdiff/releases/download/v1.32.1/oasdiff_1.32.1_linux_amd64.tar.gz
+          echo '7c8939fc49b75ee11fec66a5b83b37a2fca6aee109fed85013b1ba2ac2a1ee7f  '"$RUNNER_TEMP/oasdiff.tar.gz" | sha256sum --check
+          tar --no-same-owner -xzf "$RUNNER_TEMP/oasdiff.tar.gz" -C "$RUNNER_TEMP" oasdiff
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Self-test OpenAPI compatibility guard
+        run: bash .github/scripts/test-panel-openapi-breaking.sh
+
+      - name: Resolve OpenAPI compatibility baseline
+        id: openapi-baseline
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EVENT_NAME: ${{ github.event_name }}
+          PULL_REQUEST_BASE: ${{ github.base_ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          baseline_ref="$(bash .github/scripts/resolve-panel-compat-baseline.sh \
+            "$EVENT_NAME" "$PUSH_BEFORE" "$PULL_REQUEST_BASE" "$DEFAULT_BRANCH")"
+          printf 'ref=%s\n' "$baseline_ref" >> "$GITHUB_OUTPUT"
+
+      - name: Reject breaking OpenAPI changes
+        env:
+          BASELINE_REF: ${{ steps.openapi-baseline.outputs.ref }}
+        run: bash .github/scripts/check-panel-openapi-breaking.sh "$BASELINE_REF"
+
   rust-api:
     name: Rust public API compatibility
     runs-on: ubuntu-24.04
@@ -296,6 +350,12 @@ jobs:
 
       - name: Verify every public enum has an exhaustiveness decision
         run: python3 .github/scripts/check-panel-enum-exhaustiveness.py
+
+      - name: Self-test maintained documentation checks
+        run: python3 .github/scripts/test-panel-docs.py
+
+      - name: Check maintained links and Pingora version references
+        run: python3 .github/scripts/check-panel-docs.py
 
   dependency-hygiene:
     name: Dependency hygiene

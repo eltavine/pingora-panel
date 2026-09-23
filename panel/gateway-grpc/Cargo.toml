@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 chrono.workspace = true
+gateway-proto-codec.workspace = true
 panel-contracts.workspace = true
 panel-domain.workspace = true
 panel-engine.workspace = true

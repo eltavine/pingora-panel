@@ -1,7 +1,8 @@
 use crate::{
-    error::ApiError, request_context::command_context, ActivateRequest, ActivatedResponse, ApiDoc,
-    ApiState, GatewayStatusResponse, IdempotencyReceiptPendingResponse, IdempotencyReceiptResponse,
-    PreparedResponse, SnapshotEnvelope, ValidationResponse,
+    error::ApiError, request_context::command_context, AbortRequest, AbortResponse,
+    ActivateRequest, ActivatedResponse, ApiDoc, ApiState, GatewayStatusResponse,
+    IdempotencyReceiptPendingResponse, IdempotencyReceiptResponse, PreparedResponse,
+    SnapshotEnvelope, ValidationResponse,
 };
 use axum::{
     extract::{rejection::JsonRejection, Json, Path, State},
@@ -170,6 +171,32 @@ where
         .activate(context, payload.prepare_token, expected_active_hash)
         .await
         .map(ActivatedResponse::from)
+        .map(Json)
+        .map_err(Into::into)
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/gateway/abort",
+    request_body = AbortRequest,
+    params(crate::request_context::MutationHeaders),
+    responses((status = 200, body = AbortResponse))
+)]
+pub(crate) async fn abort<U>(
+    State(state): State<ApiState<U>>,
+    headers: HeaderMap,
+    payload: Result<Json<AbortRequest>, JsonRejection>,
+) -> Result<Json<AbortResponse>, ApiError>
+where
+    U: GatewayUseCases,
+{
+    let context = command_context(&headers)?;
+    let Json(payload) = payload.map_err(ApiError::from_json)?;
+    state
+        .use_cases
+        .abort(context, payload.prepare_token)
+        .await
+        .map(AbortResponse::from)
         .map(Json)
         .map_err(Into::into)
 }

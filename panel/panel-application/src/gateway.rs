@@ -109,6 +109,23 @@ pub struct ActivatedDeployment {
     pub previous_active_hash: Option<ContentHash>,
 }
 
+/// Successful removal of one unactivated prepared snapshot.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct AbortOutcome {
+    aborted: bool,
+}
+
+impl AbortOutcome {
+    pub const fn new(aborted: bool) -> Self {
+        Self { aborted }
+    }
+
+    pub const fn aborted(self) -> bool {
+        self.aborted
+    }
+}
+
 /// Transport-neutral gateway status projection used by REST and CLI adapters.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -226,6 +243,12 @@ pub trait GatewayPort: Send + Sync {
         expected_active_hash: Option<ContentHash>,
     ) -> Result<ActivatedDeployment>;
 
+    async fn abort(&self, _prepare_token: String) -> Result<AbortOutcome> {
+        Err(PanelError::unsupported_capability(
+            "gateway abort is not configured",
+        ))
+    }
+
     async fn status(&self) -> Result<GatewayStatus> {
         Err(PanelError::unsupported_capability(
             "gateway status is not configured",
@@ -248,6 +271,14 @@ pub trait GatewayPort: Send + Sync {
     ) -> Result<ActivatedDeployment> {
         self.activate(prepare_token, expected_active_hash).await
     }
+
+    async fn abort_with_context(
+        &self,
+        _context: CommandContext,
+        prepare_token: String,
+    ) -> Result<AbortOutcome> {
+        self.abort(prepare_token).await
+    }
 }
 
 /// Stable use-case facade consumed by HTTP, CLI and worker adapters.
@@ -269,6 +300,16 @@ pub trait GatewayUseCases: Send + Sync {
         prepare_token: String,
         expected_active_hash: Option<ContentHash>,
     ) -> Result<ActivatedDeployment>;
+
+    async fn abort(
+        &self,
+        _context: CommandContext,
+        _prepare_token: String,
+    ) -> Result<AbortOutcome> {
+        Err(PanelError::unsupported_capability(
+            "gateway abort is not configured",
+        ))
+    }
 
     async fn status(&self) -> Result<GatewayStatus> {
         Err(PanelError::unsupported_capability(
@@ -319,6 +360,12 @@ impl GatewayUseCases for GatewayService {
     ) -> Result<ActivatedDeployment> {
         self.gateway
             .activate_with_context(context, prepare_token, expected_active_hash)
+            .await
+    }
+
+    async fn abort(&self, context: CommandContext, prepare_token: String) -> Result<AbortOutcome> {
+        self.gateway
+            .abort_with_context(context, prepare_token)
             .await
     }
 

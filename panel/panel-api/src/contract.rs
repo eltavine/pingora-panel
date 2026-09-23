@@ -1,6 +1,6 @@
 use panel_application::{
-    ActivatedDeployment, ConfigDocument, DeploymentOutcome, GatewayStatus, IdempotencyRecord,
-    PreparedDeployment,
+    AbortOutcome, ActivatedDeployment, ConfigDocument, DeploymentOutcome, GatewayStatus,
+    IdempotencyRecord, PreparedDeployment,
 };
 use panel_errors::{Diagnostic, PanelError, ValidationReport};
 use serde::{Deserialize, Serialize};
@@ -32,6 +32,25 @@ pub struct ActivateRequest {
     /// null only for the first activation, when no configuration is active.
     #[serde(default)]
     pub expected_active_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AbortRequest {
+    pub prepare_token: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
+pub struct AbortResponse {
+    pub aborted: bool,
+}
+
+impl From<AbortOutcome> for AbortResponse {
+    fn from(outcome: AbortOutcome) -> Self {
+        Self {
+            aborted: outcome.aborted(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]

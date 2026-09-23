@@ -11,11 +11,13 @@ mod tests;
 #[derive(OpenApi)]
 #[openapi(
     info(title = "Pingora Panel API", version = "v1"),
-    paths(crate::routes::validate, crate::routes::prepare, crate::routes::activate, crate::routes::status, crate::routes::receipt, crate::routes::openapi),
+    paths(crate::routes::validate, crate::routes::prepare, crate::routes::activate, crate::routes::abort, crate::routes::status, crate::routes::receipt, crate::routes::openapi),
     modifiers(&HttpConventions),
     components(schemas(
         SnapshotEnvelope,
         ActivateRequest,
+        AbortRequest,
+        AbortResponse,
         ValidationResponse,
         PreparedResponse,
         ActivatedResponse,

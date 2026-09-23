@@ -15,6 +15,7 @@ members = [
     "panel-gateway-runtime",
     "snapshot-store-fs",
     "gateway-pingora",
+    "gateway-proto-codec",
     "gateway-grpc",
     "gateway-grpc-client",
     "gatewayd",
@@ -35,6 +36,7 @@ chrono = { version = "=0.4.45", default-features = false, features = ["std"] }
 futures-util = "=0.3.34"
 gateway-grpc = { version = "=0.1.0", path = "gateway-grpc" }
 gateway-grpc-client = { version = "=0.1.0", path = "gateway-grpc-client" }
+gateway-proto-codec = { version = "=0.1.0", path = "gateway-proto-codec" }
 gateway-pingora = { version = "=0.1.0", path = "gateway-pingora" }
 prost = "=0.14.4"
 panel-contracts = { version = "=0.1.0", path = "panel-contracts" }

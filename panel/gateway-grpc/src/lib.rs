@@ -2,12 +2,11 @@
 
 //! Tonic transport adapter for the stable `GatewayEngine` application port.
 
-mod codec;
 mod policy;
 
-pub use codec::{decode_snapshot, encode_snapshot};
 pub use policy::*;
 
+use gateway_proto_codec as codec;
 use panel_contracts::{common::v1 as common, gateway::v1 as wire};
 use panel_domain::ContentHash;
 use panel_engine::{
@@ -25,6 +24,18 @@ use std::{
     time::Instant,
 };
 use tonic::{Request, Response, Status};
+
+/// Decode a snapshot through the shared codec while preserving the original
+/// public function and signature for downstream crates and Rust API tooling.
+pub fn decode_snapshot(value: wire::RuntimeSnapshot) -> Result<panel_ir::RuntimeSnapshot> {
+    codec::decode_snapshot(value)
+}
+
+/// Encode a snapshot through the shared codec. New transport adapters should
+/// depend on `gateway-proto-codec` directly rather than the server crate.
+pub fn encode_snapshot(value: &panel_ir::RuntimeSnapshot) -> wire::RuntimeSnapshot {
+    codec::encode_snapshot(value)
+}
 
 pub struct GatewayGrpcService<E: GatewayEngine + ?Sized> {
     engine: Arc<E>,

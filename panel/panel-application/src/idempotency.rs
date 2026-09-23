@@ -1,9 +1,9 @@
 //! Activation replay and claim lifecycle, independent of transport and storage adapters.
 
 use crate::{
-    ActivatedDeployment, CommandContext, ConfigDocument, DeploymentOutcome, GatewayStatus,
-    GatewayUseCases, IdempotencyClaim, IdempotencyKey, IdempotencyLookup, IdempotencyRecord,
-    IdempotencyRepository, PreparedDeployment,
+    AbortOutcome, ActivatedDeployment, CommandContext, ConfigDocument, DeploymentOutcome,
+    GatewayStatus, GatewayUseCases, IdempotencyClaim, IdempotencyKey, IdempotencyLookup,
+    IdempotencyRecord, IdempotencyRepository, PreparedDeployment,
 };
 use async_trait::async_trait;
 use panel_domain::ContentHash;
@@ -126,5 +126,9 @@ impl GatewayUseCases for IdempotentGatewayUseCases {
 
     async fn activation_receipt(&self, key: &IdempotencyKey) -> Result<IdempotencyLookup> {
         self.repository.lookup(key).await
+    }
+
+    async fn abort(&self, context: CommandContext, prepare_token: String) -> Result<AbortOutcome> {
+        self.inner.abort(context, prepare_token).await
     }
 }

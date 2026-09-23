@@ -34,6 +34,116 @@ async fn prepare(server: &ManagementServer, revision: u64) -> Value {
 }
 
 #[tokio::test]
+async fn v1_transport_extensions_do_not_relax_versioned_snapshot_validation() {
+    let server = ManagementServer::start(
+        Arc::new(FakeGatewayEngine::with_default_capabilities()),
+        8192,
+    )
+    .await;
+    let mut extended = document(1);
+    extended["client_metadata"] = value!({"source": "future-client"});
+    json(
+        server
+            .post("/api/v1/gateway/validate", &extended)
+            .send()
+            .await
+            .unwrap(),
+        200,
+    )
+    .await;
+    let prepared = json(
+        server
+            .mutation("/api/v1/gateway/prepare", &extended, "extended-prepare")
+            .send()
+            .await
+            .unwrap(),
+        200,
+    )
+    .await;
+    let request = value!({
+        "prepare_token": prepared["prepare_token"],
+        "client_metadata": {"source": "future-client"}
+    });
+    let active = json(
+        server
+            .mutation("/api/v1/gateway/activate", &request, "extended-activate")
+            .send()
+            .await
+            .unwrap(),
+        200,
+    )
+    .await;
+    assert_eq!(active["content_hash"], prepared["content_hash"]);
+
+    extended["snapshot"]["listners"] = value!([]);
+    problem(
+        server
+            .mutation("/api/v1/gateway/prepare", &extended, "invalid-snapshot")
+            .send()
+            .await
+            .unwrap(),
+        400,
+        "INVALID_ARGUMENT",
+    )
+    .await;
+    let status = json(
+        server.get("/api/v1/gateway/status").send().await.unwrap(),
+        200,
+    )
+    .await;
+    assert_eq!(status["prepared_count"], 0);
+    assert_eq!(status["active_hash"], active["content_hash"]);
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn abort_releases_prepared_snapshot_without_changing_active_revision() {
+    let server = ManagementServer::start(
+        Arc::new(FakeGatewayEngine::with_default_capabilities()),
+        8192,
+    )
+    .await;
+    let prepared = prepare(&server, 1).await;
+    assert_eq!(
+        json(
+            server.get("/api/v1/gateway/status").send().await.unwrap(),
+            200
+        )
+        .await["prepared_count"],
+        1
+    );
+    let request = value!({"prepare_token": prepared["prepare_token"]});
+    let aborted = json(
+        server
+            .mutation("/api/v1/gateway/abort", &request, "abort-1")
+            .send()
+            .await
+            .unwrap(),
+        200,
+    )
+    .await;
+    assert_eq!(aborted["aborted"], true);
+    let status = json(
+        server.get("/api/v1/gateway/status").send().await.unwrap(),
+        200,
+    )
+    .await;
+    assert_eq!(status["prepared_count"], 0);
+    assert!(status["active_hash"].is_null());
+    problem(
+        server
+            .mutation("/api/v1/gateway/abort", &request, "abort-again")
+            .send()
+            .await
+            .unwrap(),
+        404,
+        "NOT_FOUND",
+    )
+    .await;
+    server.stop().await;
+}
+
+#[tokio::test]
 async fn configuration_publication_replay_cas_and_receipts_work_over_http() {
     let server = ManagementServer::start(
         Arc::new(FakeGatewayEngine::with_default_capabilities()),

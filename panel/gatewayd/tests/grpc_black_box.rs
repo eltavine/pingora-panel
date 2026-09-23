@@ -1,12 +1,15 @@
 #![forbid(unsafe_code)]
 
-use gateway_grpc::{encode_snapshot, GatewayTransportPolicy};
+use gateway_grpc::GatewayTransportPolicy;
+use gateway_grpc_client::GatewayGrpcClient;
+use gateway_proto_codec::encode_snapshot;
 use gatewayd::{build_gateway_services, gateway_service_name};
+use panel_application::{CommandContext, GatewayPort, IdempotencyKey, RequestDeadline, RequestId};
 use panel_contracts::{
     common::v1 as common,
     gateway::v1::{self as wire, gateway_engine_client::GatewayEngineClient},
 };
-use panel_domain::RevisionId;
+use panel_domain::{ContentHash, RevisionId};
 use panel_ir::RuntimeSnapshot;
 use std::{fs, net::SocketAddr, path::PathBuf};
 use tokio::{net::TcpListener, sync::oneshot, task::JoinHandle};
@@ -88,6 +91,138 @@ impl RunningGateway {
         self.shutdown.send(()).unwrap();
         self.task.await.unwrap().unwrap();
     }
+}
+
+fn application_context(key: &str) -> CommandContext {
+    CommandContext::new(
+        RequestId::new(format!("request-{key}")).unwrap(),
+        RequestId::new(format!("correlation-{key}")).unwrap(),
+        "operator",
+        RequestDeadline::new("2099-01-01T00:00:00Z").unwrap(),
+        IdempotencyKey::new(key).unwrap(),
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn application_grpc_client_publishes_over_the_real_gateway_transport() {
+    let state = TemporaryDirectory::new();
+    let server = RunningGateway::start(state.0.clone()).await;
+    let client = GatewayGrpcClient::connect(format!("http://{}", server.address))
+        .await
+        .unwrap();
+    let first = RuntimeSnapshot::empty(RevisionId::new(1));
+    assert!(client.validate(first.clone()).await.unwrap().valid);
+    assert_eq!(
+        client
+            .prepare(first.clone())
+            .await
+            .unwrap_err()
+            .code
+            .as_str(),
+        panel_errors::ErrorCode::PRECONDITION_FAILED
+    );
+    assert_eq!(
+        client
+            .activate("unused".into(), None)
+            .await
+            .unwrap_err()
+            .code
+            .as_str(),
+        panel_errors::ErrorCode::PRECONDITION_FAILED
+    );
+    let expired = CommandContext::new(
+        RequestId::new("expired-request").unwrap(),
+        RequestId::new("expired-correlation").unwrap(),
+        "operator",
+        RequestDeadline::new("2000-01-01T00:00:00Z").unwrap(),
+        IdempotencyKey::new("expired-prepare").unwrap(),
+    )
+    .unwrap();
+    let error = client
+        .prepare_with_context(expired, first.clone())
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.code.as_str(),
+        panel_errors::ErrorCode::DEADLINE_EXCEEDED
+    );
+    assert_eq!(client.status().await.unwrap().prepared_count(), 0);
+    let prepared = client
+        .prepare_with_context(application_context("prepare-1"), first.clone())
+        .await
+        .unwrap();
+    assert_eq!(prepared.content_hash, first.content_hash);
+    let active = client
+        .activate_with_context(
+            application_context("activate-1"),
+            prepared.prepare_token,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(active.content_hash, first.content_hash);
+    assert_eq!(
+        client.status().await.unwrap().active_hash(),
+        Some(&first.content_hash)
+    );
+
+    let second = RuntimeSnapshot::empty(RevisionId::new(2));
+    let prepared = client
+        .prepare_with_context(application_context("prepare-2"), second.clone())
+        .await
+        .unwrap();
+    let stale = client
+        .activate_with_context(
+            application_context("activate-stale"),
+            prepared.prepare_token.clone(),
+            Some(ContentHash::from_bytes(b"stale")),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(stale.code.as_str(), panel_errors::ErrorCode::CONFLICT);
+    assert_eq!(
+        client.status().await.unwrap().active_hash(),
+        Some(&first.content_hash)
+    );
+    let updated = client
+        .activate_with_context(
+            application_context("activate-2"),
+            prepared.prepare_token,
+            Some(first.content_hash.clone()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.content_hash, second.content_hash);
+    assert_eq!(updated.previous_active_hash, Some(first.content_hash));
+    assert_eq!(client.status().await.unwrap().prepared_count(), 0);
+
+    let abandoned = client
+        .prepare_with_context(
+            application_context("prepare-3"),
+            RuntimeSnapshot::empty(RevisionId::new(3)),
+        )
+        .await
+        .unwrap();
+    assert_eq!(client.status().await.unwrap().prepared_count(), 1);
+    assert!(client
+        .abort_with_context(application_context("abort-3"), abandoned.prepare_token)
+        .await
+        .unwrap()
+        .aborted());
+    assert_eq!(client.status().await.unwrap().prepared_count(), 0);
+    drop(client);
+    server.stop().await;
+
+    let restored_server = RunningGateway::start(state.0.clone()).await;
+    let restored_client = GatewayGrpcClient::connect(format!("http://{}", restored_server.address))
+        .await
+        .unwrap();
+    let restored = restored_client.status().await.unwrap();
+    assert_eq!(restored.prepared_count(), 0);
+    assert_eq!(restored.active_hash(), Some(&second.content_hash));
+    drop(restored_client);
+    restored_server.stop().await;
 }
 
 #[tokio::test]

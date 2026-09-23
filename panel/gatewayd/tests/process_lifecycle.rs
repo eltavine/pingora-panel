@@ -1,7 +1,7 @@
 #![cfg(unix)]
 #![forbid(unsafe_code)]
 
-use gateway_grpc::encode_snapshot;
+use gateway_proto_codec::encode_snapshot;
 use gatewayd::{
     DEADLINE_REQUIREMENT_ENV, DRAIN_TIMEOUT_MILLIS_ENV, GATEWAY_ADDRESS_ENV,
     GRPC_MAX_DECODING_MESSAGE_BYTES_ENV, MAX_PREPARED_SNAPSHOTS_ENV, MAX_REQUEST_ID_BYTES_ENV,

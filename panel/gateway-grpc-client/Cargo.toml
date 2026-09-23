@@ -9,7 +9,7 @@ publish.workspace = true
 
 [dependencies]
 async-trait.workspace = true
-gateway-grpc.workspace = true
+gateway-proto-codec.workspace = true
 panel-application.workspace = true
 panel-contracts.workspace = true
 panel-domain.workspace = true
@@ -17,8 +17,3 @@ panel-errors.workspace = true
 panel-ir.workspace = true
 tonic.workspace = true
 uuid.workspace = true
-
-[dev-dependencies]
-panel-engine.workspace = true
-tokio.workspace = true
-tokio-stream.workspace = true

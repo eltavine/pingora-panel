@@ -1,5 +1,5 @@
 [package]
-name = "panel-domain"
+name = "gateway-proto-codec"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
@@ -8,9 +8,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
-serde.workspace = true
-sha2.workspace = true
-thiserror.workspace = true
-
-[dev-dependencies]
-serde_json.workspace = true
+panel-contracts.workspace = true
+panel-domain.workspace = true
+panel-errors.workspace = true
+panel-ir.workspace = true

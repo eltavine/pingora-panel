@@ -674,6 +674,7 @@ name = "gateway-grpc"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "gateway-proto-codec",
  "panel-contracts",
  "panel-domain",
  "panel-engine",
@@ -688,15 +689,12 @@ name = "gateway-grpc-client"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "gateway-grpc",
+ "gateway-proto-codec",
  "panel-application",
  "panel-contracts",
  "panel-domain",
- "panel-engine",
  "panel-errors",
  "panel-ir",
- "tokio",
- "tokio-stream",
  "tonic",
  "uuid",
 ]
@@ -718,6 +716,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "gateway-proto-codec"
+version = "0.1.0"
+dependencies = [
+ "panel-contracts",
+ "panel-domain",
+ "panel-errors",
+ "panel-ir",
+]
+
+[[package]]
 name = "gatewayd"
 version = "0.1.0"
 dependencies = [
@@ -726,7 +734,9 @@ dependencies = [
  "chrono",
  "futures-util",
  "gateway-grpc",
+ "gateway-grpc-client",
  "gateway-pingora",
+ "gateway-proto-codec",
  "panel-api",
  "panel-application",
  "panel-config-json",
@@ -1395,6 +1405,7 @@ name = "panel-domain"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
  "sha2",
  "thiserror",
 ]

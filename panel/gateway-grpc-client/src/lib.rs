@@ -6,18 +6,17 @@
 //! callers depend only on `panel-application` values and ports.
 
 use async_trait::async_trait;
-use gateway_grpc::encode_snapshot;
+use gateway_proto_codec::{decode_hash as hash, encode_hash, encode_snapshot};
 use panel_application::{
-    ActivatedDeployment, CommandContext, ContentHash, GatewayPort, GatewayStatus,
+    AbortOutcome, ActivatedDeployment, CommandContext, ContentHash, GatewayPort, GatewayStatus,
     PreparedDeployment,
 };
 use panel_contracts::{common::v1 as common, gateway::v1 as wire};
-use panel_domain::RevisionId;
 use panel_errors::{
     Diagnostic, DiagnosticSeverity, ErrorCode, PanelError, Result, ValidationReport,
 };
 use panel_ir::RuntimeSnapshot;
-use std::time::Duration;
+use std::{net::IpAddr, time::Duration};
 use tonic::{
     transport::{Channel, Endpoint},
     Code, Status,
@@ -26,7 +25,9 @@ use uuid::Uuid;
 
 const CONTEXT_SCHEMA_VERSION: &str = panel_contracts::PROTOCOL_VERSION;
 
+mod abort_receipt;
 mod activation;
+mod preparation;
 mod status;
 
 pub struct GatewayGrpcClient {
@@ -107,10 +108,11 @@ impl GatewayGrpcClient {
         config: GatewayGrpcClientConfig,
     ) -> Result<Self> {
         config.validate()?;
-        let endpoint = Endpoint::from_shared(endpoint.into())
-            .map_err(|error| {
-                PanelError::invalid_argument(format!("invalid gateway endpoint: {error}"))
-            })?
+        let endpoint = Endpoint::from_shared(endpoint.into()).map_err(|error| {
+            PanelError::invalid_argument(format!("invalid gateway endpoint: {error}"))
+        })?;
+        validate_plaintext_endpoint(&endpoint)?;
+        let endpoint = endpoint
             .connect_timeout(config.connect_timeout)
             .timeout(config.request_timeout);
         let channel = endpoint.connect().await.map_err(|error| {
@@ -124,6 +126,8 @@ impl GatewayGrpcClient {
         })
     }
 
+    /// The channel owner is responsible for authenticating externally supplied
+    /// transports. Only `connect` constructs a plaintext connection here.
     pub fn from_channel(channel: Channel) -> Self {
         let config = GatewayGrpcClientConfig::default();
         Self {
@@ -156,6 +160,41 @@ impl GatewayGrpcClient {
         request.set_timeout(self.request_timeout);
         request
     }
+}
+
+fn validate_plaintext_endpoint(endpoint: &Endpoint) -> Result<()> {
+    let uri = endpoint.uri();
+    if uri.scheme_str() != Some("http") {
+        return Err(PanelError::invalid_argument(
+            "gateway client requires an explicit http loopback endpoint until TLS is configured",
+        ));
+    }
+    if uri
+        .path_and_query()
+        .is_some_and(|path| path.as_str() != "/")
+    {
+        return Err(PanelError::invalid_argument(
+            "gateway endpoint must not contain a path or query",
+        ));
+    }
+    let host = uri
+        .host()
+        .ok_or_else(|| PanelError::invalid_argument("gateway endpoint host is required"))?;
+    let ip: IpAddr = host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse()
+        .map_err(|_| {
+            PanelError::invalid_argument(
+                "plaintext gateway endpoint must use a numeric loopback address",
+            )
+        })?;
+    if !ip.is_loopback() {
+        return Err(PanelError::invalid_argument(
+            "plaintext gateway endpoint must be loopback",
+        ));
+    }
+    Ok(())
 }
 
 fn context(value: &CommandContext) -> common::RequestContext {
@@ -240,18 +279,6 @@ fn status_error(status: Status) -> PanelError {
     error.retryable(retryable).with_source(status)
 }
 
-fn hash(value: Option<common::ContentHash>) -> Result<ContentHash> {
-    let value =
-        value.ok_or_else(|| PanelError::invalid_argument("gateway response hash is missing"))?;
-    if value.algorithm != "sha256" {
-        return Err(PanelError::invalid_argument(
-            "unsupported gateway hash algorithm",
-        ));
-    }
-    ContentHash::from_hex(value.value)
-        .map_err(|error| PanelError::invalid_argument(error.to_string()))
-}
-
 #[async_trait]
 impl GatewayPort for GatewayGrpcClient {
     async fn validate(&self, snapshot: RuntimeSnapshot) -> Result<ValidationReport> {
@@ -272,45 +299,26 @@ impl GatewayPort for GatewayGrpcClient {
         })
     }
 
-    async fn prepare(&self, snapshot: RuntimeSnapshot) -> Result<PreparedDeployment> {
-        let request = wire::PrepareRequest {
-            context: None,
-            snapshot: Some(encode_snapshot(&snapshot)),
-        };
-        let mut client = self.client();
-        let response = client
-            .prepare(self.request(request))
-            .await
-            .map_err(status_error)?
-            .into_inner();
-        response_error(response.error)?;
-        PreparedDeployment::new(
-            RevisionId::new(response.revision_id),
-            hash(response.content_hash)?,
-            response.prepare_token,
-        )
+    async fn prepare(&self, _snapshot: RuntimeSnapshot) -> Result<PreparedDeployment> {
+        Err(PanelError::precondition_failed(
+            "remote gateway prepare requires authenticated command context",
+        ))
     }
 
     async fn activate(
         &self,
-        prepare_token: String,
-        expected_active_hash: Option<ContentHash>,
+        _prepare_token: String,
+        _expected_active_hash: Option<ContentHash>,
     ) -> Result<ActivatedDeployment> {
-        let request = wire::ActivateRequest {
-            context: None,
-            prepare_token,
-            expected_active_hash: expected_active_hash.map(|value| common::ContentHash {
-                algorithm: "sha256".into(),
-                value: value.as_str().into(),
-            }),
-        };
-        let mut client = self.client();
-        let response = client
-            .activate(self.request(request))
-            .await
-            .map_err(status_error)?
-            .into_inner();
-        activation::decode(response)
+        Err(PanelError::precondition_failed(
+            "remote gateway activate requires authenticated command context",
+        ))
+    }
+
+    async fn abort(&self, _prepare_token: String) -> Result<AbortOutcome> {
+        Err(PanelError::precondition_failed(
+            "remote gateway abort requires authenticated command context",
+        ))
     }
 
     async fn status(&self) -> Result<GatewayStatus> {
@@ -342,12 +350,7 @@ impl GatewayPort for GatewayGrpcClient {
             .await
             .map_err(status_error)?
             .into_inner();
-        response_error(response.error)?;
-        PreparedDeployment::new(
-            RevisionId::new(response.revision_id),
-            hash(response.content_hash)?,
-            response.prepare_token,
-        )
+        preparation::decode(response)
     }
 
     async fn activate_with_context(
@@ -359,10 +362,7 @@ impl GatewayPort for GatewayGrpcClient {
         let request = wire::ActivateRequest {
             context: Some(context(&context_value)),
             prepare_token,
-            expected_active_hash: expected_active_hash.map(|value| common::ContentHash {
-                algorithm: "sha256".into(),
-                value: value.as_str().into(),
-            }),
+            expected_active_hash: expected_active_hash.as_ref().map(encode_hash),
         };
         let mut client = self.client();
         let response = client
@@ -372,11 +372,46 @@ impl GatewayPort for GatewayGrpcClient {
             .into_inner();
         activation::decode(response)
     }
+
+    async fn abort_with_context(
+        &self,
+        context_value: CommandContext,
+        prepare_token: String,
+    ) -> Result<AbortOutcome> {
+        let request = wire::AbortRequest {
+            context: Some(context(&context_value)),
+            prepare_token,
+        };
+        let mut client = self.client();
+        let response = client
+            .abort(self.request(request))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        abort_receipt::decode(response)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plaintext_connections_reject_remote_and_ambiguous_endpoints_before_dialing() {
+        for address in ["http://127.0.0.1:50051", "http://[::1]:50051"] {
+            assert!(validate_plaintext_endpoint(&Endpoint::from_shared(address).unwrap()).is_ok());
+        }
+        for address in [
+            "http://192.0.2.1:50051",
+            "http://example.com:50051",
+            "https://127.0.0.1:50051",
+            "http://127.0.0.1:50051/other",
+        ] {
+            let error =
+                validate_plaintext_endpoint(&Endpoint::from_shared(address).unwrap()).unwrap_err();
+            assert_eq!(error.code.as_str(), ErrorCode::INVALID_ARGUMENT);
+        }
+    }
 
     #[test]
     fn config_rejects_unbounded_or_zero_limits() {

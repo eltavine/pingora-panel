@@ -9,7 +9,11 @@ fn document() -> Value {
 #[test]
 fn mutation_headers_describe_the_actual_request_requirements() {
     let doc = document();
-    for path in ["/api/v1/gateway/prepare", "/api/v1/gateway/activate"] {
+    for path in [
+        "/api/v1/gateway/prepare",
+        "/api/v1/gateway/activate",
+        "/api/v1/gateway/abort",
+    ] {
         let params = doc["paths"][path]["post"]["parameters"].as_array().unwrap();
         for name in ["x-actor", "x-deadline", "Idempotency-Key"] {
             let parameter = params.iter().find(|p| p["name"] == name).unwrap();

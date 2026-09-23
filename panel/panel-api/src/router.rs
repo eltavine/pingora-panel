@@ -19,6 +19,7 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         .route("/api/v1/gateway/validate", post(routes::validate::<U>))
         .route("/api/v1/gateway/prepare", post(routes::prepare::<U>))
         .route("/api/v1/gateway/activate", post(routes::activate::<U>))
+        .route("/api/v1/gateway/abort", post(routes::abort::<U>))
         .route("/api/v1/gateway/status", get(routes::status::<U>))
         .route("/api/v1/gateway/receipts/{key}", get(routes::receipt::<U>))
         .route("/api/v1/openapi.json", get(routes::openapi))
