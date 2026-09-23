@@ -7,13 +7,17 @@
 ```text
 panel-ir -> panel-domain
 panel-engine -> panel-errors + panel-domain + panel-ir
+panel-application -> panel-errors + panel-domain + panel-ir
+panel-api -> panel-application + panel-errors
+panel-config-json -> panel-application + panel-errors + panel-ir
 
 panel-gateway-runtime -> panel-engine ports
 snapshot-store-fs -> panel-engine::SnapshotStore
 gateway-pingora -> panel-engine::DataPlaneAdapter
 gateway-grpc -> panel-contracts + panel-engine::GatewayEngine
+gateway-grpc-client -> panel-application + panel-contracts + gateway-grpc
 
-gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC adapter
+gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC adapter + REST/compiler adapters
 ```
 
 箭头表示左侧 crate 依赖右侧 crate。
@@ -24,11 +28,15 @@ gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC adapter
 | `panel-domain` | Validated value objects | IR, transport, storage, Pingora |
 | `panel-ir` | Versioned canonical runtime snapshot | Proto, storage, Pingora |
 | `panel-engine` | `GatewayEngine`, `DataPlaneAdapter`, `SnapshotStore`, runtime-info ports and Fake | Proto, storage implementation, Pingora |
+| `panel-application` | Request context, format-neutral config document, use-case orchestration and persistence ports | HTTP, Proto, storage implementation, Pingora |
+| `panel-api` | Axum HTTP mapping, body limits, request-ID propagation, RFC 9457 Problem Details and OpenAPI projection | Pingora, storage, identity implementation, generated Proto, use-case orchestration |
+| `panel-config-json` | JSON `ConfigCompiler` adapter with schema and document limits | HTTP, Proto, storage, Pingora, application orchestration |
 | `panel-gateway-runtime` | Prepare/Activate/CAS/LKG orchestration | Tonic, filesystem, Pingora |
 | `snapshot-store-fs` | Versioned JSON records, fsync and atomic rename | Tonic, Pingora, runtime policy |
 | `gateway-pingora` | Compile IR into private Pingora values and atomic `ArcSwap` publication | Proto, filesystem, control-plane policy |
 | `gateway-grpc` | Proto/domain conversion, runtime-info projection and Tonic service | Pingora, filesystem, environment |
-| `gatewayd` | Dependency construction, bind/readiness policies, environment configuration, process clock, worker executor and standard gRPC Health | Business rules |
+| `gateway-grpc-client` | Tonic client adapter implementing `panel-application::GatewayPort` | HTTP, storage, identity, generated Proto outside this adapter |
+| `gatewayd` | Dependency construction, REST/gRPC adapter composition, bind/readiness policies, environment configuration, process clock, worker executor and standard gRPC Health | Business rules |
 
 `.github/scripts/check-panel-boundaries.sh` enforces these direct dependency rules in CI.
 `gatewayd::build_gateway_transport` is the single composition factory used by both the production process and TCP black-box tests, preventing test-only dependency graphs from drifting away from production.
@@ -45,6 +53,27 @@ IR validation -> adapter prepare -> persist prepared record
 
 If durable commit fails before the atomic rename, the active pointer is unchanged. If the rename succeeds but directory synchronization is inconclusive, the store returns a typed `COMMIT_OUTCOME_UNKNOWN`; the runtime still aligns the data plane and in-memory state with the visible record, marks itself degraded, and requires recovery before further mutations. Prepare, activate, and abort run in request-independent tasks, so client cancellation cannot cancel an admitted durable transaction. A bounded semaphore applies fail-fast backpressure to running and queued mutations, an async mutex serializes them, and a `TaskTracker` drains admitted work during shutdown. `PINGORA_PANEL_MAX_PENDING_MUTATIONS` configures this bound and is validated before Tokio resources are constructed. If the process stops after durable commit but before publication or ACK, `DurableGatewayEngine::restore` recompiles and republishes the committed LKG. Retrying the same prepare token returns the stored activation receipt. Corrupt startup state keeps Status available in `NotReady` mode while all mutations fail closed.
 
+The application idempotency decorator claims a key atomically before invoking
+the gateway. A completed claim replays the stored receipt; a different request
+hash conflicts; an in-flight claim is retryable. If gateway activation succeeds
+but receipt persistence fails, the claim is deliberately retained and the
+caller receives `COMMIT_OUTCOME_UNKNOWN` so a retry cannot execute a second
+mutation before reconciliation.
+
+Activation errors release a claim only for the precommit rejection codes
+documented by `GatewayPort`. Timeouts, resource/storage failures and unknown
+codes retain the claim. Malformed gRPC success receipts also preserve commit
+uncertainty. Automatic reconciliation remains separate from this protection.
+
+The HTTP adapter keeps router construction, configuration, state, metadata,
+error mapping, middleware and OpenAPI conventions in private modules behind
+its public exports. Tower HTTP owns request-ID generation and propagation;
+one renderer attaches the validated ID to Problem Details. Utoipa derives
+mutation headers from the parsed metadata type and shares error statuses with
+runtime mapping. The reviewed OpenAPI fixture and real HTTP publication tests
+cover these contracts. See [the HTTP contract decision](../docs/adr/0002-management-http-contracts.md)
+for module boundaries and the contract regeneration command.
+
 ## Compatibility fixtures and readiness
 
 `snapshot-store-fs/tests/fixtures/v1` and `snapshot-store-fs/tests/fixtures/v2` are committed storage ABI fixtures. Tests must continue reading supported versions after implementation changes and must reject unknown format versions, truncated JSON, hash mismatches, and unsafe downgrades without rewriting the source record. A new storage format requires a new fixture directory and explicit migration path; existing fixtures are immutable.
@@ -52,6 +81,8 @@ If durable commit fails before the atomic rename, the active pointer is unchange
 `.github/scripts/check-panel-proto-breaking.sh` owns Protobuf compatibility enforcement. Pull requests compare against their target branch; default-branch pushes compare against the event's immutable `before` commit rather than the already-updated branch head. A missing predecessor module is treated only as the one-time bootstrap case; an invalid baseline fails closed. `resolve-panel-proto-baseline.sh` isolates event mapping, while `test-panel-proto-breaking.sh` uses a temporary Git repository and real Buf to verify bootstrap, additive evolution, deleted fields, changed types and reused field numbers.
 
 `gatewayd` exposes the standard `grpc.health.v1.Health` service for both the overall server name (`""`) and the generated Gateway service name. Readiness comes from `GatewayEngine::status`: healthy or restored LKG state is `SERVING`; corrupt or incompatible startup state is `NOT_SERVING`. On shutdown, `ShutdownCoordinator` calls an abstract `ReadinessGate`, closes mutation admission atomically, waits the bounded drain window, and only then resolves Tonic's graceful-shutdown future. The custom Status RPC remains available for diagnostics and additively projects gateway/data-plane/adapter versions, process start time, monotonic uptime, configured worker count, completed recoveries, degraded transitions, and unknown commit outcomes through stable engine ports.
+
+`GatewaydServices` retains its original public fields for source compatibility with existing integrations. New code should use `gateway()`, `health()`, and `health_reporter()`; these accessors are the supported extension boundary for future transports. A future major release can make the collection fully opaque without changing the transport composition model.
 
 Until an authenticated transport is composed, `LoopbackOnlyManagementBindPolicy` rejects every non-loopback plaintext address. Bind validation is a policy port rather than an address-parser special case, so a future mTLS adapter can replace the policy explicitly. `GatewayWorkerCount` and `ShutdownPolicy` keep resource and drain limits valid before executor or server construction.
 
