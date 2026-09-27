@@ -181,13 +181,11 @@ impl CacheHashKey for CompactCacheKey {
     }
 }
 
-/*
- * We use blake2 hashing, which is faster and more secure, to replace md5.
- * We have not given too much thought on whether non-crypto hash can be safely
- * use because hashing performance is not critical.
- * Note: we should avoid hashes like ahash which does not have consistent output
- * across machines because it is designed purely for in memory hashtable
-*/
+// We use blake2 hashing, which is faster and more secure, to replace md5.
+// We have not given too much thought on whether non-crypto hash can be safely
+// used because hashing performance is not critical.
+// Avoid hashes like ahash, whose output is not consistent across machines:
+// they are designed for in-memory hash tables.
 
 // hash output: we use 128 bits (16 bytes) hash which will map to 32 bytes hex string
 pub(crate) type Blake2b128 = Blake2b<blake2::digest::consts::U16>;
