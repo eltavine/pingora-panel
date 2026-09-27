@@ -118,6 +118,7 @@ pub struct PanelError {
     pub message: String,
     pub diagnostics: Vec<Diagnostic>,
     pub retryable: bool,
+    confirmed_precommit: bool,
     source: Option<Box<dyn Error + Send + Sync + 'static>>,
 }
 
@@ -156,6 +157,7 @@ impl<'de> Deserialize<'de> for PanelError {
             message: wire.message,
             diagnostics: wire.diagnostics,
             retryable: wire.retryable,
+            confirmed_precommit: false,
             source: None,
         })
     }
@@ -168,6 +170,7 @@ impl Clone for PanelError {
             message: self.message.clone(),
             diagnostics: self.diagnostics.clone(),
             retryable: self.retryable,
+            confirmed_precommit: self.confirmed_precommit,
             source: None,
         }
     }
@@ -180,6 +183,7 @@ impl PanelError {
             message: message.into(),
             diagnostics: Vec::new(),
             retryable: false,
+            confirmed_precommit: false,
             source: None,
         }
     }
@@ -253,6 +257,19 @@ impl PanelError {
         Self::new(ErrorCode::DEADLINE_EXCEEDED, message).retryable(true)
     }
 
+    /// Marks a local deadline rejection proven to occur before dispatch.
+    /// The marker is deliberately omitted from the wire form: a remote error
+    /// cannot establish commit certainty for this process.
+    pub fn deadline_exceeded_before_dispatch(message: impl Into<String>) -> Self {
+        let mut error = Self::deadline_exceeded(message);
+        error.confirmed_precommit = true;
+        error
+    }
+
+    pub fn is_confirmed_precommit(&self) -> bool {
+        self.confirmed_precommit
+    }
+
     pub fn unauthenticated(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::UNAUTHENTICATED, message)
     }
@@ -294,6 +311,17 @@ mod tests {
         let decoded: PanelError = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.code.as_str(), "FUTURE_CODE");
         assert!(decoded.source().is_none());
+    }
+
+    #[test]
+    fn precommit_certainty_is_local_only() {
+        let error = PanelError::deadline_exceeded_before_dispatch("expired");
+        assert!(error.is_confirmed_precommit());
+        assert!(error.clone().is_confirmed_precommit());
+        let wire = serde_json::to_string(&error).unwrap();
+        let decoded: PanelError = serde_json::from_str(&wire).unwrap();
+        assert!(!decoded.is_confirmed_precommit());
+        assert!(!PanelError::deadline_exceeded("unknown outcome").is_confirmed_precommit());
     }
 
     #[test]

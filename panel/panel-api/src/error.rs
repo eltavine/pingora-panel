@@ -1,5 +1,5 @@
 use crate::{
-    error_contract::{status_for, PROBLEM_MEDIA_TYPE},
+    error_contract::{public_detail, status_for, PROBLEM_MEDIA_TYPE},
     DiagnosticDetails, ProblemDetails,
 };
 use axum::{
@@ -45,6 +45,7 @@ impl IntoResponse for ApiError {
         let status = self
             .status_override
             .unwrap_or_else(|| status_for(source.code.as_str()));
+        let is_server_error = status.is_server_error();
         let body = ProblemDetails {
             problem_type: format!("urn:pingora-panel:error:{}", source.code),
             title: status
@@ -52,15 +53,19 @@ impl IntoResponse for ApiError {
                 .unwrap_or("Request failed")
                 .to_string(),
             status: status.as_u16(),
-            detail: source.message,
+            detail: public_detail(source.code.as_str(), status, source.message),
             code: source.code.to_string(),
             retryable: source.retryable,
             request_id: None,
-            field_errors: source
-                .diagnostics
-                .into_iter()
-                .map(DiagnosticDetails::from)
-                .collect(),
+            field_errors: if is_server_error {
+                Vec::new()
+            } else {
+                source
+                    .diagnostics
+                    .into_iter()
+                    .map(DiagnosticDetails::from)
+                    .collect()
+            },
         };
         // The router middleware supplies request identity and serializes once.
         // Typed response extensions avoid parsing or buffering response bodies.

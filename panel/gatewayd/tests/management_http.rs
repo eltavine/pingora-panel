@@ -4,9 +4,11 @@
 mod management;
 
 use management::{json, problem, ManagementServer};
-use panel_domain::{ContentHash, RevisionId};
+use panel_api::ApiConfig;
+use panel_config_json::DEFAULT_MAX_JSON_DOCUMENT_BYTES;
+use panel_domain::{ContentHash, RevisionId, SiteId};
 use panel_engine::{FakeGatewayEngine, GatewayEngine};
-use panel_ir::{RuntimeSnapshot, IR_SCHEMA_VERSION};
+use panel_ir::{RuntimeSnapshot, SiteSpec, IR_SCHEMA_VERSION};
 use serde_json::{json as value, Value};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -31,6 +33,41 @@ async fn prepare(server: &ManagementServer, revision: u64) -> Value {
         200,
     )
     .await
+}
+
+#[tokio::test]
+async fn default_http_envelope_holds_the_largest_allowed_json_document() {
+    let compiler_limit = DEFAULT_MAX_JSON_DOCUMENT_BYTES;
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot.sites.push(SiteSpec {
+        id: SiteId::new("site").unwrap(),
+        name: String::new(),
+        enabled: true,
+        domains: Vec::new(),
+    });
+    snapshot.refresh_content_hash();
+    let base_size = serde_json::to_vec(&snapshot).unwrap().len();
+    snapshot.sites[0].name = "x".repeat(compiler_limit - base_size);
+    snapshot.refresh_content_hash();
+    assert_eq!(serde_json::to_vec(&snapshot).unwrap().len(), compiler_limit);
+    let envelope = value!({"schema_version": IR_SCHEMA_VERSION, "snapshot": snapshot});
+    assert!(serde_json::to_vec(&envelope).unwrap().len() > compiler_limit);
+
+    let server = ManagementServer::start(
+        Arc::new(FakeGatewayEngine::with_default_capabilities()),
+        ApiConfig::default().max_body_bytes(),
+    )
+    .await;
+    json(
+        server
+            .post("/api/v1/gateway/validate", &envelope)
+            .send()
+            .await
+            .unwrap(),
+        200,
+    )
+    .await;
+    server.stop().await;
 }
 
 #[tokio::test]

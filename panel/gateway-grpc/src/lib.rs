@@ -915,6 +915,7 @@ mod tests {
     #[tokio::test]
     async fn status_combines_engine_and_process_information() {
         let engine = Arc::new(FakeGatewayEngine::with_default_capabilities());
+        let capabilities = engine.capabilities().await.unwrap();
         let service = GatewayGrpcService::with_runtime_info(engine, Arc::new(FixedRuntimeInfo))
             .with_event_delivery_diagnostics(Arc::new(FixedEventDeliveryDiagnostics))
             .with_recovery_diagnostics(Arc::new(FixedRecoveryDiagnostics));
@@ -929,8 +930,8 @@ mod tests {
         let runtime = response.runtime.unwrap();
 
         assert_eq!(runtime.gateway_version, "1.2.3");
-        assert_eq!(runtime.data_plane_version, env!("CARGO_PKG_VERSION"));
-        assert_eq!(runtime.adapter_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(runtime.data_plane_version, capabilities.build_version);
+        assert_eq!(runtime.adapter_version, capabilities.adapter_version);
         assert_eq!(runtime.started_at_unix_seconds, 1_787_800_000);
         assert_eq!(runtime.uptime_seconds, 42);
         assert_eq!(runtime.worker_count, 4);

@@ -1,6 +1,7 @@
-use crate::{ADAPTER_VERSION, PINGORA_PACKAGE_VERSION};
+use crate::{routing::RouteIndex, ProxyRouteSelection, ADAPTER_VERSION, PINGORA_PACKAGE_VERSION};
 use arc_swap::ArcSwapOption;
 use async_trait::async_trait;
+use panel_domain::NormalizedHost;
 use panel_engine::{validate_engine_ir, DataPlaneAdapter, EngineCapabilities, EngineCapability};
 use panel_errors::{Diagnostic, ErrorCode, PanelError, Result, ValidationReport};
 use panel_ir::{LoadBalancingPolicy, RouteAction, RouteMatcher, RuntimeSnapshot};
@@ -19,6 +20,7 @@ pub struct PingoraGatewayAdapter {
 /// boundary even though the associated type is visible to the generic runtime.
 pub struct PreparedPingoraSnapshot {
     snapshot: RuntimeSnapshot,
+    routes: RouteIndex,
     _peers: Vec<PrivatePeer>,
 }
 
@@ -47,6 +49,16 @@ impl PingoraGatewayAdapter {
         self.active
             .load_full()
             .map(|prepared| prepared.snapshot.clone())
+    }
+
+    /// Selects from the immutable active routing table without exposing Pingora values.
+    /// `path` is the absolute URI path component, excluding query and fragment.
+    pub fn active_proxy_route(
+        &self,
+        host: &NormalizedHost,
+        path: &str,
+    ) -> Option<ProxyRouteSelection> {
+        self.active.load().as_ref()?.routes.select(host, path)
     }
 
     fn supported_capabilities() -> BTreeSet<EngineCapability> {
@@ -143,6 +155,7 @@ impl PingoraGatewayAdapter {
     }
 
     fn compile(snapshot: RuntimeSnapshot) -> Result<PreparedPingoraSnapshot> {
+        let routes = RouteIndex::compile(&snapshot)?;
         let peers = snapshot
             .upstream_pools
             .iter()
@@ -151,6 +164,7 @@ impl PingoraGatewayAdapter {
             .collect::<Result<Vec<_>>>()?;
         Ok(PreparedPingoraSnapshot {
             snapshot,
+            routes,
             _peers: peers,
         })
     }
@@ -243,9 +257,12 @@ impl DataPlaneAdapter for PingoraGatewayAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use panel_domain::{EndpointAddress, EndpointId, RevisionId, UpstreamPoolId};
+    use panel_domain::{
+        EndpointAddress, EndpointId, PathPrefix, RevisionId, RouteId, SiteId, UpstreamPoolId,
+    };
     use panel_ir::{
-        CachePolicy, CapabilityRequirement, RetryPolicy, UpstreamEndpoint, UpstreamPoolSpec,
+        CachePolicy, CapabilityRequirement, DomainSpec, RetryPolicy, RouteSpec, SiteSpec,
+        UpstreamEndpoint, UpstreamPoolSpec,
     };
 
     fn mapped_snapshot(tls: bool) -> RuntimeSnapshot {
@@ -298,6 +315,46 @@ mod tests {
                 .unwrap()
                 .valid
         );
+    }
+
+    #[tokio::test]
+    async fn active_routing_decision_comes_from_the_published_snapshot() {
+        let adapter = PingoraGatewayAdapter::new();
+        let mut snapshot = mapped_snapshot(false);
+        snapshot.sites.push(SiteSpec {
+            id: SiteId::new("site").unwrap(),
+            name: "site".into(),
+            enabled: true,
+            domains: vec![DomainSpec {
+                host: NormalizedHost::new("example.com").unwrap(),
+                tls_profile_id: None,
+            }],
+        });
+        snapshot.routes.push(RouteSpec {
+            id: RouteId::new("api").unwrap(),
+            site_id: SiteId::new("site").unwrap(),
+            priority: 1,
+            enabled: true,
+            matcher: RouteMatcher::PathPrefix {
+                path: PathPrefix::new("/api").unwrap(),
+            },
+            action: RouteAction::Proxy {
+                upstream_pool_id: UpstreamPoolId::new("primary").unwrap(),
+            },
+            retry_policy: None,
+            header_policy_id: None,
+            cache_policy_id: None,
+            security_policy_id: None,
+            lua_policy_id: None,
+        });
+        snapshot.refresh_content_hash();
+        let host = NormalizedHost::new("example.com").unwrap();
+        assert!(adapter.active_proxy_route(&host, "/api").is_none());
+        adapter.activate(Arc::new(adapter.prepare(snapshot).await.unwrap()));
+        let selected = adapter.active_proxy_route(&host, "/api/users").unwrap();
+        assert_eq!(selected.route_id().as_str(), "api");
+        assert_eq!(selected.upstream_pool_id().as_str(), "primary");
+        assert!(adapter.active_proxy_route(&host, "/apis").is_none());
     }
 
     #[tokio::test]

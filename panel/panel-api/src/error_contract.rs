@@ -29,3 +29,33 @@ pub(crate) fn status_for(code: &str) -> StatusCode {
         .find_map(|(name, status)| (*name == code).then_some(*status))
         .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
 }
+
+pub(crate) fn public_detail(code: &str, status: StatusCode, message: String) -> String {
+    if !status.is_server_error() {
+        return message;
+    }
+    match code {
+        ErrorCode::COMMIT_OUTCOME_UNKNOWN => {
+            "Operation outcome is unknown; check status and any available receipt before retrying."
+                .into()
+        }
+        ErrorCode::STORAGE_UNAVAILABLE => "A required storage service is unavailable.".into(),
+        _ => "The request could not be completed.".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ambiguous_commit_keeps_actionable_public_guidance() {
+        let detail = public_detail(
+            ErrorCode::COMMIT_OUTCOME_UNKNOWN,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "filesystem path /secret".into(),
+        );
+        assert!(detail.contains("receipt"));
+        assert!(!detail.contains("/secret"));
+    }
+}

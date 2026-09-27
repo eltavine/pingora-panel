@@ -1,6 +1,9 @@
 use panel_errors::PanelError;
 
-const DEFAULT_MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
+// The compiler permits a 2 MiB normalized snapshot. HTTP carries that
+// snapshot inside a JSON envelope, so its raw body budget is independently
+// larger. Callers can lower either limit explicitly for their deployment.
+const DEFAULT_MAX_BODY_BYTES: usize = 4 * 1024 * 1024;
 
 /// Resource policy for the public HTTP adapter.
 ///

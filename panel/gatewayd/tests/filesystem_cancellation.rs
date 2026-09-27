@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use panel_domain::RevisionId;
 use panel_engine::{
-    ActivateRequest, ActivationCommitOutcome, ActiveSnapshotRecord, DataPlaneAdapter,
+    ActivateRequest, ActiveSnapshotRecord, DataPlaneAdapter, DurableWriteOutcome,
     EngineCapabilities, GatewayEngine, PrepareRequest, PrepareToken, PreparedSnapshotRecord,
     SnapshotStore,
 };
@@ -114,15 +114,11 @@ impl SnapshotStore for PausingFileStore {
         self.inner.load_active().await
     }
 
-    async fn load_prepared(&self) -> Result<Vec<PreparedSnapshotRecord>> {
-        self.inner.load_prepared().await
+    async fn load_prepared(&self, limit: usize) -> Result<Vec<PreparedSnapshotRecord>> {
+        self.inner.load_prepared(limit).await
     }
 
-    async fn load_prepared_bounded(&self, limit: usize) -> Result<Vec<PreparedSnapshotRecord>> {
-        self.inner.load_prepared_bounded(limit).await
-    }
-
-    async fn save_prepared(&self, record: PreparedSnapshotRecord) -> Result<()> {
+    async fn save_prepared(&self, record: PreparedSnapshotRecord) -> Result<DurableWriteOutcome> {
         if self.pause_save.load(Ordering::Acquire) {
             self.save_started.notify_one();
             self.continue_save.notified().await;
@@ -130,7 +126,7 @@ impl SnapshotStore for PausingFileStore {
         self.inner.save_prepared(record).await
     }
 
-    async fn delete_prepared(&self, token: &PrepareToken) -> Result<()> {
+    async fn delete_prepared(&self, token: &PrepareToken) -> Result<DurableWriteOutcome> {
         if self.pause_delete.load(Ordering::Acquire) {
             self.delete_started.notify_one();
             self.continue_delete.notified().await;
@@ -138,23 +134,16 @@ impl SnapshotStore for PausingFileStore {
         self.inner.delete_prepared(token).await
     }
 
-    async fn commit_activation(&self, record: ActiveSnapshotRecord) -> Result<()> {
-        self.inner.commit_activation(record).await
-    }
-
-    async fn commit_activation_with_outcome(
-        &self,
-        record: ActiveSnapshotRecord,
-    ) -> Result<ActivationCommitOutcome> {
+    async fn commit_activation(&self, record: ActiveSnapshotRecord) -> Result<DurableWriteOutcome> {
         if self.pause_commit.load(Ordering::Acquire) {
             self.commit_started.notify_one();
             self.continue_commit.notified().await;
         }
-        let outcome = self.inner.commit_activation_with_outcome(record).await?;
+        let outcome = self.inner.commit_activation(record).await?;
         if self.unknown_commit.load(Ordering::Acquire)
-            && matches!(outcome, ActivationCommitOutcome::Committed)
+            && matches!(outcome, DurableWriteOutcome::Committed)
         {
-            Ok(ActivationCommitOutcome::DurabilityUnknown(
+            Ok(DurableWriteOutcome::DurabilityUnknown(
                 panel_errors::PanelError::commit_outcome_unknown(
                     "injected directory synchronization failure",
                 ),
@@ -214,13 +203,16 @@ async fn cancelled_prepare_finishes_the_filesystem_transaction() {
             let store = Arc::clone(&store);
             let engine = Arc::clone(&engine);
             async move {
-                store.inner.load_prepared().await.unwrap().len() == 1
+                store.inner.load_prepared(usize::MAX).await.unwrap().len() == 1
                     && engine.status().await.unwrap().prepared_count == 1
             }
         },
     )
     .await;
-    assert_eq!(store.inner.load_prepared().await.unwrap().len(), 1);
+    assert_eq!(
+        store.inner.load_prepared(usize::MAX).await.unwrap().len(),
+        1
+    );
     assert_eq!(engine.status().await.unwrap().prepared_count, 1);
 }
 
@@ -256,13 +248,23 @@ async fn cancelled_abort_finishes_the_filesystem_transaction() {
             let store = Arc::clone(&store);
             let engine = Arc::clone(&engine);
             async move {
-                store.inner.load_prepared().await.unwrap().is_empty()
+                store
+                    .inner
+                    .load_prepared(usize::MAX)
+                    .await
+                    .unwrap()
+                    .is_empty()
                     && engine.status().await.unwrap().prepared_count == 0
             }
         },
     )
     .await;
-    assert!(store.inner.load_prepared().await.unwrap().is_empty());
+    assert!(store
+        .inner
+        .load_prepared(usize::MAX)
+        .await
+        .unwrap()
+        .is_empty());
     assert_eq!(engine.status().await.unwrap().prepared_count, 0);
 }
 
@@ -307,7 +309,12 @@ async fn cancelled_activate_finishes_the_filesystem_transaction() {
             async move {
                 let status = engine.status().await.unwrap();
                 store.inner.load_active().await.unwrap().is_some()
-                    && store.inner.load_prepared().await.unwrap().is_empty()
+                    && store
+                        .inner
+                        .load_prepared(usize::MAX)
+                        .await
+                        .unwrap()
+                        .is_empty()
                     && status.active_revision_id == Some(RevisionId::new(1))
                     && status.prepared_count == 0
             }
@@ -318,7 +325,12 @@ async fn cancelled_activate_finishes_the_filesystem_transaction() {
     let status = engine.status().await.unwrap();
     assert_eq!(status.active_revision_id, Some(RevisionId::new(1)));
     assert_eq!(status.prepared_count, 0);
-    assert!(store.inner.load_prepared().await.unwrap().is_empty());
+    assert!(store
+        .inner
+        .load_prepared(usize::MAX)
+        .await
+        .unwrap()
+        .is_empty());
 }
 
 fn recovery_sinks() -> (

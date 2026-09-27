@@ -1,6 +1,6 @@
 use crate::EngineCapability;
 use panel_errors::{Diagnostic, ErrorCode, PanelError, Result, ValidationReport};
-use panel_ir::{RouteAction, RuntimeSnapshot, IR_SCHEMA_VERSION};
+use panel_ir::{RouteAction, RouteMatcher, RuntimeSnapshot, IR_SCHEMA_VERSION};
 use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
 
 /// Validate engine-neutral invariants before any adapter-specific compilation.
@@ -47,10 +47,19 @@ pub fn validate_engine_ir(
 }
 
 fn validate_references(snapshot: &RuntimeSnapshot, diagnostics: &mut Vec<Diagnostic>) {
-    let mut site_ids = BTreeSet::new();
+    let mut site_domains = BTreeMap::new();
     let mut domain_owners = BTreeMap::new();
     for site in &snapshot.sites {
-        if !site_ids.insert(site.id.clone()) {
+        if site_domains
+            .insert(
+                site.id.clone(),
+                site.domains
+                    .iter()
+                    .map(|domain| domain.host.clone())
+                    .collect::<BTreeSet<_>>(),
+            )
+            .is_some()
+        {
             diagnostics.push(Diagnostic::error(
                 ErrorCode::VALIDATION_FAILED,
                 format!("duplicate site id {}", site.id),
@@ -90,7 +99,17 @@ fn validate_references(snapshot: &RuntimeSnapshot, diagnostics: &mut Vec<Diagnos
                 format!("upstream pool {} has no endpoints", pool.id),
             ));
         }
+        let mut endpoint_ids = BTreeSet::new();
         for endpoint in &pool.endpoints {
+            if !endpoint_ids.insert(endpoint.id.clone()) {
+                diagnostics.push(Diagnostic::error(
+                    ErrorCode::VALIDATION_FAILED,
+                    format!(
+                        "upstream pool {} has duplicate endpoint id {}",
+                        pool.id, endpoint.id
+                    ),
+                ));
+            }
             if endpoint.weight == 0 {
                 diagnostics.push(Diagnostic::error(
                     ErrorCode::VALIDATION_FAILED,
@@ -111,14 +130,38 @@ fn validate_references(snapshot: &RuntimeSnapshot, diagnostics: &mut Vec<Diagnos
                 format!("duplicate route id {}", route.id),
             ));
         }
-        if !site_ids.contains(&route.site_id) {
-            diagnostics.push(Diagnostic::error(
+        match site_domains.get(&route.site_id) {
+            None => diagnostics.push(Diagnostic::error(
                 ErrorCode::VALIDATION_FAILED,
                 format!(
                     "route {} references unknown site {}",
                     route.id, route.site_id
                 ),
-            ));
+            )),
+            Some(domains) if domains.is_empty() => diagnostics.push(Diagnostic::error(
+                ErrorCode::VALIDATION_FAILED,
+                format!(
+                    "route {} belongs to site {} with no domains",
+                    route.id, route.site_id
+                ),
+            )),
+            Some(domains) => {
+                let matcher_host = match &route.matcher {
+                    RouteMatcher::Host { host } | RouteMatcher::HostPathPrefix { host, .. } => {
+                        Some(host)
+                    }
+                    _ => None,
+                };
+                if let Some(host) = matcher_host.filter(|host| !domains.contains(*host)) {
+                    diagnostics.push(Diagnostic::error(
+                        ErrorCode::VALIDATION_FAILED,
+                        format!(
+                            "route {} matches host {} outside site {} domains",
+                            route.id, host, route.site_id
+                        ),
+                    ));
+                }
+            }
         }
         if let RouteAction::Proxy { upstream_pool_id } = &route.action {
             if !pool_ids.contains(upstream_pool_id) {
@@ -144,8 +187,13 @@ fn validate_references(snapshot: &RuntimeSnapshot, diagnostics: &mut Vec<Diagnos
 #[cfg(test)]
 mod tests {
     use super::*;
-    use panel_domain::{NormalizedHost, RevisionId, SiteId};
-    use panel_ir::{DomainSpec, SiteSpec};
+    use panel_domain::{
+        EndpointAddress, EndpointId, NormalizedHost, RevisionId, RouteId, SiteId, UpstreamPoolId,
+    };
+    use panel_ir::{
+        DomainSpec, LoadBalancingPolicy, RetryPolicy, RouteSpec, SiteSpec, UpstreamEndpoint,
+        UpstreamPoolSpec,
+    };
 
     fn site(id: &str, host: &str) -> SiteSpec {
         SiteSpec {
@@ -195,5 +243,81 @@ mod tests {
                 .unwrap()
                 .valid
         );
+    }
+
+    #[test]
+    fn route_host_must_belong_to_a_declared_site_domain() {
+        let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+        snapshot.sites.push(site("site", "example.com"));
+        snapshot.routes.push(RouteSpec {
+            id: RouteId::new("route").unwrap(),
+            site_id: SiteId::new("site").unwrap(),
+            priority: 1,
+            enabled: true,
+            matcher: RouteMatcher::Host {
+                host: NormalizedHost::new("other.example").unwrap(),
+            },
+            action: RouteAction::Respond {
+                status: 200,
+                body: None,
+            },
+            retry_policy: None,
+            header_policy_id: None,
+            cache_policy_id: None,
+            security_policy_id: None,
+            lua_policy_id: None,
+        });
+        snapshot.refresh_content_hash();
+        let report = validate_engine_ir(&snapshot, &BTreeSet::new()).unwrap();
+        assert!(report.diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("host other.example outside site site domains")));
+
+        snapshot.routes[0].matcher = RouteMatcher::PathPrefix {
+            path: panel_domain::PathPrefix::new("/api").unwrap(),
+        };
+        snapshot.sites[0].domains.clear();
+        snapshot.refresh_content_hash();
+        let report = validate_engine_ir(&snapshot, &BTreeSet::new()).unwrap();
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("site site with no domains")));
+    }
+
+    #[tokio::test]
+    async fn duplicate_endpoint_ids_fail_before_prepare_without_changing_active() {
+        use crate::{FakeGatewayEngine, GatewayEngine, PrepareRequest};
+
+        let gateway = FakeGatewayEngine::with_default_capabilities();
+        let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+        let endpoint = UpstreamEndpoint {
+            id: EndpointId::new("origin").unwrap(),
+            address: EndpointAddress::new("127.0.0.1", 8080, false).unwrap(),
+            sni: None,
+            weight: 1,
+        };
+        snapshot.upstream_pools.push(UpstreamPoolSpec {
+            id: UpstreamPoolId::new("pool").unwrap(),
+            name: "pool".into(),
+            endpoints: vec![endpoint.clone(), endpoint],
+            load_balancing: LoadBalancingPolicy::RoundRobin,
+            retry_policy: RetryPolicy {
+                attempts: 0,
+                per_try_timeout_ms: 0,
+                retry_statuses: BTreeSet::new(),
+            },
+        });
+        snapshot.refresh_content_hash();
+        let report = gateway.validate(snapshot.clone()).await.unwrap();
+        assert!(!report.valid);
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("duplicate endpoint id origin")));
+        assert!(gateway.prepare(PrepareRequest { snapshot }).await.is_err());
+        let status = gateway.status().await.unwrap();
+        assert!(status.active_hash.is_none());
+        assert_eq!(status.prepared_count, 0);
     }
 }

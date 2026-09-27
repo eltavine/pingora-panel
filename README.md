@@ -10,7 +10,7 @@ Pingora Panel 是一个面向团队运维的单节点网站网关控制平台。
 
 > 当前 Pingora crates：0.9.0
 
-**In Progress / durable gateway foundation。** `panel/` 独立 workspace 已提供 Proto-first 契约、稳定错误模型、领域值对象、Engine-neutral IR、`GatewayEngine`/`SnapshotStore` ports、内存 `FakeGatewayEngine`、Pingora 0.9.0 数据面适配器、独立 durable runtime、原子文件快照存储、Tonic gRPC transport、标准 gRPC Health 和 `gatewayd` 组合根。Prepare/Activate/CAS、持久 Activation Receipt、Last Known Good 重启恢复、v1 磁盘格式 Golden Fixture、真实 TCP gRPC 黑盒闭环、`SERVING → NOT_SERVING → exit` 两阶段 drain、同端口重启、版本/uptime/worker 状态、plaintext loopback-only 管理端口以及适配器依赖隔离已有自动化测试。Proto breaking 门禁分别使用 PR 目标分支和 push 前一提交作为基线，并通过真实 Buf 自测试验证 bootstrap、additive、删除字段、改类型和复用编号路径。模块化 Axum/Utoipa REST adapter、独立 JSON compiler adapter、trait-object application service 和幂等激活回放 decorator 已完成第一条契约切片，但尚未接入完整控制服务、PostgreSQL、NATS、`ppanel` CLI、Web GUI 和生产 listener；产品功能只有在满足规格验收条件后才会依次标记为 `In Progress`、`Implemented` 和 `Verified`。
+**In Progress / durable gateway foundation。** `panel/` 独立 workspace 已提供 Proto-first 契约、稳定错误模型、领域值对象、Engine-neutral IR、`GatewayEngine`/`SnapshotStore` ports、内存 `FakeGatewayEngine`、Pingora 0.9.0 数据面适配器、独立 durable runtime、原子文件快照存储、Tonic gRPC transport、标准 gRPC Health 和 `gatewayd` 组合根。Prepare/Activate/CAS、持久 Activation Receipt、Last Known Good 重启恢复、v1/v2 磁盘格式 Golden Fixture、真实 TCP gRPC 黑盒闭环、`SERVING → NOT_SERVING → exit` 两阶段 drain、同端口重启、版本/uptime/worker 状态、plaintext loopback-only 管理端口以及适配器依赖隔离已有自动化测试。Proto breaking 门禁分别使用 PR 目标分支和 push 前一提交作为基线，并通过真实 Buf 自测试验证 bootstrap、additive、删除字段、改类型和复用编号路径。模块化 Axum/Utoipa REST adapter、独立 JSON compiler adapter、trait-object application service 和幂等激活回放 decorator 已完成第一条契约切片；REST 共享组合工厂已存在，但进程尚未绑定该 listener，完整控制服务、PostgreSQL、NATS、`ppanel` CLI、Web GUI 和生产 listener 也尚未实现。产品功能只有在满足规格验收条件后才会依次标记为 `In Progress`、`Implemented` 和 `Verified`。
 
 完整产品边界、架构、接口、685 项功能目录、版本路线图和 1.0 质量门禁见 [PRODUCT_SPEC.md](PRODUCT_SPEC.md)。该文件是产品需求的唯一权威来源。
 
@@ -42,6 +42,7 @@ cargo run --manifest-path panel/Cargo.toml --package gatewayd
 在内部 mTLS transport 完成前，`PINGORA_PANEL_GATEWAY_ADDR` 只接受 IPv4/IPv6 loopback；非 loopback plaintext 地址会 fail closed。worker 数必须位于 `1..=256`，drain timeout 最大为 300 秒。
 
 具体 crate 依赖方向、激活顺序和扩展规则见 [`panel/README.md`](panel/README.md)。
+当前进程能力、readiness 与故障诊断见 [Gateway foundation 运维说明](docs/gateway-foundation-runbook.md)。
 
 ## Pingora 上游归属
 

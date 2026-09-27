@@ -149,6 +149,15 @@ sed -i.bak '/    pub fn value/,/    }/d' "$test_repo/panel/stable-api/src/lib.rs
 rm -f -- "$test_repo/panel/stable-api/src/lib.rs.bak"
 assert_breaking_rejected "removed public method"
 
+# An intentional 0.x minor version bump is a SemVer major release. The guard
+# derives the release type from package versions rather than forcing every
+# private in-development crate through the same minor-release rule.
+sed -i.bak 's/version = "0.1.0"/version = "0.2.0"/' \
+  "$test_repo/panel/stable-api/Cargo.toml"
+rm -f -- "$test_repo/panel/stable-api/Cargo.toml.bak"
+cargo generate-lockfile --manifest-path "$test_repo/panel/Cargo.toml" --quiet
+bash "$test_repo/.github/scripts/check-panel-rust-api-breaking.sh" "$baseline_ref" >/dev/null
+
 sed -i.bak \
   's/members = \["panel-contracts", "stable-api", "new-api"\]/members = ["panel-contracts", "new-api"]/' \
   "$test_repo/panel/Cargo.toml"

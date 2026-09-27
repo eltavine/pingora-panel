@@ -20,6 +20,8 @@ on:
       - ".github/scripts/check-panel-proto-breaking.sh"
       - ".github/scripts/check-panel-openapi-breaking.sh"
       - ".github/scripts/check-panel-docs.py"
+      - ".github/scripts/check-panel-feature-matrix.py"
+      - ".github/scripts/test-panel-feature-matrix.py"
       - ".github/scripts/check-panel-rust-api-breaking.sh"
       - ".github/scripts/list-workspace-package-names.py"
       - ".github/scripts/resolve-panel-compat-baseline.sh"
@@ -58,6 +60,8 @@ on:
       - ".github/scripts/check-panel-proto-breaking.sh"
       - ".github/scripts/check-panel-openapi-breaking.sh"
       - ".github/scripts/check-panel-docs.py"
+      - ".github/scripts/check-panel-feature-matrix.py"
+      - ".github/scripts/test-panel-feature-matrix.py"
       - ".github/scripts/check-panel-rust-api-breaking.sh"
       - ".github/scripts/list-workspace-package-names.py"
       - ".github/scripts/resolve-panel-compat-baseline.sh"
@@ -356,6 +360,12 @@ jobs:
 
       - name: Check maintained links and Pingora version references
         run: python3 .github/scripts/check-panel-docs.py
+
+      - name: Self-test product feature matrix guard
+        run: python3 .github/scripts/test-panel-feature-matrix.py
+
+      - name: Check product feature matrix
+        run: python3 .github/scripts/check-panel-feature-matrix.py
 
   dependency-hygiene:
     name: Dependency hygiene

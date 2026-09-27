@@ -1,7 +1,8 @@
-use crate::{
-    atomic_file::{AtomicFilePublisher, AtomicPublishError, AtomicPublishStage, TemporaryPrefix},
-    state_directory::StateDirectoryHandle,
+#[cfg(unix)]
+use crate::atomic_file::{
+    AtomicFilePublisher, AtomicPublishError, AtomicPublishStage, TemporaryPrefix,
 };
+use crate::state_directory::StateDirectoryHandle;
 use panel_errors::{PanelError, Result};
 #[cfg(unix)]
 use std::{ffi::OsStr, fs::File};

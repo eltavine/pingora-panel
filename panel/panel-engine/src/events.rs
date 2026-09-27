@@ -75,6 +75,18 @@ pub enum GatewayEvent {
         revision_id: RevisionId,
         prepared_count: usize,
     },
+    /// A prepared snapshot was discarded because a revision at least as new
+    /// became active, so its token can no longer be activated.
+    PreparedDiscarded {
+        revision_id: RevisionId,
+        prepared_count: usize,
+    },
+    /// A prepared record that can no longer be activated is still stored.
+    /// Restoration removes it on the next start, so readiness is unaffected.
+    PreparedCleanupDeferred {
+        revision_id: RevisionId,
+        error_code: ErrorCode,
+    },
     Degraded {
         operation: GatewayOperation,
         error_code: ErrorCode,

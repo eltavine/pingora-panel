@@ -12,6 +12,9 @@ the production process today.
 
 - `panel-api` maps HTTP headers, JSON envelopes, application results and stable
   errors. It owns routing, request limits, Problem Details and the Utoipa schema.
+  The raw HTTP body default is 4 MiB, leaving room for the envelope around a
+  2 MiB normalized JSON snapshot. Server-side errors return stable codes and
+  safe public details without serializing internal messages or diagnostics.
 - `panel-config-json` compiles versioned JSON snapshots into the engine-neutral
   IR. Unknown configuration fields and invalid domain values fail at this
   boundary. A future DSL compiler can implement the same `ConfigCompiler` port.
@@ -48,6 +51,11 @@ Missing or already removed tokens return stable `NOT_FOUND`. The engine runs
 admitted mutations independently of request cancellation, so callers can query
 status after a timeout. The application-level idempotency repository currently
 covers activation receipts; it does not promise replayable abort responses.
+The gateway composition checks an Activate deadline before claiming its
+idempotency key, then lets an admitted activation and receipt write finish even
+if the HTTP caller disconnects. A process crash still requires reconciliation
+against durable gateway status; the current in-memory repository does not
+survive a restart.
 
 ## Contract review
 

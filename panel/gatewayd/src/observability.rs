@@ -53,6 +53,24 @@ impl GatewayEventSink for TracingGatewayEventSink {
                 prepared_count,
                 "prepared snapshot aborted"
             ),
+            GatewayEvent::PreparedDiscarded {
+                revision_id,
+                prepared_count,
+            } => tracing::info!(
+                event = "snapshot_prepared_discarded",
+                revision_id = revision_id.get(),
+                prepared_count,
+                "prepared snapshot discarded after a newer activation"
+            ),
+            GatewayEvent::PreparedCleanupDeferred {
+                revision_id,
+                error_code,
+            } => tracing::warn!(
+                event = "prepared_cleanup_deferred",
+                revision_id = revision_id.get(),
+                error_code = %error_code,
+                "unactivatable prepared snapshot remains stored until the next restoration"
+            ),
             GatewayEvent::Degraded {
                 operation,
                 error_code,

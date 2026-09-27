@@ -3,12 +3,12 @@ use chrono::DateTime;
 use panel_api::{router_with_config, ApiConfig, ApiState};
 use panel_application::{
     AbortOutcome, ActivatedDeployment, CommandContext, ConfigCompiler, GatewayPort, GatewayService,
-    GatewayStatus as ApplicationGatewayStatus, IdempotencyRepository, IdempotentGatewayUseCases,
-    PreparedDeployment,
+    GatewayStatus as ApplicationGatewayStatus, GatewayUseCases, IdempotencyKey, IdempotencyLookup,
+    IdempotencyRepository, IdempotentGatewayUseCases, PreparedDeployment,
 };
 use panel_domain::ContentHash;
 use panel_engine::{ActivateRequest, GatewayEngine, PrepareRequest, PrepareToken};
-use panel_errors::{Result, ValidationReport};
+use panel_errors::{PanelError, Result, ValidationReport};
 use panel_ir::RuntimeSnapshot;
 use std::{
     future::Future,
@@ -117,23 +117,10 @@ where
         prepare_token: String,
         expected_active_hash: Option<ContentHash>,
     ) -> Result<ActivatedDeployment> {
-        let budget = deadline_budget(&context)?;
-        let receipt = tokio::time::timeout(
-            budget,
-            self.engine.activate(ActivateRequest {
-                prepare_token: PrepareToken::new(prepare_token),
-                expected_active_hash,
-            }),
-        )
-        .await
-        .map_err(|_| {
-            panel_errors::PanelError::deadline_exceeded("request deadline elapsed during activate")
-        })??;
-        Ok(ActivatedDeployment::new(
-            receipt.revision_id,
-            receipt.content_hash,
-            receipt.previous_active_hash,
-        ))
+        // The deadline is an admission check. Once dispatched, activation must
+        // reach a known or explicitly uncertain outcome for receipt handling.
+        deadline_budget(&context)?;
+        self.activate(prepare_token, expected_active_hash).await
     }
 
     async fn abort_with_context(
@@ -151,6 +138,62 @@ where
     }
 }
 
+/// Keeps the idempotency claim and activation receipt lifecycle running after
+/// an HTTP caller disconnects. Tokio stays at the composition boundary.
+struct CancellationSafeActivation {
+    inner: Arc<dyn GatewayUseCases>,
+}
+
+#[async_trait]
+impl GatewayUseCases for CancellationSafeActivation {
+    async fn validate(
+        &self,
+        document: panel_application::ConfigDocument,
+    ) -> Result<ValidationReport> {
+        self.inner.validate(document).await
+    }
+
+    async fn prepare(
+        &self,
+        context: CommandContext,
+        document: panel_application::ConfigDocument,
+    ) -> Result<PreparedDeployment> {
+        self.inner.prepare(context, document).await
+    }
+
+    async fn activate(
+        &self,
+        context: CommandContext,
+        prepare_token: String,
+        expected_active_hash: Option<ContentHash>,
+    ) -> Result<ActivatedDeployment> {
+        deadline_budget(&context)?;
+        let inner = Arc::clone(&self.inner);
+        tokio::spawn(async move {
+            inner
+                .activate(context, prepare_token, expected_active_hash)
+                .await
+        })
+        .await
+        .map_err(|error| {
+            PanelError::commit_outcome_unknown("activation task ended before reporting its outcome")
+                .with_source(error)
+        })?
+    }
+
+    async fn abort(&self, context: CommandContext, prepare_token: String) -> Result<AbortOutcome> {
+        self.inner.abort(context, prepare_token).await
+    }
+
+    async fn status(&self) -> Result<ApplicationGatewayStatus> {
+        self.inner.status().await
+    }
+
+    async fn activation_receipt(&self, key: &IdempotencyKey) -> Result<IdempotencyLookup> {
+        self.inner.activation_receipt(key).await
+    }
+}
+
 fn deadline_budget(context: &CommandContext) -> Result<Duration> {
     let deadline = DateTime::parse_from_rfc3339(context.deadline().as_str())
         .map_err(|error| panel_errors::PanelError::invalid_argument(error.to_string()))?;
@@ -160,7 +203,7 @@ fn deadline_budget(context: &CommandContext) -> Result<Duration> {
     let now_parts = (now.as_secs() as i64, now.subsec_nanos());
     let deadline_parts = (deadline.timestamp(), deadline.timestamp_subsec_nanos());
     if deadline_parts <= now_parts {
-        return Err(panel_errors::PanelError::deadline_exceeded(
+        return Err(panel_errors::PanelError::deadline_exceeded_before_dispatch(
             "request deadline has elapsed",
         ));
     }
@@ -206,7 +249,9 @@ where
 {
     let gateway = Arc::new(EngineGatewayPort::new(engine));
     let core = Arc::new(GatewayService::new(gateway, compiler));
-    let use_cases = Arc::new(IdempotentGatewayUseCases::new(core, idempotency));
+    let idempotent: Arc<dyn GatewayUseCases> =
+        Arc::new(IdempotentGatewayUseCases::new(core, idempotency));
+    let use_cases = Arc::new(CancellationSafeActivation { inner: idempotent });
     router_with_config(ApiState::new(use_cases), api_config)
 }
 
@@ -243,6 +288,50 @@ pub async fn serve_management(
 mod tests {
     use super::*;
     use panel_application::{IdempotencyKey, RequestDeadline, RequestId};
+    use panel_domain::RevisionId;
+    use panel_persistence_memory::MemoryIdempotencyRepository;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::sync::Notify;
+
+    struct PausedActivation {
+        started: Notify,
+        release: Notify,
+        calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl GatewayUseCases for PausedActivation {
+        async fn validate(
+            &self,
+            _document: panel_application::ConfigDocument,
+        ) -> Result<ValidationReport> {
+            unreachable!()
+        }
+
+        async fn prepare(
+            &self,
+            _context: CommandContext,
+            _document: panel_application::ConfigDocument,
+        ) -> Result<PreparedDeployment> {
+            unreachable!()
+        }
+
+        async fn activate(
+            &self,
+            _context: CommandContext,
+            _prepare_token: String,
+            _expected_active_hash: Option<ContentHash>,
+        ) -> Result<ActivatedDeployment> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.started.notify_one();
+            self.release.notified().await;
+            Ok(ActivatedDeployment::new(
+                RevisionId::new(1),
+                ContentHash::from_bytes(b"active"),
+                None,
+            ))
+        }
+    }
 
     fn context(deadline: &str) -> CommandContext {
         CommandContext::new(
@@ -262,6 +351,64 @@ mod tests {
             error.code.as_str(),
             panel_errors::ErrorCode::DEADLINE_EXCEEDED
         );
+        assert!(error.is_confirmed_precommit());
+    }
+
+    #[tokio::test]
+    async fn cancelled_activation_waiter_does_not_strand_its_receipt() {
+        let gateway = Arc::new(PausedActivation {
+            started: Notify::new(),
+            release: Notify::new(),
+            calls: AtomicUsize::new(0),
+        });
+        let repository = Arc::new(MemoryIdempotencyRepository::new());
+        let idempotent: Arc<dyn GatewayUseCases> = Arc::new(IdempotentGatewayUseCases::new(
+            gateway.clone(),
+            repository.clone(),
+        ));
+        let service = Arc::new(CancellationSafeActivation { inner: idempotent });
+        let expired = service
+            .activate(context("2000-01-01T00:00:00Z"), "token".into(), None)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            expired.code.as_str(),
+            panel_errors::ErrorCode::DEADLINE_EXCEEDED
+        );
+        let key = context("2099-01-01T00:00:00Z").idempotency_key().clone();
+        assert_eq!(
+            repository.lookup(&key).await.unwrap(),
+            IdempotencyLookup::Missing
+        );
+
+        let waiter = tokio::spawn({
+            let service = Arc::clone(&service);
+            async move {
+                service
+                    .activate(context("2099-01-01T00:00:00Z"), "token".into(), None)
+                    .await
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(1), gateway.started.notified())
+            .await
+            .unwrap();
+        waiter.abort();
+        assert!(waiter.await.unwrap_err().is_cancelled());
+        gateway.release.notify_one();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if matches!(
+                    repository.lookup(&key).await.unwrap(),
+                    IdempotencyLookup::Completed(_)
+                ) {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(gateway.calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

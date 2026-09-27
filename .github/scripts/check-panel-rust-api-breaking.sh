@@ -91,6 +91,5 @@ for package in "${packages_to_check[@]}"; do
     --manifest-path "$repo_root/panel/Cargo.toml" \
     --package "$package" \
     --baseline-rev "$baseline_ref" \
-    --release-type minor \
     --all-features
 done

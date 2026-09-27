@@ -10,7 +10,15 @@ use panel_gateway_runtime::{
     GatewayMutationCapacity, PreparedSnapshotBudget, DEFAULT_MAX_OUTSTANDING_PREPARES,
     DEFAULT_MAX_PREPARED_SNAPSHOT_BYTES, DEFAULT_MAX_TOTAL_PREPARED_BYTES,
 };
-use std::{ffi::OsStr, num::NonZeroUsize, time::Duration};
+use snapshot_store_fs::{
+    SnapshotStoreLimits, DEFAULT_MAX_PREPARED_DIRECTORY_ENTRIES, DEFAULT_MAX_PREPARED_RECORD_BYTES,
+    DEFAULT_MAX_RECORD_BYTES,
+};
+use std::{
+    ffi::OsStr,
+    num::{NonZeroU64, NonZeroUsize},
+    time::Duration,
+};
 
 pub const GRPC_MAX_DECODING_MESSAGE_BYTES_ENV: &str =
     "PINGORA_PANEL_GRPC_MAX_DECODING_MESSAGE_BYTES";
@@ -32,6 +40,10 @@ pub const MAX_IDEMPOTENCY_KEY_BYTES_ENV: &str = "PINGORA_PANEL_MAX_IDEMPOTENCY_K
 pub const MAX_SCHEMA_VERSION_BYTES_ENV: &str = "PINGORA_PANEL_MAX_SCHEMA_VERSION_BYTES";
 
 pub const DEFAULT_EVENT_BUFFER_CAPACITY: usize = 1024;
+
+/// Bytes a stored record may add to its canonical snapshot: the declared
+/// content hash, the receipt and the versioned envelope.
+const SNAPSHOT_RECORD_OVERHEAD_BYTES: u64 = 64 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct GatewayResourceLimits {
@@ -174,6 +186,32 @@ impl GatewayResourceLimits {
     pub fn request_metadata_limits(self) -> GatewayRequestMetadataLimits {
         self.request_metadata
     }
+
+    /// Snapshot-store limits that hold everything the prepared budget admits,
+    /// so the store never rejects a snapshot the runtime has accepted.
+    ///
+    /// Limits only grow beyond the store defaults: lowering the prepared budget
+    /// must not make an already committed record unreadable at restart.
+    pub fn snapshot_store_limits(self) -> SnapshotStoreLimits {
+        let bytes = |value: usize| u64::try_from(value).unwrap_or(u64::MAX);
+        let outstanding = self.prepared.max_outstanding();
+        let record = bytes(self.prepared.max_snapshot_bytes())
+            .saturating_add(SNAPSHOT_RECORD_OVERHEAD_BYTES)
+            .max(DEFAULT_MAX_RECORD_BYTES);
+        let aggregate = bytes(self.prepared.max_total_bytes())
+            .saturating_add(bytes(outstanding).saturating_mul(SNAPSHOT_RECORD_OVERHEAD_BYTES))
+            .max(DEFAULT_MAX_PREPARED_RECORD_BYTES)
+            .max(record);
+        let entries = outstanding
+            .saturating_mul(2)
+            .max(DEFAULT_MAX_PREPARED_DIRECTORY_ENTRIES);
+        SnapshotStoreLimits::try_new(
+            NonZeroU64::new(record).expect("record limit is at least the store default"),
+            NonZeroU64::new(aggregate).expect("aggregate limit is at least the store default"),
+            NonZeroUsize::new(entries).expect("entry limit is at least the store default"),
+        )
+        .expect("aggregate limit is derived to hold one maximum-sized record")
+    }
 }
 
 impl Default for GatewayResourceLimits {
@@ -301,6 +339,40 @@ mod tests {
         assert_eq!(metadata.deadline_bytes(), 20);
         assert_eq!(metadata.idempotency_key_bytes(), 21);
         assert_eq!(metadata.schema_version_bytes(), 22);
+    }
+
+    #[test]
+    fn store_limits_hold_every_admitted_prepared_snapshot() {
+        let defaults = GatewayResourceLimits::default().snapshot_store_limits();
+        assert_eq!(defaults.max_record_bytes(), DEFAULT_MAX_RECORD_BYTES);
+        assert!(
+            defaults.max_prepared_record_bytes()
+                >= DEFAULT_MAX_TOTAL_PREPARED_BYTES as u64
+                    + DEFAULT_MAX_OUTSTANDING_PREPARES as u64 * SNAPSHOT_RECORD_OVERHEAD_BYTES
+        );
+        assert_eq!(
+            defaults.max_prepared_directory_entries(),
+            DEFAULT_MAX_PREPARED_DIRECTORY_ENTRIES
+        );
+
+        let mebibyte = 1024 * 1024;
+        let large = GatewayResourceLimits::new(
+            GatewayTransportPolicy::default(),
+            PreparedSnapshotBudget::with_limits(3, 100 * mebibyte, 200 * mebibyte).unwrap(),
+            DeadlineRequirement::Optional,
+            DEFAULT_EVENT_BUFFER_CAPACITY,
+        )
+        .unwrap()
+        .snapshot_store_limits();
+        assert_eq!(
+            large.max_record_bytes(),
+            100 * mebibyte as u64 + SNAPSHOT_RECORD_OVERHEAD_BYTES
+        );
+        assert_eq!(
+            large.max_prepared_record_bytes(),
+            (200 * mebibyte as u64 + 3 * SNAPSHOT_RECORD_OVERHEAD_BYTES)
+                .max(DEFAULT_MAX_PREPARED_RECORD_BYTES)
+        );
     }
 
     #[test]

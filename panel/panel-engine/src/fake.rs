@@ -1,6 +1,7 @@
 use crate::ports::{
-    AbortReceipt, ActivateRequest, ActivationReceipt, EngineCapabilities, EngineCapability,
-    GatewayEngine, GatewayStatus, PrepareReceipt, PrepareRequest, PrepareToken, SnapshotEnvelope,
+    AbortReceipt, ActivateRequest, ActivationReceipt, ActiveSnapshotRecord, EngineCapabilities,
+    EngineCapability, GatewayEngine, GatewayStatus, PrepareReceipt, PrepareRequest, PrepareToken,
+    PreparedSnapshotRecord, SnapshotEnvelope,
 };
 use crate::validate_engine_ir;
 use async_trait::async_trait;
@@ -14,8 +15,16 @@ const FAKE_ADAPTER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Default)]
 struct State {
-    active: Option<SnapshotEnvelope>,
-    prepared: HashMap<PrepareToken, SnapshotEnvelope>,
+    active: Option<ActiveSnapshotRecord>,
+    prepared: HashMap<PrepareToken, PreparedSnapshotRecord>,
+}
+
+impl State {
+    fn active_hash(&self) -> Option<panel_domain::ContentHash> {
+        self.active
+            .as_ref()
+            .map(|record| record.envelope.snapshot.content_hash.clone())
+    }
 }
 
 pub struct FakeGatewayEngine {
@@ -78,38 +87,39 @@ impl GatewayEngine for FakeGatewayEngine {
 
         let mut state = self.state.lock().await;
         if let Some(active) = &state.active {
-            if request.snapshot.revision_id <= active.snapshot.revision_id {
+            if request.snapshot.revision_id <= active.envelope.snapshot.revision_id {
                 return Err(PanelError::conflict(
                     "revision is not newer than the active revision",
                 ));
             }
         }
-        if state.prepared.values().any(|item| {
-            item.snapshot.revision_id == request.snapshot.revision_id
-                || item.snapshot.content_hash == request.snapshot.content_hash
-        }) {
-            return Err(PanelError::conflict(
-                "revision or content is already prepared",
-            ));
+        for record in state.prepared.values() {
+            if record.envelope.snapshot.content_hash == request.snapshot.content_hash {
+                return Ok(record.receipt.clone());
+            }
+            if record.envelope.snapshot.revision_id == request.snapshot.revision_id {
+                return Err(PanelError::conflict(
+                    "revision is already prepared with different content",
+                ));
+            }
         }
 
         let token = PrepareToken::new(Uuid::new_v4().to_string());
-        let previous_active_hash = state
-            .active
-            .as_ref()
-            .map(|item| item.snapshot.content_hash.clone());
         let receipt = PrepareReceipt {
             revision_id: request.snapshot.revision_id,
             content_hash: request.snapshot.content_hash.clone(),
             adapter_version: FAKE_ADAPTER_VERSION.into(),
             schema_version: request.snapshot.schema_version.clone(),
             prepare_token: token.clone(),
-            previous_active_hash,
+            previous_active_hash: state.active_hash(),
         };
         state.prepared.insert(
             token,
-            SnapshotEnvelope {
-                snapshot: request.snapshot,
+            PreparedSnapshotRecord {
+                envelope: SnapshotEnvelope {
+                    snapshot: request.snapshot,
+                },
+                receipt: receipt.clone(),
             },
         );
         Ok(receipt)
@@ -117,57 +127,57 @@ impl GatewayEngine for FakeGatewayEngine {
 
     async fn activate(&self, request: ActivateRequest) -> Result<ActivationReceipt> {
         let mut state = self.state.lock().await;
-        let current_hash = state
-            .active
-            .as_ref()
-            .map(|item| item.snapshot.content_hash.clone());
+        if let Some(active) = &state.active {
+            if active.receipt.prepare_token == request.prepare_token {
+                if active.receipt.previous_active_hash == request.expected_active_hash {
+                    return Ok(active.receipt.clone());
+                }
+                return Err(PanelError::conflict(
+                    "idempotent activation retry used a different expected active hash",
+                ));
+            }
+        }
+        let current_hash = state.active_hash();
         if current_hash != request.expected_active_hash {
             return Err(PanelError::conflict(
                 "expected active hash does not match current active hash",
             ));
         }
-        let prepared = state
-            .prepared
-            .get(&request.prepare_token)
-            .ok_or_else(|| PanelError::new(ErrorCode::NOT_FOUND, "prepare token was not found"))?;
-        if let Some(active) = &state.active {
-            if prepared.snapshot.revision_id <= active.snapshot.revision_id {
-                return Err(PanelError::conflict("prepared revision is stale"));
-            }
-        }
-
-        let envelope = state
+        let record = state
             .prepared
             .remove(&request.prepare_token)
-            .expect("token checked above");
+            .ok_or_else(|| PanelError::new(ErrorCode::NOT_FOUND, "prepare token was not found"))?;
         let receipt = ActivationReceipt {
-            revision_id: envelope.snapshot.revision_id,
-            content_hash: envelope.snapshot.content_hash.clone(),
+            revision_id: record.envelope.snapshot.revision_id,
+            content_hash: record.envelope.snapshot.content_hash.clone(),
             adapter_version: FAKE_ADAPTER_VERSION.into(),
-            schema_version: envelope.snapshot.schema_version.clone(),
+            schema_version: record.envelope.snapshot.schema_version.clone(),
             prepare_token: request.prepare_token,
             previous_active_hash: current_hash,
         };
-        state.active = Some(envelope);
+        state
+            .prepared
+            .retain(|_, prepared| prepared.envelope.snapshot.revision_id > receipt.revision_id);
+        state.active = Some(ActiveSnapshotRecord {
+            envelope: record.envelope,
+            receipt: receipt.clone(),
+        });
         Ok(receipt)
     }
 
     async fn abort(&self, token: PrepareToken) -> Result<AbortReceipt> {
         let mut state = self.state.lock().await;
-        let envelope = state
+        let record = state
             .prepared
             .remove(&token)
             .ok_or_else(|| PanelError::new(ErrorCode::NOT_FOUND, "prepare token was not found"))?;
         Ok(AbortReceipt {
-            revision_id: envelope.snapshot.revision_id,
-            content_hash: envelope.snapshot.content_hash,
+            revision_id: record.envelope.snapshot.revision_id,
+            content_hash: record.envelope.snapshot.content_hash,
             adapter_version: FAKE_ADAPTER_VERSION.into(),
-            schema_version: envelope.snapshot.schema_version,
+            schema_version: record.envelope.snapshot.schema_version,
             prepare_token: token,
-            previous_active_hash: state
-                .active
-                .as_ref()
-                .map(|item| item.snapshot.content_hash.clone()),
+            previous_active_hash: state.active_hash(),
         })
     }
 
@@ -176,11 +186,11 @@ impl GatewayEngine for FakeGatewayEngine {
         Ok(GatewayStatus {
             ready: true,
             message: None,
-            active_revision_id: state.active.as_ref().map(|item| item.snapshot.revision_id),
-            active_hash: state
+            active_revision_id: state
                 .active
                 .as_ref()
-                .map(|item| item.snapshot.content_hash.clone()),
+                .map(|record| record.envelope.snapshot.revision_id),
+            active_hash: state.active_hash(),
             prepared_count: state.prepared.len(),
             adapter_version: FAKE_ADAPTER_VERSION.into(),
             schema_version: IR_SCHEMA_VERSION.into(),

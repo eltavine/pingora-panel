@@ -59,15 +59,16 @@ pub struct ActiveSnapshotRecord {
     pub receipt: ActivationReceipt,
 }
 
-/// Result of publishing an activation record to durable storage.
+/// Result of a snapshot-store write that became visible.
 ///
-/// `DurabilityUnknown` means the record has already replaced the previous
-/// value in the current filesystem namespace, but synchronizing the directory
-/// failed. Callers must reconcile their in-memory state with the published
-/// record instead of treating this as a pre-commit failure.
+/// A store write that returns `Err` made no visible change, so callers may
+/// report it without reconciling state. `DurabilityUnknown` means the change is
+/// already visible to readers but could not be confirmed to survive a crash;
+/// callers must align their in-memory view with the visible state instead of
+/// treating it as a rejection.
 #[derive(Debug)]
 #[non_exhaustive]
-pub enum ActivationCommitOutcome {
+pub enum DurableWriteOutcome {
     Committed,
     DurabilityUnknown(PanelError),
 }
@@ -258,40 +259,23 @@ pub trait DataPlaneAdapter: Send + Sync {
     fn activate(&self, prepared: Arc<Self::Prepared>);
 }
 
+/// Durable storage for gateway snapshots.
+///
+/// Every write reports its visibility through [`DurableWriteOutcome`]: `Err`
+/// guarantees that readers observe no change, which is what lets the runtime
+/// reject a write without withdrawing readiness.
 #[async_trait]
 pub trait SnapshotStore: Send + Sync {
     async fn load_active(&self) -> Result<Option<ActiveSnapshotRecord>>;
-    async fn load_prepared(&self) -> Result<Vec<PreparedSnapshotRecord>>;
 
-    /// Load no more than `limit` prepared records.
-    ///
-    /// The default preserves source compatibility for existing adapters. Stores
-    /// that can reject an oversized collection before materializing every record
-    /// should override this method.
-    async fn load_prepared_bounded(&self, limit: usize) -> Result<Vec<PreparedSnapshotRecord>> {
-        let records = self.load_prepared().await?;
-        if records.len() > limit {
-            return Err(panel_errors::PanelError::resource_exhausted(format!(
-                "snapshot store contains more than {limit} prepared records"
-            )));
-        }
-        Ok(records)
-    }
+    /// Loads every prepared record, failing with `RESOURCE_EXHAUSTED` when the
+    /// store holds more than `limit` of them.
+    async fn load_prepared(&self, limit: usize) -> Result<Vec<PreparedSnapshotRecord>>;
 
-    async fn save_prepared(&self, record: PreparedSnapshotRecord) -> Result<()>;
-    async fn delete_prepared(&self, token: &PrepareToken) -> Result<()>;
-    async fn commit_activation(&self, record: ActiveSnapshotRecord) -> Result<()>;
+    async fn save_prepared(&self, record: PreparedSnapshotRecord) -> Result<DurableWriteOutcome>;
 
-    /// Commit an activation while preserving an ambiguous post-publication
-    /// durability outcome.
-    ///
-    /// The default keeps existing adapters source-compatible: stores without a
-    /// richer durability model report a successful commit as `Committed`.
-    async fn commit_activation_with_outcome(
-        &self,
-        record: ActiveSnapshotRecord,
-    ) -> Result<ActivationCommitOutcome> {
-        self.commit_activation(record).await?;
-        Ok(ActivationCommitOutcome::Committed)
-    }
+    /// Removing an absent record is `Committed`.
+    async fn delete_prepared(&self, token: &PrepareToken) -> Result<DurableWriteOutcome>;
+
+    async fn commit_activation(&self, record: ActiveSnapshotRecord) -> Result<DurableWriteOutcome>;
 }

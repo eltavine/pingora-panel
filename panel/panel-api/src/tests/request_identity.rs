@@ -121,10 +121,14 @@ struct FailedUseCases;
 #[async_trait]
 impl GatewayUseCases for FailedUseCases {
     async fn validate(&self, _: ConfigDocument) -> Result<ValidationReport> {
-        Err(PanelError::internal("validation unavailable"))
+        Err(PanelError::internal(
+            "private path /var/lib/panel/secret-key",
+        ))
     }
     async fn prepare(&self, _: CommandContext, _: ConfigDocument) -> Result<PreparedDeployment> {
-        Err(PanelError::storage_unavailable("storage unavailable"))
+        Err(PanelError::storage_unavailable(
+            "database password is hidden",
+        ))
     }
     async fn activate(
         &self,
@@ -135,7 +139,9 @@ impl GatewayUseCases for FailedUseCases {
         Err(PanelError::conflict("active hash changed"))
     }
     async fn status(&self) -> Result<GatewayStatus> {
-        Err(PanelError::internal("status unavailable"))
+        Err(PanelError::internal(
+            "private path /var/lib/panel/secret-key",
+        ))
     }
 }
 
@@ -178,12 +184,19 @@ async fn application_failures_and_body_limits_keep_request_identity() {
             .header("idempotency-key", "activation")
             .body(Body::from(body))
             .unwrap();
-        problem(
+        let body = problem(
             failed.clone().oneshot(request).await.unwrap(),
             expected,
             Some("application-error"),
         )
         .await;
+        if expected.is_server_error() {
+            assert!(!body["detail"].as_str().unwrap().contains("/var/lib"));
+            assert!(!body["detail"].as_str().unwrap().contains("password"));
+            assert!(body.get("field_errors").is_none());
+        } else {
+            assert_eq!(body["detail"], "active hash changed");
+        }
     }
     let request = Request::builder()
         .method("POST")

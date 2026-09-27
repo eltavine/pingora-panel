@@ -6,8 +6,10 @@
 //! of this crate's public contract.
 
 mod adapter;
+mod routing;
 
 pub use adapter::{PingoraGatewayAdapter, PreparedPingoraSnapshot};
+pub use routing::ProxyRouteSelection;
 
 pub const ADAPTER_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const PINGORA_PACKAGE_VERSION: &str = "0.9.0";

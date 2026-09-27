@@ -12,12 +12,15 @@ use panel_application::{
 };
 use panel_domain::ContentHash;
 use panel_errors::{PanelError, Result};
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
 use tokio::sync::Mutex;
 
-#[derive(Clone, Default)]
+pub const DEFAULT_MAX_IDEMPOTENCY_ENTRIES: usize = 4096;
+
+#[derive(Clone)]
 pub struct MemoryIdempotencyRepository {
     entries: Arc<Mutex<HashMap<String, Entry>>>,
+    max_entries: NonZeroUsize,
 }
 
 #[derive(Clone)]
@@ -31,12 +34,33 @@ impl MemoryIdempotencyRepository {
         Self::default()
     }
 
+    /// A full repository rejects new keys; it never evicts an uncertain claim
+    /// or a receipt that a retry may still need to replay.
+    pub fn with_max_entries(max_entries: NonZeroUsize) -> Self {
+        Self {
+            entries: Arc::new(Mutex::new(HashMap::new())),
+            max_entries,
+        }
+    }
+
+    pub fn max_entries(&self) -> usize {
+        self.max_entries.get()
+    }
+
     pub async fn len(&self) -> usize {
         self.entries.lock().await.len()
     }
 
     pub async fn is_empty(&self) -> bool {
         self.entries.lock().await.is_empty()
+    }
+}
+
+impl Default for MemoryIdempotencyRepository {
+    fn default() -> Self {
+        Self::with_max_entries(
+            NonZeroUsize::new(DEFAULT_MAX_IDEMPOTENCY_ENTRIES).expect("default limit is nonzero"),
+        )
     }
 }
 
@@ -50,6 +74,11 @@ impl IdempotencyRepository for MemoryIdempotencyRepository {
         let mut entries = self.entries.lock().await;
         match entries.get(key.as_str()) {
             None => {
+                if entries.len() >= self.max_entries.get() {
+                    return Err(PanelError::resource_exhausted(
+                        "in-memory idempotency repository is full",
+                    ));
+                }
                 entries.insert(
                     key.as_str().to_owned(),
                     Entry::InProgress {
@@ -128,6 +157,44 @@ mod tests {
                 None,
             )),
         )
+    }
+
+    #[tokio::test]
+    async fn full_repository_preserves_receipts_and_uncertain_claims() {
+        let repository =
+            MemoryIdempotencyRepository::with_max_entries(NonZeroUsize::new(2).unwrap());
+        let completed = key("completed");
+        let uncertain = key("uncertain");
+        let completed_hash = hash(b"completed");
+        let uncertain_hash = hash(b"uncertain");
+        repository.claim(&completed, &completed_hash).await.unwrap();
+        repository
+            .complete(&completed, record(completed_hash.clone()))
+            .await
+            .unwrap();
+        repository.claim(&uncertain, &uncertain_hash).await.unwrap();
+        let full = repository
+            .claim(&key("new"), &hash(b"new"))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            full.code.as_str(),
+            panel_errors::ErrorCode::RESOURCE_EXHAUSTED
+        );
+        assert_eq!(repository.len().await, 2);
+        assert!(matches!(
+            repository.claim(&completed, &completed_hash).await.unwrap(),
+            IdempotencyClaim::Replay(_)
+        ));
+        assert_eq!(
+            repository.claim(&uncertain, &uncertain_hash).await.unwrap(),
+            IdempotencyClaim::InProgress
+        );
+        repository.abort(&uncertain, &uncertain_hash).await.unwrap();
+        assert_eq!(
+            repository.claim(&key("new"), &hash(b"new")).await.unwrap(),
+            IdempotencyClaim::Acquired
+        );
     }
 
     #[tokio::test]

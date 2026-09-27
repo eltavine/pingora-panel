@@ -10,6 +10,8 @@ use panel_application::{ConfigCompiler, ConfigDocument};
 use panel_errors::{PanelError, Result};
 use panel_ir::{RuntimeSnapshot, IR_SCHEMA_VERSION};
 
+pub const DEFAULT_MAX_JSON_DOCUMENT_BYTES: usize = 2 * 1024 * 1024;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct JsonCompilerConfig {
     max_document_bytes: usize,
@@ -18,7 +20,7 @@ pub struct JsonCompilerConfig {
 impl Default for JsonCompilerConfig {
     fn default() -> Self {
         Self {
-            max_document_bytes: 2 * 1024 * 1024,
+            max_document_bytes: DEFAULT_MAX_JSON_DOCUMENT_BYTES,
         }
     }
 }

@@ -28,8 +28,7 @@ use atomic_file::{
 };
 use panel_domain::ContentHash;
 use panel_engine::{
-    ActivationCommitOutcome, ActiveSnapshotRecord, PrepareToken, PreparedSnapshotRecord,
-    SnapshotStore,
+    ActiveSnapshotRecord, DurableWriteOutcome, PrepareToken, PreparedSnapshotRecord, SnapshotStore,
 };
 #[cfg(test)]
 use panel_errors::ErrorCode;
@@ -284,31 +283,7 @@ impl SnapshotStore for FileSnapshotStore {
         .await
     }
 
-    async fn load_prepared(&self) -> Result<Vec<PreparedSnapshotRecord>> {
-        let root = self.root.clone();
-        let lease = self.lease.clone();
-        let codecs = Arc::clone(&self.codecs);
-        let limits = self.limits;
-        let operation_gate = Arc::clone(&self.operation_gate);
-        Self::run_blocking(move || {
-            let _operation = acquire_operation_gate(operation_gate.as_ref())?;
-            let Some(directory) = operation_directory(&root, lease.as_ref(), false)? else {
-                return Ok(Vec::new());
-            };
-            let Some(prepared) = open_child_directory(
-                directory.as_ref(),
-                OsStr::new(PREPARED_DIRECTORY_NAME),
-                false,
-            )?
-            else {
-                return Ok(Vec::new());
-            };
-            load_prepared_records(&prepared, usize::MAX, codecs.as_ref(), limits)
-        })
-        .await
-    }
-
-    async fn load_prepared_bounded(&self, limit: usize) -> Result<Vec<PreparedSnapshotRecord>> {
+    async fn load_prepared(&self, limit: usize) -> Result<Vec<PreparedSnapshotRecord>> {
         let root = self.root.clone();
         let lease = self.lease.clone();
         let codecs = Arc::clone(&self.codecs);
@@ -332,7 +307,7 @@ impl SnapshotStore for FileSnapshotStore {
         .await
     }
 
-    async fn save_prepared(&self, record: PreparedSnapshotRecord) -> Result<()> {
+    async fn save_prepared(&self, record: PreparedSnapshotRecord) -> Result<DurableWriteOutcome> {
         let root = self.root.clone();
         let lease = self.lease.clone();
         let codecs = Arc::clone(&self.codecs);
@@ -353,14 +328,12 @@ impl SnapshotStore for FileSnapshotStore {
             let name = OsStr::new(&name);
             let bytes = encode_record(&record, codecs.as_ref(), limits.max_record_bytes())?;
             ensure_prepared_write_capacity(&prepared, name, bytes.len(), limits)?;
-            publish_record(&prepared, name, &bytes)?
-                .into_result()
-                .map_err(snapshot_outcome_unknown)
+            publish_record(&prepared, name, &bytes).map(durable_write_outcome)
         })
         .await
     }
 
-    async fn delete_prepared(&self, token: &PrepareToken) -> Result<()> {
+    async fn delete_prepared(&self, token: &PrepareToken) -> Result<DurableWriteOutcome> {
         let root = self.root.clone();
         let lease = self.lease.clone();
         let token = token.clone();
@@ -368,7 +341,7 @@ impl SnapshotStore for FileSnapshotStore {
         Self::run_blocking(move || {
             let _operation = acquire_operation_gate(operation_gate.as_ref())?;
             let Some(directory) = operation_directory(&root, lease.as_ref(), false)? else {
-                return Ok(());
+                return Ok(DurableWriteOutcome::Committed);
             };
             let Some(prepared) = open_child_directory(
                 directory.as_ref(),
@@ -376,35 +349,31 @@ impl SnapshotStore for FileSnapshotStore {
                 false,
             )?
             else {
-                return Ok(());
+                return Ok(DurableWriteOutcome::Committed);
             };
             let name = Self::prepared_file_name(&token);
             let path = prepared.path_for(OsStr::new(&name));
             match prepared.remove_file(OsStr::new(&name)) {
-                Ok(()) => prepared.sync().map_err(|error| {
-                    storage_error("sync prepared directory", prepared.path(), error)
+                Ok(()) => Ok(match prepared.sync() {
+                    Ok(()) => DurableWriteOutcome::Committed,
+                    Err(error) => DurableWriteOutcome::DurabilityUnknown(
+                        PanelError::commit_outcome_unknown(format!(
+                            "prepared snapshot removal is visible, but its crash durability is unknown because {} could not be synchronized",
+                            prepared.path().display()
+                        ))
+                        .with_source(error),
+                    ),
                 }),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    Ok(DurableWriteOutcome::Committed)
+                }
                 Err(error) => Err(storage_error("delete prepared snapshot", &path, error)),
             }
         })
         .await
     }
 
-    async fn commit_activation(&self, record: ActiveSnapshotRecord) -> Result<()> {
-        match self.commit_activation_with_outcome(record).await? {
-            ActivationCommitOutcome::Committed => Ok(()),
-            ActivationCommitOutcome::DurabilityUnknown(error) => Err(error),
-            _ => Err(PanelError::internal(
-                "snapshot store returned an unsupported activation commit outcome",
-            )),
-        }
-    }
-
-    async fn commit_activation_with_outcome(
-        &self,
-        record: ActiveSnapshotRecord,
-    ) -> Result<ActivationCommitOutcome> {
+    async fn commit_activation(&self, record: ActiveSnapshotRecord) -> Result<DurableWriteOutcome> {
         let root = self.root.clone();
         let lease = self.lease.clone();
         let codecs = Arc::clone(&self.codecs);
@@ -415,21 +384,25 @@ impl SnapshotStore for FileSnapshotStore {
             validate_active_record(&record)?;
             let directory = operation_directory(&root, lease.as_ref(), true)?
                 .expect("creating the state directory returns a handle");
-            let outcome = atomic_write_record(
+            atomic_write_record(
                 directory.as_ref(),
                 OsStr::new(ACTIVE_FILE_NAME),
                 &record,
                 codecs.as_ref(),
                 limits.max_record_bytes(),
-            )?;
-            Ok(match outcome {
-                AtomicPublishOutcome::Committed => ActivationCommitOutcome::Committed,
-                AtomicPublishOutcome::DurabilityUnknown(error) => {
-                    ActivationCommitOutcome::DurabilityUnknown(snapshot_outcome_unknown(error))
-                }
-            })
+            )
+            .map(durable_write_outcome)
         })
         .await
+    }
+}
+
+fn durable_write_outcome(outcome: AtomicPublishOutcome) -> DurableWriteOutcome {
+    match outcome {
+        AtomicPublishOutcome::Committed => DurableWriteOutcome::Committed,
+        AtomicPublishOutcome::DurabilityUnknown(error) => {
+            DurableWriteOutcome::DurabilityUnknown(snapshot_outcome_unknown(error))
+        }
     }
 }
 
@@ -901,7 +874,10 @@ mod tests {
         let store = FileSnapshotStore::new(&temporary.0);
         let prepared = prepared_record(1);
         store.save_prepared(prepared.clone()).await.unwrap();
-        assert_eq!(store.load_prepared().await.unwrap(), vec![prepared.clone()]);
+        assert_eq!(
+            store.load_prepared(usize::MAX).await.unwrap(),
+            vec![prepared.clone()]
+        );
 
         let active = ActiveSnapshotRecord {
             envelope: prepared.envelope.clone(),
@@ -921,7 +897,7 @@ mod tests {
             .delete_prepared(&prepared.receipt.prepare_token)
             .await
             .unwrap();
-        assert!(store.load_prepared().await.unwrap().is_empty());
+        assert!(store.load_prepared(usize::MAX).await.unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -941,7 +917,7 @@ mod tests {
         assert!(String::from_utf8(bytes)
             .unwrap()
             .contains(r#""format_version":2"#));
-        assert_eq!(store.load_prepared().await.unwrap(), [prepared]);
+        assert_eq!(store.load_prepared(usize::MAX).await.unwrap(), [prepared]);
     }
 
     #[tokio::test]
@@ -957,7 +933,7 @@ mod tests {
         );
 
         store.save_prepared(prepared.clone()).await.unwrap();
-        assert_eq!(store.load_prepared().await.unwrap(), [prepared]);
+        assert_eq!(store.load_prepared(usize::MAX).await.unwrap(), [prepared]);
     }
 
     #[tokio::test]
@@ -974,7 +950,7 @@ mod tests {
 
         let error = store.save_prepared(prepared).await.unwrap_err();
         assert_eq!(error.code.as_str(), ErrorCode::RESOURCE_EXHAUSTED);
-        assert!(store.load_prepared().await.unwrap().is_empty());
+        assert!(store.load_prepared(usize::MAX).await.unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -1002,7 +978,7 @@ mod tests {
         let error = store.save_prepared(second).await.unwrap_err();
 
         assert_eq!(error.code.as_str(), ErrorCode::RESOURCE_EXHAUSTED);
-        assert_eq!(store.load_prepared().await.unwrap(), [first]);
+        assert_eq!(store.load_prepared(usize::MAX).await.unwrap(), [first]);
     }
 
     #[tokio::test]
@@ -1021,7 +997,7 @@ mod tests {
         let error = store.save_prepared(prepared_record(2)).await.unwrap_err();
 
         assert_eq!(error.code.as_str(), ErrorCode::RESOURCE_EXHAUSTED);
-        assert_eq!(store.load_prepared().await.unwrap(), [first]);
+        assert_eq!(store.load_prepared(usize::MAX).await.unwrap(), [first]);
     }
 
     #[tokio::test]
@@ -1041,7 +1017,7 @@ mod tests {
         store.save_prepared(prepared.clone()).await.unwrap();
         store.save_prepared(prepared.clone()).await.unwrap();
 
-        assert_eq!(store.load_prepared().await.unwrap(), [prepared]);
+        assert_eq!(store.load_prepared(usize::MAX).await.unwrap(), [prepared]);
     }
 
     #[tokio::test]
@@ -1070,7 +1046,7 @@ mod tests {
             limits,
         );
 
-        let error = store.load_prepared().await.unwrap_err();
+        let error = store.load_prepared(usize::MAX).await.unwrap_err();
 
         assert_eq!(error.code.as_str(), ErrorCode::RESOURCE_EXHAUSTED);
         assert_eq!(decodes.load(Ordering::Relaxed), 0);
@@ -1287,7 +1263,10 @@ mod tests {
         fs::rename(&configured_root, &anchored_root).unwrap();
         fs::create_dir(&configured_root).unwrap();
 
-        assert_eq!(store.load_prepared().await.unwrap(), vec![prepared]);
+        assert_eq!(
+            store.load_prepared(usize::MAX).await.unwrap(),
+            vec![prepared]
+        );
         assert!(anchored_root.join(PREPARED_DIRECTORY_NAME).is_dir());
         assert!(!configured_root.join(PREPARED_DIRECTORY_NAME).exists());
     }
@@ -1299,7 +1278,7 @@ mod tests {
         store.save_prepared(prepared_record(1)).await.unwrap();
         store.save_prepared(prepared_record(2)).await.unwrap();
 
-        let error = store.load_prepared_bounded(1).await.unwrap_err();
+        let error = store.load_prepared(1).await.unwrap_err();
         assert_eq!(error.code.as_str(), ErrorCode::RESOURCE_EXHAUSTED);
     }
 
@@ -1314,7 +1293,7 @@ mod tests {
 
         let store = FileSnapshotStore::new(&temporary.0);
         let error = store
-            .load_prepared_bounded(DEFAULT_MAX_PREPARED_DIRECTORY_ENTRIES)
+            .load_prepared(DEFAULT_MAX_PREPARED_DIRECTORY_ENTRIES)
             .await
             .unwrap_err();
         assert_eq!(error.code.as_str(), ErrorCode::RESOURCE_EXHAUSTED);

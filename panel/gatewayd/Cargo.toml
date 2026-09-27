@@ -37,5 +37,6 @@ panel-config-json.workspace = true
 panel-persistence-memory.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true
+tempfile.workspace = true
 tokio-stream.workspace = true
 uuid.workspace = true

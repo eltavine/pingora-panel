@@ -34,11 +34,11 @@ pub use prepared_policy::{
 };
 
 use async_trait::async_trait;
+use panel_domain::RevisionId;
 use panel_engine::{
-    AbortReceipt, ActivateRequest, ActivationCommitOutcome, ActivationReceipt,
-    ActiveSnapshotRecord, DataPlaneAdapter, EngineCapabilities, GatewayEngine, GatewayStatus,
-    PrepareReceipt, PrepareRequest, PrepareToken, PreparedSnapshotRecord, SnapshotEnvelope,
-    SnapshotStore,
+    AbortReceipt, ActivateRequest, ActivationReceipt, ActiveSnapshotRecord, DataPlaneAdapter,
+    DurableWriteOutcome, EngineCapabilities, GatewayEngine, GatewayStatus, PrepareReceipt,
+    PrepareRequest, PrepareToken, PreparedSnapshotRecord, SnapshotEnvelope, SnapshotStore,
 };
 use panel_errors::{ErrorCode, PanelError, Result, ValidationReport};
 use panel_ir::RuntimeSnapshot;
@@ -173,7 +173,7 @@ where
 
         if state.degraded.is_none() {
             match store
-                .load_prepared_bounded(options.prepared_policy.restoration_limit())
+                .load_prepared(options.prepared_policy.restoration_limit())
                 .await
             {
                 Ok(records) => {
@@ -182,17 +182,13 @@ where
                             record.envelope.snapshot.revision_id
                                 <= active.envelope.snapshot.revision_id
                         }) {
-                            if let Err(error) =
-                                store.delete_prepared(&record.receipt.prepare_token).await
-                            {
-                                Self::mark_degraded(
-                                    &mut state,
-                                    options.events.as_ref(),
-                                    GatewayOperation::DeletePrepared,
-                                    &error,
-                                );
-                                break;
-                            }
+                            Self::discard_unactivatable(
+                                store.as_ref(),
+                                options.events.as_ref(),
+                                &record.receipt.prepare_token,
+                                record.envelope.snapshot.revision_id,
+                            )
+                            .await;
                             continue;
                         }
                         if state.prepared.contains_key(&record.receipt.prepare_token) {
@@ -302,10 +298,46 @@ where
         });
     }
 
-    fn ensure_prepare_is_new(
+    /// Returns the failure that must be reconciled when a visible write could
+    /// not be confirmed durable.
+    fn uncertain_durability(outcome: DurableWriteOutcome) -> Option<PanelError> {
+        match outcome {
+            DurableWriteOutcome::Committed => None,
+            DurableWriteOutcome::DurabilityUnknown(error) => Some(error),
+            _ => Some(PanelError::internal(
+                "snapshot store returned an unsupported write outcome",
+            )),
+        }
+    }
+
+    /// Removes a prepared record whose revision can no longer be activated.
+    ///
+    /// Restoration discards such records on the next start, so a failed removal
+    /// only defers cleanup and never fails the operation that made it stale.
+    async fn discard_unactivatable(
+        store: &S,
+        events: &dyn GatewayEventSink,
+        token: &PrepareToken,
+        revision_id: RevisionId,
+    ) {
+        let failure = match store.delete_prepared(token).await {
+            Ok(outcome) => Self::uncertain_durability(outcome),
+            Err(error) => Some(error),
+        };
+        if let Some(error) = failure {
+            events.emit(&GatewayEvent::PreparedCleanupDeferred {
+                revision_id,
+                error_code: error.code,
+            });
+        }
+    }
+
+    /// Returns the stored receipt when this exact snapshot is already prepared,
+    /// so a client that lost the first response recovers its token by retrying.
+    fn prepared_replay(
         state: &RuntimeState<A::Prepared>,
         snapshot: &RuntimeSnapshot,
-    ) -> Result<()> {
+    ) -> Result<Option<PrepareReceipt>> {
         if let Some(active) = &state.active {
             if snapshot.revision_id <= active.envelope.snapshot.revision_id {
                 return Err(PanelError::conflict(
@@ -313,15 +345,18 @@ where
                 ));
             }
         }
-        if state.prepared.values().any(|item| {
-            item.record.envelope.snapshot.revision_id == snapshot.revision_id
-                || item.record.envelope.snapshot.content_hash == snapshot.content_hash
-        }) {
-            return Err(PanelError::conflict(
-                "revision or content is already prepared",
-            ));
+        for entry in state.prepared.values() {
+            let prepared = &entry.record.envelope.snapshot;
+            if prepared.content_hash == snapshot.content_hash {
+                return Ok(Some(entry.record.receipt.clone()));
+            }
+            if prepared.revision_id == snapshot.revision_id {
+                return Err(PanelError::conflict(
+                    "revision is already prepared with different content",
+                ));
+            }
         }
-        Ok(())
+        Ok(None)
     }
 
     fn ensure_mutations_allowed(state: &RuntimeState<A::Prepared>) -> Result<()> {
@@ -345,7 +380,9 @@ where
         {
             let state = state.lock().await;
             Self::ensure_mutations_allowed(&state)?;
-            Self::ensure_prepare_is_new(&state, &request.snapshot)?;
+            if let Some(receipt) = Self::prepared_replay(&state, &request.snapshot)? {
+                return Ok(receipt);
+            }
             prepared_policy.admit(
                 PreparedSnapshotUsage {
                     outstanding: state.prepared.len(),
@@ -359,7 +396,9 @@ where
         let (token, receipt, record, accounted_bytes, prepared_bytes) = {
             let state = state.lock().await;
             Self::ensure_mutations_allowed(&state)?;
-            Self::ensure_prepare_is_new(&state, &request.snapshot)?;
+            if let Some(receipt) = Self::prepared_replay(&state, &request.snapshot)? {
+                return Ok(receipt);
+            }
             prepared_policy.admit(
                 PreparedSnapshotUsage {
                     outstanding: state.prepared.len(),
@@ -394,16 +433,7 @@ where
             };
             (token, receipt, record, accounted_bytes, prepared_bytes)
         };
-        if let Err(error) = store.save_prepared(record.clone()).await {
-            let mut state = state.lock().await;
-            Self::mark_degraded(
-                &mut state,
-                events.as_ref(),
-                GatewayOperation::SavePrepared,
-                &error,
-            );
-            return Err(error);
-        }
+        let outcome = store.save_prepared(record.clone()).await?;
         let mut state = state.lock().await;
         state.prepared_bytes = prepared_bytes;
         state.prepared.insert(
@@ -418,6 +448,15 @@ where
             revision_id: receipt.revision_id,
             prepared_count: state.prepared.len(),
         });
+        if let Some(error) = Self::uncertain_durability(outcome) {
+            Self::mark_degraded(
+                &mut state,
+                events.as_ref(),
+                GatewayOperation::SavePrepared,
+                &error,
+            );
+            return Err(error);
+        }
         Ok(receipt)
     }
 
@@ -450,8 +489,18 @@ where
                     .map(|item| item.envelope.snapshot.content_hash.clone()),
             }
         };
-        if let Err(error) = store.delete_prepared(&token).await {
-            let mut state = state.lock().await;
+        let outcome = store.delete_prepared(&token).await?;
+        let mut state = state.lock().await;
+        let removed = state
+            .prepared
+            .remove(&token)
+            .expect("aborted prepare token remains present while mutations are serialized");
+        state.prepared_bytes = state.prepared_bytes.saturating_sub(removed.accounted_bytes);
+        events.emit(&GatewayEvent::Aborted {
+            revision_id: receipt.revision_id,
+            prepared_count: state.prepared.len(),
+        });
+        if let Some(error) = Self::uncertain_durability(outcome) {
             Self::mark_degraded(
                 &mut state,
                 events.as_ref(),
@@ -460,16 +509,6 @@ where
             );
             return Err(error);
         }
-        let mut state = state.lock().await;
-        let removed = state
-            .prepared
-            .remove(&token)
-            .expect("aborted prepare token remains present while state is locked");
-        state.prepared_bytes = state.prepared_bytes.saturating_sub(removed.accounted_bytes);
-        events.emit(&GatewayEvent::Aborted {
-            revision_id: receipt.revision_id,
-            prepared_count: state.prepared.len(),
-        });
         Ok(receipt)
     }
 
@@ -500,16 +539,13 @@ where
             }
         };
         if let Some(receipt) = retry_receipt {
-            if let Err(error) = store.delete_prepared(&request.prepare_token).await {
-                let mut state = state.lock().await;
-                Self::mark_degraded(
-                    &mut state,
-                    events.as_ref(),
-                    GatewayOperation::DeletePrepared,
-                    &error,
-                );
-                return Err(error);
-            }
+            Self::discard_unactivatable(
+                store.as_ref(),
+                events.as_ref(),
+                &request.prepare_token,
+                receipt.revision_id,
+            )
+            .await;
             return Ok(receipt);
         }
 
@@ -551,52 +587,49 @@ where
         // The durable record is committed before the infallible data-plane pointer
         // swap. `activate` runs this transaction in a detached task, so request
         // cancellation cannot strand a committed receipt behind an old pointer.
-        let durability_unknown = match store.commit_activation_with_outcome(active.clone()).await {
-            Ok(ActivationCommitOutcome::Committed) => None,
-            Ok(ActivationCommitOutcome::DurabilityUnknown(error)) => Some(error),
-            Ok(_) => {
-                let error = PanelError::internal(
-                    "snapshot store returned an unsupported activation commit outcome",
-                );
-                let mut state = state.lock().await;
-                Self::mark_degraded(
-                    &mut state,
-                    events.as_ref(),
-                    GatewayOperation::CommitActivation,
-                    &error,
-                );
-                return Err(error);
-            }
-            Err(error) => {
-                let mut state = state.lock().await;
-                Self::mark_degraded(
-                    &mut state,
-                    events.as_ref(),
-                    GatewayOperation::CommitActivation,
-                    &error,
-                );
-                return Err(error);
-            }
-        };
+        // A failed commit leaves the previous record visible, so the prepared
+        // token stays activatable and readiness is unaffected.
+        let durability_unknown =
+            Self::uncertain_durability(store.commit_activation(active.clone()).await?);
         adapter.activate(artifact);
         let mut runtime_state = state.lock().await;
         runtime_state.active = Some(active);
-        let removed = runtime_state
+        // Every prepared revision up to the new active one, including the
+        // activated token itself, can no longer be activated.
+        let unactivatable: Vec<_> = runtime_state
             .prepared
-            .remove(&request.prepare_token)
-            .expect("activated prepare token remains present while state is locked");
-        runtime_state.prepared_bytes = runtime_state
-            .prepared_bytes
-            .saturating_sub(removed.accounted_bytes);
+            .iter()
+            .filter(|(_, entry)| entry.record.envelope.snapshot.revision_id <= receipt.revision_id)
+            .map(|(token, entry)| (token.clone(), entry.record.envelope.snapshot.revision_id))
+            .collect();
+        for (token, _) in &unactivatable {
+            let removed = runtime_state
+                .prepared
+                .remove(token)
+                .expect("collected prepare token remains present while state is locked");
+            runtime_state.prepared_bytes = runtime_state
+                .prepared_bytes
+                .saturating_sub(removed.accounted_bytes);
+        }
+        let prepared_count = runtime_state.prepared.len();
         events.emit(&GatewayEvent::Activated {
             revision_id: receipt.revision_id,
-            prepared_count: runtime_state.prepared.len(),
+            prepared_count,
         });
+        for (token, revision_id) in &unactivatable {
+            if *token != request.prepare_token {
+                events.emit(&GatewayEvent::PreparedDiscarded {
+                    revision_id: *revision_id,
+                    prepared_count,
+                });
+            }
+        }
 
         // The rename already made this activation visible to readers. Keep the
         // data plane and in-memory state aligned with that namespace, then stop
         // mutations and report the outcome as unknown until recovery verifies
-        // whichever record survived a crash.
+        // whichever record survived a crash. Stored prepared records stay in
+        // place so restoration judges them against the surviving revision.
         if let Some(error) = durability_unknown {
             Self::mark_degraded(
                 &mut runtime_state,
@@ -608,17 +641,8 @@ where
         }
         drop(runtime_state);
 
-        // If cleanup fails the activation is intentionally reported as unknown.
-        // Retrying the same token returns the persisted receipt idempotently.
-        if let Err(error) = store.delete_prepared(&request.prepare_token).await {
-            let mut state = state.lock().await;
-            Self::mark_degraded(
-                &mut state,
-                events.as_ref(),
-                GatewayOperation::DeletePrepared,
-                &error,
-            );
-            return Err(error);
+        for (token, revision_id) in &unactivatable {
+            Self::discard_unactivatable(store.as_ref(), events.as_ref(), token, *revision_id).await;
         }
         Ok(receipt)
     }
@@ -706,7 +730,7 @@ mod tests {
     use super::*;
     use panel_domain::RevisionId;
     use panel_engine::{EngineCapability, SnapshotStore};
-    use panel_ir::{RuntimeSnapshot, IR_SCHEMA_VERSION};
+    use panel_ir::{CapabilityRequirement, RuntimeSnapshot, IR_SCHEMA_VERSION};
     use std::{
         collections::BTreeSet,
         sync::{
@@ -777,6 +801,19 @@ mod tests {
         commit_durability_unknown: bool,
         pause_commit: bool,
         load_error: Option<PanelError>,
+        reject_save: bool,
+        save_durability_unknown: bool,
+        fail_delete: bool,
+    }
+
+    fn injected_outcome(durability_unknown: bool) -> DurableWriteOutcome {
+        if durability_unknown {
+            DurableWriteOutcome::DurabilityUnknown(PanelError::commit_outcome_unknown(
+                "injected directory sync failure",
+            ))
+        } else {
+            DurableWriteOutcome::Committed
+        }
     }
 
     #[derive(Default)]
@@ -802,48 +839,51 @@ mod tests {
             Ok(state.active.clone())
         }
 
-        async fn load_prepared(&self) -> Result<Vec<PreparedSnapshotRecord>> {
-            Ok(self.state.lock().await.prepared.values().cloned().collect())
+        async fn load_prepared(&self, limit: usize) -> Result<Vec<PreparedSnapshotRecord>> {
+            let records: Vec<_> = self.state.lock().await.prepared.values().cloned().collect();
+            if records.len() > limit {
+                return Err(PanelError::resource_exhausted("too many prepared records"));
+            }
+            Ok(records)
         }
 
-        async fn save_prepared(&self, record: PreparedSnapshotRecord) -> Result<()> {
+        async fn save_prepared(
+            &self,
+            record: PreparedSnapshotRecord,
+        ) -> Result<DurableWriteOutcome> {
             let pause_save = self.pause_save.load(Ordering::Acquire);
             if pause_save {
                 self.save_started.notify_one();
                 self.continue_save.notified().await;
             }
-            self.state
-                .lock()
-                .await
+            let mut state = self.state.lock().await;
+            if state.reject_save {
+                return Err(PanelError::resource_exhausted("injected record limit"));
+            }
+            state
                 .prepared
                 .insert(record.receipt.prepare_token.clone(), record);
-            Ok(())
+            Ok(injected_outcome(state.save_durability_unknown))
         }
 
-        async fn delete_prepared(&self, token: &PrepareToken) -> Result<()> {
+        async fn delete_prepared(&self, token: &PrepareToken) -> Result<DurableWriteOutcome> {
             let pause_delete = self.pause_delete.load(Ordering::Acquire);
             if pause_delete {
                 self.delete_started.notify_one();
                 self.continue_delete.notified().await;
             }
-            self.state.lock().await.prepared.remove(token);
-            Ok(())
-        }
-
-        async fn commit_activation(&self, record: ActiveSnapshotRecord) -> Result<()> {
-            match self.commit_activation_with_outcome(record).await? {
-                ActivationCommitOutcome::Committed => Ok(()),
-                ActivationCommitOutcome::DurabilityUnknown(error) => Err(error),
-                _ => Err(PanelError::internal(
-                    "snapshot store returned an unsupported activation commit outcome",
-                )),
+            let mut state = self.state.lock().await;
+            if state.fail_delete {
+                return Err(PanelError::storage_unavailable("injected delete failure"));
             }
+            state.prepared.remove(token);
+            Ok(DurableWriteOutcome::Committed)
         }
 
-        async fn commit_activation_with_outcome(
+        async fn commit_activation(
             &self,
             record: ActiveSnapshotRecord,
-        ) -> Result<ActivationCommitOutcome> {
+        ) -> Result<DurableWriteOutcome> {
             let (fail_commit, pause_commit, commit_durability_unknown) = {
                 let state = self.state.lock().await;
                 (
@@ -861,13 +901,7 @@ mod tests {
             }
             let mut state = self.state.lock().await;
             state.active = Some(record);
-            if commit_durability_unknown {
-                Ok(ActivationCommitOutcome::DurabilityUnknown(
-                    PanelError::commit_outcome_unknown("injected directory sync failure"),
-                ))
-            } else {
-                Ok(ActivationCommitOutcome::Committed)
-            }
+            Ok(injected_outcome(commit_durability_unknown))
         }
     }
 
@@ -925,25 +959,152 @@ mod tests {
             .await
             .unwrap();
         store.state.lock().await.fail_commit = true;
+        let request = ActivateRequest {
+            prepare_token: prepared.prepare_token,
+            expected_active_hash: None,
+        };
+
+        let error = engine.activate(request.clone()).await.unwrap_err();
+        assert_eq!(error.code.as_str(), ErrorCode::STORAGE_UNAVAILABLE);
+        assert!(adapter.active_hash().is_none());
+        let status = engine.status().await.unwrap();
+        assert!(status.active_hash.is_none());
+        assert!(status.ready);
+        assert_eq!(status.prepared_count, 1);
+        assert!(!events
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| matches!(event, GatewayEvent::Degraded { .. })));
+
+        store.state.lock().await.fail_commit = false;
+        let receipt = engine.activate(request).await.unwrap();
+        assert_eq!(adapter.active_hash(), Some(receipt.content_hash));
+    }
+
+    #[tokio::test]
+    async fn rejected_prepared_write_keeps_the_gateway_ready() {
+        let store = Arc::new(MemoryStore::default());
+        let engine =
+            DurableGatewayEngine::restore(Arc::new(TestAdapter::new()), Arc::clone(&store))
+                .await
+                .unwrap();
+        store.state.lock().await.reject_save = true;
 
         let error = engine
+            .prepare(PrepareRequest {
+                snapshot: snapshot(1),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(error.code.as_str(), ErrorCode::RESOURCE_EXHAUSTED);
+        let status = engine.status().await.unwrap();
+        assert!(status.ready);
+        assert_eq!(status.prepared_count, 0);
+
+        store.state.lock().await.reject_save = false;
+        engine
+            .prepare(PrepareRequest {
+                snapshot: snapshot(1),
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn unknown_prepared_durability_aligns_memory_and_requires_recovery() {
+        let store = Arc::new(MemoryStore::default());
+        let engine =
+            DurableGatewayEngine::restore(Arc::new(TestAdapter::new()), Arc::clone(&store))
+                .await
+                .unwrap();
+        store.state.lock().await.save_durability_unknown = true;
+
+        let error = engine
+            .prepare(PrepareRequest {
+                snapshot: snapshot(1),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(error.code.as_str(), ErrorCode::COMMIT_OUTCOME_UNKNOWN);
+        let status = engine.status().await.unwrap();
+        assert!(!status.ready);
+        assert_eq!(status.prepared_count, 1);
+    }
+
+    #[tokio::test]
+    async fn failed_abort_keeps_the_token_without_degrading() {
+        let store = Arc::new(MemoryStore::default());
+        let engine =
+            DurableGatewayEngine::restore(Arc::new(TestAdapter::new()), Arc::clone(&store))
+                .await
+                .unwrap();
+        let prepared = engine
+            .prepare(PrepareRequest {
+                snapshot: snapshot(1),
+            })
+            .await
+            .unwrap();
+        store.state.lock().await.fail_delete = true;
+
+        let error = engine
+            .abort(prepared.prepare_token.clone())
+            .await
+            .unwrap_err();
+        assert_eq!(error.code.as_str(), ErrorCode::STORAGE_UNAVAILABLE);
+        let status = engine.status().await.unwrap();
+        assert!(status.ready);
+        assert_eq!(status.prepared_count, 1);
+
+        store.state.lock().await.fail_delete = false;
+        engine.abort(prepared.prepare_token).await.unwrap();
+        assert_eq!(engine.status().await.unwrap().prepared_count, 0);
+    }
+
+    #[tokio::test]
+    async fn deferred_cleanup_of_a_consumed_prepare_does_not_fail_activation() {
+        let store = Arc::new(MemoryStore::default());
+        let events = Arc::new(RecordingEventSink::default());
+        let engine = DurableGatewayEngine::restore_with_options(
+            Arc::new(TestAdapter::new()),
+            Arc::clone(&store),
+            DurableGatewayEngineOptions::default()
+                .with_event_sink(Arc::clone(&events) as Arc<dyn GatewayEventSink>),
+        )
+        .await
+        .unwrap();
+        let prepared = engine
+            .prepare(PrepareRequest {
+                snapshot: snapshot(1),
+            })
+            .await
+            .unwrap();
+        store.state.lock().await.fail_delete = true;
+
+        let receipt = engine
             .activate(ActivateRequest {
                 prepare_token: prepared.prepare_token,
                 expected_active_hash: None,
             })
             .await
-            .unwrap_err();
-        assert_eq!(error.code.as_str(), ErrorCode::STORAGE_UNAVAILABLE);
-        assert!(adapter.active_hash().is_none());
-        assert!(engine.status().await.unwrap().active_hash.is_none());
-        assert!(!engine.status().await.unwrap().ready);
+            .unwrap();
+        let status = engine.status().await.unwrap();
+        assert!(status.ready);
+        assert_eq!(status.active_hash, Some(receipt.content_hash));
         assert!(events.0.lock().unwrap().iter().any(|event| matches!(
             event,
-            GatewayEvent::Degraded {
-                operation: GatewayOperation::CommitActivation,
-                ..
-            }
+            GatewayEvent::PreparedCleanupDeferred { revision_id, .. }
+                if *revision_id == RevisionId::new(1)
         )));
+
+        store.state.lock().await.fail_delete = false;
+        let restarted =
+            DurableGatewayEngine::restore(Arc::new(TestAdapter::new()), Arc::clone(&store))
+                .await
+                .unwrap();
+        assert_eq!(restarted.status().await.unwrap().prepared_count, 0);
+        assert!(store.state.lock().await.prepared.is_empty());
     }
 
     #[tokio::test]
@@ -1080,6 +1241,133 @@ mod tests {
         let first = engine.activate(request.clone()).await.unwrap();
         let second = engine.activate(request).await.unwrap();
         assert_eq!(first, second);
+    }
+
+    #[tokio::test]
+    async fn identical_prepare_replays_the_stored_receipt() {
+        let store = Arc::new(MemoryStore::default());
+        let engine =
+            DurableGatewayEngine::restore(Arc::new(TestAdapter::new()), Arc::clone(&store))
+                .await
+                .unwrap();
+        let request = PrepareRequest {
+            snapshot: snapshot(1),
+        };
+
+        let first = engine.prepare(request.clone()).await.unwrap();
+        let replayed = engine.prepare(request).await.unwrap();
+        assert_eq!(replayed, first);
+        assert_eq!(engine.status().await.unwrap().prepared_count, 1);
+        assert_eq!(store.state.lock().await.prepared.len(), 1);
+
+        let mut different = snapshot(1);
+        different
+            .required_capabilities
+            .push(CapabilityRequirement::new("route.host", "1"));
+        different.refresh_content_hash();
+        let error = engine
+            .prepare(PrepareRequest {
+                snapshot: different,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(error.code.as_str(), ErrorCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn retry_after_a_lost_prepare_response_recovers_the_token() {
+        let store = Arc::new(MemoryStore::default());
+        store.pause_save.store(true, Ordering::Release);
+        let engine = Arc::new(
+            DurableGatewayEngine::restore(Arc::new(TestAdapter::new()), Arc::clone(&store))
+                .await
+                .unwrap(),
+        );
+        let lost = {
+            let engine = Arc::clone(&engine);
+            tokio::spawn(async move {
+                engine
+                    .prepare(PrepareRequest {
+                        snapshot: snapshot(1),
+                    })
+                    .await
+            })
+        };
+        store.save_started.notified().await;
+        lost.abort();
+        store.pause_save.store(false, Ordering::Release);
+        store.continue_save.notify_one();
+
+        let recovered = tokio::time::timeout(
+            Duration::from_secs(1),
+            engine.prepare(PrepareRequest {
+                snapshot: snapshot(1),
+            }),
+        )
+        .await
+        .expect("the retry is serialized behind the detached prepare")
+        .unwrap();
+        let stored = store.state.lock().await.prepared.clone();
+        assert_eq!(stored.len(), 1);
+        assert!(stored.contains_key(&recovered.prepare_token));
+        engine
+            .activate(ActivateRequest {
+                prepare_token: recovered.prepare_token,
+                expected_active_hash: None,
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn activation_discards_the_prepared_revisions_it_supersedes() {
+        let store = Arc::new(MemoryStore::default());
+        let events = Arc::new(RecordingEventSink::default());
+        let engine = DurableGatewayEngine::restore_with_options(
+            Arc::new(TestAdapter::new()),
+            Arc::clone(&store),
+            DurableGatewayEngineOptions::default()
+                .with_event_sink(Arc::clone(&events) as Arc<dyn GatewayEventSink>),
+        )
+        .await
+        .unwrap();
+        let mut tokens = Vec::new();
+        for revision in 1..=3 {
+            tokens.push(
+                engine
+                    .prepare(PrepareRequest {
+                        snapshot: snapshot(revision),
+                    })
+                    .await
+                    .unwrap()
+                    .prepare_token,
+            );
+        }
+
+        engine
+            .activate(ActivateRequest {
+                prepare_token: tokens[1].clone(),
+                expected_active_hash: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(engine.status().await.unwrap().prepared_count, 1);
+        let stored = store.state.lock().await.prepared.clone();
+        assert_eq!(stored.keys().collect::<Vec<_>>(), [&tokens[2]]);
+        assert!(events.0.lock().unwrap().iter().any(|event| matches!(
+            event,
+            GatewayEvent::PreparedDiscarded { revision_id, prepared_count: 1 }
+                if *revision_id == RevisionId::new(1)
+        )));
+        let active_hash = engine.status().await.unwrap().active_hash;
+        let error = engine
+            .activate(ActivateRequest {
+                prepare_token: tokens[0].clone(),
+                expected_active_hash: active_hash,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(error.code.as_str(), ErrorCode::NOT_FOUND);
     }
 
     #[tokio::test]

@@ -750,6 +750,7 @@ dependencies = [
  "reqwest",
  "serde_json",
  "snapshot-store-fs",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -1412,7 +1413,7 @@ dependencies = [
 
 [[package]]
 name = "panel-engine"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "panel-domain",
@@ -1433,7 +1434,7 @@ dependencies = [
 
 [[package]]
 name = "panel-gateway-runtime"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "loom",
@@ -2236,7 +2237,7 @@ checksum = "b9be42f50aa861c555654aa3a37f52f4b1074bacf4e48fe0ef7fa584e80f1f0f"
 
 [[package]]
 name = "snapshot-store-fs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "libc",

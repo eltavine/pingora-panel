@@ -16,6 +16,8 @@ mod tests;
 
 /// Application decorator that makes activation retries replay a durable
 /// receipt instead of executing the gateway mutation twice.
+/// Composition roots must keep an admitted `activate` future running after a
+/// caller disconnects so it can persist the final receipt.
 pub struct IdempotentGatewayUseCases {
     inner: Arc<dyn GatewayUseCases>,
     repository: Arc<dyn IdempotencyRepository>,

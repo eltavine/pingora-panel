@@ -43,6 +43,12 @@ gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC/Proto adapters
 `.github/scripts/check-panel-boundaries.sh` enforces these direct dependency rules in CI.
 `gatewayd::build_gateway_transport` is the single composition factory used by both the production process and TCP black-box tests, preventing test-only dependency graphs from drifting away from production.
 
+The current process entry point starts only the loopback gRPC management
+transport. The Axum REST router has a shared library composition factory but
+is not bound by that process; no Pingora traffic listener exists yet. See the
+[gateway foundation runbook](../docs/gateway-foundation-runbook.md) for startup,
+readiness, recovery and current limits.
+
 ## Activation invariant
 
 All fallible work required to build and durably publish the activation occurs

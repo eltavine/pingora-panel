@@ -36,6 +36,7 @@ pub(crate) enum AtomicPublishOutcome {
     DurabilityUnknown(AtomicPublishError),
 }
 
+#[cfg(unix)]
 impl AtomicPublishOutcome {
     pub(crate) fn into_result(self) -> Result<(), AtomicPublishError> {
         match self {

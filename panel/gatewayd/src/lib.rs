@@ -55,7 +55,7 @@ use panel_gateway_runtime::{
     GatewayMutationCapacity, GatewayMutationExecutor, GatewayRecoveryMonitor,
     PreparedSnapshotAdmissionPolicy, PreparedSnapshotBudget,
 };
-use snapshot_store_fs::FileSnapshotStore;
+use snapshot_store_fs::{FileSnapshotStore, SnapshotStoreLimits};
 use std::{future::Future, num::NonZeroU32, path::PathBuf, sync::Arc};
 use tokio::sync::oneshot;
 use tonic::server::NamedService;
@@ -132,6 +132,7 @@ pub struct GatewaydServiceOptions {
     event_sinks: Vec<Arc<dyn GatewayEventSink>>,
     event_buffer_capacity: usize,
     mutation_capacity: GatewayMutationCapacity,
+    snapshot_store_limits: SnapshotStoreLimits,
 }
 
 impl GatewaydServiceOptions {
@@ -175,6 +176,13 @@ impl GatewaydServiceOptions {
         self.mutation_capacity = capacity;
         self
     }
+
+    /// Store limits must hold everything the prepared policy admits; derive
+    /// them with [`GatewayResourceLimits::snapshot_store_limits`].
+    pub fn with_snapshot_store_limits(mut self, limits: SnapshotStoreLimits) -> Self {
+        self.snapshot_store_limits = limits;
+        self
+    }
 }
 
 impl Default for GatewaydServiceOptions {
@@ -187,6 +195,7 @@ impl Default for GatewaydServiceOptions {
             event_sinks: Vec::new(),
             event_buffer_capacity: DEFAULT_EVENT_BUFFER_CAPACITY,
             mutation_capacity: GatewayMutationCapacity::default(),
+            snapshot_store_limits: GatewayResourceLimits::default().snapshot_store_limits(),
         }
     }
 }
@@ -263,7 +272,13 @@ pub async fn build_gateway_runtime_with_options(
         },
     );
     let adapter = Arc::new(PingoraGatewayAdapter::new());
-    let store = Arc::new(FileSnapshotStore::open_exclusive(state_directory).await?);
+    let store = Arc::new(
+        FileSnapshotStore::open_exclusive_with_limits(
+            state_directory,
+            options.snapshot_store_limits,
+        )
+        .await?,
+    );
     let health_state = Arc::new(RuntimeHealthState::new());
     let event_delivery = GatewayEventDeliveryMonitor::new();
     let recovery = GatewayRecoveryMonitor::new();
@@ -378,6 +393,7 @@ pub async fn serve_gatewayd(
             .with_request_metadata_limits(resource_limits.request_metadata_limits())
             .with_event_buffer_capacity(resource_limits.event_buffer_capacity())
             .with_mutation_capacity(resource_limits.mutation_capacity())
+            .with_snapshot_store_limits(resource_limits.snapshot_store_limits())
             .with_event_sink(tracing_events),
     )
     .await?;

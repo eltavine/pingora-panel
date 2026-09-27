@@ -122,13 +122,13 @@ Pingora Panel 是一个面向团队运维的单节点网站网关控制平台。
 
 ### 3.1 当前仓库事实
 
-当前仓库是 Pingora 0.9.0 的完整 Rust workspace，包含 `pingora-core`、`pingora-proxy`、`pingora-load-balancing`、TLS、缓存、指标等上游 crates，并包含针对 Rust 与 OpenResty 基线的 CI 调整。Pingora Panel 现处于 `In Progress / durable gateway foundation`：`panel/` 独立 workspace 已提供 Proto-first 契约、稳定错误模型、领域值对象、Engine-neutral IR、`GatewayEngine`/`SnapshotStore`/`DataPlaneAdapter`/`GatewayRuntimeInfoProvider` ports、内存 `FakeGatewayEngine`、独立 durable runtime、原子文件快照存储、Pingora 0.9.0 adapter、Tonic gRPC transport、标准 gRPC Health、`gatewayd` 组合根、v1/v2 磁盘格式 Golden Fixture、真实 TCP 与文件系统故障黑盒测试、有界 mutation admission、两阶段 readiness drain、plaintext loopback-only 管理绑定、恢复诊断、Proto compatibility guard 自测试、security lockfile resolver hermetic 自测试、依赖边界检查，以及尚未接入真实服务组合根的模块化 Axum/Utoipa REST adapter。控制服务、DSL 编译服务、数据库迁移、CLI、Web GUI、REST 服务组合、内部 mTLS 和生产 listener 仍未实现。
+当前仓库是 Pingora 0.9.0 的完整 Rust workspace，包含 `pingora-core`、`pingora-proxy`、`pingora-load-balancing`、TLS、缓存、指标等上游 crates，并包含针对 Rust 与 OpenResty 基线的 CI 调整。Pingora Panel 现处于 `In Progress / durable gateway foundation`：`panel/` 独立 workspace 已提供 Proto-first 契约、稳定错误模型、领域值对象、Engine-neutral IR、`GatewayEngine`/`SnapshotStore`/`DataPlaneAdapter`/`GatewayRuntimeInfoProvider` ports、内存 `FakeGatewayEngine`、独立 durable runtime、原子文件快照存储、Pingora 0.9.0 adapter、Tonic gRPC transport、标准 gRPC Health、`gatewayd` 组合根、v1/v2 磁盘格式 Golden Fixture、真实 TCP 与文件系统故障黑盒测试、有界 mutation admission、两阶段 readiness drain、plaintext loopback-only 管理绑定、恢复诊断、Proto compatibility guard 自测试、security lockfile resolver hermetic 自测试、依赖边界检查，以及模块化 Axum/Utoipa REST adapter 的共享库级组合工厂。该 REST listener 尚未在实际进程中绑定；控制服务、DSL 编译服务、数据库迁移、CLI、Web GUI、内部 mTLS 和生产 listener 仍未实现。
 
 Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交：`665fd57`；该提交的 Pingora crates：`0.8.0`；许可证：Apache-2.0；此记录不代表当前提交的验收状态）：
 
 - `Implemented`：十个 Panel crate 的严格边界、动态生成 Proto 契约、稳定错误转换、领域值对象、版本化 IR 结构与确定性 canonical hash、`GatewayEngine`/`SnapshotStore`/`DataPlaneAdapter` 接口、durable runtime、原子文件存储、`gatewayd` gRPC 服务与标准 Health、Activation Receipt 持久化和 LKG 重启恢复。
 - `Verified`（仅对应上述历史提交）：`FakeGatewayEngine` 的 capability negotiation、Prepare/Activate/Abort/CAS 语义与失败原子性；`gateway-pingora` 在本地 Pingora 0.8.0 上的 adapter compile smoke test、HTTP/HTTPS peer mapping、未支持节点的结构化拒绝；Panel Pingora 依赖边界自动检查；真实 `gatewayd` 的 SIGTERM、同端口重启、服务状态、版本、uptime 和配置 worker 数查询；定时 Pingora upstream `main` 兼容性 canary。
-- `Planned`：PostgreSQL、NATS、控制服务、REST 服务组合（adapter 已有）、`ppanel` CLI、Vue GUI、生产 listener 和 TLS/cache/Lua 执行能力。
+- `Planned`：PostgreSQL、NATS、控制服务、REST 进程 listener（adapter 与库级组合工厂已有）、`ppanel` CLI、Vue GUI、生产 listener 和 TLS/cache/Lua 执行能力。
 
 上述状态只覆盖 Initial Foundation，不把面板完整功能目录误写为已实现。
 进程级 shutdown 与运行信息测试是 `gatewayd` 基础设施验收证据；在生产 Pingora listener、权限检查和操作审计接入前，`GATE-002` 至 `GATE-006` 仍保持 `Planned`，不得用基础设施测试替代完整产品验收。

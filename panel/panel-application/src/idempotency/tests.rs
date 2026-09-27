@@ -1,6 +1,7 @@
 use super::*;
 use crate::{IdempotencyKey, RequestDeadline, RequestId};
 use panel_domain::RevisionId;
+use panel_errors::ErrorCode;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Mutex,
@@ -120,6 +121,7 @@ fn context(key: &str) -> CommandContext {
 struct RejectedActivation {
     code: &'static str,
     activations: AtomicUsize,
+    confirmed_precommit: bool,
 }
 
 #[async_trait]
@@ -137,6 +139,11 @@ impl GatewayUseCases for RejectedActivation {
         _: Option<ContentHash>,
     ) -> Result<ActivatedDeployment> {
         self.activations.fetch_add(1, Ordering::SeqCst);
+        if self.confirmed_precommit {
+            return Err(PanelError::deadline_exceeded_before_dispatch(
+                "deadline expired before dispatch",
+            ));
+        }
         // Retryability deliberately does not establish commit certainty.
         Err(PanelError::new(self.code, "activation failed").retryable(true))
     }
@@ -158,6 +165,7 @@ async fn uncertain_and_future_errors_retain_claim_and_block_redispatch() {
         let gateway = Arc::new(RejectedActivation {
             code,
             activations: AtomicUsize::new(0),
+            confirmed_precommit: false,
         });
         let repository = Arc::new(MemoryIdempotency {
             value: Mutex::new(None),
@@ -206,6 +214,7 @@ async fn confirmed_precommit_rejections_release_claim_for_another_attempt() {
         let gateway = Arc::new(RejectedActivation {
             code,
             activations: AtomicUsize::new(0),
+            confirmed_precommit: false,
         });
         let repository = Arc::new(MemoryIdempotency {
             value: Mutex::new(None),
@@ -232,6 +241,39 @@ async fn confirmed_precommit_rejections_release_claim_for_another_attempt() {
         }
         assert_eq!(gateway.activations.load(Ordering::SeqCst), 2);
     }
+}
+
+#[tokio::test]
+async fn confirmed_precommit_deadline_releases_the_claim() {
+    let gateway = Arc::new(RejectedActivation {
+        code: ErrorCode::DEADLINE_EXCEEDED,
+        activations: AtomicUsize::new(0),
+        confirmed_precommit: true,
+    });
+    let repository = Arc::new(MemoryIdempotency {
+        value: Mutex::new(None),
+        fail_complete: false,
+    });
+    let service = IdempotentGatewayUseCases::new(gateway.clone(), repository);
+    for _ in 0..2 {
+        assert_eq!(
+            service
+                .activate(context("expired"), "prepare-1".into(), None)
+                .await
+                .unwrap_err()
+                .code
+                .as_str(),
+            ErrorCode::DEADLINE_EXCEEDED
+        );
+        assert_eq!(
+            service
+                .activation_receipt(context("expired").idempotency_key())
+                .await
+                .unwrap(),
+            IdempotencyLookup::Missing
+        );
+    }
+    assert_eq!(gateway.activations.load(Ordering::SeqCst), 2);
 }
 
 #[test]

@@ -182,9 +182,10 @@ impl StateDirectoryHandle {
     /// This is reserved for crash reclamation while the caller holds exclusive
     /// ownership of the directory. Capacity checks should keep using
     /// `read_entry_names`, whose entry ceiling also bounds their work.
-    pub(crate) fn visit_entry_names(&self, mut visitor: impl FnMut(&OsStr)) -> io::Result<()> {
+    pub(crate) fn visit_entry_names(&self, visitor: impl FnMut(&OsStr)) -> io::Result<()> {
         #[cfg(any(target_os = "linux", target_vendor = "apple"))]
         {
+            let mut visitor = visitor;
             self.visit_entry_names_from_descriptor(&mut visitor)
         }
         #[cfg(all(unix, not(target_os = "linux"), not(target_vendor = "apple")))]
