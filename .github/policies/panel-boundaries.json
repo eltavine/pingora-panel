@@ -348,6 +348,14 @@
         "panel-platform-codec"
       ]
     },
+    "panel-tls": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-context",
+        "panel-errors",
+        "panel-pki"
+      ]
+    },
     "snapshot-store-fs": {
       "catalog": true,
       "allowed_workspace_dependencies": [

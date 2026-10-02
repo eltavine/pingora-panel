@@ -2365,6 +2365,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "panel-tls"
+version = "0.1.0"
+dependencies = [
+ "arc-swap",
+ "chrono",
+ "hyper-util",
+ "panel-context",
+ "panel-errors",
+ "panel-pki",
+ "rustls",
+ "rustls-pki-types",
+ "rustls-webpki",
+ "tokio",
+ "tokio-rustls",
+ "tokio-stream",
+ "tokio-util",
+ "tonic",
+ "tonic-health",
+ "tower",
+ "tracing",
+]
+
+[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

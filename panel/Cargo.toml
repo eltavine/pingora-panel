@@ -16,6 +16,7 @@ members = [
     "panel-application",
     "panel-outbox",
     "panel-pki",
+    "panel-tls",
     "panel-platform",
     "panel-platform-codec",
     "panel-persistence-memory",
@@ -87,6 +88,7 @@ panel-application = { version = "=0.1.0", path = "panel-application" }
 panel-outbox = { version = "=0.1.0", path = "panel-outbox" }
 panel-persistence-memory = { version = "=0.1.0", path = "panel-persistence-memory" }
 panel-pki = { version = "=0.1.0", path = "panel-pki" }
+panel-tls = { version = "=0.1.0", path = "panel-tls" }
 panel-platform = { version = "=0.1.0", path = "panel-platform" }
 panel-platform-codec = { version = "=0.1.0", path = "panel-platform-codec" }
 panel-postgres = { version = "=0.1.0", path = "panel-postgres" }
@@ -114,12 +116,14 @@ thiserror = "=2.0.21"
 time = "=0.3.55"
 tempfile = "=3.27.0"
 tokio = { version = "=1.48.0", features = ["fs", "macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring"] }
 tokio-stream = { version = "=0.1.19", features = ["net"] }
 tokio-util = { version = "=0.7.19", features = ["rt"] }
 tower = { version = "=0.5.3", features = ["util"] }
 rcgen = { version = "=0.14.10", default-features = false, features = ["crypto", "ring"] }
 reqwest = { version = "=0.13.4", default-features = false, features = ["json"] }
 rrule = "=0.14.0"
+rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std"] }
 rustls-pki-types = { version = "=1.15.1", features = ["std"] }
 rustls-webpki = { version = "=0.103.15", default-features = false, features = ["ring", "std"] }
 tower-http = { version = "=0.7.1", features = ["fs", "request-id", "set-header", "trace"] }
