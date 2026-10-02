@@ -216,6 +216,25 @@ def main() -> int:
         if check(web, configuration(actions, cargo_root, entry("npm", "/fixtures"))) != 1:
             raise AssertionError("an npm entry without a locked package was accepted")
 
+        # Container images and Compose files need docker and docker-compose
+        # entries for the directories that hold them.
+        images = Path(temporary).resolve() / "images"
+        images.mkdir()
+        build_tree(images, ["/"])
+        (images / "deploy").mkdir()
+        (images / "deploy/Containerfile").write_text("FROM scratch\n", encoding="utf-8")
+        (images / "deploy/compose.yaml").write_text("services: {}\n", encoding="utf-8")
+        (images / "target/release").mkdir(parents=True)
+        (images / "target/release/Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+        docker = entry("docker", "/deploy")
+        compose = entry("docker-compose", "/deploy")
+        if check(images, configuration(actions, cargo_root, docker, compose)) != 0:
+            raise AssertionError("declared container definitions were rejected")
+        if check(images, configuration(actions, cargo_root, compose)) != 1:
+            raise AssertionError("a Containerfile without a docker entry was accepted")
+        if check(images, configuration(actions, cargo_root, docker)) != 1:
+            raise AssertionError("a Compose file without a docker-compose entry was accepted")
+
         # A target directory is build output, never a governed workspace.
         ignored = Path(temporary).resolve() / "ignored"
         ignored.mkdir()

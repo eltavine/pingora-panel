@@ -81,6 +81,31 @@ def _npm_projects(root: Path) -> set[str]:
     return directories
 
 
+CONTAINER_FILES = ("Containerfile", "Dockerfile")
+COMPOSE_FILES = ("compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml")
+
+
+def _directories_holding(root: Path, names: tuple[str, ...]) -> set[str]:
+    """Every directory outside build output that holds one of `names`."""
+    directories: set[str] = set()
+    for name in names:
+        for path in sorted(root.rglob(name)):
+            if any(part in IGNORED_DIRECTORIES for part in path.relative_to(root).parts):
+                continue
+            directories.add(_as_dependabot_directory(root, path))
+    return directories
+
+
+def _container_images(root: Path) -> set[str]:
+    """Every directory with a container image definition whose bases update."""
+    return _directories_holding(root, CONTAINER_FILES)
+
+
+def _compose_projects(root: Path) -> set[str]:
+    """Every directory with a Compose file whose service images update."""
+    return _directories_holding(root, COMPOSE_FILES)
+
+
 def _github_actions(root: Path) -> set[str]:
     """Workflows and composite Actions always live at the repository root."""
     if not (root / ".github/workflows").is_dir():
@@ -118,6 +143,8 @@ ECOSYSTEMS: tuple[Ecosystem, ...] = (
     Ecosystem("cargo", _cargo_workspaces, "every Cargo workspace root"),
     Ecosystem("github-actions", _github_actions, "the workflow directory"),
     Ecosystem("npm", _npm_projects, "every locked JavaScript package root"),
+    Ecosystem("docker", _container_images, "every Containerfile or Dockerfile directory"),
+    Ecosystem("docker-compose", _compose_projects, "every Compose file directory"),
 )
 
 
