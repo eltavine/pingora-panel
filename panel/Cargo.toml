@@ -71,6 +71,7 @@ hex = "=0.4.3"
 hyper = { version = "=1.11.1", features = ["client", "http1"] }
 hyper-util = { version = "=0.1.20", features = ["tokio"] }
 hmac = "=0.13.0"
+idna = "=1.1.0"
 iri-string = "=0.7.14"
 mediatype = "=0.23.0"
 pbkdf2 = { version = "=0.13.0", default-features = false, features = ["hmac"] }

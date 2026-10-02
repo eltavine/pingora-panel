@@ -132,29 +132,35 @@ impl<'de> Deserialize<'de> for ContentHash {
     }
 }
 
+/// A DNS host name in canonical A-label form, or a wildcard pattern whose
+/// leftmost label is `*` (RFC 6125 §6.4.3 without partial-label wildcards).
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
 pub struct NormalizedHost(String);
 
+const WILDCARD_PREFIX: &str = "*.";
+
 impl NormalizedHost {
+    /// Internationalized names are converted with UTS #46 so equal names have
+    /// one representation regardless of how they were entered.
     pub fn new(value: impl AsRef<str>) -> Result<Self, DomainError> {
-        let value = value
-            .as_ref()
-            .trim()
-            .trim_end_matches('.')
-            .to_ascii_lowercase();
+        let value = value.as_ref().trim();
+        let value = value.strip_suffix('.').unwrap_or(value);
         if value.is_empty() {
             return Err(DomainError::Empty);
         }
-        if value.len() > 253 {
-            return Err(DomainError::TooLong(253));
-        }
-        if value.parse::<IpAddr>().is_ok() {
+        let (wildcard, name) = match value.strip_prefix(WILDCARD_PREFIX) {
+            Some(name) => (true, name),
+            None => (false, value),
+        };
+        if name.parse::<IpAddr>().is_ok() {
             return Err(DomainError::Invalid(
                 "host must be a DNS name, not an IP literal".into(),
             ));
         }
-        for label in value.split('.') {
+        let ascii = idna::domain_to_ascii_strict(name)
+            .map_err(|_| DomainError::Invalid("invalid DNS host name".into()))?;
+        for label in ascii.split('.') {
             if label.is_empty()
                 || label.len() > 63
                 || label.starts_with('-')
@@ -166,10 +172,52 @@ impl NormalizedHost {
                 return Err(DomainError::Invalid("invalid DNS host label".into()));
             }
         }
+        if wildcard && !ascii.contains('.') {
+            return Err(DomainError::Invalid(
+                "a wildcard must cover at least two labels".into(),
+            ));
+        }
+        let value = if wildcard {
+            format!("{WILDCARD_PREFIX}{ascii}")
+        } else {
+            ascii
+        };
+        if value.len() > 253 {
+            return Err(DomainError::TooLong(253));
+        }
         Ok(Self(value))
     }
+
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    pub fn is_wildcard(&self) -> bool {
+        self.0.starts_with(WILDCARD_PREFIX)
+    }
+
+    /// A wildcard matches exactly one additional leftmost label.
+    pub fn matches(&self, host: &NormalizedHost) -> bool {
+        match self.0.strip_prefix('*') {
+            Some(suffix) => {
+                !host.is_wildcard()
+                    && host
+                        .0
+                        .strip_suffix(suffix)
+                        .is_some_and(|label| !label.is_empty() && !label.contains('.'))
+            }
+            None => self == host,
+        }
+    }
+
+    /// The name with U-labels for display; A-labels are kept where they do not decode.
+    pub fn to_unicode(&self) -> String {
+        let (unicode, result) = idna::domain_to_unicode(&self.0);
+        if result.is_ok() {
+            unicode
+        } else {
+            self.0.clone()
+        }
     }
 }
 
@@ -330,6 +378,40 @@ mod tests {
         );
         assert_eq!(PathPrefix::new("/api/").unwrap().as_str(), "/api");
         assert!(PathPrefix::new("relative").is_err());
+    }
+
+    #[test]
+    fn internationalized_hosts_use_one_ascii_form() {
+        let unicode = NormalizedHost::new("Bücher.Example").unwrap();
+        let ascii = NormalizedHost::new("xn--bcher-kva.example").unwrap();
+        assert_eq!(unicode, ascii);
+        assert_eq!(unicode.as_str(), "xn--bcher-kva.example");
+        assert_eq!(unicode.to_unicode(), "bücher.example");
+        assert!(NormalizedHost::new("xn--a.example").is_err());
+        assert!(NormalizedHost::new("under_score.example").is_err());
+        assert!(NormalizedHost::new("example.com..").is_err());
+        assert!(NormalizedHost::new("192.0.2.1").is_err());
+    }
+
+    #[test]
+    fn wildcards_cover_exactly_one_label() {
+        let wildcard = NormalizedHost::new("*.Example.com").unwrap();
+        assert!(wildcard.is_wildcard());
+        assert_eq!(wildcard.as_str(), "*.example.com");
+        let host = |value| NormalizedHost::new(value).unwrap();
+        assert!(wildcard.matches(&host("api.example.com")));
+        assert!(!wildcard.matches(&host("example.com")));
+        assert!(!wildcard.matches(&host("a.b.example.com")));
+        assert!(!wildcard.matches(&host("api.example.org")));
+        assert!(!wildcard.matches(&wildcard));
+        assert!(host("example.com").matches(&host("example.com")));
+        assert!(NormalizedHost::new("*.com").is_err());
+        assert!(NormalizedHost::new("a.*.example.com").is_err());
+        assert!(NormalizedHost::new("f*.example.com").is_err());
+        assert_eq!(
+            NormalizedHost::new("*.bücher.example").unwrap().as_str(),
+            "*.xn--bcher-kva.example"
+        );
     }
 
     #[test]
