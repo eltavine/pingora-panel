@@ -169,7 +169,10 @@
     "panel-postgres": {
       "catalog": true,
       "allowed_workspace_dependencies": [
-        "panel-errors"
+        "panel-errors",
+        "panel-event-codec",
+        "panel-events",
+        "panel-outbox"
       ]
     },
     "snapshot-store-fs": {

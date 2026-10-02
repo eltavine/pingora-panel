@@ -13,12 +13,14 @@ mod bootstrap;
 mod database;
 mod error;
 mod identifier;
+mod outbox;
 mod scram;
 
 pub use bootstrap::{DatabaseBootstrap, ServiceRole};
 pub use database::{SchemaMigration, ServiceDatabase, ServiceDatabaseConfig};
 pub use error::storage_error;
 pub use identifier::SqlIdentifier;
+pub use outbox::{OutboxBacklog, PgOutbox, PgOutboxWakeup, PgRelayLeadership};
 pub use scram::{RoleSecret, ScramVerifier};
 
 #[cfg(feature = "test-support")]

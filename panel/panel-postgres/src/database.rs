@@ -44,7 +44,11 @@ impl SchemaMigration {
 }
 
 /// Tables every service schema carries, such as the outbox and inbox.
-const PLATFORM_MIGRATIONS: &[SchemaMigration] = &[];
+const PLATFORM_MIGRATIONS: &[SchemaMigration] = &[SchemaMigration::new(
+    1,
+    "transactional outbox",
+    include_str!("../migrations/0001_outbox.sql"),
+)];
 
 /// Connection settings for one service role.
 #[derive(Clone, Debug)]
@@ -185,6 +189,8 @@ impl ServiceDatabase {
             .map_err(|error| PanelError::internal(format!("migration failed: {error}")))
     }
 
+    /// Closes the pool once every checked-out connection, including relay
+    /// leadership and commit listeners, has been returned.
     pub async fn close(&self) {
         self.pool.close().await;
     }

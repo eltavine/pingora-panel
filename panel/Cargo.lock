@@ -1824,11 +1824,17 @@ dependencies = [
 name = "panel-postgres"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "base64",
+ "chrono",
  "getrandom 0.4.3",
  "hmac",
  "panel-errors",
+ "panel-event-codec",
+ "panel-events",
+ "panel-outbox",
  "pbkdf2",
+ "serde_json",
  "sha2 0.11.0",
  "sqlx",
  "stringprep",

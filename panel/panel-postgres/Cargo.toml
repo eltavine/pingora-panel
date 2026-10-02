@@ -9,19 +9,24 @@ publish.workspace = true
 
 [features]
 # Disposable databases for integration tests in this and dependent crates.
-test-support = ["dep:uuid"]
+test-support = []
 
 [dependencies]
+async-trait.workspace = true
 base64.workspace = true
+chrono.workspace = true
 getrandom.workspace = true
 hmac.workspace = true
 panel-errors.workspace = true
+panel-event-codec.workspace = true
+panel-events.workspace = true
+panel-outbox.workspace = true
 pbkdf2.workspace = true
 sha2.workspace = true
 sqlx.workspace = true
 stringprep.workspace = true
-uuid = { workspace = true, optional = true }
-
-[dev-dependencies]
 tokio.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

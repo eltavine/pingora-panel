@@ -18,7 +18,8 @@ snapshot-store-fs -> panel-engine::SnapshotStore
 gateway-pingora -> panel-engine::DataPlaneAdapter
 gateway-proto-codec -> panel-contracts + panel-domain + panel-ir
 panel-event-codec -> panel-contracts + panel-events
-panel-postgres -> panel-errors
+panel-outbox -> panel-events + panel-errors
+panel-postgres -> panel-outbox + panel-event-codec + panel-events + panel-errors
 gateway-grpc -> gateway-proto-codec + panel-engine::GatewayEngine
 gateway-grpc-client -> panel-application + gateway-proto-codec + panel-contracts
 
@@ -34,7 +35,8 @@ gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC/Proto adapters
 | `panel-domain` | Validated value objects | IR, transport, storage, Pingora |
 | `panel-events` | CloudEvents-aligned event model, publisher/handler ports and idempotent consumption | Event formats, brokers, storage, Pingora |
 | `panel-event-codec` | CloudEvents Protobuf, JSON and binary-mode representations | Brokers, storage, application rules, Pingora |
-| `panel-postgres` | Service schema ownership, SCRAM role bootstrap, connection pools and per-schema migrations | Application rules, transports, Pingora |
+| `panel-outbox` | Ordered at-least-once outbox relay over `OutboxSource`, `OutboxWakeup` and `EventPublisher` ports | Storage, brokers, Pingora |
+| `panel-postgres` | Service schema ownership, SCRAM role bootstrap, per-schema migrations and the transactional outbox | Application rules, transports, Pingora |
 | `panel-ir` | Versioned canonical runtime snapshot | Proto, storage, Pingora |
 | `panel-engine` | `GatewayEngine`, `DataPlaneAdapter`, `SnapshotStore`, runtime-info ports and Fake | Proto, storage implementation, Pingora |
 | `panel-application` | Request context, format-neutral config document, use-case orchestration and persistence ports | HTTP, Proto, storage implementation, Pingora |
@@ -117,6 +119,13 @@ schema. The administrator, never a service role, must own the database.
 `ServiceDatabase::migrate` applies platform migrations (versions below 10000) and the
 service's own migrations (10000 and above) in one ordered history stored in the
 service schema, so services migrate independently.
+
+Producers call `PgOutbox::append` inside the transaction that changes their state, so an
+event exists exactly when that change commits. Each row stores the CloudEvents Protobuf
+form. A statement trigger issues `NOTIFY` (delivered only after commit) to wake the
+relay, and polling bounds the delay when a notification is lost. One relay per schema
+holds a PostgreSQL advisory lock and publishes in append order; a producer must lock the
+aggregate before appending so append order matches the aggregate's commit order.
 
 Integration tests use a disposable server named by `PANEL_TEST_DATABASE_URL` and skip
 without one; CI sets `PANEL_REQUIRE_INTEGRATION_SERVICES` so a missing server fails
