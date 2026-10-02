@@ -516,13 +516,22 @@ Protobuf package 使用 `pingora.panel.<domain>.v1`。容器间默认 mTLS TCP�
 
 ### 9.3 Event Envelope
 
-JetStream 事件统一包含：
+所有领域事件都是 [CloudEvents 1.0](https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/spec.md) 事件，产品字段与 CloudEvents 属性一一对应：
 
-```text
-event_id, event_type, event_version, occurred_at, producer,
-aggregate_type, aggregate_id, correlation_id, causation_id,
-idempotency_key, actor, payload
-```
+| 产品字段 | CloudEvents 属性 | 规则 |
+|---|---|---|
+| event_id | `id` | UUIDv7；`source` + `id` 唯一 |
+| producer | `source` | URI-reference `/pingora-panel/<service>` |
+| event_type、event_version | `type` | `io.github.eltavine.pingora-panel.<event_type>.v<major>`；数据不兼容变更必须提升 major |
+| occurred_at | `time` | RFC 3339 |
+| aggregate_type、aggregate_id | `subject` | `<aggregate_type>/<aggregate_id>` |
+| payload | `data`、`datacontenttype`、`dataschema` | RFC 6838 media type；Protobuf 数据使用 RFC 9996 `application/protobuf` 与 type URL |
+| correlation_id、causation_id | `correlationid`、`causationid` | Correlation 扩展 |
+| actor | `authtype`、`authid` | Auth Context 扩展；`authid` 为不透明主体标识，不含个人信息 |
+| idempotency_key | `idempotencykey` | 产品扩展属性 |
+| trace context | `traceparent`、`tracestate` | Distributed Tracing 扩展，遵循 W3C Trace Context |
+
+持久存储使用 CloudEvents Protobuf format；JetStream 使用 NATS protocol binding 的 binary content mode（`ce-` 头），消费者同时接受 JSON structured mode。单个事件不超过 CloudEvents 中间件必须转发的 64 KiB；大对象通过引用传递。
 
 投递语义为 at-least-once；消费者必须幂等。Outbox relay 只有在 PostgreSQL 事务提交后才发布。无法处理的事件进入 DLQ 并触发告警，不得无限快速重试。
 
@@ -1335,7 +1344,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | PLAT-018 | - | Maintenance Window | 0.1 | I | Administrator | platform | 执行“Maintenance Window”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
 | PLAT-019 | - | ETag/If-Match 乐观并发 | 0.1 | I | Administrator | platform | 执行“ETag/If-Match 乐观并发”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
 | PLAT-020 | - | 全局 Request-ID | 0.1 | I | Administrator | platform | 执行“全局 Request-ID”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| PLAT-021 | - | Correlation/Causation ID 传播 | 0.1 | I | Administrator | platform | 执行“Correlation/Causation ID 传播”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
+| PLAT-021 | - | Correlation/Causation ID 传播 | 0.1 | I | Administrator | platform | 执行“Correlation/Causation ID 传播”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | Yes |
 | PLAT-022 | - | 服务协议版本协商 | 0.1 | I | Administrator | platform | 查询“服务协议版本协商”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | Yes |
 | PLAT-023 | - | 聚合 Readiness | 0.1 | I | Administrator | platform | 执行“聚合 Readiness”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
 | PLAT-024 | - | 控制面 Degraded Mode | 0.1 | I | Administrator | platform | 执行“控制面 Degraded Mode”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |

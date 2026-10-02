@@ -5,9 +5,11 @@
 ## Crate dependency direction
 
 ```text
+panel-context -> panel-errors
+panel-events -> panel-context + panel-errors
 panel-ir -> panel-domain
 panel-engine -> panel-errors + panel-domain + panel-ir
-panel-application -> panel-errors + panel-domain + panel-ir
+panel-application -> panel-context + panel-errors + panel-domain + panel-ir
 panel-api -> panel-application + panel-errors
 panel-config-json -> panel-application + panel-errors + panel-ir
 
@@ -15,6 +17,7 @@ panel-gateway-runtime -> panel-engine ports
 snapshot-store-fs -> panel-engine::SnapshotStore
 gateway-pingora -> panel-engine::DataPlaneAdapter
 gateway-proto-codec -> panel-contracts + panel-domain + panel-ir
+panel-event-codec -> panel-contracts + panel-events
 gateway-grpc -> gateway-proto-codec + panel-engine::GatewayEngine
 gateway-grpc-client -> panel-application + gateway-proto-codec + panel-contracts
 
@@ -26,7 +29,10 @@ gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC/Proto adapters
 | Crate | Responsibility | Forbidden knowledge |
 |---|---|---|
 | `panel-errors` | Stable error codes and diagnostics | Domain, transport, storage, Pingora |
+| `panel-context` | Request, correlation, idempotency and actor identifiers shared by commands and events | Domain, transport, storage, Pingora |
 | `panel-domain` | Validated value objects | IR, transport, storage, Pingora |
+| `panel-events` | CloudEvents-aligned event model, publisher/handler ports and idempotent consumption | Event formats, brokers, storage, Pingora |
+| `panel-event-codec` | CloudEvents Protobuf, JSON and binary-mode representations | Brokers, storage, application rules, Pingora |
 | `panel-ir` | Versioned canonical runtime snapshot | Proto, storage, Pingora |
 | `panel-engine` | `GatewayEngine`, `DataPlaneAdapter`, `SnapshotStore`, runtime-info ports and Fake | Proto, storage implementation, Pingora |
 | `panel-application` | Request context, format-neutral config document, use-case orchestration and persistence ports | HTTP, Proto, storage implementation, Pingora |
