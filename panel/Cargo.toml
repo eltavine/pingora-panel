@@ -9,6 +9,7 @@ members = [
     "panel-events",
     "panel-event-codec",
     "panel-health",
+    "panel-jobs",
     "panel-domain",
     "panel-config-domain",
     "panel-config-state-codec",
@@ -97,6 +98,7 @@ panel-health = { version = "=0.1.0", path = "panel-health" }
 panel-gateway-runtime = { version = "=0.2.0", path = "panel-gateway-runtime" }
 panel-ir = { version = "=0.1.0", path = "panel-ir" }
 panel-jetstream = { version = "=0.1.0", path = "panel-jetstream" }
+panel-jobs = { version = "=0.1.0", path = "panel-jobs" }
 pingora-core = { version = "=0.9.0", path = "../pingora-core", default-features = false }
 pingora-http = { version = "=0.9.0", path = "../pingora-http", default-features = false }
 pingora-load-balancing = { version = "=0.9.0", path = "../pingora-load-balancing", default-features = false }
@@ -113,6 +115,7 @@ tokio-stream = { version = "=0.1.19", features = ["net"] }
 tokio-util = { version = "=0.7.19", features = ["rt"] }
 tower = { version = "=0.5.3", features = ["util"] }
 reqwest = { version = "=0.13.4", default-features = false, features = ["json"] }
+rrule = "=0.14.0"
 tower-http = { version = "=0.7.1", features = ["fs", "request-id", "set-header", "trace"] }
 utoipa = "=5.5.0"
 tonic = { version = "=0.14.6", default-features = false, features = ["codegen", "router", "transport"] }

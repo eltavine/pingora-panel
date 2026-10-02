@@ -280,6 +280,13 @@
         "panel-platform-codec"
       ]
     },
+    "panel-jobs": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-context",
+        "panel-errors"
+      ]
+    },
     "panel-outbox": {
       "catalog": true,
       "allowed_workspace_dependencies": [
@@ -357,6 +364,7 @@
       "panel-gateway-runtime",
       "panel-health",
       "panel-ir",
+      "panel-jobs",
       "panel-outbox",
       "panel-platform"
     ],
