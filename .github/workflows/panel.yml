@@ -159,6 +159,7 @@ jobs:
           --health-retries 30
     env:
       PANEL_TEST_DATABASE_URL: postgres://postgres:panel-ci-superuser@127.0.0.1:5432/postgres
+      PANEL_TEST_NATS_URL: nats://127.0.0.1:4222
       # A missing service must fail the job instead of skipping the tests.
       PANEL_REQUIRE_INTEGRATION_SERVICES: "1"
     steps:
@@ -175,11 +176,26 @@ jobs:
         with:
           toolchain: 1.98.0
 
-      - name: Run PostgreSQL adapter tests
+      # Service containers cannot pass server arguments, so NATS is started
+      # here with JetStream enabled.
+      - name: Start NATS with JetStream
+        run: |
+          docker run --detach --name nats --publish 4222:4222 \
+            nats:2.15.0-alpine@sha256:ac8f88a6494bffc2c2a5289a0ca61cb28a9145c11ba5677cf24265d07f46d8d4 \
+            --jetstream
+          for _ in $(seq 1 30); do
+            nc -z 127.0.0.1 4222 && exit 0
+            sleep 1
+          done
+          docker logs nats
+          exit 1
+
+      - name: Run storage and broker adapter tests
         run: >-
           cargo test
           --manifest-path panel/Cargo.toml
           --package panel-postgres
+          --package panel-jetstream
           --all-features
           --locked
 

@@ -20,6 +20,7 @@ gateway-proto-codec -> panel-contracts + panel-domain + panel-ir
 panel-event-codec -> panel-contracts + panel-events
 panel-outbox -> panel-events + panel-errors
 panel-postgres -> panel-outbox + panel-event-codec + panel-events + panel-errors
+panel-jetstream -> panel-event-codec + panel-events + panel-errors
 gateway-grpc -> gateway-proto-codec + panel-engine::GatewayEngine
 gateway-grpc-client -> panel-application + gateway-proto-codec + panel-contracts
 
@@ -36,7 +37,8 @@ gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC/Proto adapters
 | `panel-events` | CloudEvents-aligned event model, publisher/handler ports and idempotent consumption | Event formats, brokers, storage, Pingora |
 | `panel-event-codec` | CloudEvents Protobuf, JSON and binary-mode representations | Brokers, storage, application rules, Pingora |
 | `panel-outbox` | Ordered at-least-once outbox relay over `OutboxSource`, `OutboxWakeup` and `EventPublisher` ports | Storage, brokers, Pingora |
-| `panel-postgres` | Service schema ownership, SCRAM role bootstrap, per-schema migrations and the transactional outbox | Application rules, transports, Pingora |
+| `panel-postgres` | Service schema ownership, SCRAM role bootstrap, per-schema migrations, the transactional outbox and the idempotent-consumer inbox | Application rules, transports, Pingora |
+| `panel-jetstream` | Stream provisioning, deduplicated CloudEvents publication, durable consumers, dead letters and targeted replay | Storage, application rules, Pingora |
 | `panel-ir` | Versioned canonical runtime snapshot | Proto, storage, Pingora |
 | `panel-engine` | `GatewayEngine`, `DataPlaneAdapter`, `SnapshotStore`, runtime-info ports and Fake | Proto, storage implementation, Pingora |
 | `panel-application` | Request context, format-neutral config document, use-case orchestration and persistence ports | HTTP, Proto, storage implementation, Pingora |
@@ -127,14 +129,20 @@ relay, and polling bounds the delay when a notification is lost. One relay per s
 holds a PostgreSQL advisory lock and publishes in append order; a producer must lock the
 aggregate before appending so append order matches the aggregate's commit order.
 
-Integration tests use a disposable server named by `PANEL_TEST_DATABASE_URL` and skip
-without one; CI sets `PANEL_REQUIRE_INTEGRATION_SERVICES` so a missing server fails
+`panel-jetstream` publishes relayed events to NATS JetStream and drives durable consumers.
+Events a consumer cannot process are parked in a dead-letter stream, either by the handler's
+decision, after the final failed attempt, or from the max-deliveries advisory. Replay
+returns them to that consumer alone. See
+[the delivery decision](../docs/adr/0006-jetstream-delivery-and-dead-letters.md).
+
+Integration tests use disposable servers named by `PANEL_TEST_DATABASE_URL` and
+`PANEL_TEST_NATS_URL` and skip without them; CI sets `PANEL_REQUIRE_INTEGRATION_SERVICES` so a missing server fails
 instead. Locally:
 
 ```sh
 panel/scripts/dev-services.sh up
 eval "$(panel/scripts/dev-services.sh env)"
-cargo test --manifest-path panel/Cargo.toml --package panel-postgres --all-features
+cargo test --manifest-path panel/Cargo.toml --package panel-postgres --package panel-jetstream --all-features
 panel/scripts/dev-services.sh down
 ```
 

@@ -151,6 +151,14 @@
         "panel-domain"
       ]
     },
+    "panel-jetstream": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-errors",
+        "panel-event-codec",
+        "panel-events"
+      ]
+    },
     "panel-outbox": {
       "catalog": true,
       "allowed_workspace_dependencies": [

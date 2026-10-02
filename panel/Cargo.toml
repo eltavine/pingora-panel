@@ -16,6 +16,7 @@ members = [
     "panel-postgres",
     "panel-config-json",
     "panel-ir",
+    "panel-jetstream",
     "panel-engine",
     "panel-gateway-runtime",
     "snapshot-store-fs",
@@ -36,9 +37,11 @@ publish = false
 [workspace.dependencies]
 arc-swap = "=1.9.2"
 axum = "=0.8.9"
+async-nats = { version = "=0.50.0", default-features = false, features = ["jetstream", "nuid", "ring", "server_2_10", "server_2_11", "server_2_12", "server_2_14"] }
 async-trait = "=0.1.92"
 backon = { version = "=1.6.0", default-features = false, features = ["std"] }
 base64 = "=0.22.1"
+bytes = "=1.12.1"
 chrono = { version = "=0.4.45", default-features = false, features = ["clock", "std"] }
 futures-util = "=0.3.34"
 gateway-grpc = { version = "=0.1.0", path = "gateway-grpc" }
@@ -71,6 +74,7 @@ panel-event-codec = { version = "=0.1.0", path = "panel-event-codec" }
 panel-events = { version = "=0.1.0", path = "panel-events" }
 panel-gateway-runtime = { version = "=0.2.0", path = "panel-gateway-runtime" }
 panel-ir = { version = "=0.1.0", path = "panel-ir" }
+panel-jetstream = { version = "=0.1.0", path = "panel-jetstream" }
 pingora-core = { version = "=0.9.0", path = "../pingora-core", default-features = false }
 pingora-http = { version = "=0.9.0", path = "../pingora-http", default-features = false }
 pingora-load-balancing = { version = "=0.9.0", path = "../pingora-load-balancing", default-features = false }
