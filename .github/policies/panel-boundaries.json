@@ -159,6 +159,12 @@
         "panel-errors"
       ]
     },
+    "panel-postgres": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-errors"
+      ]
+    },
     "snapshot-store-fs": {
       "catalog": true,
       "allowed_workspace_dependencies": [

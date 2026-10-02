@@ -18,6 +18,7 @@ snapshot-store-fs -> panel-engine::SnapshotStore
 gateway-pingora -> panel-engine::DataPlaneAdapter
 gateway-proto-codec -> panel-contracts + panel-domain + panel-ir
 panel-event-codec -> panel-contracts + panel-events
+panel-postgres -> panel-errors
 gateway-grpc -> gateway-proto-codec + panel-engine::GatewayEngine
 gateway-grpc-client -> panel-application + gateway-proto-codec + panel-contracts
 
@@ -33,6 +34,7 @@ gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC/Proto adapters
 | `panel-domain` | Validated value objects | IR, transport, storage, Pingora |
 | `panel-events` | CloudEvents-aligned event model, publisher/handler ports and idempotent consumption | Event formats, brokers, storage, Pingora |
 | `panel-event-codec` | CloudEvents Protobuf, JSON and binary-mode representations | Brokers, storage, application rules, Pingora |
+| `panel-postgres` | Service schema ownership, SCRAM role bootstrap, connection pools and per-schema migrations | Application rules, transports, Pingora |
 | `panel-ir` | Versioned canonical runtime snapshot | Proto, storage, Pingora |
 | `panel-engine` | `GatewayEngine`, `DataPlaneAdapter`, `SnapshotStore`, runtime-info ports and Fake | Proto, storage implementation, Pingora |
 | `panel-application` | Request context, format-neutral config document, use-case orchestration and persistence ports | HTTP, Proto, storage implementation, Pingora |
@@ -101,6 +103,31 @@ The OpenAPI fixture is also compared across commits by `check-panel-openapi-brea
 `GatewaydServices` retains its original public fields for source compatibility with existing integrations. New code should use `gateway()`, `health()`, and `health_reporter()`; these accessors are the supported extension boundary for future transports. A future major release can make the collection fully opaque without changing the transport composition model.
 
 Until an authenticated transport is composed, `LoopbackOnlyManagementBindPolicy` rejects every non-loopback plaintext address. Bind validation is a policy port rather than an address-parser special case, so a future mTLS adapter can replace the policy explicitly. `GatewayWorkerCount` and `ShutdownPolicy` keep resource and drain limits valid before executor or server construction.
+
+## Service-owned PostgreSQL schemas
+
+Each service connects as a login role that owns exactly one schema. `DatabaseBootstrap`
+applies PostgreSQL's secure schema usage pattern idempotently: it revokes `PUBLIC`
+privileges on the database and on `public`, creates each role with a client-computed
+SCRAM-SHA-256 verifier so the server never sees a plaintext password, makes the role
+own its schema, and pins the role's `search_path` to that schema. Unqualified platform
+SQL therefore resolves to the caller's own tables and cannot reach another service's
+schema. The administrator, never a service role, must own the database.
+
+`ServiceDatabase::migrate` applies platform migrations (versions below 10000) and the
+service's own migrations (10000 and above) in one ordered history stored in the
+service schema, so services migrate independently.
+
+Integration tests use a disposable server named by `PANEL_TEST_DATABASE_URL` and skip
+without one; CI sets `PANEL_REQUIRE_INTEGRATION_SERVICES` so a missing server fails
+instead. Locally:
+
+```sh
+panel/scripts/dev-services.sh up
+eval "$(panel/scripts/dev-services.sh env)"
+cargo test --manifest-path panel/Cargo.toml --package panel-postgres --all-features
+panel/scripts/dev-services.sh down
+```
 
 ## Extension rules
 

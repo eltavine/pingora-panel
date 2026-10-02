@@ -28,6 +28,46 @@
       "enforcement": "identity",
       "duplicates": [
         {
+          "crate": "block-buffer",
+          "versions": [
+            "0.10.4",
+            "0.12.1"
+          ],
+          "owner": "pingora-panel-platform",
+          "reason": "sqlx 0.9.0 straddles two RustCrypto generations: sqlx-core hashes migrations with sha2 0.10 while sqlx-postgres authenticates with sha2 0.11/hmac 0.13. 0.10.4 via digest 0.10; 0.12.1 via digest 0.11.",
+          "expires_on": "2027-03-01"
+        },
+        {
+          "crate": "cpufeatures",
+          "versions": [
+            "0.2.17",
+            "0.3.1"
+          ],
+          "owner": "pingora-panel-platform",
+          "reason": "sqlx 0.9.0 straddles two RustCrypto generations: sqlx-core hashes migrations with sha2 0.10 while sqlx-postgres authenticates with sha2 0.11/hmac 0.13. 0.2.17 via sha2 0.10; 0.3.1 via sha2 0.11.",
+          "expires_on": "2027-03-01"
+        },
+        {
+          "crate": "crypto-common",
+          "versions": [
+            "0.1.6",
+            "0.2.2"
+          ],
+          "owner": "pingora-panel-platform",
+          "reason": "sqlx 0.9.0 straddles two RustCrypto generations: sqlx-core hashes migrations with sha2 0.10 while sqlx-postgres authenticates with sha2 0.11/hmac 0.13. 0.1.6 via digest 0.10; 0.2.2 via digest 0.11.",
+          "expires_on": "2027-03-01"
+        },
+        {
+          "crate": "digest",
+          "versions": [
+            "0.10.7",
+            "0.11.3"
+          ],
+          "owner": "pingora-panel-platform",
+          "reason": "sqlx 0.9.0 straddles two RustCrypto generations: sqlx-core hashes migrations with sha2 0.10 while sqlx-postgres authenticates with sha2 0.11/hmac 0.13. 0.10.7 via sha2 0.10 in sqlx-core; 0.11.3 via sha2 0.11 and hmac 0.13.",
+          "expires_on": "2027-03-01"
+        },
+        {
           "crate": "foldhash",
           "versions": [
             "0.1.5",
@@ -53,10 +93,11 @@
           "versions": [
             "0.14.5",
             "0.15.5",
+            "0.16.1",
             "0.17.1"
           ],
           "owner": "pingora-panel-platform",
-          "reason": "Inherited transitive duplicate with no unified release line: 0.14.5 via dashmap; 0.15.5 via petgraph; 0.17.1 via indexmap, lru.",
+          "reason": "Inherited transitive duplicate with no unified release line: 0.14.5 via dashmap; 0.15.5 via petgraph; 0.16.1 via sqlx-core and hashlink; 0.17.1 via indexmap, lru.",
           "expires_on": "2027-03-01"
         },
         {
@@ -67,6 +108,36 @@
           ],
           "owner": "pingora-panel-platform",
           "reason": "Inherited transitive duplicate with no unified release line: 0.7.1 via daggy; 0.8.3 via prost-build.",
+          "expires_on": "2027-03-01"
+        },
+        {
+          "crate": "rand",
+          "versions": [
+            "0.8.8",
+            "0.10.3"
+          ],
+          "owner": "pingora-panel-platform",
+          "reason": "Inherited transitive duplicate with no unified release line: 0.8.8 via pingora-core, pingora-load-balancing and pingora-runtime; 0.10.3 via sqlx-postgres.",
+          "expires_on": "2027-03-01"
+        },
+        {
+          "crate": "rand_core",
+          "versions": [
+            "0.6.4",
+            "0.10.1"
+          ],
+          "owner": "pingora-panel-platform",
+          "reason": "Inherited transitive duplicate with no unified release line: 0.6.4 via rand 0.8; 0.10.1 via rand 0.10 and getrandom 0.4.",
+          "expires_on": "2027-03-01"
+        },
+        {
+          "crate": "sha2",
+          "versions": [
+            "0.10.9",
+            "0.11.0"
+          ],
+          "owner": "pingora-panel-platform",
+          "reason": "sqlx 0.9.0 straddles two RustCrypto generations: sqlx-core hashes migrations with sha2 0.10 while sqlx-postgres authenticates with sha2 0.11/hmac 0.13. 0.10.9 via sqlx-core; 0.11.0 via sqlx-postgres and panel-domain.",
           "expires_on": "2027-03-01"
         },
         {

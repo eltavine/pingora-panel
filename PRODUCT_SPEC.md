@@ -1328,7 +1328,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | PLAT-002 | - | 服务 Capability 注册 | 0.1 | I | Administrator | platform | 执行“服务 Capability 注册”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
 | PLAT-003 | - | 内部 mTLS CA 初始化 | 0.1 | I | Administrator | platform | 执行“内部 mTLS CA 初始化”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
 | PLAT-004 | - | 内部服务证书自动轮换 | 0.1 | I | Administrator | platform | 执行“内部服务证书自动轮换”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| PLAT-005 | - | PostgreSQL Schema 写权限隔离 | 0.1 | I | Administrator | platform | 执行“PostgreSQL Schema 写权限隔离”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
+| PLAT-005 | - | PostgreSQL Schema 写权限隔离 | 0.1 | I | Administrator | platform | 执行“PostgreSQL Schema 写权限隔离”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | PLAT-006 | - | Transactional Outbox | 0.1 | I | Administrator | platform | 执行“Transactional Outbox”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
 | PLAT-007 | - | Outbox Relay | 0.1 | I | Administrator | platform | 执行“Outbox Relay”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
 | PLAT-008 | - | JetStream Stream 自动配置 | 0.1 | I | Administrator | platform | 执行“JetStream Stream 自动配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
@@ -1413,7 +1413,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | 新增团队/平台需求 | 105 |
 | 总 Feature ID | 685 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
-| 当前 `Implemented` | 3（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`） |
+| 当前 `Implemented` | 4（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-005`） |
 | 1.0 要求 `Verified` | 685 |
 
 分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 47、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。

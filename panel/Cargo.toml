@@ -12,6 +12,7 @@ members = [
     "panel-config-state-codec",
     "panel-application",
     "panel-persistence-memory",
+    "panel-postgres",
     "panel-config-json",
     "panel-ir",
     "panel-engine",
@@ -26,7 +27,7 @@ members = [
 
 [workspace.package]
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.94"
 license = "Apache-2.0"
 repository = "https://github.com/eltavine/pingora-panel"
 publish = false
@@ -42,9 +43,12 @@ gateway-grpc = { version = "=0.1.0", path = "gateway-grpc" }
 gateway-grpc-client = { version = "=0.1.0", path = "gateway-grpc-client" }
 gateway-proto-codec = { version = "=0.1.0", path = "gateway-proto-codec" }
 gateway-pingora = { version = "=0.1.0", path = "gateway-pingora" }
+getrandom = "=0.4.3"
 hex = "=0.4.3"
+hmac = "=0.13.0"
 iri-string = "=0.7.14"
 mediatype = "=0.23.0"
+pbkdf2 = { version = "=0.13.0", default-features = false, features = ["hmac"] }
 percent-encoding = "=2.3.2"
 prost = "=0.14.4"
 prost-types = "=0.14.4"
@@ -56,6 +60,7 @@ panel-config-json = { version = "=0.1.0", path = "panel-config-json" }
 panel-api = { version = "=0.1.0", path = "panel-api" }
 panel-application = { version = "=0.1.0", path = "panel-application" }
 panel-persistence-memory = { version = "=0.1.0", path = "panel-persistence-memory" }
+panel-postgres = { version = "=0.1.0", path = "panel-postgres" }
 panel-domain = { version = "=0.1.0", path = "panel-domain" }
 panel-engine = { version = "=0.2.0", path = "panel-engine" }
 panel-errors = { version = "=0.1.0", path = "panel-errors" }
@@ -70,7 +75,9 @@ serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.145"
 sha2 = "=0.11.0"
 snapshot-store-fs = { version = "=0.2.0", path = "snapshot-store-fs" }
-thiserror = "=2.0.17"
+sqlx = { version = "=0.9.0", default-features = false, features = ["chrono", "migrate", "postgres", "runtime-tokio", "tls-rustls-ring-webpki", "uuid"] }
+stringprep = "=0.1.5"
+thiserror = "=2.0.21"
 tempfile = "=3.27.0"
 tokio = { version = "=1.48.0", features = ["fs", "macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-stream = { version = "=0.1.19", features = ["net"] }
