@@ -36,6 +36,7 @@ members = [
     "automation-service",
     "observability-service",
     "panel-bootstrap",
+    "panel-api-server",
 ]
 
 [workspace.package]
@@ -57,6 +58,7 @@ chrono = { version = "=0.4.45", default-features = false, features = ["clock", "
 futures-util = "=0.3.34"
 config-grpc-client = { version = "=0.1.0", path = "config-grpc-client" }
 config-proto-codec = { version = "=0.1.0", path = "config-proto-codec" }
+config-service = { version = "=0.1.0", path = "config-service" }
 gateway-grpc = { version = "=0.1.0", path = "gateway-grpc" }
 gateway-grpc-client = { version = "=0.1.0", path = "gateway-grpc-client" }
 gateway-proto-codec = { version = "=0.1.0", path = "gateway-proto-codec" }
@@ -111,7 +113,7 @@ tokio-stream = { version = "=0.1.19", features = ["net"] }
 tokio-util = { version = "=0.7.19", features = ["rt"] }
 tower = { version = "=0.5.3", features = ["util"] }
 reqwest = { version = "=0.13.4", default-features = false, features = ["json"] }
-tower-http = { version = "=0.7.1", features = ["request-id", "trace"] }
+tower-http = { version = "=0.7.1", features = ["fs", "request-id", "set-header", "trace"] }
 utoipa = "=5.5.0"
 tonic = { version = "=0.14.6", default-features = false, features = ["codegen", "router", "transport"] }
 tonic-health = "=0.14.6"

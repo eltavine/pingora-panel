@@ -33,7 +33,7 @@
       ]
     },
     "config-service": {
-      "catalog": false,
+      "catalog": true,
       "allowed_workspace_dependencies": [
         "config-grpc-client",
         "config-proto-codec",
@@ -134,6 +134,25 @@
         "panel-errors",
         "panel-health",
         "panel-platform"
+      ]
+    },
+    "panel-api-server": {
+      "catalog": false,
+      "allowed_workspace_dependencies": [
+        "config-grpc-client",
+        "config-service",
+        "gateway-grpc",
+        "panel-api",
+        "panel-control-runtime",
+        "panel-domain",
+        "panel-engine",
+        "panel-errors",
+        "panel-health",
+        "panel-ir",
+        "panel-jetstream",
+        "panel-platform",
+        "panel-postgres",
+        "panel-service"
       ]
     },
     "panel-application": {

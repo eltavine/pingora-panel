@@ -1,0 +1,106 @@
+#![forbid(unsafe_code)]
+
+//! Composition of `panel-api`, the single public management entry point.
+//!
+//! The process serves the REST API and the web console on its public
+//! listener. Publication is delegated to `config-service`; the service
+//! directory is read from the broker. While a dependency the API needs for
+//! changes is down the process runs degraded: reads continue and changes
+//! are refused with a retryable 503.
+
+mod console;
+mod directory;
+
+use config_grpc_client::{ConfigClientConfig, ConfigPublicationClient};
+use panel_api::{router_with_config, ApiConfig, ApiState};
+use panel_control_runtime::{ControlPlaneProcess, DefaultAddresses, ProcessSettings};
+use panel_errors::{PanelError, Result};
+use panel_health::Impact;
+use panel_platform::ServiceName;
+use panel_postgres::SqlIdentifier;
+use panel_service::{require_loopback, Environment};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+
+pub const SERVICE: &str = "panel-api";
+pub const SCHEMA: &str = "identity";
+/// The public listener; loopback-only until the API authenticates callers.
+pub const HTTP_ADDRESS_ENV: &str = "PINGORA_PANEL_HTTP_ADDR";
+pub const CONFIG_URL_ENV: &str = "PINGORA_PANEL_CONFIG_URL";
+/// Directory holding the built web console; the API is served without it.
+pub const WEB_ROOT_ENV: &str = "PINGORA_PANEL_WEB_ROOT";
+
+const DEFAULT_HTTP_ADDRESS: SocketAddr =
+    SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 8080);
+const DEFAULT_CONFIG_URL: &str = "http://127.0.0.1:50061";
+const DEFAULT_WEB_ROOT: &str = "/usr/share/pingora-panel/web";
+
+pub fn default_addresses() -> DefaultAddresses {
+    DefaultAddresses {
+        ops: SocketAddr::from(([127, 0, 0, 1], 9180)),
+        grpc: SocketAddr::from(([127, 0, 0, 1], 50060)),
+    }
+}
+
+pub fn process(
+    env: &mut Environment<'_>,
+    settings: ProcessSettings,
+) -> Result<ControlPlaneProcess> {
+    let http_address = require_loopback(
+        HTTP_ADDRESS_ENV,
+        env.socket_addr(HTTP_ADDRESS_ENV, DEFAULT_HTTP_ADDRESS)?,
+    )?;
+    let config = ConfigPublicationClient::connect_lazy(
+        env.string(CONFIG_URL_ENV)?
+            .unwrap_or_else(|| DEFAULT_CONFIG_URL.into()),
+        ConfigClientConfig::default(),
+    )?;
+    let web_root = PathBuf::from(
+        env.string(WEB_ROOT_ENV)?
+            .unwrap_or_else(|| DEFAULT_WEB_ROOT.into()),
+    );
+    // Bound now so a taken port fails the start before anything else runs.
+    let listener = std::net::TcpListener::bind(http_address).map_err(|error| {
+        PanelError::precondition_failed(format!(
+            "cannot bind the public listener on {http_address}: {error}"
+        ))
+    })?;
+    listener.set_nonblocking(true).map_err(|error| {
+        PanelError::internal(format!("cannot configure the public listener: {error}"))
+    })?;
+    let config_health = config.health_check();
+    Ok(ControlPlaneProcess::new(
+        ServiceName::new(SERVICE)?,
+        env!("CARGO_PKG_VERSION"),
+        settings,
+        SqlIdentifier::new(SCHEMA)?,
+    )?
+    .with_database_impact(Impact::Degrading)
+    .with_check(Arc::new(config_health), Impact::Degrading)
+    .on_start(move |running| {
+        let api = router_with_config(
+            ApiState::new(Arc::new(config))
+                .with_health(running.health())
+                .with_directory(Arc::new(directory::RegistryDirectory::new(
+                    running.jetstream().clone(),
+                    Arc::clone(running.jetstream_settings()),
+                ))),
+            ApiConfig::default(),
+        );
+        let app = console::with_console(api, &web_root)?;
+        let listener = tokio::net::TcpListener::from_std(listener).map_err(|error| {
+            PanelError::internal(format!("cannot serve the public listener: {error}"))
+        })?;
+        let address = listener.local_addr().ok();
+        let shutdown = running.shutdown_token();
+        running.spawn(async move {
+            if let Err(error) = axum::serve(listener, app)
+                .with_graceful_shutdown(shutdown.cancelled_owned())
+                .await
+            {
+                tracing::error!(%error, "public listener failed");
+            }
+        });
+        tracing::info!(address = ?address, "public API listening");
+        Ok(())
+    }))
+}
