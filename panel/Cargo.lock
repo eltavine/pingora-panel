@@ -1777,6 +1777,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "panel-bootstrap"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "panel-control-runtime",
+ "panel-errors",
+ "panel-jetstream",
+ "panel-postgres",
+ "panel-service",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "panel-config-domain"
 version = "0.1.0"
 dependencies = [

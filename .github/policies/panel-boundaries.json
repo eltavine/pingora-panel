@@ -112,6 +112,16 @@
         "panel-ir"
       ]
     },
+    "panel-bootstrap": {
+      "catalog": false,
+      "allowed_workspace_dependencies": [
+        "panel-control-runtime",
+        "panel-errors",
+        "panel-jetstream",
+        "panel-postgres",
+        "panel-service"
+      ]
+    },
     "panel-config-domain": {
       "catalog": true,
       "allowed_workspace_dependencies": []

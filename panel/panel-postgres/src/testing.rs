@@ -21,6 +21,7 @@ pub const REQUIRE_ENV: &str = "PANEL_REQUIRE_INTEGRATION_SERVICES";
 /// A freshly created database plus the roles bootstrapped into it.
 pub struct TestDatabase {
     admin: PgConnectOptions,
+    admin_url: String,
     name: SqlIdentifier,
     prefix: String,
     roles: Vec<SqlIdentifier>,
@@ -44,12 +45,31 @@ impl TestDatabase {
             .execute(&mut connection)
             .await
             .expect("test database can be created");
+        let (base, query) = url
+            .split_once('?')
+            .map_or((url.as_str(), None), |(base, query)| (base, Some(query)));
+        let server = base.rsplit_once('/').map_or(base, |(server, _)| server);
+        let admin_url = match query {
+            Some(query) => format!("{server}/{name}?{query}"),
+            None => format!("{server}/{name}"),
+        };
         Some(Self {
             admin,
+            admin_url,
             name,
             prefix: format!("t{}", &suffix[..10]),
             roles: Vec::new(),
         })
+    }
+
+    /// The administrator's URL for this database, including credentials.
+    pub fn admin_url(&self) -> &str {
+        &self.admin_url
+    }
+
+    /// Drops `role` with the database, for roles a test created itself.
+    pub fn adopt_role(&mut self, role: SqlIdentifier) {
+        self.roles.push(role);
     }
 
     /// A cluster-unique role name; roles outlive databases, so tests must

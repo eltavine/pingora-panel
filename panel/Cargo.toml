@@ -33,6 +33,7 @@ members = [
     "config-service",
     "automation-service",
     "observability-service",
+    "panel-bootstrap",
 ]
 
 [workspace.package]

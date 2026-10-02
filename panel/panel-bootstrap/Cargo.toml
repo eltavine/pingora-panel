@@ -1,0 +1,22 @@
+[package]
+name = "panel-bootstrap"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-nats.workspace = true
+panel-control-runtime.workspace = true
+panel-errors.workspace = true
+panel-jetstream.workspace = true
+panel-postgres.workspace = true
+panel-service.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+panel-jetstream = { workspace = true, features = ["test-support"] }
+panel-postgres = { workspace = true, features = ["test-support"] }

@@ -1,7 +1,10 @@
-use crate::{storage_error, ScramVerifier, SqlIdentifier};
+use crate::{storage_error, RoleSecret, ScramVerifier, SqlIdentifier};
 use panel_errors::{PanelError, Result};
-use sqlx::{postgres::PgConnection, AssertSqlSafe, Connection};
-use std::collections::BTreeSet;
+use sqlx::{
+    postgres::{PgConnectOptions, PgConnection},
+    AssertSqlSafe, Connection,
+};
+use std::{collections::BTreeSet, str::FromStr};
 
 /// One service's database identity: a login role that owns one schema.
 #[derive(Clone, Debug)]
@@ -54,6 +57,23 @@ impl DatabaseBootstrap {
     pub fn with_service(mut self, service: ServiceRole) -> Self {
         self.services.push(service);
         self
+    }
+
+    /// Connects as the administrator named by `url` and applies the
+    /// bootstrap.
+    pub async fn apply_at(&self, url: &str, password: Option<&RoleSecret>) -> Result<()> {
+        let mut options = PgConnectOptions::from_str(url)
+            .map_err(|_| PanelError::invalid_argument("database URL is not a PostgreSQL URL"))?
+            .application_name("panel-bootstrap");
+        if let Some(password) = password {
+            options = options.password(password.expose());
+        }
+        let mut admin = PgConnection::connect_with(&options)
+            .await
+            .map_err(storage_error)?;
+        let applied = self.apply(&mut admin).await;
+        let _ = admin.close().await;
+        applied
     }
 
     pub async fn apply(&self, admin: &mut PgConnection) -> Result<()> {
