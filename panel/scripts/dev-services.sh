@@ -39,14 +39,23 @@ start_postgres() {
   fi
 }
 
+# Runs a command in a new session so it outlives the invoking shell's process group.
+detach() {
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "$@" </dev/null >/dev/null 2>&1 &
+  else
+    perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV or die "exec: $!"' "$@" </dev/null >/dev/null 2>&1 &
+  fi
+}
+
 start_nats() {
   require nats-server
   if [[ -f "$root/nats.pid" ]] && kill -0 "$(cat "$root/nats.pid")" 2>/dev/null; then
     return
   fi
   mkdir -p "$root/nats"
-  nohup nats-server --jetstream --store_dir "$root/nats" --addr 127.0.0.1 \
-    --port "$nats_port" --pid "$root/nats.pid" --log "$root/nats.log" >/dev/null 2>&1 &
+  detach nats-server --jetstream --store_dir "$root/nats" --addr 127.0.0.1 \
+    --port "$nats_port" --pid "$root/nats.pid" --log "$root/nats.log"
   for _ in $(seq 1 50); do
     if [[ -f "$root/nats.pid" ]] && nc -z 127.0.0.1 "$nats_port" 2>/dev/null; then
       return
