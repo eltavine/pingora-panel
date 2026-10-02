@@ -1,4 +1,4 @@
-use crate::{files::write_atomic, pem, TrustDomain, WorkloadIdentity};
+use crate::{files::write_atomic, pem, CredentialFiles, TrustDomain, WorkloadIdentity};
 use chrono::{DateTime, Utc};
 use panel_context::ServiceName;
 use panel_errors::{PanelError, Result};
@@ -25,6 +25,15 @@ pub struct IssuedCredentials {
     pub serial: String,
     pub not_before: DateTime<Utc>,
     pub not_after: DateTime<Utc>,
+}
+
+/// A service whose credentials the authority keeps current.
+#[derive(Clone, Debug)]
+pub struct IssuanceTarget {
+    pub service: ServiceName,
+    pub files: CredentialFiles,
+    /// Further names peers may reach the service by, such as its host name.
+    pub alternative_names: Vec<String>,
 }
 
 /// The installation's certificate authority.
@@ -172,6 +181,26 @@ impl CertificateAuthority {
     /// The authority certificate services trust.
     pub fn certificate_pem(&self) -> &str {
         &self.certificate_pem
+    }
+
+    /// Issues credentials valid for `lifetime` to every target whose identity
+    /// is missing or due for renewal, and returns the services renewed.
+    pub fn renew_due(
+        &self,
+        targets: &[IssuanceTarget],
+        lifetime: Duration,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<ServiceName>> {
+        let mut renewed = Vec::new();
+        for target in targets {
+            if target.files.renewal_due(now)? {
+                let issued =
+                    self.issue(&target.service, &target.alternative_names, lifetime, now)?;
+                target.files.write(&issued, self.certificate_pem())?;
+                renewed.push(target.service.clone());
+            }
+        }
+        Ok(renewed)
     }
 
     /// Issues a fresh key and certificate for `service`, valid for

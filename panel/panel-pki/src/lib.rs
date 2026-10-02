@@ -16,6 +16,8 @@ mod files;
 mod identity;
 mod pem;
 
-pub use authority::{CertificateAuthority, IssuedCredentials, DEFAULT_AUTHORITY_VALIDITY};
+pub use authority::{
+    CertificateAuthority, IssuanceTarget, IssuedCredentials, DEFAULT_AUTHORITY_VALIDITY,
+};
 pub use files::{CredentialFiles, Validity, IDENTITY_FILE, TRUST_FILE};
 pub use identity::{TrustDomain, WorkloadIdentity, DEFAULT_TRUST_DOMAIN};

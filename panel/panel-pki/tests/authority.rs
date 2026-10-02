@@ -2,7 +2,9 @@
 
 use chrono::{Duration as Span, Utc};
 use panel_context::ServiceName;
-use panel_pki::{CertificateAuthority, CredentialFiles, TrustDomain, DEFAULT_AUTHORITY_VALIDITY};
+use panel_pki::{
+    CertificateAuthority, CredentialFiles, IssuanceTarget, TrustDomain, DEFAULT_AUTHORITY_VALIDITY,
+};
 use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use std::{path::PathBuf, time::Duration};
 use webpki::{anchor_from_trusted_cert, EndEntityCert, KeyUsage};
@@ -201,4 +203,41 @@ fn credential_files_are_atomic_private_and_renewed_at_two_thirds_of_their_lifeti
             .mode();
         assert_eq!(mode & 0o777, 0o600);
     }
+}
+
+#[test]
+fn renewal_issues_only_missing_or_due_credentials() {
+    let directory = Directory::new("renew");
+    let now = Utc::now();
+    let (authority, _) = CertificateAuthority::load_or_create(
+        &directory.0.join("authority"),
+        TrustDomain::default(),
+        DEFAULT_AUTHORITY_VALIDITY,
+        now,
+    )
+    .unwrap();
+    let targets: Vec<IssuanceTarget> = ["panel-api", "config-service"]
+        .into_iter()
+        .map(|service| IssuanceTarget {
+            service: ServiceName::new(service).unwrap(),
+            files: CredentialFiles::new(directory.0.join(service)),
+            alternative_names: vec![service.to_owned()],
+        })
+        .collect();
+    let lifetime = Duration::from_secs(3 * 3600);
+    assert_eq!(
+        authority.renew_due(&targets, lifetime, now).unwrap().len(),
+        2
+    );
+    assert!(authority
+        .renew_due(&targets, lifetime, now)
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        authority
+            .renew_due(&targets, lifetime, now + Span::hours(2))
+            .unwrap()
+            .len(),
+        2
+    );
 }
