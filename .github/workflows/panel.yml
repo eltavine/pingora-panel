@@ -7,6 +7,8 @@ on:
       - ".cargo/config.toml"
       - ".rustfmt.toml"
       - "panel/**"
+      # The web console has its own workflow.
+      - "!panel/web/**"
       - ".github/policies/panel-boundaries.json"
       - ".github/scripts/check-cargo-machete-workspace.sh"
       - ".github/scripts/check-panel-boundaries.sh"
@@ -47,6 +49,8 @@ on:
       - ".cargo/config.toml"
       - ".rustfmt.toml"
       - "panel/**"
+      # The web console has its own workflow.
+      - "!panel/web/**"
       - ".github/policies/panel-boundaries.json"
       - ".github/scripts/check-cargo-machete-workspace.sh"
       - ".github/scripts/check-panel-boundaries.sh"

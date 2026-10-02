@@ -1,0 +1,3 @@
+allowBuilds:
+  # Vue 3 needs no install-time switch; every other build script stays blocked.
+  vue-demi: false

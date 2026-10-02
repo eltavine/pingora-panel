@@ -138,6 +138,14 @@ cargo test --manifest-path panel/Cargo.toml --package panel-postgres --all-featu
 panel/scripts/dev-services.sh down
 ```
 
+## Web console
+
+`panel/web` is the Vue console served by the management API. It is generated from the
+official `create-vue` and shadcn-vue tooling, renders feature modules that register their
+own routes and navigation, and calls the API through a client generated from the reviewed
+OpenAPI fixture. See [`web/README.md`](web/README.md) and
+[the console decision](../docs/adr/0005-web-console-stack.md).
+
 ## Extension rules
 
 1. Add a new engine without changing the runtime by implementing `DataPlaneAdapter` in a new leaf crate.

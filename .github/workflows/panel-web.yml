@@ -1,0 +1,108 @@
+name: panel-web
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "panel/web/**"
+      - "panel/panel-api/tests/fixtures/openapi.json"
+      - ".github/workflows/panel-web.yml"
+  pull_request:
+    paths:
+      - "panel/web/**"
+      - "panel/panel-api/tests/fixtures/openapi.json"
+      - ".github/workflows/panel-web.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: panel/web
+
+jobs:
+  checks:
+    name: Type-check, lint, unit tests and build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm from packageManager
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: panel/web/package.json
+
+      - name: Install Node.js 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          cache: pnpm
+          cache-dependency-path: panel/web/pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate the API client from the reviewed OpenAPI contract
+        run: pnpm codegen
+
+      - name: Type-check
+        run: pnpm type-check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Check formatting
+        run: pnpm format:check
+
+      - name: Run unit tests
+        run: pnpm exec vitest run
+
+      - name: Build
+        run: pnpm build-only
+
+  e2e:
+    name: Playwright (desktop and mobile)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm from packageManager
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: panel/web/package.json
+
+      - name: Install Node.js 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+          cache: pnpm
+          cache-dependency-path: panel/web/pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install browsers matching the locked Playwright release
+        run: pnpm exec playwright install --with-deps chromium webkit
+
+      - name: Run end-to-end tests
+        run: pnpm test:e2e
+
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report
+          path: panel/web/playwright-report
+          retention-days: 7

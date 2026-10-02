@@ -555,6 +555,8 @@ ppanel audit list --correlation-id req_01...
 
 GUI 信息架构包括 Dashboard、Sites、Routes、Upstreams、Certificates、Config Studio、Lua、Deployments、Approvals、Traffic、Logs、Alerts、Containers、Host、Backups、Team、Audit 与 Settings。所有状态明确显示 revision、hash、数据时间和 loading/error/empty/stale 状态；配置发布必须展示 Diff、验证结果、影响范围和审批状态。
 
+视觉规范：简约 shadcn 风格（shadcn-vue + Reka UI + Tailwind CSS v4），浅色与深色主题的全部颜色 token 均为无彩色黑白灰；所有导航项、操作、状态与空状态均配 Lucide 图标。状态以图标加文字表达，不单独依赖颜色；正文对比度不低于 4.5:1，输入边框与焦点环不低于 3:1（WCAG 2.2 AA）。字体自托管，不依赖第三方源。破坏性或不可逆操作必须二次确认。技术栈与依据见 [ADR 0005](docs/adr/0005-web-console-stack.md)。
+
 ---
 
 ## 10. 身份、权限与审批
@@ -1287,7 +1289,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | IAM-013 | 566 | Secure Cookie | 0.4 | A/C/G | Administrator | identity | 执行“Secure Cookie”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | SEC-034 | 567 | 后端监听 localhost/Unix Socket | 0.4 | A/C/G | Operator | policy-engine | 执行“后端监听 localhost/Unix Socket”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | SEC-035 | 568 | Web API 操作审计 | 0.4 | A/C/G | Operator | policy-engine | 执行“Web API 操作审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| GUI-001 | 569 | UI 配置编辑器 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“UI 配置编辑器”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Planned | No |
+| GUI-001 | 569 | UI 配置编辑器 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“UI 配置编辑器”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | In Progress | No |
 | GUI-002 | 570 | UI DSL Monaco 高亮 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“UI DSL Monaco 高亮”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Planned | No |
 | GUI-003 | 571 | UI Lua Monaco 高亮 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“UI Lua Monaco 高亮”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Planned | No |
 | GUI-004 | 572 | UI 配置错误行定位 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“UI 配置错误行定位”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Planned | No |
@@ -1295,10 +1297,10 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | GUI-006 | 574 | UI 网站状态卡片 | 0.8 | G/S | Viewer | web | 在 Web GUI 完成“UI 网站状态卡片”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Planned | No |
 | GUI-007 | 575 | UI 证书到期提示 | 0.8 | G/S | Viewer | web | 在 Web GUI 完成“UI 证书到期提示”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Planned | No |
 | GUI-008 | 576 | UI 配置 Diff | 0.8 | A/C/G | Viewer | web | 查询“UI 配置 Diff”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | Yes |
-| GUI-009 | 577 | UI 发布确认 | 0.8 | A/C/G | Operator | web | 执行“UI 发布确认”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
+| GUI-009 | 577 | UI 发布确认 | 0.8 | A/C/G | Operator | web | 执行“UI 发布确认”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | Yes |
 | GUI-010 | 578 | UI 回滚确认 | 0.8 | A/C/G | Operator | web | 执行“UI 回滚确认”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| GUI-011 | 579 | 暗色模式 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“暗色模式”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Planned | No |
-| GUI-012 | 580 | 响应式布局 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“响应式布局”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Planned | No |
+| GUI-011 | 579 | 暗色模式 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“暗色模式”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Implemented | No |
+| GUI-012 | 580 | 响应式布局 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“响应式布局”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Implemented | No |
 | IAM-014 | - | 一次性 Bootstrap Token | 0.4 | A/C/G/I | Administrator | identity | 执行“一次性 Bootstrap Token”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | IAM-015 | - | OIDC Provider 创建与更新 | 0.4 | A/C/G/I | Administrator | identity | 执行“OIDC Provider 创建与更新”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | IAM-016 | - | OIDC Authorization Code + PKCE | 0.4 | A/C/G/I | Administrator | identity | 执行“OIDC Authorization Code + PKCE”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
@@ -1413,7 +1415,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | 新增团队/平台需求 | 105 |
 | 总 Feature ID | 685 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
-| 当前 `Implemented` | 6（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-005`、`PLAT-006`、`PLAT-007`） |
+| 当前 `Implemented` | 8（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-005`、`PLAT-006`、`PLAT-007`；GUI：`GUI-011`、`GUI-012`） |
 | 1.0 要求 `Verified` | 685 |
 
 分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 47、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。
