@@ -99,8 +99,7 @@ pub struct ContentHash(String);
 
 impl ContentHash {
     pub fn from_bytes(bytes: &[u8]) -> Self {
-        let digest = Sha256::digest(bytes);
-        Self(format!("{digest:x}"))
+        Self(hex::encode(Sha256::digest(bytes)))
     }
 
     pub fn from_hex(value: impl Into<String>) -> Result<Self, DomainError> {

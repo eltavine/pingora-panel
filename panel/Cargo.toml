@@ -42,6 +42,7 @@ gateway-grpc = { version = "=0.1.0", path = "gateway-grpc" }
 gateway-grpc-client = { version = "=0.1.0", path = "gateway-grpc-client" }
 gateway-proto-codec = { version = "=0.1.0", path = "gateway-proto-codec" }
 gateway-pingora = { version = "=0.1.0", path = "gateway-pingora" }
+hex = "=0.4.3"
 iri-string = "=0.7.14"
 mediatype = "=0.23.0"
 percent-encoding = "=2.3.2"
@@ -67,7 +68,7 @@ pingora-http = { version = "=0.9.0", path = "../pingora-http", default-features 
 pingora-load-balancing = { version = "=0.9.0", path = "../pingora-load-balancing", default-features = false }
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.145"
-sha2 = "=0.10.9"
+sha2 = "=0.11.0"
 snapshot-store-fs = { version = "=0.2.0", path = "snapshot-store-fs" }
 thiserror = "=2.0.17"
 tempfile = "=3.27.0"
