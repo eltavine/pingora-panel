@@ -439,6 +439,18 @@
               "maxLength": 256,
               "minLength": 1
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The active configuration this activation replaces, as an entity tag of its content hash, or \"*\" for any. Mismatches answer 412. An alternative to expected_active_hash; send only one.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "requestBody": {
@@ -455,6 +467,12 @@
           "200": {
             "description": "",
             "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Content hash of the configuration now active, for the next If-Match"
+              },
               "x-request-id": {
                 "schema": {
                   "type": "string"
@@ -1091,12 +1109,30 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "description": "Entity tags of receipt representations the client holds; a current one answers 304.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
           "200": {
             "description": "",
             "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Strong validator of the completed receipt, which never changes"
+              },
               "x-request-id": {
                 "schema": {
                   "type": "string"
@@ -1130,6 +1166,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/IdempotencyReceiptPendingResponse"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The receipt named by If-None-Match is current.",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -1417,12 +1463,30 @@
               "maxLength": 256,
               "minLength": 1
             }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "description": "Entity tags of status representations the client holds; a current one answers 304.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
           "200": {
             "description": "",
             "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Strong validator of this representation"
+              },
               "x-request-id": {
                 "schema": {
                   "type": "string"
@@ -1433,6 +1497,22 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GatewayStatusResponse"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current.",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Strong validator of the current representation"
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }

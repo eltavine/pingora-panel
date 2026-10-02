@@ -1344,7 +1344,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | PLAT-016 | - | Job 进度事件 | 0.1 | I | Administrator | platform | 执行“Job 进度事件”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
 | PLAT-017 | - | 持久化任务调度器 | 0.1 | I | Administrator | platform | 执行“持久化任务调度器”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
 | PLAT-018 | - | Maintenance Window | 0.1 | I | Administrator | platform | 执行“Maintenance Window”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| PLAT-019 | - | ETag/If-Match 乐观并发 | 0.1 | I | Administrator | platform | 执行“ETag/If-Match 乐观并发”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
+| PLAT-019 | - | ETag/If-Match 乐观并发 | 0.1 | I | Administrator | platform | 执行“ETag/If-Match 乐观并发”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | PLAT-020 | - | 全局 Request-ID | 0.1 | I | Administrator | platform | 执行“全局 Request-ID”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | PLAT-021 | - | Correlation/Causation ID 传播 | 0.1 | I | Administrator | platform | 执行“Correlation/Causation ID 传播”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | PLAT-022 | - | 服务协议版本协商 | 0.1 | I | Administrator | platform | 查询“服务协议版本协商”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | Yes |
@@ -1415,7 +1415,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | 新增团队/平台需求 | 105 |
 | 总 Feature ID | 685 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
-| 当前 `Implemented` | 19（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`、`PLAT-005`～`PLAT-012`、`PLAT-020`～`PLAT-024`；GUI：`GUI-011`、`GUI-012`） |
+| 当前 `Implemented` | 20（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`、`PLAT-005`～`PLAT-012`、`PLAT-019`～`PLAT-024`；GUI：`GUI-011`、`GUI-012`） |
 | 1.0 要求 `Verified` | 685 |
 
 分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 47、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。

@@ -7,6 +7,7 @@
 //! transports are injected through application-owned ports.
 
 mod admission;
+mod conditional;
 mod config;
 mod contract;
 mod error;

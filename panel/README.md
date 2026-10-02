@@ -186,6 +186,17 @@ caller start their own correlation. `EventOrigin::scoped` and
 `EventOrigin::caused_by` place the same identity in CloudEvents
 `correlationid`, `causationid`, `traceparent` and `tracestate`.
 
+## Conditional requests
+
+Responses that clients poll or replay carry strong entity tags (RFC 9110
+section 8.8.3) and `Cache-Control: no-cache`, so a client revalidates with
+`If-None-Match` and receives `304 Not Modified` while nothing changed. An
+activation may state the configuration it replaces as `If-Match` with the
+active content hash instead of `expected_active_hash`; the precondition is
+evaluated before the activation and fails with `412 Precondition Failed`, and
+the gateway's compare-and-swap still refuses a change made since. The
+response's `ETag` is the new active hash, ready for the next `If-Match`.
+
 ## Service-owned PostgreSQL schemas
 
 Each service connects as a login role that owns exactly one schema. `DatabaseBootstrap`
