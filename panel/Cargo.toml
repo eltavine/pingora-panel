@@ -11,6 +11,7 @@ members = [
     "panel-config-domain",
     "panel-config-state-codec",
     "panel-application",
+    "panel-outbox",
     "panel-persistence-memory",
     "panel-postgres",
     "panel-config-json",
@@ -36,6 +37,7 @@ publish = false
 arc-swap = "=1.9.2"
 axum = "=0.8.9"
 async-trait = "=0.1.92"
+backon = { version = "=1.6.0", default-features = false, features = ["std"] }
 base64 = "=0.22.1"
 chrono = { version = "=0.4.45", default-features = false, features = ["clock", "std"] }
 futures-util = "=0.3.34"
@@ -59,6 +61,7 @@ panel-config-state-codec = { version = "=0.1.0", path = "panel-config-state-code
 panel-config-json = { version = "=0.1.0", path = "panel-config-json" }
 panel-api = { version = "=0.1.0", path = "panel-api" }
 panel-application = { version = "=0.1.0", path = "panel-application" }
+panel-outbox = { version = "=0.1.0", path = "panel-outbox" }
 panel-persistence-memory = { version = "=0.1.0", path = "panel-persistence-memory" }
 panel-postgres = { version = "=0.1.0", path = "panel-postgres" }
 panel-domain = { version = "=0.1.0", path = "panel-domain" }

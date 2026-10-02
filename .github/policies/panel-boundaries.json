@@ -151,6 +151,13 @@
         "panel-domain"
       ]
     },
+    "panel-outbox": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-errors",
+        "panel-events"
+      ]
+    },
     "panel-persistence-memory": {
       "catalog": true,
       "allowed_workspace_dependencies": [
@@ -181,15 +188,16 @@
     ],
     "pingora_dependency_owner": "gateway-pingora",
     "engine_transport_storage_neutral_members": [
-      "panel-config-domain",
       "panel-application",
+      "panel-config-domain",
       "panel-context",
       "panel-domain",
       "panel-engine",
       "panel-errors",
       "panel-events",
       "panel-gateway-runtime",
-      "panel-ir"
+      "panel-ir",
+      "panel-outbox"
     ],
     "forbidden_neutral_dependencies": [
       "async-nats",
