@@ -47,11 +47,7 @@ validated_name!(
     validate_event_type
 );
 
-validated_name!(
-    /// A service identity such as `config-service`.
-    ServiceName,
-    validate_component_name
-);
+pub use panel_context::ServiceName;
 
 validated_name!(
     /// A durable consumer identity. Durable names cannot contain subject
@@ -141,19 +137,7 @@ fn validate_event_type(value: &str) -> Result<()> {
 }
 
 fn validate_component_name(value: &str) -> Result<()> {
-    let bytes = value.as_bytes();
-    let valid = (1..=63).contains(&bytes.len())
-        && bytes[0].is_ascii_lowercase()
-        && bytes[bytes.len() - 1] != b'-'
-        && bytes
-            .iter()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'-');
-    if !valid {
-        return Err(PanelError::invalid_argument(
-            "component names must match [a-z][a-z0-9-]{0,62} and must not end with '-'",
-        ));
-    }
-    Ok(())
+    ServiceName::new(value).map(drop)
 }
 
 fn validate_aggregate_type(value: &str) -> Result<()> {

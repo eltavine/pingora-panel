@@ -136,6 +136,56 @@ impl<'de> Deserialize<'de> for RequestDeadline {
     }
 }
 
+/// A service identity such as `config-service`: a lowercase DNS-label-like
+/// name that maps onto broker subjects and durable names without escaping.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct ServiceName(String);
+
+impl ServiceName {
+    pub const MAX_BYTES: usize = 63;
+
+    pub fn new(value: impl Into<String>) -> Result<Self> {
+        let value = value.into();
+        if !is_component_name(&value) {
+            return Err(PanelError::invalid_argument(
+                "component names must match [a-z][a-z0-9-]{0,62} and must not end with '-'",
+            ));
+        }
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// `[a-z][a-z0-9-]{0,62}` without a trailing `-`.
+pub fn is_component_name(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    (1..=ServiceName::MAX_BYTES).contains(&bytes.len())
+        && bytes[0].is_ascii_lowercase()
+        && bytes[bytes.len() - 1] != b'-'
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'-')
+}
+
+impl fmt::Display for ServiceName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for ServiceName {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Self::new(String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
 /// The identity of one request as it crosses surfaces, services and events.
 ///
 /// The request ID names this hop; the correlation ID is shared by every
