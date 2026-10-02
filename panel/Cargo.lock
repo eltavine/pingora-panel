@@ -2023,12 +2023,16 @@ name = "panel-bootstrap"
 version = "0.1.0"
 dependencies = [
  "async-nats",
+ "chrono",
+ "panel-context",
  "panel-control-runtime",
  "panel-errors",
  "panel-jetstream",
+ "panel-pki",
  "panel-postgres",
  "panel-service",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 

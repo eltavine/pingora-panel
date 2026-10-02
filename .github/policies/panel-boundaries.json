@@ -177,9 +177,11 @@
     "panel-bootstrap": {
       "catalog": false,
       "allowed_workspace_dependencies": [
+        "panel-context",
         "panel-control-runtime",
         "panel-errors",
         "panel-jetstream",
+        "panel-pki",
         "panel-postgres",
         "panel-service"
       ]

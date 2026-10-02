@@ -9,12 +9,16 @@ publish.workspace = true
 
 [dependencies]
 async-nats.workspace = true
+chrono.workspace = true
+panel-context.workspace = true
 panel-control-runtime.workspace = true
 panel-errors.workspace = true
 panel-jetstream.workspace = true
+panel-pki.workspace = true
 panel-postgres.workspace = true
 panel-service.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]

@@ -1,9 +1,17 @@
 #![forbid(unsafe_code)]
 
-//! One-shot, idempotent provisioning of an installation: one login role and
-//! schema per service in PostgreSQL, and the event streams and service
-//! registry in JetStream. Rerunning it applies the current role passwords,
-//! so rotating a secret is a rerun.
+//! Idempotent provisioning of an installation: one login role and schema
+//! per service in PostgreSQL, and the event streams and service registry in
+//! JetStream. Rerunning it applies the current role passwords, so rotating
+//! a secret is a rerun. Its `pki` mode creates the internal certificate
+//! authority and keeps every service's mutual TLS credentials current.
+
+mod pki;
+
+pub use pki::{
+    PkiPlan, CERTIFICATE_LIFETIME_MS_ENV, PKI_CHECK_INTERVAL_MS_ENV, PKI_CREDENTIALS_ENV,
+    PKI_DIR_ENV,
+};
 
 use panel_control_runtime::NATS_URL_ENV;
 use panel_errors::Result;
