@@ -1,8 +1,13 @@
-use crate::{HealthRegistry, HealthReport, ServiceMode};
+use crate::{HealthRegistry, HealthReport, HealthStatus, ServiceMode};
 use std::{sync::Arc, time::Duration};
-use tokio::{sync::watch, task::JoinHandle, time::MissedTickBehavior};
+use tokio::{sync::watch, task::JoinHandle};
 
-/// Re-evaluates a registry on a fixed interval and publishes each report.
+/// How soon an unhealthy service is evaluated again, so that startup and
+/// recovery are reported promptly.
+const UNHEALTHY_RECHECK: Duration = Duration::from_millis(500);
+
+/// Re-evaluates a registry and publishes each report: at the given interval
+/// while healthy, and more often while any check fails or warns.
 pub struct HealthMonitor {
     registry: Arc<HealthRegistry>,
     interval: Duration,
@@ -18,18 +23,21 @@ impl HealthMonitor {
     pub fn spawn(self) -> (HealthWatch, JoinHandle<()>) {
         let (sender, receiver) = watch::channel(HealthReport::starting(self.registry.identity()));
         let task = tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(self.interval);
-            ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
             loop {
-                tokio::select! {
-                    _ = ticker.tick() => {}
-                    () = sender.closed() => return,
-                }
                 let report = tokio::select! {
                     report = self.registry.evaluate() => report,
                     () = sender.closed() => return,
                 };
+                let delay = if report.status() == HealthStatus::Pass {
+                    self.interval
+                } else {
+                    self.interval.min(UNHEALTHY_RECHECK)
+                };
                 sender.send_replace(report);
+                tokio::select! {
+                    () = tokio::time::sleep(delay) => {}
+                    () = sender.closed() => return,
+                }
             }
         });
         (HealthWatch { receiver }, task)
@@ -123,6 +131,36 @@ mod tests {
             .await
             .expect("monitor stops when unobserved")
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn unhealthy_services_are_rechecked_sooner_than_the_interval() {
+        let switch = Arc::new(Switch(AtomicBool::new(false)));
+        let registry = HealthRegistry::new(ServiceIdentity::new("panel-api", "0.1.0")).register(
+            Arc::clone(&switch) as Arc<dyn HealthCheck>,
+            Impact::Required,
+        );
+        let (mut watch, task) =
+            HealthMonitor::new(Arc::new(registry), Duration::from_secs(3600)).spawn();
+        while !watch
+            .current()
+            .checks()
+            .contains_key("postgresql:responseTime")
+        {
+            assert!(watch.changed().await);
+        }
+        assert_eq!(watch.mode(), ServiceMode::Unavailable);
+
+        switch.0.store(true, Ordering::SeqCst);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while watch.mode() != ServiceMode::Normal {
+                assert!(watch.changed().await);
+            }
+        })
+        .await
+        .expect("recovery is noticed without waiting for the full interval");
+        drop(watch);
+        task.await.unwrap();
     }
 
     #[test]
