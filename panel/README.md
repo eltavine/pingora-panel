@@ -19,6 +19,7 @@ gateway-pingora -> panel-engine::DataPlaneAdapter
 gateway-proto-codec -> panel-contracts + panel-domain + panel-ir
 panel-event-codec -> panel-contracts + panel-events
 panel-health (no workspace dependencies)
+panel-jobs -> panel-context + panel-errors
 panel-platform -> panel-context + panel-errors
 panel-platform-codec -> panel-contracts + panel-platform
 panel-service -> panel-health + panel-platform-codec + panel-contracts
@@ -34,7 +35,8 @@ panel-control-runtime -> panel-postgres + panel-jetstream + panel-outbox + panel
 gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC/Proto adapters + REST/compiler adapters
 config-service -> panel-control-runtime + gateway-grpc-client + panel-config-json + config-proto-codec
 panel-api-server -> panel-control-runtime + panel-api + config-grpc-client
-automation-service, observability-service -> panel-control-runtime
+automation-service -> panel-control-runtime + panel-jobs + panel-postgres + panel-events
+observability-service -> panel-control-runtime
 panel-bootstrap -> panel-postgres + panel-jetstream
 ```
 
@@ -52,6 +54,7 @@ panel-bootstrap -> panel-postgres + panel-jetstream
 | `panel-platform-codec` | Protobuf form of service descriptors | Registries, transports, Pingora |
 | `panel-service` | Liveness/readiness endpoints, gRPC health and `ServiceInfo`, peer negotiation, trace metadata, settings, signals and logging shared by service processes | Storage, brokers, application rules, Pingora |
 | `panel-control-runtime` | Composition of control-plane processes: lazy dependencies, migrations, registration, outbox relay leadership, health and graceful shutdown | Application rules, Pingora |
+| `panel-jobs` | Durable job model, leasing worker, retry policy, RFC 5545 schedules and maintenance windows, and an in-memory store | Storage, transports, Pingora |
 | `panel-outbox` | Ordered at-least-once outbox relay over `OutboxSource`, `OutboxWakeup` and `EventPublisher` ports | Storage, brokers, Pingora |
 | `panel-postgres` | Service schema ownership, SCRAM role bootstrap, per-schema migrations, the transactional outbox, the idempotent-consumer inbox and the database health check | Application rules, transports, Pingora |
 | `panel-jetstream` | Stream provisioning, deduplicated CloudEvents publication, durable consumers, dead letters, targeted replay and the broker health check | Storage, application rules, Pingora |
@@ -70,7 +73,8 @@ panel-bootstrap -> panel-postgres + panel-jetstream
 | `gateway-grpc-client` | Tonic client adapter implementing `panel-application::GatewayPort`, and the gateway health check | HTTP, storage, identity, generated Proto outside this adapter |
 | `config-service` | Publication API, PostgreSQL activation receipts and the `config` schema | HTTP, Pingora |
 | `panel-api-server` | The `panel-api` process: public REST and web console, degraded admission and the service directory | Storage implementation, Pingora |
-| `automation-service`, `observability-service` | Service processes owning the `automation` and `observability` schemas | Pingora |
+| `automation-service` | PostgreSQL job store with outbox events, worker and scheduler in the `automation` schema | HTTP, Pingora |
+| `observability-service` | Service process owning the `observability` schema | Pingora |
 | `panel-bootstrap` | Idempotent provisioning of service roles, schemas, streams and the service registry | Application rules, Pingora |
 | `gatewayd` | Dependency construction, REST/gRPC adapter composition, bind/readiness policies, environment configuration, process clock, worker executor and standard gRPC Health | Business rules |
 
@@ -127,6 +131,15 @@ active configuration receives the desired one, and a newer configuration
 prepared here and confirmed by the gateway becomes the desired one. Any other
 configuration is quarantined: publication answers `UNAVAILABLE` and
 readiness reports the service degraded until an operator resolves it.
+
+`automation-service` runs durable jobs
+([decision](../docs/adr/0008-durable-jobs.md)): a worker leases jobs of the
+kinds it has handlers for, renews the lease while a job runs, stops a job
+cooperatively when it is cancelled, retries retryable failures with
+exponential backoff and records progress; a scheduler enqueues one job per
+occurrence of each RFC 5545 schedule, and jobs that require a maintenance
+window wait until an occurrence of it is open. Every job change is published
+as an `automation.job.<change>` CloudEvent through the outbox.
 
 A service whose degrading dependency is down keeps serving reads and refuses
 changes with `503 Service Unavailable`, `Retry-After` and a retryable
