@@ -7,7 +7,8 @@
 //! provisioned idempotently, publications are deduplicated by event ID,
 //! consumers acknowledge explicitly, and events that cannot be processed are
 //! parked in a dead-letter queue from which an operator can replay them to
-//! the consumer that failed.
+//! the consumer that failed. A key-value bucket records live service
+//! instances and the capabilities they provide.
 
 mod consumer;
 mod dead_letter;
@@ -15,6 +16,7 @@ mod error;
 mod health;
 mod message;
 mod publisher;
+mod registry;
 mod settings;
 mod topology;
 
@@ -22,6 +24,7 @@ pub use consumer::{ConsumerSpec, JetStreamConsumer};
 pub use dead_letter::{DeadLetterQueue, DeadLetterRecord, ReplayReceipt};
 pub use health::JetStreamHealthCheck;
 pub use publisher::JetStreamPublisher;
+pub use registry::JetStreamServiceRegistry;
 pub use settings::JetStreamSettings;
 pub use topology::{ensure_streams, StreamChange};
 

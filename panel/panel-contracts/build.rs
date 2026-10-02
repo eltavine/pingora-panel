@@ -17,6 +17,7 @@ fn main() {
                 "../proto/common/v1/common.proto",
                 "../proto/io/cloudevents/v1/cloudevents.proto",
                 "../proto/gateway/v1/gateway.proto",
+                "../proto/platform/v1/platform.proto",
             ],
             &["../proto"],
         )

@@ -13,6 +13,8 @@ members = [
     "panel-config-state-codec",
     "panel-application",
     "panel-outbox",
+    "panel-platform",
+    "panel-platform-codec",
     "panel-persistence-memory",
     "panel-postgres",
     "panel-config-json",
@@ -38,7 +40,7 @@ publish = false
 [workspace.dependencies]
 arc-swap = "=1.9.2"
 axum = "=0.8.9"
-async-nats = { version = "=0.50.0", default-features = false, features = ["jetstream", "nuid", "ring", "server_2_10", "server_2_11", "server_2_12", "server_2_14"] }
+async-nats = { version = "=0.50.0", default-features = false, features = ["jetstream", "kv", "nuid", "ring", "server_2_10", "server_2_11", "server_2_12", "server_2_14"] }
 async-trait = "=0.1.92"
 backon = { version = "=1.6.0", default-features = false, features = ["std"] }
 base64 = "=0.22.1"
@@ -67,6 +69,8 @@ panel-api = { version = "=0.1.0", path = "panel-api" }
 panel-application = { version = "=0.1.0", path = "panel-application" }
 panel-outbox = { version = "=0.1.0", path = "panel-outbox" }
 panel-persistence-memory = { version = "=0.1.0", path = "panel-persistence-memory" }
+panel-platform = { version = "=0.1.0", path = "panel-platform" }
+panel-platform-codec = { version = "=0.1.0", path = "panel-platform-codec" }
 panel-postgres = { version = "=0.1.0", path = "panel-postgres" }
 panel-domain = { version = "=0.1.0", path = "panel-domain" }
 panel-engine = { version = "=0.2.0", path = "panel-engine" }

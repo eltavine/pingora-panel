@@ -18,10 +18,16 @@ pub mod pingora {
                 tonic::include_proto!("pingora.panel.gateway.v1");
             }
         }
+
+        pub mod platform {
+            pub mod v1 {
+                tonic::include_proto!("pingora.panel.platform.v1");
+            }
+        }
     }
 }
 
-pub use pingora::panel::{common, gateway};
+pub use pingora::panel::{common, gateway, platform};
 
 /// The CloudEvents Protobuf format, generated from the vendored official schema.
 pub mod cloudevents {
@@ -32,6 +38,29 @@ pub mod cloudevents {
 
 pub const PROTOCOL_NAME: &str = "pingora.panel";
 pub const PROTOCOL_VERSION: &str = "v1";
+
+/// The revisions of one protocol package this build speaks.
+///
+/// Raise `max` with every additive change to the package; raise `min` only
+/// after the revisions below it are retired by every deployed peer.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProtocolRevisions {
+    pub package: &'static str,
+    pub min: u32,
+    pub max: u32,
+}
+
+pub const GATEWAY_V1: ProtocolRevisions = ProtocolRevisions {
+    package: "pingora.panel.gateway.v1",
+    min: 1,
+    max: 1,
+};
+
+pub const PLATFORM_V1: ProtocolRevisions = ProtocolRevisions {
+    package: "pingora.panel.platform.v1",
+    min: 1,
+    max: 1,
+};
 
 impl From<&panel_errors::Diagnostic> for common::v1::Diagnostic {
     fn from(value: &panel_errors::Diagnostic) -> Self {
@@ -133,6 +162,17 @@ mod tests {
         let decoded =
             gateway::v1::StatusResponse::decode(original.encode_to_vec().as_slice()).unwrap();
         assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn protocol_revisions_name_generated_packages() {
+        for (revisions, service) in [
+            (GATEWAY_V1, gateway::v1::gateway_engine_server::SERVICE_NAME),
+            (PLATFORM_V1, platform::v1::service_info_server::SERVICE_NAME),
+        ] {
+            assert_eq!(service.rsplit_once('.').unwrap().0, revisions.package);
+            assert!(1 <= revisions.min && revisions.min <= revisions.max);
+        }
     }
 
     #[test]

@@ -86,6 +86,11 @@ impl JetStreamSettings {
         format!("{}_DLQ", self.stream_prefix)
     }
 
+    /// Key-value bucket of live service instances.
+    pub fn service_bucket(&self) -> String {
+        format!("{}_SERVICES", self.stream_prefix)
+    }
+
     pub fn event_subject(&self, event_type: &EventType, version: EventVersion) -> String {
         format!(
             "{}.events.{event_type}.v{}",

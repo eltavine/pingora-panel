@@ -165,7 +165,9 @@
         "panel-errors",
         "panel-event-codec",
         "panel-events",
-        "panel-health"
+        "panel-health",
+        "panel-platform",
+        "panel-platform-codec"
       ]
     },
     "panel-outbox": {
@@ -181,6 +183,21 @@
         "panel-application",
         "panel-domain",
         "panel-errors"
+      ]
+    },
+    "panel-platform": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-context",
+        "panel-errors"
+      ]
+    },
+    "panel-platform-codec": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-contracts",
+        "panel-errors",
+        "panel-platform"
       ]
     },
     "panel-postgres": {
@@ -219,7 +236,8 @@
       "panel-gateway-runtime",
       "panel-health",
       "panel-ir",
-      "panel-outbox"
+      "panel-outbox",
+      "panel-platform"
     ],
     "forbidden_neutral_dependencies": [
       "async-nats",

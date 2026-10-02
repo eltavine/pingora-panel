@@ -1906,6 +1906,8 @@ dependencies = [
  "panel-events",
  "panel-health",
  "panel-outbox",
+ "panel-platform",
+ "panel-platform-codec",
  "panel-postgres",
  "percent-encoding",
  "serde",
@@ -1939,6 +1941,34 @@ dependencies = [
  "panel-domain",
  "panel-errors",
  "tokio",
+]
+
+[[package]]
+name = "panel-platform"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "panel-context",
+ "panel-errors",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "panel-platform-codec"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "panel-contracts",
+ "panel-errors",
+ "panel-platform",
+ "prost",
+ "prost-types",
+ "uuid",
 ]
 
 [[package]]

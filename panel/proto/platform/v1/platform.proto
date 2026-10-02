@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package pingora.panel.platform.v1;
+
+import "common/v1/common.proto";
+import "google/protobuf/timestamp.proto";
+
+// Implemented by every internal service next to grpc.health.v1.Health.
+service ServiceInfo {
+  // Describes the serving instance: its versions, the protocol revisions it
+  // speaks and the capabilities it provides.
+  rpc Describe(DescribeRequest) returns (DescribeResponse);
+}
+
+message DescribeRequest {}
+
+message DescribeResponse {
+  ServiceDescriptor descriptor = 1;
+}
+
+// The revisions of one protocol major version that an instance speaks.
+// Within a major version each revision only adds to the previous one.
+message ProtocolSupport {
+  // Versioned Protobuf package, such as "pingora.panel.gateway.v1".
+  string name = 1;
+  uint32 min_revision = 2;
+  uint32 max_revision = 3;
+}
+
+// One running service instance. Registries store this message as the value
+// of an instance's registration.
+message ServiceDescriptor {
+  // Service name, such as "config-service".
+  string service = 1;
+  // UUIDv7 assigned when the process starts.
+  string instance_id = 2;
+  // Product, component, build and persistent schema versions.
+  .pingora.panel.common.v1.Version version = 3;
+  repeated ProtocolSupport protocols = 4;
+  repeated .pingora.panel.common.v1.Capability capabilities = 5;
+  google.protobuf.Timestamp started_at = 6;
+}
