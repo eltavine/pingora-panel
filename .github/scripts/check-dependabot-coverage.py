@@ -67,6 +67,20 @@ def _cargo_workspaces(root: Path) -> set[str]:
     return directories
 
 
+NPM_LOCKFILES = ("pnpm-lock.yaml", "package-lock.json", "yarn.lock")
+
+
+def _npm_projects(root: Path) -> set[str]:
+    """Every JavaScript package root whose dependencies are pinned by a lockfile."""
+    directories: set[str] = set()
+    for manifest in sorted(root.rglob("package.json")):
+        if any(part in IGNORED_DIRECTORIES for part in manifest.relative_to(root).parts):
+            continue
+        if any((manifest.parent / lockfile).is_file() for lockfile in NPM_LOCKFILES):
+            directories.add(_as_dependabot_directory(root, manifest))
+    return directories
+
+
 def _github_actions(root: Path) -> set[str]:
     """Workflows and composite Actions always live at the repository root."""
     if not (root / ".github/workflows").is_dir():
@@ -103,6 +117,7 @@ def scalar(value: str, context: str) -> str:
 ECOSYSTEMS: tuple[Ecosystem, ...] = (
     Ecosystem("cargo", _cargo_workspaces, "every Cargo workspace root"),
     Ecosystem("github-actions", _github_actions, "the workflow directory"),
+    Ecosystem("npm", _npm_projects, "every locked JavaScript package root"),
 )
 
 

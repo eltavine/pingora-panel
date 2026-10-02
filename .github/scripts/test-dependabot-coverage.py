@@ -111,7 +111,7 @@ def main() -> int:
         require(
             1,
             "an ecosystem this guard does not govern",
-            configuration(actions, cargo_root, cargo_panel, entry("npm", "/")),
+            configuration(actions, cargo_root, cargo_panel, entry("pip", "/")),
         )
         require(
             2,
@@ -195,6 +195,26 @@ def main() -> int:
             != 0
         ):
             raise AssertionError("a declared nested workspace was rejected")
+
+        # A locked JavaScript package needs an npm entry; dependency trees and
+        # unlocked manifests do not.
+        web = Path(temporary).resolve() / "web"
+        web.mkdir()
+        build_tree(web, ["/"])
+        (web / "ui").mkdir()
+        (web / "ui/package.json").write_text("{}\n", encoding="utf-8")
+        (web / "ui/pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n", encoding="utf-8")
+        (web / "ui/node_modules/dependency").mkdir(parents=True)
+        (web / "ui/node_modules/dependency/package.json").write_text("{}\n", encoding="utf-8")
+        (web / "ui/node_modules/dependency/package-lock.json").write_text("{}\n", encoding="utf-8")
+        (web / "fixtures").mkdir()
+        (web / "fixtures/package.json").write_text("{}\n", encoding="utf-8")
+        if check(web, configuration(actions, cargo_root)) != 1:
+            raise AssertionError("a locked JavaScript package was not required")
+        if check(web, configuration(actions, cargo_root, entry("npm", "/ui"))) != 0:
+            raise AssertionError("a declared JavaScript package was rejected")
+        if check(web, configuration(actions, cargo_root, entry("npm", "/fixtures"))) != 1:
+            raise AssertionError("an npm entry without a locked package was accepted")
 
         # A target directory is build output, never a governed workspace.
         ignored = Path(temporary).resolve() / "ignored"
