@@ -210,6 +210,16 @@
         "panel-outbox"
       ]
     },
+    "panel-service": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-contracts",
+        "panel-errors",
+        "panel-health",
+        "panel-platform",
+        "panel-platform-codec"
+      ]
+    },
     "snapshot-store-fs": {
       "catalog": true,
       "allowed_workspace_dependencies": [

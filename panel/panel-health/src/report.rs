@@ -176,6 +176,20 @@ impl HealthReport {
         self.mode
     }
 
+    /// The liveness view of this report: the same service, passing, without
+    /// dependency checks.
+    pub fn liveness(&self) -> Self {
+        Self {
+            status: HealthStatus::Pass,
+            version: self.version.clone(),
+            release_id: self.release_id.clone(),
+            service_id: self.service_id.clone(),
+            output: None,
+            checks: BTreeMap::new(),
+            mode: ServiceMode::Normal,
+        }
+    }
+
     pub fn service_id(&self) -> &str {
         &self.service_id
     }

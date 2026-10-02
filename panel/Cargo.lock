@@ -1995,6 +1995,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "panel-service"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "chrono",
+ "hyper",
+ "hyper-util",
+ "panel-contracts",
+ "panel-errors",
+ "panel-health",
+ "panel-platform",
+ "panel-platform-codec",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tonic-health",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
