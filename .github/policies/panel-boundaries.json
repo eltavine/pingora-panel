@@ -4,8 +4,11 @@
     "automation-service": {
       "catalog": false,
       "allowed_workspace_dependencies": [
+        "panel-context",
         "panel-control-runtime",
         "panel-errors",
+        "panel-events",
+        "panel-jobs",
         "panel-platform",
         "panel-postgres",
         "panel-service"

@@ -197,11 +197,21 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 name = "automation-service"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "chrono",
+ "panel-context",
  "panel-control-runtime",
  "panel-errors",
+ "panel-events",
+ "panel-jobs",
  "panel-platform",
  "panel-postgres",
  "panel-service",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tokio-util",
+ "uuid",
 ]
 
 [[package]]
