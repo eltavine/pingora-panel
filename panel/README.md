@@ -32,7 +32,7 @@ gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC/Proto adapters
 | Crate | Responsibility | Forbidden knowledge |
 |---|---|---|
 | `panel-errors` | Stable error codes and diagnostics | Domain, transport, storage, Pingora |
-| `panel-context` | Request, correlation, idempotency and actor identifiers shared by commands and events | Domain, transport, storage, Pingora |
+| `panel-context` | Request scope, W3C Trace Context, correlation, idempotency and actor identifiers shared by requests, commands and events | Domain, transport, storage, Pingora |
 | `panel-domain` | Validated value objects | IR, transport, storage, Pingora |
 | `panel-events` | CloudEvents-aligned event model, publisher/handler ports and idempotent consumption | Event formats, brokers, storage, Pingora |
 | `panel-event-codec` | CloudEvents Protobuf, JSON and binary-mode representations | Brokers, storage, application rules, Pingora |
@@ -107,6 +107,24 @@ The OpenAPI fixture is also compared across commits by `check-panel-openapi-brea
 `GatewaydServices` retains its original public fields for source compatibility with existing integrations. New code should use `gateway()`, `health()`, and `health_reporter()`; these accessors are the supported extension boundary for future transports. A future major release can make the collection fully opaque without changing the transport composition model.
 
 Until an authenticated transport is composed, `LoopbackOnlyManagementBindPolicy` rejects every non-loopback plaintext address. Bind validation is a policy port rather than an address-parser special case, so a future mTLS adapter can replace the policy explicitly. `GatewayWorkerCount` and `ShutdownPolicy` keep resource and drain limits valid before executor or server construction.
+
+## Request identity
+
+Every request has one identity from the first surface to the last event.
+The REST adapter accepts a valid `x-request-id` or generates one, echoes it on
+every response and Problem Details body, and records it with `correlation_id`
+and the W3C `trace_id` on the request span. `x-correlation-id` is optional and
+defaults to the request ID. `traceparent` and `tracestate` follow the W3C Trace
+Context receiver rules: an invalid or repeated `traceparent` is ignored rather
+than rejected, and repeated `tracestate` fields are combined in order.
+
+Queries carry this identity as a `RequestScope`; commands carry it in
+`CommandContext`. The gRPC client maps both into `RequestContext` and sends the
+trace as `traceparent`/`tracestate` metadata, so gateway request events and logs
+report the caller's request, correlation and trace IDs. Requests without a
+caller start their own correlation. `EventOrigin::scoped` and
+`EventOrigin::caused_by` place the same identity in CloudEvents
+`correlationid`, `causationid`, `traceparent` and `tracestate`.
 
 ## Service-owned PostgreSQL schemas
 

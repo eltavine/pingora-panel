@@ -7,6 +7,7 @@ mod policy;
 pub use policy::*;
 
 use gateway_proto_codec as codec;
+use panel_context::TraceContext;
 use panel_contracts::{common::v1 as common, gateway::v1 as wire};
 use panel_domain::ContentHash;
 use panel_engine::{
@@ -180,11 +181,13 @@ where
         &self,
         request: Request<wire::GetCapabilitiesRequest>,
     ) -> std::result::Result<Response<wire::GetCapabilitiesResponse>, Status> {
+        let trace = policy::trace_context(request.metadata());
         let request = request.into_inner();
         let scope = RequestEventScope::start(
             Arc::clone(&self.events),
             GatewayRequestOperation::GetCapabilities,
             request.context.as_ref(),
+            trace.as_ref(),
             self.event_metadata_limits,
         );
         let response = match self
@@ -224,11 +227,13 @@ where
         &self,
         request: Request<wire::ValidateRequest>,
     ) -> std::result::Result<Response<wire::ValidateResponse>, Status> {
+        let trace = policy::trace_context(request.metadata());
         let request = request.into_inner();
         let scope = RequestEventScope::start(
             Arc::clone(&self.events),
             GatewayRequestOperation::Validate,
             request.context.as_ref(),
+            trace.as_ref(),
             self.event_metadata_limits,
         );
         let snapshot = self
@@ -264,11 +269,13 @@ where
         &self,
         request: Request<wire::PrepareRequest>,
     ) -> std::result::Result<Response<wire::PrepareResponse>, Status> {
+        let trace = policy::trace_context(request.metadata());
         let request = request.into_inner();
         let scope = RequestEventScope::start(
             Arc::clone(&self.events),
             GatewayRequestOperation::Prepare,
             request.context.as_ref(),
+            trace.as_ref(),
             self.event_metadata_limits,
         );
         let snapshot = self
@@ -306,11 +313,13 @@ where
         &self,
         request: Request<wire::ActivateRequest>,
     ) -> std::result::Result<Response<wire::ActivateResponse>, Status> {
+        let trace = policy::trace_context(request.metadata());
         let request = request.into_inner();
         let scope = RequestEventScope::start(
             Arc::clone(&self.events),
             GatewayRequestOperation::Activate,
             request.context.as_ref(),
+            trace.as_ref(),
             self.event_metadata_limits,
         );
         let parsed = self
@@ -356,11 +365,13 @@ where
         &self,
         request: Request<wire::AbortRequest>,
     ) -> std::result::Result<Response<wire::AbortResponse>, Status> {
+        let trace = policy::trace_context(request.metadata());
         let request = request.into_inner();
         let scope = RequestEventScope::start(
             Arc::clone(&self.events),
             GatewayRequestOperation::Abort,
             request.context.as_ref(),
+            trace.as_ref(),
             self.event_metadata_limits,
         );
         let parsed = self
@@ -403,11 +414,13 @@ where
         &self,
         request: Request<wire::StatusRequest>,
     ) -> std::result::Result<Response<wire::StatusResponse>, Status> {
+        let trace = policy::trace_context(request.metadata());
         let request = request.into_inner();
         let scope = RequestEventScope::start(
             Arc::clone(&self.events),
             GatewayRequestOperation::Status,
             request.context.as_ref(),
+            trace.as_ref(),
             self.event_metadata_limits,
         );
         let mut response = match self
@@ -484,9 +497,10 @@ impl RequestEventScope {
         events: Arc<dyn GatewayEventSink>,
         operation: GatewayRequestOperation,
         context: Option<&common::RequestContext>,
+        trace: Option<&TraceContext>,
         limits: GatewayRequestMetadataLimits,
     ) -> Self {
-        let metadata = policy::project_gateway_event_metadata(context, limits);
+        let metadata = policy::project_gateway_event_metadata(context, trace, limits);
         events.emit(&GatewayEvent::RequestStarted {
             operation,
             metadata: metadata.clone(),
@@ -814,6 +828,52 @@ mod tests {
                 ..
             } if error_code.as_str() == panel_errors::ErrorCode::INVALID_ARGUMENT
         ));
+    }
+
+    #[tokio::test]
+    async fn request_events_carry_the_callers_trace_id() {
+        const TRACEPARENT: &str = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+        let engine = Arc::new(FakeGatewayEngine::with_default_capabilities());
+        let events = Arc::new(RecordingEventSink::default());
+        let service = GatewayGrpcService::new(engine)
+            .with_event_sink(Arc::clone(&events) as Arc<dyn GatewayEventSink>);
+
+        let mut traced = Request::new(wire::GetCapabilitiesRequest {
+            context: Some(context(false)),
+        });
+        traced
+            .metadata_mut()
+            .insert("traceparent", TRACEPARENT.parse().unwrap());
+        service.get_capabilities(traced).await.unwrap();
+
+        let mut repeated = Request::new(wire::GetCapabilitiesRequest {
+            context: Some(context(false)),
+        });
+        for _ in 0..2 {
+            repeated
+                .metadata_mut()
+                .append("traceparent", TRACEPARENT.parse().unwrap());
+        }
+        service.get_capabilities(repeated).await.unwrap();
+
+        let events = events.0.lock().unwrap();
+        let trace_ids = events
+            .iter()
+            .map(|event| match event {
+                GatewayEvent::RequestStarted { metadata, .. }
+                | GatewayEvent::RequestCompleted { metadata, .. } => metadata.trace_id.as_str(),
+                _ => unreachable!(),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            trace_ids,
+            [
+                "4bf92f3577b34da6a3ce929d0e0e4736",
+                "4bf92f3577b34da6a3ce929d0e0e4736",
+                "",
+                ""
+            ]
+        );
     }
 
     #[tokio::test]

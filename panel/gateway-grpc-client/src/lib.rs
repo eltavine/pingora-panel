@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use gateway_proto_codec::{decode_hash as hash, encode_hash, encode_snapshot};
 use panel_application::{
     AbortOutcome, ActivatedDeployment, CommandContext, ContentHash, GatewayPort, GatewayStatus,
-    PreparedDeployment,
+    PreparedDeployment, RequestId, RequestScope, TraceContext,
 };
 use panel_contracts::{common::v1 as common, gateway::v1 as wire};
 use panel_errors::{
@@ -18,12 +18,14 @@ use panel_errors::{
 use panel_ir::RuntimeSnapshot;
 use std::{net::IpAddr, time::Duration};
 use tonic::{
+    metadata::MetadataValue,
     transport::{Channel, Endpoint},
     Code, Status,
 };
 use uuid::Uuid;
 
 const CONTEXT_SCHEMA_VERSION: &str = panel_contracts::PROTOCOL_VERSION;
+const CLIENT_ACTOR: &str = "gateway-grpc-client";
 
 mod abort_receipt;
 mod activation;
@@ -155,11 +157,26 @@ impl GatewayGrpcClient {
             .max_encoding_message_size(self.max_message_bytes)
     }
 
-    fn request<T>(&self, value: T) -> tonic::Request<T> {
-        let mut request = tonic::Request::new(value);
-        request.set_timeout(self.request_timeout);
-        request
+    fn request<T>(&self, value: T, trace: Option<&TraceContext>) -> tonic::Request<T> {
+        request(value, self.request_timeout, trace)
     }
+}
+
+/// A bounded request carrying the caller's W3C Trace Context as gRPC
+/// metadata, so the gateway can attribute work to the caller's trace.
+fn request<T>(value: T, timeout: Duration, trace: Option<&TraceContext>) -> tonic::Request<T> {
+    let mut request = tonic::Request::new(value);
+    request.set_timeout(timeout);
+    if let Some(trace) = trace {
+        let metadata = request.metadata_mut();
+        if let Ok(parent) = MetadataValue::try_from(trace.traceparent()) {
+            metadata.insert("traceparent", parent);
+            if let Some(Ok(state)) = trace.tracestate().map(MetadataValue::try_from) {
+                metadata.insert("tracestate", state);
+            }
+        }
+    }
+    request
 }
 
 fn validate_plaintext_endpoint(endpoint: &Endpoint) -> Result<()> {
@@ -208,16 +225,21 @@ fn context(value: &CommandContext) -> common::RequestContext {
     }
 }
 
-fn read_only_context(operation: &str) -> common::RequestContext {
-    let request_id = format!("gateway-grpc-client-{operation}-{}", Uuid::new_v4());
+fn query_context(scope: &RequestScope) -> common::RequestContext {
     common::RequestContext {
-        request_id: request_id.clone(),
-        correlation_id: request_id,
-        actor: "gateway-grpc-client".into(),
+        request_id: scope.request_id().as_str().into(),
+        correlation_id: scope.correlation_id().as_str().into(),
+        actor: CLIENT_ACTOR.into(),
         deadline: String::new(),
         idempotency_key: String::new(),
         schema_version: CONTEXT_SCHEMA_VERSION.into(),
     }
+}
+
+/// A scope for queries issued without a caller, which start their own
+/// correlation.
+fn standalone_scope(operation: &str) -> Result<RequestScope> {
+    RequestId::new(format!("{CLIENT_ACTOR}-{operation}-{}", Uuid::now_v7())).map(RequestScope::new)
 }
 
 fn diagnostic(value: common::Diagnostic) -> Diagnostic {
@@ -282,13 +304,22 @@ fn status_error(status: Status) -> PanelError {
 #[async_trait]
 impl GatewayPort for GatewayGrpcClient {
     async fn validate(&self, snapshot: RuntimeSnapshot) -> Result<ValidationReport> {
+        self.validate_with_scope(standalone_scope("validate")?, snapshot)
+            .await
+    }
+
+    async fn validate_with_scope(
+        &self,
+        scope: RequestScope,
+        snapshot: RuntimeSnapshot,
+    ) -> Result<ValidationReport> {
         let request = wire::ValidateRequest {
-            context: Some(read_only_context("validate")),
+            context: Some(query_context(&scope)),
             snapshot: Some(encode_snapshot(&snapshot)),
         };
         let mut client = self.client();
         let response = client
-            .validate(self.request(request))
+            .validate(self.request(request, scope.trace_context()))
             .await
             .map_err(status_error)?
             .into_inner();
@@ -322,12 +353,16 @@ impl GatewayPort for GatewayGrpcClient {
     }
 
     async fn status(&self) -> Result<GatewayStatus> {
+        self.status_with_scope(standalone_scope("status")?).await
+    }
+
+    async fn status_with_scope(&self, scope: RequestScope) -> Result<GatewayStatus> {
         let request = wire::StatusRequest {
-            context: Some(read_only_context("status")),
+            context: Some(query_context(&scope)),
         };
         let mut client = self.client();
         let response = client
-            .status(self.request(request))
+            .status(self.request(request, scope.trace_context()))
             .await
             .map_err(status_error)?
             .into_inner();
@@ -346,7 +381,7 @@ impl GatewayPort for GatewayGrpcClient {
         };
         let mut client = self.client();
         let response = client
-            .prepare(self.request(request))
+            .prepare(self.request(request, context_value.trace_context()))
             .await
             .map_err(status_error)?
             .into_inner();
@@ -366,7 +401,7 @@ impl GatewayPort for GatewayGrpcClient {
         };
         let mut client = self.client();
         let response = client
-            .activate(self.request(request))
+            .activate(self.request(request, context_value.trace_context()))
             .await
             .map_err(status_error)?
             .into_inner();
@@ -384,7 +419,7 @@ impl GatewayPort for GatewayGrpcClient {
         };
         let mut client = self.client();
         let response = client
-            .abort(self.request(request))
+            .abort(self.request(request, context_value.trace_context()))
             .await
             .map_err(status_error)?
             .into_inner();
@@ -426,6 +461,43 @@ mod tests {
             config.validate().unwrap_err().code.as_str(),
             ErrorCode::INVALID_ARGUMENT
         );
+    }
+
+    #[test]
+    fn requests_carry_the_callers_trace_context_as_metadata() {
+        let trace = TraceContext::parse(
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            Some("rojo=00f067aa0ba902b7"),
+        );
+        let traced = request((), Duration::from_secs(1), trace.as_ref());
+        assert_eq!(
+            traced.metadata().get("traceparent").unwrap(),
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+        );
+        assert_eq!(
+            traced.metadata().get("tracestate").unwrap(),
+            "rojo=00f067aa0ba902b7"
+        );
+
+        let untraced = request((), Duration::from_secs(1), None);
+        assert!(untraced.metadata().get("traceparent").is_none());
+        assert!(untraced.metadata().get("tracestate").is_none());
+    }
+
+    #[test]
+    fn queries_report_the_callers_request_and_correlation_identity() {
+        let scope = RequestScope::new(RequestId::new("status-1").unwrap())
+            .with_correlation_id(RequestId::new("flow-1").unwrap());
+        let context = query_context(&scope);
+        assert_eq!(context.request_id, "status-1");
+        assert_eq!(context.correlation_id, "flow-1");
+
+        let standalone = standalone_scope("status").unwrap();
+        assert!(standalone
+            .request_id()
+            .as_str()
+            .starts_with("gateway-grpc-client-status-"));
+        assert_eq!(standalone.correlation_id(), standalone.request_id());
     }
 
     #[test]

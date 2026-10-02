@@ -5,6 +5,7 @@
       "catalog": true,
       "allowed_workspace_dependencies": [
         "gateway-proto-codec",
+        "panel-context",
         "panel-contracts",
         "panel-domain",
         "panel-engine",

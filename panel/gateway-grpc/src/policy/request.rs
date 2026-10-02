@@ -1,5 +1,6 @@
 use super::DEFAULT_REQUEST_TIMEOUT;
 use chrono::DateTime;
+use panel_context::TraceContext;
 use panel_contracts::common::v1 as common;
 use panel_engine::GatewayRequestMetadata;
 use panel_errors::{PanelError, Result};
@@ -283,16 +284,36 @@ fn validate_metadata_field(name: &str, value: &str, max_bytes: usize) -> Result<
 
 pub(crate) fn project_gateway_event_metadata(
     context: Option<&common::RequestContext>,
+    trace: Option<&TraceContext>,
     limits: GatewayRequestMetadataLimits,
 ) -> GatewayRequestMetadata {
-    let Some(context) = context else {
-        return GatewayRequestMetadata::new("", "", "");
+    let metadata = match context {
+        Some(context) => GatewayRequestMetadata::new(
+            project_metadata_field(&context.request_id, limits.request_id_bytes()),
+            project_metadata_field(&context.correlation_id, limits.correlation_id_bytes()),
+            project_metadata_field(&context.actor, limits.actor_bytes()),
+        ),
+        None => GatewayRequestMetadata::new("", "", ""),
     };
-    GatewayRequestMetadata::new(
-        project_metadata_field(&context.request_id, limits.request_id_bytes()),
-        project_metadata_field(&context.correlation_id, limits.correlation_id_bytes()),
-        project_metadata_field(&context.actor, limits.actor_bytes()),
-    )
+    metadata.with_trace_id(trace.map(TraceContext::trace_id).unwrap_or_default())
+}
+
+/// The caller's W3C Trace Context from gRPC metadata, under the same
+/// receiver rules as HTTP: an invalid or repeated `traceparent` is ignored,
+/// and repeated `tracestate` entries are combined in order.
+pub(crate) fn trace_context(metadata: &tonic::metadata::MetadataMap) -> Option<TraceContext> {
+    let mut parents = metadata.get_all("traceparent").iter();
+    let parent = parents.next()?.to_str().ok()?;
+    if parents.next().is_some() {
+        return None;
+    }
+    let state = metadata
+        .get_all("tracestate")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .collect::<Vec<_>>()
+        .join(",");
+    TraceContext::parse(parent, (!state.is_empty()).then_some(state.as_str()))
 }
 
 fn project_metadata_field(value: &str, max_bytes: usize) -> String {

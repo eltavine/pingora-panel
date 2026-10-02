@@ -32,6 +32,8 @@ pub struct GatewayRequestMetadata {
     pub request_id: String,
     pub correlation_id: String,
     pub actor: String,
+    /// W3C trace ID of the caller's trace; empty when the caller sent none.
+    pub trace_id: String,
 }
 
 impl GatewayRequestMetadata {
@@ -44,7 +46,13 @@ impl GatewayRequestMetadata {
             request_id: request_id.into(),
             correlation_id: correlation_id.into(),
             actor: actor.into(),
+            trace_id: String::new(),
         }
+    }
+
+    pub fn with_trace_id(mut self, trace_id: impl Into<String>) -> Self {
+        self.trace_id = trace_id.into();
+        self
     }
 }
 
