@@ -12,7 +12,7 @@ mod gateway;
 mod idempotency;
 mod persistence;
 
-pub use context::{CommandContext, IdempotencyKey, RequestDeadline, RequestId};
+pub use context::{Actor, CommandContext, IdempotencyKey, RequestDeadline, RequestId};
 pub use gateway::{
     AbortOutcome, ActivatedDeployment, ConfigCompiler, ConfigDocument, DeploymentOutcome,
     GatewayPort, GatewayService, GatewayStatus, GatewayUseCases, PreparedDeployment,

@@ -1350,7 +1350,7 @@ name = "panel-application"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "chrono",
+ "panel-context",
  "panel-domain",
  "panel-errors",
  "panel-ir",
@@ -1385,6 +1385,16 @@ version = "0.1.0"
 dependencies = [
  "panel-config-domain",
  "proptest",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "panel-context"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "panel-errors",
  "serde",
  "serde_json",
 ]

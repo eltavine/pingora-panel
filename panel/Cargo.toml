@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "panel-api",
+    "panel-context",
     "panel-contracts",
     "panel-errors",
     "panel-domain",
@@ -39,6 +40,7 @@ gateway-grpc-client = { version = "=0.1.0", path = "gateway-grpc-client" }
 gateway-proto-codec = { version = "=0.1.0", path = "gateway-proto-codec" }
 gateway-pingora = { version = "=0.1.0", path = "gateway-pingora" }
 prost = "=0.14.4"
+panel-context = { version = "=0.1.0", path = "panel-context" }
 panel-contracts = { version = "=0.1.0", path = "panel-contracts" }
 panel-config-domain = { version = "=0.1.0", path = "panel-config-domain" }
 panel-config-state-codec = { version = "=0.1.0", path = "panel-config-state-codec" }

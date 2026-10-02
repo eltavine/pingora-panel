@@ -23,20 +23,20 @@
         "panel-ir"
       ]
     },
-    "gateway-proto-codec": {
-      "catalog": true,
-      "allowed_workspace_dependencies": [
-        "panel-contracts",
-        "panel-domain",
-        "panel-errors",
-        "panel-ir"
-      ]
-    },
     "gateway-pingora": {
       "catalog": true,
       "allowed_workspace_dependencies": [
         "panel-domain",
         "panel-engine",
+        "panel-errors",
+        "panel-ir"
+      ]
+    },
+    "gateway-proto-codec": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-contracts",
+        "panel-domain",
         "panel-errors",
         "panel-ir"
       ]
@@ -66,6 +66,15 @@
         "panel-errors"
       ]
     },
+    "panel-application": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-context",
+        "panel-domain",
+        "panel-errors",
+        "panel-ir"
+      ]
+    },
     "panel-config-domain": {
       "catalog": true,
       "allowed_workspace_dependencies": []
@@ -84,12 +93,10 @@
         "panel-config-domain"
       ]
     },
-    "panel-application": {
+    "panel-context": {
       "catalog": true,
       "allowed_workspace_dependencies": [
-        "panel-domain",
-        "panel-errors",
-        "panel-ir"
+        "panel-errors"
       ]
     },
     "panel-contracts": {
@@ -155,6 +162,7 @@
     "engine_transport_storage_neutral_members": [
       "panel-config-domain",
       "panel-application",
+      "panel-context",
       "panel-domain",
       "panel-engine",
       "panel-errors",
