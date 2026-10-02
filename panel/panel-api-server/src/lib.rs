@@ -49,11 +49,9 @@ pub fn process(
         HTTP_ADDRESS_ENV,
         env.socket_addr(HTTP_ADDRESS_ENV, DEFAULT_HTTP_ADDRESS)?,
     )?;
-    let config = ConfigPublicationClient::connect_lazy(
-        env.string(CONFIG_URL_ENV)?
-            .unwrap_or_else(|| DEFAULT_CONFIG_URL.into()),
-        ConfigClientConfig::default(),
-    )?;
+    let config_url = env
+        .string(CONFIG_URL_ENV)?
+        .unwrap_or_else(|| DEFAULT_CONFIG_URL.into());
     let web_root = PathBuf::from(
         env.string(WEB_ROOT_ENV)?
             .unwrap_or_else(|| DEFAULT_WEB_ROOT.into()),
@@ -67,40 +65,47 @@ pub fn process(
     listener.set_nonblocking(true).map_err(|error| {
         PanelError::internal(format!("cannot configure the public listener: {error}"))
     })?;
-    let config_health = config.health_check();
-    Ok(ControlPlaneProcess::new(
+    let process = ControlPlaneProcess::new(
         ServiceName::new(SERVICE)?,
         env!("CARGO_PKG_VERSION"),
         settings,
         SqlIdentifier::new(SCHEMA)?,
-    )?
-    .with_database_impact(Impact::Degrading)
-    .with_check(Arc::new(config_health), Impact::Degrading)
-    .on_start(move |running| {
-        let api = router_with_config(
-            ApiState::new(Arc::new(config))
-                .with_health(running.health())
-                .with_directory(Arc::new(directory::RegistryDirectory::new(
-                    running.jetstream().clone(),
-                    Arc::clone(running.jetstream_settings()),
-                ))),
-            ApiConfig::default(),
-        );
-        let app = console::with_console(api, &web_root)?;
-        let listener = tokio::net::TcpListener::from_std(listener).map_err(|error| {
-            PanelError::internal(format!("cannot serve the public listener: {error}"))
-        })?;
-        let address = listener.local_addr().ok();
-        let shutdown = running.shutdown_token();
-        running.spawn(async move {
-            if let Err(error) = axum::serve(listener, app)
-                .with_graceful_shutdown(shutdown.cancelled_owned())
-                .await
-            {
-                tracing::error!(%error, "public listener failed");
-            }
-        });
-        tracing::info!(address = ?address, "public API listening");
-        Ok(())
-    }))
+    )?;
+    let config = match process.peer_channel(&config_url, ServiceName::new("config-service")?)? {
+        Some(channel) => {
+            ConfigPublicationClient::from_channel(channel, ConfigClientConfig::default())
+        }
+        None => ConfigPublicationClient::connect_lazy(config_url, ConfigClientConfig::default())?,
+    };
+    let config_health = config.health_check();
+    Ok(process
+        .with_database_impact(Impact::Degrading)
+        .with_check(Arc::new(config_health), Impact::Degrading)
+        .on_start(move |running| {
+            let api = router_with_config(
+                ApiState::new(Arc::new(config))
+                    .with_health(running.health())
+                    .with_directory(Arc::new(directory::RegistryDirectory::new(
+                        running.jetstream().clone(),
+                        Arc::clone(running.jetstream_settings()),
+                    ))),
+                ApiConfig::default(),
+            );
+            let app = console::with_console(api, &web_root)?;
+            let listener = tokio::net::TcpListener::from_std(listener).map_err(|error| {
+                PanelError::internal(format!("cannot serve the public listener: {error}"))
+            })?;
+            let address = listener.local_addr().ok();
+            let shutdown = running.shutdown_token();
+            running.spawn(async move {
+                if let Err(error) = axum::serve(listener, app)
+                    .with_graceful_shutdown(shutdown.cancelled_owned())
+                    .await
+                {
+                    tracing::error!(%error, "public listener failed");
+                }
+            });
+            tracing::info!(address = ?address, "public API listening");
+            Ok(())
+        }))
 }

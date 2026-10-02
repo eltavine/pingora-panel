@@ -31,13 +31,19 @@ tower-http.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+chrono.workspace = true
+config-grpc-client.workspace = true
 config-service.workspace = true
 gateway-grpc.workspace = true
+panel-application.workspace = true
+panel-context.workspace = true
 panel-domain.workspace = true
 panel-engine.workspace = true
 panel-ir.workspace = true
 panel-jetstream = { workspace = true, features = ["test-support"] }
+panel-pki.workspace = true
 panel-postgres = { workspace = true, features = ["test-support"] }
+panel-tls.workspace = true
 reqwest.workspace = true
 tokio-stream.workspace = true
 tonic.workspace = true

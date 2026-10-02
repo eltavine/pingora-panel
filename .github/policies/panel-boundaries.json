@@ -110,6 +110,7 @@
         "panel-api",
         "panel-application",
         "panel-config-json",
+        "panel-context",
         "panel-contracts",
         "panel-domain",
         "panel-engine",
@@ -117,6 +118,8 @@
         "panel-gateway-runtime",
         "panel-health",
         "panel-ir",
+        "panel-pki",
+        "panel-tls",
         "snapshot-store-fs"
       ]
     },
@@ -146,6 +149,8 @@
         "config-service",
         "gateway-grpc",
         "panel-api",
+        "panel-application",
+        "panel-context",
         "panel-control-runtime",
         "panel-domain",
         "panel-engine",
@@ -153,9 +158,11 @@
         "panel-health",
         "panel-ir",
         "panel-jetstream",
+        "panel-pki",
         "panel-platform",
         "panel-postgres",
-        "panel-service"
+        "panel-service",
+        "panel-tls"
       ]
     },
     "panel-application": {
@@ -216,10 +223,12 @@
         "panel-health",
         "panel-jetstream",
         "panel-outbox",
+        "panel-pki",
         "panel-platform",
         "panel-platform-codec",
         "panel-postgres",
-        "panel-service"
+        "panel-service",
+        "panel-tls"
       ]
     },
     "panel-domain": {

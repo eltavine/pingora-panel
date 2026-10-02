@@ -16,7 +16,7 @@ mod credentials;
 mod policy;
 mod server;
 
-pub use client::{channel, MtlsConnector};
+pub use client::{address_of, channel, MtlsConnector};
 pub use credentials::TlsCredentials;
 pub use policy::{PeerPolicy, PeerPolicyService};
 pub use server::{incoming, PeerIdentity, TlsConnection};

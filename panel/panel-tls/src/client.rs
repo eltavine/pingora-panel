@@ -67,6 +67,19 @@ impl tower::Service<Uri> for MtlsConnector {
     }
 }
 
+/// The `host:port` a URL such as `https://config-service:50061` names.
+pub fn address_of(url: &str) -> Result<String> {
+    let uri: Uri = url
+        .parse()
+        .map_err(|_| PanelError::invalid_argument(format!("invalid peer address `{url}`")))?;
+    match (uri.host(), uri.port_u16()) {
+        (Some(host), Some(port)) => Ok(format!("{host}:{port}")),
+        _ => Err(PanelError::invalid_argument(format!(
+            "peer address `{url}` needs a host and a port"
+        ))),
+    }
+}
+
 /// A channel to `peer` at `address` (`host:port`) over mutual TLS. It
 /// connects on first use.
 pub fn channel(

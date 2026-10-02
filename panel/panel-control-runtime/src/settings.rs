@@ -1,7 +1,8 @@
 use panel_errors::Result;
+use panel_pki::TrustDomain;
 use panel_postgres::RoleSecret;
 use panel_service::{require_loopback, Environment};
-use std::{net::SocketAddr, time::Duration};
+use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 pub const OPS_ADDRESS_ENV: &str = "PINGORA_PANEL_OPS_ADDR";
 pub const GRPC_ADDRESS_ENV: &str = "PINGORA_PANEL_GRPC_ADDR";
@@ -10,6 +11,10 @@ pub const DATABASE_URL_ENV: &str = "PINGORA_PANEL_DATABASE_URL";
 pub const DATABASE_PASSWORD_ENV: &str = "PINGORA_PANEL_DATABASE_PASSWORD";
 pub const NATS_URL_ENV: &str = "PINGORA_PANEL_NATS_URL";
 pub const HEALTH_INTERVAL_MS_ENV: &str = "PINGORA_PANEL_HEALTH_INTERVAL_MS";
+/// Directory with the service's `identity.pem` and `trust.pem`; enables
+/// mutual TLS on internal gRPC.
+pub const TLS_DIR_ENV: &str = "PINGORA_PANEL_TLS_DIR";
+pub const TRUST_DOMAIN_ENV: &str = "PINGORA_PANEL_TRUST_DOMAIN";
 
 const DEFAULT_NATS_URL: &str = "nats://127.0.0.1:4222";
 const DEFAULT_HEALTH_INTERVAL: Duration = Duration::from_secs(5);
@@ -21,6 +26,31 @@ pub struct DefaultAddresses {
     pub grpc: SocketAddr,
 }
 
+/// Where a service's mutual TLS credentials are and the trust domain they
+/// belong to.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TlsSettings {
+    pub directory: PathBuf,
+    pub trust_domain: TrustDomain,
+}
+
+impl TlsSettings {
+    /// The TLS settings in `env`, if a credential directory is configured.
+    pub fn read(env: &mut Environment<'_>) -> Result<Option<Self>> {
+        let Some(directory) = env.string(TLS_DIR_ENV)? else {
+            return Ok(None);
+        };
+        Ok(Some(Self {
+            directory: PathBuf::from(directory),
+            trust_domain: env
+                .string(TRUST_DOMAIN_ENV)?
+                .map(TrustDomain::new)
+                .transpose()?
+                .unwrap_or_default(),
+        }))
+    }
+}
+
 /// Settings shared by every control-plane process.
 #[derive(Clone)]
 pub struct ProcessSettings {
@@ -30,6 +60,7 @@ pub struct ProcessSettings {
     database_password: Option<RoleSecret>,
     nats_url: String,
     health_interval: Duration,
+    tls: Option<TlsSettings>,
 }
 
 impl ProcessSettings {
@@ -37,17 +68,22 @@ impl ProcessSettings {
         Self::read(&mut Environment::process(), defaults)
     }
 
-    /// Reads the settings; plaintext listeners must be loopback addresses.
+    /// Reads the settings. The operational listener stays on loopback; the
+    /// gRPC listener may bind any address only with mutual TLS.
     pub fn read(env: &mut Environment<'_>, defaults: DefaultAddresses) -> Result<Self> {
+        let tls = TlsSettings::read(env)?;
+        let grpc_address = env.socket_addr(GRPC_ADDRESS_ENV, defaults.grpc)?;
         Ok(Self {
             ops_address: require_loopback(
                 OPS_ADDRESS_ENV,
                 env.socket_addr(OPS_ADDRESS_ENV, defaults.ops)?,
             )?,
-            grpc_address: require_loopback(
-                GRPC_ADDRESS_ENV,
-                env.socket_addr(GRPC_ADDRESS_ENV, defaults.grpc)?,
-            )?,
+            grpc_address: if tls.is_some() {
+                grpc_address
+            } else {
+                require_loopback(GRPC_ADDRESS_ENV, grpc_address)?
+            },
+            tls,
             database_url: env.required(DATABASE_URL_ENV)?,
             database_password: env
                 .secret(DATABASE_PASSWORD_ENV)?
@@ -82,6 +118,10 @@ impl ProcessSettings {
 
     pub fn health_interval(&self) -> Duration {
         self.health_interval
+    }
+
+    pub fn tls(&self) -> Option<&TlsSettings> {
+        self.tls.as_ref()
     }
 
     pub fn with_listeners(mut self, ops: SocketAddr, grpc: SocketAddr) -> Self {
@@ -145,5 +185,26 @@ mod tests {
         .unwrap();
         assert_eq!(settings.database_password().unwrap().expose(), "secret");
         assert_eq!(settings.ops_address().port(), 9999);
+    }
+
+    #[test]
+    fn mutual_tls_lets_the_grpc_listener_leave_loopback() {
+        let settings = read(&[
+            (DATABASE_URL_ENV, "postgres://config@db/panel"),
+            (GRPC_ADDRESS_ENV, "0.0.0.0:50061"),
+            (TLS_DIR_ENV, "/run/pingora-panel/tls"),
+        ])
+        .unwrap();
+        let tls = settings.tls().unwrap();
+        assert_eq!(tls.trust_domain.as_str(), "pingora-panel.internal");
+        assert!(
+            read(&[
+                (DATABASE_URL_ENV, "postgres://config@db/panel"),
+                (OPS_ADDRESS_ENV, "0.0.0.0:9181"),
+                (TLS_DIR_ENV, "/run/pingora-panel/tls"),
+            ])
+            .is_err(),
+            "operational endpoints stay on loopback"
+        );
     }
 }

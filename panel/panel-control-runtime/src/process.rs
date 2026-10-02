@@ -14,6 +14,7 @@ use panel_jetstream::{
     JetStreamHealthCheck, JetStreamPublisher, JetStreamServiceRegistry, JetStreamSettings,
 };
 use panel_outbox::RelayOptions;
+use panel_pki::{CredentialFiles, WorkloadIdentity};
 use panel_platform::{
     Capability, ProtocolRange, RegistrationPolicy, ServiceDescriptor, ServiceName,
 };
@@ -22,6 +23,7 @@ use panel_postgres::{
     PgHealthCheck, PgOutbox, SchemaMigration, ServiceDatabase, ServiceDatabaseConfig, SqlIdentifier,
 };
 use panel_service::{ops_router, publish_grpc_health, ServiceInfoService};
+use panel_tls::{PeerPolicy, TlsCredentials};
 use std::{convert::Infallible, future::Future, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{net::TcpListener, sync::watch, task::JoinHandle};
 use tokio_stream::wrappers::TcpListenerStream;
@@ -35,6 +37,10 @@ use tonic::{
 };
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+const CREDENTIAL_RELOAD_INTERVAL: Duration = Duration::from_secs(30);
+const PEER_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const PEER_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 type StartHook = Box<dyn FnOnce(&RunningProcess) -> Result<()> + Send>;
 
@@ -54,6 +60,8 @@ pub struct ControlPlaneProcess {
     registration: RegistrationPolicy,
     relay: RelayOptions,
     start_hooks: Vec<StartHook>,
+    tls: Option<Arc<TlsCredentials>>,
+    peer_policy: PeerPolicy,
 }
 
 impl ControlPlaneProcess {
@@ -72,6 +80,19 @@ impl ControlPlaneProcess {
         if let Some(secret) = settings.database_password() {
             database_config = database_config.with_secret(secret);
         }
+        let trust_domain = settings
+            .tls()
+            .map(|tls| tls.trust_domain.clone())
+            .unwrap_or_default();
+        let tls = settings
+            .tls()
+            .map(|tls| {
+                TlsCredentials::load(
+                    CredentialFiles::new(&tls.directory),
+                    WorkloadIdentity::new(service.clone(), tls.trust_domain.clone()),
+                )
+            })
+            .transpose()?;
         Ok(Self {
             descriptor: ServiceDescriptor::new(service, release, Utc::now())
                 .with_protocol(protocol_range(PLATFORM_V1)),
@@ -88,7 +109,46 @@ impl ControlPlaneProcess {
             registration: RegistrationPolicy::default(),
             relay: RelayOptions::default(),
             start_hooks: Vec::new(),
+            tls,
+            peer_policy: PeerPolicy::new(trust_domain),
         })
+    }
+
+    /// The mutual TLS credentials, when the process serves and calls peers
+    /// over mutual TLS.
+    pub fn tls(&self) -> Option<&Arc<TlsCredentials>> {
+        self.tls.as_ref()
+    }
+
+    /// A mutual TLS channel to `peer` at `url` when the process has
+    /// credentials; `None` when peers are reached over plaintext loopback.
+    pub fn peer_channel(
+        &self,
+        url: &str,
+        peer: ServiceName,
+    ) -> Result<Option<tonic::transport::Channel>> {
+        let Some(credentials) = &self.tls else {
+            return Ok(None);
+        };
+        let identity = WorkloadIdentity::new(peer, credentials.identity().trust_domain().clone());
+        panel_tls::channel(
+            &panel_tls::address_of(url)?,
+            &identity,
+            Arc::clone(credentials),
+            PEER_CONNECT_TIMEOUT,
+            PEER_REQUEST_TIMEOUT,
+        )
+        .map(Some)
+    }
+
+    /// Lets `peers` call `grpc_service` once mutual TLS is enabled.
+    pub fn with_peer_access(
+        mut self,
+        grpc_service: &str,
+        peers: impl IntoIterator<Item = ServiceName>,
+    ) -> Self {
+        self.peer_policy = self.peer_policy.allow(grpc_service, peers);
+        self
     }
 
     /// Runs once the process has started, to serve service-specific
@@ -270,17 +330,42 @@ impl ControlPlaneProcess {
             .routes
             .add_service(health_service)
             .add_service(ServiceInfoService::new(&descriptor).into_server());
-        let grpc = Server::builder()
-            .add_routes(routes)
-            .serve_with_incoming_shutdown(
-                TcpListenerStream::new(grpc_listener),
-                cancel.clone().cancelled_owned(),
-            );
-        tasks.spawn(async move {
-            if let Err(error) = grpc.await {
-                tracing::error!(%error, "gRPC listener failed");
+        match &self.tls {
+            Some(credentials) => {
+                let grpc = Server::builder()
+                    .layer(self.peer_policy)
+                    .add_routes(routes)
+                    .serve_with_incoming_shutdown(
+                        panel_tls::incoming(
+                            grpc_listener,
+                            Arc::clone(credentials),
+                            HANDSHAKE_TIMEOUT,
+                        ),
+                        cancel.clone().cancelled_owned(),
+                    );
+                tasks.spawn(async move {
+                    if let Err(error) = grpc.await {
+                        tracing::error!(%error, "gRPC listener failed");
+                    }
+                });
+                tasks.spawn(
+                    Arc::clone(credentials).watch(CREDENTIAL_RELOAD_INTERVAL, cancel.clone()),
+                );
             }
-        });
+            None => {
+                let grpc = Server::builder()
+                    .add_routes(routes)
+                    .serve_with_incoming_shutdown(
+                        TcpListenerStream::new(grpc_listener),
+                        cancel.clone().cancelled_owned(),
+                    );
+                tasks.spawn(async move {
+                    if let Err(error) = grpc.await {
+                        tracing::error!(%error, "gRPC listener failed");
+                    }
+                });
+            }
+        }
         tracing::info!(
             service = %service,
             instance_id = %descriptor.instance_id(),

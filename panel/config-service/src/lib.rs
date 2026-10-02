@@ -74,14 +74,20 @@ pub fn process(
     let gateway_url = env
         .string(GATEWAY_URL_ENV)?
         .unwrap_or_else(|| DEFAULT_GATEWAY_URL.into());
-    let gateway = GatewayGrpcClient::connect_lazy(gateway_url, GatewayGrpcClientConfig::default())?;
-    let gateway_health = gateway.health_check();
     let process = ControlPlaneProcess::new(
         ServiceName::new(SERVICE)?,
         env!("CARGO_PKG_VERSION"),
         settings,
         SqlIdentifier::new(SCHEMA)?,
     )?;
+    let gateway = match process.peer_channel(&gateway_url, ServiceName::new("gatewayd")?)? {
+        Some(channel) => GatewayGrpcClient::from_channel_with_config(
+            channel,
+            GatewayGrpcClientConfig::default(),
+        )?,
+        None => GatewayGrpcClient::connect_lazy(gateway_url, GatewayGrpcClientConfig::default())?,
+    };
+    let gateway_health = gateway.health_check();
     let reconcile_interval = env.millis(RECONCILE_INTERVAL_MS_ENV, DEFAULT_RECONCILE_INTERVAL)?;
     let gateway: Arc<dyn GatewayUseCases> = Arc::new(GatewayService::new(
         Arc::new(gateway),
@@ -106,6 +112,10 @@ pub fn process(
         .with_protocol(protocol_range(CONFIG_V1))
         .with_capability(Capability::new("config.publication", "1")?)
         .with_check(Arc::new(gateway_health), Impact::Degrading)
+        .with_peer_access(
+            panel_contracts::config::v1::publication_server::SERVICE_NAME,
+            [ServiceName::new("panel-api")?],
+        )
         .with_check(
             Arc::new(ReconciliationCheck(reconciliation)),
             Impact::Degrading,

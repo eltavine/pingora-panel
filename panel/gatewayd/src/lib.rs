@@ -26,9 +26,9 @@ pub use background_tasks::{
 };
 pub use bind_policy::{LoopbackOnlyManagementBindPolicy, ManagementBindPolicy};
 pub use config::{
-    GatewayWorkerCount, GatewaydConfig, BACKGROUND_TASK_SHUTDOWN_TIMEOUT_MILLIS_ENV,
+    GatewayTls, GatewayWorkerCount, GatewaydConfig, BACKGROUND_TASK_SHUTDOWN_TIMEOUT_MILLIS_ENV,
     DRAIN_TIMEOUT_MILLIS_ENV, GATEWAY_ADDRESS_ENV, MAX_GATEWAY_WORKERS, STATE_DIRECTORY_ENV,
-    WORKER_COUNT_ENV,
+    TLS_DIR_ENV, TRUST_DOMAIN_ENV, WORKER_COUNT_ENV,
 };
 pub use health::{RuntimeHealthState, RuntimeReadiness, TonicHealthSynchronizer};
 pub use management::{
@@ -46,6 +46,7 @@ use gateway_grpc::{
     GatewayTransportPolicy, StandardGatewayRequestPolicy,
 };
 use gateway_pingora::PingoraGatewayAdapter;
+use panel_context::ServiceName;
 use panel_contracts::gateway::v1::gateway_engine_server::GatewayEngineServer;
 use panel_engine::{GatewayEngine, GatewayRuntimeInfoProvider};
 use panel_errors::Result;
@@ -55,6 +56,8 @@ use panel_gateway_runtime::{
     GatewayMutationCapacity, GatewayMutationExecutor, GatewayRecoveryMonitor,
     PreparedSnapshotAdmissionPolicy, PreparedSnapshotBudget,
 };
+use panel_pki::{CredentialFiles, WorkloadIdentity};
+use panel_tls::{PeerPolicy, TlsCredentials};
 use snapshot_store_fs::{FileSnapshotStore, SnapshotStoreLimits};
 use std::{future::Future, num::NonZeroU32, path::PathBuf, sync::Arc};
 use tokio::sync::oneshot;
@@ -211,6 +214,11 @@ pub enum GatewaydError {
     #[error("gateway background task failed: {0}")]
     BackgroundTask(#[from] BackgroundTaskError),
 }
+
+/// The gateway's workload identity in the trust domain.
+pub const GATEWAY_IDENTITY: &str = "gatewayd";
+const CREDENTIAL_RELOAD_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+const TLS_HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 pub fn gateway_service_name() -> &'static str {
     <GatewayEngineServer<GatewaydTransport> as NamedService>::NAME
@@ -425,17 +433,57 @@ pub async fn serve_gatewayd(
         worker_count: config.worker_count().get(),
     });
     let transport_policy = services.gateway().transport_policy();
+    let shutdown = shutdown_coordinator.run_with_shutdown_reason(shutdown_reason);
 
-    let transport_result = Server::builder()
-        .concurrency_limit_per_connection(transport_policy.max_concurrent_requests())
-        .timeout(transport_policy.request_timeout())
-        .add_service(transport_policy.gateway_server(services.gateway()))
-        .add_service(services.health())
-        .serve_with_shutdown(
-            config.listen_address(),
-            shutdown_coordinator.run_with_shutdown_reason(shutdown_reason),
-        )
-        .await;
+    let transport_result = match config.tls() {
+        Some(tls) => {
+            let credentials = TlsCredentials::load(
+                CredentialFiles::new(&tls.directory),
+                WorkloadIdentity::new(
+                    ServiceName::new(GATEWAY_IDENTITY)?,
+                    tls.trust_domain.clone(),
+                ),
+            )?;
+            let listener = tokio::net::TcpListener::bind(config.listen_address())
+                .await
+                .map_err(|error| {
+                    panel_errors::PanelError::precondition_failed(format!(
+                        "cannot bind {}: {error}",
+                        config.listen_address()
+                    ))
+                })?;
+            let reload = tokio_util::sync::CancellationToken::new();
+            let watcher = tokio::spawn(
+                Arc::clone(&credentials).watch(CREDENTIAL_RELOAD_INTERVAL, reload.clone()),
+            );
+            let result = Server::builder()
+                .concurrency_limit_per_connection(transport_policy.max_concurrent_requests())
+                .timeout(transport_policy.request_timeout())
+                .layer(PeerPolicy::new(tls.trust_domain.clone()).allow(
+                    gateway_service_name(),
+                    [ServiceName::new("config-service")?],
+                ))
+                .add_service(transport_policy.gateway_server(services.gateway()))
+                .add_service(services.health())
+                .serve_with_incoming_shutdown(
+                    panel_tls::incoming(listener, credentials, TLS_HANDSHAKE_TIMEOUT),
+                    shutdown,
+                )
+                .await;
+            reload.cancel();
+            let _ = watcher.await;
+            result
+        }
+        None => {
+            Server::builder()
+                .concurrency_limit_per_connection(transport_policy.max_concurrent_requests())
+                .timeout(transport_policy.request_timeout())
+                .add_service(transport_policy.gateway_server(services.gateway()))
+                .add_service(services.health())
+                .serve_with_shutdown(config.listen_address(), shutdown)
+                .await
+        }
+    };
     let background_result = background_tasks
         .shutdown_and_join_with_policy(config.background_task_shutdown_policy())
         .await;

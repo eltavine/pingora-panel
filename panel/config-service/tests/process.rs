@@ -17,8 +17,8 @@ fn environment(values: Vec<(&'static str, String)>) -> Environment<'static> {
     Environment::from_lookup(move |name| values.get(name).cloned())
 }
 
-#[test]
-fn plaintext_gateway_connections_must_stay_on_loopback() {
+#[tokio::test]
+async fn plaintext_gateway_connections_must_stay_on_loopback() {
     let mut env = environment(vec![
         (DATABASE_URL_ENV, "postgres://config@127.0.0.1/panel".into()),
         (

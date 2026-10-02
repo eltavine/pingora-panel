@@ -3,6 +3,7 @@ use crate::{
     ManagementBindPolicy, ShutdownPolicy,
 };
 use panel_errors::{PanelError, Result};
+use panel_pki::TrustDomain;
 use std::{
     ffi::{OsStr, OsString},
     net::SocketAddr,
@@ -17,6 +18,10 @@ pub const WORKER_COUNT_ENV: &str = "PINGORA_PANEL_WORKERS";
 pub const DRAIN_TIMEOUT_MILLIS_ENV: &str = "PINGORA_PANEL_DRAIN_TIMEOUT_MS";
 pub const BACKGROUND_TASK_SHUTDOWN_TIMEOUT_MILLIS_ENV: &str =
     "PINGORA_PANEL_BACKGROUND_TASK_SHUTDOWN_TIMEOUT_MS";
+/// Directory with the gateway's `identity.pem` and `trust.pem`; serves the
+/// management transport over mutual TLS.
+pub const TLS_DIR_ENV: &str = "PINGORA_PANEL_TLS_DIR";
+pub const TRUST_DOMAIN_ENV: &str = "PINGORA_PANEL_TRUST_DOMAIN";
 
 pub const MAX_GATEWAY_WORKERS: u32 = 256;
 
@@ -31,6 +36,14 @@ pub struct GatewaydConfig {
     shutdown_policy: ShutdownPolicy,
     background_task_shutdown_policy: BackgroundTaskShutdownPolicy,
     resource_limits: GatewayResourceLimits,
+    tls: Option<GatewayTls>,
+}
+
+/// The gateway's mutual TLS credentials and trust domain.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GatewayTls {
+    pub directory: PathBuf,
+    pub trust_domain: TrustDomain,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -73,6 +86,8 @@ impl GatewaydConfig {
         Self::from_lookup_with_policy(&mut lookup, &LoopbackOnlyManagementBindPolicy)
     }
 
+    /// With TLS credentials configured the transport authenticates every
+    /// peer, so the plaintext bind policy does not apply.
     pub fn from_lookup_with_policy(
         mut lookup: impl FnMut(&str) -> Option<OsString>,
         bind_policy: &dyn ManagementBindPolicy,
@@ -85,7 +100,24 @@ impl GatewaydConfig {
                     .parse()
                     .expect("default gateway address is valid")
             });
-        bind_policy.validate(listen_address)?;
+        let text = |value: OsString, name: &str| {
+            value
+                .into_string()
+                .map_err(|_| PanelError::invalid_argument(format!("{name} must be valid UTF-8")))
+        };
+        let tls = match lookup(TLS_DIR_ENV) {
+            Some(directory) => Some(GatewayTls {
+                directory: PathBuf::from(text(directory, TLS_DIR_ENV)?),
+                trust_domain: lookup(TRUST_DOMAIN_ENV)
+                    .map(|value| text(value, TRUST_DOMAIN_ENV).and_then(TrustDomain::new))
+                    .transpose()?
+                    .unwrap_or_default(),
+            }),
+            None => None,
+        };
+        if tls.is_none() {
+            bind_policy.validate(listen_address)?;
+        }
         let state_directory = lookup(STATE_DIRECTORY_ENV)
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(DEFAULT_STATE_DIRECTORY));
@@ -110,6 +142,7 @@ impl GatewaydConfig {
             shutdown_policy,
             background_task_shutdown_policy,
             resource_limits,
+            tls,
         })
     }
 
@@ -135,6 +168,10 @@ impl GatewaydConfig {
 
     pub fn resource_limits(&self) -> GatewayResourceLimits {
         self.resource_limits
+    }
+
+    pub fn tls(&self) -> Option<&GatewayTls> {
+        self.tls.as_ref()
     }
 }
 
@@ -271,6 +308,20 @@ mod tests {
         assert_eq!(
             error.code.as_str(),
             panel_errors::ErrorCode::INVALID_ARGUMENT
+        );
+    }
+
+    #[test]
+    fn mutual_tls_transport_replaces_the_plaintext_bind_policy() {
+        let values = HashMap::from([
+            (GATEWAY_ADDRESS_ENV, OsString::from("0.0.0.0:50051")),
+            (TLS_DIR_ENV, OsString::from("/run/pingora-panel/tls")),
+        ]);
+        let config = GatewaydConfig::from_lookup(|key| values.get(key).cloned()).unwrap();
+        assert_eq!(config.listen_address().port(), 50051);
+        assert_eq!(
+            config.tls().unwrap().trust_domain.as_str(),
+            "pingora-panel.internal"
         );
     }
 

@@ -20,6 +20,7 @@ mod tasks;
 pub use main_loop::{service_main, HEALTHCHECK_ARGUMENT};
 pub use process::{ControlPlaneProcess, RunningProcess};
 pub use settings::{
-    DefaultAddresses, ProcessSettings, DATABASE_PASSWORD_ENV, DATABASE_URL_ENV, GRPC_ADDRESS_ENV,
-    HEALTH_INTERVAL_MS_ENV, NATS_URL_ENV, OPS_ADDRESS_ENV,
+    DefaultAddresses, ProcessSettings, TlsSettings, DATABASE_PASSWORD_ENV, DATABASE_URL_ENV,
+    GRPC_ADDRESS_ENV, HEALTH_INTERVAL_MS_ENV, NATS_URL_ENV, OPS_ADDRESS_ENV, TLS_DIR_ENV,
+    TRUST_DOMAIN_ENV,
 };
