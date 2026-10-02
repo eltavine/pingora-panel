@@ -30,6 +30,9 @@ members = [
     "gateway-grpc",
     "gateway-grpc-client",
     "gatewayd",
+    "config-service",
+    "automation-service",
+    "observability-service",
 ]
 
 [workspace.package]

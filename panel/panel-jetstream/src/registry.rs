@@ -22,6 +22,10 @@ pub struct JetStreamServiceRegistry {
 }
 
 impl JetStreamServiceRegistry {
+    /// Expiry every provisioner of one installation must agree on, since
+    /// the bucket keeps the last configuration applied.
+    pub const DEFAULT_TTL: Duration = Duration::from_secs(30);
+
     /// Creates or reconfigures the registry bucket.
     pub async fn provision(
         context: &Context,

@@ -10,7 +10,9 @@ use panel_errors::{PanelError, Result};
 use panel_health::{
     HealthCheck, HealthMonitor, HealthRegistry, HealthWatch, Impact, ServiceIdentity,
 };
-use panel_jetstream::{JetStreamHealthCheck, JetStreamPublisher, JetStreamSettings};
+use panel_jetstream::{
+    JetStreamHealthCheck, JetStreamPublisher, JetStreamServiceRegistry, JetStreamSettings,
+};
 use panel_outbox::RelayOptions;
 use panel_platform::{
     Capability, ProtocolRange, RegistrationPolicy, ServiceDescriptor, ServiceName,
@@ -32,7 +34,6 @@ use tonic::{
     transport::Server,
 };
 
-const DEFAULT_REGISTRATION_TTL: Duration = Duration::from_secs(30);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A control-plane service process before it starts.
@@ -75,7 +76,7 @@ impl ControlPlaneProcess {
             routes: Routes::default(),
             grpc_services: Vec::new(),
             jetstream: JetStreamSettings::default(),
-            registration_ttl: DEFAULT_REGISTRATION_TTL,
+            registration_ttl: JetStreamServiceRegistry::DEFAULT_TTL,
             registration: RegistrationPolicy::default(),
             relay: RelayOptions::default(),
         }

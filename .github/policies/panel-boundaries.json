@@ -1,6 +1,29 @@
 {
   "schema_version": 1,
   "members": {
+    "automation-service": {
+      "catalog": false,
+      "allowed_workspace_dependencies": [
+        "panel-control-runtime",
+        "panel-errors",
+        "panel-platform",
+        "panel-postgres",
+        "panel-service"
+      ]
+    },
+    "config-service": {
+      "catalog": false,
+      "allowed_workspace_dependencies": [
+        "gateway-grpc-client",
+        "panel-control-runtime",
+        "panel-errors",
+        "panel-health",
+        "panel-jetstream",
+        "panel-platform",
+        "panel-postgres",
+        "panel-service"
+      ]
+    },
     "gateway-grpc": {
       "catalog": true,
       "allowed_workspace_dependencies": [
@@ -60,6 +83,16 @@
         "panel-health",
         "panel-ir",
         "snapshot-store-fs"
+      ]
+    },
+    "observability-service": {
+      "catalog": false,
+      "allowed_workspace_dependencies": [
+        "panel-control-runtime",
+        "panel-errors",
+        "panel-platform",
+        "panel-postgres",
+        "panel-service"
       ]
     },
     "panel-api": {

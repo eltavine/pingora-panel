@@ -1,0 +1,22 @@
+[package]
+name = "config-service"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+gateway-grpc-client.workspace = true
+panel-control-runtime.workspace = true
+panel-errors.workspace = true
+panel-health.workspace = true
+panel-platform.workspace = true
+panel-postgres.workspace = true
+panel-service.workspace = true
+
+[dev-dependencies]
+panel-jetstream = { workspace = true, features = ["test-support"] }
+panel-postgres = { workspace = true, features = ["test-support"] }
+tokio.workspace = true

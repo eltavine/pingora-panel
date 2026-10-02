@@ -194,6 +194,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
+name = "automation-service"
+version = "0.1.0"
+dependencies = [
+ "panel-control-runtime",
+ "panel-errors",
+ "panel-platform",
+ "panel-postgres",
+ "panel-service",
+]
+
+[[package]]
 name = "axum"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -462,6 +473,21 @@ name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
+
+[[package]]
+name = "config-service"
+version = "0.1.0"
+dependencies = [
+ "gateway-grpc-client",
+ "panel-control-runtime",
+ "panel-errors",
+ "panel-health",
+ "panel-jetstream",
+ "panel-platform",
+ "panel-postgres",
+ "panel-service",
+ "tokio",
+]
 
 [[package]]
 name = "const-oid"
@@ -1679,6 +1705,17 @@ checksum = "91df4bbde75afed763b708b7eee1e8e7651e02d97f6d5dd763e89367e957b23b"
 dependencies = [
  "hermit-abi",
  "libc",
+]
+
+[[package]]
+name = "observability-service"
+version = "0.1.0"
+dependencies = [
+ "panel-control-runtime",
+ "panel-errors",
+ "panel-platform",
+ "panel-postgres",
+ "panel-service",
 ]
 
 [[package]]
