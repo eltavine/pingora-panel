@@ -90,6 +90,23 @@ impl Diagnostic {
             help: None,
         }
     }
+
+    pub fn warning(code: impl Into<ErrorCode>, message: impl Into<String>) -> Self {
+        Self {
+            severity: DiagnosticSeverity::Warning,
+            ..Self::error(code, message)
+        }
+    }
+
+    pub fn with_resource(mut self, resource_id: impl Into<String>) -> Self {
+        self.resource_id = Some(resource_id.into());
+        self
+    }
+
+    pub fn with_help(mut self, help: impl Into<String>) -> Self {
+        self.help = Some(help.into());
+        self
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
