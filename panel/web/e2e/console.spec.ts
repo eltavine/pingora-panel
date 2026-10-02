@@ -30,6 +30,22 @@ async function expectNoHorizontalOverflow(page: Page) {
 
 test.beforeEach(async ({ page }) => {
   await useEnglish(page)
+  // The preview server sends the production Content Security Policy; any
+  // violation means the console would break when served by the API.
+  await page.addInitScript(() => {
+    const violations: string[] = []
+    Object.assign(window, { __cspViolations: violations })
+    document.addEventListener('securitypolicyviolation', (event) =>
+      violations.push(`${event.violatedDirective} ${event.blockedURI}`),
+    )
+  })
+})
+
+test.afterEach(async ({ page }) => {
+  const violations = await page.evaluate(
+    () => (window as unknown as { __cspViolations?: string[] }).__cspViolations ?? [],
+  )
+  expect(violations).toEqual([])
 })
 
 test('the overview reports readiness and the active configuration', async ({ page }) => {

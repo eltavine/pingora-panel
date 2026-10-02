@@ -1,4 +1,5 @@
 import { fileURLToPath, URL } from 'node:url'
+import securityHeaders from './security-headers.json' with { type: 'json' }
 
 import { defineConfig } from 'vite'
 import tailwindcss from '@tailwindcss/vite'
@@ -12,6 +13,8 @@ export default defineConfig({
     // Vite forwards API calls to it.
     proxy: { '/api': process.env.PANEL_API_URL ?? 'http://127.0.0.1:8080' },
   },
+  // The production headers, so end-to-end tests run under the same policy.
+  preview: { headers: securityHeaders },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

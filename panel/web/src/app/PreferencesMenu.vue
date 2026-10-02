@@ -14,7 +14,13 @@ import {
 import { LOCALES, type Locale } from '@/i18n'
 
 const { t, locale } = useI18n()
-const mode = useColorMode({ storageKey: 'pingora-panel.color-mode', emitAuto: true })
+// Transition suppression injects an inline stylesheet, which the console's
+// Content Security Policy forbids.
+const mode = useColorMode({
+  storageKey: 'pingora-panel.color-mode',
+  emitAuto: true,
+  disableTransition: false,
+})
 
 const themes = [
   { value: 'light', icon: Sun, label: 'shell.themeLight' },
