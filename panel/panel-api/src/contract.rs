@@ -3,6 +3,7 @@ use panel_application::{
     IdempotencyRecord, PreparedDeployment,
 };
 use panel_errors::{Diagnostic, PanelError, ValidationReport};
+use panel_platform::ServiceListing;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -224,4 +225,78 @@ pub struct ProblemDetails {
     pub request_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub field_errors: Vec<DiagnosticDetails>,
+}
+
+/// Live service instances at one moment.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
+pub struct ServiceListingResponse {
+    /// RFC 3339 time at which the directory was read.
+    pub observed_at: String,
+    pub services: Vec<ServiceInstanceResponse>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
+pub struct ServiceInstanceResponse {
+    pub service: String,
+    pub instance_id: String,
+    pub build_version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema_version: Option<String>,
+    /// RFC 3339 start time of the instance.
+    pub started_at: String,
+    pub protocols: Vec<ProtocolSupportResponse>,
+    pub capabilities: Vec<CapabilityResponse>,
+}
+
+/// The revisions of one protocol package an instance speaks.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
+pub struct ProtocolSupportResponse {
+    pub name: String,
+    pub min_revision: u32,
+    pub max_revision: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
+pub struct CapabilityResponse {
+    pub name: String,
+    pub version: String,
+}
+
+impl From<ServiceListing> for ServiceListingResponse {
+    fn from(value: ServiceListing) -> Self {
+        let time = |time: chrono::DateTime<chrono::Utc>| {
+            time.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        };
+        Self {
+            observed_at: time(value.observed_at()),
+            services: value
+                .services()
+                .iter()
+                .map(|instance| ServiceInstanceResponse {
+                    service: instance.service().to_string(),
+                    instance_id: instance.instance_id().to_string(),
+                    build_version: instance.build_version().into(),
+                    schema_version: (!instance.schema_version().is_empty())
+                        .then(|| instance.schema_version().into()),
+                    started_at: time(instance.started_at()),
+                    protocols: instance
+                        .protocols()
+                        .iter()
+                        .map(|range| ProtocolSupportResponse {
+                            name: range.name().into(),
+                            min_revision: range.min_revision(),
+                            max_revision: range.max_revision(),
+                        })
+                        .collect(),
+                    capabilities: instance
+                        .capabilities()
+                        .map(|capability| CapabilityResponse {
+                            name: capability.name().into(),
+                            version: capability.version().into(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
 }

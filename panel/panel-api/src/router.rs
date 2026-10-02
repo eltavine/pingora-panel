@@ -30,6 +30,7 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         .route("/api/v1/gateway/abort", post(routes::abort::<U>))
         .route("/api/v1/gateway/status", get(routes::status::<U>))
         .route("/api/v1/gateway/receipts/{key}", get(routes::receipt::<U>))
+        .route("/api/v1/platform/services", get(routes::services::<U>))
         .route("/api/v1/openapi.json", get(routes::openapi))
         .layer(DefaultBodyLimit::max(config.max_body_bytes()))
         .with_state(state);

@@ -11,7 +11,7 @@ mod tests;
 #[derive(OpenApi)]
 #[openapi(
     info(title = "Pingora Panel API", version = "v1"),
-    paths(crate::routes::validate, crate::routes::prepare, crate::routes::activate, crate::routes::abort, crate::routes::status, crate::routes::receipt, crate::routes::openapi),
+    paths(crate::routes::validate, crate::routes::prepare, crate::routes::activate, crate::routes::abort, crate::routes::status, crate::routes::receipt, crate::routes::services, crate::routes::openapi),
     modifiers(&HttpConventions),
     components(schemas(
         SnapshotEnvelope,
@@ -25,6 +25,10 @@ mod tests;
         IdempotencyReceiptPendingResponse,
         IdempotencyReceiptResponse,
         ReceiptOutcomeResponse,
+        ServiceListingResponse,
+        ServiceInstanceResponse,
+        ProtocolSupportResponse,
+        CapabilityResponse,
         ProblemDetails
     ))
 )]

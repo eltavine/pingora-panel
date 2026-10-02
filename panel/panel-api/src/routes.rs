@@ -3,7 +3,7 @@ use crate::{
     request_context::{command_context, request_scope},
     AbortRequest, AbortResponse, ActivateRequest, ActivatedResponse, ApiDoc, ApiState,
     GatewayStatusResponse, IdempotencyReceiptPendingResponse, IdempotencyReceiptResponse,
-    PreparedResponse, SnapshotEnvelope, ValidationResponse,
+    PreparedResponse, ServiceListingResponse, SnapshotEnvelope, ValidationResponse,
 };
 use axum::{
     extract::{rejection::JsonRejection, Json, Path, State},
@@ -215,4 +215,25 @@ where
 )]
 pub(crate) async fn openapi() -> Json<utoipa::openapi::OpenApi> {
     Json(ApiDoc::openapi())
+}
+
+/// Live service instances, their protocol revisions and capabilities.
+#[utoipa::path(
+    get,
+    path = "/api/v1/platform/services",
+    params(crate::request_context::QueryHeaders),
+    responses(
+        (status = 200, body = ServiceListingResponse)
+    )
+)]
+pub(crate) async fn services<U>(
+    State(state): State<ApiState<U>>,
+) -> Result<Json<ServiceListingResponse>, ApiError>
+where
+    U: GatewayUseCases,
+{
+    let directory = state.directory.as_ref().ok_or_else(|| {
+        PanelError::unsupported_capability("the service directory is not configured")
+    })?;
+    Ok(Json(directory.list().await?.into()))
 }

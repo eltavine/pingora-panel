@@ -16,6 +16,7 @@ use std::sync::Arc;
 use tower::ServiceExt;
 
 mod admission;
+mod platform;
 mod request_identity;
 
 struct IdentityCompiler;

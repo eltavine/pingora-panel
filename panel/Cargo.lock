@@ -1793,11 +1793,13 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
+ "chrono",
  "panel-application",
  "panel-domain",
  "panel-errors",
  "panel-health",
  "panel-ir",
+ "panel-platform",
  "serde",
  "serde_json",
  "tokio",
