@@ -13,6 +13,12 @@ pub mod pingora {
             }
         }
 
+        pub mod config {
+            pub mod v1 {
+                tonic::include_proto!("pingora.panel.config.v1");
+            }
+        }
+
         pub mod gateway {
             pub mod v1 {
                 tonic::include_proto!("pingora.panel.gateway.v1");
@@ -27,7 +33,7 @@ pub mod pingora {
     }
 }
 
-pub use pingora::panel::{common, gateway, platform};
+pub use pingora::panel::{common, config, gateway, platform};
 
 /// The CloudEvents Protobuf format, generated from the vendored official schema.
 pub mod cloudevents {
@@ -49,6 +55,12 @@ pub struct ProtocolRevisions {
     pub min: u32,
     pub max: u32,
 }
+
+pub const CONFIG_V1: ProtocolRevisions = ProtocolRevisions {
+    package: "pingora.panel.config.v1",
+    min: 1,
+    max: 1,
+};
 
 pub const GATEWAY_V1: ProtocolRevisions = ProtocolRevisions {
     package: "pingora.panel.gateway.v1",
@@ -94,6 +106,35 @@ impl From<&panel_errors::PanelError> for common::v1::Error {
 impl From<panel_errors::PanelError> for common::v1::Error {
     fn from(value: panel_errors::PanelError) -> Self {
         Self::from(&value)
+    }
+}
+
+impl From<common::v1::Diagnostic> for panel_errors::Diagnostic {
+    fn from(value: common::v1::Diagnostic) -> Self {
+        let severity = match common::v1::DiagnosticSeverity::try_from(value.severity)
+            .unwrap_or(common::v1::DiagnosticSeverity::Error)
+        {
+            common::v1::DiagnosticSeverity::Info => panel_errors::DiagnosticSeverity::Info,
+            common::v1::DiagnosticSeverity::Warning => panel_errors::DiagnosticSeverity::Warning,
+            _ => panel_errors::DiagnosticSeverity::Error,
+        };
+        let optional = |value: String| (!value.is_empty()).then_some(value);
+        Self {
+            code: panel_errors::ErrorCode::new(value.code),
+            severity,
+            message: value.message,
+            source_span: optional(value.source_span),
+            resource_id: optional(value.resource_id),
+            help: optional(value.help),
+        }
+    }
+}
+
+impl From<common::v1::Error> for panel_errors::PanelError {
+    fn from(value: common::v1::Error) -> Self {
+        Self::new(value.code, value.message)
+            .retryable(value.retryable)
+            .with_diagnostics(value.diagnostics.into_iter().map(Into::into).collect())
     }
 }
 
@@ -167,12 +208,28 @@ mod tests {
     #[test]
     fn protocol_revisions_name_generated_packages() {
         for (revisions, service) in [
+            (CONFIG_V1, config::v1::publication_server::SERVICE_NAME),
             (GATEWAY_V1, gateway::v1::gateway_engine_server::SERVICE_NAME),
             (PLATFORM_V1, platform::v1::service_info_server::SERVICE_NAME),
         ] {
             assert_eq!(service.rsplit_once('.').unwrap().0, revisions.package);
             assert!(1 <= revisions.min && revisions.min <= revisions.max);
         }
+    }
+
+    #[test]
+    fn wire_errors_convert_back_with_diagnostics() {
+        let original = panel_errors::PanelError::new(panel_errors::ErrorCode::CONFLICT, "stale")
+            .retryable(true)
+            .with_diagnostics(vec![panel_errors::Diagnostic {
+                help: Some("reload".into()),
+                ..panel_errors::Diagnostic::error("CAS_MISMATCH", "changed")
+            }]);
+        let decoded = panel_errors::PanelError::from(common::v1::Error::from(&original));
+        assert_eq!(decoded.code, original.code);
+        assert_eq!(decoded.message, original.message);
+        assert!(decoded.retryable);
+        assert_eq!(decoded.diagnostics, original.diagnostics);
     }
 
     #[test]

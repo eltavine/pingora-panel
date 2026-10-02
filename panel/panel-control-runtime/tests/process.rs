@@ -86,6 +86,7 @@ async fn a_ready_process_serves_registers_relays_and_deregisters() {
         ]),
         SqlIdentifier::new("config").unwrap(),
     )
+    .unwrap()
     .with_jetstream_settings((*broker.settings).clone())
     .with_registration(
         Duration::from_secs(5),
@@ -177,6 +178,7 @@ async fn an_unreachable_database_keeps_the_process_unavailable_but_stoppable() {
         ]),
         SqlIdentifier::new("observability").unwrap(),
     )
+    .unwrap()
     .start()
     .await
     .unwrap();

@@ -27,6 +27,8 @@ members = [
     "snapshot-store-fs",
     "gateway-pingora",
     "gateway-proto-codec",
+    "config-proto-codec",
+    "config-grpc-client",
     "gateway-grpc",
     "gateway-grpc-client",
     "gatewayd",
@@ -53,6 +55,8 @@ base64 = "=0.22.1"
 bytes = "=1.12.1"
 chrono = { version = "=0.4.45", default-features = false, features = ["clock", "serde", "std"] }
 futures-util = "=0.3.34"
+config-grpc-client = { version = "=0.1.0", path = "config-grpc-client" }
+config-proto-codec = { version = "=0.1.0", path = "config-proto-codec" }
 gateway-grpc = { version = "=0.1.0", path = "gateway-grpc" }
 gateway-grpc-client = { version = "=0.1.0", path = "gateway-grpc-client" }
 gateway-proto-codec = { version = "=0.1.0", path = "gateway-proto-codec" }

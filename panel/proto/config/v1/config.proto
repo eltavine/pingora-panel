@@ -1,0 +1,137 @@
+syntax = "proto3";
+
+package pingora.panel.config.v1;
+
+import "common/v1/common.proto";
+
+// Publishes configuration documents to the gateway. Activation is
+// replay-safe: a repeated idempotency key returns the recorded receipt
+// instead of activating twice.
+service Publication {
+  rpc Validate(ValidateRequest) returns (ValidateResponse);
+  rpc Prepare(PrepareRequest) returns (PrepareResponse);
+  rpc Activate(ActivateRequest) returns (ActivateResponse);
+  rpc Abort(AbortRequest) returns (AbortResponse);
+  rpc GetGatewayStatus(GetGatewayStatusRequest) returns (GetGatewayStatusResponse);
+  rpc GetActivationReceipt(GetActivationReceiptRequest) returns (GetActivationReceiptResponse);
+}
+
+// A configuration document in any supported source format.
+message ConfigDocument {
+  string schema_version = 1;
+  // RFC 6838 media type of `content`, such as "application/json".
+  string media_type = 2;
+  bytes content = 3;
+}
+
+message ValidationReport {
+  bool valid = 1;
+  repeated .pingora.panel.common.v1.Diagnostic diagnostics = 2;
+}
+
+message PreparedDeployment {
+  uint64 revision_id = 1;
+  .pingora.panel.common.v1.ContentHash content_hash = 2;
+  string prepare_token = 3;
+}
+
+message ActivatedDeployment {
+  uint64 revision_id = 1;
+  .pingora.panel.common.v1.ContentHash content_hash = 2;
+  .pingora.panel.common.v1.ContentHash previous_active_hash = 3;
+}
+
+message GatewayStatus {
+  bool ready = 1;
+  string message = 2;
+  uint64 active_revision_id = 3;
+  .pingora.panel.common.v1.ContentHash active_hash = 4;
+  uint64 prepared_count = 5;
+  string adapter_version = 6;
+  string schema_version = 7;
+}
+
+// The recorded result of one activation.
+message ActivationReceipt {
+  .pingora.panel.common.v1.ContentHash request_hash = 1;
+  oneof outcome {
+    ActivatedDeployment succeeded = 2;
+    ValidationReport rejected = 3;
+    FailedBeforeCommit failed_before_commit = 4;
+    PendingReconciliation pending_reconciliation = 5;
+  }
+}
+
+message FailedBeforeCommit {}
+
+message PendingReconciliation {}
+
+message ValidateRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  ConfigDocument document = 2;
+}
+
+message ValidateResponse {
+  ValidationReport report = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message PrepareRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  ConfigDocument document = 2;
+}
+
+message PrepareResponse {
+  PreparedDeployment deployment = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message ActivateRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string prepare_token = 2;
+  // Required except for the first activation, when nothing is active.
+  .pingora.panel.common.v1.ContentHash expected_active_hash = 3;
+}
+
+message ActivateResponse {
+  ActivatedDeployment deployment = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message AbortRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string prepare_token = 2;
+}
+
+message AbortResponse {
+  bool aborted = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message GetGatewayStatusRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+}
+
+message GetGatewayStatusResponse {
+  GatewayStatus status = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message GetActivationReceiptRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string idempotency_key = 2;
+}
+
+message GetActivationReceiptResponse {
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    STATE_MISSING = 1;
+    STATE_IN_PROGRESS = 2;
+    STATE_COMPLETED = 3;
+  }
+
+  State state = 1;
+  // Present when `state` is STATE_COMPLETED.
+  ActivationReceipt receipt = 2;
+  .pingora.panel.common.v1.Error error = 3;
+}

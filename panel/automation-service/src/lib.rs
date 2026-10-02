@@ -25,10 +25,10 @@ pub fn process(
     _env: &mut Environment<'_>,
     settings: ProcessSettings,
 ) -> Result<ControlPlaneProcess> {
-    Ok(ControlPlaneProcess::new(
+    ControlPlaneProcess::new(
         ServiceName::new(SERVICE)?,
         env!("CARGO_PKG_VERSION"),
         settings,
         SqlIdentifier::new(SCHEMA)?,
-    ))
+    )
 }

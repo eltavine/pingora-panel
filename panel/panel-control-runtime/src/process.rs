@@ -36,11 +36,13 @@ use tonic::{
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
+type StartHook = Box<dyn FnOnce(&RunningProcess) -> Result<()> + Send>;
+
 /// A control-plane service process before it starts.
 pub struct ControlPlaneProcess {
     descriptor: ServiceDescriptor,
     settings: ProcessSettings,
-    schema: SqlIdentifier,
+    database: ServiceDatabase,
     migrations: &'static [SchemaMigration],
     database_impact: Impact,
     broker_impact: Impact,
@@ -51,6 +53,7 @@ pub struct ControlPlaneProcess {
     registration_ttl: Duration,
     registration: RegistrationPolicy,
     relay: RelayOptions,
+    start_hooks: Vec<StartHook>,
 }
 
 impl ControlPlaneProcess {
@@ -63,12 +66,17 @@ impl ControlPlaneProcess {
         release: impl Into<String>,
         settings: ProcessSettings,
         schema: SqlIdentifier,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        let mut database_config =
+            ServiceDatabaseConfig::new(settings.database_url(), service.as_str(), schema)?;
+        if let Some(secret) = settings.database_password() {
+            database_config = database_config.with_secret(secret);
+        }
+        Ok(Self {
             descriptor: ServiceDescriptor::new(service, release, Utc::now())
                 .with_protocol(protocol_range(PLATFORM_V1)),
+            database: ServiceDatabase::connect_lazy(database_config),
             settings,
-            schema,
             migrations: &[],
             database_impact: Impact::Required,
             broker_impact: Impact::Informational,
@@ -79,7 +87,25 @@ impl ControlPlaneProcess {
             registration_ttl: JetStreamServiceRegistry::DEFAULT_TTL,
             registration: RegistrationPolicy::default(),
             relay: RelayOptions::default(),
-        }
+            start_hooks: Vec::new(),
+        })
+    }
+
+    /// Runs once the process has started, to serve service-specific
+    /// listeners or tasks through [`RunningProcess::spawn`]. A failing hook
+    /// stops the process and fails the start.
+    pub fn on_start(
+        mut self,
+        hook: impl FnOnce(&RunningProcess) -> Result<()> + Send + 'static,
+    ) -> Self {
+        self.start_hooks.push(Box::new(hook));
+        self
+    }
+
+    /// The service database. It connects on first use, so adapters can be
+    /// built on it before the process starts.
+    pub fn database(&self) -> &ServiceDatabase {
+        &self.database
     }
 
     /// Service migrations, at versions from
@@ -162,15 +188,7 @@ impl ControlPlaneProcess {
             .descriptor
             .with_schema_version(SchemaMigration::latest(self.migrations).to_string());
 
-        let mut database_config = ServiceDatabaseConfig::new(
-            self.settings.database_url(),
-            service.as_str(),
-            self.schema,
-        )?;
-        if let Some(secret) = self.settings.database_password() {
-            database_config = database_config.with_secret(secret);
-        }
-        let database = ServiceDatabase::connect_lazy(database_config);
+        let database = self.database;
         let client = async_nats::ConnectOptions::new()
             .name(service.as_str())
             .retry_on_initial_connect()
@@ -271,7 +289,7 @@ impl ControlPlaneProcess {
             "service started"
         );
 
-        Ok(RunningProcess {
+        let running = RunningProcess {
             descriptor,
             health,
             database,
@@ -282,7 +300,14 @@ impl ControlPlaneProcess {
             cancel,
             tasks,
             monitor,
-        })
+        };
+        for hook in self.start_hooks {
+            if let Err(error) = hook(&running) {
+                running.stop().await;
+                return Err(error);
+            }
+        }
+        Ok(running)
     }
 }
 

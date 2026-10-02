@@ -11,15 +11,47 @@
         "panel-service"
       ]
     },
+    "config-grpc-client": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "config-proto-codec",
+        "gateway-proto-codec",
+        "panel-application",
+        "panel-contracts",
+        "panel-errors",
+        "panel-service"
+      ]
+    },
+    "config-proto-codec": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "gateway-proto-codec",
+        "panel-application",
+        "panel-contracts",
+        "panel-domain",
+        "panel-errors"
+      ]
+    },
     "config-service": {
       "catalog": false,
       "allowed_workspace_dependencies": [
+        "config-grpc-client",
+        "config-proto-codec",
+        "gateway-grpc",
         "gateway-grpc-client",
+        "gateway-proto-codec",
+        "panel-application",
+        "panel-config-json",
+        "panel-contracts",
         "panel-control-runtime",
+        "panel-domain",
+        "panel-engine",
         "panel-errors",
         "panel-health",
+        "panel-ir",
         "panel-jetstream",
         "panel-platform",
+        "panel-platform-codec",
         "panel-postgres",
         "panel-service"
       ]
@@ -271,6 +303,7 @@
     "panel-service": {
       "catalog": true,
       "allowed_workspace_dependencies": [
+        "panel-context",
         "panel-contracts",
         "panel-errors",
         "panel-health",
