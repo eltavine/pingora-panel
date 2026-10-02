@@ -32,6 +32,17 @@ impl SchemaMigration {
         self.version
     }
 
+    /// The schema version a service reaches after applying the platform
+    /// migrations and `service`.
+    pub fn latest(service: &[SchemaMigration]) -> i64 {
+        PLATFORM_MIGRATIONS
+            .iter()
+            .chain(service)
+            .map(|migration| migration.version)
+            .max()
+            .unwrap_or_default()
+    }
+
     fn to_sqlx(self) -> Migration {
         Migration::new(
             self.version,

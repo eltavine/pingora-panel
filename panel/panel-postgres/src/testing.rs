@@ -89,6 +89,17 @@ impl TestDatabase {
         secrets
     }
 
+    /// The URL of a bootstrapped service role, without its password.
+    pub fn service_url(&self, service: &str) -> String {
+        format!(
+            "postgres://{}@{}:{}/{}",
+            self.role_name(service),
+            self.admin.get_host(),
+            self.admin.get_port(),
+            self.name
+        )
+    }
+
     /// Connection settings for a bootstrapped service role.
     pub fn service_config(
         &self,
@@ -96,14 +107,7 @@ impl TestDatabase {
         schema: &str,
         secret: &RoleSecret,
     ) -> ServiceDatabaseConfig {
-        let role = self.role_name(service);
-        let url = format!(
-            "postgres://{}@{}:{}/{}",
-            role,
-            self.admin.get_host(),
-            self.admin.get_port(),
-            self.name
-        );
+        let url = self.service_url(service);
         ServiceDatabaseConfig::new(&url, service, SqlIdentifier::new(schema).unwrap())
             .unwrap()
             .with_secret(secret)

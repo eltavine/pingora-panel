@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "panel-api",
     "panel-context",
+    "panel-control-runtime",
     "panel-contracts",
     "panel-errors",
     "panel-events",
@@ -64,6 +65,7 @@ percent-encoding = "=2.3.2"
 prost = "=0.14.4"
 prost-types = "=0.14.4"
 panel-context = { version = "=0.1.0", path = "panel-context" }
+panel-control-runtime = { version = "=0.1.0", path = "panel-control-runtime" }
 panel-contracts = { version = "=0.1.0", path = "panel-contracts" }
 panel-config-domain = { version = "=0.1.0", path = "panel-config-domain" }
 panel-config-state-codec = { version = "=0.1.0", path = "panel-config-state-codec" }

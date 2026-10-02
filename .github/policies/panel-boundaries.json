@@ -109,6 +109,21 @@
         "panel-errors"
       ]
     },
+    "panel-control-runtime": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-contracts",
+        "panel-errors",
+        "panel-events",
+        "panel-health",
+        "panel-jetstream",
+        "panel-outbox",
+        "panel-platform",
+        "panel-platform-codec",
+        "panel-postgres",
+        "panel-service"
+      ]
+    },
     "panel-domain": {
       "catalog": true,
       "allowed_workspace_dependencies": []

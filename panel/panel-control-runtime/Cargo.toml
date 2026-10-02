@@ -1,0 +1,38 @@
+[package]
+name = "panel-control-runtime"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-nats.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+backon.workspace = true
+chrono.workspace = true
+panel-contracts.workspace = true
+panel-errors.workspace = true
+panel-health.workspace = true
+panel-jetstream.workspace = true
+panel-outbox.workspace = true
+panel-platform.workspace = true
+panel-platform-codec.workspace = true
+panel-postgres.workspace = true
+panel-service.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tokio-util.workspace = true
+tonic.workspace = true
+tonic-health.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+chrono.workspace = true
+panel-events.workspace = true
+panel-jetstream = { workspace = true, features = ["test-support"] }
+panel-postgres = { workspace = true, features = ["test-support"] }
+reqwest.workspace = true
+serde_json.workspace = true
