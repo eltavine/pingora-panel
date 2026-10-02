@@ -4,6 +4,6 @@ import { defineConfig } from '@hey-api/openapi-ts'
 // contract; the client is regenerated from it and never committed.
 export default defineConfig({
   input: '../panel-api/tests/fixtures/openapi.json',
-  output: { path: 'src/api/generated', format: false, lint: false },
+  output: { path: 'src/api/generated', postProcess: [] },
   plugins: ['@hey-api/client-fetch', '@hey-api/typescript', '@hey-api/sdk', '@tanstack/vue-query'],
 })
