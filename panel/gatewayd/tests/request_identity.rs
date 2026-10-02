@@ -159,3 +159,55 @@ async fn remote_gateway_requests_keep_the_callers_identity_and_trace() {
     shutdown.send(()).unwrap();
     server.await.unwrap().unwrap();
 }
+
+#[tokio::test]
+async fn lazily_connected_clients_report_gateway_health() {
+    use gateway_grpc_client::GatewayGrpcClientConfig;
+    use panel_health::{HealthCheck, HealthStatus};
+
+    let unreachable =
+        GatewayGrpcClient::connect_lazy("http://127.0.0.1:1", GatewayGrpcClientConfig::default())
+            .unwrap();
+    let outcome = unreachable.health_check().check().await;
+    assert_eq!(outcome.status(), HealthStatus::Fail);
+    assert_eq!(outcome.output(), Some("unreachable"));
+
+    let state = tempfile::tempdir().unwrap();
+    let runtime = build_gateway_runtime_with_options(
+        state.path(),
+        Arc::new(ProcessRuntimeInfo::new("test", NonZeroU32::MIN)),
+        GatewaydServiceOptions::default(),
+    )
+    .await
+    .unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let gateway = runtime.services.gateway();
+    let health = runtime.services.health();
+    let (shutdown, requested) = oneshot::channel::<()>();
+    let server = tokio::spawn(async move {
+        let policy = gateway.transport_policy();
+        Server::builder()
+            .add_service(policy.gateway_server(gateway))
+            .add_service(health)
+            .serve_with_incoming_shutdown(TcpListenerStream::new(listener), async {
+                let _ = requested.await;
+            })
+            .await
+    });
+    let client =
+        GatewayGrpcClient::connect_lazy(format!("http://{address}"), Default::default()).unwrap();
+    let check = client.health_check();
+    let mut status = check.check().await.status();
+    for _ in 0..100 {
+        if status == HealthStatus::Pass {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        status = check.check().await.status();
+    }
+    assert_eq!(status, HealthStatus::Pass);
+
+    shutdown.send(()).unwrap();
+    server.await.unwrap().unwrap();
+}

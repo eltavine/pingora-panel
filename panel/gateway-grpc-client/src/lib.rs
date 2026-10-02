@@ -29,8 +29,11 @@ const CLIENT_ACTOR: &str = "gateway-grpc-client";
 
 mod abort_receipt;
 mod activation;
+mod health;
 mod preparation;
 mod status;
+
+pub use health::GatewayHealthCheck;
 
 pub struct GatewayGrpcClient {
     channel: Channel,
@@ -126,6 +129,35 @@ impl GatewayGrpcClient {
             max_message_bytes: config.max_message_bytes,
             request_timeout: config.request_timeout,
         })
+    }
+
+    /// Like [`Self::connect_with_config`], but connects on first use, so a
+    /// caller can start, and report itself degraded, while the gateway is
+    /// still unavailable.
+    pub fn connect_lazy(
+        endpoint: impl Into<String>,
+        config: GatewayGrpcClientConfig,
+    ) -> Result<Self> {
+        config.validate()?;
+        let endpoint = Endpoint::from_shared(endpoint.into()).map_err(|error| {
+            PanelError::invalid_argument(format!("invalid gateway endpoint: {error}"))
+        })?;
+        validate_plaintext_endpoint(&endpoint)?;
+        let channel = endpoint
+            .connect_timeout(config.connect_timeout)
+            .timeout(config.request_timeout)
+            .connect_lazy();
+        Ok(Self {
+            channel,
+            max_message_bytes: config.max_message_bytes,
+            request_timeout: config.request_timeout,
+        })
+    }
+
+    /// A readiness check that asks the gateway's standard gRPC health service
+    /// for the overall serving status.
+    pub fn health_check(&self) -> GatewayHealthCheck {
+        GatewayHealthCheck::new(self.channel.clone(), self.request_timeout)
     }
 
     /// The channel owner is responsible for authenticating externally supplied

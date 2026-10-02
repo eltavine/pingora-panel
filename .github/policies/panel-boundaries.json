@@ -21,6 +21,7 @@
         "panel-contracts",
         "panel-domain",
         "panel-errors",
+        "panel-health",
         "panel-ir"
       ]
     },
@@ -46,8 +47,8 @@
       "catalog": false,
       "allowed_workspace_dependencies": [
         "gateway-grpc",
-        "gateway-proto-codec",
         "gateway-pingora",
+        "gateway-proto-codec",
         "panel-api",
         "panel-application",
         "panel-config-json",
@@ -56,6 +57,7 @@
         "panel-engine",
         "panel-errors",
         "panel-gateway-runtime",
+        "panel-health",
         "panel-ir",
         "snapshot-store-fs"
       ]
@@ -146,6 +148,10 @@
         "panel-ir"
       ]
     },
+    "panel-health": {
+      "catalog": true,
+      "allowed_workspace_dependencies": []
+    },
     "panel-ir": {
       "catalog": true,
       "allowed_workspace_dependencies": [
@@ -157,7 +163,8 @@
       "allowed_workspace_dependencies": [
         "panel-errors",
         "panel-event-codec",
-        "panel-events"
+        "panel-events",
+        "panel-health"
       ]
     },
     "panel-outbox": {
@@ -181,6 +188,7 @@
         "panel-errors",
         "panel-event-codec",
         "panel-events",
+        "panel-health",
         "panel-outbox"
       ]
     },
@@ -208,6 +216,7 @@
       "panel-errors",
       "panel-events",
       "panel-gateway-runtime",
+      "panel-health",
       "panel-ir",
       "panel-outbox"
     ],

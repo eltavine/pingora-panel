@@ -20,6 +20,7 @@ hmac.workspace = true
 panel-errors.workspace = true
 panel-event-codec.workspace = true
 panel-events.workspace = true
+panel-health.workspace = true
 panel-outbox.workspace = true
 pbkdf2.workspace = true
 sha2.workspace = true

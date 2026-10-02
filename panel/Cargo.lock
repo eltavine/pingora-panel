@@ -398,6 +398,7 @@ checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
  "num-traits",
+ "serde",
  "windows-link",
 ]
 
@@ -933,8 +934,10 @@ dependencies = [
  "panel-contracts",
  "panel-domain",
  "panel-errors",
+ "panel-health",
  "panel-ir",
  "tonic",
+ "tonic-health",
  "uuid",
 ]
 
@@ -984,6 +987,7 @@ dependencies = [
  "panel-engine",
  "panel-errors",
  "panel-gateway-runtime",
+ "panel-health",
  "panel-ir",
  "panel-persistence-memory",
  "reqwest",
@@ -1867,6 +1871,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "panel-health"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "panel-ir"
 version = "0.1.0"
 dependencies = [
@@ -1887,6 +1903,7 @@ dependencies = [
  "panel-errors",
  "panel-event-codec",
  "panel-events",
+ "panel-health",
  "panel-outbox",
  "panel-postgres",
  "percent-encoding",
@@ -1935,6 +1952,7 @@ dependencies = [
  "panel-errors",
  "panel-event-codec",
  "panel-events",
+ "panel-health",
  "panel-outbox",
  "pbkdf2",
  "serde_json",

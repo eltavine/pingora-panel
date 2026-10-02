@@ -18,11 +18,12 @@ snapshot-store-fs -> panel-engine::SnapshotStore
 gateway-pingora -> panel-engine::DataPlaneAdapter
 gateway-proto-codec -> panel-contracts + panel-domain + panel-ir
 panel-event-codec -> panel-contracts + panel-events
+panel-health (no workspace dependencies)
 panel-outbox -> panel-events + panel-errors
-panel-postgres -> panel-outbox + panel-event-codec + panel-events + panel-errors
-panel-jetstream -> panel-event-codec + panel-events + panel-errors
+panel-postgres -> panel-outbox + panel-event-codec + panel-events + panel-health + panel-errors
+panel-jetstream -> panel-event-codec + panel-events + panel-health + panel-errors
 gateway-grpc -> gateway-proto-codec + panel-engine::GatewayEngine
-gateway-grpc-client -> panel-application + gateway-proto-codec + panel-contracts
+gateway-grpc-client -> panel-application + gateway-proto-codec + panel-contracts + panel-health
 
 gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC/Proto adapters + REST/compiler adapters
 ```
@@ -36,9 +37,10 @@ gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC/Proto adapters
 | `panel-domain` | Validated value objects | IR, transport, storage, Pingora |
 | `panel-events` | CloudEvents-aligned event model, publisher/handler ports and idempotent consumption | Event formats, brokers, storage, Pingora |
 | `panel-event-codec` | CloudEvents Protobuf, JSON and binary-mode representations | Brokers, storage, application rules, Pingora |
+| `panel-health` | Health checks, impact-based readiness aggregation, service mode and `application/health+json` documents | Transports, drivers, Pingora |
 | `panel-outbox` | Ordered at-least-once outbox relay over `OutboxSource`, `OutboxWakeup` and `EventPublisher` ports | Storage, brokers, Pingora |
-| `panel-postgres` | Service schema ownership, SCRAM role bootstrap, per-schema migrations, the transactional outbox and the idempotent-consumer inbox | Application rules, transports, Pingora |
-| `panel-jetstream` | Stream provisioning, deduplicated CloudEvents publication, durable consumers, dead letters and targeted replay | Storage, application rules, Pingora |
+| `panel-postgres` | Service schema ownership, SCRAM role bootstrap, per-schema migrations, the transactional outbox, the idempotent-consumer inbox and the database health check | Application rules, transports, Pingora |
+| `panel-jetstream` | Stream provisioning, deduplicated CloudEvents publication, durable consumers, dead letters, targeted replay and the broker health check | Storage, application rules, Pingora |
 | `panel-ir` | Versioned canonical runtime snapshot | Proto, storage, Pingora |
 | `panel-engine` | `GatewayEngine`, `DataPlaneAdapter`, `SnapshotStore`, runtime-info ports and Fake | Proto, storage implementation, Pingora |
 | `panel-application` | Request context, format-neutral config document, use-case orchestration and persistence ports | HTTP, Proto, storage implementation, Pingora |
@@ -49,7 +51,7 @@ gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC/Proto adapters
 | `gateway-pingora` | Compile IR into private Pingora values and atomic `ArcSwap` publication | Proto, filesystem, control-plane policy |
 | `gateway-proto-codec` | Shared Proto/IR conversion used by client and server | Engine, server, client, Pingora, filesystem |
 | `gateway-grpc` | Runtime-info projection, request policy and Tonic service | Pingora, filesystem, environment |
-| `gateway-grpc-client` | Tonic client adapter implementing `panel-application::GatewayPort` | HTTP, storage, identity, generated Proto outside this adapter |
+| `gateway-grpc-client` | Tonic client adapter implementing `panel-application::GatewayPort`, and the gateway health check | HTTP, storage, identity, generated Proto outside this adapter |
 | `gatewayd` | Dependency construction, REST/gRPC adapter composition, bind/readiness policies, environment configuration, process clock, worker executor and standard gRPC Health | Business rules |
 
 `.github/scripts/check-panel-boundaries.sh` enforces these direct dependency rules in CI.

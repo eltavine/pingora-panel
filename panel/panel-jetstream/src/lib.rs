@@ -12,6 +12,7 @@
 mod consumer;
 mod dead_letter;
 mod error;
+mod health;
 mod message;
 mod publisher;
 mod settings;
@@ -19,6 +20,7 @@ mod topology;
 
 pub use consumer::{ConsumerSpec, JetStreamConsumer};
 pub use dead_letter::{DeadLetterQueue, DeadLetterRecord, ReplayReceipt};
+pub use health::JetStreamHealthCheck;
 pub use publisher::JetStreamPublisher;
 pub use settings::JetStreamSettings;
 pub use topology::{ensure_streams, StreamChange};

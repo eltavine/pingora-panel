@@ -34,6 +34,7 @@ tracing-subscriber.workspace = true
 gateway-grpc-client.workspace = true
 gateway-proto-codec.workspace = true
 panel-config-json.workspace = true
+panel-health.workspace = true
 panel-persistence-memory.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true

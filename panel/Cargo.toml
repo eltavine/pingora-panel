@@ -7,6 +7,7 @@ members = [
     "panel-errors",
     "panel-events",
     "panel-event-codec",
+    "panel-health",
     "panel-domain",
     "panel-config-domain",
     "panel-config-state-codec",
@@ -42,7 +43,7 @@ async-trait = "=0.1.92"
 backon = { version = "=1.6.0", default-features = false, features = ["std"] }
 base64 = "=0.22.1"
 bytes = "=1.12.1"
-chrono = { version = "=0.4.45", default-features = false, features = ["clock", "std"] }
+chrono = { version = "=0.4.45", default-features = false, features = ["clock", "serde", "std"] }
 futures-util = "=0.3.34"
 gateway-grpc = { version = "=0.1.0", path = "gateway-grpc" }
 gateway-grpc-client = { version = "=0.1.0", path = "gateway-grpc-client" }
@@ -72,6 +73,7 @@ panel-engine = { version = "=0.2.0", path = "panel-engine" }
 panel-errors = { version = "=0.1.0", path = "panel-errors" }
 panel-event-codec = { version = "=0.1.0", path = "panel-event-codec" }
 panel-events = { version = "=0.1.0", path = "panel-events" }
+panel-health = { version = "=0.1.0", path = "panel-health" }
 panel-gateway-runtime = { version = "=0.2.0", path = "panel-gateway-runtime" }
 panel-ir = { version = "=0.1.0", path = "panel-ir" }
 panel-jetstream = { version = "=0.1.0", path = "panel-jetstream" }
