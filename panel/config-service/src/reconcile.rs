@@ -17,6 +17,7 @@ const DEADLINE: Duration = Duration::from_secs(60);
 const RETENTION: Duration = Duration::from_secs(7 * 24 * 3600);
 
 /// How the gateway's active configuration relates to the desired one.
+#[non_exhaustive]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Reconciliation {
     /// Not compared yet, or the last attempt could not reach a dependency.
