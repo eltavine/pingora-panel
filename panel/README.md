@@ -20,6 +20,8 @@ gateway-proto-codec -> panel-contracts + panel-domain + panel-ir
 panel-event-codec -> panel-contracts + panel-events
 panel-health (no workspace dependencies)
 panel-jobs -> panel-context + panel-errors
+panel-pki -> panel-context + panel-errors
+panel-tls -> panel-pki + panel-context + panel-errors
 panel-platform -> panel-context + panel-errors
 panel-platform-codec -> panel-contracts + panel-platform
 panel-service -> panel-health + panel-platform-codec + panel-contracts
@@ -30,14 +32,14 @@ gateway-grpc -> gateway-proto-codec + panel-engine::GatewayEngine
 gateway-grpc-client -> panel-application + gateway-proto-codec + panel-contracts + panel-health
 config-proto-codec -> panel-application + gateway-proto-codec + panel-contracts
 config-grpc-client -> panel-application + config-proto-codec + panel-service
-panel-control-runtime -> panel-postgres + panel-jetstream + panel-outbox + panel-service
+panel-control-runtime -> panel-postgres + panel-jetstream + panel-outbox + panel-service + panel-tls
 
 gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC/Proto adapters + REST/compiler adapters
 config-service -> panel-control-runtime + gateway-grpc-client + panel-config-json + config-proto-codec
 panel-api-server -> panel-control-runtime + panel-api + config-grpc-client
 automation-service -> panel-control-runtime + panel-jobs + panel-postgres + panel-events
 observability-service -> panel-control-runtime
-panel-bootstrap -> panel-postgres + panel-jetstream
+panel-bootstrap -> panel-postgres + panel-jetstream + panel-pki
 ```
 
 箭头表示左侧 crate 依赖右侧 crate。
@@ -55,6 +57,8 @@ panel-bootstrap -> panel-postgres + panel-jetstream
 | `panel-service` | Liveness/readiness endpoints, gRPC health and `ServiceInfo`, peer negotiation, trace metadata, settings, signals and logging shared by service processes | Storage, brokers, application rules, Pingora |
 | `panel-control-runtime` | Composition of control-plane processes: lazy dependencies, migrations, registration, outbox relay leadership, health and graceful shutdown | Application rules, Pingora |
 | `panel-jobs` | Durable job model, leasing worker, retry policy, RFC 5545 schedules and maintenance windows, and an in-memory store | Storage, transports, Pingora |
+| `panel-pki` | Internal certificate authority, workload identities, credential files and renewal | Transports, storage, Pingora |
+| `panel-tls` | TLS 1.3 mutual authentication with reloadable credentials, tonic server and client integration, and per-service peer authorization | Storage, application rules, Pingora |
 | `panel-outbox` | Ordered at-least-once outbox relay over `OutboxSource`, `OutboxWakeup` and `EventPublisher` ports | Storage, brokers, Pingora |
 | `panel-postgres` | Service schema ownership, SCRAM role bootstrap, per-schema migrations, the transactional outbox, the idempotent-consumer inbox and the database health check | Application rules, transports, Pingora |
 | `panel-jetstream` | Stream provisioning, deduplicated CloudEvents publication, durable consumers, dead letters, targeted replay and the broker health check | Storage, application rules, Pingora |
@@ -75,7 +79,7 @@ panel-bootstrap -> panel-postgres + panel-jetstream
 | `panel-api-server` | The `panel-api` process: public REST and web console, degraded admission and the service directory | Storage implementation, Pingora |
 | `automation-service` | PostgreSQL job store with outbox events, worker and scheduler in the `automation` schema | HTTP, Pingora |
 | `observability-service` | Service process owning the `observability` schema | Pingora |
-| `panel-bootstrap` | Idempotent provisioning of service roles, schemas, streams and the service registry | Application rules, Pingora |
+| `panel-bootstrap` | Idempotent provisioning of service roles, schemas, streams and the service registry; issuance and rotation of service credentials | Application rules, Pingora |
 | `gatewayd` | Dependency construction, REST/gRPC adapter composition, bind/readiness policies, environment configuration, process clock, worker executor and standard gRPC Health | Business rules |
 
 `.github/scripts/check-panel-boundaries.sh` enforces these direct dependency rules in CI.
@@ -112,6 +116,22 @@ Every process reads `PINGORA_PANEL_DATABASE_URL` (its role, without password),
 `PINGORA_PANEL_HTTP_ADDR`, `PINGORA_PANEL_CONFIG_URL` and
 `PINGORA_PANEL_WEB_ROOT`, the directory of the built console. Plaintext
 listeners must stay on loopback until internal transports are authenticated.
+
+Internal gRPC runs over mutual TLS once a service has credentials
+([decision](../docs/adr/0009-internal-mutual-tls.md)): set
+`PINGORA_PANEL_TLS_DIR` to the directory holding its `identity.pem` and
+`trust.pem`, and optionally `PINGORA_PANEL_TRUST_DOMAIN`. Its gRPC listener then
+requires client certificates from the installation's authority and may bind
+beyond loopback; clients verify each peer's identity
+`<service>.<trust domain>` whatever address they dial, and the gateway and
+publication APIs admit only `config-service` and `panel-api` respectively.
+`gatewayd` reads the same variables. Credentials reload without a restart.
+`panel-bootstrap pki` keeps them current: it creates the authority in
+`PINGORA_PANEL_PKI_DIR` on first run and issues to every
+`service=directory` pair in `PINGORA_PANEL_PKI_CREDENTIALS` whose credentials
+are missing or past two thirds of their lifetime
+(`PINGORA_PANEL_CERTIFICATE_LIFETIME_MS`, 24 hours by default), once with
+`--once` or continuously.
 
 `panel-bootstrap` runs once per installation and on every upgrade or password
 rotation. It connects with `PINGORA_PANEL_ADMIN_DATABASE_URL` (the database

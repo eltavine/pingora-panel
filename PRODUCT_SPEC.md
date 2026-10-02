@@ -122,7 +122,7 @@ Pingora Panel 是一个面向团队运维的单节点网站网关控制平台。
 
 ### 3.1 当前仓库事实
 
-当前仓库是 Pingora 0.9.0 的完整 Rust workspace，包含 `pingora-core`、`pingora-proxy`、`pingora-load-balancing`、TLS、缓存、指标等上游 crates，并包含针对 Rust 与 OpenResty 基线的 CI 调整。Pingora Panel 现处于 `In Progress / durable gateway foundation`：`panel/` 独立 workspace 已提供 Proto-first 契约、稳定错误模型、领域值对象、Engine-neutral IR、`GatewayEngine`/`SnapshotStore`/`DataPlaneAdapter`/`GatewayRuntimeInfoProvider` ports、内存 `FakeGatewayEngine`、独立 durable runtime、原子文件快照存储、Pingora 0.9.0 adapter、Tonic gRPC transport、标准 gRPC Health、`gatewayd` 组合根、v1/v2 磁盘格式 Golden Fixture、真实 TCP 与文件系统故障黑盒测试、有界 mutation admission、两阶段 readiness drain、plaintext loopback-only 管理绑定、恢复诊断、Proto compatibility guard 自测试、security lockfile resolver hermetic 自测试、依赖边界检查，模块化 Axum/Utoipa REST adapter、从 HTTP 经 gRPC 到事件贯通的 Request-ID/Correlation/W3C Trace Context 传播、CloudEvents 领域事件契约、服务独占 PostgreSQL schema 与迁移、事务性 Outbox、幂等 Inbox、NATS JetStream 投递与 DLQ，以及 shadcn-vue 管理控制台。`panel-api`、`config-service`、`automation-service`、`observability-service` 已作为独立进程运行：统一的控制面运行时负责延迟连接依赖、迁移、Outbox relay 选主、`application/health+json` 聚合 Readiness、gRPC Health、Degraded Mode、服务描述与 JetStream KV 服务注册，`panel-bootstrap` 幂等初始化角色、schema 与流；`automation-service` 提供带租约、取消、指数退避重试、进度事件、RFC 5545 持久化调度与维护窗口的作业引擎。`panel-api` 在公共 listener 上提供 REST 与控制台，发布请求经 `pingora.panel.config.v1` 交给 `config-service`，回执持久化在 `config` schema。DSL 编译服务、CLI、内部 mTLS、Compose 打包和生产数据面 listener 仍未实现。
+当前仓库是 Pingora 0.9.0 的完整 Rust workspace，包含 `pingora-core`、`pingora-proxy`、`pingora-load-balancing`、TLS、缓存、指标等上游 crates，并包含针对 Rust 与 OpenResty 基线的 CI 调整。Pingora Panel 现处于 `In Progress / durable gateway foundation`：`panel/` 独立 workspace 已提供 Proto-first 契约、稳定错误模型、领域值对象、Engine-neutral IR、`GatewayEngine`/`SnapshotStore`/`DataPlaneAdapter`/`GatewayRuntimeInfoProvider` ports、内存 `FakeGatewayEngine`、独立 durable runtime、原子文件快照存储、Pingora 0.9.0 adapter、Tonic gRPC transport、标准 gRPC Health、`gatewayd` 组合根、v1/v2 磁盘格式 Golden Fixture、真实 TCP 与文件系统故障黑盒测试、有界 mutation admission、两阶段 readiness drain、plaintext loopback-only 管理绑定、恢复诊断、Proto compatibility guard 自测试、security lockfile resolver hermetic 自测试、依赖边界检查，模块化 Axum/Utoipa REST adapter、从 HTTP 经 gRPC 到事件贯通的 Request-ID/Correlation/W3C Trace Context 传播、CloudEvents 领域事件契约、服务独占 PostgreSQL schema 与迁移、事务性 Outbox、幂等 Inbox、NATS JetStream 投递与 DLQ，以及 shadcn-vue 管理控制台。`panel-api`、`config-service`、`automation-service`、`observability-service` 已作为独立进程运行：统一的控制面运行时负责延迟连接依赖、迁移、Outbox relay 选主、`application/health+json` 聚合 Readiness、gRPC Health、Degraded Mode、服务描述与 JetStream KV 服务注册，`panel-bootstrap` 幂等初始化角色、schema 与流；`automation-service` 提供带租约、取消、指数退避重试、进度事件、RFC 5545 持久化调度与维护窗口的作业引擎。`panel-api` 在公共 listener 上提供 REST 与控制台，发布请求经 `pingora.panel.config.v1` 交给 `config-service`，回执持久化在 `config` schema。服务间 gRPC 可启用基于内部 CA 的 mTLS（SPIFFE/DNS 工作负载身份、TLS 1.3、按调用方授权、证书自动轮换）。DSL 编译服务、CLI、Compose 打包和生产数据面 listener 仍未实现。
 
 Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交：`665fd57`；该提交的 Pingora crates：`0.8.0`；许可证：Apache-2.0；此记录不代表当前提交的验收状态）：
 
@@ -1328,8 +1328,8 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | IAM-038 | - | 紧急发布绕过及强审计 | 0.4 | A/C/G/I | Administrator | identity | 执行“紧急发布绕过及强审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | PLAT-001 | - | 服务健康注册 | 0.1 | I | Administrator | platform | 执行“服务健康注册”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | PLAT-002 | - | 服务 Capability 注册 | 0.1 | I | Administrator | platform | 执行“服务 Capability 注册”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
-| PLAT-003 | - | 内部 mTLS CA 初始化 | 0.1 | I | Administrator | platform | 执行“内部 mTLS CA 初始化”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| PLAT-004 | - | 内部服务证书自动轮换 | 0.1 | I | Administrator | platform | 执行“内部服务证书自动轮换”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
+| PLAT-003 | - | 内部 mTLS CA 初始化 | 0.1 | I | Administrator | platform | 执行“内部 mTLS CA 初始化”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| PLAT-004 | - | 内部服务证书自动轮换 | 0.1 | I | Administrator | platform | 执行“内部服务证书自动轮换”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | PLAT-005 | - | PostgreSQL Schema 写权限隔离 | 0.1 | I | Administrator | platform | 执行“PostgreSQL Schema 写权限隔离”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | PLAT-006 | - | Transactional Outbox | 0.1 | I | Administrator | platform | 执行“Transactional Outbox”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | PLAT-007 | - | Outbox Relay | 0.1 | I | Administrator | platform | 执行“Outbox Relay”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
@@ -1415,7 +1415,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | 新增团队/平台需求 | 105 |
 | 总 Feature ID | 685 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
-| 当前 `Implemented` | 27（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`、`PLAT-005`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`） |
+| 当前 `Implemented` | 29（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`） |
 | 1.0 要求 `Verified` | 685 |
 
 分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 47、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。
