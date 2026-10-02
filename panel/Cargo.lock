@@ -506,6 +506,7 @@ name = "config-service"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "config-grpc-client",
  "config-proto-codec",
  "gateway-grpc",
@@ -530,8 +531,11 @@ dependencies = [
  "sqlx",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "tonic",
  "tonic-health",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

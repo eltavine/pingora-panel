@@ -115,6 +115,19 @@ owner) and creates the `panel_<schema>` roles with the passwords in
 `PINGORA_PANEL_<SCHEMA>_DATABASE_PASSWORD` (or `_FILE`), then provisions the
 event streams and the service registry.
 
+`config-service` reconciles the gateway at startup and then every
+`PINGORA_PANEL_RECONCILE_INTERVAL_MS` (30 s by default). It records the
+document of every prepared deployment, each activation's intent before the
+activation claims its idempotency key, and the newest activated
+configuration as the desired one. Reconciliation re-issues activations that
+claimed their key without recording a receipt, so the gateway either replays
+the receipt of one that committed or runs it now, and an activation that can
+no longer commit is released for its caller to retry. A gateway without an
+active configuration receives the desired one, and a newer configuration
+prepared here and confirmed by the gateway becomes the desired one. Any other
+configuration is quarantined: publication answers `UNAVAILABLE` and
+readiness reports the service degraded until an operator resolves it.
+
 A service whose degrading dependency is down keeps serving reads and refuses
 changes with `503 Service Unavailable`, `Retry-After` and a retryable
 `UNAVAILABLE` problem; a failing required dependency makes it unavailable.

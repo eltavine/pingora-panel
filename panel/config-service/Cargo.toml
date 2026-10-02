@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 async-trait.workspace = true
+chrono.workspace = true
 config-proto-codec.workspace = true
 gateway-grpc-client.workspace = true
 gateway-proto-codec.workspace = true
@@ -16,6 +17,7 @@ panel-application.workspace = true
 panel-config-json.workspace = true
 panel-contracts.workspace = true
 panel-control-runtime.workspace = true
+panel-domain.workspace = true
 panel-errors.workspace = true
 panel-health.workspace = true
 panel-platform.workspace = true
@@ -25,12 +27,14 @@ panel-service.workspace = true
 prost.workspace = true
 sqlx.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 tonic.workspace = true
+tracing.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 config-grpc-client.workspace = true
 gateway-grpc.workspace = true
-panel-domain.workspace = true
 panel-engine.workspace = true
 panel-ir.workspace = true
 panel-jetstream = { workspace = true, features = ["test-support"] }

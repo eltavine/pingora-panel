@@ -1350,7 +1350,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | PLAT-022 | - | 服务协议版本协商 | 0.1 | I | Administrator | platform | 查询“服务协议版本协商”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | Yes |
 | PLAT-023 | - | 聚合 Readiness | 0.1 | I | Administrator | platform | 执行“聚合 Readiness”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | PLAT-024 | - | 控制面 Degraded Mode | 0.1 | I | Administrator | platform | 执行“控制面 Degraded Mode”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
-| PLAT-025 | - | 启动自动 Reconciliation | 0.1 | I | Administrator | platform | 执行“启动自动 Reconciliation”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
+| PLAT-025 | - | 启动自动 Reconciliation | 0.1 | I | Administrator | platform | 执行“启动自动 Reconciliation”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | PLAT-026 | - | Activation Receipt 持久化 | 0.1 | I | Administrator | platform | 执行“Activation Receipt 持久化”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | PLAT-027 | - | Last Known Good 快照 | 0.1 | I | Administrator | platform | 执行“Last Known Good 快照”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | PLAT-028 | - | GatewayEngine Fake 实现 | 0.1 | I | Administrator | platform | 执行“GatewayEngine Fake 实现”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Verified | Yes |
@@ -1415,7 +1415,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | 新增团队/平台需求 | 105 |
 | 总 Feature ID | 685 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
-| 当前 `Implemented` | 20（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`、`PLAT-005`～`PLAT-012`、`PLAT-019`～`PLAT-024`；GUI：`GUI-011`、`GUI-012`） |
+| 当前 `Implemented` | 21（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`、`PLAT-005`～`PLAT-012`、`PLAT-019`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`） |
 | 1.0 要求 `Verified` | 685 |
 
 分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 47、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。
