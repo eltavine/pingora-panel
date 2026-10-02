@@ -1,0 +1,22 @@
+[package]
+name = "panel-events"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+iri-string.workspace = true
+mediatype.workspace = true
+panel-context.workspace = true
+panel-errors.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

@@ -5,6 +5,7 @@ members = [
     "panel-context",
     "panel-contracts",
     "panel-errors",
+    "panel-events",
     "panel-domain",
     "panel-config-domain",
     "panel-config-state-codec",
@@ -33,12 +34,14 @@ publish = false
 arc-swap = "=1.9.2"
 axum = "=0.8.9"
 async-trait = "=0.1.92"
-chrono = { version = "=0.4.45", default-features = false, features = ["std"] }
+chrono = { version = "=0.4.45", default-features = false, features = ["clock", "std"] }
 futures-util = "=0.3.34"
 gateway-grpc = { version = "=0.1.0", path = "gateway-grpc" }
 gateway-grpc-client = { version = "=0.1.0", path = "gateway-grpc-client" }
 gateway-proto-codec = { version = "=0.1.0", path = "gateway-proto-codec" }
 gateway-pingora = { version = "=0.1.0", path = "gateway-pingora" }
+iri-string = "=0.7.14"
+mediatype = "=0.23.0"
 prost = "=0.14.4"
 panel-context = { version = "=0.1.0", path = "panel-context" }
 panel-contracts = { version = "=0.1.0", path = "panel-contracts" }
@@ -51,6 +54,7 @@ panel-persistence-memory = { version = "=0.1.0", path = "panel-persistence-memor
 panel-domain = { version = "=0.1.0", path = "panel-domain" }
 panel-engine = { version = "=0.2.0", path = "panel-engine" }
 panel-errors = { version = "=0.1.0", path = "panel-errors" }
+panel-events = { version = "=0.1.0", path = "panel-events" }
 panel-gateway-runtime = { version = "=0.2.0", path = "panel-gateway-runtime" }
 panel-ir = { version = "=0.1.0", path = "panel-ir" }
 pingora-core = { version = "=0.9.0", path = "../pingora-core", default-features = false }
@@ -73,7 +77,7 @@ tonic = { version = "=0.14.6", default-features = false, features = ["codegen", 
 tonic-health = "=0.14.6"
 tonic-prost = "=0.14.6"
 tonic-prost-build = "=0.14.6"
-uuid = { version = "=1.18.1", features = ["serde", "v4"] }
+uuid = { version = "=1.18.1", features = ["serde", "v4", "v7"] }
 libc = "=0.2.189"
 tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.20", features = ["env-filter", "fmt", "json"] }
