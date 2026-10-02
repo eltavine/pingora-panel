@@ -305,6 +305,13 @@
         "panel-errors"
       ]
     },
+    "panel-pki": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-context",
+        "panel-errors"
+      ]
+    },
     "panel-platform": {
       "catalog": true,
       "allowed_workspace_dependencies": [
