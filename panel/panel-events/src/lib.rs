@@ -13,7 +13,6 @@ mod inbox;
 mod names;
 mod payload;
 mod principal;
-mod trace;
 
 pub use delivery::{EventDelivery, EventHandler, EventPublisher, HandlerOutcome, PublishReceipt};
 pub use envelope::{
@@ -25,10 +24,11 @@ pub use inbox::{
     IdempotentEventHandler, InboxClaim, MemoryProcessedEventStore, ProcessedEventStore,
 };
 pub use names::{AggregateId, AggregateRef, AggregateType, ConsumerName, EventType, ServiceName};
-pub use panel_context::{Actor, IdempotencyKey, RequestId};
+pub use panel_context::{
+    Actor, IdempotencyKey, RequestId, RequestScope, TraceContext, TRACESTATE_PROPAGATION_LIMIT,
+};
 pub use payload::{
     EventPayload, JSON_MEDIA_TYPE, MAX_DATA_BYTES, MAX_EVENT_BYTES, PROTOBUF_MEDIA_TYPE,
     PROTOBUF_TYPE_URL_PREFIX,
 };
 pub use principal::{Principal, PrincipalKind};
-pub use trace::{TraceContext, TRACESTATE_PROPAGATION_LIMIT};

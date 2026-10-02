@@ -1,5 +1,5 @@
-//! W3C Trace Context (Recommendation, 23 November 2021) for the CloudEvents
-//! Distributed Tracing extension.
+//! W3C Trace Context (Recommendation, 23 November 2021), carried by HTTP and
+//! gRPC requests and by the CloudEvents Distributed Tracing extension.
 
 use serde::{Deserialize, Serialize};
 
@@ -9,7 +9,7 @@ const TRACESTATE_MAX_MEMBERS: usize = 32;
 const TRACESTATE_LONG_ENTRY: usize = 128;
 const TRACEPARENT_V00_LEN: usize = 55;
 
-/// Trace context of the trace that started a causal chain.
+/// A validated `traceparent` with its optional `tracestate`.
 ///
 /// Parsing follows the specification's receiver rules: an invalid
 /// `traceparent` is ignored, and an invalid `tracestate` is dropped without

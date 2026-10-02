@@ -6,6 +6,10 @@
 //! Commands, events and audit records carry the same identifiers, so the
 //! validation rules live here once instead of being repeated per adapter.
 
+mod trace;
+
+pub use trace::{TraceContext, TRACESTATE_PROPAGATION_LIMIT};
+
 use chrono::DateTime;
 use panel_errors::{PanelError, Result};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -132,6 +136,53 @@ impl<'de> Deserialize<'de> for RequestDeadline {
     }
 }
 
+/// The identity of one request as it crosses surfaces, services and events.
+///
+/// The request ID names this hop; the correlation ID is shared by every
+/// request and event of one logical operation and defaults to the request ID
+/// at the system entry point. The trace context is the caller's W3C trace,
+/// propagated unchanged by components that do not record spans.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RequestScope {
+    request_id: RequestId,
+    correlation_id: RequestId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    trace_context: Option<TraceContext>,
+}
+
+impl RequestScope {
+    /// A scope that starts a new correlation at this request.
+    pub fn new(request_id: RequestId) -> Self {
+        Self {
+            correlation_id: request_id.clone(),
+            request_id,
+            trace_context: None,
+        }
+    }
+
+    pub fn with_correlation_id(mut self, correlation_id: RequestId) -> Self {
+        self.correlation_id = correlation_id;
+        self
+    }
+
+    pub fn with_trace_context(mut self, trace_context: Option<TraceContext>) -> Self {
+        self.trace_context = trace_context;
+        self
+    }
+
+    pub fn request_id(&self) -> &RequestId {
+        &self.request_id
+    }
+
+    pub fn correlation_id(&self) -> &RequestId {
+        &self.correlation_id
+    }
+
+    pub fn trace_context(&self) -> Option<&TraceContext> {
+        self.trace_context.as_ref()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,5 +201,23 @@ mod tests {
         assert!(Actor::new("").is_err());
         assert!(serde_json::from_str::<IdempotencyKey>("\"\"").is_err());
         assert!(serde_json::from_str::<Actor>("\"operator@example.com\"").is_ok());
+    }
+
+    #[test]
+    fn scopes_start_a_correlation_unless_one_is_inherited() {
+        let request = RequestId::new("req-1").unwrap();
+        let scope = RequestScope::new(request.clone());
+        assert_eq!(scope.correlation_id(), &request);
+        assert!(scope.trace_context().is_none());
+
+        let trace = TraceContext::parse(
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            None,
+        );
+        let inherited = RequestScope::new(request)
+            .with_correlation_id(RequestId::new("corr-9").unwrap())
+            .with_trace_context(trace.clone());
+        assert_eq!(inherited.correlation_id().as_str(), "corr-9");
+        assert_eq!(inherited.trace_context(), trace.as_ref());
     }
 }

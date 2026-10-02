@@ -1,6 +1,6 @@
-use crate::{AggregateRef, EventPayload, EventType, Principal, ServiceName, TraceContext};
+use crate::{AggregateRef, EventPayload, EventType, Principal, ServiceName};
 use chrono::{DateTime, Utc};
-use panel_context::{IdempotencyKey, RequestId};
+use panel_context::{IdempotencyKey, RequestId, RequestScope, TraceContext};
 use panel_errors::{PanelError, Result};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{fmt, num::NonZeroU32, str::FromStr};
@@ -192,6 +192,19 @@ impl EventOrigin {
             principal,
             idempotency_key: None,
             trace_context: None,
+        }
+    }
+
+    /// An event caused directly by the request described by `scope`; its
+    /// correlation identity and trace context propagate.
+    pub fn scoped(producer: ServiceName, scope: &RequestScope, principal: Principal) -> Self {
+        Self {
+            producer,
+            correlation_id: scope.correlation_id().clone(),
+            causation_id: scope.request_id().clone(),
+            principal,
+            idempotency_key: None,
+            trace_context: scope.trace_context().cloned(),
         }
     }
 
@@ -443,6 +456,28 @@ mod tests {
             "io.github.eltavine.pingora-panel.config.revision.applied.v1"
         );
         assert_eq!(event.source(), "/pingora-panel/config-service");
+    }
+
+    #[test]
+    fn scoped_events_carry_the_request_identity_and_trace() {
+        let scope = RequestScope::new(RequestId::new("req-7").unwrap())
+            .with_correlation_id(RequestId::new("corr-7").unwrap())
+            .with_trace_context(TraceContext::parse(
+                "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+                Some("rojo=1"),
+            ));
+        let event = EventEnvelope::new(
+            draft("config.revision.applied"),
+            EventOrigin::scoped(
+                ServiceName::new("config-service").unwrap(),
+                &scope,
+                Principal::user(Actor::new("user-7").unwrap()),
+            ),
+            Utc::now(),
+        );
+        assert_eq!(event.causation_id().as_str(), "req-7");
+        assert_eq!(event.correlation_id().as_str(), "corr-7");
+        assert_eq!(event.trace_context(), scope.trace_context());
     }
 
     #[test]
