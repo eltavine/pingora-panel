@@ -261,29 +261,22 @@ mod tests {
         EndpointAddress, EndpointId, PathPrefix, RevisionId, RouteId, SiteId, UpstreamPoolId,
     };
     use panel_ir::{
-        CachePolicy, CapabilityRequirement, DomainSpec, RetryPolicy, RouteSpec, SiteSpec,
-        UpstreamEndpoint, UpstreamPoolSpec,
+        CachePolicy, CapabilityRequirement, DomainSpec, RouteSpec, SiteSpec, UpstreamEndpoint,
+        UpstreamPoolSpec,
     };
 
     fn mapped_snapshot(tls: bool) -> RuntimeSnapshot {
         let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
-        snapshot.upstream_pools.push(UpstreamPoolSpec {
-            id: UpstreamPoolId::new("primary").unwrap(),
-            name: "primary".into(),
-            endpoints: vec![UpstreamEndpoint {
-                id: EndpointId::new("local").unwrap(),
-                address: EndpointAddress::new("127.0.0.1", if tls { 443 } else { 80 }, tls)
-                    .unwrap(),
-                sni: tls.then(|| "example.com".into()),
-                weight: 1,
-            }],
-            load_balancing: LoadBalancingPolicy::RoundRobin,
-            retry_policy: RetryPolicy {
-                attempts: 0,
-                per_try_timeout_ms: 0,
-                retry_statuses: BTreeSet::new(),
-            },
-        });
+        let mut endpoint = UpstreamEndpoint::new(
+            EndpointId::new("local").unwrap(),
+            EndpointAddress::new("127.0.0.1", if tls { 443 } else { 80 }, tls).unwrap(),
+        );
+        endpoint.sni = tls.then(|| "example.com".into());
+        snapshot.upstream_pools.push(UpstreamPoolSpec::new(
+            UpstreamPoolId::new("primary").unwrap(),
+            "primary",
+            vec![endpoint],
+        ));
         snapshot
             .required_capabilities
             .push(CapabilityRequirement::new(
@@ -321,32 +314,22 @@ mod tests {
     async fn active_routing_decision_comes_from_the_published_snapshot() {
         let adapter = PingoraGatewayAdapter::new();
         let mut snapshot = mapped_snapshot(false);
-        snapshot.sites.push(SiteSpec {
-            id: SiteId::new("site").unwrap(),
-            name: "site".into(),
-            enabled: true,
-            domains: vec![DomainSpec {
-                host: NormalizedHost::new("example.com").unwrap(),
-                tls_profile_id: None,
-            }],
-        });
-        snapshot.routes.push(RouteSpec {
-            id: RouteId::new("api").unwrap(),
-            site_id: SiteId::new("site").unwrap(),
-            priority: 1,
-            enabled: true,
-            matcher: RouteMatcher::PathPrefix {
+        snapshot.sites.push(SiteSpec::new(
+            SiteId::new("site").unwrap(),
+            "site",
+            vec![DomainSpec::new(NormalizedHost::new("example.com").unwrap())],
+        ));
+        snapshot.routes.push(RouteSpec::new(
+            RouteId::new("api").unwrap(),
+            SiteId::new("site").unwrap(),
+            1,
+            RouteMatcher::PathPrefix {
                 path: PathPrefix::new("/api").unwrap(),
             },
-            action: RouteAction::Proxy {
+            RouteAction::Proxy {
                 upstream_pool_id: UpstreamPoolId::new("primary").unwrap(),
             },
-            retry_policy: None,
-            header_policy_id: None,
-            cache_policy_id: None,
-            security_policy_id: None,
-            lua_policy_id: None,
-        });
+        ));
         snapshot.refresh_content_hash();
         let host = NormalizedHost::new("example.com").unwrap();
         assert!(adapter.active_proxy_route(&host, "/api").is_none());

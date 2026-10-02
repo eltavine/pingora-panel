@@ -157,12 +157,76 @@ impl RuntimeSnapshot {
     }
 }
 
+// Fields added after the first schema release default to values that are not
+// serialized, so snapshots written before them keep their canonical hash.
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
+const fn enabled() -> bool {
+    true
+}
+
+/// A fixed listening socket. `address` is an `ip:port` socket address.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ListenerRef {
     pub id: String,
     pub address: String,
     pub tls_profile_id: Option<String>,
+    #[serde(default, skip_serializing_if = "ListenerProtocols::is_default")]
+    pub protocols: ListenerProtocols,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub reuse_port: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ipv6_only: Option<bool>,
+    /// Serves requests whose host matches no site; without it they are rejected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_site_id: Option<SiteId>,
+}
+
+impl ListenerRef {
+    pub fn new(id: impl Into<String>, address: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            address: address.into(),
+            tls_profile_id: None,
+            protocols: ListenerProtocols::default(),
+            reuse_port: false,
+            ipv6_only: None,
+            default_site_id: None,
+        }
+    }
+}
+
+/// HTTP versions accepted on a listener. With TLS, HTTP/2 is negotiated with
+/// ALPN; without TLS it is accepted with prior knowledge (h2c).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ListenerProtocols {
+    pub http1: bool,
+    pub http2: bool,
+    pub http3: bool,
+}
+
+impl Default for ListenerProtocols {
+    fn default() -> Self {
+        Self {
+            http1: true,
+            http2: true,
+            http3: false,
+        }
+    }
+}
+
+impl ListenerProtocols {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -172,6 +236,45 @@ pub struct SiteSpec {
     pub name: String,
     pub enabled: bool,
     pub domains: Vec<DomainSpec>,
+    /// Listeners serving this site; empty means every listener.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub listener_ids: BTreeSet<String>,
+    /// Redirects cleartext requests to the site's HTTPS listener.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub https_redirect: bool,
+    #[serde(default, skip_serializing_if = "WwwRedirect::is_none")]
+    pub www_redirect: WwwRedirect,
+}
+
+impl SiteSpec {
+    pub fn new(id: SiteId, name: impl Into<String>, domains: Vec<DomainSpec>) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            enabled: true,
+            domains,
+            listener_ids: BTreeSet::new(),
+            https_redirect: false,
+            www_redirect: WwwRedirect::None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WwwRedirect {
+    #[default]
+    None,
+    /// `example.com` redirects to `www.example.com`.
+    AddWww,
+    /// `www.example.com` redirects to `example.com`.
+    RemoveWww,
+}
+
+impl WwwRedirect {
+    pub fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -179,6 +282,26 @@ pub struct SiteSpec {
 pub struct DomainSpec {
     pub host: NormalizedHost,
     pub tls_profile_id: Option<String>,
+    #[serde(default = "enabled", skip_serializing_if = "is_true")]
+    pub enabled: bool,
+    /// The canonical name used as the target of alias and `www` redirects.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub primary: bool,
+    /// An alias that redirects to the primary domain instead of serving the site.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub redirect_to_primary: bool,
+}
+
+impl DomainSpec {
+    pub fn new(host: NormalizedHost) -> Self {
+        Self {
+            host,
+            tls_profile_id: None,
+            enabled: true,
+            primary: false,
+            redirect_to_primary: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -195,6 +318,33 @@ pub struct RouteSpec {
     pub cache_policy_id: Option<String>,
     pub security_policy_id: Option<String>,
     pub lua_policy_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+impl RouteSpec {
+    pub fn new(
+        id: RouteId,
+        site_id: SiteId,
+        priority: u32,
+        matcher: RouteMatcher,
+        action: RouteAction,
+    ) -> Self {
+        Self {
+            id,
+            site_id,
+            priority,
+            enabled: true,
+            matcher,
+            action,
+            retry_policy: None,
+            header_policy_id: None,
+            cache_policy_id: None,
+            security_policy_id: None,
+            lua_policy_id: None,
+            name: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -226,10 +376,46 @@ pub enum RouteMatcher {
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
 pub enum RouteAction {
-    Proxy { upstream_pool_id: UpstreamPoolId },
-    Static { policy_id: String },
-    Redirect { location: String, status: u16 },
-    Respond { status: u16, body: Option<String> },
+    Proxy {
+        upstream_pool_id: UpstreamPoolId,
+    },
+    Static {
+        policy_id: String,
+    },
+    Redirect {
+        location: String,
+        status: u16,
+        /// Appends the request path and query to `location`.
+        #[serde(default, skip_serializing_if = "is_false")]
+        preserve_path: bool,
+    },
+    Respond {
+        status: u16,
+        body: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        content_type: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retry_after_seconds: Option<u32>,
+    },
+}
+
+impl RouteAction {
+    pub fn redirect(location: impl Into<String>, status: u16) -> Self {
+        Self::Redirect {
+            location: location.into(),
+            status,
+            preserve_path: false,
+        }
+    }
+
+    pub fn respond(status: u16, body: Option<String>) -> Self {
+        Self::Respond {
+            status,
+            body,
+            content_type: None,
+            retry_after_seconds: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -240,6 +426,148 @@ pub struct UpstreamPoolSpec {
     pub endpoints: Vec<UpstreamEndpoint>,
     pub load_balancing: LoadBalancingPolicy,
     pub retry_policy: RetryPolicy,
+    #[serde(default, skip_serializing_if = "UpstreamConnectionPolicy::is_default")]
+    pub connection: UpstreamConnectionPolicy,
+    #[serde(default, skip_serializing_if = "UpstreamTlsPolicy::is_default")]
+    pub tls: UpstreamTlsPolicy,
+    /// Replaces the `Host` header sent upstream; the client's host is kept otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_header: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health_check: Option<ActiveHealthCheck>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub passive_health: Option<PassiveHealthPolicy>,
+}
+
+impl UpstreamPoolSpec {
+    pub fn new(
+        id: UpstreamPoolId,
+        name: impl Into<String>,
+        endpoints: Vec<UpstreamEndpoint>,
+    ) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            endpoints,
+            load_balancing: LoadBalancingPolicy::RoundRobin,
+            retry_policy: RetryPolicy::none(),
+            connection: UpstreamConnectionPolicy::default(),
+            tls: UpstreamTlsPolicy::default(),
+            host_header: None,
+            health_check: None,
+            passive_health: None,
+        }
+    }
+}
+
+/// Timeouts are in milliseconds; `None` uses the engine default.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpstreamConnectionPolicy {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connect_timeout_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_timeout_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub write_timeout_ms: Option<u64>,
+    /// How long an idle pooled connection is kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_timeout_ms: Option<u64>,
+    /// Reuses upstream connections from the pool.
+    #[serde(default = "enabled", skip_serializing_if = "is_true")]
+    pub keepalive: bool,
+    /// Concurrent requests per endpoint; saturated endpoints are skipped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_connections: Option<u32>,
+    /// Speaks HTTP/2 to TLS upstreams that negotiate it with ALPN.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub http2: bool,
+}
+
+impl Default for UpstreamConnectionPolicy {
+    fn default() -> Self {
+        Self {
+            connect_timeout_ms: None,
+            read_timeout_ms: None,
+            write_timeout_ms: None,
+            idle_timeout_ms: None,
+            keepalive: true,
+            max_connections: None,
+            http2: false,
+        }
+    }
+}
+
+impl UpstreamConnectionPolicy {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpstreamTlsPolicy {
+    #[serde(default = "enabled", skip_serializing_if = "is_true")]
+    pub verify_certificate: bool,
+    #[serde(default = "enabled", skip_serializing_if = "is_true")]
+    pub verify_hostname: bool,
+    /// Trust anchors replacing the system roots, as a PEM bundle secret.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ca_secret_id: Option<String>,
+    /// Server name for endpoints that do not set their own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sni: Option<String>,
+}
+
+impl Default for UpstreamTlsPolicy {
+    fn default() -> Self {
+        Self {
+            verify_certificate: true,
+            verify_hostname: true,
+            ca_secret_id: None,
+            sni: None,
+        }
+    }
+}
+
+impl UpstreamTlsPolicy {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HealthCheckProtocol {
+    Http,
+    Tcp,
+}
+
+/// Probes every endpoint; thresholds count consecutive results.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActiveHealthCheck {
+    pub protocol: HealthCheckProtocol,
+    pub path: String,
+    pub method: String,
+    pub interval_ms: u64,
+    pub timeout_ms: u64,
+    pub healthy_threshold: u32,
+    pub unhealthy_threshold: u32,
+    /// Statuses meaning healthy; empty means any 2xx or 3xx.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub expected_statuses: BTreeSet<u16>,
+    /// `Host` sent with HTTP probes; the endpoint address otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+}
+
+/// Ejects an endpoint after consecutive proxy failures for `ejection_ms`.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PassiveHealthPolicy {
+    pub failure_threshold: u32,
+    pub ejection_ms: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -249,8 +577,31 @@ pub struct UpstreamEndpoint {
     pub address: EndpointAddress,
     pub sni: Option<String>,
     pub weight: u32,
+    #[serde(default = "enabled", skip_serializing_if = "is_true")]
+    pub enabled: bool,
+    /// Receives traffic only while no primary endpoint is available.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub backup: bool,
+    /// Connects to a Unix domain socket instead of `address`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unix_socket: Option<String>,
 }
 
+impl UpstreamEndpoint {
+    pub fn new(id: EndpointId, address: EndpointAddress) -> Self {
+        Self {
+            id,
+            address,
+            sni: None,
+            weight: 1,
+            enabled: true,
+            backup: false,
+            unix_socket: None,
+        }
+    }
+}
+
+/// Consistent hash keys are `client_ip`, `uri`, `header:<name>` or `cookie:<name>`.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
@@ -266,6 +617,16 @@ pub struct RetryPolicy {
     pub attempts: u32,
     pub per_try_timeout_ms: u64,
     pub retry_statuses: BTreeSet<u16>,
+}
+
+impl RetryPolicy {
+    pub fn none() -> Self {
+        Self {
+            attempts: 0,
+            per_try_timeout_ms: 0,
+            retry_statuses: BTreeSet::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -364,6 +725,88 @@ mod tests {
             serde_json::to_vec(&left).unwrap(),
             serde_json::to_vec(&right).unwrap()
         );
+    }
+
+    /// Snapshots written before a field existed must keep their hash, so
+    /// defaulted fields are absent from canonical bytes.
+    #[test]
+    fn defaulted_fields_do_not_change_canonical_bytes() {
+        let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+        snapshot
+            .listeners
+            .push(ListenerRef::new("http", "0.0.0.0:80"));
+        snapshot.sites.push(SiteSpec::new(
+            SiteId::new("site").unwrap(),
+            "site",
+            vec![DomainSpec::new(NormalizedHost::new("example.com").unwrap())],
+        ));
+        snapshot.routes.push(RouteSpec::new(
+            RouteId::new("route").unwrap(),
+            SiteId::new("site").unwrap(),
+            1,
+            RouteMatcher::PathPrefix {
+                path: PathPrefix::new("/").unwrap(),
+            },
+            RouteAction::respond(204, None),
+        ));
+        snapshot.upstream_pools.push(UpstreamPoolSpec::new(
+            UpstreamPoolId::new("pool").unwrap(),
+            "pool",
+            vec![UpstreamEndpoint::new(
+                EndpointId::new("node").unwrap(),
+                EndpointAddress::new("127.0.0.1", 8080, false).unwrap(),
+            )],
+        ));
+        assert_eq!(
+            String::from_utf8(snapshot.canonical_bytes()).unwrap(),
+            concat!(
+                r#"{"schema_version":"pingora.panel.ir/v1alpha1","revision_id":1,"#,
+                r#""listeners":[{"id":"http","address":"0.0.0.0:80","tls_profile_id":null}],"#,
+                r#""sites":[{"id":"site","name":"site","enabled":true,"#,
+                r#""domains":[{"host":"example.com","tls_profile_id":null}]}],"#,
+                r#""routes":[{"id":"route","site_id":"site","priority":1,"enabled":true,"#,
+                r#""matcher":{"kind":"path_prefix","path":"/"},"#,
+                r#""action":{"kind":"respond","status":204,"body":null},"#,
+                r#""retry_policy":null,"header_policy_id":null,"cache_policy_id":null,"#,
+                r#""security_policy_id":null,"lua_policy_id":null}],"#,
+                r#""upstream_pools":[{"id":"pool","name":"pool","endpoints":[{"id":"node","#,
+                r#""address":{"host":"127.0.0.1","port":8080,"tls":false},"sni":null,"weight":1}],"#,
+                r#""load_balancing":"round_robin","#,
+                r#""retry_policy":{"attempts":0,"per_try_timeout_ms":0,"retry_statuses":[]}}],"#,
+                r#""tls_profiles":[],"header_policies":[],"static_content":[],"cache_policies":[],"#,
+                r#""security_policies":[],"lua_policies":[],"required_capabilities":[]}"#
+            )
+        );
+    }
+
+    #[test]
+    fn extension_fields_round_trip() {
+        let mut listener = ListenerRef::new("https", "[::]:443");
+        listener.protocols.http3 = true;
+        listener.reuse_port = true;
+        listener.default_site_id = Some(SiteId::new("site").unwrap());
+        let mut pool = UpstreamPoolSpec::new(UpstreamPoolId::new("pool").unwrap(), "pool", vec![]);
+        pool.connection.keepalive = false;
+        pool.tls.verify_hostname = false;
+        pool.health_check = Some(ActiveHealthCheck {
+            protocol: HealthCheckProtocol::Http,
+            path: "/healthz".into(),
+            method: "GET".into(),
+            interval_ms: 5_000,
+            timeout_ms: 1_000,
+            healthy_threshold: 2,
+            unhealthy_threshold: 3,
+            expected_statuses: BTreeSet::from([200]),
+            host: None,
+        });
+        let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(2));
+        snapshot.listeners.push(listener);
+        snapshot.upstream_pools.push(pool);
+        snapshot.refresh_content_hash();
+        let decoded: RuntimeSnapshot =
+            serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
+        assert_eq!(decoded, snapshot);
+        assert!(decoded.has_valid_content_hash());
     }
 
     #[test]

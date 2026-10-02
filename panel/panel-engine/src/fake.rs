@@ -248,6 +248,7 @@ mod tests {
             cache_policy_id: None,
             security_policy_id: None,
             lua_policy_id: None,
+            name: None,
         });
         candidate.refresh_content_hash();
         let report = engine.validate(candidate).await.unwrap();

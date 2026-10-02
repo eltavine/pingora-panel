@@ -7,7 +7,10 @@ use crate::{
 use panel_contracts::gateway::v1 as wire;
 use panel_domain::{NormalizedHost, PathPrefix, RouteId, SiteId, UpstreamPoolId};
 use panel_errors::{PanelError, Result};
-use panel_ir::{DomainSpec, ListenerRef, RouteAction, RouteMatcher, RouteSpec, SiteSpec};
+use panel_ir::{
+    DomainSpec, ListenerProtocols, ListenerRef, RouteAction, RouteMatcher, RouteSpec, SiteSpec,
+    WwwRedirect,
+};
 
 pub(super) fn decode_listener(value: wire::ListenerRef) -> Result<ListenerRef> {
     if value.tls && value.tls_profile_id.is_empty() {
@@ -20,6 +23,19 @@ pub(super) fn decode_listener(value: wire::ListenerRef) -> Result<ListenerRef> {
         id: value.id,
         address: value.address,
         tls_profile_id: optional_string(value.tls_profile_id),
+        protocols: value
+            .protocols
+            .map_or_else(ListenerProtocols::default, |protocols| ListenerProtocols {
+                http1: protocols.http1,
+                http2: protocols.http2,
+                http3: protocols.http3,
+            }),
+        reuse_port: value.reuse_port,
+        ipv6_only: value.ipv6_only,
+        default_site_id: optional_string(value.default_site_id)
+            .map(SiteId::new)
+            .transpose()
+            .map_err(domain_error)?,
     })
 }
 
@@ -29,10 +45,33 @@ pub(super) fn encode_listener(value: &ListenerRef) -> wire::ListenerRef {
         address: value.address.clone(),
         tls: value.tls_profile_id.is_some(),
         tls_profile_id: value.tls_profile_id.clone().unwrap_or_default(),
+        protocols: Some(wire::ListenerProtocols {
+            http1: value.protocols.http1,
+            http2: value.protocols.http2,
+            http3: value.protocols.http3,
+        }),
+        reuse_port: value.reuse_port,
+        ipv6_only: value.ipv6_only,
+        default_site_id: value
+            .default_site_id
+            .as_ref()
+            .map(|id| id.as_str().into())
+            .unwrap_or_default(),
     }
 }
 
 pub(super) fn decode_site(value: wire::SiteSpec) -> Result<SiteSpec> {
+    let www_redirect = match wire::WwwRedirect::try_from(value.www_redirect) {
+        Ok(wire::WwwRedirect::Unspecified) => WwwRedirect::None,
+        Ok(wire::WwwRedirect::Add) => WwwRedirect::AddWww,
+        Ok(wire::WwwRedirect::Remove) => WwwRedirect::RemoveWww,
+        Err(_) => {
+            return Err(PanelError::invalid_argument(format!(
+                "unknown www redirect {}",
+                value.www_redirect
+            )))
+        }
+    };
     Ok(SiteSpec {
         id: SiteId::new(value.id).map_err(domain_error)?,
         name: value.name,
@@ -44,13 +83,24 @@ pub(super) fn decode_site(value: wire::SiteSpec) -> Result<SiteSpec> {
                 Ok(DomainSpec {
                     host: NormalizedHost::new(domain.host).map_err(domain_error)?,
                     tls_profile_id: optional_string(domain.tls_profile_id),
+                    enabled: !domain.disabled,
+                    primary: domain.primary,
+                    redirect_to_primary: domain.redirect_to_primary,
                 })
             })
             .collect::<Result<Vec<_>>>()?,
+        listener_ids: value.listener_ids.into_iter().collect(),
+        https_redirect: value.https_redirect,
+        www_redirect,
     })
 }
 
 pub(super) fn encode_site(value: &SiteSpec) -> wire::SiteSpec {
+    let www_redirect = match value.www_redirect {
+        WwwRedirect::None => wire::WwwRedirect::Unspecified,
+        WwwRedirect::AddWww => wire::WwwRedirect::Add,
+        WwwRedirect::RemoveWww => wire::WwwRedirect::Remove,
+    };
     wire::SiteSpec {
         id: value.id.as_str().into(),
         name: value.name.clone(),
@@ -61,8 +111,14 @@ pub(super) fn encode_site(value: &SiteSpec) -> wire::SiteSpec {
             .map(|domain| wire::DomainSpec {
                 host: domain.host.as_str().into(),
                 tls_profile_id: domain.tls_profile_id.clone().unwrap_or_default(),
+                disabled: !domain.enabled,
+                primary: domain.primary,
+                redirect_to_primary: domain.redirect_to_primary,
             })
             .collect(),
+        listener_ids: value.listener_ids.iter().cloned().collect(),
+        https_redirect: value.https_redirect,
+        www_redirect: www_redirect.into(),
     }
 }
 
@@ -87,6 +143,7 @@ pub(super) fn decode_route(value: wire::RouteSpec) -> Result<RouteSpec> {
         cache_policy_id: optional_string(value.cache_policy_id),
         security_policy_id: optional_string(value.security_policy_id),
         lua_policy_id: optional_string(value.lua_policy_id),
+        name: optional_string(value.name),
     })
 }
 
@@ -103,6 +160,7 @@ pub(super) fn encode_route(value: &RouteSpec) -> wire::RouteSpec {
         cache_policy_id: value.cache_policy_id.clone().unwrap_or_default(),
         security_policy_id: value.security_policy_id.clone().unwrap_or_default(),
         lua_policy_id: value.lua_policy_id.clone().unwrap_or_default(),
+        name: value.name.clone().unwrap_or_default(),
     }
 }
 
@@ -156,21 +214,18 @@ fn decode_action(value: wire::RouteAction) -> Result<RouteAction> {
             upstream_pool_id: UpstreamPoolId::new(id).map_err(domain_error)?,
         }),
         Kind::StaticContentId(policy_id) => Ok(RouteAction::Static { policy_id }),
-        Kind::RedirectUrl(location) => Ok(RouteAction::Redirect {
-            location,
-            status: 302,
-        }),
-        Kind::ReturnStatus(status) => Ok(RouteAction::Respond {
-            status: status_code(status)?,
-            body: None,
-        }),
+        Kind::RedirectUrl(location) => Ok(RouteAction::redirect(location, 302)),
+        Kind::ReturnStatus(status) => Ok(RouteAction::respond(status_code(status)?, None)),
         Kind::Redirect(action) => Ok(RouteAction::Redirect {
             location: action.location,
             status: status_code(action.status)?,
+            preserve_path: action.preserve_path,
         }),
         Kind::Respond(action) => Ok(RouteAction::Respond {
             status: status_code(action.status)?,
             body: action.has_body.then_some(action.body),
+            content_type: optional_string(action.content_type),
+            retry_after_seconds: action.retry_after_seconds,
         }),
     }
 }
@@ -182,14 +237,26 @@ fn encode_action(value: &RouteAction) -> wire::RouteAction {
             Kind::UpstreamPoolId(upstream_pool_id.as_str().into())
         }
         RouteAction::Static { policy_id } => Kind::StaticContentId(policy_id.clone()),
-        RouteAction::Redirect { location, status } => Kind::Redirect(wire::RedirectAction {
+        RouteAction::Redirect {
+            location,
+            status,
+            preserve_path,
+        } => Kind::Redirect(wire::RedirectAction {
             location: location.clone(),
             status: u32::from(*status),
+            preserve_path: *preserve_path,
         }),
-        RouteAction::Respond { status, body } => Kind::Respond(wire::RespondAction {
+        RouteAction::Respond {
+            status,
+            body,
+            content_type,
+            retry_after_seconds,
+        } => Kind::Respond(wire::RespondAction {
             status: u32::from(*status),
             body: body.clone().unwrap_or_default(),
             has_body: body.is_some(),
+            content_type: content_type.clone().unwrap_or_default(),
+            retry_after_seconds: *retry_after_seconds,
         }),
     };
     wire::RouteAction { kind: Some(kind) }

@@ -4,9 +4,10 @@ use panel_domain::{
     UpstreamPoolId,
 };
 use panel_ir::{
-    CachePolicy, CapabilityRequirement, DomainSpec, HeaderPolicy, ListenerRef, LoadBalancingPolicy,
-    LuaPolicy, RetryPolicy, RouteAction, RouteMatcher, RouteSpec, RuntimeSnapshot, SecurityPolicy,
-    SiteSpec, StaticContentPolicy, TlsProfile, UpstreamEndpoint, UpstreamPoolSpec,
+    ActiveHealthCheck, CachePolicy, CapabilityRequirement, DomainSpec, HeaderPolicy,
+    HealthCheckProtocol, ListenerRef, LoadBalancingPolicy, LuaPolicy, PassiveHealthPolicy,
+    RetryPolicy, RouteAction, RouteMatcher, RouteSpec, RuntimeSnapshot, SecurityPolicy, SiteSpec,
+    StaticContentPolicy, TlsProfile, UpstreamEndpoint, UpstreamPoolSpec, WwwRedirect,
 };
 
 #[test]
@@ -19,60 +20,132 @@ fn empty_snapshot_round_trips_without_transport_types_leaking() {
 #[test]
 fn populated_snapshot_round_trips_additive_v1_fields() {
     let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(8));
-    snapshot.listeners.push(ListenerRef {
-        id: "https".into(),
-        address: "0.0.0.0:443".into(),
-        tls_profile_id: Some("tls-main".into()),
-    });
-    snapshot.sites.push(SiteSpec {
-        id: SiteId::new("site-main").unwrap(),
-        name: "main".into(),
-        enabled: true,
-        domains: vec![DomainSpec {
-            host: NormalizedHost::new("example.com").unwrap(),
-            tls_profile_id: Some("tls-main".into()),
-        }],
-    });
-    snapshot.routes.push(RouteSpec {
-        id: RouteId::new("route-main").unwrap(),
-        site_id: SiteId::new("site-main").unwrap(),
-        priority: 10,
-        enabled: true,
-        matcher: RouteMatcher::HostPathPrefix {
+    let mut listener = ListenerRef::new("https", "0.0.0.0:443");
+    listener.tls_profile_id = Some("tls-main".into());
+    listener.protocols.http1 = false;
+    listener.protocols.http3 = true;
+    listener.reuse_port = true;
+    listener.ipv6_only = Some(false);
+    listener.default_site_id = Some(SiteId::new("site-main").unwrap());
+    snapshot.listeners.push(listener);
+    let mut primary = DomainSpec::new(NormalizedHost::new("example.com").unwrap());
+    primary.tls_profile_id = Some("tls-main".into());
+    primary.primary = true;
+    let mut alias = DomainSpec::new(NormalizedHost::new("*.example.net").unwrap());
+    alias.enabled = false;
+    alias.redirect_to_primary = true;
+    let mut site = SiteSpec::new(
+        SiteId::new("site-main").unwrap(),
+        "main",
+        vec![primary, alias],
+    );
+    site.listener_ids.insert("https".into());
+    site.https_redirect = true;
+    site.www_redirect = WwwRedirect::RemoveWww;
+    snapshot.sites.push(site);
+    let mut route = RouteSpec::new(
+        RouteId::new("route-main").unwrap(),
+        SiteId::new("site-main").unwrap(),
+        10,
+        RouteMatcher::HostPathPrefix {
             host: NormalizedHost::new("example.com").unwrap(),
             path: PathPrefix::new("/api").unwrap(),
         },
-        action: RouteAction::Proxy {
+        RouteAction::Proxy {
             upstream_pool_id: UpstreamPoolId::new("pool-main").unwrap(),
         },
-        retry_policy: Some(RetryPolicy {
-            attempts: 2,
-            per_try_timeout_ms: 500,
-            retry_statuses: [502, 503].into_iter().collect(),
-        }),
-        header_policy_id: Some("headers".into()),
-        cache_policy_id: Some("cache".into()),
-        security_policy_id: Some("security".into()),
-        lua_policy_id: Some("lua".into()),
+    );
+    route.retry_policy = Some(RetryPolicy {
+        attempts: 2,
+        per_try_timeout_ms: 500,
+        retry_statuses: [502, 503].into_iter().collect(),
     });
-    snapshot.upstream_pools.push(UpstreamPoolSpec {
-        id: UpstreamPoolId::new("pool-main").unwrap(),
-        name: "primary".into(),
-        endpoints: vec![UpstreamEndpoint {
-            id: EndpointId::new("origin-1").unwrap(),
-            address: EndpointAddress::new("127.0.0.1", 8443, true).unwrap(),
-            sni: Some("origin.example.com".into()),
-            weight: 10,
-        }],
-        load_balancing: LoadBalancingPolicy::ConsistentHash {
-            key: "client-ip".into(),
+    route.header_policy_id = Some("headers".into());
+    route.cache_policy_id = Some("cache".into());
+    route.security_policy_id = Some("security".into());
+    route.lua_policy_id = Some("lua".into());
+    route.name = Some("api".into());
+    snapshot.routes.push(route);
+    let mut redirect = RouteSpec::new(
+        RouteId::new("route-redirect").unwrap(),
+        SiteId::new("site-main").unwrap(),
+        20,
+        RouteMatcher::ExactPath {
+            path: "/old".into(),
         },
-        retry_policy: RetryPolicy {
-            attempts: 3,
-            per_try_timeout_ms: 750,
-            retry_statuses: [500, 502].into_iter().collect(),
+        RouteAction::Redirect {
+            location: "https://example.com/new".into(),
+            status: 308,
+            preserve_path: true,
         },
+    );
+    redirect.enabled = false;
+    snapshot.routes.push(redirect);
+    snapshot.routes.push(RouteSpec::new(
+        RouteId::new("route-maintenance").unwrap(),
+        SiteId::new("site-main").unwrap(),
+        30,
+        RouteMatcher::PathPrefix {
+            path: PathPrefix::new("/").unwrap(),
+        },
+        RouteAction::Respond {
+            status: 503,
+            body: Some("maintenance".into()),
+            content_type: Some("text/plain; charset=utf-8".into()),
+            retry_after_seconds: Some(120),
+        },
+    ));
+    let mut endpoint = UpstreamEndpoint::new(
+        EndpointId::new("origin-1").unwrap(),
+        EndpointAddress::new("127.0.0.1", 8443, true).unwrap(),
+    );
+    endpoint.sni = Some("origin.example.com".into());
+    endpoint.weight = 10;
+    let mut backup = UpstreamEndpoint::new(
+        EndpointId::new("origin-2").unwrap(),
+        EndpointAddress::new("localhost", 80, false).unwrap(),
+    );
+    backup.enabled = false;
+    backup.backup = true;
+    backup.unix_socket = Some("/run/app.sock".into());
+    let mut pool = UpstreamPoolSpec::new(
+        UpstreamPoolId::new("pool-main").unwrap(),
+        "primary",
+        vec![endpoint, backup],
+    );
+    pool.load_balancing = LoadBalancingPolicy::ConsistentHash {
+        key: "client_ip".into(),
+    };
+    pool.retry_policy = RetryPolicy {
+        attempts: 3,
+        per_try_timeout_ms: 750,
+        retry_statuses: [500, 502].into_iter().collect(),
+    };
+    pool.connection.connect_timeout_ms = Some(1_000);
+    pool.connection.idle_timeout_ms = Some(60_000);
+    pool.connection.keepalive = false;
+    pool.connection.max_connections = Some(128);
+    pool.connection.http2 = true;
+    pool.tls.verify_hostname = false;
+    pool.tls.ca_secret_id = Some("ca".into());
+    pool.tls.sni = Some("origin.example.com".into());
+    pool.host_header = Some("origin.example.com".into());
+    pool.health_check = Some(ActiveHealthCheck {
+        protocol: HealthCheckProtocol::Http,
+        path: "/healthz".into(),
+        method: "HEAD".into(),
+        interval_ms: 5_000,
+        timeout_ms: 1_000,
+        healthy_threshold: 2,
+        unhealthy_threshold: 3,
+        expected_statuses: [200, 204].into_iter().collect(),
+        host: Some("origin.example.com".into()),
     });
+    pool.passive_health = Some(PassiveHealthPolicy {
+        failure_threshold: 5,
+        ejection_ms: 30_000,
+    });
+    snapshot.upstream_pools.push(pool);
     snapshot.tls_profiles.push(TlsProfile {
         id: "tls-main".into(),
         certificate_secret_id: "cert".into(),
@@ -120,4 +193,28 @@ fn populated_snapshot_round_trips_additive_v1_fields() {
 
     let decoded = decode_snapshot(encode_snapshot(&snapshot)).unwrap();
     assert_eq!(decoded, snapshot);
+}
+
+/// Messages from senders that predate the extension fields decode to the
+/// IR defaults, so their canonical hash is unchanged.
+#[test]
+fn absent_extension_messages_decode_to_defaults() {
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(9));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", "0.0.0.0:80"));
+    snapshot.upstream_pools.push(UpstreamPoolSpec::new(
+        UpstreamPoolId::new("pool").unwrap(),
+        "pool",
+        vec![UpstreamEndpoint::new(
+            EndpointId::new("node").unwrap(),
+            EndpointAddress::new("127.0.0.1", 8080, false).unwrap(),
+        )],
+    ));
+    snapshot.refresh_content_hash();
+    let mut wire = encode_snapshot(&snapshot);
+    wire.listeners[0].protocols = None;
+    wire.upstream_pools[0].connection = None;
+    wire.upstream_pools[0].tls = None;
+    assert_eq!(decode_snapshot(wire).unwrap(), snapshot);
 }

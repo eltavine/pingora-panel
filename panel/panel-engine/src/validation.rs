@@ -22,6 +22,7 @@ pub fn validate_engine_ir(
         ));
     }
     validate_references(snapshot, &mut diagnostics);
+    crate::traffic::validate_traffic(snapshot, &mut diagnostics);
 
     let unsupported: Vec<_> = snapshot
         .required_capabilities()
@@ -152,7 +153,12 @@ fn validate_references(snapshot: &RuntimeSnapshot, diagnostics: &mut Vec<Diagnos
                     }
                     _ => None,
                 };
-                if let Some(host) = matcher_host.filter(|host| !domains.contains(*host)) {
+                if let Some(host) = matcher_host.filter(|host| {
+                    !domains
+                        .iter()
+                        .any(|domain: &panel_domain::NormalizedHost| domain.matches(host))
+                        && !domains.contains(*host)
+                }) {
                     diagnostics.push(Diagnostic::error(
                         ErrorCode::VALIDATION_FAILED,
                         format!(
@@ -190,21 +196,14 @@ mod tests {
     use panel_domain::{
         EndpointAddress, EndpointId, NormalizedHost, RevisionId, RouteId, SiteId, UpstreamPoolId,
     };
-    use panel_ir::{
-        DomainSpec, LoadBalancingPolicy, RetryPolicy, RouteSpec, SiteSpec, UpstreamEndpoint,
-        UpstreamPoolSpec,
-    };
+    use panel_ir::{DomainSpec, RouteSpec, SiteSpec, UpstreamEndpoint, UpstreamPoolSpec};
 
     fn site(id: &str, host: &str) -> SiteSpec {
-        SiteSpec {
-            id: SiteId::new(id).unwrap(),
-            name: id.into(),
-            enabled: true,
-            domains: vec![DomainSpec {
-                host: NormalizedHost::new(host).unwrap(),
-                tls_profile_id: None,
-            }],
-        }
+        SiteSpec::new(
+            SiteId::new(id).unwrap(),
+            id,
+            vec![DomainSpec::new(NormalizedHost::new(host).unwrap())],
+        )
     }
 
     #[test]
@@ -249,29 +248,32 @@ mod tests {
     fn route_host_must_belong_to_a_declared_site_domain() {
         let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
         snapshot.sites.push(site("site", "example.com"));
-        snapshot.routes.push(RouteSpec {
-            id: RouteId::new("route").unwrap(),
-            site_id: SiteId::new("site").unwrap(),
-            priority: 1,
-            enabled: true,
-            matcher: RouteMatcher::Host {
+        snapshot.routes.push(RouteSpec::new(
+            RouteId::new("route").unwrap(),
+            SiteId::new("site").unwrap(),
+            1,
+            RouteMatcher::Host {
                 host: NormalizedHost::new("other.example").unwrap(),
             },
-            action: RouteAction::Respond {
-                status: 200,
-                body: None,
-            },
-            retry_policy: None,
-            header_policy_id: None,
-            cache_policy_id: None,
-            security_policy_id: None,
-            lua_policy_id: None,
-        });
+            RouteAction::respond(200, None),
+        ));
         snapshot.refresh_content_hash();
         let report = validate_engine_ir(&snapshot, &BTreeSet::new()).unwrap();
         assert!(report.diagnostics.iter().any(|diagnostic| diagnostic
             .message
             .contains("host other.example outside site site domains")));
+
+        snapshot.sites[0].domains[0].host = NormalizedHost::new("*.example.com").unwrap();
+        snapshot.routes[0].matcher = RouteMatcher::Host {
+            host: NormalizedHost::new("api.example.com").unwrap(),
+        };
+        snapshot.refresh_content_hash();
+        assert!(
+            validate_engine_ir(&snapshot, &BTreeSet::new())
+                .unwrap()
+                .valid
+        );
+        snapshot.sites[0].domains[0].host = NormalizedHost::new("example.com").unwrap();
 
         snapshot.routes[0].matcher = RouteMatcher::PathPrefix {
             path: panel_domain::PathPrefix::new("/api").unwrap(),
@@ -291,23 +293,15 @@ mod tests {
 
         let gateway = FakeGatewayEngine::with_default_capabilities();
         let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
-        let endpoint = UpstreamEndpoint {
-            id: EndpointId::new("origin").unwrap(),
-            address: EndpointAddress::new("127.0.0.1", 8080, false).unwrap(),
-            sni: None,
-            weight: 1,
-        };
-        snapshot.upstream_pools.push(UpstreamPoolSpec {
-            id: UpstreamPoolId::new("pool").unwrap(),
-            name: "pool".into(),
-            endpoints: vec![endpoint.clone(), endpoint],
-            load_balancing: LoadBalancingPolicy::RoundRobin,
-            retry_policy: RetryPolicy {
-                attempts: 0,
-                per_try_timeout_ms: 0,
-                retry_statuses: BTreeSet::new(),
-            },
-        });
+        let endpoint = UpstreamEndpoint::new(
+            EndpointId::new("origin").unwrap(),
+            EndpointAddress::new("127.0.0.1", 8080, false).unwrap(),
+        );
+        snapshot.upstream_pools.push(UpstreamPoolSpec::new(
+            UpstreamPoolId::new("pool").unwrap(),
+            "pool",
+            vec![endpoint.clone(), endpoint],
+        ));
         snapshot.refresh_content_hash();
         let report = gateway.validate(snapshot.clone()).await.unwrap();
         assert!(!report.valid);

@@ -208,15 +208,11 @@ mod tests {
         assert!(compiler.compile(compile(baseline)).await.is_ok());
 
         let mut canonical = RuntimeSnapshot::empty(RevisionId::new(2));
-        canonical.sites.push(SiteSpec {
-            id: SiteId::new("site-1").unwrap(),
-            name: "site".into(),
-            enabled: true,
-            domains: vec![DomainSpec {
-                host: NormalizedHost::new("example.com").unwrap(),
-                tls_profile_id: None,
-            }],
-        });
+        canonical.sites.push(SiteSpec::new(
+            SiteId::new("site-1").unwrap(),
+            "site",
+            vec![DomainSpec::new(NormalizedHost::new("example.com").unwrap())],
+        ));
         canonical.refresh_content_hash();
         let mut wire = serde_json::to_value(&canonical).unwrap();
         wire["sites"][0]["domains"][0]["host"] = serde_json::json!("Example.COM.");

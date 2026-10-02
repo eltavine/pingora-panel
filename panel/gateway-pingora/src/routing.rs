@@ -144,33 +144,23 @@ mod tests {
     use panel_ir::{DomainSpec, RouteSpec, SiteSpec};
 
     fn site(id: &str, host: &str) -> SiteSpec {
-        SiteSpec {
-            id: SiteId::new(id).unwrap(),
-            name: id.into(),
-            enabled: true,
-            domains: vec![DomainSpec {
-                host: NormalizedHost::new(host).unwrap(),
-                tls_profile_id: None,
-            }],
-        }
+        SiteSpec::new(
+            SiteId::new(id).unwrap(),
+            id,
+            vec![DomainSpec::new(NormalizedHost::new(host).unwrap())],
+        )
     }
 
     fn route(id: &str, priority: u32, matcher: RouteMatcher) -> RouteSpec {
-        RouteSpec {
-            id: RouteId::new(id).unwrap(),
-            site_id: SiteId::new("site").unwrap(),
+        RouteSpec::new(
+            RouteId::new(id).unwrap(),
+            SiteId::new("site").unwrap(),
             priority,
-            enabled: true,
             matcher,
-            action: RouteAction::Proxy {
+            RouteAction::Proxy {
                 upstream_pool_id: UpstreamPoolId::new(id).unwrap(),
             },
-            retry_policy: None,
-            header_policy_id: None,
-            cache_policy_id: None,
-            security_policy_id: None,
-            lua_policy_id: None,
-        }
+        )
     }
 
     #[test]
@@ -336,10 +326,7 @@ mod tests {
         snapshot.routes[0].matcher = RouteMatcher::Host {
             host: NormalizedHost::new("example.com").unwrap(),
         };
-        snapshot.routes[0].action = RouteAction::Respond {
-            status: 200,
-            body: None,
-        };
+        snapshot.routes[0].action = RouteAction::respond(200, None);
         assert_eq!(
             RouteIndex::compile(&snapshot).err().unwrap().code.as_str(),
             panel_errors::ErrorCode::UNSUPPORTED_CAPABILITY

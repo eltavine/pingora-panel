@@ -39,12 +39,9 @@ async fn prepare(server: &ManagementServer, revision: u64) -> Value {
 async fn default_http_envelope_holds_the_largest_allowed_json_document() {
     let compiler_limit = DEFAULT_MAX_JSON_DOCUMENT_BYTES;
     let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
-    snapshot.sites.push(SiteSpec {
-        id: SiteId::new("site").unwrap(),
-        name: String::new(),
-        enabled: true,
-        domains: Vec::new(),
-    });
+    snapshot
+        .sites
+        .push(SiteSpec::new(SiteId::new("site").unwrap(), "", Vec::new()));
     snapshot.refresh_content_hash();
     let base_size = serde_json::to_vec(&snapshot).unwrap().len();
     snapshot.sites[0].name = "x".repeat(compiler_limit - base_size);

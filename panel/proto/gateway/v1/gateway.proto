@@ -45,6 +45,17 @@ message ListenerRef {
   string address = 2;
   bool tls = 3;
   string tls_profile_id = 4;
+  // Absent means HTTP/1.1 and HTTP/2 without HTTP/3.
+  ListenerProtocols protocols = 5;
+  bool reuse_port = 6;
+  optional bool ipv6_only = 7;
+  string default_site_id = 8;
+}
+
+message ListenerProtocols {
+  bool http1 = 1;
+  bool http2 = 2;
+  bool http3 = 3;
 }
 
 message SiteSpec {
@@ -52,11 +63,23 @@ message SiteSpec {
   string name = 2;
   bool enabled = 3;
   repeated DomainSpec domains = 4;
+  repeated string listener_ids = 5;
+  bool https_redirect = 6;
+  WwwRedirect www_redirect = 7;
+}
+
+enum WwwRedirect {
+  WWW_REDIRECT_UNSPECIFIED = 0;
+  WWW_REDIRECT_ADD = 1;
+  WWW_REDIRECT_REMOVE = 2;
 }
 
 message DomainSpec {
   string host = 1;
   string tls_profile_id = 2;
+  bool disabled = 3;
+  bool primary = 4;
+  bool redirect_to_primary = 5;
 }
 
 message RouteSpec {
@@ -71,6 +94,7 @@ message RouteSpec {
   string cache_policy_id = 9;
   string security_policy_id = 10;
   string lua_policy_id = 11;
+  string name = 12;
 }
 
 message RouteMatcher {
@@ -103,11 +127,14 @@ message RouteAction {
 message RedirectAction {
   string location = 1;
   uint32 status = 2;
+  bool preserve_path = 3;
 }
 message RespondAction {
   uint32 status = 1;
   string body = 2;
   bool has_body = 3;
+  string content_type = 4;
+  optional uint32 retry_after_seconds = 5;
 }
 
 message UpstreamPoolSpec {
@@ -118,6 +145,51 @@ message UpstreamPoolSpec {
   string retry_policy = 5;
   LoadBalancingPolicy load_balancing_v1 = 6;
   RetryPolicy retry_policy_v1 = 7;
+  UpstreamConnectionPolicy connection = 8;
+  UpstreamTlsPolicy tls = 9;
+  string host_header = 10;
+  ActiveHealthCheck health_check = 11;
+  PassiveHealthPolicy passive_health = 12;
+}
+
+message UpstreamConnectionPolicy {
+  optional uint64 connect_timeout_ms = 1;
+  optional uint64 read_timeout_ms = 2;
+  optional uint64 write_timeout_ms = 3;
+  optional uint64 idle_timeout_ms = 4;
+  bool disable_keepalive = 5;
+  optional uint32 max_connections = 6;
+  bool http2 = 7;
+}
+
+message UpstreamTlsPolicy {
+  bool skip_certificate_verification = 1;
+  bool skip_hostname_verification = 2;
+  string ca_secret_id = 3;
+  string sni = 4;
+}
+
+enum HealthCheckProtocol {
+  HEALTH_CHECK_PROTOCOL_UNSPECIFIED = 0;
+  HEALTH_CHECK_PROTOCOL_HTTP = 1;
+  HEALTH_CHECK_PROTOCOL_TCP = 2;
+}
+
+message ActiveHealthCheck {
+  HealthCheckProtocol protocol = 1;
+  string path = 2;
+  string method = 3;
+  uint64 interval_ms = 4;
+  uint64 timeout_ms = 5;
+  uint32 healthy_threshold = 6;
+  uint32 unhealthy_threshold = 7;
+  repeated uint32 expected_statuses = 8;
+  string host = 9;
+}
+
+message PassiveHealthPolicy {
+  uint32 failure_threshold = 1;
+  uint64 ejection_ms = 2;
 }
 
 message UpstreamEndpoint {
@@ -127,6 +199,9 @@ message UpstreamEndpoint {
   bool tls = 4;
   string sni = 5;
   uint32 weight = 6;
+  bool disabled = 7;
+  bool backup = 8;
+  string unix_socket = 9;
 }
 
 message LoadBalancingPolicy {

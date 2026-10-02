@@ -5,6 +5,7 @@
 mod events;
 pub mod fake;
 pub mod ports;
+mod traffic;
 mod validation;
 
 pub use events::*;
