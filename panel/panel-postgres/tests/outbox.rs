@@ -206,3 +206,41 @@ async fn only_one_relay_leads_an_outbox_at_a_time() {
     service.close().await;
     database.drop().await;
 }
+
+#[tokio::test]
+async fn a_terminated_leadership_session_is_noticed_and_succeeded() {
+    let Some(mut database) = TestDatabase::create().await else {
+        return;
+    };
+    let service = migrated(&mut database).await;
+    let outbox = PgOutbox::new(&service);
+    let mut leader = outbox.try_lead().await.unwrap().expect("first relay leads");
+
+    let mut admin = database.admin_connection().await;
+    let terminated: Vec<bool> = sqlx::query_scalar(
+        "SELECT pg_terminate_backend(pid) FROM pg_locks \
+         WHERE locktype = 'advisory' AND granted AND database = \
+         (SELECT oid FROM pg_database WHERE datname = current_database())",
+    )
+    .fetch_all(&mut admin)
+    .await
+    .unwrap();
+    assert_eq!(terminated, [true]);
+
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        leader.lost(Duration::from_millis(20)),
+    )
+    .await
+    .expect("the lost session is noticed");
+    drop(leader);
+    let successor = outbox.try_lead().await.unwrap();
+    assert!(
+        successor.is_some(),
+        "the lock was released with the session"
+    );
+    successor.unwrap().release().await.unwrap();
+
+    service.close().await;
+    database.drop().await;
+}

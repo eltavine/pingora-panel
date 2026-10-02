@@ -122,6 +122,18 @@ impl ServiceDatabase {
     /// Connects and verifies the session resolves unqualified names to the
     /// service schema only.
     pub async fn connect(config: ServiceDatabaseConfig) -> Result<Self> {
+        let database = Self::connect_lazy(config);
+        if let Err(error) = database.verify_schema().await {
+            database.pool.close().await;
+            return Err(error);
+        }
+        Ok(database)
+    }
+
+    /// Creates the pool without connecting, so a service can start while
+    /// the database is unavailable. Call [`Self::verify_schema`] or
+    /// [`Self::migrate`] before relying on the schema.
+    pub fn connect_lazy(config: ServiceDatabaseConfig) -> Self {
         let schema = config.schema.clone();
         let connect = config.connect.options([
             ("search_path", schema.quoted()),
@@ -137,20 +149,24 @@ impl ServiceDatabase {
         let pool = PgPoolOptions::new()
             .max_connections(config.max_connections)
             .acquire_timeout(config.acquire_timeout)
-            .connect_with(connect)
-            .await
-            .map_err(storage_error)?;
+            .connect_lazy_with(connect);
+        Self { pool, schema }
+    }
+
+    /// Fails unless the session resolves unqualified names to the service
+    /// schema, which proves the role owns it and bootstrap has run.
+    pub async fn verify_schema(&self) -> Result<()> {
         let current: Option<String> = sqlx::query_scalar("SELECT current_schema()::text")
-            .fetch_one(&pool)
+            .fetch_one(&self.pool)
             .await
             .map_err(storage_error)?;
-        if current.as_deref() != Some(schema.as_str()) {
-            pool.close().await;
+        if current.as_deref() != Some(self.schema.as_str()) {
             return Err(PanelError::precondition_failed(format!(
-                "service schema {schema} is not available to this role"
+                "service schema {} is not available to this role",
+                self.schema
             )));
         }
-        Ok(Self { pool, schema })
+        Ok(())
     }
 
     pub fn pool(&self) -> &PgPool {

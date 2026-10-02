@@ -143,3 +143,33 @@ async fn bootstrap_refuses_a_service_owned_database() {
     drop(admin);
     database.drop().await;
 }
+
+#[tokio::test]
+async fn lazy_connections_start_without_a_database_and_verify_later() {
+    use panel_postgres::{ServiceDatabaseConfig, SqlIdentifier};
+    let unreachable = ServiceDatabase::connect_lazy(
+        ServiceDatabaseConfig::new(
+            "postgres://config@127.0.0.1:1/panel",
+            "config-service",
+            SqlIdentifier::new("config").unwrap(),
+        )
+        .unwrap()
+        .with_acquire_timeout(std::time::Duration::from_millis(200)),
+    );
+    let error = unreachable.verify_schema().await.unwrap_err();
+    assert_eq!(
+        error.code.as_str(),
+        panel_errors::ErrorCode::STORAGE_UNAVAILABLE
+    );
+
+    let Some(mut database) = TestDatabase::create().await else {
+        return;
+    };
+    let secrets = database.bootstrap(&[("config", "config")]).await;
+    let lazy =
+        ServiceDatabase::connect_lazy(database.service_config("config", "config", &secrets[0]));
+    lazy.verify_schema().await.unwrap();
+    lazy.migrate(&[]).await.unwrap();
+    lazy.close().await;
+    database.drop().await;
+}

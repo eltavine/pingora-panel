@@ -210,6 +210,24 @@ pub struct PgRelayLeadership {
 }
 
 impl PgRelayLeadership {
+    /// Resolves once the leadership connection stops answering, checking
+    /// every `interval`. PostgreSQL releases the lock with the session, so a
+    /// relay must stop when this resolves; another instance may lead
+    /// within one interval, and the broker's deduplication absorbs any
+    /// overlapping republication.
+    pub async fn lost(&mut self, interval: Duration) {
+        loop {
+            tokio::time::sleep(interval).await;
+            if sqlx::query("SELECT 1")
+                .execute(self.guard.as_mut())
+                .await
+                .is_err()
+            {
+                return;
+            }
+        }
+    }
+
     pub async fn release(self) -> Result<()> {
         self.guard
             .release_now()
