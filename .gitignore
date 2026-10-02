@@ -14,3 +14,6 @@ bleeper.user.toml
 .DS_Store
 # The policy guards import a shared package from .github/scripts.
 __pycache__/
+
+# Passwords generated for a Compose installation.
+panel/deploy/secrets/

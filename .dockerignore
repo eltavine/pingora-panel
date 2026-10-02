@@ -1,0 +1,10 @@
+# Build context of panel/deploy/Containerfile: sources only.
+.git
+.idea
+.vscode
+**/target
+panel/web/node_modules
+panel/web/dist
+panel/web/test-results
+panel/web/playwright-report
+panel/deploy/secrets

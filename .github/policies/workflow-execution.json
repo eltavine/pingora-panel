@@ -57,6 +57,12 @@
         "contents": "read"
       }
     },
+    ".github/workflows/panel-deploy.yml": {
+      "cancel_in_progress": true,
+      "permissions": {
+        "contents": "read"
+      }
+    },
     ".github/workflows/panel-web.yml": {
       "cancel_in_progress": true,
       "permissions": {

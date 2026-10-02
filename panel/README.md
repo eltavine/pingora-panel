@@ -281,6 +281,29 @@ cargo test --manifest-path panel/Cargo.toml --package panel-postgres --package p
 panel/scripts/dev-services.sh down
 ```
 
+## Compose installation
+
+`deploy/compose.yaml` installs Pingora Panel on one Linux host with Docker
+Compose or Podman Compose, from one image built by `deploy/Containerfile`
+(distroless, non-root) and digest-pinned PostgreSQL and NATS images:
+
+```bash
+panel/deploy/generate-secrets.sh
+docker compose -f panel/deploy/compose.yaml up -d
+```
+
+Every container uses the host network and binds loopback addresses, so the
+console at <http://127.0.0.1:8080> and every internal port stay local until
+the API authenticates callers. `pki-init` creates the certificate authority
+and every service's credentials, `pki` renews them, and `bootstrap`
+provisions roles, schemas, streams and the service registry before the
+services start; internal gRPC runs over mutual TLS. Each service mounts only
+its own credential volume, read-only, and runs with a read-only root file
+system, no capabilities and `no-new-privileges`. Passwords are generated
+into `deploy/secrets/` (never committed) and mounted as Compose secrets.
+The `panel-deploy` workflow builds the image and checks the running
+installation through its API.
+
 ## Web console
 
 `panel/web` is the Vue console served by `panel-api`. It is generated from the official

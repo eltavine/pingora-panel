@@ -1,0 +1,232 @@
+# Pingora Panel on one Linux host, for Docker Compose and Podman Compose.
+#
+#   panel/deploy/generate-secrets.sh
+#   docker compose -f panel/deploy/compose.yaml up -d
+#
+# Every process uses the host network and binds loopback addresses, so
+# nothing is reachable from other hosts until the API authenticates callers;
+# the console is at http://127.0.0.1:8080. Internal gRPC additionally runs
+# over mutual TLS with credentials the pki service rotates.
+
+name: pingora-panel
+
+x-panel: &panel
+  image: ${PINGORA_PANEL_IMAGE:-localhost/pingora-panel:dev}
+  build:
+    context: ../..
+    dockerfile: panel/deploy/Containerfile
+  network_mode: host
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+x-database: &database
+  PINGORA_PANEL_NATS_URL: nats://127.0.0.1:4222
+  PINGORA_PANEL_TRUST_DOMAIN: pingora-panel.internal
+
+x-after-bootstrap: &after-bootstrap
+  bootstrap:
+    condition: service_completed_successfully
+  pki-init:
+    condition: service_completed_successfully
+
+x-pki: &pki
+  <<: *panel
+  environment:
+    PINGORA_PANEL_PKI_DIR: /var/lib/pingora-panel/pki
+    PINGORA_PANEL_TRUST_DOMAIN: pingora-panel.internal
+    PINGORA_PANEL_PKI_CREDENTIALS: >-
+      panel-api=/var/lib/pingora-panel/credentials/panel-api,config-service=/var/lib/pingora-panel/credentials/config-service,automation-service=/var/lib/pingora-panel/credentials/automation-service,observability-service=/var/lib/pingora-panel/credentials/observability-service,gatewayd=/var/lib/pingora-panel/credentials/gatewayd
+  volumes:
+    - pki-authority:/var/lib/pingora-panel/pki
+    - credentials-panel-api:/var/lib/pingora-panel/credentials/panel-api
+    - credentials-config-service:/var/lib/pingora-panel/credentials/config-service
+    - credentials-automation-service:/var/lib/pingora-panel/credentials/automation-service
+    - credentials-observability-service:/var/lib/pingora-panel/credentials/observability-service
+    - credentials-gatewayd:/var/lib/pingora-panel/credentials/gatewayd
+
+services:
+  postgres:
+    image: docker.io/library/postgres:18.6-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+    network_mode: host
+    restart: unless-stopped
+    command: ["postgres", "-c", "listen_addresses=127.0.0.1", "-c", "port=5432"]
+    environment:
+      POSTGRES_DB: pingora_panel
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-admin-password
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256
+    secrets: [postgres-admin-password]
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "pingora_panel"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  nats:
+    image: docker.io/library/nats:2.15.0-alpine@sha256:ac8f88a6494bffc2c2a5289a0ca61cb28a9145c11ba5677cf24265d07f46d8d4
+    network_mode: host
+    restart: unless-stopped
+    command: ["--jetstream", "--store_dir", "/data", "--addr", "127.0.0.1", "--port", "4222", "--http_port", "8222"]
+    volumes:
+      - nats-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8222/healthz?js-enabled-only=true"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # Creates the certificate authority and every service's credentials.
+  pki-init:
+    <<: *pki
+    restart: "no"
+    command: ["/usr/local/bin/panel-bootstrap", "pki", "--once"]
+
+  # Renews credentials before they expire; services reload them.
+  pki:
+    <<: *pki
+    command: ["/usr/local/bin/panel-bootstrap", "pki"]
+    depends_on:
+      pki-init:
+        condition: service_completed_successfully
+
+  # Creates the service roles, schemas, streams and service registry.
+  bootstrap:
+    <<: *panel
+    restart: "no"
+    command: ["/usr/local/bin/panel-bootstrap"]
+    environment:
+      <<: *database
+      PINGORA_PANEL_ADMIN_DATABASE_URL: postgres://postgres@127.0.0.1:5432/pingora_panel
+      PINGORA_PANEL_ADMIN_DATABASE_PASSWORD_FILE: /run/secrets/postgres-admin-password
+      PINGORA_PANEL_IDENTITY_DATABASE_PASSWORD_FILE: /run/secrets/identity-database-password
+      PINGORA_PANEL_CONFIG_DATABASE_PASSWORD_FILE: /run/secrets/config-database-password
+      PINGORA_PANEL_AUTOMATION_DATABASE_PASSWORD_FILE: /run/secrets/automation-database-password
+      PINGORA_PANEL_OBSERVABILITY_DATABASE_PASSWORD_FILE: /run/secrets/observability-database-password
+    secrets:
+      - postgres-admin-password
+      - identity-database-password
+      - config-database-password
+      - automation-database-password
+      - observability-database-password
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+
+  gatewayd:
+    <<: *panel
+    command: ["/usr/local/bin/gatewayd"]
+    environment:
+      PINGORA_PANEL_GATEWAY_ADDR: 127.0.0.1:50051
+      PINGORA_PANEL_STATE_DIR: /var/lib/pingora-panel/gateway
+      PINGORA_PANEL_TLS_DIR: /var/lib/pingora-panel/credentials/gatewayd
+      PINGORA_PANEL_TRUST_DOMAIN: pingora-panel.internal
+    volumes:
+      - gateway-state:/var/lib/pingora-panel/gateway
+      - credentials-gatewayd:/var/lib/pingora-panel/credentials/gatewayd:ro
+    depends_on:
+      pki-init:
+        condition: service_completed_successfully
+
+  config-service:
+    <<: *panel
+    command: ["/usr/local/bin/config-service"]
+    environment:
+      <<: *database
+      PINGORA_PANEL_DATABASE_URL: postgres://panel_config@127.0.0.1:5432/pingora_panel
+      PINGORA_PANEL_DATABASE_PASSWORD_FILE: /run/secrets/config-database-password
+      PINGORA_PANEL_TLS_DIR: /var/lib/pingora-panel/credentials/config-service
+      PINGORA_PANEL_GATEWAY_URL: https://127.0.0.1:50051
+    secrets: [config-database-password]
+    volumes:
+      - credentials-config-service:/var/lib/pingora-panel/credentials/config-service:ro
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/config-service", "healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    depends_on: *after-bootstrap
+
+  automation-service:
+    <<: *panel
+    command: ["/usr/local/bin/automation-service"]
+    environment:
+      <<: *database
+      PINGORA_PANEL_DATABASE_URL: postgres://panel_automation@127.0.0.1:5432/pingora_panel
+      PINGORA_PANEL_DATABASE_PASSWORD_FILE: /run/secrets/automation-database-password
+      PINGORA_PANEL_TLS_DIR: /var/lib/pingora-panel/credentials/automation-service
+    secrets: [automation-database-password]
+    volumes:
+      - credentials-automation-service:/var/lib/pingora-panel/credentials/automation-service:ro
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/automation-service", "healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    depends_on: *after-bootstrap
+
+  observability-service:
+    <<: *panel
+    command: ["/usr/local/bin/observability-service"]
+    environment:
+      <<: *database
+      PINGORA_PANEL_DATABASE_URL: postgres://panel_observability@127.0.0.1:5432/pingora_panel
+      PINGORA_PANEL_DATABASE_PASSWORD_FILE: /run/secrets/observability-database-password
+      PINGORA_PANEL_TLS_DIR: /var/lib/pingora-panel/credentials/observability-service
+    secrets: [observability-database-password]
+    volumes:
+      - credentials-observability-service:/var/lib/pingora-panel/credentials/observability-service:ro
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/observability-service", "healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    depends_on: *after-bootstrap
+
+  panel-api:
+    <<: *panel
+    command: ["/usr/local/bin/panel-api"]
+    environment:
+      <<: *database
+      PINGORA_PANEL_DATABASE_URL: postgres://panel_identity@127.0.0.1:5432/pingora_panel
+      PINGORA_PANEL_DATABASE_PASSWORD_FILE: /run/secrets/identity-database-password
+      PINGORA_PANEL_TLS_DIR: /var/lib/pingora-panel/credentials/panel-api
+      PINGORA_PANEL_HTTP_ADDR: 127.0.0.1:8080
+      PINGORA_PANEL_CONFIG_URL: https://127.0.0.1:50061
+      PINGORA_PANEL_WEB_ROOT: /usr/share/pingora-panel/web
+    secrets: [identity-database-password]
+    volumes:
+      - credentials-panel-api:/var/lib/pingora-panel/credentials/panel-api:ro
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/panel-api", "healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    depends_on: *after-bootstrap
+
+secrets:
+  postgres-admin-password:
+    file: ./secrets/postgres-admin-password
+  identity-database-password:
+    file: ./secrets/identity-database-password
+  config-database-password:
+    file: ./secrets/config-database-password
+  automation-database-password:
+    file: ./secrets/automation-database-password
+  observability-database-password:
+    file: ./secrets/observability-database-password
+
+volumes:
+  postgres-data:
+  nats-data:
+  gateway-state:
+  pki-authority:
+  credentials-panel-api:
+  credentials-config-service:
+  credentials-automation-service:
+  credentials-observability-service:
+  credentials-gatewayd:
