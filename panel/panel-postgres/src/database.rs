@@ -44,11 +44,18 @@ impl SchemaMigration {
 }
 
 /// Tables every service schema carries, such as the outbox and inbox.
-const PLATFORM_MIGRATIONS: &[SchemaMigration] = &[SchemaMigration::new(
-    1,
-    "transactional outbox",
-    include_str!("../migrations/0001_outbox.sql"),
-)];
+const PLATFORM_MIGRATIONS: &[SchemaMigration] = &[
+    SchemaMigration::new(
+        1,
+        "transactional outbox",
+        include_str!("../migrations/0001_outbox.sql"),
+    ),
+    SchemaMigration::new(
+        2,
+        "processed events",
+        include_str!("../migrations/0002_processed_events.sql"),
+    ),
+];
 
 /// Connection settings for one service role.
 #[derive(Clone, Debug)]
