@@ -23,6 +23,13 @@ pub mod pingora {
 
 pub use pingora::panel::{common, gateway};
 
+/// The CloudEvents Protobuf format, generated from the vendored official schema.
+pub mod cloudevents {
+    pub mod v1 {
+        tonic::include_proto!("io.cloudevents.v1");
+    }
+}
+
 pub const PROTOCOL_NAME: &str = "pingora.panel";
 pub const PROTOCOL_VERSION: &str = "v1";
 

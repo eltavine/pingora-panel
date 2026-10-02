@@ -1462,6 +1462,7 @@ version = "0.1.0"
 dependencies = [
  "panel-errors",
  "prost",
+ "prost-types",
  "protoc-bin-vendored",
  "tonic",
  "tonic-prost",
@@ -1496,6 +1497,22 @@ name = "panel-errors"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "panel-event-codec"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "chrono",
+ "mediatype",
+ "panel-contracts",
+ "panel-errors",
+ "panel-events",
+ "percent-encoding",
+ "prost",
+ "prost-types",
  "serde_json",
 ]
 

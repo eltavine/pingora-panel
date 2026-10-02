@@ -121,6 +121,14 @@
       "catalog": true,
       "allowed_workspace_dependencies": []
     },
+    "panel-event-codec": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-contracts",
+        "panel-errors",
+        "panel-events"
+      ]
+    },
     "panel-events": {
       "catalog": true,
       "allowed_workspace_dependencies": [
@@ -167,8 +175,8 @@
     ],
     "pingora_dependency_owner": "gateway-pingora",
     "engine_transport_storage_neutral_members": [
-      "panel-application",
       "panel-config-domain",
+      "panel-application",
       "panel-context",
       "panel-domain",
       "panel-engine",

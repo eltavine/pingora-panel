@@ -6,6 +6,7 @@ members = [
     "panel-contracts",
     "panel-errors",
     "panel-events",
+    "panel-event-codec",
     "panel-domain",
     "panel-config-domain",
     "panel-config-state-codec",
@@ -34,6 +35,7 @@ publish = false
 arc-swap = "=1.9.2"
 axum = "=0.8.9"
 async-trait = "=0.1.92"
+base64 = "=0.22.1"
 chrono = { version = "=0.4.45", default-features = false, features = ["clock", "std"] }
 futures-util = "=0.3.34"
 gateway-grpc = { version = "=0.1.0", path = "gateway-grpc" }
@@ -42,7 +44,9 @@ gateway-proto-codec = { version = "=0.1.0", path = "gateway-proto-codec" }
 gateway-pingora = { version = "=0.1.0", path = "gateway-pingora" }
 iri-string = "=0.7.14"
 mediatype = "=0.23.0"
+percent-encoding = "=2.3.2"
 prost = "=0.14.4"
+prost-types = "=0.14.4"
 panel-context = { version = "=0.1.0", path = "panel-context" }
 panel-contracts = { version = "=0.1.0", path = "panel-contracts" }
 panel-config-domain = { version = "=0.1.0", path = "panel-config-domain" }
@@ -54,6 +58,7 @@ panel-persistence-memory = { version = "=0.1.0", path = "panel-persistence-memor
 panel-domain = { version = "=0.1.0", path = "panel-domain" }
 panel-engine = { version = "=0.2.0", path = "panel-engine" }
 panel-errors = { version = "=0.1.0", path = "panel-errors" }
+panel-event-codec = { version = "=0.1.0", path = "panel-event-codec" }
 panel-events = { version = "=0.1.0", path = "panel-events" }
 panel-gateway-runtime = { version = "=0.2.0", path = "panel-gateway-runtime" }
 panel-ir = { version = "=0.1.0", path = "panel-ir" }

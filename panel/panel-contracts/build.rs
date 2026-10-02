@@ -9,9 +9,13 @@ fn main() {
     tonic_prost_build::configure()
         .build_client(true)
         .build_server(true)
+        // Ordered attributes keep encoded CloudEvents byte-stable for storage
+        // fixtures and content hashes.
+        .btree_map(".io.cloudevents.v1.CloudEvent.attributes")
         .compile_protos(
             &[
                 "../proto/common/v1/common.proto",
+                "../proto/io/cloudevents/v1/cloudevents.proto",
                 "../proto/gateway/v1/gateway.proto",
             ],
             &["../proto"],
