@@ -19,13 +19,23 @@ gateway-pingora -> panel-engine::DataPlaneAdapter
 gateway-proto-codec -> panel-contracts + panel-domain + panel-ir
 panel-event-codec -> panel-contracts + panel-events
 panel-health (no workspace dependencies)
+panel-platform -> panel-context + panel-errors
+panel-platform-codec -> panel-contracts + panel-platform
+panel-service -> panel-health + panel-platform-codec + panel-contracts
 panel-outbox -> panel-events + panel-errors
 panel-postgres -> panel-outbox + panel-event-codec + panel-events + panel-health + panel-errors
 panel-jetstream -> panel-event-codec + panel-events + panel-health + panel-errors
 gateway-grpc -> gateway-proto-codec + panel-engine::GatewayEngine
 gateway-grpc-client -> panel-application + gateway-proto-codec + panel-contracts + panel-health
+config-proto-codec -> panel-application + gateway-proto-codec + panel-contracts
+config-grpc-client -> panel-application + config-proto-codec + panel-service
+panel-control-runtime -> panel-postgres + panel-jetstream + panel-outbox + panel-service
 
 gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC/Proto adapters + REST/compiler adapters
+config-service -> panel-control-runtime + gateway-grpc-client + panel-config-json + config-proto-codec
+panel-api-server -> panel-control-runtime + panel-api + config-grpc-client
+automation-service, observability-service -> panel-control-runtime
+panel-bootstrap -> panel-postgres + panel-jetstream
 ```
 
 箭头表示左侧 crate 依赖右侧 crate。
@@ -38,6 +48,10 @@ gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC/Proto adapters
 | `panel-events` | CloudEvents-aligned event model, publisher/handler ports and idempotent consumption | Event formats, brokers, storage, Pingora |
 | `panel-event-codec` | CloudEvents Protobuf, JSON and binary-mode representations | Brokers, storage, application rules, Pingora |
 | `panel-health` | Health checks, impact-based readiness aggregation, service mode and `application/health+json` documents | Transports, drivers, Pingora |
+| `panel-platform` | Service descriptors, protocol revision ranges and negotiation, capability directory and registration ports | Transports, registries, Pingora |
+| `panel-platform-codec` | Protobuf form of service descriptors | Registries, transports, Pingora |
+| `panel-service` | Liveness/readiness endpoints, gRPC health and `ServiceInfo`, peer negotiation, trace metadata, settings, signals and logging shared by service processes | Storage, brokers, application rules, Pingora |
+| `panel-control-runtime` | Composition of control-plane processes: lazy dependencies, migrations, registration, outbox relay leadership, health and graceful shutdown | Application rules, Pingora |
 | `panel-outbox` | Ordered at-least-once outbox relay over `OutboxSource`, `OutboxWakeup` and `EventPublisher` ports | Storage, brokers, Pingora |
 | `panel-postgres` | Service schema ownership, SCRAM role bootstrap, per-schema migrations, the transactional outbox, the idempotent-consumer inbox and the database health check | Application rules, transports, Pingora |
 | `panel-jetstream` | Stream provisioning, deduplicated CloudEvents publication, durable consumers, dead letters, targeted replay and the broker health check | Storage, application rules, Pingora |
@@ -51,17 +65,61 @@ gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC/Proto adapters
 | `gateway-pingora` | Compile IR into private Pingora values and atomic `ArcSwap` publication | Proto, filesystem, control-plane policy |
 | `gateway-proto-codec` | Shared Proto/IR conversion used by client and server | Engine, server, client, Pingora, filesystem |
 | `gateway-grpc` | Runtime-info projection, request policy and Tonic service | Pingora, filesystem, environment |
+| `config-proto-codec` | Protobuf form of the configuration publication contract | Storage, transports, Pingora |
+| `config-grpc-client` | `GatewayUseCases` over `config-service`'s publication API | Storage, Pingora |
 | `gateway-grpc-client` | Tonic client adapter implementing `panel-application::GatewayPort`, and the gateway health check | HTTP, storage, identity, generated Proto outside this adapter |
+| `config-service` | Publication API, PostgreSQL activation receipts and the `config` schema | HTTP, Pingora |
+| `panel-api-server` | The `panel-api` process: public REST and web console, degraded admission and the service directory | Storage implementation, Pingora |
+| `automation-service`, `observability-service` | Service processes owning the `automation` and `observability` schemas | Pingora |
+| `panel-bootstrap` | Idempotent provisioning of service roles, schemas, streams and the service registry | Application rules, Pingora |
 | `gatewayd` | Dependency construction, REST/gRPC adapter composition, bind/readiness policies, environment configuration, process clock, worker executor and standard gRPC Health | Business rules |
 
 `.github/scripts/check-panel-boundaries.sh` enforces these direct dependency rules in CI.
 `gatewayd::build_gateway_transport` is the single composition factory used by both the production process and TCP black-box tests, preventing test-only dependency graphs from drifting away from production.
 
-The current process entry point starts only the loopback gRPC management
-transport. The Axum REST router has a shared library composition factory but
-is not bound by that process; no Pingora traffic listener exists yet. See the
+`gatewayd` starts the loopback gRPC management transport; no Pingora traffic
+listener exists yet. See the
 [gateway foundation runbook](../docs/gateway-foundation-runbook.md) for startup,
 readiness, recovery and current limits.
+
+## Service processes
+
+`panel-api`, `config-service`, `automation-service` and `observability-service`
+are composed by `panel-control-runtime`
+([decision](../docs/adr/0007-service-processes-health-and-discovery.md)). Each
+binds an operational listener with `/livez` and `/readyz`
+(`application/health+json`) and a gRPC listener with `grpc.health.v1.Health`
+and `pingora.panel.platform.v1.ServiceInfo`, then migrates its schema, registers
+in the service directory and relays its outbox in the background. Run a binary
+with `healthcheck` to probe its own readiness, as container health checks do.
+
+| Process | Schema | Operational | gRPC | Other |
+|---|---|---|---|---|
+| `panel-api` | `identity` | `127.0.0.1:9180` | `127.0.0.1:50060` | public HTTP `127.0.0.1:8080` |
+| `config-service` | `config` | `127.0.0.1:9181` | `127.0.0.1:50061` | calls `gatewayd` at `127.0.0.1:50051` |
+| `automation-service` | `automation` | `127.0.0.1:9182` | `127.0.0.1:50062` | |
+| `observability-service` | `observability` | `127.0.0.1:9183` | `127.0.0.1:50063` | |
+
+Every process reads `PINGORA_PANEL_DATABASE_URL` (its role, without password),
+`PINGORA_PANEL_DATABASE_PASSWORD` or `PINGORA_PANEL_DATABASE_PASSWORD_FILE`,
+`PINGORA_PANEL_NATS_URL`, and optionally `PINGORA_PANEL_OPS_ADDR`,
+`PINGORA_PANEL_GRPC_ADDR` and `PINGORA_PANEL_HEALTH_INTERVAL_MS`.
+`config-service` also reads `PINGORA_PANEL_GATEWAY_URL`; `panel-api` reads
+`PINGORA_PANEL_HTTP_ADDR`, `PINGORA_PANEL_CONFIG_URL` and
+`PINGORA_PANEL_WEB_ROOT`, the directory of the built console. Plaintext
+listeners must stay on loopback until internal transports are authenticated.
+
+`panel-bootstrap` runs once per installation and on every upgrade or password
+rotation. It connects with `PINGORA_PANEL_ADMIN_DATABASE_URL` (the database
+owner) and creates the `panel_<schema>` roles with the passwords in
+`PINGORA_PANEL_<SCHEMA>_DATABASE_PASSWORD` (or `_FILE`), then provisions the
+event streams and the service registry.
+
+A service whose degrading dependency is down keeps serving reads and refuses
+changes with `503 Service Unavailable`, `Retry-After` and a retryable
+`UNAVAILABLE` problem; a failing required dependency makes it unavailable.
+`GET /api/v1/platform/services` lists live instances with their versions,
+protocol revisions and capabilities.
 
 ## Activation invariant
 
@@ -168,11 +226,15 @@ panel/scripts/dev-services.sh down
 
 ## Web console
 
-`panel/web` is the Vue console served by the management API. It is generated from the
-official `create-vue` and shadcn-vue tooling, renders feature modules that register their
-own routes and navigation, and calls the API through a client generated from the reviewed
+`panel/web` is the Vue console served by `panel-api`. It is generated from the official
+`create-vue` and shadcn-vue tooling, renders feature modules that register their own
+routes and navigation, and calls the API through a client generated from the reviewed
 OpenAPI fixture. See [`web/README.md`](web/README.md) and
 [the console decision](../docs/adr/0005-web-console-stack.md).
+
+`panel-api` sends the security headers in
+[`web/security-headers.json`](web/security-headers.json). The preview server used by
+end-to-end tests sends the same headers, and the tests fail on any policy violation.
 
 ## Extension rules
 
