@@ -121,8 +121,7 @@ impl GatewayGrpcClient {
             .connect_timeout(config.connect_timeout)
             .timeout(config.request_timeout);
         let channel = endpoint.connect().await.map_err(|error| {
-            PanelError::storage_unavailable(format!("gateway connect failed: {error}"))
-                .with_source(error)
+            PanelError::unavailable(format!("gateway connect failed: {error}")).with_source(error)
         })?;
         Ok(Self {
             channel,
@@ -324,7 +323,7 @@ fn status_error(status: Status) -> PanelError {
         Code::ResourceExhausted => PanelError::resource_exhausted(message),
         Code::FailedPrecondition => PanelError::precondition_failed(message),
         Code::Unimplemented => PanelError::unsupported_capability(message),
-        Code::Unavailable => PanelError::storage_unavailable(message),
+        Code::Unavailable => PanelError::unavailable(message),
         Code::DataLoss => PanelError::corrupt_state(message),
         Code::Cancelled | Code::Internal | Code::Unknown | Code::Ok => {
             PanelError::internal(message)

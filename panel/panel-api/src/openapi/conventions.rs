@@ -71,17 +71,20 @@ impl Modify for HttpConventions {
                             .ok()
                             .and_then(|value| value.canonical_reason())
                             .unwrap_or("Request failed");
-                        operation.responses.responses.insert(
-                            status.to_string(),
-                            ResponseBuilder::new()
-                                .description(description)
-                                .content(
-                                    PROBLEM_MEDIA_TYPE,
-                                    Content::new(Some(Ref::from_schema_name("ProblemDetails"))),
-                                )
-                                .build()
-                                .into(),
+                        let mut response = ResponseBuilder::new().description(description).content(
+                            PROBLEM_MEDIA_TYPE,
+                            Content::new(Some(Ref::from_schema_name("ProblemDetails"))),
                         );
+                        if status == 503 {
+                            response = response.header(
+                                "Retry-After",
+                                Header::new(ObjectBuilder::new().schema_type(Type::Integer)),
+                            );
+                        }
+                        operation
+                            .responses
+                            .responses
+                            .insert(status.to_string(), response.build().into());
                     }
                 }
                 for response in operation.responses.responses.values_mut() {

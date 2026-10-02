@@ -9,10 +9,12 @@ use axum::{
     Extension, Json,
 };
 use panel_errors::PanelError;
+use std::time::Duration;
 
 pub(crate) struct ApiError {
     source: Box<PanelError>,
     status_override: Option<StatusCode>,
+    retry_after: Option<Duration>,
 }
 
 impl ApiError {
@@ -20,7 +22,14 @@ impl ApiError {
         Self {
             source: Box::new(source),
             status_override: None,
+            retry_after: None,
         }
+    }
+
+    /// Advertises when the request may succeed (RFC 9110 `Retry-After`).
+    pub(crate) fn with_retry_after(mut self, delay: Duration) -> Self {
+        self.retry_after = Some(delay);
+        self
     }
 
     pub(crate) fn from_json(error: JsonRejection) -> Self {
@@ -69,7 +78,14 @@ impl IntoResponse for ApiError {
         };
         // The router middleware supplies request identity and serializes once.
         // Typed response extensions avoid parsing or buffering response bodies.
-        (status, Extension(PendingProblem(body))).into_response()
+        let mut response = (status, Extension(PendingProblem(body))).into_response();
+        if let Some(delay) = self.retry_after {
+            let seconds = delay.as_secs().max(1);
+            response
+                .headers_mut()
+                .insert(header::RETRY_AFTER, seconds.into());
+        }
+        response
     }
 }
 

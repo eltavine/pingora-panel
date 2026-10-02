@@ -159,7 +159,7 @@ async fn application_failures_and_body_limits_keep_request_identity() {
             "POST",
             "/api/v1/gateway/prepare",
             r#"{"schema_version":"v1","snapshot":{}}"#,
-            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::SERVICE_UNAVAILABLE,
         ),
         (
             "POST",

@@ -66,7 +66,8 @@
       "catalog": true,
       "allowed_workspace_dependencies": [
         "panel-application",
-        "panel-errors"
+        "panel-errors",
+        "panel-health"
       ]
     },
     "panel-application": {

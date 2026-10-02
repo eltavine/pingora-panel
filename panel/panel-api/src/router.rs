@@ -1,6 +1,10 @@
-use crate::{middleware, routes, ApiConfig, ApiState};
+use crate::{
+    admission::{admit, Admission},
+    middleware, routes, ApiConfig, ApiState,
+};
 use axum::{
     extract::DefaultBodyLimit,
+    middleware::from_fn,
     routing::{get, post},
     Router,
 };
@@ -15,6 +19,10 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
     state: ApiState<U>,
     config: ApiConfig,
 ) -> Router {
+    let admission = state.health.clone().map(|health| Admission {
+        health,
+        retry_after: config.unavailable_retry_after(),
+    });
     let router = Router::new()
         .route("/api/v1/gateway/validate", post(routes::validate::<U>))
         .route("/api/v1/gateway/prepare", post(routes::prepare::<U>))
@@ -25,5 +33,11 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         .route("/api/v1/openapi.json", get(routes::openapi))
         .layer(DefaultBodyLimit::max(config.max_body_bytes()))
         .with_state(state);
+    let router = match admission {
+        Some(admission) => router.layer(from_fn(move |request, next| {
+            admit(admission.clone(), request, next)
+        })),
+        None => router,
+    };
     middleware::apply(router)
 }

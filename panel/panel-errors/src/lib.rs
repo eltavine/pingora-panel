@@ -21,6 +21,9 @@ impl ErrorCode {
     pub const ACTIVATE_FAILED: &'static str = "ACTIVATE_FAILED";
     pub const COMMIT_OUTCOME_UNKNOWN: &'static str = "COMMIT_OUTCOME_UNKNOWN";
     pub const STORAGE_UNAVAILABLE: &'static str = "STORAGE_UNAVAILABLE";
+    /// The service cannot accept the request now, for example while a
+    /// dependency it needs is down; the same request can succeed later.
+    pub const UNAVAILABLE: &'static str = "UNAVAILABLE";
     pub const CORRUPT_STATE: &'static str = "CORRUPT_STATE";
     pub const RESOURCE_EXHAUSTED: &'static str = "RESOURCE_EXHAUSTED";
     pub const DEADLINE_EXCEEDED: &'static str = "DEADLINE_EXCEEDED";
@@ -243,6 +246,10 @@ impl PanelError {
 
     pub fn storage_unavailable(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::STORAGE_UNAVAILABLE, message).retryable(true)
+    }
+
+    pub fn unavailable(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::UNAVAILABLE, message).retryable(true)
     }
 
     pub fn corrupt_state(message: impl Into<String>) -> Self {

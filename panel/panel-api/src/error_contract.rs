@@ -21,6 +21,11 @@ pub(crate) const ERROR_STATUSES: &[(&str, StatusCode)] = &[
     (ErrorCode::DEADLINE_EXCEEDED, StatusCode::REQUEST_TIMEOUT),
     (ErrorCode::UNAUTHENTICATED, StatusCode::UNAUTHORIZED),
     (ErrorCode::PERMISSION_DENIED, StatusCode::FORBIDDEN),
+    (ErrorCode::UNAVAILABLE, StatusCode::SERVICE_UNAVAILABLE),
+    (
+        ErrorCode::STORAGE_UNAVAILABLE,
+        StatusCode::SERVICE_UNAVAILABLE,
+    ),
 ];
 
 pub(crate) fn status_for(code: &str) -> StatusCode {
@@ -40,6 +45,9 @@ pub(crate) fn public_detail(code: &str, status: StatusCode, message: String) -> 
                 .into()
         }
         ErrorCode::STORAGE_UNAVAILABLE => "A required storage service is unavailable.".into(),
+        ErrorCode::UNAVAILABLE => {
+            "The service is temporarily unable to accept this request; retry later.".into()
+        }
         _ => "The request could not be completed.".into(),
     }
 }

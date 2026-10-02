@@ -1714,6 +1714,7 @@ dependencies = [
  "panel-application",
  "panel-domain",
  "panel-errors",
+ "panel-health",
  "panel-ir",
  "serde",
  "serde_json",

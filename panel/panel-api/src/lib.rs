@@ -6,6 +6,7 @@
 //! separate modules. Concrete compilers, persistence, identity and gateway
 //! transports are injected through application-owned ports.
 
+mod admission;
 mod config;
 mod contract;
 mod error;

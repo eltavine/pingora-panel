@@ -15,6 +15,7 @@ use panel_ir::RuntimeSnapshot;
 use std::sync::Arc;
 use tower::ServiceExt;
 
+mod admission;
 mod request_identity;
 
 struct IdentityCompiler;
