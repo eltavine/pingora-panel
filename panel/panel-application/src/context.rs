@@ -1,7 +1,9 @@
 use panel_errors::Result;
 use serde::{Deserialize, Serialize};
 
-pub use panel_context::{Actor, IdempotencyKey, RequestDeadline, RequestId};
+pub use panel_context::{
+    Actor, IdempotencyKey, RequestDeadline, RequestId, RequestScope, TraceContext,
+};
 
 /// Authenticated command metadata shared by every mutating surface.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -11,6 +13,8 @@ pub struct CommandContext {
     actor: Actor,
     deadline: RequestDeadline,
     idempotency_key: IdempotencyKey,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    trace_context: Option<TraceContext>,
 }
 
 impl CommandContext {
@@ -27,7 +31,14 @@ impl CommandContext {
             actor: Actor::new(actor)?,
             deadline,
             idempotency_key,
+            trace_context: None,
         })
+    }
+
+    /// Attaches the caller's W3C trace context.
+    pub fn with_trace_context(mut self, trace_context: Option<TraceContext>) -> Self {
+        self.trace_context = trace_context;
+        self
     }
 
     pub fn request_id(&self) -> &RequestId {
@@ -48,6 +59,17 @@ impl CommandContext {
 
     pub fn idempotency_key(&self) -> &IdempotencyKey {
         &self.idempotency_key
+    }
+
+    pub fn trace_context(&self) -> Option<&TraceContext> {
+        self.trace_context.as_ref()
+    }
+
+    /// The request identity shared with queries and emitted events.
+    pub fn scope(&self) -> RequestScope {
+        RequestScope::new(self.request_id.clone())
+            .with_correlation_id(self.correlation_id.clone())
+            .with_trace_context(self.trace_context.clone())
     }
 }
 

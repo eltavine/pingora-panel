@@ -3,7 +3,7 @@
 use crate::{
     AbortOutcome, ActivatedDeployment, CommandContext, ConfigDocument, DeploymentOutcome,
     GatewayStatus, GatewayUseCases, IdempotencyClaim, IdempotencyKey, IdempotencyLookup,
-    IdempotencyRecord, IdempotencyRepository, PreparedDeployment,
+    IdempotencyRecord, IdempotencyRepository, PreparedDeployment, RequestScope,
 };
 use async_trait::async_trait;
 use panel_domain::ContentHash;
@@ -132,5 +132,17 @@ impl GatewayUseCases for IdempotentGatewayUseCases {
 
     async fn abort(&self, context: CommandContext, prepare_token: String) -> Result<AbortOutcome> {
         self.inner.abort(context, prepare_token).await
+    }
+
+    async fn validate_with_scope(
+        &self,
+        scope: RequestScope,
+        document: ConfigDocument,
+    ) -> Result<ValidationReport> {
+        self.inner.validate_with_scope(scope, document).await
+    }
+
+    async fn status_with_scope(&self, scope: RequestScope) -> Result<GatewayStatus> {
+        self.inner.status_with_scope(scope).await
     }
 }

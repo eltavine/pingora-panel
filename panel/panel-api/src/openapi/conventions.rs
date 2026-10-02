@@ -1,6 +1,6 @@
 use crate::{
     error_contract::{ERROR_STATUSES, PROBLEM_MEDIA_TYPE},
-    request_context::REQUEST_ID_HEADER,
+    request_context::{REQUEST_ID_HEADER, TRACEPARENT_HEADER, TRACESTATE_HEADER},
 };
 use utoipa::{
     openapi::{
@@ -25,6 +25,27 @@ impl Modify for HttpConventions {
                 .description(Some("Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID."))
                 .schema(Some(ObjectBuilder::new().schema_type(Type::String).min_length(Some(1)).max_length(Some(256))))
                 .build());
+            item.parameters.get_or_insert_default().push(ParameterBuilder::new()
+                .name(TRACEPARENT_HEADER).parameter_in(ParameterIn::Header)
+                .required(Required::False)
+                .description(Some("W3C Trace Context parent of the caller's trace. Invalid values are ignored."))
+                .schema(Some(ObjectBuilder::new().schema_type(Type::String).min_length(Some(55)).max_length(Some(512))))
+                .build());
+            item.parameters.get_or_insert_default().push(
+                ParameterBuilder::new()
+                    .name(TRACESTATE_HEADER)
+                    .parameter_in(ParameterIn::Header)
+                    .required(Required::False)
+                    .description(Some(
+                        "W3C Trace Context vendor state, propagated with a valid traceparent.",
+                    ))
+                    .schema(Some(
+                        ObjectBuilder::new()
+                            .schema_type(Type::String)
+                            .max_length(Some(512)),
+                    ))
+                    .build(),
+            );
             for operation in [
                 &mut item.get,
                 &mut item.post,

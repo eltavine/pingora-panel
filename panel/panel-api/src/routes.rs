@@ -1,8 +1,9 @@
 use crate::{
-    error::ApiError, request_context::command_context, AbortRequest, AbortResponse,
-    ActivateRequest, ActivatedResponse, ApiDoc, ApiState, GatewayStatusResponse,
-    IdempotencyReceiptPendingResponse, IdempotencyReceiptResponse, PreparedResponse,
-    SnapshotEnvelope, ValidationResponse,
+    error::ApiError,
+    request_context::{command_context, request_scope},
+    AbortRequest, AbortResponse, ActivateRequest, ActivatedResponse, ApiDoc, ApiState,
+    GatewayStatusResponse, IdempotencyReceiptPendingResponse, IdempotencyReceiptResponse,
+    PreparedResponse, SnapshotEnvelope, ValidationResponse,
 };
 use axum::{
     extract::{rejection::JsonRejection, Json, Path, State},
@@ -18,19 +19,22 @@ use utoipa::OpenApi;
 #[utoipa::path(
     get,
     path = "/api/v1/gateway/status",
+    params(crate::request_context::QueryHeaders),
     responses(
         (status = 200, body = GatewayStatusResponse)
     )
 )]
 pub(crate) async fn status<U>(
     State(state): State<ApiState<U>>,
+    headers: HeaderMap,
 ) -> Result<Json<GatewayStatusResponse>, ApiError>
 where
     U: GatewayUseCases,
 {
+    let scope = request_scope(&headers)?;
     state
         .use_cases
-        .status()
+        .status_with_scope(scope)
         .await
         .map(GatewayStatusResponse::from)
         .map(Json)
@@ -91,22 +95,25 @@ fn project_receipt(lookup: IdempotencyLookup) -> Result<Response, ApiError> {
     post,
     path = "/api/v1/gateway/validate",
     request_body = SnapshotEnvelope,
+    params(crate::request_context::QueryHeaders),
     responses(
         (status = 200, body = ValidationResponse)
     )
 )]
 pub(crate) async fn validate<U>(
     State(state): State<ApiState<U>>,
+    headers: HeaderMap,
     payload: Result<Json<SnapshotEnvelope>, JsonRejection>,
 ) -> Result<Json<ValidationResponse>, ApiError>
 where
     U: GatewayUseCases,
 {
+    let scope = request_scope(&headers)?;
     let Json(payload) = payload.map_err(ApiError::from_json)?;
     let document = ConfigDocument::try_from(payload)?;
     state
         .use_cases
-        .validate(document)
+        .validate_with_scope(scope, document)
         .await
         .map(ValidationResponse::from)
         .map(Json)

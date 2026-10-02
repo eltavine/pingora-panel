@@ -4,7 +4,7 @@ use panel_api::{router_with_config, ApiConfig, ApiState};
 use panel_application::{
     AbortOutcome, ActivatedDeployment, CommandContext, ConfigCompiler, GatewayPort, GatewayService,
     GatewayStatus as ApplicationGatewayStatus, GatewayUseCases, IdempotencyKey, IdempotencyLookup,
-    IdempotencyRepository, IdempotentGatewayUseCases, PreparedDeployment,
+    IdempotencyRepository, IdempotentGatewayUseCases, PreparedDeployment, RequestScope,
 };
 use panel_domain::ContentHash;
 use panel_engine::{ActivateRequest, GatewayEngine, PrepareRequest, PrepareToken};
@@ -191,6 +191,18 @@ impl GatewayUseCases for CancellationSafeActivation {
 
     async fn activation_receipt(&self, key: &IdempotencyKey) -> Result<IdempotencyLookup> {
         self.inner.activation_receipt(key).await
+    }
+
+    async fn validate_with_scope(
+        &self,
+        scope: RequestScope,
+        document: panel_application::ConfigDocument,
+    ) -> Result<ValidationReport> {
+        self.inner.validate_with_scope(scope, document).await
+    }
+
+    async fn status_with_scope(&self, scope: RequestScope) -> Result<ApplicationGatewayStatus> {
+        self.inner.status_with_scope(scope).await
     }
 }
 

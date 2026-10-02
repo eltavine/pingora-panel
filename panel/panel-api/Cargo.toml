@@ -14,8 +14,9 @@ panel-errors.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tower-http.workspace = true
-utoipa.workspace = true
 tower.workspace = true
+tracing.workspace = true
+utoipa.workspace = true
 
 [dev-dependencies]
 async-trait.workspace = true

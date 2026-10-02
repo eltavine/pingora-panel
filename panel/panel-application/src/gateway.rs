@@ -1,4 +1,4 @@
-use crate::{CommandContext, IdempotencyKey, IdempotencyLookup};
+use crate::{CommandContext, IdempotencyKey, IdempotencyLookup, RequestScope};
 use async_trait::async_trait;
 use panel_domain::{ContentHash, RevisionId};
 use panel_errors::{PanelError, Result, ValidationReport};
@@ -279,6 +279,20 @@ pub trait GatewayPort: Send + Sync {
     ) -> Result<AbortOutcome> {
         self.abort(prepare_token).await
     }
+
+    /// Validates on behalf of the request in `scope`, so a remote gateway
+    /// can attribute the call to it.
+    async fn validate_with_scope(
+        &self,
+        _scope: RequestScope,
+        snapshot: RuntimeSnapshot,
+    ) -> Result<ValidationReport> {
+        self.validate(snapshot).await
+    }
+
+    async fn status_with_scope(&self, _scope: RequestScope) -> Result<GatewayStatus> {
+        self.status().await
+    }
 }
 
 /// Stable use-case facade consumed by HTTP, CLI and worker adapters.
@@ -321,6 +335,20 @@ pub trait GatewayUseCases: Send + Sync {
         Err(PanelError::unsupported_capability(
             "activation receipt queries are not configured",
         ))
+    }
+
+    /// Query variants that carry the caller's request identity. Decorators
+    /// must forward them so the identity reaches the gateway.
+    async fn validate_with_scope(
+        &self,
+        _scope: RequestScope,
+        document: ConfigDocument,
+    ) -> Result<ValidationReport> {
+        self.validate(document).await
+    }
+
+    async fn status_with_scope(&self, _scope: RequestScope) -> Result<GatewayStatus> {
+        self.status().await
     }
 }
 
@@ -371,5 +399,18 @@ impl GatewayUseCases for GatewayService {
 
     async fn status(&self) -> Result<GatewayStatus> {
         self.gateway.status().await
+    }
+
+    async fn validate_with_scope(
+        &self,
+        scope: RequestScope,
+        document: ConfigDocument,
+    ) -> Result<ValidationReport> {
+        let snapshot = self.compiler.compile(document).await?;
+        self.gateway.validate_with_scope(scope, snapshot).await
+    }
+
+    async fn status_with_scope(&self, scope: RequestScope) -> Result<GatewayStatus> {
+        self.gateway.status_with_scope(scope).await
     }
 }
