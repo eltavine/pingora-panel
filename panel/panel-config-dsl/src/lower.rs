@@ -1031,6 +1031,8 @@ impl<'a> Lowerer<'a> {
             reuse_port: false,
             ipv6_only: None,
             default_site_id: None,
+            real_ip_header: Default::default(),
+            trusted_proxies: Default::default(),
         };
         let mut default_server = None;
         let Some(block) = directive.block() else {
@@ -1580,6 +1582,7 @@ impl<'a> Lowerer<'a> {
                 deleted_at: None,
                 created_at: now,
                 updated_at: now,
+                security_policy_id: Default::default(),
             },
             action: None,
             routes: Vec::new(),
@@ -1824,6 +1827,7 @@ impl<'a> Lowerer<'a> {
                     host: None,
                 },
                 action: placeholder_action(),
+                security_policy_id: Default::default(),
             },
             priority_set: false,
             action: None,

@@ -59,6 +59,7 @@ pub struct SecurityPolicy {
 }
 
 /// Which pages may link to the site's resources (hotlink protection).
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RefererRule {
@@ -70,6 +71,7 @@ pub struct RefererRule {
 }
 
 /// Basic authentication (RFC 7617) against an htpasswd file.
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BasicAuth {
@@ -79,6 +81,7 @@ pub struct BasicAuth {
 }
 
 /// What a rate limit counts requests by.
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 #[non_exhaustive]
@@ -94,6 +97,7 @@ pub enum RateLimitKey {
 
 /// A token bucket: `requests` per `per_seconds`, refilled continuously,
 /// holding at most `burst` more.
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RateLimit {
@@ -105,6 +109,7 @@ pub struct RateLimit {
 }
 
 /// The answer to requests over a limit.
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LimitedResponse {
@@ -116,6 +121,7 @@ pub struct LimitedResponse {
 }
 
 /// Where trusted proxies put the address of the client they forward.
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]

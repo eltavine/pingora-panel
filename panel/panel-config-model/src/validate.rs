@@ -32,6 +32,7 @@ impl Report {
 pub fn validate(model: &ConfigModel) -> Vec<Diagnostic> {
     let mut report = Report(Vec::new());
     let tls_profiles = validate_tls_profiles(model, &mut report);
+    let policies = validate_security_policies(model, &mut report);
     let upstreams = validate_upstreams(model, &mut report);
     let live_sites: BTreeSet<Uuid> = model
         .sites
@@ -110,6 +111,16 @@ pub fn validate(model: &ConfigModel) -> Vec<Diagnostic> {
         {
             report.error(&resource, format!("TLS profile {profile} does not exist"));
         }
+        if let Some(policy) = site
+            .security_policy_id
+            .as_deref()
+            .filter(|policy| !policies.contains(policy))
+        {
+            report.error(
+                &resource,
+                format!("security policy {policy} does not exist"),
+            );
+        }
         validate_domains(site, &resource, &tls_profiles, &mut hosts, &mut report);
         if site.hsts.is_some_and(|hsts| {
             hsts.preload && (!hsts.include_subdomains || hsts.max_age_seconds < PRELOAD_MAX_AGE)
@@ -128,6 +139,16 @@ pub fn validate(model: &ConfigModel) -> Vec<Diagnostic> {
                 );
             }
             validate_route(site, route, &resource, &upstreams, &mut report);
+            if let Some(policy) = route
+                .security_policy_id
+                .as_deref()
+                .filter(|policy| !policies.contains(policy))
+            {
+                report.error(
+                    format!("{resource}/routes/{}", route.id),
+                    format!("security policy {policy} does not exist"),
+                );
+            }
         }
     }
     report.0
@@ -176,6 +197,29 @@ fn validate_tls_profiles<'a>(model: &'a ConfigModel, report: &mut Report) -> BTr
             report.error(&resource, "minimum protocol must be TLSv1.2 or TLSv1.3");
         }
         validate_tls_settings(profile, &resource, report);
+    }
+    ids
+}
+
+fn validate_security_policies<'a>(
+    model: &'a ConfigModel,
+    report: &mut Report,
+) -> BTreeSet<&'a str> {
+    let mut ids = BTreeSet::new();
+    for policy in &model.security_policies {
+        let resource = format!("security-policies/{}", policy.id);
+        if !is_token(&policy.id) || !ids.insert(policy.id.as_str()) {
+            report.error(
+                &resource,
+                format!(
+                    "security policy id {:?} is invalid or duplicated",
+                    policy.id
+                ),
+            );
+        }
+        for problem in policy.problems() {
+            report.error(&resource, problem);
+        }
     }
     ids
 }
@@ -284,6 +328,16 @@ fn validate_listeners<'a>(
             .filter(|site| !live_sites.contains(site))
         {
             report.error(&resource, format!("default site {site} does not exist"));
+        }
+        for proxy in listener
+            .trusted_proxies
+            .iter()
+            .filter(|proxy| !crate::security::is_cidr(proxy))
+        {
+            report.error(
+                &resource,
+                format!("trusted proxy {proxy:?} is not a CIDR network such as 10.0.0.0/8"),
+            );
         }
     }
     ids
@@ -585,6 +639,7 @@ mod tests {
             deleted_at: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            security_policy_id: Default::default(),
         }
     }
 
@@ -801,6 +856,8 @@ mod tests {
             reuse_port: false,
             ipv6_only: None,
             default_site_id: Some(Uuid::now_v7()),
+            real_ip_header: Default::default(),
+            trusted_proxies: Default::default(),
         });
         let found = messages(&model);
         for expected in [
@@ -879,6 +936,7 @@ mod tests {
                 index_files: vec!["index.html".into()],
                 spa_fallback: false,
             },
+            security_policy_id: Default::default(),
         });
         model.sites.push(shop);
         let found = messages(&model);

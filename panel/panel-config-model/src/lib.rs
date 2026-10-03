@@ -12,6 +12,7 @@ mod edit;
 mod model;
 mod query;
 mod revisions;
+mod security;
 mod validate;
 mod views;
 
@@ -26,10 +27,11 @@ pub use query::{
     SiteSort, SiteStatus, SiteSummary, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE,
 };
 pub use revisions::{Revision, RevisionDetail, RevisionList, RevisionOutcome};
+pub use security::{SecurityPolicy, MAX_BODY_TIMEOUT_SECONDS, MAX_RATE_PERIOD_SECONDS};
 pub use validate::validate;
 pub use views::{
     BatchAction, BatchRequest, DomainCheck, DomainOwner, DomainView, ListenerView, RouteView,
-    SiteList, SiteView, TlsProfileView, UpstreamView, ValidationResult,
+    SecurityPolicyView, SiteList, SiteView, TlsProfileView, UpstreamView, ValidationResult,
 };
 
 /// Identifies the document format in storage, exports and imports.

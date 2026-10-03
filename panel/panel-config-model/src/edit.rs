@@ -7,6 +7,7 @@ use crate::{
         Action, ConfigModel, Domain, Listener, Route, RouteMatch, Site, TlsProfile, Upstream,
         UpstreamNode,
     },
+    security::SecurityPolicy,
     validate::validate,
     MODEL_VERSION,
 };
@@ -53,6 +54,9 @@ pub struct SiteInput {
     /// Sent with HTTPS responses for the site's hosts.
     #[serde(default)]
     pub hsts: Option<StrictTransportSecurity>,
+    /// Restrictions every request to the site passes first.
+    #[serde(default)]
+    pub security_policy_id: Option<String>,
     #[serde(default)]
     pub group: Option<String>,
     #[serde(default)]
@@ -78,6 +82,9 @@ pub struct RouteInput {
     #[serde(rename = "match")]
     pub matcher: RouteMatch,
     pub action: Action,
+    /// Restrictions the route's requests pass after the site's.
+    #[serde(default)]
+    pub security_policy_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -190,6 +197,7 @@ fn routes_from(inputs: Vec<RouteInput>, existing: &[Route]) -> Vec<Route> {
             priority: input.priority,
             matcher: input.matcher,
             action: input.action,
+            security_policy_id: input.security_policy_id,
         })
         .collect()
 }
@@ -258,6 +266,7 @@ impl ConfigModel {
             www_redirect: input.www_redirect,
             tls_profile_id: input.tls_profile_id,
             hsts: input.hsts,
+            security_policy_id: input.security_policy_id,
             group: input.group,
             tags: input.tags,
             note: input.note,
@@ -284,6 +293,7 @@ impl ConfigModel {
             www_redirect: input.www_redirect,
             tls_profile_id: input.tls_profile_id,
             hsts: input.hsts,
+            security_policy_id: input.security_policy_id,
             group: input.group,
             tags: input.tags,
             note: input.note,
@@ -464,6 +474,7 @@ impl ConfigModel {
             priority: input.priority,
             matcher: input.matcher,
             action: input.action,
+            security_policy_id: input.security_policy_id,
         };
         Ok(())
     }
@@ -686,6 +697,44 @@ impl ConfigModel {
         }
     }
 
+    /// Creates or replaces a security policy; returns whether it was created.
+    pub fn put_security_policy(&mut self, policy: SecurityPolicy) -> bool {
+        match self
+            .security_policies
+            .iter_mut()
+            .find(|item| item.id == policy.id)
+        {
+            Some(slot) => {
+                *slot = policy;
+                false
+            }
+            None => {
+                self.security_policies.push(policy);
+                true
+            }
+        }
+    }
+
+    pub fn delete_security_policy(&mut self, id: &str) -> Result<()> {
+        if !self.security_policies.iter().any(|policy| policy.id == id) {
+            return Err(not_found("security policy", id));
+        }
+        let used = self.sites.iter().any(|site| {
+            site.security_policy_id.as_deref() == Some(id)
+                || site
+                    .routes
+                    .iter()
+                    .any(|route| route.security_policy_id.as_deref() == Some(id))
+        });
+        if used {
+            return Err(PanelError::conflict(format!(
+                "security policy {id} is still in use"
+            )));
+        }
+        self.security_policies.retain(|policy| policy.id != id);
+        Ok(())
+    }
+
     pub fn delete_tls_profile(&mut self, id: &str) -> Result<()> {
         if !self.tls_profiles.iter().any(|profile| profile.id == id) {
             return Err(not_found("TLS profile", id));
@@ -869,6 +918,7 @@ mod tests {
             tags: BTreeSet::new(),
             note: None,
             favorite: false,
+            security_policy_id: Default::default(),
         }
     }
 
@@ -940,6 +990,8 @@ mod tests {
             reuse_port: false,
             ipv6_only: None,
             default_site_id: Some(id),
+            real_ip_header: Default::default(),
+            trusted_proxies: Default::default(),
         });
         model.delete_site(id, now).unwrap();
         assert!(model.site(id).unwrap().is_deleted());
@@ -980,6 +1032,7 @@ mod tests {
                 host: None,
             },
             action: maintenance(),
+            security_policy_id: Default::default(),
         };
         let first = model.create_route(site, route("/a"), now).unwrap();
         let second = model.create_route(site, route("/b"), now).unwrap();

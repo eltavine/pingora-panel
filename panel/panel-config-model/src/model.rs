@@ -1,9 +1,10 @@
 //! The editable configuration document.
 
+use crate::security::SecurityPolicy;
 use chrono::{DateTime, Utc};
 use panel_domain::{CertificateId, ContentHash, NormalizedHost};
 use panel_ir::{
-    ActiveHealthCheck, ListenerProtocols, LoadBalancingPolicy, PassiveHealthPolicy,
+    ActiveHealthCheck, ListenerProtocols, LoadBalancingPolicy, PassiveHealthPolicy, RealIpHeader,
     StrictTransportSecurity, UpstreamConnectionPolicy, UpstreamTlsPolicy, WwwRedirect,
 };
 use serde::{Deserialize, Serialize};
@@ -18,6 +19,10 @@ const fn one() -> u32 {
     1
 }
 
+fn is_default<T: Default + PartialEq>(value: &T) -> bool {
+    *value == T::default()
+}
+
 /// Everything an operator configures for one gateway.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -27,6 +32,8 @@ pub struct ConfigModel {
     pub listeners: Vec<Listener>,
     #[serde(default)]
     pub tls_profiles: Vec<TlsProfile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub security_policies: Vec<SecurityPolicy>,
     #[serde(default)]
     pub upstreams: Vec<Upstream>,
     #[serde(default)]
@@ -171,6 +178,12 @@ pub struct Listener {
     /// Serves requests for unknown hosts; they are rejected with 421 otherwise.
     #[serde(default)]
     pub default_site_id: Option<Uuid>,
+    /// Proxies in CIDR notation whose forwarding headers name the client.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trusted_proxies: Vec<String>,
+    /// The header trusted proxies name the client in.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub real_ip_header: RealIpHeader,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -201,6 +214,9 @@ pub struct Site {
     /// Sent with HTTPS responses for the site's hosts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hsts: Option<StrictTransportSecurity>,
+    /// Restrictions every request to the site passes first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_policy_id: Option<String>,
     #[serde(default)]
     pub group: Option<String>,
     #[serde(default)]
@@ -273,6 +289,9 @@ pub struct Route {
     #[serde(rename = "match")]
     pub matcher: RouteMatch,
     pub action: Action,
+    /// Restrictions the route's requests pass after the site's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_policy_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -453,6 +472,8 @@ mod tests {
             reuse_port: false,
             ipv6_only: None,
             default_site_id: None,
+            real_ip_header: Default::default(),
+            trusted_proxies: Default::default(),
         });
         assert_eq!(entity_tag(&model), entity_tag(&ConfigModel::default()));
         assert_ne!(entity_tag(&model), entity_tag(&changed));

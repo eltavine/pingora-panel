@@ -362,6 +362,7 @@ mod tests {
             deleted_at: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            security_policy_id: Default::default(),
         }
     }
 
@@ -429,6 +430,8 @@ mod tests {
                 reuse_port: false,
                 ipv6_only: None,
                 default_site_id: None,
+                real_ip_header: Default::default(),
+                trusted_proxies: Default::default(),
             }],
             upstreams: vec![upstream],
             tls_profiles: vec![crate::TlsProfile {

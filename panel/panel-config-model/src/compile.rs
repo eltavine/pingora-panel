@@ -12,6 +12,7 @@ use panel_ir::{
     RouteMatcher, RouteSpec, RuntimeSnapshot, SiteSpec, StaticContentPolicy, UpstreamEndpoint,
     UpstreamPoolSpec, WwwRedirect,
 };
+use panel_ir::{REQUEST_SECURITY_CAPABILITY, TRUSTED_PROXIES_CAPABILITY};
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
@@ -63,6 +64,25 @@ pub fn compile(
     {
         compiler.upstream(upstream);
     }
+    let policies: BTreeSet<&str> = live
+        .iter()
+        .flat_map(|site| {
+            site.security_policy_id.as_deref().into_iter().chain(
+                site.routes
+                    .iter()
+                    .filter_map(|route| route.security_policy_id.as_deref()),
+            )
+        })
+        .collect();
+    compiler.snapshot.security_policies = model
+        .security_policies
+        .iter()
+        .filter(|policy| policies.contains(policy.id.as_str()))
+        .map(crate::SecurityPolicy::compile)
+        .collect();
+    if !policies.is_empty() {
+        compiler.capabilities.insert(REQUEST_SECURITY_CAPABILITY);
+    }
     for site in live {
         compiler.site(site);
     }
@@ -109,6 +129,11 @@ impl Compiler {
         compiled.protocols = listener.protocols;
         compiled.reuse_port = listener.reuse_port;
         compiled.ipv6_only = listener.ipv6_only;
+        compiled.trusted_proxies = listener.trusted_proxies.iter().cloned().collect();
+        compiled.real_ip_header = listener.real_ip_header;
+        if !listener.trusted_proxies.is_empty() {
+            self.capabilities.insert(TRUSTED_PROXIES_CAPABILITY);
+        }
         compiled.default_site_id = listener
             .default_site_id
             .filter(|id| live.iter().any(|site| site.id == *id))
@@ -192,6 +217,9 @@ impl Compiler {
         compiled.https_redirect = site.https_redirect;
         compiled.www_redirect = site.www_redirect;
         compiled.hsts = site.hsts;
+        compiled
+            .security_policy_id
+            .clone_from(&site.security_policy_id);
         if site.hsts.is_some() {
             self.capabilities.insert(HSTS_CAPABILITY);
         }
@@ -272,6 +300,9 @@ impl Compiler {
         );
         compiled.enabled = route.enabled;
         compiled.name.clone_from(&route.name);
+        compiled
+            .security_policy_id
+            .clone_from(&route.security_policy_id);
         self.snapshot.routes.push(compiled);
     }
 
@@ -411,6 +442,7 @@ mod tests {
                     index_files: vec!["index.html".into()],
                     spa_fallback: false,
                 },
+                security_policy_id: Default::default(),
             }],
             listener_ids: BTreeSet::new(),
             https_redirect: false,
@@ -424,6 +456,7 @@ mod tests {
             deleted_at: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            security_policy_id: Default::default(),
         };
         let site_id = site.id;
         let model = ConfigModel {
@@ -435,10 +468,13 @@ mod tests {
                 reuse_port: false,
                 ipv6_only: None,
                 default_site_id: Some(site_id),
+                real_ip_header: Default::default(),
+                trusted_proxies: Default::default(),
             }],
             tls_profiles: Vec::new(),
             upstreams: vec![upstream],
             sites: vec![site],
+            security_policies: Default::default(),
         };
         (model, site_id)
     }
@@ -527,6 +563,79 @@ mod tests {
             snapshot.sites[0].hsts.unwrap().header_value(),
             "max-age=63072000; includeSubDomains; preload"
         );
+    }
+
+    #[test]
+    fn security_policies_reach_the_snapshot_through_their_users() {
+        let (mut model, site) = model();
+        let unused = crate::SecurityPolicy {
+            id: "unused".into(),
+            ..crate::SecurityPolicy::default()
+        };
+        assert!(model.put_security_policy(crate::SecurityPolicy {
+            id: "staff".into(),
+            allowed_methods: vec!["get".into()],
+            body_timeout_seconds: Some(5),
+            ..crate::SecurityPolicy::default()
+        }));
+        assert!(model.put_security_policy(unused));
+        model.sites[0].security_policy_id = Some("staff".into());
+        model.sites[0].routes[0].security_policy_id = Some("staff".into());
+        model.listeners[0].trusted_proxies = vec!["10.0.0.0/8".into()];
+
+        let snapshot = compile(&model, RevisionId::new(10)).unwrap();
+        let required: Vec<_> = snapshot
+            .required_capabilities
+            .iter()
+            .map(|capability| capability.name.as_str())
+            .collect();
+        assert!(
+            required.contains(&REQUEST_SECURITY_CAPABILITY),
+            "{required:?}"
+        );
+        assert!(
+            required.contains(&TRUSTED_PROXIES_CAPABILITY),
+            "{required:?}"
+        );
+        assert_eq!(snapshot.security_policies.len(), 1);
+        let policy = &snapshot.security_policies[0];
+        assert!(policy.allowed_methods.contains("GET"));
+        assert_eq!(policy.body_timeout_ms, Some(5000));
+        assert_eq!(
+            snapshot.sites[0].security_policy_id.as_deref(),
+            Some("staff")
+        );
+        assert_eq!(
+            snapshot.routes[0].security_policy_id.as_deref(),
+            Some("staff")
+        );
+        assert!(snapshot.listeners[0].trusted_proxies.contains("10.0.0.0/8"));
+        assert!(model.clone().delete_security_policy("staff").is_err());
+        assert!(model.clone().delete_security_policy("unused").is_ok());
+
+        model.sites[0].routes[0].security_policy_id = Some("missing".into());
+        model.listeners[0].trusted_proxies = vec!["proxy".into()];
+        let messages: Vec<String> = crate::validate(&model)
+            .into_iter()
+            .map(|diagnostic| diagnostic.message)
+            .collect();
+        assert!(
+            messages
+                .iter()
+                .any(|message| message == "security policy missing does not exist"),
+            "{messages:?}"
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("trusted proxy")),
+            "{messages:?}"
+        );
+        model.sites[0].routes[0].security_policy_id = None;
+        model.listeners[0].trusted_proxies.clear();
+        model.delete_site(site, Utc::now()).unwrap();
+        let snapshot = compile(&model, RevisionId::new(11)).unwrap();
+        assert!(snapshot.security_policies.is_empty());
     }
 
     #[test]

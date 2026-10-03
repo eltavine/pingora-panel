@@ -44440,6 +44440,10 @@
           "protocols": {
             "$ref": "#/components/schemas/ListenerProtocols"
           },
+          "real_ip_header": {
+            "$ref": "#/components/schemas/RealIpHeader",
+            "description": "The header trusted proxies name the client in."
+          },
           "reuse_port": {
             "type": "boolean"
           },
@@ -44449,6 +44453,13 @@
               "null"
             ],
             "description": "Serves HTTPS with this profile's certificate when no domain claims one."
+          },
+          "trusted_proxies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Proxies in CIDR notation whose forwarding headers name the client."
           }
         },
         "additionalProperties": false
@@ -45137,6 +45148,15 @@
           }
         }
       },
+      "RealIpHeader": {
+        "type": "string",
+        "description": "Where trusted proxies put the address of the client they forward.",
+        "enum": [
+          "x-forwarded-for",
+          "x-real-ip",
+          "forwarded"
+        ]
+      },
       "ReceiptOutcomeResponse": {
         "oneOf": [
           {
@@ -45530,6 +45550,13 @@
             "format": "int32",
             "description": "Lower values are evaluated first.",
             "minimum": 0
+          },
+          "security_policy_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Restrictions the route's requests pass after the site's."
           }
         },
         "additionalProperties": false
@@ -45569,6 +45596,13 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          },
+          "security_policy_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Restrictions the route's requests pass after the site's."
           }
         },
         "additionalProperties": false
@@ -45972,6 +46006,13 @@
             },
             "description": "Evaluated by priority before the site action."
           },
+          "security_policy_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Restrictions every request to the site passes first."
+          },
           "tags": {
             "type": "array",
             "items": {
@@ -46092,6 +46133,13 @@
             "items": {
               "$ref": "#/components/schemas/RouteInput"
             }
+          },
+          "security_policy_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Restrictions every request to the site passes first."
           },
           "tags": {
             "type": "array",

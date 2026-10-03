@@ -144,6 +144,7 @@ mod tests {
                 content_type: None,
                 retry_after_seconds: None,
             },
+            security_policy_id: Default::default(),
         }
     }
 
@@ -179,6 +180,7 @@ mod tests {
             deleted_at: None,
             created_at: now,
             updated_at: now,
+            security_policy_id: Default::default(),
         };
         let model = ConfigModel {
             sites: vec![site],
