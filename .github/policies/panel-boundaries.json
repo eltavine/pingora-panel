@@ -11,7 +11,7 @@
       ]
     },
     "audit-service": {
-      "catalog": false,
+      "catalog": true,
       "allowed_workspace_dependencies": [
         "panel-contracts",
         "panel-control-runtime",
@@ -175,6 +175,8 @@
     "panel-api-server": {
       "catalog": false,
       "allowed_workspace_dependencies": [
+        "audit-grpc-client",
+        "audit-service",
         "config-grpc-client",
         "config-service",
         "gateway-grpc",

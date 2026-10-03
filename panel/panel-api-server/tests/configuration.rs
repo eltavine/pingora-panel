@@ -115,7 +115,11 @@ async fn sites_are_edited_validated_and_applied_through_the_api() {
         return;
     };
     let secrets = database
-        .bootstrap(&[("config", "config"), ("identity", "identity")])
+        .bootstrap(&[
+            ("config", "config"),
+            ("identity", "identity"),
+            ("audit", "audit"),
+        ])
         .await;
     let nats = std::env::var(TEST_NATS_URL_ENV).unwrap();
     let gateway = gateway().await;
@@ -134,6 +138,20 @@ async fn sites_are_edited_validated_and_applied_through_the_api() {
         .await
         .unwrap();
     ready(&config).await;
+    let mut audit_env = environment(vec![
+        (DATABASE_URL_ENV, database.service_url("audit")),
+        (DATABASE_PASSWORD_ENV, secrets[2].expose().into()),
+        (NATS_URL_ENV, nats.clone()),
+    ]);
+    let audit_settings =
+        local(ProcessSettings::read(&mut audit_env, audit_service::default_addresses()).unwrap());
+    let audit = audit_service::process(&mut audit_env, audit_settings)
+        .unwrap()
+        .with_jetstream_settings((*broker.settings).clone())
+        .start()
+        .await
+        .unwrap();
+    ready(&audit).await;
     let web = tempfile::tempdir().unwrap();
     std::fs::write(web.path().join("index.html"), "<!doctype html>").unwrap();
     let http = std::net::TcpListener::bind("127.0.0.1:0")
@@ -152,6 +170,10 @@ async fn sites_are_edited_validated_and_applied_through_the_api() {
         (
             panel_api_server::WEB_ROOT_ENV,
             web.path().display().to_string(),
+        ),
+        (
+            panel_api_server::AUDIT_URL_ENV,
+            format!("http://{}", audit.grpc_address()),
         ),
     ]);
     let api_settings =
@@ -289,6 +311,7 @@ async fn sites_are_edited_validated_and_applied_through_the_api() {
     let (applied, headers) = api
         .json(
             api.mutate(Method::POST, "/api/v1/config/apply", "apply")
+                .header("x-request-id", "req-audit-apply")
                 .json(&json!({"expected_version": 7})),
             StatusCode::OK,
         )
@@ -468,7 +491,81 @@ async fn sites_are_edited_validated_and_applied_through_the_api() {
     let missing = api.get("/api/v1/revisions/99").send().await.unwrap();
     assert_eq!(missing.status(), StatusCode::NOT_FOUND);
 
+    let reload = api
+        .mutate(Method::POST, "/api/v1/gateway/reload", "reload")
+        .header("x-request-id", "req-audit-reload")
+        .send()
+        .await
+        .unwrap();
+    assert!(!reload.status().is_success());
+    let audited = |correlation: &'static str, until: &'static str| {
+        let api = &api;
+        async move {
+            tokio::time::timeout(Duration::from_secs(20), async {
+                loop {
+                    let (page, _) = api
+                        .json(
+                            api.get(&format!(
+                                "/api/v1/audit-events?correlation_id={correlation}"
+                            )),
+                            StatusCode::OK,
+                        )
+                        .await;
+                    let items = page["items"].as_array().unwrap().clone();
+                    if items.iter().any(|item| item["event_type"] == until) {
+                        return items;
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            })
+            .await
+            .expect("the request is audited")
+        }
+    };
+    let applied = audited("req-audit-apply", "config.draft.applied").await;
+    for expected in [
+        "gateway.snapshot.prepared",
+        "gateway.snapshot.activated",
+        "config.draft.applied",
+    ] {
+        assert!(
+            applied.iter().any(|item| item["event_type"] == expected),
+            "{expected}: {applied:?}"
+        );
+    }
+    assert!(applied.iter().all(|item| item["actor_id"] == "operator"));
+    let refused = audited("req-audit-reload", "gateway.operation.refused").await;
+    assert_eq!(refused[0]["data"]["operation"], "reloaded");
+    assert_eq!(refused[0]["source"], "/pingora-panel/panel-api");
+
+    let (page, _) = api
+        .json(
+            api.get("/api/v1/audit-events?type=config.&limit=2"),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(page["items"].as_array().unwrap().len(), 2);
+    let next = page["next_before"].as_u64().unwrap();
+    let (first, _) = api
+        .json(api.get("/api/v1/audit-events/1"), StatusCode::OK)
+        .await;
+    assert_eq!(first["sequence"], 1);
+    assert_eq!(first["previous_hash"], "");
+    assert!(next > 1);
+    let (verified, _) = api
+        .json(api.get("/api/v1/audit-events/verify"), StatusCode::OK)
+        .await;
+    assert_eq!(verified["intact"], true);
+    assert!(verified["checked"].as_u64().unwrap() > 5);
+    let invalid = api
+        .get("/api/v1/audit-events?since=yesterday")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
     server.stop().await;
+    audit.stop().await;
     config.stop().await;
     let _ = broker
         .context

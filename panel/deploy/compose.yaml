@@ -226,6 +226,7 @@ services:
       PINGORA_PANEL_TLS_DIR: /var/lib/pingora-panel/credentials/panel-api
       PINGORA_PANEL_HTTP_ADDR: 127.0.0.1:8080
       PINGORA_PANEL_CONFIG_URL: https://127.0.0.1:50061
+      PINGORA_PANEL_AUDIT_URL: https://127.0.0.1:50064
       PINGORA_PANEL_WEB_ROOT: /usr/share/pingora-panel/web
     secrets: [identity-database-password]
     volumes:

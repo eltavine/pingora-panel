@@ -12,6 +12,7 @@ mod console;
 mod directory;
 mod operations;
 
+use audit_grpc_client::AuditClient;
 use config_grpc_client::{ConfigClientConfig, ConfigPublicationClient};
 use gateway_grpc_client::{GatewayGrpcClient, GatewayGrpcClientConfig};
 use panel_api::{router_with_config, ApiConfig, ApiState};
@@ -29,6 +30,8 @@ pub const SCHEMA: &str = "identity";
 /// The public listener; loopback-only until the API authenticates callers.
 pub const HTTP_ADDRESS_ENV: &str = "PINGORA_PANEL_HTTP_ADDR";
 pub const CONFIG_URL_ENV: &str = "PINGORA_PANEL_CONFIG_URL";
+/// `audit-service`, which serves the audit trail.
+pub const AUDIT_URL_ENV: &str = "PINGORA_PANEL_AUDIT_URL";
 /// The gateway's runtime API, for data plane operations and upstream health.
 pub const GATEWAY_URL_ENV: &str = "PINGORA_PANEL_GATEWAY_URL";
 /// Directory holding the built web console; the API is served without it.
@@ -37,6 +40,7 @@ pub const WEB_ROOT_ENV: &str = "PINGORA_PANEL_WEB_ROOT";
 const DEFAULT_HTTP_ADDRESS: SocketAddr =
     SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 8080);
 const DEFAULT_CONFIG_URL: &str = "http://127.0.0.1:50061";
+const DEFAULT_AUDIT_URL: &str = "http://127.0.0.1:50064";
 const DEFAULT_GATEWAY_URL: &str = "http://127.0.0.1:50051";
 const DEFAULT_WEB_ROOT: &str = "/usr/share/pingora-panel/web";
 
@@ -61,6 +65,9 @@ pub fn process(
     let gateway_url = env
         .string(GATEWAY_URL_ENV)?
         .unwrap_or_else(|| DEFAULT_GATEWAY_URL.into());
+    let audit_url = env
+        .string(AUDIT_URL_ENV)?
+        .unwrap_or_else(|| DEFAULT_AUDIT_URL.into());
     let web_root = PathBuf::from(
         env.string(WEB_ROOT_ENV)?
             .unwrap_or_else(|| DEFAULT_WEB_ROOT.into()),
@@ -93,6 +100,11 @@ pub fn process(
         )?,
         None => GatewayGrpcClient::connect_lazy(gateway_url, GatewayGrpcClientConfig::default())?,
     };
+    let audit = match process.peer_channel(&audit_url, ServiceName::new("audit-service")?)? {
+        Some(channel) => AuditClient::from_channel(channel),
+        None => AuditClient::connect_lazy(audit_url)?,
+    };
+    let audit_health = audit.health_check();
     let config_health = config.health_check();
     let runtime = RecordedRuntime::new(
         Arc::new(gateway),
@@ -104,12 +116,14 @@ pub fn process(
     Ok(process
         .with_database_impact(Impact::Degrading)
         .with_check(Arc::new(config_health), Impact::Degrading)
+        .with_check(Arc::new(audit_health), Impact::Informational)
         .on_start(move |running| {
             let config = Arc::new(config);
             let api = router_with_config(
                 ApiState::new(Arc::clone(&config))
                     .with_configuration(config)
                     .with_runtime(Arc::new(runtime))
+                    .with_audit(Arc::new(audit))
                     .with_health(running.health())
                     .with_directory(Arc::new(directory::RegistryDirectory::new(
                         running.jetstream().clone(),
