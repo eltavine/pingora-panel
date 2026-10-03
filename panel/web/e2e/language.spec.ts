@@ -165,6 +165,26 @@ test('configuration files are checked as they are edited, saved and applied', as
     })
   })
   await page.route('**/api/v1/config/plan', (route) => route.fulfill({ json: changes }))
+  await page.route('**/api/v1/config/ast', (route) =>
+    route.fulfill({
+      json: {
+        file: route.request().postDataJSON().file,
+        directives: [
+          { name: 'language_version', args: ['1'], span: 'main.conf:1.1-19' },
+          {
+            name: 'http',
+            args: [],
+            span: 'main.conf:3.1-9.1',
+            block: [{ name: 'upstream', args: ['app'], span: 'main.conf:4.5-6.5', block: [] }],
+          },
+        ],
+        diagnostics: [],
+      },
+    }),
+  )
+  await page.route('**/api/v1/config/ir', (route) =>
+    route.fulfill({ json: { schema_version: 'panel.ir.v1', listeners: [], sites: [] } }),
+  )
   await page.route('**/api/v1/config/dry-run', (route) =>
     route.fulfill({
       json: { draft: { version: 5, pending: true, applied_version: 3 }, diagnostics: [] },
@@ -191,6 +211,13 @@ test('configuration files are checked as they are edited, saved and applied', as
   await expect(editor).toContainText('include sites/*.conf;')
   await expect(page.getByText('No problems found')).toBeVisible()
   await expectNoHorizontalOverflow(page)
+
+  await page.getByRole('tab', { name: 'Outline' }).click()
+  await page.getByRole('button', { name: /upstream\s+app/ }).click()
+  const download = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Download IR' }).click()
+  expect((await download).suggestedFilename()).toBe('config-ir-v4.json')
+  await page.getByRole('tab', { name: /Problems/ }).click()
 
   await editor.click()
   await editor.press('ControlOrMeta+End')

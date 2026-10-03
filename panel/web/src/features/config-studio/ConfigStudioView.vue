@@ -1,27 +1,30 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, useTemplateRef } from 'vue'
+import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { lintGutter, linter } from '@codemirror/lint'
 import { keymap } from '@codemirror/view'
-import { useEventListener } from '@vueuse/core'
+import { useEventListener, watchDebounced } from '@vueuse/core'
 import {
   Check,
   CircleCheck,
   FileCode2,
+  FileJson2,
   FilePlus2,
+  ListTree,
   GitCompareArrows,
   RotateCw,
   Save,
   Trash2,
   TriangleAlert,
   Undo2,
+  CircleAlert,
   WandSparkles,
   X,
 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { onBeforeRouteLeave } from 'vue-router'
 import { toast } from 'vue-sonner'
-import type { DiagnosticDetails } from '@/api/generated'
+import { ast, ir, type DiagnosticDetails, type SyntaxNode, type SyntaxTree } from '@/api/generated'
 import { schemaOptions } from '@/api/generated/@tanstack/vue-query.gen'
 import ApiFailureAlert from '@/components/ApiFailureAlert.vue'
 import CodeEditor from '@/components/code/CodeEditor.vue'
@@ -36,10 +39,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toApiFailure } from '@/lib/api'
 import { changeHeaders, notifyFailure, useRefreshConfiguration } from '@/lib/configuration'
+import { downloadJson } from '@/lib/download'
 import { baseContext, directiveCompletion } from './completion'
 import { editorDiagnostics } from './lint'
+import OutlineTree from './OutlineTree.vue'
 import ReviewSheet from './ReviewSheet.vue'
 import { ENTRY, isFilePath, useConfigFiles } from './useConfigFiles'
 
@@ -50,6 +56,9 @@ const schema = useQuery({ ...schemaOptions(), staleTime: Infinity })
 const editor = useTemplateRef<InstanceType<typeof CodeEditor>>('editor')
 const reviewing = ref(false)
 const naming = ref(false)
+const panel = ref<'problems' | 'outline'>('problems')
+const outline = ref<SyntaxTree>()
+const exporting = ref(false)
 const newPath = ref('')
 
 const text = computed({
@@ -124,6 +133,43 @@ function addFile() {
   naming.value = false
 }
 
+async function readOutline() {
+  if (panel.value !== 'outline' || !config.source.data.value) {
+    return
+  }
+  try {
+    const { data } = await ast({
+      body: { files: config.files.value, file: config.active.value },
+      throwOnError: true,
+    })
+    outline.value = data
+  } catch {
+    outline.value = undefined
+  }
+}
+watch(panel, readOutline)
+watchDebounced([text, config.active], readOutline, { debounce: 400 })
+
+function selectNode(node: SyntaxNode) {
+  const span = parseSpan(node.span)
+  if (span) {
+    editor.value?.reveal(span.start, span.end)
+  }
+}
+
+async function exportSnapshot() {
+  exporting.value = true
+  try {
+    const { data } = await ir({ throwOnError: true })
+    downloadJson(`config-ir-v${config.version.value ?? 0}.json`, data)
+    toast.success(t('studio.irDownloaded', { version: config.version.value ?? 0 }))
+  } catch (error) {
+    notifyFailure(error, t('studio.irFailed'))
+  } finally {
+    exporting.value = false
+  }
+}
+
 async function reveal(diagnostic: DiagnosticDetails) {
   const span = parseSpan(diagnostic.source_span)
   if (!span || !(span.file in config.files.value)) {
@@ -180,6 +226,11 @@ useEventListener(window, 'beforeunload', (event: BeforeUnloadEvent) => {
           <Spinner v-if="config.format.isPending.value" data-icon="inline-start" />
           <WandSparkles v-else data-icon="inline-start" aria-hidden="true" />
           {{ t('studio.format') }}
+        </Button>
+        <Button variant="outline" size="sm" :disabled="exporting" @click="exportSnapshot">
+          <Spinner v-if="exporting" data-icon="inline-start" />
+          <FileJson2 v-else data-icon="inline-start" aria-hidden="true" />
+          {{ t('studio.downloadIr') }}
         </Button>
         <Button variant="outline" size="sm" :disabled="!config.dirty.value" @click="config.revert">
           <Undo2 data-icon="inline-start" aria-hidden="true" />
@@ -328,17 +379,24 @@ useEventListener(window, 'beforeunload', (event: BeforeUnloadEvent) => {
           </div>
         </div>
 
-        <Card class="gap-3 py-4">
-          <CardHeader class="flex flex-row items-center gap-2 px-4">
-            <CardTitle class="text-sm">
-              {{ t('studio.problemsCount', { count: config.problems.value.length }) }}
-            </CardTitle>
+        <Tabs v-model="panel" class="gap-3 rounded-xl border p-4">
+          <div class="flex items-center gap-2">
+            <TabsList>
+              <TabsTrigger value="problems">
+                <CircleAlert aria-hidden="true" />
+                {{ t('studio.problemsCount', { count: config.problems.value.length }) }}
+              </TabsTrigger>
+              <TabsTrigger value="outline">
+                <ListTree aria-hidden="true" />
+                {{ t('studio.outline') }}
+              </TabsTrigger>
+            </TabsList>
             <Spinner v-if="config.checking.value" class="size-3.5" />
             <Badge v-if="errors" variant="outline" class="ml-auto">
               {{ t('studio.errors', { count: errors }) }}
             </Badge>
-          </CardHeader>
-          <CardContent class="px-4">
+          </div>
+          <TabsContent value="problems">
             <DiagnosticList
               v-if="config.problems.value.length"
               :diagnostics="config.problems.value"
@@ -349,8 +407,17 @@ useEventListener(window, 'beforeunload', (event: BeforeUnloadEvent) => {
               <CircleCheck class="size-4" aria-hidden="true" />
               {{ t('studio.noProblems') }}
             </p>
-          </CardContent>
-        </Card>
+          </TabsContent>
+          <TabsContent value="outline" class="max-h-96 overflow-y-auto">
+            <OutlineTree
+              v-if="outline?.directives.length"
+              :nodes="outline.directives"
+              :aria-label="t('studio.outline')"
+              @select="selectNode"
+            />
+            <p v-else class="text-muted-foreground text-sm">{{ t('studio.outlineEmpty') }}</p>
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
 

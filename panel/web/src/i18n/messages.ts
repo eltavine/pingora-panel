@@ -520,6 +520,11 @@ const zhCN = {
     apply: '应用 v{version}',
     applied: '已应用为版本 #{revision}',
     leave: '有未保存的修改，确定离开？',
+    outline: '结构',
+    outlineEmpty: '这个文件还没有指令',
+    downloadIr: '下载 IR',
+    irDownloaded: '已下载草稿 v{version} 编译出的 IR',
+    irFailed: '草稿无法编译',
   },
   revisions: {
     title: '配置版本',
@@ -1126,6 +1131,11 @@ const en: DeepString<Messages> = {
     apply: 'Apply v{version}',
     applied: 'Applied as revision #{revision}',
     leave: 'Leave with unsaved changes?',
+    outline: 'Outline',
+    outlineEmpty: 'This file has no directives yet',
+    downloadIr: 'Download IR',
+    irDownloaded: 'Downloaded the IR of draft v{version}',
+    irFailed: 'The draft does not compile',
   },
   revisions: {
     title: 'Revisions',
