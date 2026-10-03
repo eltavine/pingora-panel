@@ -8,10 +8,11 @@ use panel_config_model::{
     Assessment, ConfigModel, PlannedChange, PolicyVersion, Risk, REQUEST_LIFETIME,
 };
 use panel_errors::{PanelError, Result};
+use panel_event_contracts::config::v1 as event;
+use panel_events::EventData;
 use panel_events::RequestScope;
 use panel_postgres::{storage_error, EventLog, PgOutbox, ServiceDatabase};
 use serde::Serialize;
-use serde_json::json;
 use sqlx::{postgres::PgRow, PgPool, Postgres, Row, Transaction};
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -189,6 +190,51 @@ pub struct PgApprovals {
     events: EventLog,
 }
 
+/// How an open request closes without being applied.
+#[derive(Clone, Copy)]
+enum Closing {
+    Rejected,
+    Withdrawn,
+    Outdated,
+}
+
+impl Closing {
+    fn state(self) -> &'static str {
+        match self {
+            Self::Rejected => "rejected",
+            Self::Withdrawn => "withdrawn",
+            Self::Outdated => "outdated",
+        }
+    }
+}
+
+/// The event recording a stored policy, created or updated alike.
+macro_rules! policy_event {
+    ($event:path, $stored:expr) => {{
+        let stored: &ApprovalPolicy = $stored;
+        let policy = &stored.policy;
+        $event {
+            id: stored.id.clone(),
+            version: stored.version,
+            description: policy.description.clone(),
+            resources: policy.resources.clone(),
+            site_tags: policy.site_tags.clone(),
+            min_risk: policy.min_risk.as_str().into(),
+            windows: policy
+                .windows
+                .iter()
+                .map(|window| event::Window {
+                    recurrence: window.recurrence().as_str().to_owned(),
+                    minutes: u32::try_from(window.duration().as_secs() / 60).unwrap_or(u32::MAX),
+                })
+                .collect(),
+            approvals: policy.approvals,
+            valid_minutes: policy.valid_minutes,
+            enabled: policy.enabled,
+        }
+    }};
+}
+
 impl PgApprovals {
     pub fn new(database: &ServiceDatabase, events: EventLog) -> Self {
         Self {
@@ -197,18 +243,15 @@ impl PgApprovals {
         }
     }
 
-    async fn emit<T: Serialize>(
+    async fn emit<E: EventData>(
         &self,
         transaction: &mut Transaction<'_, Postgres>,
-        event_type: &str,
         aggregate: (&str, &str),
         scope: &RequestScope,
         actor: &str,
-        data: &T,
+        data: &E,
     ) -> Result<()> {
-        let event = self
-            .events
-            .event_named(event_type, aggregate, scope, actor, data)?;
+        let event = self.events.event(aggregate, scope, actor, data)?;
         PgOutbox::append(transaction, &event).await
     }
 
@@ -268,19 +311,25 @@ impl PgApprovals {
         .map_err(storage_error)?;
         let created: bool = row.try_get("created").map_err(storage_error)?;
         let stored = policy(&row)?;
-        self.emit(
-            &mut transaction,
-            if created {
-                "config.approval_policy.created"
-            } else {
-                "config.approval_policy.updated"
-            },
-            ("approval_policy", id),
-            scope,
-            actor,
-            &stored,
-        )
-        .await?;
+        if created {
+            self.emit(
+                &mut transaction,
+                ("approval_policy", id),
+                scope,
+                actor,
+                &policy_event!(event::ApprovalPolicyCreated, &stored),
+            )
+            .await?;
+        } else {
+            self.emit(
+                &mut transaction,
+                ("approval_policy", id),
+                scope,
+                actor,
+                &policy_event!(event::ApprovalPolicyUpdated, &stored),
+            )
+            .await?;
+        }
         transaction.commit().await.map_err(storage_error)?;
         Ok((stored, created))
     }
@@ -299,11 +348,12 @@ impl PgApprovals {
         }
         self.emit(
             &mut transaction,
-            "config.approval_policy.deleted",
             ("approval_policy", id),
             scope,
             actor,
-            &json!({ "policy": id }),
+            &event::ApprovalPolicyDeleted {
+                policy: id.to_owned(),
+            },
         )
         .await?;
         transaction.commit().await.map_err(storage_error)
@@ -411,7 +461,7 @@ impl PgApprovals {
                 ApprovalState::Approved if current => return Ok(Gate::Approved(existing.id)),
                 ApprovalState::Pending if current => return Ok(Gate::Awaiting(Box::new(existing))),
                 _ => {
-                    self.close(existing.id, "outdated", actor, None, scope, now)
+                    self.close(existing.id, Closing::Outdated, actor, None, scope, now)
                         .await?;
                 }
             }
@@ -472,19 +522,32 @@ impl PgApprovals {
         .map_err(storage_error)?;
         self.emit(
             &mut transaction,
-            "config.approval.requested",
             ("approval_request", &created.id.to_string()),
             scope,
             actor,
-            &json!({
-                "request": created.id,
-                "draft_version": created.draft_version,
-                "content_hash": created.content_hash,
-                "risk": created.risk,
-                "policies": created.policies,
-                "required": created.required,
-                "changes": created.changes,
-            }),
+            &event::ApprovalRequested {
+                request: created.id.to_string(),
+                draft_version: created.draft_version,
+                content_hash: created.content_hash.clone(),
+                risk: created.risk.as_str().into(),
+                policies: created
+                    .policies
+                    .iter()
+                    .map(|policy| event::PolicyVersion {
+                        id: policy.id.clone(),
+                        version: policy.version,
+                    })
+                    .collect(),
+                required: created.required,
+                changes: created
+                    .changes
+                    .iter()
+                    .map(|change| event::PlannedChange {
+                        resource: change.resource.clone(),
+                        change: change.change.clone(),
+                    })
+                    .collect(),
+            },
         )
         .await?;
         transaction.commit().await.map_err(storage_error)?;
@@ -578,11 +641,14 @@ impl PgApprovals {
         }
         self.emit(
             &mut transaction,
-            "config.approval.approved",
             ("approval_request", &id.to_string()),
             scope,
             approver,
-            &json!({ "request": id, "valid_until": valid_until, "approved": approved }),
+            &event::ApprovalApproved {
+                request: id.to_string(),
+                valid_until: Some(valid_until.into()),
+                approved,
+            },
         )
         .await?;
         transaction.commit().await.map_err(storage_error)?;
@@ -608,7 +674,7 @@ impl PgApprovals {
             ));
         }
         drop(transaction);
-        self.close(id, "rejected", approver, reason, scope, now)
+        self.close(id, Closing::Rejected, approver, reason, scope, now)
             .await?;
         self.request(id).await
     }
@@ -635,7 +701,8 @@ impl PgApprovals {
                 "the request is already closed",
             ));
         }
-        self.close(id, "withdrawn", actor, None, scope, now).await?;
+        self.close(id, Closing::Withdrawn, actor, None, scope, now)
+            .await?;
         self.request(id).await
     }
 
@@ -684,11 +751,12 @@ impl PgApprovals {
         }
         self.emit(
             &mut transaction,
-            "config.approval.revoked",
             ("approval_request", &id.to_string()),
             scope,
             approver,
-            &json!({ "request": id }),
+            &event::ApprovalRevoked {
+                request: id.to_string(),
+            },
         )
         .await?;
         transaction.commit().await.map_err(storage_error)?;
@@ -716,11 +784,13 @@ impl PgApprovals {
         .map_err(storage_error)?;
         self.emit(
             &mut transaction,
-            "config.approval.applied",
             ("approval_request", &id.to_string()),
             scope,
             actor,
-            &json!({ "request": id, "revision": revision }),
+            &event::ApprovalApplied {
+                request: id.to_string(),
+                revision,
+            },
         )
         .await?;
         transaction.commit().await.map_err(storage_error)
@@ -753,19 +823,17 @@ impl PgApprovals {
         .execute(&mut *transaction)
         .await
         .map_err(storage_error)?;
-        let policies: Vec<&str> = covering.iter().map(|policy| policy.id.as_str()).collect();
         self.emit(
             &mut transaction,
-            "config.approval.bypassed",
             ("configuration", "draft"),
             scope,
             actor,
-            &json!({
-                "reason": bypass.reason.trim(),
-                "incident": bypass.incident.trim(),
-                "content_hash": content_hash,
-                "policies": policies,
-            }),
+            &event::ApprovalBypassed {
+                reason: bypass.reason.trim().to_owned(),
+                incident: bypass.incident.trim().to_owned(),
+                content_hash: content_hash.to_owned(),
+                policies: covering.iter().map(|policy| policy.id.clone()).collect(),
+            },
         )
         .await?;
         transaction.commit().await.map_err(storage_error)
@@ -774,7 +842,7 @@ impl PgApprovals {
     async fn close(
         &self,
         id: Uuid,
-        state: &str,
+        closing: Closing,
         actor: &str,
         reason: Option<&str>,
         scope: &RequestScope,
@@ -786,22 +854,53 @@ impl PgApprovals {
              WHERE id = $1",
         )
         .bind(id)
-        .bind(state)
+        .bind(closing.state())
         .bind(actor)
         .bind(now)
         .bind(reason)
         .execute(&mut *transaction)
         .await
         .map_err(storage_error)?;
-        self.emit(
-            &mut transaction,
-            &format!("config.approval.{state}"),
-            ("approval_request", &id.to_string()),
-            scope,
-            actor,
-            &json!({ "request": id, "reason": reason }),
-        )
-        .await?;
+        let request = id.to_string();
+        match closing {
+            Closing::Rejected => {
+                self.emit(
+                    &mut transaction,
+                    ("approval_request", &request),
+                    scope,
+                    actor,
+                    &event::ApprovalRejected {
+                        request: request.clone(),
+                        reason: reason.map(str::to_owned),
+                    },
+                )
+                .await?;
+            }
+            Closing::Withdrawn => {
+                self.emit(
+                    &mut transaction,
+                    ("approval_request", &request),
+                    scope,
+                    actor,
+                    &event::ApprovalWithdrawn {
+                        request: request.clone(),
+                    },
+                )
+                .await?;
+            }
+            Closing::Outdated => {
+                self.emit(
+                    &mut transaction,
+                    ("approval_request", &request),
+                    scope,
+                    actor,
+                    &event::ApprovalOutdated {
+                        request: request.clone(),
+                    },
+                )
+                .await?;
+            }
+        }
         transaction.commit().await.map_err(storage_error)
     }
 }

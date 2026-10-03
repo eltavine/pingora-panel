@@ -22,6 +22,7 @@ panel-control-runtime.workspace = true
 panel-domain.workspace = true
 panel-engine.workspace = true
 panel-errors.workspace = true
+panel-event-contracts.workspace = true
 panel-events.workspace = true
 panel-health.workspace = true
 panel-ir.workspace = true

@@ -4,8 +4,8 @@ use panel_application::{ContentHash, IdempotencyKey, RequestScope};
 use panel_config_dsl::Sources;
 use panel_config_model::{ConfigModel, MODEL_VERSION};
 use panel_errors::{PanelError, Result};
+use panel_event_contracts::config::v1 as event;
 use panel_postgres::{storage_error, EventLog, PgOutbox, ServiceDatabase};
-use serde_json::json;
 use sqlx::{PgConnection, PgPool};
 
 /// The aggregate of draft events.
@@ -151,16 +151,15 @@ impl PgDrafts {
         .execute(&mut *transaction)
         .await
         .map_err(storage_error)?;
-        let event = self.events.event_named(
-            "config.draft.changed",
+        let event = self.events.event(
             DRAFT,
             request.scope,
             request.actor,
-            &json!({
-                "version": next,
-                "operation": request.operation,
-                "resource": request.resource,
-            }),
+            &event::DraftChanged {
+                version: next,
+                operation: request.operation.to_owned(),
+                resource: request.resource.to_owned(),
+            },
         )?;
         PgOutbox::append(&mut transaction, &event).await?;
         transaction.commit().await.map_err(storage_error)?;
@@ -195,12 +194,15 @@ impl PgDrafts {
         .execute(&mut *transaction)
         .await
         .map_err(storage_error)?;
-        let event = self.events.event_named(
-            "config.draft.applied",
+        let event = self.events.event(
             DRAFT,
             scope,
             actor,
-            &json!({ "version": version, "revision": revision, "note": note }),
+            &event::DraftApplied {
+                version,
+                revision,
+                note: note.map(str::to_owned),
+            },
         )?;
         PgOutbox::append(&mut transaction, &event).await?;
         let state = read(&mut transaction, false).await?;

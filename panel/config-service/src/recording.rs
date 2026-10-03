@@ -8,8 +8,9 @@ use panel_application::{
     GatewayUseCases, IdempotencyKey, IdempotencyLookup, PreparedDeployment, RequestScope,
 };
 use panel_errors::{PanelError, Result, ValidationReport};
+use panel_event_contracts::gateway::v1 as event;
+use panel_events::EventData;
 use panel_postgres::EventLog;
-use serde_json::{json, Value};
 use std::sync::Arc;
 
 /// Records what reconciliation needs around publication: the document of
@@ -43,29 +44,36 @@ impl RecordingUseCases {
         }
     }
 
-    async fn record<T>(
+    /// Records what an operation on the gateway did, or why it was refused.
+    async fn record<T, E: EventData>(
         &self,
         context: &CommandContext,
         operation: &str,
         result: &Result<T>,
-        data: impl FnOnce(&T) -> Value,
+        data: impl FnOnce(&T) -> E,
     ) {
-        let (event_type, data) = match result {
-            Ok(value) => (format!("gateway.snapshot.{operation}"), data(value)),
-            Err(error) => (
-                "gateway.snapshot.refused".to_owned(),
-                json!({ "operation": operation, "code": error.code.as_str(), "message": error.message }),
-            ),
-        };
-        self.events
-            .record_named(
-                &event_type,
-                SNAPSHOT,
-                &context.scope(),
-                context.actor(),
-                &data,
-            )
-            .await;
+        let (scope, actor) = (context.scope(), context.actor());
+        match result {
+            Ok(value) => {
+                self.events
+                    .record(SNAPSHOT, &scope, actor, &data(value))
+                    .await;
+            }
+            Err(error) => {
+                self.events
+                    .record(
+                        SNAPSHOT,
+                        &scope,
+                        actor,
+                        &event::SnapshotRefused {
+                            operation: operation.to_owned(),
+                            code: error.code.as_str().to_owned(),
+                            message: error.message.clone(),
+                        },
+                    )
+                    .await;
+            }
+        }
     }
 
     fn admit(&self) -> Result<()> {
@@ -113,11 +121,9 @@ impl GatewayUseCases for RecordingUseCases {
             &context,
             "prepared",
             &result,
-            |prepared: &PreparedDeployment| {
-                json!({
-                    "revision_id": prepared.revision_id().get(),
-                    "content_hash": prepared.content_hash().as_str(),
-                })
+            |prepared: &PreparedDeployment| event::SnapshotPrepared {
+                revision_id: prepared.revision_id().get(),
+                content_hash: prepared.content_hash().as_str().to_owned(),
             },
         )
         .await;
@@ -140,13 +146,18 @@ impl GatewayUseCases for RecordingUseCases {
                 .await
         }
         .await;
-        self.record(&context, "activated", &result, |activated: &ActivatedDeployment| {
-            json!({
-                "revision_id": activated.revision_id().get(),
-                "content_hash": activated.content_hash().as_str(),
-                "previous_active_hash": activated.previous_active_hash().map(ContentHash::as_str),
-            })
-        })
+        self.record(
+            &context,
+            "activated",
+            &result,
+            |activated: &ActivatedDeployment| event::SnapshotActivated {
+                revision_id: activated.revision_id().get(),
+                content_hash: activated.content_hash().as_str().to_owned(),
+                previous_active_hash: activated
+                    .previous_active_hash()
+                    .map(|hash| hash.as_str().to_owned()),
+            },
+        )
         .await;
         let activated = result?;
         // The gateway already committed; a failure here only delays the
@@ -163,7 +174,7 @@ impl GatewayUseCases for RecordingUseCases {
 
     async fn abort(&self, context: CommandContext, prepare_token: String) -> Result<AbortOutcome> {
         let result = self.inner.abort(context.clone(), prepare_token).await;
-        self.record(&context, "aborted", &result, |_| json!({}))
+        self.record(&context, "aborted", &result, |_| event::SnapshotAborted {})
             .await;
         result
     }

@@ -21,6 +21,7 @@ use panel_contracts::config::v1::{self as wire, configuration_server::Configurat
 use panel_domain::RevisionId;
 use panel_engine::{validate_engine_ir, EngineCapability};
 use panel_errors::{Diagnostic, DiagnosticSeverity, PanelError, Result, ValidationReport};
+use panel_event_contracts::config::v1 as event;
 use panel_ir::{RuntimeSnapshot, IR_SCHEMA_VERSION};
 use panel_postgres::EventLog;
 use panel_service::trace_context;
@@ -197,38 +198,69 @@ impl ConfigurationService {
                 .map(|diagnostic| diagnostic.code.as_str().to_owned())
                 .collect::<Vec<_>>()
         };
-        let (event_type, data) = match result {
-            Ok((_, Applied::Activated(..) | Applied::AwaitingApproval(_))) => return,
-            Ok((draft, Applied::Checked(_))) => (
-                "config.apply.checked",
-                json!({ "version": draft.version, "valid": true }),
-            ),
-            Ok((draft, Applied::Rejected(report, revision))) => (
-                if request.dry_run {
-                    "config.apply.checked"
-                } else {
-                    "config.apply.rejected"
-                },
-                json!({
-                    "version": draft.version,
-                    "valid": false,
-                    "revision": revision,
-                    "codes": codes(report),
-                }),
-            ),
-            Err(error) => (
-                "config.apply.failed",
-                json!({
-                    "expected_version": request.expected_version,
-                    "dry_run": request.dry_run,
-                    "code": error.code.as_str(),
-                    "message": error.message,
-                }),
-            ),
-        };
-        self.events
-            .record_named(event_type, DRAFT, &context.scope(), context.actor(), &data)
-            .await;
+        let (scope, actor) = (context.scope(), context.actor());
+        match result {
+            Ok((_, Applied::Activated(..) | Applied::AwaitingApproval(_))) => {}
+            Ok((draft, Applied::Checked(_))) => {
+                self.events
+                    .record(
+                        DRAFT,
+                        &scope,
+                        actor,
+                        &event::ApplyChecked {
+                            version: draft.version,
+                            valid: true,
+                            revision: None,
+                            codes: Vec::new(),
+                        },
+                    )
+                    .await;
+            }
+            Ok((draft, Applied::Rejected(report, revision))) if request.dry_run => {
+                self.events
+                    .record(
+                        DRAFT,
+                        &scope,
+                        actor,
+                        &event::ApplyChecked {
+                            version: draft.version,
+                            valid: false,
+                            revision: *revision,
+                            codes: codes(report),
+                        },
+                    )
+                    .await;
+            }
+            Ok((draft, Applied::Rejected(report, revision))) => {
+                self.events
+                    .record(
+                        DRAFT,
+                        &scope,
+                        actor,
+                        &event::ApplyRejected {
+                            version: draft.version,
+                            revision: *revision,
+                            codes: codes(report),
+                        },
+                    )
+                    .await;
+            }
+            Err(error) => {
+                self.events
+                    .record(
+                        DRAFT,
+                        &scope,
+                        actor,
+                        &event::ApplyFailed {
+                            expected_version: request.expected_version,
+                            dry_run: request.dry_run,
+                            code: error.code.as_str().to_owned(),
+                            message: error.message.clone(),
+                        },
+                    )
+                    .await;
+            }
+        }
     }
 
     /// The model and files of the active revision; empty before the first.
@@ -710,12 +742,14 @@ impl Configuration for ConfigurationService {
                 let id = revision_id(&request.resource)?;
                 let revision = self.revisions.set_note(id, note).await?;
                 self.events
-                    .record_named(
-                        "config.revision.noted",
+                    .record(
                         ("revision", &id.to_string()),
                         &context.scope(),
                         context.actor(),
-                        &json!({ "revision": id, "note": note }),
+                        &event::RevisionNoted {
+                            revision: id,
+                            note: note.map(str::to_owned),
+                        },
                     )
                     .await;
                 let draft = self.drafts.load().await?;
@@ -792,17 +826,16 @@ impl Configuration for ConfigurationService {
         .await;
         if let Err(error) = &result {
             self.events
-                .record_named(
-                    "config.change.refused",
+                .record(
                     DRAFT,
                     &context.scope(),
                     context.actor(),
-                    &json!({
-                        "operation": request.operation,
-                        "resource": request.resource,
-                        "code": error.code.as_str(),
-                        "message": error.message,
-                    }),
+                    &event::ChangeRefused {
+                        operation: request.operation.clone(),
+                        resource: request.resource.clone(),
+                        code: error.code.as_str().to_owned(),
+                        message: error.message.clone(),
+                    },
                 )
                 .await;
         }

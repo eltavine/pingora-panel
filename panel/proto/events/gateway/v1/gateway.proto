@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+// The data of gateway events (ADR 0001, ADR 0010). Each message is the data
+// of one event type, named in its comment; events carry it as JSON in the
+// proto3 JSON mapping, with the field names below.
+package pingora.panel.events.gateway.v1;
+
+// `gateway.snapshot.prepared`
+message SnapshotPrepared {
+  uint64 revision_id = 1;
+  string content_hash = 2;
+}
+
+// `gateway.snapshot.activated`
+message SnapshotActivated {
+  uint64 revision_id = 1;
+  string content_hash = 2;
+  optional string previous_active_hash = 3;
+}
+
+// `gateway.snapshot.aborted`
+message SnapshotAborted {}
+
+// `gateway.snapshot.refused`
+message SnapshotRefused {
+  // `prepared`, `activated` or `aborted`.
+  string operation = 1;
+  string code = 2;
+  string message = 3;
+}

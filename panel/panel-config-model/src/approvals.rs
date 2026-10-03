@@ -43,6 +43,15 @@ pub enum Risk {
     High,
 }
 
+impl Risk {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::High => "high",
+        }
+    }
+}
+
 const fn one() -> u32 {
     1
 }

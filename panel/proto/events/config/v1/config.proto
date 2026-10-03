@@ -1,0 +1,170 @@
+syntax = "proto3";
+
+// The data of configuration events (ADR 0011, ADR 0012, ADR 0019). Each
+// message is the data of one event type, named in its comment; events carry
+// it as JSON in the proto3 JSON mapping, with the field names below.
+package pingora.panel.events.config.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// `config.draft.changed`
+message DraftChanged {
+  uint64 version = 1;
+  string operation = 2;
+  string resource = 3;
+}
+
+// `config.draft.applied`
+message DraftApplied {
+  uint64 version = 1;
+  uint64 revision = 2;
+  optional string note = 3;
+}
+
+// `config.apply.checked`: a check, or an apply that only checked.
+message ApplyChecked {
+  uint64 version = 1;
+  bool valid = 2;
+  // The revision a failed check was recorded as.
+  optional uint64 revision = 3;
+  repeated string codes = 4;
+}
+
+// `config.apply.rejected`
+message ApplyRejected {
+  uint64 version = 1;
+  optional uint64 revision = 2;
+  repeated string codes = 3;
+}
+
+// `config.apply.failed`
+message ApplyFailed {
+  uint64 expected_version = 1;
+  bool dry_run = 2;
+  string code = 3;
+  string message = 4;
+}
+
+// `config.revision.noted`
+message RevisionNoted {
+  uint64 revision = 1;
+  optional string note = 2;
+}
+
+// `config.change.refused`
+message ChangeRefused {
+  string operation = 1;
+  string resource = 2;
+  string code = 3;
+  string message = 4;
+}
+
+// Recurring periods: each opens at an occurrence of an RFC 5545 recurrence
+// and lasts `minutes`.
+message Window {
+  string recurrence = 1;
+  uint32 minutes = 2;
+}
+
+// `config.approval_policy.created`
+message ApprovalPolicyCreated {
+  string id = 1;
+  uint64 version = 2;
+  string description = 3;
+  repeated string resources = 4;
+  repeated string site_tags = 5;
+  // `low` or `high`.
+  string min_risk = 6;
+  repeated Window windows = 7;
+  uint32 approvals = 8;
+  uint32 valid_minutes = 9;
+  bool enabled = 10;
+}
+
+// `config.approval_policy.updated`
+message ApprovalPolicyUpdated {
+  string id = 1;
+  uint64 version = 2;
+  string description = 3;
+  repeated string resources = 4;
+  repeated string site_tags = 5;
+  string min_risk = 6;
+  repeated Window windows = 7;
+  uint32 approvals = 8;
+  uint32 valid_minutes = 9;
+  bool enabled = 10;
+}
+
+// `config.approval_policy.deleted`
+message ApprovalPolicyDeleted {
+  string policy = 1;
+}
+
+// A policy at the version a request was opened under.
+message PolicyVersion {
+  string id = 1;
+  uint64 version = 2;
+}
+
+// A resource a change adds, changes or removes.
+message PlannedChange {
+  // Such as `sites/<id>`.
+  string resource = 1;
+  // `added`, `changed` or `removed`.
+  string change = 2;
+}
+
+// `config.approval.requested`
+message ApprovalRequested {
+  string request = 1;
+  uint64 draft_version = 2;
+  string content_hash = 3;
+  string risk = 4;
+  repeated PolicyVersion policies = 5;
+  uint32 required = 6;
+  repeated PlannedChange changes = 7;
+}
+
+// `config.approval.approved`
+message ApprovalApproved {
+  string request = 1;
+  google.protobuf.Timestamp valid_until = 2;
+  // The approval was the last one the request needed.
+  bool approved = 3;
+}
+
+// `config.approval.rejected`
+message ApprovalRejected {
+  string request = 1;
+  optional string reason = 2;
+}
+
+// `config.approval.withdrawn`
+message ApprovalWithdrawn {
+  string request = 1;
+}
+
+// `config.approval.outdated`: a newer request for the same draft replaced it.
+message ApprovalOutdated {
+  string request = 1;
+}
+
+// `config.approval.revoked`
+message ApprovalRevoked {
+  string request = 1;
+}
+
+// `config.approval.applied`
+message ApprovalApplied {
+  string request = 1;
+  uint64 revision = 2;
+}
+
+// `config.approval.bypassed`
+message ApprovalBypassed {
+  string reason = 1;
+  string incident = 2;
+  string content_hash = 3;
+  // The policies that covered the change.
+  repeated string policies = 4;
+}

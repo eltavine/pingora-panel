@@ -8,18 +8,24 @@
 
 use panel_events::{EventData, PROTOBUF_TYPE_URL_PREFIX};
 
-pub mod identity {
-    #[allow(clippy::all)]
-    pub mod v1 {
-        include!(concat!(
-            env!("OUT_DIR"),
-            "/pingora.panel.events.identity.v1.rs"
-        ));
-        include!(concat!(
-            env!("OUT_DIR"),
-            "/pingora.panel.events.identity.v1.serde.rs"
-        ));
-    }
+macro_rules! packages {
+    ($($module:ident => $package:literal,)*) => {
+        $(
+            pub mod $module {
+                #[allow(clippy::all)]
+                pub mod v1 {
+                    include!(concat!(env!("OUT_DIR"), "/", $package, ".rs"));
+                    include!(concat!(env!("OUT_DIR"), "/", $package, ".serde.rs"));
+                }
+            }
+        )*
+    };
+}
+
+packages! {
+    config => "pingora.panel.events.config.v1",
+    gateway => "pingora.panel.events.gateway.v1",
+    identity => "pingora.panel.events.identity.v1",
 }
 
 macro_rules! event_types {
@@ -43,6 +49,28 @@ macro_rules! event_types {
 }
 
 event_types! {
+    config::v1::DraftChanged => "config.draft.changed",
+    config::v1::DraftApplied => "config.draft.applied",
+    config::v1::ApplyChecked => "config.apply.checked",
+    config::v1::ApplyRejected => "config.apply.rejected",
+    config::v1::ApplyFailed => "config.apply.failed",
+    config::v1::RevisionNoted => "config.revision.noted",
+    config::v1::ChangeRefused => "config.change.refused",
+    config::v1::ApprovalPolicyCreated => "config.approval_policy.created",
+    config::v1::ApprovalPolicyUpdated => "config.approval_policy.updated",
+    config::v1::ApprovalPolicyDeleted => "config.approval_policy.deleted",
+    config::v1::ApprovalRequested => "config.approval.requested",
+    config::v1::ApprovalApproved => "config.approval.approved",
+    config::v1::ApprovalRejected => "config.approval.rejected",
+    config::v1::ApprovalWithdrawn => "config.approval.withdrawn",
+    config::v1::ApprovalOutdated => "config.approval.outdated",
+    config::v1::ApprovalRevoked => "config.approval.revoked",
+    config::v1::ApprovalApplied => "config.approval.applied",
+    config::v1::ApprovalBypassed => "config.approval.bypassed",
+    gateway::v1::SnapshotPrepared => "gateway.snapshot.prepared",
+    gateway::v1::SnapshotActivated => "gateway.snapshot.activated",
+    gateway::v1::SnapshotAborted => "gateway.snapshot.aborted",
+    gateway::v1::SnapshotRefused => "gateway.snapshot.refused",
     identity::v1::AccountCreated => "identity.account.created",
     identity::v1::AccountUpdated => "identity.account.updated",
     identity::v1::PasswordChanged => "identity.password.changed",
