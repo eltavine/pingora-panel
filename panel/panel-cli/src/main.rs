@@ -72,6 +72,9 @@ enum Command {
     /// Configurations applied or attempted, their files and notes.
     #[command(subcommand)]
     Revision(commands::revisions::RevisionCommand),
+    /// Every change and every refused or failed attempt.
+    #[command(subcommand)]
+    Audit(commands::audit::AuditCommand),
     /// The running gateway.
     #[command(subcommand)]
     Gateway(commands::gateway::GatewayCommand),
@@ -115,6 +118,7 @@ async fn main() -> ExitCode {
             }
             Command::Config(command) => commands::config::run(&api, &output, command).await,
             Command::Revision(command) => commands::revisions::run(&api, &output, command).await,
+            Command::Audit(command) => commands::audit::run(&api, &output, command).await,
             Command::Gateway(command) => commands::gateway::gateway(&api, &output, command).await,
             Command::Completion { .. } => Ok(()),
         }
@@ -208,6 +212,19 @@ mod tests {
             vec!["ppanel", "revision", "show", "4", "--file", "main.conf"],
             vec!["ppanel", "revision", "diff", "4", "--against", "active"],
             vec!["ppanel", "revision", "note", "4", ""],
+            vec![
+                "ppanel",
+                "audit",
+                "list",
+                "--type",
+                "config.",
+                "--correlation-id",
+                "req-1",
+                "--since",
+                "2026-10-01T00:00:00Z",
+            ],
+            vec!["ppanel", "audit", "show", "12"],
+            vec!["ppanel", "audit", "verify", "--from", "1"],
             vec![
                 "ppanel",
                 "listener",

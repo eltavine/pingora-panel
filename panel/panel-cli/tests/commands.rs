@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
-//! `ppanel config` and `ppanel revision` against a stand-in API that records
-//! what the command line sends.
+//! `ppanel config`, `ppanel revision` and `ppanel audit` against a stand-in
+//! API that records what the command line sends.
 
 use axum::{
     extract::State,
@@ -20,6 +20,7 @@ use std::{
 struct Request {
     method: Method,
     path: String,
+    query: String,
     if_match: Option<String>,
     body: Value,
 }
@@ -44,6 +45,7 @@ async fn api(
     log.lock().unwrap().push(Request {
         method: method.clone(),
         path: uri.path().to_owned(),
+        query: uri.query().unwrap_or_default().to_owned(),
         if_match: headers
             .get("if-match")
             .map(|value| value.to_str().unwrap().to_owned()),
@@ -103,6 +105,31 @@ async fn api(
         ("GET", "/api/v1/config/plan") | ("GET", "/api/v1/revisions/3/diff") => {
             Json(changes).into_response()
         }
+        ("GET", "/api/v1/audit-events") => Json(json!({
+            "items": [{
+                "sequence": 2, "occurred_at": "2026-10-03T10:00:00.000001Z", "actor_id": "ops",
+                "event_type": "config.draft.applied", "subject": "configuration/draft",
+                "correlation_id": "req-1"
+            }],
+            "next_before": null
+        }))
+        .into_response(),
+        ("GET", "/api/v1/audit-events/verify") => {
+            if uri.query().unwrap_or_default().contains("from=9") {
+                Json(json!({"intact": false, "checked": 0, "first_mismatch": 9,
+                            "head_sequence": 12, "head_hash": "ab"}))
+                .into_response()
+            } else {
+                Json(json!({"intact": true, "checked": 12, "first_mismatch": null,
+                            "head_sequence": 12, "head_hash": "ab"}))
+                .into_response()
+            }
+        }
+        ("GET", "/api/v1/audit-events/2") => Json(json!({
+            "sequence": 2, "event_type": "config.draft.applied", "event_version": 1,
+            "actor_id": "ops", "actor_type": "user", "data": {"revision": 1}
+        }))
+        .into_response(),
         ("GET", "/api/v1/config/draft") => {
             Json(json!({"version": 6, "pending": true})).into_response()
         }
@@ -281,6 +308,38 @@ fn syntax_trees_and_snapshots_are_printed() {
     let snapshot = stub.ppanel(&["config", "ir"]);
     let snapshot: Value = serde_json::from_slice(&snapshot.stdout).unwrap();
     assert_eq!(snapshot["schema_version"], "panel.ir.v1");
+}
+
+#[test]
+fn audit_events_are_listed_shown_and_verified() {
+    let stub = Stub::start();
+    let listed = stub.ppanel(&[
+        "audit",
+        "list",
+        "--type",
+        "config.",
+        "--correlation-id",
+        "req-1",
+        "--limit",
+        "5",
+    ]);
+    assert!(
+        stdout(&listed).contains("config.draft.applied"),
+        "{}",
+        stdout(&listed)
+    );
+    assert_eq!(
+        stub.requests("GET", "/api/v1/audit-events")[0].query,
+        "limit=5&type=config.&correlation_id=req-1"
+    );
+    let shown = stub.ppanel(&["audit", "show", "2"]);
+    assert!(stdout(&shown).contains("ops (user)"));
+    assert!(stdout(&shown).contains("\"revision\": 1"));
+    let verified = stub.ppanel(&["audit", "verify"]);
+    assert!(stdout(&verified).starts_with("The audit trail is intact: 12 events checked"));
+    let tampered = stub.ppanel(&["audit", "verify", "--from", "9"]);
+    assert_eq!(tampered.status.code(), Some(1));
+    assert!(stderr(&tampered).contains("event 9 does not match its hash"));
 }
 
 #[test]

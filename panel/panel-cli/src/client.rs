@@ -24,14 +24,20 @@ pub(crate) enum Exit {
 #[derive(Debug)]
 pub(crate) enum CliError {
     Usage(String),
-    Api { status: StatusCode, problem: Value },
+    Api {
+        status: StatusCode,
+        problem: Value,
+    },
     Transport(String),
+    /// A check that ran and found a problem.
+    Failed(String),
 }
 
 impl CliError {
     pub fn exit(&self) -> ExitCode {
         let code = match self {
             Self::Usage(_) => 2,
+            Self::Failed(_) => Exit::Failure as u8,
             Self::Transport(_) => Exit::Unavailable as u8,
             Self::Api { status, .. } => {
                 (match status.as_u16() {
@@ -51,7 +57,7 @@ impl CliError {
 impl fmt::Display for CliError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Usage(message) => write!(formatter, "{message}"),
+            Self::Usage(message) | Self::Failed(message) => write!(formatter, "{message}"),
             Self::Transport(message) => write!(formatter, "cannot reach the API: {message}"),
             Self::Api { status, problem } => {
                 let detail = problem["detail"]
