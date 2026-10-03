@@ -354,6 +354,7 @@ mod tests {
             https_redirect: false,
             www_redirect: WwwRedirect::None,
             tls_profile_id: None,
+            hsts: None,
             group: None,
             tags: BTreeSet::new(),
             note: None,
@@ -436,6 +437,10 @@ mod tests {
                 certificate_secret_id: "main.crt".into(),
                 private_key_secret_id: "main.key".into(),
                 min_protocol: "TLSv1.2".into(),
+                max_protocol: None,
+                cipher_suites: Vec::new(),
+                session_resumption: true,
+                ocsp_stapling: false,
                 alpn: BTreeSet::new(),
             }],
             ..ConfigModel::default()

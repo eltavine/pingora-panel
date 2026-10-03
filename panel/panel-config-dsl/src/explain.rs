@@ -307,6 +307,7 @@ impl<'a> Explainer<'a> {
             ("enabled", "on"),
             ("listen", all.as_str()),
             ("https_redirect", "off"),
+            ("hsts", "off"),
             ("www_redirect", "off"),
         ] {
             self.or_default(&mut settings, &resource, Context::Server, directive, value);
@@ -524,13 +525,20 @@ impl<'a> Explainer<'a> {
     fn tls_profile(&self, profile: &TlsProfile) -> Vec<Setting> {
         let resource = format!("tls-profiles/{}", profile.id);
         let mut settings = self.own(&resource, Context::TlsProfile, &[]);
-        self.or_default(
-            &mut settings,
-            &resource,
-            Context::TlsProfile,
-            "min_protocol",
-            "TLSv1.2",
-        );
+        for (directive, value) in [
+            ("min_protocol", "TLSv1.2"),
+            ("max_protocol", "TLSv1.3"),
+            ("session_resumption", "on"),
+            ("ocsp_stapling", "off"),
+        ] {
+            self.or_default(
+                &mut settings,
+                &resource,
+                Context::TlsProfile,
+                directive,
+                value,
+            );
+        }
         self.constants(&mut settings, &resource);
         settings
     }

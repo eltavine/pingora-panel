@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use panel_domain::{CertificateId, ContentHash, NormalizedHost};
 use panel_ir::{
     ActiveHealthCheck, ListenerProtocols, LoadBalancingPolicy, PassiveHealthPolicy,
-    UpstreamConnectionPolicy, UpstreamTlsPolicy, WwwRedirect,
+    StrictTransportSecurity, UpstreamConnectionPolicy, UpstreamTlsPolicy, WwwRedirect,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -49,6 +49,19 @@ pub struct TlsProfile {
     /// when `certificate_id` names the certificate.
     pub private_key_secret_id: String,
     pub min_protocol: String,
+    /// The newest TLS version accepted; the newest supported when absent.
+    /// Like the cipher suites and session resumption, it applies to listeners
+    /// that use this profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_protocol: Option<String>,
+    /// IANA names of the cipher suites accepted; the defaults when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cipher_suites: Vec<String>,
+    #[serde(default = "enabled")]
+    pub session_resumption: bool,
+    /// Reserved: recorded, but OCSP responses are not stapled yet.
+    #[serde(default)]
+    pub ocsp_stapling: bool,
     /// ALPN protocol IDs a listener using this profile offers, narrowing the
     /// listener's enabled protocols; empty offers all of them. A profile chosen
     /// by SNI for a domain does not change its listener's offer.
@@ -56,6 +69,11 @@ pub struct TlsProfile {
 }
 
 impl TlsProfile {
+    /// Whether listeners using it need settings beyond a minimum version.
+    pub fn narrows_listener(&self) -> bool {
+        self.max_protocol.is_some() || !self.cipher_suites.is_empty() || !self.session_resumption
+    }
+
     /// The files the gateway reads the chain and key from: those delivered
     /// for its certificate, or those it names.
     pub fn secret_files(&self) -> (String, String) {
@@ -75,9 +93,9 @@ impl TlsProfile {
             certificate_secret_id,
             private_key_secret_id,
             min_protocol: self.min_protocol.clone(),
-            max_protocol: None,
-            cipher_suites: Vec::new(),
-            session_resumption: true,
+            max_protocol: self.max_protocol.clone(),
+            cipher_suites: self.cipher_suites.clone(),
+            session_resumption: self.session_resumption,
             alpn: self.alpn.clone(),
         }
     }
@@ -104,6 +122,14 @@ pub struct TlsProfileInput {
     #[serde(default = "tls12")]
     pub min_protocol: String,
     #[serde(default)]
+    pub max_protocol: Option<String>,
+    #[serde(default)]
+    pub cipher_suites: Vec<String>,
+    #[serde(default = "enabled")]
+    pub session_resumption: bool,
+    #[serde(default)]
+    pub ocsp_stapling: bool,
+    #[serde(default)]
     pub alpn: BTreeSet<String>,
 }
 
@@ -115,6 +141,10 @@ impl From<TlsProfileInput> for TlsProfile {
             certificate_secret_id: input.certificate_secret_id,
             private_key_secret_id: input.private_key_secret_id,
             min_protocol: input.min_protocol,
+            max_protocol: input.max_protocol,
+            cipher_suites: input.cipher_suites,
+            session_resumption: input.session_resumption,
+            ocsp_stapling: input.ocsp_stapling,
             alpn: input.alpn,
         }
     }
@@ -168,6 +198,9 @@ pub struct Site {
     /// Certificate for domains that do not name their own.
     #[serde(default)]
     pub tls_profile_id: Option<String>,
+    /// Sent with HTTPS responses for the site's hosts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hsts: Option<StrictTransportSecurity>,
     #[serde(default)]
     pub group: Option<String>,
     #[serde(default)]

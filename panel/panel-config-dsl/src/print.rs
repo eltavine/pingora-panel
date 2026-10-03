@@ -68,6 +68,21 @@ pub fn tls_profile(profile: &TlsProfile) -> Directive {
             [profile.min_protocol.clone()],
         ));
     }
+    if let Some(max) = &profile.max_protocol {
+        body.push(Directive::simple("max_protocol", [max.clone()]));
+    }
+    if !profile.cipher_suites.is_empty() {
+        body.push(Directive::simple(
+            "ciphers",
+            profile.cipher_suites.iter().cloned(),
+        ));
+    }
+    if !profile.session_resumption {
+        body.push(Directive::simple("session_resumption", ["off"]));
+    }
+    if profile.ocsp_stapling {
+        body.push(Directive::simple("ocsp_stapling", ["on"]));
+    }
     if !profile.alpn.is_empty() {
         body.push(Directive::simple("alpn", profile.alpn.iter().cloned()));
     }
@@ -376,6 +391,19 @@ pub fn server(site: &Site, model: &ConfigModel) -> Directive {
     }
     if site.https_redirect {
         body.push(Directive::simple("https_redirect", ["on"]));
+    }
+    if let Some(hsts) = &site.hsts {
+        let mut args = vec![format!(
+            "max_age={}",
+            print_duration_ms(hsts.max_age_seconds.saturating_mul(1_000))
+        )];
+        if hsts.include_subdomains {
+            args.push("include_subdomains".into());
+        }
+        if hsts.preload {
+            args.push("preload".into());
+        }
+        body.push(Directive::simple("hsts", args));
     }
     match site.www_redirect {
         WwwRedirect::None => {}

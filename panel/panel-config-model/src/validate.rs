@@ -6,6 +6,7 @@ use crate::model::{Action, ConfigModel, MatchKind, Route, Site};
 use panel_domain::EndpointAddress;
 use panel_errors::{Diagnostic, ErrorCode};
 use panel_ir::template::parse_template;
+use panel_ir::tls::{suite_version, SuiteVersion, PROTOCOLS};
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     net::SocketAddr,
@@ -110,6 +111,14 @@ pub fn validate(model: &ConfigModel) -> Vec<Diagnostic> {
             report.error(&resource, format!("TLS profile {profile} does not exist"));
         }
         validate_domains(site, &resource, &tls_profiles, &mut hosts, &mut report);
+        if site.hsts.is_some_and(|hsts| {
+            hsts.preload && (!hsts.include_subdomains || hsts.max_age_seconds < PRELOAD_MAX_AGE)
+        }) {
+            report.error(
+                &resource,
+                "HSTS preloading needs includeSubDomains and a max-age of at least a year (31536000 seconds)",
+            );
+        }
         check_action(&site.action, &resource, &upstreams, &mut report);
         for route in &site.routes {
             if !route_ids.insert(route.id) {
@@ -166,6 +175,7 @@ fn validate_tls_profiles<'a>(model: &'a ConfigModel, report: &mut Report) -> BTr
         if !matches!(profile.min_protocol.as_str(), "TLSv1.2" | "TLSv1.3") {
             report.error(&resource, "minimum protocol must be TLSv1.2 or TLSv1.3");
         }
+        validate_tls_settings(profile, &resource, report);
     }
     ids
 }
@@ -472,6 +482,63 @@ fn check_text(
 
 /// Files of certificates of the inventory in the gateway's secret directory.
 const DELIVERED_PREFIX: &str = "cert-";
+/// The shortest max-age browsers' preload lists accept.
+const PRELOAD_MAX_AGE: u64 = 31_536_000;
+
+/// The protocol range, cipher suites and their fit for that range.
+fn validate_tls_settings(profile: &crate::TlsProfile, resource: &str, report: &mut Report) {
+    let index = |name: &str| PROTOCOLS.iter().position(|known| *known == name);
+    let newest = PROTOCOLS.len() - 1;
+    let max = match &profile.max_protocol {
+        None => Some(newest),
+        Some(name) => {
+            let found = index(name);
+            if found.is_none() {
+                report.error(resource, "maximum protocol must be TLSv1.2 or TLSv1.3");
+            }
+            found
+        }
+    };
+    let range = match (index(&profile.min_protocol), max) {
+        (Some(min), Some(max)) if max < min => {
+            report.error(
+                resource,
+                "the maximum TLS version is older than the minimum",
+            );
+            None
+        }
+        (Some(min), Some(max)) => Some(min..=max),
+        _ => None,
+    };
+    let mut seen = BTreeSet::new();
+    for suite in &profile.cipher_suites {
+        if suite_version(suite).is_none() {
+            report.error(resource, format!("unknown cipher suite {suite:?}"));
+        } else if !seen.insert(suite.as_str()) {
+            report.error(resource, format!("cipher suite {suite} is listed twice"));
+        }
+    }
+    if profile.cipher_suites.is_empty() {
+        return;
+    }
+    for version in range.into_iter().flatten() {
+        let needed = if version == 0 {
+            SuiteVersion::Tls12
+        } else {
+            SuiteVersion::Tls13
+        };
+        if !profile
+            .cipher_suites
+            .iter()
+            .any(|suite| suite_version(suite) == Some(needed))
+        {
+            report.error(
+                resource,
+                format!("no listed cipher suite works with {}", PROTOCOLS[version]),
+            );
+        }
+    }
+}
 
 pub(crate) fn is_token(value: &str) -> bool {
     !value.is_empty()
@@ -487,7 +554,7 @@ mod tests {
     use crate::model::{Domain, Listener, Upstream, UpstreamNode};
     use chrono::Utc;
     use panel_domain::NormalizedHost;
-    use panel_ir::{ListenerProtocols, LoadBalancingPolicy, WwwRedirect};
+    use panel_ir::{ListenerProtocols, LoadBalancingPolicy, StrictTransportSecurity, WwwRedirect};
 
     pub(crate) fn site(name: &str, hosts: &[&str], action: Action) -> Site {
         Site {
@@ -510,6 +577,7 @@ mod tests {
             https_redirect: false,
             www_redirect: WwwRedirect::None,
             tls_profile_id: None,
+            hsts: None,
             group: None,
             tags: BTreeSet::new(),
             note: None,
@@ -577,6 +645,10 @@ mod tests {
             certificate_secret_id: files.0.into(),
             private_key_secret_id: files.1.into(),
             min_protocol: "TLSv1.2".into(),
+            max_protocol: None,
+            cipher_suites: Vec::new(),
+            session_resumption: true,
+            ocsp_stapling: false,
             alpn: BTreeSet::new(),
         }
     }
@@ -624,6 +696,77 @@ mod tests {
                 "{expected}: {found:?}"
             );
         }
+    }
+
+    #[test]
+    fn tls_settings_fit_their_protocol_range() {
+        let mut capped = profile("capped", None, ("site.pem", "site.key"));
+        capped.max_protocol = Some("TLSv1.2".into());
+        capped.cipher_suites = vec!["TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256".into()];
+        let model = ConfigModel {
+            tls_profiles: vec![capped.clone()],
+            ..ConfigModel::default()
+        };
+        assert!(validate(&model).is_empty(), "{:?}", messages(&model));
+
+        let mut inverted = capped.clone();
+        inverted.id = "inverted".into();
+        inverted.min_protocol = "TLSv1.3".into();
+        let mut unknown = capped;
+        unknown.id = "unknown".into();
+        unknown.max_protocol = None;
+        unknown.cipher_suites = vec![
+            "RC4_MD5".into(),
+            "TLS13_AES_128_GCM_SHA256".into(),
+            "TLS13_AES_128_GCM_SHA256".into(),
+        ];
+        let model = ConfigModel {
+            tls_profiles: vec![inverted, unknown],
+            ..ConfigModel::default()
+        };
+        let found = messages(&model);
+        for expected in [
+            "older than the minimum",
+            "unknown cipher suite \"RC4_MD5\"",
+            "is listed twice",
+            "no listed cipher suite works with TLSv1.2",
+        ] {
+            assert!(
+                found.iter().any(|message| message.contains(expected)),
+                "{expected}: {found:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn hsts_preloading_needs_subdomains_and_a_year() {
+        let upstream = upstream();
+        let mut shop = site(
+            "shop",
+            &["shop.example.com"],
+            Action::Proxy {
+                upstream_id: upstream.id,
+            },
+        );
+        shop.hsts = Some(StrictTransportSecurity {
+            max_age_seconds: 300,
+            include_subdomains: false,
+            preload: true,
+        });
+        let mut model = ConfigModel {
+            sites: vec![shop],
+            upstreams: vec![upstream],
+            ..ConfigModel::default()
+        };
+        assert!(messages(&model)
+            .iter()
+            .any(|message| message.contains("HSTS preloading")));
+        model.sites[0].hsts = Some(StrictTransportSecurity {
+            max_age_seconds: 31_536_000,
+            include_subdomains: true,
+            preload: true,
+        });
+        assert!(validate(&model).is_empty(), "{:?}", messages(&model));
     }
 
     #[test]

@@ -17,9 +17,11 @@ use panel_config_model::{
 use panel_domain::{CertificateId, NormalizedHost};
 use panel_dsl::{Argument, Body, Directive, Document, LineIndex, Span};
 use panel_errors::{Diagnostic, DiagnosticSeverity};
+use panel_ir::tls::{suite_version, CIPHER_SUITES, PROTOCOLS};
 use panel_ir::{
     ActiveHealthCheck, HealthCheckProtocol, ListenerProtocols, LoadBalancingPolicy,
-    PassiveHealthPolicy, UpstreamConnectionPolicy, UpstreamTlsPolicy, WwwRedirect,
+    PassiveHealthPolicy, StrictTransportSecurity, UpstreamConnectionPolicy, UpstreamTlsPolicy,
+    WwwRedirect,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -860,6 +862,10 @@ impl<'a> Lowerer<'a> {
             certificate_secret_id: String::new(),
             private_key_secret_id: String::new(),
             min_protocol: "TLSv1.2".into(),
+            max_protocol: None,
+            cipher_suites: Vec::new(),
+            session_resumption: true,
+            ocsp_stapling: false,
             alpn: BTreeSet::new(),
         };
         let Some(block) = directive.block() else {
@@ -896,6 +902,57 @@ impl<'a> Lowerer<'a> {
                         "key" => {
                             profile.private_key_secret_id =
                                 lowerer.value(file, arg).unwrap_or_default()
+                        }
+                        "max_protocol" => {
+                            if let Some(value) = lowerer.value(file, arg) {
+                                if PROTOCOLS.contains(&value.as_str()) {
+                                    profile.max_protocol = Some(value);
+                                } else {
+                                    lowerer.error(
+                                        file,
+                                        arg.span,
+                                        codes::TYPE,
+                                        format!("{value:?} is not TLSv1.2 or TLSv1.3"),
+                                    );
+                                }
+                            }
+                        }
+                        "ciphers" => {
+                            for arg in &directive.args {
+                                if suite_version(&arg.value).is_some() {
+                                    profile.cipher_suites.push(arg.value.clone());
+                                } else {
+                                    lowerer.error_with_help(
+                                        file,
+                                        arg.span,
+                                        codes::TYPE,
+                                        format!("{:?} is not a cipher suite", arg.value),
+                                        format!(
+                                            "expected one of {}",
+                                            CIPHER_SUITES
+                                                .iter()
+                                                .map(|(name, _)| *name)
+                                                .collect::<Vec<_>>()
+                                                .join(", ")
+                                        ),
+                                    );
+                                }
+                            }
+                        }
+                        "session_resumption" => {
+                            profile.session_resumption =
+                                lowerer.bool_arg(file, arg).unwrap_or(true)
+                        }
+                        "ocsp_stapling" => {
+                            profile.ocsp_stapling =
+                                lowerer.bool_arg(file, arg).unwrap_or_default();
+                            if profile.ocsp_stapling {
+                                let diagnostic = Diagnostic::warning(
+                                    codes::NO_EFFECT,
+                                    "OCSP stapling is reserved: it is recorded, but no OCSP responses are stapled yet",
+                                );
+                                lowerer.report(diagnostic, file, directive.span);
+                            }
                         }
                         "min_protocol" => {
                             if let Some(value) = lowerer.value(file, arg) {
@@ -1261,6 +1318,50 @@ impl<'a> Lowerer<'a> {
         parsed
     }
 
+    /// `hsts max_age=<duration> [include_subdomains] [preload];` or `hsts off;`.
+    fn hsts(&mut self, file: &str, directive: &Directive) -> Option<StrictTransportSecurity> {
+        let params = Params::split(&directive.args);
+        if params.named.is_empty()
+            && matches!(params.positional.as_slice(), [arg] if arg.value == "off")
+        {
+            return None;
+        }
+        self.only_params(file, &params, &["max_age"]);
+        let mut policy = StrictTransportSecurity {
+            max_age_seconds: 0,
+            include_subdomains: false,
+            preload: false,
+        };
+        match params.named.get("max_age") {
+            Some((value, arg)) => {
+                policy.max_age_seconds = self.duration(file, arg, value)? / 1_000;
+            }
+            None => {
+                self.error(
+                    file,
+                    directive.span,
+                    codes::ARGUMENTS,
+                    "hsts needs max_age=, such as max_age=365d",
+                );
+                return None;
+            }
+        }
+        for flag in &params.positional {
+            match flag.value.as_str() {
+                "include_subdomains" => policy.include_subdomains = true,
+                "preload" => policy.preload = true,
+                other => self.error_with_help(
+                    file,
+                    flag.span,
+                    codes::ARGUMENTS,
+                    format!("unknown hsts flag {other:?}"),
+                    "expected include_subdomains or preload",
+                ),
+            }
+        }
+        Some(policy)
+    }
+
     /// Reports parameters and positional arguments other than `allowed`.
     fn only_params(&mut self, file: &str, params: &Params<'_>, allowed: &[&str]) {
         for arg in &params.repeated {
@@ -1471,6 +1572,7 @@ impl<'a> Lowerer<'a> {
                 https_redirect: false,
                 www_redirect: WwwRedirect::None,
                 tls_profile_id: None,
+                hsts: None,
                 group: None,
                 tags: BTreeSet::new(),
                 note: None,
@@ -1651,6 +1753,7 @@ impl<'a> Lowerer<'a> {
                     .and_then(|arg| self.bool_arg(file, arg))
                     .unwrap_or_default()
             }
+            "hsts" => draft.site.hsts = self.hsts(file, directive),
             "www_redirect" => {
                 let Some(arg) = arg else { return };
                 draft.site.www_redirect = match arg.value.as_str() {

@@ -14,8 +14,8 @@ use chrono::{DateTime, Utc};
 use panel_domain::NormalizedHost;
 use panel_errors::{Diagnostic, PanelError, Result};
 use panel_ir::{
-    ActiveHealthCheck, LoadBalancingPolicy, PassiveHealthPolicy, UpstreamConnectionPolicy,
-    UpstreamTlsPolicy, WwwRedirect,
+    ActiveHealthCheck, LoadBalancingPolicy, PassiveHealthPolicy, StrictTransportSecurity,
+    UpstreamConnectionPolicy, UpstreamTlsPolicy, WwwRedirect,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
@@ -50,6 +50,9 @@ pub struct SiteInput {
     pub www_redirect: WwwRedirect,
     #[serde(default)]
     pub tls_profile_id: Option<String>,
+    /// Sent with HTTPS responses for the site's hosts.
+    #[serde(default)]
+    pub hsts: Option<StrictTransportSecurity>,
     #[serde(default)]
     pub group: Option<String>,
     #[serde(default)]
@@ -254,6 +257,7 @@ impl ConfigModel {
             https_redirect: input.https_redirect,
             www_redirect: input.www_redirect,
             tls_profile_id: input.tls_profile_id,
+            hsts: input.hsts,
             group: input.group,
             tags: input.tags,
             note: input.note,
@@ -279,6 +283,7 @@ impl ConfigModel {
             https_redirect: input.https_redirect,
             www_redirect: input.www_redirect,
             tls_profile_id: input.tls_profile_id,
+            hsts: input.hsts,
             group: input.group,
             tags: input.tags,
             note: input.note,
@@ -859,6 +864,7 @@ mod tests {
             https_redirect: false,
             www_redirect: WwwRedirect::None,
             tls_profile_id: None,
+            hsts: None,
             group: None,
             tags: BTreeSet::new(),
             note: None,

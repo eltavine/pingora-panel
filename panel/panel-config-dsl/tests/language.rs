@@ -311,6 +311,65 @@ fn tls_profiles_name_certificates_of_the_inventory() {
 }
 
 #[test]
+fn tls_settings_and_hsts_read_and_print() {
+    let text = "language_version 1;\nhttp {\n    tls_profile edge {\n        certificate_id example.com;\n        max_protocol TLSv1.2;\n        ciphers TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256;\n        session_resumption off;\n    }\n    server shop {\n        server_name shop.example;\n        tls_profile edge;\n        hsts max_age=365d include_subdomains preload;\n        respond 200 \"body=ok\";\n    }\n}\n";
+    let lowered = read(text);
+    assert!(lowered.is_valid(), "{:#?}", lowered.diagnostics);
+    let profile = &lowered.model.tls_profiles[0];
+    assert_eq!(profile.max_protocol.as_deref(), Some("TLSv1.2"));
+    assert_eq!(profile.cipher_suites.len(), 2);
+    assert!(!profile.session_resumption);
+    let hsts = lowered.model.sites[0].hsts.unwrap();
+    assert_eq!(
+        (hsts.max_age_seconds, hsts.include_subdomains, hsts.preload),
+        (31_536_000, true, true)
+    );
+    let printed = print(&lowered.model);
+    for line in [
+        "        max_protocol TLSv1.2;\n",
+        "        ciphers TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256;\n",
+        "        session_resumption off;\n",
+        "        hsts max_age=365d include_subdomains preload;\n",
+    ] {
+        assert!(printed.contains(line), "{line}{printed}");
+    }
+    assert!(same_configuration(&lowered.model, &read(&printed).model));
+
+    for (from, to, code, message) in [
+        (
+            "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+            "RC4_MD5",
+            codes::TYPE,
+            "is not a cipher suite",
+        ),
+        ("max_age=365d ", "", codes::ARGUMENTS, "hsts needs max_age="),
+        (
+            "session_resumption off",
+            "ocsp_stapling on",
+            codes::NO_EFFECT,
+            "OCSP stapling is reserved",
+        ),
+        (
+            "max_protocol TLSv1.2",
+            "max_protocol TLSv1.1",
+            codes::TYPE,
+            "is not TLSv1.2 or TLSv1.3",
+        ),
+    ] {
+        let lowered = read(&text.replace(from, to));
+        assert!(
+            lowered
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code.as_str() == code
+                    && diagnostic.message.contains(message)),
+            "{message}: {:#?}",
+            lowered.diagnostics
+        );
+    }
+}
+
+#[test]
 fn literal_dollars_survive_a_round_trip() {
     let text = "language_version 1;\nhttp {\n    upstream app {\n        server 10.0.0.1:80;\n    }\n    server s {\n        server_name s.example;\n        note \"uses $HOME\";\n        respond 200 \"body=cost $$5 or $$amount\";\n    }\n}\n";
     let lowered = read(text);

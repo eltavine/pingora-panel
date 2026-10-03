@@ -171,6 +171,7 @@ mod tests {
             https_redirect: false,
             www_redirect: Default::default(),
             tls_profile_id: None,
+            hsts: None,
             group: None,
             tags: Default::default(),
             note: None,

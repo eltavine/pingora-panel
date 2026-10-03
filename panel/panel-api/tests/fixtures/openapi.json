@@ -40537,6 +40537,17 @@
               "null"
             ]
           },
+          "hsts": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StrictTransportSecurity",
+                "description": "Sent with HTTPS responses for the site's hosts."
+              }
+            ]
+          },
           "https_redirect": {
             "type": "boolean"
           },
@@ -40651,6 +40662,17 @@
             "type": [
               "string",
               "null"
+            ]
+          },
+          "hsts": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StrictTransportSecurity",
+                "description": "Sent with HTTPS responses for the site's hosts."
+              }
             ]
           },
           "https_redirect": {
@@ -40868,6 +40890,29 @@
           }
         }
       },
+      "StrictTransportSecurity": {
+        "type": "object",
+        "description": "An HTTP Strict Transport Security policy (RFC 6797 §6.1).",
+        "required": [
+          "max_age_seconds"
+        ],
+        "properties": {
+          "include_subdomains": {
+            "type": "boolean"
+          },
+          "max_age_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How long browsers keep using HTTPS only; zero makes them forget it.",
+            "minimum": 0
+          },
+          "preload": {
+            "type": "boolean",
+            "description": "Consents to inclusion in browsers' preload lists."
+          }
+        },
+        "additionalProperties": false
+      },
       "SyntaxNode": {
         "type": "object",
         "description": "One directive with its arguments and block.",
@@ -40994,15 +41039,36 @@
             "type": "string",
             "description": "The PEM chain's file in the gateway's secret directory; empty when\n`certificate_id` names the certificate."
           },
+          "cipher_suites": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "IANA names of the cipher suites accepted; the defaults when empty."
+          },
           "id": {
             "type": "string"
+          },
+          "max_protocol": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The newest TLS version accepted; the newest supported when absent.\nLike the cipher suites and session resumption, it applies to listeners\nthat use this profile."
           },
           "min_protocol": {
             "type": "string"
           },
+          "ocsp_stapling": {
+            "type": "boolean",
+            "description": "Reserved: recorded, but OCSP responses are not stapled yet."
+          },
           "private_key_secret_id": {
             "type": "string",
             "description": "The PEM private key's file in the gateway's secret directory; empty\nwhen `certificate_id` names the certificate."
+          },
+          "session_resumption": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -41034,15 +41100,33 @@
           "certificate_secret_id": {
             "type": "string"
           },
+          "cipher_suites": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "id": {
             "type": "string"
+          },
+          "max_protocol": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "min_protocol": {
             "type": "string",
             "description": "`TLSv1.2` or `TLSv1.3`; `TLSv1.2` when absent."
           },
+          "ocsp_stapling": {
+            "type": "boolean"
+          },
           "private_key_secret_id": {
             "type": "string"
+          },
+          "session_resumption": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false

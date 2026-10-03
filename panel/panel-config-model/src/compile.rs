@@ -6,6 +6,7 @@ use panel_domain::{
 };
 use panel_errors::{Diagnostic, ErrorCode};
 use panel_ir::template::{uses_variables, TEMPLATE_CAPABILITY};
+use panel_ir::tls::{HSTS_CAPABILITY, TLS_SETTINGS_CAPABILITY};
 use panel_ir::{
     CapabilityRequirement, DomainSpec, ListenerRef, LoadBalancingPolicy, RetryPolicy, RouteAction,
     RouteMatcher, RouteSpec, RuntimeSnapshot, SiteSpec, StaticContentPolicy, UpstreamEndpoint,
@@ -52,6 +53,9 @@ pub fn compile(
         compiler.listener(listener, &live);
     }
     compiler.snapshot.tls_profiles = model.tls_profiles.iter().map(TlsProfile::runtime).collect();
+    if model.tls_profiles.iter().any(TlsProfile::narrows_listener) {
+        compiler.capabilities.insert(TLS_SETTINGS_CAPABILITY);
+    }
     for upstream in model
         .upstreams
         .iter()
@@ -187,6 +191,10 @@ impl Compiler {
         compiled.listener_ids = site.listener_ids.clone();
         compiled.https_redirect = site.https_redirect;
         compiled.www_redirect = site.www_redirect;
+        compiled.hsts = site.hsts;
+        if site.hsts.is_some() {
+            self.capabilities.insert(HSTS_CAPABILITY);
+        }
         if site.https_redirect
             || site.www_redirect != WwwRedirect::None
             || site.domains.iter().any(|domain| domain.redirect)
@@ -346,7 +354,7 @@ mod tests {
     use crate::model::{Domain, Listener, RouteMatch, Upstream, UpstreamNode};
     use chrono::Utc;
     use panel_domain::NormalizedHost;
-    use panel_ir::ListenerProtocols;
+    use panel_ir::{ListenerProtocols, StrictTransportSecurity};
 
     fn model() -> (ConfigModel, Uuid) {
         let upstream = Upstream {
@@ -408,6 +416,7 @@ mod tests {
             https_redirect: false,
             www_redirect: WwwRedirect::None,
             tls_profile_id: None,
+            hsts: None,
             group: None,
             tags: BTreeSet::new(),
             note: None,
@@ -481,6 +490,43 @@ mod tests {
         )
         .unwrap();
         assert!(report.valid, "{:?}", report.diagnostics);
+    }
+
+    #[test]
+    fn tls_settings_and_hsts_require_their_capabilities() {
+        let (mut model, _) = model();
+        model.tls_profiles.push(crate::TlsProfile {
+            id: "edge".into(),
+            certificate_id: Some(panel_domain::CertificateId::new("example.com").unwrap()),
+            certificate_secret_id: String::new(),
+            private_key_secret_id: String::new(),
+            min_protocol: "TLSv1.2".into(),
+            max_protocol: Some("TLSv1.2".into()),
+            cipher_suites: Vec::new(),
+            session_resumption: true,
+            ocsp_stapling: false,
+            alpn: BTreeSet::new(),
+        });
+        model.sites[0].hsts = Some(StrictTransportSecurity {
+            max_age_seconds: 63_072_000,
+            include_subdomains: true,
+            preload: true,
+        });
+        let snapshot = compile(&model, RevisionId::new(9)).unwrap();
+        let required: Vec<_> = snapshot
+            .required_capabilities
+            .iter()
+            .map(|capability| capability.name.as_str())
+            .collect();
+        assert!(required.contains(&TLS_SETTINGS_CAPABILITY), "{required:?}");
+        assert!(required.contains(&HSTS_CAPABILITY), "{required:?}");
+        let profile = &snapshot.tls_profiles[0];
+        assert_eq!(profile.max_protocol.as_deref(), Some("TLSv1.2"));
+        assert_eq!(profile.certificate_secret_id, "cert-example.com.pem");
+        assert_eq!(
+            snapshot.sites[0].hsts.unwrap().header_value(),
+            "max-age=63072000; includeSubDomains; preload"
+        );
     }
 
     #[test]
