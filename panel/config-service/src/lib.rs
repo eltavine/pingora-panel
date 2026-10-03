@@ -13,6 +13,7 @@
 mod configuration;
 mod deployments;
 mod draft;
+mod events;
 mod language;
 mod operations;
 mod publication;
@@ -24,6 +25,7 @@ mod revisions;
 pub use configuration::ConfigurationService;
 pub use deployments::{PendingActivation, PgDeployments, PreparedRecord};
 pub use draft::{DraftState, PgDrafts};
+pub use events::EventLog;
 pub use publication::PublicationService;
 pub use receipts::PgActivationReceipts;
 pub use reconcile::{Reconciler, Reconciliation, ReconciliationCheck, ReconciliationWatch};
@@ -118,6 +120,7 @@ pub fn process(
         )?),
     ));
     let receipts = Arc::new(PgActivationReceipts::new(process.database()));
+    let events = events::EventLog::new(process.database(), ServiceName::new(SERVICE)?);
     let deployments = PgDeployments::new(process.database());
     let (reconciler, reconciliation) = Reconciler::new(
         Arc::clone(&gateway),
@@ -128,8 +131,9 @@ pub fn process(
         Arc::new(IdempotentGatewayUseCases::new(gateway, receipts)),
         deployments,
         reconciliation.clone(),
+        events.clone(),
     ));
-    let drafts = PgDrafts::new(process.database(), ServiceName::new(SERVICE)?);
+    let drafts = PgDrafts::new(process.database(), events.clone());
     let revisions = revisions::PgRevisions::new(process.database());
     Ok(process
         .with_migrations(MIGRATIONS)
@@ -158,6 +162,7 @@ pub fn process(
                 drafts,
                 revisions,
                 Arc::clone(&use_cases),
+                events,
             ))
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES),

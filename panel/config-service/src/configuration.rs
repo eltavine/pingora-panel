@@ -1,5 +1,6 @@
 use crate::{
-    draft::{ChangeOutput, ChangeRequest, DraftChange, DraftState, PgDrafts},
+    draft::{ChangeOutput, ChangeRequest, DraftChange, DraftState, PgDrafts, DRAFT},
+    events::EventLog,
     language, operations,
     revisions::{NewRevision, PgRevisions},
 };
@@ -36,6 +37,7 @@ pub struct ConfigurationService {
     drafts: PgDrafts,
     revisions: PgRevisions,
     publication: Arc<dyn GatewayUseCases>,
+    events: EventLog,
 }
 
 /// How an apply ended.
@@ -125,12 +127,63 @@ impl ConfigurationService {
         drafts: PgDrafts,
         revisions: PgRevisions,
         publication: Arc<dyn GatewayUseCases>,
+        events: EventLog,
     ) -> Self {
         Self {
             drafts,
             revisions,
             publication,
+            events,
         }
+    }
+
+    /// Records how an apply ended unless it activated, which the draft
+    /// records with the activation.
+    async fn record_apply(
+        &self,
+        context: &CommandContext,
+        request: &wire::ApplyRequest,
+        result: &Result<(DraftState, Applied)>,
+    ) {
+        let codes = |report: &ValidationReport| {
+            report
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.code.as_str().to_owned())
+                .collect::<Vec<_>>()
+        };
+        let (event_type, data) = match result {
+            Ok((_, Applied::Activated(..))) => return,
+            Ok((draft, Applied::Checked(_))) => (
+                "config.apply.checked",
+                json!({ "version": draft.version, "valid": true }),
+            ),
+            Ok((draft, Applied::Rejected(report, revision))) => (
+                if request.dry_run {
+                    "config.apply.checked"
+                } else {
+                    "config.apply.rejected"
+                },
+                json!({
+                    "version": draft.version,
+                    "valid": false,
+                    "revision": revision,
+                    "codes": codes(report),
+                }),
+            ),
+            Err(error) => (
+                "config.apply.failed",
+                json!({
+                    "expected_version": request.expected_version,
+                    "dry_run": request.dry_run,
+                    "code": error.code.as_str(),
+                    "message": error.message,
+                }),
+            ),
+        };
+        self.events
+            .record(event_type, DRAFT, &context.scope(), context.actor(), data)
+            .await;
     }
 
     /// The model and files of the active revision; empty before the first.
@@ -426,7 +479,7 @@ impl ConfigurationService {
             .await?;
         let draft = self
             .drafts
-            .mark_applied(draft.version, id, &context.scope(), context.actor())
+            .mark_applied(draft.version, id, note, &context.scope(), context.actor())
             .await?;
         Ok((draft, Applied::Activated(activated, id)))
     }
@@ -515,12 +568,30 @@ impl Configuration for ConfigurationService {
         let trace = trace_context(request.metadata());
         let request = request.into_inner();
         let hash = request_hash(&request);
+        let context = match codec::decode_command(request.context.clone(), trace) {
+            Ok(context) => context,
+            Err(error) => {
+                return Ok(Response::new(wire::ChangeResponse {
+                    error: Some((&error).into()),
+                    ..wire::ChangeResponse::default()
+                }))
+            }
+        };
         let result: Result<_> = async {
-            let context = codec::decode_command(request.context.clone(), trace)?;
             if request.operation == "revisions.note" {
                 let body: NoteBody = decode(&request.content)?;
                 let note = body.note.as_deref().map(str::trim).filter(|note| !note.is_empty());
-                let revision = self.revisions.set_note(revision_id(&request.resource)?, note).await?;
+                let id = revision_id(&request.resource)?;
+                let revision = self.revisions.set_note(id, note).await?;
+                self.events
+                    .record(
+                        "config.revision.noted",
+                        ("revision", &id.to_string()),
+                        &context.scope(),
+                        context.actor(),
+                        json!({ "revision": id, "note": note }),
+                    )
+                    .await;
                 let draft = self.drafts.load().await?;
                 return Ok((draft, ChangeOutput { content: serde_json::to_vec(&revision).expect("API values serialize"), etag: String::new() }));
             }
@@ -592,6 +663,22 @@ impl Configuration for ConfigurationService {
                 .await
         }
         .await;
+        if let Err(error) = &result {
+            self.events
+                .record(
+                    "config.change.refused",
+                    DRAFT,
+                    &context.scope(),
+                    context.actor(),
+                    json!({
+                        "operation": request.operation,
+                        "resource": request.resource,
+                        "code": error.code.as_str(),
+                        "message": error.message,
+                    }),
+                )
+                .await;
+        }
         Ok(Response::new(match result {
             Ok((draft, output)) => wire::ChangeResponse {
                 content: output.content,
@@ -612,11 +699,17 @@ impl Configuration for ConfigurationService {
     ) -> std::result::Result<Response<wire::ApplyResponse>, Status> {
         let trace = trace_context(request.metadata());
         let request = request.into_inner();
-        let result: Result<_> = async {
-            let context = codec::decode_command(request.context.clone(), trace)?;
-            self.apply_draft(context, request).await
-        }
-        .await;
+        let context = match codec::decode_command(request.context.clone(), trace) {
+            Ok(context) => context,
+            Err(error) => {
+                return Ok(Response::new(wire::ApplyResponse {
+                    error: Some((&error).into()),
+                    ..wire::ApplyResponse::default()
+                }))
+            }
+        };
+        let result = self.apply_draft(context.clone(), request.clone()).await;
+        self.record_apply(&context, &request, &result).await;
         Ok(Response::new(match result {
             Ok((draft, Applied::Activated(deployment, revision))) => wire::ApplyResponse {
                 draft: Some(encode_draft(&draft)),

@@ -1,16 +1,15 @@
-use crate::language;
+use crate::{events::EventLog, language};
 use chrono::{DateTime, Utc};
 use panel_application::{ContentHash, IdempotencyKey, RequestScope};
 use panel_config_dsl::Sources;
 use panel_config_model::{ConfigModel, MODEL_VERSION};
 use panel_errors::{PanelError, Result};
-use panel_events::{
-    Actor, AggregateId, AggregateRef, AggregateType, EventDraft, EventEnvelope, EventOrigin,
-    EventPayload, EventType, EventVersion, Principal, ServiceName,
-};
 use panel_postgres::{storage_error, PgOutbox, ServiceDatabase};
 use serde_json::json;
 use sqlx::{PgConnection, PgPool};
+
+/// The aggregate of draft events.
+pub const DRAFT: (&str, &str) = ("configuration", "draft");
 
 /// The draft and its application state.
 #[derive(Clone, Debug)]
@@ -54,7 +53,7 @@ pub struct ChangeRequest<'a> {
 #[derive(Clone)]
 pub struct PgDrafts {
     pool: PgPool,
-    producer: ServiceName,
+    events: EventLog,
 }
 
 type DraftRow = (
@@ -76,10 +75,10 @@ fn stored(version: u64) -> Result<i64> {
 }
 
 impl PgDrafts {
-    pub fn new(database: &ServiceDatabase, producer: ServiceName) -> Self {
+    pub fn new(database: &ServiceDatabase, events: EventLog) -> Self {
         Self {
             pool: database.pool().clone(),
-            producer,
+            events,
         }
     }
 
@@ -152,11 +151,12 @@ impl PgDrafts {
         .execute(&mut *transaction)
         .await
         .map_err(storage_error)?;
-        let event = self.event(
+        let event = self.events.event(
             "config.draft.changed",
+            DRAFT,
             request.scope,
             request.actor,
-            json!({
+            &json!({
                 "version": next,
                 "operation": request.operation,
                 "resource": request.resource,
@@ -181,6 +181,7 @@ impl PgDrafts {
         &self,
         version: u64,
         revision: u64,
+        note: Option<&str>,
         scope: &RequestScope,
         actor: &str,
     ) -> Result<DraftState> {
@@ -194,41 +195,17 @@ impl PgDrafts {
         .execute(&mut *transaction)
         .await
         .map_err(storage_error)?;
-        let event = self.event(
+        let event = self.events.event(
             "config.draft.applied",
+            DRAFT,
             scope,
             actor,
-            json!({ "version": version, "revision": revision }),
+            &json!({ "version": version, "revision": revision, "note": note }),
         )?;
         PgOutbox::append(&mut transaction, &event).await?;
         let state = read(&mut transaction, false).await?;
         transaction.commit().await.map_err(storage_error)?;
         Ok(state)
-    }
-
-    fn event(
-        &self,
-        event_type: &str,
-        scope: &RequestScope,
-        actor: &str,
-        data: serde_json::Value,
-    ) -> Result<EventEnvelope> {
-        let principal = Actor::new(actor)
-            .map(Principal::user)
-            .unwrap_or_else(|_| Principal::unknown());
-        Ok(EventEnvelope::new(
-            EventDraft::new(
-                EventType::new(event_type)?,
-                EventVersion::V1,
-                AggregateRef::new(
-                    AggregateType::new("configuration")?,
-                    AggregateId::new("draft")?,
-                ),
-                EventPayload::json(&data)?,
-            ),
-            EventOrigin::scoped(self.producer.clone(), scope, principal),
-            Utc::now(),
-        ))
     }
 }
 

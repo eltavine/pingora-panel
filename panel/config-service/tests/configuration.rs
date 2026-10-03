@@ -95,7 +95,7 @@ fn json(content: &[u8]) -> Value {
 /// A running config-service with its database, broker and gateway.
 struct Harness {
     client: ConfigPublicationClient,
-    _process: RunningProcess,
+    process: RunningProcess,
     _broker: TestBroker,
     _database: TestDatabase,
 }
@@ -149,7 +149,7 @@ async fn start() -> Option<Harness> {
     .unwrap();
     Some(Harness {
         client,
-        _process: process,
+        process,
         _broker: broker,
         _database: database,
     })
@@ -633,4 +633,25 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
         .await
         .unwrap();
     assert_eq!(json(&active.content)["items"][1]["outcome"], "active");
+
+    let recorded: Vec<String> =
+        sqlx::query_scalar("SELECT event_type FROM outbox ORDER BY position")
+            .fetch_all(harness.process.database().pool())
+            .await
+            .unwrap();
+    for expected in [
+        "config.change.refused",
+        "config.draft.changed",
+        "config.apply.checked",
+        "config.draft.applied",
+        "config.revision.noted",
+        "config.apply.failed",
+        "gateway.snapshot.prepared",
+        "gateway.snapshot.aborted",
+        "gateway.snapshot.activated",
+        "gateway.snapshot.refused",
+    ] {
+        let qualified = format!("io.github.eltavine.pingora-panel.{expected}.v1");
+        assert!(recorded.contains(&qualified), "{expected}: {recorded:?}");
+    }
 }

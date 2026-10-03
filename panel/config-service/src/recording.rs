@@ -1,5 +1,6 @@
 use crate::{
     deployments::PgDeployments,
+    events::EventLog,
     reconcile::{Reconciliation, ReconciliationWatch},
 };
 use async_trait::async_trait;
@@ -8,29 +9,63 @@ use panel_application::{
     GatewayUseCases, IdempotencyKey, IdempotencyLookup, PreparedDeployment, RequestScope,
 };
 use panel_errors::{PanelError, Result, ValidationReport};
+use serde_json::{json, Value};
 use std::sync::Arc;
 
 /// Records what reconciliation needs around publication: the document of
 /// every prepared deployment, each activation's intent before it claims its
 /// key, and the desired configuration once an activation succeeds. While
 /// the gateway's configuration is quarantined, publication is refused.
+/// Every preparation, activation and abort, and every refusal of one, is
+/// published as an event.
 pub struct RecordingUseCases {
     inner: Arc<dyn GatewayUseCases>,
     deployments: PgDeployments,
     reconciliation: ReconciliationWatch,
+    events: EventLog,
 }
+
+/// The aggregate of snapshot events.
+const SNAPSHOT: (&str, &str) = ("gateway", "snapshot");
 
 impl RecordingUseCases {
     pub fn new(
         inner: Arc<dyn GatewayUseCases>,
         deployments: PgDeployments,
         reconciliation: ReconciliationWatch,
+        events: EventLog,
     ) -> Self {
         Self {
             inner,
             deployments,
             reconciliation,
+            events,
         }
+    }
+
+    async fn record<T>(
+        &self,
+        context: &CommandContext,
+        operation: &str,
+        result: &Result<T>,
+        data: impl FnOnce(&T) -> Value,
+    ) {
+        let (event_type, data) = match result {
+            Ok(value) => (format!("gateway.snapshot.{operation}"), data(value)),
+            Err(error) => (
+                "gateway.snapshot.refused".to_owned(),
+                json!({ "operation": operation, "code": error.code.as_str(), "message": error.message }),
+            ),
+        };
+        self.events
+            .record(
+                &event_type,
+                SNAPSHOT,
+                &context.scope(),
+                context.actor(),
+                data,
+            )
+            .await;
     }
 
     fn admit(&self) -> Result<()> {
@@ -62,12 +97,31 @@ impl GatewayUseCases for RecordingUseCases {
         context: CommandContext,
         document: ConfigDocument,
     ) -> Result<PreparedDeployment> {
-        self.admit()?;
-        let prepared = self.inner.prepare(context, document.clone()).await?;
-        self.deployments
-            .record_prepared(&prepared, &document)
-            .await?;
-        Ok(prepared)
+        let result = async {
+            self.admit()?;
+            let prepared = self
+                .inner
+                .prepare(context.clone(), document.clone())
+                .await?;
+            self.deployments
+                .record_prepared(&prepared, &document)
+                .await?;
+            Ok(prepared)
+        }
+        .await;
+        self.record(
+            &context,
+            "prepared",
+            &result,
+            |prepared: &PreparedDeployment| {
+                json!({
+                    "revision_id": prepared.revision_id().get(),
+                    "content_hash": prepared.content_hash().as_str(),
+                })
+            },
+        )
+        .await;
+        result
     }
 
     async fn activate(
@@ -76,14 +130,25 @@ impl GatewayUseCases for RecordingUseCases {
         prepare_token: String,
         expected_active_hash: Option<ContentHash>,
     ) -> Result<ActivatedDeployment> {
-        self.admit()?;
-        self.deployments
-            .record_intent(&context, &prepare_token, expected_active_hash.as_ref())
-            .await?;
-        let activated = self
-            .inner
-            .activate(context, prepare_token.clone(), expected_active_hash)
-            .await?;
+        let result = async {
+            self.admit()?;
+            self.deployments
+                .record_intent(&context, &prepare_token, expected_active_hash.as_ref())
+                .await?;
+            self.inner
+                .activate(context.clone(), prepare_token.clone(), expected_active_hash)
+                .await
+        }
+        .await;
+        self.record(&context, "activated", &result, |activated: &ActivatedDeployment| {
+            json!({
+                "revision_id": activated.revision_id().get(),
+                "content_hash": activated.content_hash().as_str(),
+                "previous_active_hash": activated.previous_active_hash().map(ContentHash::as_str),
+            })
+        })
+        .await;
+        let activated = result?;
         // The gateway already committed; a failure here only delays the
         // record until reconciliation adopts the gateway's configuration.
         if let Err(error) = self
@@ -97,7 +162,10 @@ impl GatewayUseCases for RecordingUseCases {
     }
 
     async fn abort(&self, context: CommandContext, prepare_token: String) -> Result<AbortOutcome> {
-        self.inner.abort(context, prepare_token).await
+        let result = self.inner.abort(context.clone(), prepare_token).await;
+        self.record(&context, "aborted", &result, |_| json!({}))
+            .await;
+        result
     }
 
     async fn status(&self) -> Result<GatewayStatus> {

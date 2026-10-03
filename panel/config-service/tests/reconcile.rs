@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use config_service::{
-    PgActivationReceipts, PgDeployments, Reconciler, Reconciliation, ReconciliationCheck,
+    EventLog, PgActivationReceipts, PgDeployments, Reconciler, Reconciliation, ReconciliationCheck,
     RecordingUseCases, MIGRATIONS,
 };
 use gateway_grpc::GatewayGrpcService;
@@ -15,6 +15,7 @@ use panel_config_json::{JsonCompilerConfig, JsonRuntimeSnapshotCompiler};
 use panel_domain::RevisionId;
 use panel_engine::FakeGatewayEngine;
 use panel_errors::ErrorCode;
+use panel_events::ServiceName;
 use panel_health::{HealthCheck, HealthStatus};
 use panel_ir::{RuntimeSnapshot, IR_SCHEMA_VERSION};
 use panel_postgres::{testing::TestDatabase, ServiceDatabase};
@@ -100,6 +101,7 @@ impl Fixture {
             )),
             self.deployments.clone(),
             watch,
+            EventLog::new(&self.service, ServiceName::new("config-service").unwrap()),
         );
         (reconciler, publication)
     }
