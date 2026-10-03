@@ -30,3 +30,10 @@ pub struct Certificate {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
+
+impl Certificate {
+    /// The entity tag of this version, for conditional changes (RFC 9110 §8.8.3).
+    pub fn etag(&self) -> String {
+        format!("\"{}\"", self.version)
+    }
+}

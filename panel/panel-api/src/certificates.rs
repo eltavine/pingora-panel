@@ -44,14 +44,16 @@ pub(crate) struct CertificateView {
     #[serde(flatten)]
     certificate: Certificate,
     status: CertificateStatus,
+    /// For `If-Match` when replacing or deleting it.
+    etag: String,
 }
 
 impl From<Certificate> for CertificateView {
     fn from(certificate: Certificate) -> Self {
-        let status = certificate.details.status(Utc::now());
         Self {
+            status: certificate.details.status(Utc::now()),
+            etag: certificate.etag(),
             certificate,
-            status,
         }
     }
 }

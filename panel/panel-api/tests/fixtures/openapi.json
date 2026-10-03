@@ -38147,9 +38147,14 @@
           {
             "type": "object",
             "required": [
-              "status"
+              "status",
+              "etag"
             ],
             "properties": {
+              "etag": {
+                "type": "string",
+                "description": "For `If-Match` when replacing or deleting it."
+              },
               "status": {
                 "$ref": "#/components/schemas/CertificateStatus"
               }

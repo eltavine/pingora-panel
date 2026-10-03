@@ -91,10 +91,6 @@ fn encode<T: Serialize>(value: &T) -> Vec<u8> {
     serde_json::to_vec(value).expect("API values serialize")
 }
 
-fn etag(version: u64) -> String {
-    format!("\"{version}\"")
-}
-
 /// The version an `If-Match` entity tag names; empty means unconditional.
 fn expected(if_match: &str) -> Result<Option<u64>> {
     if if_match.is_empty() {
@@ -122,7 +118,7 @@ impl Certificates for CertificateService {
                 }
                 ("certificates.get", Target::Certificate(id)) => {
                     let certificate = self.inventory.get(&id).await?;
-                    Ok((encode(&certificate), etag(certificate.version)))
+                    Ok((encode(&certificate), certificate.etag()))
                 }
                 (operation, _) => Err(unknown(operation)),
             }
@@ -156,7 +152,7 @@ impl Certificates for CertificateService {
                 actor: &actor,
             };
             let created = |certificate: panel_certificates::Certificate| {
-                (encode(&certificate), etag(certificate.version))
+                (encode(&certificate), certificate.etag())
             };
             match (request.operation.as_str(), target(&request.resource)?) {
                 ("certificates.upload", Target::Collection) => {
