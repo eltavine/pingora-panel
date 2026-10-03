@@ -125,11 +125,14 @@ fn snapshot(listen: SocketAddr) -> RuntimeSnapshot {
     snapshot
 }
 
-/// The metrics the gateway serves on its operational listener.
-async fn scrape(ops: SocketAddr) -> String {
+/// What the gateway's operational listener answers at `path`.
+async fn ops_get(ops: SocketAddr, path: &str) -> String {
     let mut stream = tokio::net::TcpStream::connect(ops).await.unwrap();
     stream
-        .write_all(b"GET /metrics HTTP/1.1\r\nhost: localhost\r\nconnection: close\r\n\r\n")
+        .write_all(
+            format!("GET {path} HTTP/1.1\r\nhost: localhost\r\nconnection: close\r\n\r\n")
+                .as_bytes(),
+        )
         .await
         .unwrap();
     let mut response = String::new();
@@ -184,7 +187,9 @@ async fn runtime_operations_persist_and_shut_the_gateway_down() {
     assert_eq!(plane.worker_count, 2);
     assert_eq!(plane.active_revision_id, Some(1));
     assert_eq!(plane.engine_version, "0.9.0");
-    let metrics = scrape(ops).await;
+    let ready = ops_get(ops, "/readyz").await;
+    assert!(ready.starts_with("HTTP/1.1 200"), "{ready}");
+    let metrics = ops_get(ops, "/metrics").await;
     assert!(metrics.starts_with("HTTP/1.1 200"), "{metrics}");
     assert!(
         metrics.contains("pingora_panel_gateway_config_revision 1\n"),

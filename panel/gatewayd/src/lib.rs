@@ -489,7 +489,11 @@ pub async fn serve_gatewayd(
             ))
         })?;
     let stop_ops = tokio_util::sync::CancellationToken::new();
-    let ops_router = ops::ops_router(Arc::new(metrics), config.metrics_token().clone());
+    let ops_router = ops::ops_router(
+        Arc::new(metrics),
+        config.metrics_token().clone(),
+        HealthService::from_health_reporter(runtime.services.health_reporter()),
+    );
     let ops_stopped = stop_ops.clone().cancelled_owned();
     let ops_task = tokio::spawn(async move {
         axum::serve(ops_listener, ops_router)
