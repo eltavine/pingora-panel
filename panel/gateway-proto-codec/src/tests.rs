@@ -4,9 +4,10 @@ use panel_domain::{
     UpstreamPoolId,
 };
 use panel_ir::{
-    ActiveHealthCheck, CachePolicy, CapabilityRequirement, DomainSpec, HeaderPolicy,
-    HealthCheckProtocol, ListenerRef, LoadBalancingPolicy, LuaPolicy, PassiveHealthPolicy,
-    RetryPolicy, RouteAction, RouteMatcher, RouteSpec, RuntimeSnapshot, SecurityPolicy, SiteSpec,
+    ActiveHealthCheck, BasicAuth, CachePolicy, CapabilityRequirement, DomainSpec, HeaderPolicy,
+    HealthCheckProtocol, LimitedResponse, ListenerRef, LoadBalancingPolicy, LuaPolicy,
+    PassiveHealthPolicy, RateLimit, RateLimitKey, RealIpHeader, RefererRule, RetryPolicy,
+    RouteAction, RouteMatcher, RouteSpec, RuntimeSnapshot, SecurityPolicy, SiteSpec,
     StaticContentPolicy, StrictTransportSecurity, TlsProfile, UpstreamEndpoint, UpstreamPoolSpec,
     WwwRedirect,
 };
@@ -28,6 +29,8 @@ fn populated_snapshot_round_trips_additive_v1_fields() {
     listener.reuse_port = true;
     listener.ipv6_only = Some(false);
     listener.default_site_id = Some(SiteId::new("site-main").unwrap());
+    listener.trusted_proxies = ["10.0.0.0/8".into()].into_iter().collect();
+    listener.real_ip_header = RealIpHeader::Forwarded;
     snapshot.listeners.push(listener);
     let mut primary = DomainSpec::new(NormalizedHost::new("example.com").unwrap());
     primary.tls_profile_id = Some("tls-main".into());
@@ -48,6 +51,7 @@ fn populated_snapshot_round_trips_additive_v1_fields() {
         preload: false,
     });
     site.www_redirect = WwwRedirect::RemoveWww;
+    site.security_policy_id = Some("security".into());
     snapshot.sites.push(site);
     let mut route = RouteSpec::new(
         RouteId::new("route-main").unwrap(),
@@ -186,6 +190,42 @@ fn populated_snapshot_round_trips_additive_v1_fields() {
         allowed_cidrs: ["10.0.0.0/8".into()].into_iter().collect(),
         denied_cidrs: ["10.1.0.0/16".into()].into_iter().collect(),
         request_rate_per_second: Some(100),
+        allowed_methods: ["GET".into(), "HEAD".into()].into_iter().collect(),
+        denied_path_prefixes: vec!["/admin".into()],
+        denied_user_agents: vec!["(?i)scanner".into()],
+        referer: Some(RefererRule {
+            allowed_hosts: vec!["*.example.com".into()],
+            allow_empty: true,
+        }),
+        basic_auth: Some(BasicAuth {
+            realm: "Staff".into(),
+            users_secret_id: "staff.htpasswd".into(),
+        }),
+        max_header_bytes: Some(16_384),
+        max_body_bytes: Some(1_048_576),
+        body_timeout_ms: Some(30_000),
+        rate_limits: vec![
+            RateLimit {
+                key: RateLimitKey::ClientAddress,
+                requests: 10,
+                per_seconds: 1,
+                burst: 20,
+            },
+            RateLimit {
+                key: RateLimitKey::Header {
+                    name: "x-api-key".into(),
+                },
+                requests: 600,
+                per_seconds: 60,
+                burst: 0,
+            },
+        ],
+        max_concurrent_requests: Some(8),
+        limited_response: Some(LimitedResponse {
+            status: 503,
+            body: "slow down".into(),
+            content_type: Some("text/plain".into()),
+        }),
     });
     snapshot.lua_policies.push(LuaPolicy {
         id: "lua".into(),

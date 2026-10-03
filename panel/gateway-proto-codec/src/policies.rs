@@ -1,8 +1,11 @@
 //! Optional runtime policy wire conversion.
 
+use crate::optional_string;
 use panel_contracts::gateway::v1 as wire;
+use panel_errors::{PanelError, Result};
 use panel_ir::{
-    CachePolicy, HeaderPolicy, LuaPolicy, SecurityPolicy, StaticContentPolicy, TlsProfile,
+    BasicAuth, CachePolicy, HeaderPolicy, LimitedResponse, LuaPolicy, RateLimit, RateLimitKey,
+    RefererRule, SecurityPolicy, StaticContentPolicy, TlsProfile,
 };
 use std::collections::BTreeMap;
 
@@ -100,13 +103,65 @@ pub(super) fn encode_cache_policy(value: &CachePolicy) -> wire::CachePolicy {
     }
 }
 
-pub(super) fn decode_security_policy(value: wire::SecurityPolicy) -> SecurityPolicy {
-    SecurityPolicy {
+pub(super) fn decode_security_policy(value: wire::SecurityPolicy) -> Result<SecurityPolicy> {
+    let rate_limits = value
+        .rate_limits
+        .into_iter()
+        .map(|limit| {
+            let key = match wire::RateLimitKey::try_from(limit.key) {
+                Ok(wire::RateLimitKey::ClientAddress) => RateLimitKey::ClientAddress,
+                Ok(wire::RateLimitKey::Host) => RateLimitKey::Host,
+                Ok(wire::RateLimitKey::Route) => RateLimitKey::Route,
+                Ok(wire::RateLimitKey::Header) => RateLimitKey::Header { name: limit.header },
+                _ => {
+                    return Err(PanelError::invalid_argument(format!(
+                        "security policy {} has a rate limit without a key",
+                        value.id
+                    )))
+                }
+            };
+            Ok(RateLimit {
+                key,
+                requests: limit.requests,
+                per_seconds: limit.per_seconds,
+                burst: limit.burst,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(SecurityPolicy {
         id: value.id,
         allowed_cidrs: value.allowed_cidrs.into_iter().collect(),
         denied_cidrs: value.denied_cidrs.into_iter().collect(),
         request_rate_per_second: value.has_request_rate.then_some(value.request_rate),
-    }
+        allowed_methods: value.allowed_methods.into_iter().collect(),
+        denied_path_prefixes: value.denied_path_prefixes,
+        denied_user_agents: value.denied_user_agents,
+        referer: value.referer.map(|rule| RefererRule {
+            allowed_hosts: rule.allowed_hosts,
+            allow_empty: rule.allow_empty,
+        }),
+        basic_auth: value.basic_auth.map(|auth| BasicAuth {
+            realm: auth.realm,
+            users_secret_id: auth.users_secret_id,
+        }),
+        max_header_bytes: value.max_header_bytes,
+        max_body_bytes: value.max_body_bytes,
+        body_timeout_ms: value.body_timeout_ms,
+        rate_limits,
+        max_concurrent_requests: value.max_concurrent_requests,
+        limited_response: value
+            .limited_response
+            .map(|response| {
+                Ok::<_, PanelError>(LimitedResponse {
+                    status: u16::try_from(response.status).map_err(|_| {
+                        PanelError::invalid_argument("a limited response status is out of range")
+                    })?,
+                    body: response.body,
+                    content_type: optional_string(response.content_type),
+                })
+            })
+            .transpose()?,
+    })
 }
 
 pub(super) fn encode_security_policy(value: &SecurityPolicy) -> wire::SecurityPolicy {
@@ -116,6 +171,51 @@ pub(super) fn encode_security_policy(value: &SecurityPolicy) -> wire::SecurityPo
         request_rate: value.request_rate_per_second.unwrap_or_default(),
         denied_cidrs: value.denied_cidrs.iter().cloned().collect(),
         has_request_rate: value.request_rate_per_second.is_some(),
+        allowed_methods: value.allowed_methods.iter().cloned().collect(),
+        denied_path_prefixes: value.denied_path_prefixes.clone(),
+        denied_user_agents: value.denied_user_agents.clone(),
+        referer: value.referer.as_ref().map(|rule| wire::RefererRule {
+            allowed_hosts: rule.allowed_hosts.clone(),
+            allow_empty: rule.allow_empty,
+        }),
+        basic_auth: value.basic_auth.as_ref().map(|auth| wire::BasicAuth {
+            realm: auth.realm.clone(),
+            users_secret_id: auth.users_secret_id.clone(),
+        }),
+        max_header_bytes: value.max_header_bytes,
+        max_body_bytes: value.max_body_bytes,
+        body_timeout_ms: value.body_timeout_ms,
+        rate_limits: value
+            .rate_limits
+            .iter()
+            .map(|limit| {
+                let (key, header) = match &limit.key {
+                    RateLimitKey::ClientAddress => {
+                        (wire::RateLimitKey::ClientAddress, String::new())
+                    }
+                    RateLimitKey::Host => (wire::RateLimitKey::Host, String::new()),
+                    RateLimitKey::Route => (wire::RateLimitKey::Route, String::new()),
+                    RateLimitKey::Header { name } => (wire::RateLimitKey::Header, name.clone()),
+                    _ => (wire::RateLimitKey::Unspecified, String::new()),
+                };
+                wire::RateLimit {
+                    key: key.into(),
+                    header,
+                    requests: limit.requests,
+                    per_seconds: limit.per_seconds,
+                    burst: limit.burst,
+                }
+            })
+            .collect(),
+        max_concurrent_requests: value.max_concurrent_requests,
+        limited_response: value
+            .limited_response
+            .as_ref()
+            .map(|response| wire::LimitedResponse {
+                status: u32::from(response.status),
+                body: response.body.clone(),
+                content_type: response.content_type.clone().unwrap_or_default(),
+            }),
     }
 }
 

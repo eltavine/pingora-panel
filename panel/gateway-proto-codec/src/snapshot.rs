@@ -56,7 +56,7 @@ pub fn decode_snapshot(value: wire::RuntimeSnapshot) -> Result<RuntimeSnapshot> 
             .security_policies
             .into_iter()
             .map(policies::decode_security_policy)
-            .collect(),
+            .collect::<Result<_>>()?,
         lua_policies: value
             .lua_policies
             .into_iter()

@@ -12,6 +12,12 @@ use panel_domain::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub use security::{
+    BasicAuth, LimitedResponse, RateLimit, RateLimitKey, RealIpHeader, RefererRule, SecurityPolicy,
+    REQUEST_SECURITY_CAPABILITY, TRUSTED_PROXIES_CAPABILITY,
+};
+
+pub mod security;
 pub mod template;
 pub mod tls;
 
@@ -190,6 +196,11 @@ pub struct ListenerRef {
     /// Serves requests whose host matches no site; without it they are rejected.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_site_id: Option<SiteId>,
+    /// Proxies in these networks name the client in `real_ip_header`.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub trusted_proxies: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "RealIpHeader::is_default")]
+    pub real_ip_header: RealIpHeader,
 }
 
 impl ListenerRef {
@@ -202,6 +213,8 @@ impl ListenerRef {
             reuse_port: false,
             ipv6_only: None,
             default_site_id: None,
+            trusted_proxies: BTreeSet::new(),
+            real_ip_header: RealIpHeader::default(),
         }
     }
 }
@@ -251,6 +264,9 @@ pub struct SiteSpec {
     /// Sent with every HTTPS response for the site's hosts (RFC 6797).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hsts: Option<StrictTransportSecurity>,
+    /// Every request for the site passes this policy first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_policy_id: Option<String>,
 }
 
 /// An HTTP Strict Transport Security policy (RFC 6797 §6.1).
@@ -292,6 +308,7 @@ impl SiteSpec {
             https_redirect: false,
             www_redirect: WwwRedirect::None,
             hsts: None,
+            security_policy_id: None,
         }
     }
 }
@@ -726,15 +743,6 @@ pub struct CachePolicy {
     pub enabled: bool,
     pub ttl_seconds: u64,
     pub vary_headers: BTreeSet<String>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SecurityPolicy {
-    pub id: String,
-    pub allowed_cidrs: BTreeSet<String>,
-    pub denied_cidrs: BTreeSet<String>,
-    pub request_rate_per_second: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

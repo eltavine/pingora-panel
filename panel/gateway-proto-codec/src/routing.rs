@@ -8,8 +8,8 @@ use panel_contracts::gateway::v1 as wire;
 use panel_domain::{NormalizedHost, PathPrefix, RouteId, SiteId, UpstreamPoolId};
 use panel_errors::{PanelError, Result};
 use panel_ir::{
-    DomainSpec, ListenerProtocols, ListenerRef, RouteAction, RouteMatcher, RouteSpec, SiteSpec,
-    StrictTransportSecurity, WwwRedirect,
+    DomainSpec, ListenerProtocols, ListenerRef, RealIpHeader, RouteAction, RouteMatcher, RouteSpec,
+    SiteSpec, StrictTransportSecurity, WwwRedirect,
 };
 
 pub(super) fn decode_listener(value: wire::ListenerRef) -> Result<ListenerRef> {
@@ -36,6 +36,20 @@ pub(super) fn decode_listener(value: wire::ListenerRef) -> Result<ListenerRef> {
             .map(SiteId::new)
             .transpose()
             .map_err(domain_error)?,
+        trusted_proxies: value.trusted_proxies.into_iter().collect(),
+        real_ip_header: match wire::RealIpHeader::try_from(value.real_ip_header) {
+            Ok(wire::RealIpHeader::Unspecified | wire::RealIpHeader::XForwardedFor) => {
+                RealIpHeader::XForwardedFor
+            }
+            Ok(wire::RealIpHeader::XRealIp) => RealIpHeader::XRealIp,
+            Ok(wire::RealIpHeader::Forwarded) => RealIpHeader::Forwarded,
+            Err(_) => {
+                return Err(PanelError::invalid_argument(format!(
+                    "unknown real IP header {}",
+                    value.real_ip_header
+                )))
+            }
+        },
     })
 }
 
@@ -57,6 +71,13 @@ pub(super) fn encode_listener(value: &ListenerRef) -> wire::ListenerRef {
             .as_ref()
             .map(|id| id.as_str().into())
             .unwrap_or_default(),
+        trusted_proxies: value.trusted_proxies.iter().cloned().collect(),
+        real_ip_header: match value.real_ip_header {
+            RealIpHeader::XRealIp => wire::RealIpHeader::XRealIp,
+            RealIpHeader::Forwarded => wire::RealIpHeader::Forwarded,
+            _ => wire::RealIpHeader::XForwardedFor,
+        }
+        .into(),
     }
 }
 
@@ -97,6 +118,7 @@ pub(super) fn decode_site(value: wire::SiteSpec) -> Result<SiteSpec> {
             include_subdomains: hsts.include_subdomains,
             preload: hsts.preload,
         }),
+        security_policy_id: optional_string(value.security_policy_id),
     })
 }
 
@@ -129,6 +151,7 @@ pub(super) fn encode_site(value: &SiteSpec) -> wire::SiteSpec {
             include_subdomains: hsts.include_subdomains,
             preload: hsts.preload,
         }),
+        security_policy_id: value.security_policy_id.clone().unwrap_or_default(),
     }
 }
 

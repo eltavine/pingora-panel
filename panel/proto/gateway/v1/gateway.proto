@@ -50,6 +50,19 @@ message ListenerRef {
   bool reuse_port = 6;
   optional bool ipv6_only = 7;
   string default_site_id = 8;
+  // Proxies in these networks name the client in `real_ip_header`.
+  repeated string trusted_proxies = 9;
+  RealIpHeader real_ip_header = 10;
+}
+
+// Where trusted proxies put the client's address; unspecified means
+// X-Forwarded-For.
+enum RealIpHeader {
+  REAL_IP_HEADER_UNSPECIFIED = 0;
+  REAL_IP_HEADER_X_FORWARDED_FOR = 1;
+  REAL_IP_HEADER_X_REAL_IP = 2;
+  // RFC 7239.
+  REAL_IP_HEADER_FORWARDED = 3;
 }
 
 message ListenerProtocols {
@@ -68,6 +81,8 @@ message SiteSpec {
   WwwRedirect www_redirect = 7;
   // Sent with every HTTPS response for the site's hosts (RFC 6797).
   StrictTransportSecurity hsts = 8;
+  // Every request for the site passes this policy first.
+  string security_policy_id = 9;
 }
 
 // An HTTP Strict Transport Security policy (RFC 6797 §6.1).
@@ -270,12 +285,70 @@ message CachePolicy {
   repeated string vary_headers = 4;
 }
 
+// Restrictions a request must pass before its site or route handles it.
 message SecurityPolicy {
   string id = 1;
+  // Client networks; when any are listed, other clients are refused.
   repeated string allowed_cidrs = 2;
+  // Requests per second per client address, when `has_request_rate`; the
+  // first form of a rate limit, which `rate_limits` generalizes.
   uint64 request_rate = 3;
   repeated string denied_cidrs = 4;
   bool has_request_rate = 5;
+  // Empty allows every method.
+  repeated string allowed_methods = 6;
+  repeated string denied_path_prefixes = 7;
+  // Case-insensitive regular expressions.
+  repeated string denied_user_agents = 8;
+  RefererRule referer = 9;
+  BasicAuth basic_auth = 10;
+  optional uint64 max_header_bytes = 11;
+  optional uint64 max_body_bytes = 12;
+  // The longest wait for the next part of a request body.
+  optional uint64 body_timeout_ms = 13;
+  repeated RateLimit rate_limits = 14;
+  // The most requests one client address may have in progress.
+  optional uint64 max_concurrent_requests = 15;
+  // The answer to requests over a limit, instead of 429.
+  LimitedResponse limited_response = 16;
+}
+
+// Which pages may link to the site's resources.
+message RefererRule {
+  // Hosts of referring pages, with `*.` for any one or more labels.
+  repeated string allowed_hosts = 1;
+  bool allow_empty = 2;
+}
+
+// Basic authentication (RFC 7617) against an htpasswd file.
+message BasicAuth {
+  string realm = 1;
+  string users_secret_id = 2;
+}
+
+// What a rate limit counts requests by.
+enum RateLimitKey {
+  RATE_LIMIT_KEY_UNSPECIFIED = 0;
+  RATE_LIMIT_KEY_CLIENT_ADDRESS = 1;
+  RATE_LIMIT_KEY_HOST = 2;
+  RATE_LIMIT_KEY_ROUTE = 3;
+  // The value of the header named in `header`.
+  RATE_LIMIT_KEY_HEADER = 4;
+}
+
+// A token bucket: `requests` per `per_seconds`, holding `burst` more.
+message RateLimit {
+  RateLimitKey key = 1;
+  string header = 2;
+  uint64 requests = 3;
+  uint64 per_seconds = 4;
+  uint64 burst = 5;
+}
+
+message LimitedResponse {
+  uint32 status = 1;
+  string body = 2;
+  string content_type = 3;
 }
 
 message LuaPolicy {
