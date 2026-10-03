@@ -289,6 +289,50 @@ async fn api(
                       {"host": "example.org", "covered": false}]
         }))
         .into_response(),
+        ("GET", "/api/v1/acme-accounts") => Json(json!([
+            {"id": "letsencrypt", "directory": "https://acme-v02.api.letsencrypt.org/directory",
+             "contact": ["ops@example.com"], "url": "https://acme.example/acct/1"}
+        ]))
+        .into_response(),
+        ("POST", "/api/v1/acme-accounts") => (
+            StatusCode::CREATED,
+            [("etag", "\"1\"")],
+            Json(json!({"id": body["id"], "directory": body["directory"], "version": 1})),
+        )
+            .into_response(),
+        ("GET", "/api/v1/acme-accounts/letsencrypt") => with_etag(
+            "1",
+            json!({"id": "letsencrypt", "directory": "https://acme-v02.api.letsencrypt.org/directory",
+                   "contact": ["ops@example.com"], "ca_bundle": null, "version": 1}),
+        ),
+        ("DELETE", "/api/v1/acme-accounts/letsencrypt") => StatusCode::NO_CONTENT.into_response(),
+        ("GET", "/api/v1/acme-certificates") => Json(json!([
+            {"id": "example.com", "names": ["example.com", "www.example.com"], "state": "failing",
+             "challenge": "http-01", "account": "letsencrypt",
+             "renew_after": "2026-10-04T00:00:00Z", "failures": 2}
+        ]))
+        .into_response(),
+        ("POST", "/api/v1/acme-certificates") => (
+            StatusCode::CREATED,
+            [("etag", "\"1\"")],
+            Json(json!({"id": body["id"], "state": "pending"})),
+        )
+            .into_response(),
+        ("GET", "/api/v1/acme-certificates/example.com") => with_etag(
+            "4",
+            json!({"id": "example.com", "state": "failing", "failures": 2,
+                   "last_error": {"code": "VALIDATION_FAILED",
+                                  "message": "the CA refused (connection): no answer",
+                                  "at": "2026-10-03T00:00:00Z"}, "version": 4}),
+        ),
+        ("POST", "/api/v1/acme-certificates/example.com/renewals") => (
+            StatusCode::ACCEPTED,
+            Json(json!({"id": "example.com", "state": "failing"})),
+        )
+            .into_response(),
+        ("DELETE", "/api/v1/acme-certificates/example.com") => {
+            StatusCode::NO_CONTENT.into_response()
+        }
         ("POST", "/api/v1/certificate-inspections") => Json(json!({
             "status": "valid", "key_matches": !body["key"].is_null(), "names": ["example.com"],
             "fingerprint": "0a1bff"
@@ -878,6 +922,99 @@ fn certificates_are_uploaded_generated_checked_and_replaced() {
     ]);
     assert!(!unreadable.status.success());
     assert!(stderr(&unreadable).contains("cannot read /nonexistent"));
+}
+
+#[test]
+fn acme_accounts_register_and_certificates_renew() {
+    let stub = Stub::start();
+    let files = tempfile::tempdir().unwrap();
+    let mac_key = files.path().join("eab.key");
+    std::fs::write(&mac_key, "c2VjcmV0\n").unwrap();
+    let run = |arguments: &[&str]| {
+        let output = stub.ppanel(&[&["--token", "ppat_admin", "acme"], arguments].concat());
+        assert!(
+            output.status.success(),
+            "{arguments:?}: {}",
+            stderr(&output)
+        );
+        stdout(&output)
+    };
+
+    assert!(run(&["account", "list"]).contains("ops@example.com"));
+    run(&[
+        "account",
+        "register",
+        "zerossl",
+        "--directory",
+        "zerossl",
+        "--email",
+        "ops@example.com",
+        "--agree-tos",
+        "--eab-key-id",
+        "kid-1",
+        "--eab-mac-key-file",
+        mac_key.to_str().unwrap(),
+    ]);
+    assert_eq!(
+        stub.requests("POST", "/api/v1/acme-accounts")[0].body,
+        json!({"id": "zerossl", "directory": "https://acme.zerossl.com/v2/DV90",
+               "contact": ["ops@example.com"], "terms_of_service_agreed": true,
+               "external_account": {"key_id": "kid-1", "mac_key": "c2VjcmV0"}})
+    );
+    let refused = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "acme",
+        "account",
+        "register",
+        "letsencrypt",
+        "--directory",
+        "letsencrypt",
+    ]);
+    assert!(!refused.status.success());
+    assert!(stderr(&refused).contains("--agree-tos"));
+    assert_eq!(stub.requests("POST", "/api/v1/acme-accounts").len(), 1);
+    assert!(run(&["account", "show", "letsencrypt"]).contains("false"));
+    run(&["account", "delete", "letsencrypt"]);
+    assert_eq!(
+        stub.requests("DELETE", "/api/v1/acme-accounts/letsencrypt")[0]
+            .if_match
+            .as_deref(),
+        Some("\"1\"")
+    );
+
+    let listed = run(&["certificate", "list"]);
+    assert!(listed.contains("example.com,www.example.com") && listed.contains("failing"));
+    run(&[
+        "certificate",
+        "request",
+        "example.com",
+        "--account",
+        "letsencrypt",
+        "--name",
+        "example.com",
+        "--name",
+        "www.example.com",
+    ]);
+    assert_eq!(
+        stub.requests("POST", "/api/v1/acme-certificates")[0].body,
+        json!({"id": "example.com", "account": "letsencrypt",
+               "names": ["example.com", "www.example.com"], "challenge": "http-01"})
+    );
+    assert!(run(&["certificate", "show", "example.com"]).contains("no answer"));
+    run(&["certificate", "renew", "example.com"]);
+    assert_eq!(
+        stub.requests("POST", "/api/v1/acme-certificates/example.com/renewals")
+            .len(),
+        1
+    );
+    run(&["certificate", "delete", "example.com"]);
+    assert_eq!(
+        stub.requests("DELETE", "/api/v1/acme-certificates/example.com")[0]
+            .if_match
+            .as_deref(),
+        Some("\"4\"")
+    );
 }
 
 #[test]

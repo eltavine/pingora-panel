@@ -111,6 +111,9 @@ enum Command {
     /// Certificates the panel keeps and delivers to the gateway.
     #[command(subcommand)]
     Certificate(commands::certificates::CertificateCommand),
+    /// ACME accounts and the certificates they obtain and keep renewed.
+    #[command(subcommand)]
+    Acme(commands::acme::AcmeCommand),
     /// The draft configuration: its files, checks, plans and applying it.
     #[command(subcommand)]
     Config(commands::config::ConfigCommand),
@@ -188,6 +191,7 @@ async fn main() -> ExitCode {
             Command::Certificate(command) => {
                 commands::certificates::run(&api, &output, command).await
             }
+            Command::Acme(command) => commands::acme::run(&api, &output, command).await,
             Command::TlsProfile(command) => {
                 commands::gateway::tls_profile(&api, &output, command).await
             }
