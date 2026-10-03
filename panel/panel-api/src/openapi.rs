@@ -33,6 +33,9 @@ mod tests;
         crate::configuration::apply,
         crate::language::source, crate::language::replace_source, crate::language::check,
         crate::language::format, crate::language::schema,
+        crate::audit::list_audit_events,
+        crate::audit::get_audit_event,
+        crate::audit::verify_audit_events,
         crate::language::ast,
         crate::language::ir, crate::language::plan, crate::language::dry_run,
         crate::language::list_revisions, crate::language::get_revision, crate::language::diff_revision,
@@ -43,7 +46,8 @@ mod tests;
     ),
     tags(
         (name = "configuration", description = "Sites, domains, routes, upstreams, listeners and TLS profiles, edited as a draft and applied to the gateway"),
-        (name = "gateway", description = "The running gateway: data plane, workers, shutdown and upstream health")
+        (name = "gateway", description = "The running gateway: data plane, workers, shutdown and upstream health"),
+        (name = "audit", description = "Every change and every refused or failed attempt, in a tamper-evident hash chain")
     ),
     modifiers(&HttpConventions),
     components(schemas(

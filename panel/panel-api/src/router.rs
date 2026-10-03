@@ -1,7 +1,7 @@
 use crate::{
     admission::{admit, Admission},
-    configuration as config, gateway_runtime as runtime, language, middleware, routes, ApiConfig,
-    ApiState,
+    audit, configuration as config, gateway_runtime as runtime, language, middleware, routes,
+    ApiConfig, ApiState,
 };
 use axum::{
     extract::DefaultBodyLimit,
@@ -153,6 +153,15 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         .route(
             "/api/v1/revisions/{id}/note",
             put(language::note_revision::<U>),
+        )
+        .route("/api/v1/audit-events", get(audit::list_audit_events::<U>))
+        .route(
+            "/api/v1/audit-events/verify",
+            get(audit::verify_audit_events::<U>),
+        )
+        .route(
+            "/api/v1/audit-events/{sequence}",
+            get(audit::get_audit_event::<U>),
         )
         .route("/api/v1/openapi.json", get(routes::openapi))
         .layer(DefaultBodyLimit::max(config.max_body_bytes()))

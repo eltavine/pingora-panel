@@ -1,4 +1,4 @@
-use panel_application::{ConfigurationPort, GatewayRuntimePort};
+use panel_application::{AuditPort, ConfigurationPort, GatewayRuntimePort};
 use panel_health::HealthWatch;
 use panel_platform::ServiceDirectory;
 use std::sync::Arc;
@@ -9,6 +9,7 @@ pub struct ApiState<U> {
     pub(crate) directory: Option<Arc<dyn ServiceDirectory>>,
     pub(crate) configuration: Option<Arc<dyn ConfigurationPort>>,
     pub(crate) runtime: Option<Arc<dyn GatewayRuntimePort>>,
+    pub(crate) audit: Option<Arc<dyn AuditPort>>,
 }
 
 impl<U> Clone for ApiState<U> {
@@ -19,6 +20,7 @@ impl<U> Clone for ApiState<U> {
             directory: self.directory.clone(),
             configuration: self.configuration.clone(),
             runtime: self.runtime.clone(),
+            audit: self.audit.clone(),
         }
     }
 }
@@ -31,12 +33,19 @@ impl<U> ApiState<U> {
             directory: None,
             configuration: None,
             runtime: None,
+            audit: None,
         }
     }
 
     /// Serves data plane status, reloads, workers, shutdown and upstream health.
     pub fn with_runtime(mut self, runtime: Arc<dyn GatewayRuntimePort>) -> Self {
         self.runtime = Some(runtime);
+        self
+    }
+
+    /// Serves the audit trail under `/api/v1/audit-events`.
+    pub fn with_audit(mut self, audit: Arc<dyn AuditPort>) -> Self {
+        self.audit = Some(audit);
         self
     }
 
