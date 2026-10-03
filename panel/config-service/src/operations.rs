@@ -4,9 +4,9 @@
 use chrono::{DateTime, Utc};
 use panel_config_model::{
     abnormal_sites, checked, entity_tag, query_sites, summarize, validate, BatchAction,
-    BatchRequest, ConfigModel, Domain, DomainCheck, DomainView, Listener, NodeInput, Route,
-    RouteInput, RouteView, SiteBundle, SiteInput, SiteList, SiteQuery, SiteView, UpstreamInput,
-    UpstreamView, ValidationResult,
+    BatchRequest, ConfigModel, Domain, DomainCheck, DomainView, Listener, ListenerView, NodeInput,
+    Route, RouteInput, RouteView, SiteBundle, SiteInput, SiteList, SiteQuery, SiteView,
+    TlsProfileView, UpstreamInput, UpstreamView, ValidationResult,
 };
 use panel_domain::NormalizedHost;
 use panel_errors::{Diagnostic, PanelError, Result};
@@ -134,17 +134,10 @@ fn route_view(model: &ConfigModel, id: Uuid) -> Result<Output> {
         .routes
         .iter()
         .find(|route| route.id == id)
-        .expect("route_site found the route")
-        .clone();
-    let etag = entity_tag(&route);
-    Ok(Output::tagged(
-        &RouteView {
-            route,
-            site_id: site.id,
-            etag: etag.clone(),
-        },
-        etag,
-    ))
+        .expect("route_site found the route");
+    let view = RouteView::new(site.id, route);
+    let etag = view.etag.clone();
+    Ok(Output::tagged(&view, etag))
 }
 
 fn upstream_view(model: &ConfigModel, id: Uuid) -> Result<Output> {
@@ -262,9 +255,14 @@ pub fn read(
             Ok(Output::json(&checks))
         }
         ("routes.list", Path::SiteRoutes(site)) => {
-            let mut routes: Vec<&Route> = model.site(site)?.routes.iter().collect();
+            let site = model.site(site)?;
+            let mut routes: Vec<&Route> = site.routes.iter().collect();
             routes.sort_by_key(|route| (route.priority, route.id));
-            Ok(Output::json(&routes))
+            let views: Vec<RouteView> = routes
+                .into_iter()
+                .map(|route| RouteView::new(site.id, route))
+                .collect();
+            Ok(Output::json(&views))
         }
         ("routes.get", Path::Route(id)) => route_view(model, id),
         ("upstreams.list", Path::Upstreams) => {
@@ -276,12 +274,19 @@ pub fn read(
             Ok(Output::json(&views))
         }
         ("upstreams.get", Path::Upstream(id)) => upstream_view(model, id),
-        ("listeners.list", Path::Listeners) => Ok(Output::json(&model.listeners)),
+        ("listeners.list", Path::Listeners) => {
+            let views: Vec<ListenerView> = model.listeners.iter().map(ListenerView::new).collect();
+            Ok(Output::json(&views))
+        }
         ("listeners.get", Path::Listener(id)) => {
             let listener = named(&model.listeners, id, |item| &item.id, "listener")?;
             Ok(Output::tagged(listener, entity_tag(listener)))
         }
-        ("tls_profiles.list", Path::TlsProfiles) => Ok(Output::json(&model.tls_profiles)),
+        ("tls_profiles.list", Path::TlsProfiles) => {
+            let views: Vec<TlsProfileView> =
+                model.tls_profiles.iter().map(TlsProfileView::new).collect();
+            Ok(Output::json(&views))
+        }
         ("tls_profiles.get", Path::TlsProfile(id)) => {
             let profile = named(&model.tls_profiles, id, |item| &item.id, "TLS profile")?;
             Ok(Output::tagged(profile, entity_tag(profile)))

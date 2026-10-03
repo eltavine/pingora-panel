@@ -5309,7 +5309,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/Listener"
+                    "$ref": "#/components/schemas/ListenerView"
                   }
                 }
               }
@@ -14156,7 +14156,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/Route"
+                    "$ref": "#/components/schemas/RouteView"
                   }
                 }
               }
@@ -14867,7 +14867,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/Route"
+                    "$ref": "#/components/schemas/RouteView"
                   }
                 }
               }
@@ -15565,7 +15565,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/TlsProfile"
+                    "$ref": "#/components/schemas/TlsProfileView"
                   }
                 }
               }
@@ -21509,6 +21509,24 @@
         },
         "additionalProperties": false
       },
+      "ListenerView": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Listener"
+          },
+          {
+            "type": "object",
+            "required": [
+              "etag"
+            ],
+            "properties": {
+              "etag": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      },
       "LoadBalancingPolicy": {
         "oneOf": [
           {
@@ -22451,6 +22469,24 @@
           }
         },
         "additionalProperties": false
+      },
+      "TlsProfileView": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/TlsProfile"
+          },
+          {
+            "type": "object",
+            "required": [
+              "etag"
+            ],
+            "properties": {
+              "etag": {
+                "type": "string"
+              }
+            }
+          }
+        ]
       },
       "Upstream": {
         "type": "object",

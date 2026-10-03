@@ -21,9 +21,9 @@ use panel_application::{
     ConfigurationRead, DraftInfo, GatewayUseCases,
 };
 use panel_config_model::{
-    BatchRequest, Domain, DomainCheck, DomainView, Listener, NodeInput, Route, RouteInput,
-    RouteView, SiteBundle, SiteInput, SiteList, SiteQuery, SiteSummary, SiteView, UpstreamInput,
-    UpstreamView, ValidationResult,
+    BatchRequest, Domain, DomainCheck, DomainView, Listener, ListenerView, NodeInput, RouteInput,
+    RouteView, SiteBundle, SiteInput, SiteList, SiteQuery, SiteSummary, SiteView, TlsProfileView,
+    UpstreamInput, UpstreamView, ValidationResult,
 };
 use panel_errors::PanelError;
 use panel_ir::TlsProfile;
@@ -349,7 +349,7 @@ read_route!(
     "/api/v1/listeners",
     "listeners.list",
     "listeners",
-    Vec<Listener>,
+    Vec<ListenerView>,
     "Lists listeners."
 );
 read_route!(
@@ -357,7 +357,7 @@ read_route!(
     "/api/v1/tls-profiles",
     "tls_profiles.list",
     "tls-profiles",
-    Vec<TlsProfile>,
+    Vec<TlsProfileView>,
     "Lists TLS profiles."
 );
 read_route!(
@@ -705,7 +705,7 @@ pub(crate) async fn remove_domain<U: GatewayUseCases>(
 
 /// Lists a site's routes in evaluation order.
 #[utoipa::path(get, path = "/api/v1/sites/{id}/routes", params(QueryHeaders, SitePath),
-    responses((status = 200, body = Vec<Route>)), tag = "configuration")]
+    responses((status = 200, body = Vec<RouteView>)), tag = "configuration")]
 pub(crate) async fn list_routes<U: GatewayUseCases>(
     State(state): State<ApiState<U>>,
     headers: HeaderMap,
@@ -744,7 +744,7 @@ pub(crate) async fn create_route<U: GatewayUseCases>(
 
 /// Reorders a site's routes, assigning priorities in the given order.
 #[utoipa::path(put, path = "/api/v1/sites/{id}/routes/order", request_body = RouteOrderRequest,
-    params(MutationHeaders, SitePath), responses((status = 200, body = Vec<Route>)), tag = "configuration")]
+    params(MutationHeaders, SitePath), responses((status = 200, body = Vec<RouteView>)), tag = "configuration")]
 pub(crate) async fn reorder_routes<U: GatewayUseCases>(
     State(state): State<ApiState<U>>,
     headers: HeaderMap,

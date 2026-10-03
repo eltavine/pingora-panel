@@ -26,8 +26,8 @@ pub use query::{
 };
 pub use validate::validate;
 pub use views::{
-    BatchAction, BatchRequest, DomainCheck, DomainOwner, DomainView, RouteView, SiteList, SiteView,
-    UpstreamView, ValidationResult,
+    BatchAction, BatchRequest, DomainCheck, DomainOwner, DomainView, ListenerView, RouteView,
+    SiteList, SiteView, TlsProfileView, UpstreamView, ValidationResult,
 };
 
 /// Identifies the document format in storage, exports and imports.

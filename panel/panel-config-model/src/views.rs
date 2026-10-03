@@ -2,11 +2,12 @@
 //! HTTP contract that documents them.
 
 use crate::{
-    model::{ConfigModel, Domain, Route, Site, SiteKind, Upstream},
+    model::{ConfigModel, Domain, Listener, Route, Site, SiteKind, Upstream},
     query::{serves_https, site_status, SiteStatus},
 };
 use panel_domain::NormalizedHost;
 use panel_errors::Diagnostic;
+use panel_ir::TlsProfile;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
@@ -149,6 +150,50 @@ pub struct RouteView {
     pub route: Route,
     pub site_id: Uuid,
     pub etag: String,
+}
+
+impl RouteView {
+    pub fn new(site_id: Uuid, route: &Route) -> Self {
+        Self {
+            etag: crate::entity_tag(route),
+            route: route.clone(),
+            site_id,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ListenerView {
+    #[serde(flatten)]
+    pub listener: Listener,
+    pub etag: String,
+}
+
+impl ListenerView {
+    pub fn new(listener: &Listener) -> Self {
+        Self {
+            etag: crate::entity_tag(listener),
+            listener: listener.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TlsProfileView {
+    #[serde(flatten)]
+    pub profile: TlsProfile,
+    pub etag: String,
+}
+
+impl TlsProfileView {
+    pub fn new(profile: &TlsProfile) -> Self {
+        Self {
+            etag: crate::entity_tag(profile),
+            profile: profile.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
