@@ -67,6 +67,9 @@ pub struct AccountChange {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct Attempt {
     pub username: String,
+    /// The identity provider the person signed in through.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
     pub client_address: Option<String>,
     pub user_agent: Option<String>,
 }

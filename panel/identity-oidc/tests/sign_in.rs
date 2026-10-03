@@ -220,7 +220,26 @@ async fn people_get_accounts_roles_and_sessions_from_their_provider() {
             .count(),
         2
     );
-    assert!(events.iter().all(|event| event != "identity.login.failed"));
+    let refusals: Vec<String> = store
+        .events()
+        .into_iter()
+        .filter(|event| event.event_type == "identity.login.failed")
+        .map(|event| {
+            format!(
+                "{} {}",
+                event.data["attempt"]["provider"], event.data["reason"]
+            )
+        })
+        .collect();
+    assert_eq!(
+        refusals,
+        [
+            r#""corp" "provider_state""#,
+            r#""corp" "username_taken""#,
+            r#""corp" "unknown_account""#,
+        ],
+        "{events:?}"
+    );
 
     // The provider is asked about sessions every fifteen minutes; it rotates
     // refresh tokens, so the second recheck works only with the kept ones.

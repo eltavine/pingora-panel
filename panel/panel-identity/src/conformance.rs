@@ -942,6 +942,7 @@ async fn providers_link_accounts_and_keep_sign_ins_once(subject: impl StoreUnder
 
     let attempt = Attempt {
         username: "alice".into(),
+        provider: Some("corp".into()),
         client_address: None,
         user_agent: None,
     };

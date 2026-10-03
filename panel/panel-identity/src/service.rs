@@ -304,6 +304,7 @@ impl Identity {
         scope: &RequestScope,
     ) -> Result<Login> {
         let attempt = Attempt {
+            provider: None,
             username: username.chars().take(Username::MAX_LEN).collect(),
             client_address: client.address.clone(),
             user_agent: client.user_agent.clone(),

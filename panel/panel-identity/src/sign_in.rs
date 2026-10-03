@@ -12,7 +12,7 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use panel_context::{RequestId, RequestScope};
-use panel_errors::{PanelError, Result};
+use panel_errors::{ErrorCode, PanelError, Result};
 use panel_secrets::{Sealed, SecretVault};
 use serde_json::{Map, Value};
 use std::{collections::BTreeSet, sync::Arc, time::Duration};
@@ -52,6 +52,12 @@ pub struct Rechecked {
     pub ended: usize,
     /// Not answered for; tried again at a later recheck.
     pub unanswered: usize,
+}
+
+/// How far a sign-in got, for recording it when refused.
+struct Progress {
+    attempt: Attempt,
+    reason: &'static str,
 }
 
 /// Sign-ins through identity providers.
@@ -211,6 +217,7 @@ impl ProviderSignIns {
 
     /// Completes a sign-in from the provider's callback. `browser_state` is
     /// the state the browser kept, which must equal the one returned.
+    /// Refused sign-ins are recorded with the stage they failed at.
     #[allow(clippy::too_many_arguments)]
     pub async fn finish(
         &self,
@@ -221,6 +228,51 @@ impl ProviderSignIns {
         transport: Transport,
         client: &Client,
         scope: &RequestScope,
+    ) -> Result<(Login, String)> {
+        let mut progress = Progress {
+            attempt: Attempt {
+                username: String::new(),
+                provider: Some(provider.to_owned()),
+                client_address: client.address.clone(),
+                user_agent: client.user_agent.clone(),
+            },
+            reason: "provider_state",
+        };
+        let finished = self
+            .complete_sign_in(
+                provider,
+                code,
+                state,
+                browser_state,
+                transport,
+                scope,
+                &mut progress,
+            )
+            .await;
+        if let Err(error) = &finished {
+            let reason = if error.code.as_str() == ErrorCode::CONFLICT {
+                "username_taken"
+            } else {
+                progress.reason
+            };
+            let cause = cause(scope, &progress.attempt.username);
+            self.identity
+                .login_refused(&progress.attempt, reason, &cause)
+                .await;
+        }
+        finished
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn complete_sign_in(
+        &self,
+        provider: &str,
+        code: &str,
+        state: &str,
+        browser_state: &str,
+        transport: Transport,
+        scope: &RequestScope,
+        progress: &mut Progress,
     ) -> Result<(Login, String)> {
         let refused = || {
             PanelError::permission_denied(
@@ -237,25 +289,24 @@ impl ProviderSignIns {
             .await?
             .filter(|pending| pending.provider == provider)
             .ok_or_else(refused)?;
+        progress.reason = "provider_disabled";
         let stored = self.enabled(provider).await?;
         let settings = self
             .directory
             .settings(&stored, self.redirect_uri(provider))
             .await?;
+        progress.reason = "provider_refused";
         let signed_in = self
             .connect
             .complete(&settings, code, &pending.verifier, &pending.nonce)
             .await?;
         let claims = &signed_in.claims;
-        let attempt = Attempt {
-            username: claim(claims, &stored.claims.username)
-                .unwrap_or(&signed_in.subject)
-                .chars()
-                .take(Username::MAX_LEN)
-                .collect(),
-            client_address: client.address.clone(),
-            user_agent: client.user_agent.clone(),
-        };
+        progress.attempt.username = claim(claims, &stored.claims.username)
+            .unwrap_or(&signed_in.subject)
+            .chars()
+            .take(Username::MAX_LEN)
+            .collect();
+        progress.reason = "sign_in";
         let mapped: BTreeSet<String> = {
             let groups = groups(claims, &stored.claims.groups);
             stored
@@ -275,16 +326,19 @@ impl ProviderSignIns {
                     .ok_or_else(|| PanelError::corrupt_state("a provider link names no account"))?
                     .account;
                 if account.disabled {
+                    progress.reason = "disabled";
                     return Err(PanelError::permission_denied("your account is disabled"));
                 }
                 (account.id, None, account.roles, link.granted_roles)
             }
             None => {
                 if !stored.create_accounts {
+                    progress.reason = "unknown_account";
                     return Err(PanelError::permission_denied(
                         "no account is linked to you; ask an Administrator to create one",
                     ));
                 }
+                progress.reason = "no_username";
                 let raw = claim(claims, &stored.claims.username).ok_or_else(|| {
                     PanelError::permission_denied(format!(
                         "the provider sent no {:?} claim to name your account",
@@ -349,8 +403,8 @@ impl ProviderSignIns {
             created_at: now,
             last_seen_at: now,
             expires_at: now + duration(self.sessions.absolute),
-            client_address: client.address.clone(),
-            user_agent: client.user_agent.clone(),
+            client_address: progress.attempt.client_address.clone(),
+            user_agent: progress.attempt.user_agent.clone(),
             revoked_at: None,
         };
         let refresh_token = match signed_in.refresh_token {
@@ -381,8 +435,8 @@ impl ProviderSignIns {
                     },
                     refresh_token,
                 },
-                &attempt,
-                &cause(scope, &attempt.username),
+                &progress.attempt,
+                &cause(scope, &progress.attempt.username),
             )
             .await?;
         Ok((
