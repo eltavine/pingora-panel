@@ -358,6 +358,26 @@ ppanel audit verify
 The console's audit log filters the same records, follows one request's
 events and verifies the chain.
 
+## Traffic
+
+The gateway measures every request it serves and sends upstream, its
+connections and its TLS handshakes, with the metric names of the
+OpenTelemetry semantic conventions
+([decision](../docs/adr/0022-metrics-logs-and-traces.md)). Prometheus
+scrapes them, and `observability-service` answers for them with fixed
+queries, so callers never write PromQL. `GET /api/v1/traffic` summarizes a
+window — requests, rate, status classes, latency percentiles, traffic in
+and out, open connections, handshakes, upstream error ratios and the
+busiest routes — for every site, one `site` or one `route`, and
+`/api/v1/traffic/series` charts the request rate, server errors and 95th
+percentile latency. Both need the gateway read permission.
+
+```sh
+ppanel traffic summary --window 1h
+ppanel traffic summary --site shop --route checkout --window 15m
+ppanel traffic series --window 1d --step 15m
+```
+
 ## Accounts and access
 
 Every request to `panel-api` is authenticated and authorized

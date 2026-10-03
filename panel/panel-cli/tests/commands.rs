@@ -137,6 +137,25 @@ async fn api(
             "diagnostics": []
         }))
         .into_response(),
+        ("GET", "/api/v1/traffic") => Json(json!({
+            "observed_at": "2026-10-04T10:00:00Z", "window_seconds": 900,
+            "requests": 119.6, "requests_per_second": 0.13,
+            "statuses": {"informational": 0, "success": 110, "redirection": 0,
+                         "client_error": 0, "server_error": 9.6},
+            "latency": {"p50": 0.012, "p90": null, "p95": 0.25, "p99": null},
+            "bytes_received": 2048, "bytes_sent": 1_572_864,
+            "open_connections": 3, "tls_handshakes": 7,
+            "upstreams": [{"upstream": "app", "requests": 50, "error_ratio": 0.125,
+                           "latency": {"p50": null, "p90": null, "p95": 1.5, "p99": null}}],
+            "routes": [{"site": "shop", "route": "checkout", "requests": 60}],
+            "revision": 7, "activated_at": "2026-10-04T09:00:00Z"
+        }))
+        .into_response(),
+        ("GET", "/api/v1/traffic/series") => Json(json!({
+            "points": [{"at": "2026-10-04T09:59:00Z", "requests_per_second": 2,
+                        "server_errors_per_second": 0.1, "p95": null}]
+        }))
+        .into_response(),
         ("GET", "/api/v1/audit-events") => Json(json!({
             "items": [{
                 "sequence": 2, "occurred_at": "2026-10-03T10:00:00.000001Z", "actor_id": "ops",
@@ -758,6 +777,39 @@ fn audit_events_are_listed_shown_and_verified() {
     let tampered = stub.ppanel(&["audit", "verify", "--from", "9"]);
     assert_eq!(tampered.status.code(), Some(1));
     assert!(stderr(&tampered).contains("event 9 does not match its hash"));
+}
+
+#[test]
+fn traffic_is_summarized_and_charted() {
+    let stub = Stub::start();
+    let summary = stub.ppanel(&[
+        "traffic", "summary", "--site", "shop", "--route", "checkout", "--window", "15m",
+    ]);
+    let printed = stdout(&summary);
+    for expected in [
+        "15m",
+        "120",
+        "110 / 0 / 0 / 10",
+        "12 ms / - / 250 ms / -",
+        "2.0 KiB / 1.5 MiB",
+        "7 (activated 2026-10-04T09:00:00Z)",
+        "12.5%",
+        "checkout",
+    ] {
+        assert!(printed.contains(expected), "{expected} in\n{printed}");
+    }
+    assert_eq!(
+        stub.requests("GET", "/api/v1/traffic")[0].query,
+        "window=900&site=shop&route=checkout"
+    );
+    let series = stub.ppanel(&["traffic", "series", "--window", "1d", "--step", "5m"]);
+    assert!(stdout(&series).contains("2026-10-04T09:59:00Z"));
+    assert_eq!(
+        stub.requests("GET", "/api/v1/traffic/series")[0].query,
+        "window=86400&step=300"
+    );
+    let routeless = stub.ppanel(&["traffic", "summary", "--route", "checkout"]);
+    assert_eq!(routeless.status.code(), Some(2));
 }
 
 #[test]

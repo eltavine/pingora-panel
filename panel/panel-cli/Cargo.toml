@@ -15,6 +15,7 @@ path = "src/main.rs"
 chrono.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
+humantime.workspace = true
 reqwest = { workspace = true, features = ["query", "rustls-no-provider"] }
 rpassword.workspace = true
 rustls.workspace = true
