@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use panel_identity::{
     conformance::{check, StoreUnderTest},
     memory::{MemoryIdentityStore, RecordedEvent},
-    IdentityStore, ProviderStore,
+    IdentityStore, ProviderStore, WorkloadStore,
 };
 use std::sync::Arc;
 
@@ -17,6 +17,10 @@ impl StoreUnderTest for Memory {
     }
 
     fn providers(&self) -> Arc<dyn ProviderStore> {
+        self.0.clone()
+    }
+
+    fn workloads(&self) -> Arc<dyn WorkloadStore> {
         self.0.clone()
     }
 

@@ -9,7 +9,7 @@ use crate::{
     GroupRole, Identity, IdentityProvider, IdentitySettings, IdentityStore, Login, PasswordSignIn,
     PendingSignIn, Permission, PermissionSet, Principal, ProviderLink, ProviderSignIn,
     ProviderStore, RoleRequest, Secret, SecretHash, Session, SessionId, TokenRequest, Transport,
-    Username,
+    Username, VerifiedWorkload, WorkloadIdentity, WorkloadRequest, WorkloadStore, WorkloadVerifier,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
@@ -27,6 +27,9 @@ pub trait StoreUnderTest: Send + Sync {
 
     /// The same store, as it keeps identity providers.
     fn providers(&self) -> Arc<dyn ProviderStore>;
+
+    /// The same store, as it keeps workload identity trusts.
+    fn workloads(&self) -> Arc<dyn WorkloadStore>;
 
     async fn events(&self) -> Vec<RecordedEvent>;
 }
@@ -50,6 +53,7 @@ where
     providers_link_accounts_and_keep_sign_ins_once(fresh().await).await;
     break_glass_accounts_keep_password_sign_in(fresh().await).await;
     service_accounts_never_sign_in_and_get_tokens_from_managers(fresh().await).await;
+    workloads_exchange_trusted_tokens_for_short_sessions(fresh().await).await;
 }
 
 const PASSWORD: &str = "glacier violin tapestry orbit";
@@ -1307,4 +1311,191 @@ async fn service_accounts_never_sign_in_and_get_tokens_from_managers(subject: im
         ErrorCode::PRECONDITION_FAILED,
         "people create their own tokens"
     );
+}
+
+/// Vouches for the token `good` as a GitHub Actions job of `shop/site`.
+struct FixedVerifier;
+
+#[async_trait]
+impl WorkloadVerifier for FixedVerifier {
+    async fn verify(
+        &self,
+        token: &str,
+        issuers: &[String],
+    ) -> panel_errors::Result<VerifiedWorkload> {
+        let issuer = "https://token.example".to_owned();
+        if token != "good" || !issuers.contains(&issuer) {
+            return Err(panel_errors::PanelError::unauthenticated("bad signature"));
+        }
+        Ok(VerifiedWorkload {
+            issuer,
+            subject: "repo:shop/site:ref:refs/heads/main".into(),
+            audiences: vec!["pingora-panel".into()],
+            claims: serde_json::json!({"repository": "shop/site"})
+                .as_object()
+                .cloned()
+                .unwrap_or_default(),
+        })
+    }
+}
+
+async fn workloads_exchange_trusted_tokens_for_short_sessions(subject: impl StoreUnderTest) {
+    let harness = Harness::new(subject, IdentitySettings::default());
+    harness.admin().await;
+    let store = harness.subject.store();
+    let ci = harness
+        .identity
+        .create_account(
+            AccountRequest {
+                username: "ci".into(),
+                roles: vec!["operator".into()],
+                service: true,
+                ..AccountRequest::default()
+            },
+            &scope(),
+            "root",
+        )
+        .await
+        .unwrap();
+    let clock = Arc::clone(&harness.now);
+    let workloads = WorkloadIdentity::new(
+        harness.subject.workloads(),
+        store.clone(),
+        Arc::new(FixedVerifier),
+    )
+    .with_clock(move || *clock.lock().unwrap());
+    let request = |subject: &str, account: AccountId| WorkloadRequest {
+        account,
+        issuer: "https://token.example".into(),
+        audience: "pingora-panel".into(),
+        subject: subject.into(),
+        claims: [("repository".to_owned(), "shop/site".to_owned())].into(),
+        session_minutes: 15,
+        enabled: true,
+    };
+    let root = store
+        .account_named(&Username::new("root").unwrap())
+        .await
+        .unwrap()
+        .unwrap()
+        .account;
+    assert_eq!(
+        workloads
+            .put(
+                "people",
+                request("repo:shop/site:*", root.id),
+                &scope(),
+                "root"
+            )
+            .await
+            .unwrap_err()
+            .code
+            .as_str(),
+        ErrorCode::INVALID_ARGUMENT,
+        "workloads act as service accounts"
+    );
+    let (_, created) = workloads
+        .put(
+            "deploy",
+            request("repo:shop/site:*", ci.id),
+            &scope(),
+            "root",
+        )
+        .await
+        .unwrap();
+    assert!(created);
+    let (_, created) = workloads
+        .put(
+            "deploy",
+            request("repo:shop/site:ref:refs/heads/*", ci.id),
+            &scope(),
+            "root",
+        )
+        .await
+        .unwrap();
+    assert!(!created);
+    assert_eq!(workloads.list().await.unwrap().len(), 1);
+
+    let login = workloads
+        .exchange("good", &client(), &scope())
+        .await
+        .unwrap();
+    assert_eq!(login.account.id, ci.id);
+    assert_eq!(login.session.transport, Transport::Bearer);
+    assert_eq!(
+        login.session.expires_at - login.session.created_at,
+        Duration::minutes(15)
+    );
+    let principal = harness
+        .identity
+        .authenticate_session(login.secret.expose(), Transport::Bearer)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(principal.can(Permission::ConfigApply));
+    let own_token = harness
+        .identity
+        .create_token(
+            &principal,
+            TokenRequest {
+                name: "escape".into(),
+                permissions: None,
+                lifetime: std::time::Duration::from_secs(86_400),
+            },
+            &scope(),
+        )
+        .await;
+    assert_eq!(
+        own_token.unwrap_err().code.as_str(),
+        ErrorCode::PERMISSION_DENIED,
+        "a workload's session cannot mint long-lived secrets"
+    );
+    let logins = harness.events("identity.login.succeeded").await;
+    assert!(logins
+        .iter()
+        .any(|login| login["attempt"]["provider"] == "workload/deploy"));
+
+    assert_eq!(
+        workloads
+            .exchange("forged", &client(), &scope())
+            .await
+            .unwrap_err()
+            .code
+            .as_str(),
+        ErrorCode::UNAUTHENTICATED
+    );
+    workloads
+        .put(
+            "deploy",
+            request("repo:shop/other:*", ci.id),
+            &scope(),
+            "root",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        workloads
+            .exchange("good", &client(), &scope())
+            .await
+            .unwrap_err()
+            .code
+            .as_str(),
+        ErrorCode::PERMISSION_DENIED
+    );
+    let refusals = harness.events("identity.login.failed").await;
+    for reason in ["workload_token", "workload_untrusted"] {
+        assert!(
+            refusals.iter().any(|failure| failure["reason"] == reason),
+            "{reason}"
+        );
+    }
+    workloads.delete("deploy", &scope(), "root").await.unwrap();
+    assert!(workloads.list().await.unwrap().is_empty());
+    for (event, count) in [
+        ("identity.workload_trust.created", 1),
+        ("identity.workload_trust.updated", 2),
+        ("identity.workload_trust.deleted", 1),
+    ] {
+        assert_eq!(harness.events(event).await.len(), count, "{event}");
+    }
 }

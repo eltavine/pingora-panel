@@ -12,7 +12,10 @@ use base64::{
     Engine,
 };
 use panel_errors::{PanelError, Result};
-use panel_identity::{OpenIdConnect, ProviderSettings, Refreshed, SignInRequest, SignedIn};
+use panel_identity::{
+    OpenIdConnect, ProviderSettings, Refreshed, SignInRequest, SignedIn, VerifiedWorkload,
+    WorkloadVerifier,
+};
 use percent_encoding::utf8_percent_encode;
 use ring::{
     digest::{digest, SHA256},
@@ -39,7 +42,10 @@ const LEEWAY_SECONDS: u64 = 60;
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct Metadata {
     pub issuer: String,
+    /// Absent for issuers of workload tokens, which nobody signs in through.
+    #[serde(default)]
     pub authorization_endpoint: String,
+    #[serde(default)]
     pub token_endpoint: String,
     pub jwks_uri: String,
     #[serde(default)]
@@ -94,9 +100,21 @@ impl OidcClient {
         })
     }
 
-    /// Reads the provider's discovery document and keys, checking them.
+    /// Reads the provider's discovery document and keys, checking them and
+    /// that people can sign in through it.
     pub async fn discover(&self, issuer: &str) -> Result<Metadata> {
-        Ok(self.provider(issuer, false).await?.metadata.clone())
+        let metadata = self.provider(issuer, false).await?.metadata.clone();
+        for (endpoint, name) in [
+            (&metadata.authorization_endpoint, "authorization endpoint"),
+            (&metadata.token_endpoint, "token endpoint"),
+        ] {
+            if endpoint.is_empty() {
+                return Err(PanelError::validation_failed(format!(
+                    "the provider publishes no {name}, so nobody can sign in through it"
+                )));
+            }
+        }
+        Ok(metadata)
     }
 
     /// Starts a sign-in: the authorization URL with a fresh state, nonce and
@@ -271,22 +289,33 @@ impl OidcClient {
         id_token: &str,
         nonce: &str,
     ) -> Result<Map<String, Value>> {
+        let claims = self
+            .signed_claims(&settings.issuer, provider, id_token)
+            .await?;
+        check_claims(&claims, settings, nonce, now_seconds())?;
+        Ok(claims)
+    }
+
+    /// The claims of a token whose signature one of the issuer's keys
+    /// verifies, reading the keys again once if the issuer may have rotated
+    /// them.
+    async fn signed_claims(
+        &self,
+        issuer: &str,
+        provider: Arc<Cached>,
+        token: &str,
+    ) -> Result<Map<String, Value>> {
         let allowed = algorithms(&provider.metadata);
-        let verified = match jose::verify(id_token, &provider.keys, &allowed) {
+        let verified = match jose::verify(token, &provider.keys, &allowed) {
             Ok(verified) => verified,
             Err(error) if provider.keys_fetched.elapsed() >= KEY_REFETCH => {
-                // The provider may have rotated its keys since they were read.
-                let refreshed = self.provider(&settings.issuer, true).await?;
-                jose::verify(id_token, &refreshed.keys, &allowed).map_err(|_| error)?
+                let refreshed = self.provider(issuer, true).await?;
+                jose::verify(token, &refreshed.keys, &allowed).map_err(|_| error)?
             }
             Err(error) => return Err(error),
         };
-        let claims: Map<String, Value> =
-            serde_json::from_slice(&verified.payload).map_err(|_| {
-                PanelError::unauthenticated("the ID token's claims are not a JSON object")
-            })?;
-        check_claims(&claims, settings, nonce, now_seconds())?;
-        Ok(claims)
+        serde_json::from_slice(&verified.payload)
+            .map_err(|_| PanelError::unauthenticated("the token's claims are not a JSON object"))
     }
 
     /// The provider's checked discovery document and keys, from the cache
@@ -341,15 +370,17 @@ impl OidcClient {
                 metadata.issuer
             )));
         }
+        require_secure(&metadata.jwks_uri, "the key set")?;
         for (endpoint, name) in [
             (
                 &metadata.authorization_endpoint,
                 "the authorization endpoint",
             ),
             (&metadata.token_endpoint, "the token endpoint"),
-            (&metadata.jwks_uri, "the key set"),
         ] {
-            require_secure(endpoint, name)?;
+            if !endpoint.is_empty() {
+                require_secure(endpoint, name)?;
+            }
         }
         if !metadata.code_challenge_methods_supported.is_empty()
             && !metadata
@@ -458,6 +489,98 @@ fn now_seconds() -> u64 {
         .as_secs()
 }
 
+#[async_trait]
+impl WorkloadVerifier for OidcClient {
+    async fn verify(&self, token: &str, issuers: &[String]) -> Result<VerifiedWorkload> {
+        let issuer = unverified_issuer(token)?;
+        if !issuers.contains(&issuer) {
+            return Err(PanelError::unauthenticated(
+                "no workload identity trusts the token's issuer",
+            ));
+        }
+        let provider = self.provider(&issuer, false).await?;
+        let claims = self.signed_claims(&issuer, provider, token).await?;
+        check_workload_claims(&claims, &issuer, now_seconds())?;
+        Ok(VerifiedWorkload {
+            subject: claims
+                .get("sub")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            audiences: audiences(&claims).into_iter().map(str::to_owned).collect(),
+            issuer,
+            claims,
+        })
+    }
+}
+
+/// The issuer a token names, before anything about it is trusted; only
+/// used to pick the keys that must then verify it.
+fn unverified_issuer(token: &str) -> Result<String> {
+    let refused = || PanelError::unauthenticated("the workload token is not a signed JWT");
+    let payload = token.split('.').nth(1).ok_or_else(refused)?;
+    let bytes = URL_SAFE_NO_PAD.decode(payload).map_err(|_| refused())?;
+    let claims: Map<String, Value> = serde_json::from_slice(&bytes).map_err(|_| refused())?;
+    claims
+        .get("iss")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(refused)
+}
+
+fn audiences(claims: &Map<String, Value>) -> Vec<&str> {
+    match claims.get("aud") {
+        Some(Value::String(audience)) => vec![audience.as_str()],
+        Some(Value::Array(audiences)) => audiences.iter().filter_map(Value::as_str).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// RFC 7519 §4.1 for a workload token whose signature verified.
+pub(crate) fn check_workload_claims(
+    claims: &Map<String, Value>,
+    issuer: &str,
+    now: u64,
+) -> Result<()> {
+    let refused = |message: &str| {
+        Err(PanelError::unauthenticated(format!(
+            "the workload token {message}"
+        )))
+    };
+    if claims.get("iss").and_then(Value::as_str) != Some(issuer) {
+        return refused("comes from another issuer");
+    }
+    if claims
+        .get("sub")
+        .and_then(Value::as_str)
+        .is_none_or(str::is_empty)
+    {
+        return refused("names no subject");
+    }
+    if audiences(claims).is_empty() {
+        return refused("names no audience");
+    }
+    let Some(expires) = claims.get("exp").and_then(Value::as_u64) else {
+        return refused("has no expiry");
+    };
+    if expires + LEEWAY_SECONDS <= now {
+        return refused("has expired");
+    }
+    for (claim, what) in [
+        ("nbf", "is not valid yet"),
+        ("iat", "was issued in the future"),
+    ] {
+        if claims
+            .get(claim)
+            .and_then(Value::as_u64)
+            .is_some_and(|time| time > now + LEEWAY_SECONDS)
+        {
+            return refused(what);
+        }
+    }
+    Ok(())
+}
+
 /// OpenID Connect Core §3.1.3.7 for a token whose signature verified.
 pub(crate) fn check_claims(
     claims: &Map<String, Value>,
@@ -521,6 +644,32 @@ mod tests {
             client_secret: None,
             scopes: vec!["profile".into(), "openid".into()],
             redirect_uri: "https://panel.example/callback".into(),
+        }
+    }
+
+    #[test]
+    fn workload_claims_follow_rfc_7519() {
+        let now = 1_000_000;
+        let good = json!({
+            "iss": "https://token.example", "aud": ["pingora-panel"], "sub": "repo:a/b",
+            "exp": now + 300, "iat": now, "nbf": now
+        });
+        let check = |claims: &Value| {
+            check_workload_claims(claims.as_object().unwrap(), "https://token.example", now)
+        };
+        assert!(check(&good).is_ok());
+        for (field, value) in [
+            ("iss", json!("https://evil.example")),
+            ("sub", json!("")),
+            ("aud", json!([])),
+            ("exp", json!(now - 61)),
+            ("exp", Value::Null),
+            ("nbf", json!(now + 61)),
+            ("iat", json!(now + 61)),
+        ] {
+            let mut bad = good.clone();
+            bad[field] = value.clone();
+            assert!(check(&bad).is_err(), "{field} = {value}");
         }
     }
 

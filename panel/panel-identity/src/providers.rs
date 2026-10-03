@@ -102,7 +102,21 @@ fn is_slug(value: &str) -> bool {
         && !value.ends_with('-')
 }
 
-fn text(value: &str, name: &str, max: usize) -> Result<()> {
+/// An issuer URL as tokens name it; the adapter that fetches it insists on
+/// HTTPS except on loopback.
+pub(crate) fn check_issuer(issuer: &str) -> Result<()> {
+    if issuer.len() > 512
+        || !(issuer.starts_with("https://") || issuer.starts_with("http://"))
+        || issuer.ends_with('/') && issuer.matches('/').count() == 3
+    {
+        return Err(PanelError::invalid_argument(
+            "the issuer must be its HTTPS URL, exactly as its tokens name it",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn text(value: &str, name: &str, max: usize) -> Result<()> {
     if value.trim().is_empty() || value.len() > max || value.chars().any(char::is_control) {
         Err(PanelError::invalid_argument(format!(
             "the {name} must be 1 to {max} printable characters"
@@ -291,15 +305,7 @@ impl ProviderDirectory {
     async fn validate(&self, request: &ProviderRequest) -> Result<()> {
         text(&request.display_name, "display name", 64)?;
         text(&request.client_id, "client ID", MAX_TEXT)?;
-        let issuer = &request.issuer;
-        if issuer.len() > 512
-            || !(issuer.starts_with("https://") || issuer.starts_with("http://"))
-            || issuer.ends_with('/') && issuer.matches('/').count() == 3
-        {
-            return Err(PanelError::invalid_argument(
-                "the issuer must be the provider's HTTPS URL, exactly as its tokens name it",
-            ));
-        }
+        check_issuer(&request.issuer)?;
         if request.scopes.len() > 32
             || request.scopes.iter().any(|scope| {
                 scope.is_empty()

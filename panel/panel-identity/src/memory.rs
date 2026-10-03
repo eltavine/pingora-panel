@@ -9,7 +9,7 @@ use crate::{
     },
     Account, AccountId, ApiToken, IdentityProvider, PasswordSignIn, PendingSignIn, PermissionSet,
     ProviderLink, ProviderSession, ProviderSignIn, ProviderStore, Role, SecretHash, Session,
-    SessionId, TokenId, Username,
+    SessionId, TokenId, Username, WorkloadStore, WorkloadTrust,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -39,6 +39,7 @@ struct State {
     /// Sessions signed in through a provider, with the sealed refresh token.
     provider_sessions: Vec<ProviderSessionRow>,
     password_sign_in: PasswordSignIn,
+    trusts: Vec<WorkloadTrust>,
     events: Vec<RecordedEvent>,
 }
 
@@ -66,6 +67,7 @@ impl Default for MemoryIdentityStore {
                 links: Vec::new(),
                 provider_sessions: Vec::new(),
                 password_sign_in: PasswordSignIn::default(),
+                trusts: Vec::new(),
                 events: Vec::new(),
             }),
         }
@@ -886,5 +888,54 @@ fn end_provider_sessions(state: &mut State, provider: &str) {
         if ended.contains(&session.id) && session.revoked_at.is_none() {
             session.revoked_at = Some(now);
         }
+    }
+}
+
+#[async_trait]
+impl WorkloadStore for MemoryIdentityStore {
+    async fn trusts(&self) -> Result<Vec<WorkloadTrust>> {
+        let mut trusts = self.state().trusts.clone();
+        trusts.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(trusts)
+    }
+
+    async fn put_trust(&self, trust: WorkloadTrust, cause: &Cause) -> Result<bool> {
+        let mut state = self.state();
+        let data = json!({ "workload_identity": trust.id, "account": trust.account, "issuer": trust.issuer });
+        let created = match state.trusts.iter_mut().find(|kept| kept.id == trust.id) {
+            Some(kept) => {
+                *kept = trust;
+                false
+            }
+            None => {
+                state.trusts.push(trust);
+                true
+            }
+        };
+        let event = if created {
+            "identity.workload_trust.created"
+        } else {
+            "identity.workload_trust.updated"
+        };
+        record(&mut state, event, cause, data);
+        Ok(created)
+    }
+
+    async fn delete_trust(&self, id: &str, cause: &Cause) -> Result<()> {
+        let mut state = self.state();
+        let before = state.trusts.len();
+        state.trusts.retain(|trust| trust.id != id);
+        if state.trusts.len() == before {
+            return Err(PanelError::not_found(format!(
+                "there is no workload identity {id}"
+            )));
+        }
+        record(
+            &mut state,
+            "identity.workload_trust.deleted",
+            cause,
+            json!({ "workload_identity": id }),
+        );
+        Ok(())
     }
 }

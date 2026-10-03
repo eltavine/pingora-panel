@@ -106,6 +106,21 @@ impl TestProvider {
         *self.provider.current.lock().unwrap() = Some(subject.into());
     }
 
+    /// A token this provider signs for a workload, as CI systems issue to
+    /// their jobs; `iss`, `iat` and a five-minute `exp` are filled in unless
+    /// given.
+    pub fn workload_token(&self, claims: Value) -> String {
+        let mut claims = claims.as_object().cloned().unwrap_or_default();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        claims.entry("iss").or_insert(json!(self.issuer));
+        claims.entry("iat").or_insert(json!(now));
+        claims.entry("exp").or_insert(json!(now + 300));
+        self.provider.sign(&Value::Object(claims))
+    }
+
     /// Ends the person's access: their refresh tokens stop working.
     pub fn disable(&self, subject: &str) {
         self.provider

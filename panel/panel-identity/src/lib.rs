@@ -21,6 +21,7 @@ mod session;
 mod sign_in;
 pub mod store;
 mod throttle;
+mod workload;
 
 pub use account::{Account, AccountId, PasswordSignIn, Username};
 pub use password::{PasswordHasher, PasswordPolicy, PasswordProblem, Verification};
@@ -40,3 +41,7 @@ pub use session::{ApiToken, Session, SessionId, SessionPolicy, TokenId, Transpor
 pub use sign_in::{ProviderSignIns, Rechecked, SignInOption, Started, RECHECK_INTERVAL};
 pub use store::{AccountChange, Cause, IdentityStore};
 pub use throttle::FailurePolicy;
+pub use workload::{
+    VerifiedWorkload, WorkloadIdentity, WorkloadRequest, WorkloadStore, WorkloadTrust,
+    WorkloadVerifier, MAX_SESSION_MINUTES, MIN_SESSION_MINUTES,
+};

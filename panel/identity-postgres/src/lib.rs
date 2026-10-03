@@ -23,6 +23,7 @@ use sqlx::{postgres::PgRow, PgConnection, PgPool, Row};
 use std::sync::LazyLock;
 
 mod providers;
+mod workload;
 
 pub const MIGRATIONS: &[SchemaMigration] = &[
     SchemaMigration::new(
@@ -44,6 +45,11 @@ pub const MIGRATIONS: &[SchemaMigration] = &[
         10_300,
         "service accounts",
         include_str!("../migrations/10300_service_accounts.sql"),
+    ),
+    SchemaMigration::new(
+        10_400,
+        "workload identity trusts",
+        include_str!("../migrations/10400_workload_trusts.sql"),
     ),
 ];
 
