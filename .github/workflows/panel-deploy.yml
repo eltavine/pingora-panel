@@ -107,6 +107,27 @@ jobs:
           curl --fail --silent --show-error --header 'Host: console.test' --header "$auth" \
             http://127.0.0.1:18080/api/v1/gateway/status
 
+      - name: Serve the site over HTTPS with a certificate the panel keeps
+        run: |
+          ppanel() { docker compose exec -T -e PPANEL_TOKEN panel-api ppanel "$@"; }
+          ppanel certificate generate console --name console.test --days 30
+          ppanel tls-profile set console --certificate-id console
+          ppanel listener set edge-tls --address 127.0.0.1:18443 --tls-profile console
+          ppanel config apply
+          auth="Authorization: Bearer $PPANEL_TOKEN"
+          for _ in $(seq 1 30); do
+            if curl --fail --silent --show-error --insecure --header "$auth" \
+              --resolve console.test:18443:127.0.0.1 https://console.test:18443/api/v1/gateway/status; then
+              break
+            fi
+            sleep 1
+          done
+          served=$(openssl s_client -connect 127.0.0.1:18443 -servername console.test </dev/null 2>/dev/null \
+            | openssl x509 -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':' | tr 'A-F' 'a-f')
+          kept=$(ppanel -o json certificate show console \
+            | python3 -c "import json, sys; print(json.load(sys.stdin)['fingerprint'])")
+          test "$served" = "$kept"
+
       - name: Audit the changes
         run: |
           ppanel() { docker compose exec -T -e PPANEL_TOKEN panel-api ppanel "$@"; }
@@ -121,6 +142,15 @@ jobs:
             | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"
           ppanel audit list --actor-id ci
           ppanel -o json audit list --type identity.login.succeeded --actor-id ci \
+            | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"
+          for _ in $(seq 1 30); do
+            if ppanel -o json audit list --type tls.certificate.created --actor-id ci \
+              | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"; then
+              break
+            fi
+            sleep 1
+          done
+          ppanel -o json audit list --type tls.certificate.created --actor-id ci \
             | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"
           ppanel audit verify
 
