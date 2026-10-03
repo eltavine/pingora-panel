@@ -204,13 +204,27 @@ impl PgIdentityStore {
         cause: &Cause,
         data: &T,
     ) -> Result<()> {
-        let event = self.events.event(
+        self.emit_on(
+            connection,
             event_type,
             ("account", &account.to_string()),
-            &cause.scope,
-            &cause.actor,
+            cause,
             data,
-        )?;
+        )
+        .await
+    }
+
+    async fn emit_on<T: Serialize>(
+        &self,
+        connection: &mut PgConnection,
+        event_type: &str,
+        aggregate: (&str, &str),
+        cause: &Cause,
+        data: &T,
+    ) -> Result<()> {
+        let event = self
+            .events
+            .event(event_type, aggregate, &cause.scope, &cause.actor, data)?;
         PgOutbox::append(connection, &event).await
     }
 
@@ -744,5 +758,177 @@ impl IdentityStore for PgIdentityStore {
         }
         transaction.commit().await.map_err(storage)?;
         Ok(revoked)
+    }
+
+    async fn rotate_token(
+        &self,
+        old: TokenId,
+        new: NewToken,
+        now: DateTime<Utc>,
+        cause: &Cause,
+    ) -> Result<bool> {
+        let token = &new.token;
+        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        let revoked = sqlx::query(
+            "UPDATE api_tokens SET revoked_at = $3 \
+             WHERE id = $1 AND account_id = $2 AND revoked_at IS NULL",
+        )
+        .bind(old.as_uuid())
+        .bind(token.account.as_uuid())
+        .bind(now)
+        .execute(&mut *transaction)
+        .await
+        .map_err(storage)?
+        .rows_affected()
+            > 0;
+        if !revoked {
+            return Ok(false);
+        }
+        sqlx::query(
+            "INSERT INTO api_tokens (id, account_id, name, secret_hash, permissions, created_at, \
+             expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        )
+        .bind(token.id.as_uuid())
+        .bind(token.account.as_uuid())
+        .bind(&token.name)
+        .bind(new.secret.as_bytes().as_slice())
+        .bind(token.permissions.names())
+        .bind(token.created_at)
+        .bind(token.expires_at)
+        .execute(&mut *transaction)
+        .await
+        .map_err(storage)?;
+        self.emit(
+            &mut transaction,
+            "identity.token.rotated",
+            token.account,
+            cause,
+            &json!({ "account": token.account, "token": token.id, "replaces": old }),
+        )
+        .await?;
+        transaction.commit().await.map_err(storage)?;
+        Ok(true)
+    }
+
+    async fn end_sessions(
+        &self,
+        account: AccountId,
+        keep: Option<SessionId>,
+        now: DateTime<Utc>,
+        cause: &Cause,
+    ) -> Result<u64> {
+        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        let ended = sqlx::query(
+            "UPDATE sessions SET revoked_at = $3, revoke_reason = 'revoked' \
+             WHERE account_id = $1 AND revoked_at IS NULL AND id IS DISTINCT FROM $2",
+        )
+        .bind(account.as_uuid())
+        .bind(keep.map(|session| session.as_uuid()))
+        .bind(now)
+        .execute(&mut *transaction)
+        .await
+        .map_err(storage)?
+        .rows_affected();
+        if ended > 0 {
+            self.emit(
+                &mut transaction,
+                "identity.session.ended",
+                account,
+                cause,
+                &json!({ "account": account, "reason": "revoked", "sessions": ended }),
+            )
+            .await?;
+        }
+        transaction.commit().await.map_err(storage)?;
+        Ok(ended)
+    }
+
+    async fn create_role(&self, role: Role, cause: &Cause) -> Result<Role> {
+        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        sqlx::query(
+            "INSERT INTO roles (id, name, description, permissions, built_in) \
+             VALUES ($1, $2, $3, $4, false)",
+        )
+        .bind(&role.id)
+        .bind(&role.name)
+        .bind(&role.description)
+        .bind(role.permissions.names())
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| match storage(error) {
+            conflict if conflict.code.as_str() == panel_errors::ErrorCode::CONFLICT => {
+                PanelError::conflict(format!("the role {} exists", role.id))
+            }
+            other => other,
+        })?;
+        self.emit_on(
+            &mut transaction,
+            "identity.role.created",
+            ("role", &role.id),
+            cause,
+            &json!({ "role": role.id, "permissions": role.permissions }),
+        )
+        .await?;
+        transaction.commit().await.map_err(storage)?;
+        Ok(role)
+    }
+
+    async fn update_role(&self, role: Role, cause: &Cause) -> Result<Role> {
+        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        let updated = sqlx::query(
+            "UPDATE roles SET name = $2, description = $3, permissions = $4 \
+             WHERE id = $1 AND NOT built_in",
+        )
+        .bind(&role.id)
+        .bind(&role.name)
+        .bind(&role.description)
+        .bind(role.permissions.names())
+        .execute(&mut *transaction)
+        .await
+        .map_err(storage)?;
+        if updated.rows_affected() == 0 {
+            return Err(PanelError::not_found(format!(
+                "there is no custom role {}",
+                role.id
+            )));
+        }
+        self.emit_on(
+            &mut transaction,
+            "identity.role.updated",
+            ("role", &role.id),
+            cause,
+            &json!({ "role": role.id, "permissions": role.permissions }),
+        )
+        .await?;
+        transaction.commit().await.map_err(storage)?;
+        Ok(role)
+    }
+
+    async fn delete_role(&self, id: &str, cause: &Cause) -> Result<()> {
+        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        let deleted = sqlx::query("DELETE FROM roles WHERE id = $1 AND NOT built_in")
+            .bind(id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(|error| match storage(error) {
+                held if held.code.as_str() == panel_errors::ErrorCode::INVALID_ARGUMENT => {
+                    PanelError::conflict(format!("the role {id} is still granted to accounts"))
+                }
+                other => other,
+            })?;
+        if deleted.rows_affected() == 0 {
+            return Err(PanelError::not_found(format!(
+                "there is no custom role {id}"
+            )));
+        }
+        self.emit_on(
+            &mut transaction,
+            "identity.role.deleted",
+            ("role", id),
+            cause,
+            &json!({ "role": id }),
+        )
+        .await?;
+        transaction.commit().await.map_err(storage)
     }
 }

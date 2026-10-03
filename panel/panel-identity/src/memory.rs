@@ -24,8 +24,8 @@ pub struct RecordedEvent {
     pub data: Value,
 }
 
-#[derive(Default)]
 struct State {
+    roles: Vec<Role>,
     accounts: Vec<StoredAccount>,
     sessions: Vec<(Session, SecretHash)>,
     tokens: Vec<(ApiToken, SecretHash)>,
@@ -33,15 +33,19 @@ struct State {
 }
 
 pub struct MemoryIdentityStore {
-    roles: Vec<Role>,
     state: Mutex<State>,
 }
 
 impl Default for MemoryIdentityStore {
     fn default() -> Self {
         Self {
-            roles: built_in_roles(),
-            state: Mutex::default(),
+            state: Mutex::new(State {
+                roles: built_in_roles(),
+                accounts: Vec::new(),
+                sessions: Vec::new(),
+                tokens: Vec::new(),
+                events: Vec::new(),
+            }),
         }
     }
 }
@@ -56,15 +60,16 @@ impl MemoryIdentityStore {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
+}
 
-    fn permissions(&self, account: &Account) -> PermissionSet {
-        self.roles
-            .iter()
-            .filter(|role| account.roles.contains(&role.id))
-            .fold(PermissionSet::default(), |all, role| {
-                all.union(&role.permissions)
-            })
-    }
+fn permissions(state: &State, account: &Account) -> PermissionSet {
+    state
+        .roles
+        .iter()
+        .filter(|role| account.roles.contains(&role.id))
+        .fold(PermissionSet::default(), |all, role| {
+            all.union(&role.permissions)
+        })
 }
 
 fn record(state: &mut State, event_type: &str, cause: &Cause, data: Value) {
@@ -103,7 +108,7 @@ impl IdentityStore for MemoryIdentityStore {
     }
 
     async fn roles(&self) -> Result<Vec<Role>> {
-        Ok(self.roles.clone())
+        Ok(self.state().roles.clone())
     }
 
     async fn create_account(&self, new: NewAccount, cause: &Cause) -> Result<Account> {
@@ -324,7 +329,7 @@ impl IdentityStore for MemoryIdentityStore {
         Ok(Some(SessionGrant {
             session: session.clone(),
             account: stored.account.clone(),
-            permissions: self.permissions(&stored.account),
+            permissions: permissions(&state, &stored.account),
         }))
     }
 
@@ -404,7 +409,7 @@ impl IdentityStore for MemoryIdentityStore {
         Ok(Some(TokenGrant {
             token: token.clone(),
             account: stored.account.clone(),
-            permissions: self.permissions(&stored.account),
+            permissions: permissions(&state, &stored.account),
         }))
     }
 
@@ -448,5 +453,123 @@ impl IdentityStore for MemoryIdentityStore {
             json!({ "account": account, "token": id }),
         );
         Ok(true)
+    }
+
+    async fn rotate_token(
+        &self,
+        old: TokenId,
+        new: NewToken,
+        now: DateTime<Utc>,
+        cause: &Cause,
+    ) -> Result<bool> {
+        let mut state = self.state();
+        let account = new.token.account;
+        let Some((token, _)) = state.tokens.iter_mut().find(|(token, _)| {
+            token.id == old && token.account == account && token.revoked_at.is_none()
+        }) else {
+            return Ok(false);
+        };
+        token.revoked_at = Some(now);
+        let event = json!({ "account": account, "token": new.token.id, "replaces": old });
+        state.tokens.push((new.token, new.secret));
+        record(&mut state, "identity.token.rotated", cause, event);
+        Ok(true)
+    }
+
+    async fn end_sessions(
+        &self,
+        account: AccountId,
+        keep: Option<SessionId>,
+        now: DateTime<Utc>,
+        cause: &Cause,
+    ) -> Result<u64> {
+        let mut state = self.state();
+        let mut ended = 0;
+        for (session, _) in &mut state.sessions {
+            if session.account == account
+                && Some(session.id) != keep
+                && session.revoked_at.is_none()
+            {
+                session.revoked_at = Some(now);
+                ended += 1;
+            }
+        }
+        if ended > 0 {
+            record(
+                &mut state,
+                "identity.session.ended",
+                cause,
+                json!({ "account": account, "reason": "revoked", "sessions": ended }),
+            );
+        }
+        Ok(ended)
+    }
+
+    async fn create_role(&self, role: Role, cause: &Cause) -> Result<Role> {
+        let mut state = self.state();
+        if state.roles.iter().any(|existing| existing.id == role.id) {
+            return Err(PanelError::conflict(format!("the role {} exists", role.id)));
+        }
+        state.roles.push(role.clone());
+        record(
+            &mut state,
+            "identity.role.created",
+            cause,
+            json!({ "role": role.id, "permissions": role.permissions }),
+        );
+        Ok(role)
+    }
+
+    async fn update_role(&self, role: Role, cause: &Cause) -> Result<Role> {
+        let mut state = self.state();
+        let Some(existing) = state
+            .roles
+            .iter_mut()
+            .find(|existing| existing.id == role.id && !existing.built_in)
+        else {
+            return Err(PanelError::not_found(format!(
+                "there is no custom role {}",
+                role.id
+            )));
+        };
+        *existing = role.clone();
+        record(
+            &mut state,
+            "identity.role.updated",
+            cause,
+            json!({ "role": role.id, "permissions": role.permissions }),
+        );
+        Ok(role)
+    }
+
+    async fn delete_role(&self, id: &str, cause: &Cause) -> Result<()> {
+        let mut state = self.state();
+        if !state
+            .roles
+            .iter()
+            .any(|role| role.id == id && !role.built_in)
+        {
+            return Err(PanelError::not_found(format!(
+                "there is no custom role {id}"
+            )));
+        }
+        let holders = state
+            .accounts
+            .iter()
+            .filter(|stored| stored.account.roles.iter().any(|role| role == id))
+            .count();
+        if holders > 0 {
+            return Err(PanelError::conflict(format!(
+                "the role {id} is still granted to {holders} accounts"
+            )));
+        }
+        state.roles.retain(|role| role.id != id);
+        record(
+            &mut state,
+            "identity.role.deleted",
+            cause,
+            json!({ "role": id }),
+        );
+        Ok(())
     }
 }

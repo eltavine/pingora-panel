@@ -66,10 +66,12 @@ async fn the_postgres_store_follows_the_identity_rules() {
         let store = Arc::clone(&store);
         let database = database.clone();
         async move {
-            sqlx::raw_sql("TRUNCATE accounts, outbox CASCADE")
-                .execute(database.pool())
-                .await
-                .unwrap();
+            sqlx::raw_sql(
+                "TRUNCATE accounts, outbox CASCADE; DELETE FROM roles WHERE NOT built_in",
+            )
+            .execute(database.pool())
+            .await
+            .unwrap();
             Postgres { store, database }
         }
     })

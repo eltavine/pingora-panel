@@ -70,6 +70,77 @@ pub struct AccountRequest {
     pub roles: Vec<String>,
 }
 
+/// A role to create or replace.
+#[derive(Clone, Debug)]
+pub struct RoleRequest {
+    /// 1 to 64 lowercase letters, digits, `.`, `_` or `-`.
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub permissions: PermissionSet,
+}
+
+impl RoleRequest {
+    fn into_role(self) -> Result<Role> {
+        let id = Username::new(&self.id)
+            .map_err(|_| {
+                PanelError::invalid_argument(format!(
+                    "{:?} is not a role identifier: use 1 to 64 letters, digits, '.', '_' or '-'",
+                    self.id
+                ))
+            })?
+            .to_string();
+        let name = self.name.trim().to_owned();
+        if name.is_empty() || name.chars().count() > 64 {
+            return Err(PanelError::invalid_argument(
+                "a role needs a name of 1 to 64 characters",
+            ));
+        }
+        if self.description.chars().count() > 256 {
+            return Err(PanelError::invalid_argument(
+                "a role's description has at most 256 characters",
+            ));
+        }
+        if self.permissions.is_empty() {
+            return Err(PanelError::invalid_argument(
+                "a role needs at least one permission",
+            ));
+        }
+        Ok(Role {
+            id,
+            name,
+            description: self.description.trim().to_owned(),
+            permissions: self.permissions,
+            built_in: false,
+        })
+    }
+}
+
+/// Refuses a state in which no enabled account, given as whether it is
+/// disabled and the roles it holds, can manage accounts.
+fn ensure_managers(
+    accounts: &[(bool, Vec<String>)],
+    roles: &BTreeMap<String, PermissionSet>,
+) -> Result<()> {
+    let manages = |held: &[String]| {
+        held.iter().any(|role| {
+            roles
+                .get(role)
+                .is_some_and(|permissions| permissions.contains(Permission::IdentityManage))
+        })
+    };
+    if accounts
+        .iter()
+        .any(|(disabled, held)| !disabled && manages(held))
+    {
+        Ok(())
+    } else {
+        Err(PanelError::precondition_failed(
+            "at least one enabled account must be able to manage accounts",
+        ))
+    }
+}
+
 /// A new API token.
 #[derive(Clone, Debug)]
 pub struct TokenRequest {
@@ -524,44 +595,117 @@ impl Identity {
         if let Some(roles) = &change.roles {
             self.known_roles(roles).await?;
         }
-        let roles: BTreeMap<String, PermissionSet> = self
+        let accounts = self.store.accounts().await?;
+        if !accounts.iter().any(|account| account.id == id) {
+            return Err(PanelError::not_found(format!("there is no account {id}")));
+        }
+        let roles = self.role_permissions(None).await?;
+        let after: Vec<(bool, Vec<String>)> = accounts
+            .into_iter()
+            .map(|account| {
+                if account.id == id {
+                    (
+                        change.disabled.unwrap_or(account.disabled),
+                        change.roles.clone().unwrap_or(account.roles),
+                    )
+                } else {
+                    (account.disabled, account.roles)
+                }
+            })
+            .collect();
+        ensure_managers(&after, &roles)?;
+        self.store
+            .update_account(id, change, self.now(), &cause(scope, actor))
+            .await
+    }
+
+    /// Every role's permissions, with `replaced` in place of its stored
+    /// version.
+    async fn role_permissions(
+        &self,
+        replaced: Option<&Role>,
+    ) -> Result<BTreeMap<String, PermissionSet>> {
+        let mut roles: BTreeMap<String, PermissionSet> = self
             .store
             .roles()
             .await?
             .into_iter()
             .map(|role| (role.id, role.permissions))
             .collect();
-        let accounts = self.store.accounts().await?;
-        if !accounts.iter().any(|account| account.id == id) {
-            return Err(PanelError::not_found(format!("there is no account {id}")));
+        if let Some(role) = replaced {
+            roles.insert(role.id.clone(), role.permissions.clone());
         }
-        let managers = accounts
-            .iter()
-            .filter(|account| {
-                let (disabled, held) = if account.id == id {
-                    (
-                        change.disabled.unwrap_or(account.disabled),
-                        change.roles.as_ref().unwrap_or(&account.roles),
-                    )
-                } else {
-                    (account.disabled, &account.roles)
-                };
-                !disabled
-                    && held.iter().any(|role| {
-                        roles.get(role).is_some_and(|permissions| {
-                            permissions.contains(Permission::IdentityManage)
-                        })
-                    })
-            })
-            .count();
-        if managers == 0 {
-            return Err(PanelError::precondition_failed(
-                "at least one enabled account must be able to manage accounts",
-            ));
-        }
+        Ok(roles)
+    }
+
+    /// Ends every session of an account but `keep`, such as the caller's
+    /// own; returns how many ended.
+    pub async fn end_sessions(
+        &self,
+        account: AccountId,
+        keep: Option<SessionId>,
+        scope: &RequestScope,
+        actor: &str,
+    ) -> Result<u64> {
         self.store
-            .update_account(id, change, self.now(), &cause(scope, actor))
+            .end_sessions(account, keep, self.now(), &cause(scope, actor))
             .await
+    }
+
+    /// Creates a role of the caller's choosing.
+    pub async fn create_role(
+        &self,
+        request: RoleRequest,
+        scope: &RequestScope,
+        actor: &str,
+    ) -> Result<Role> {
+        let role = request.into_role()?;
+        self.store.create_role(role, &cause(scope, actor)).await
+    }
+
+    /// Replaces a role that is not built in, keeping at least one enabled
+    /// account that can manage accounts.
+    pub async fn update_role(
+        &self,
+        request: RoleRequest,
+        scope: &RequestScope,
+        actor: &str,
+    ) -> Result<Role> {
+        let role = request.into_role()?;
+        self.custom_role(&role.id).await?;
+        let roles = self.role_permissions(Some(&role)).await?;
+        let accounts: Vec<(bool, Vec<String>)> = self
+            .store
+            .accounts()
+            .await?
+            .into_iter()
+            .map(|account| (account.disabled, account.roles))
+            .collect();
+        ensure_managers(&accounts, &roles)?;
+        self.store.update_role(role, &cause(scope, actor)).await
+    }
+
+    /// Deletes a role that is not built in and that no account holds.
+    pub async fn delete_role(&self, id: &str, scope: &RequestScope, actor: &str) -> Result<()> {
+        self.custom_role(id).await?;
+        self.store.delete_role(id, &cause(scope, actor)).await
+    }
+
+    /// Refuses roles that do not exist or are built in.
+    async fn custom_role(&self, id: &str) -> Result<()> {
+        match self
+            .store
+            .roles()
+            .await?
+            .into_iter()
+            .find(|role| role.id == id)
+        {
+            None => Err(PanelError::not_found(format!("there is no role {id:?}"))),
+            Some(role) if role.built_in => Err(PanelError::permission_denied(
+                "built-in roles cannot be changed or deleted",
+            )),
+            Some(_) => Ok(()),
+        }
     }
 
     /// The sessions of an account that have not ended.
@@ -670,6 +814,68 @@ impl Identity {
             )
             .await?;
         Ok((token, secret))
+    }
+
+    /// Replaces one of the caller's tokens by a new one with its name,
+    /// permissions and lifetime and a new secret; the old one stops
+    /// working at once.
+    pub async fn rotate_token(
+        &self,
+        principal: &Principal,
+        token: TokenId,
+        scope: &RequestScope,
+    ) -> Result<(ApiToken, Secret)> {
+        if principal.session().is_none() {
+            return Err(PanelError::permission_denied(
+                "API tokens are rotated from a login session, not with another token",
+            ));
+        }
+        let now = self.now();
+        let old = self
+            .store
+            .tokens(principal.account)
+            .await?
+            .into_iter()
+            .find(|candidate| candidate.id == token && candidate.is_live(now))
+            .ok_or_else(|| PanelError::not_found(format!("there is no live token {token}")))?;
+        let permissions = old.permissions.intersection(&principal.permissions);
+        if permissions.is_empty() {
+            return Err(PanelError::permission_denied(
+                "you no longer hold any of the token's permissions",
+            ));
+        }
+        let lifetime =
+            (old.expires_at - old.created_at).min(duration(self.settings.max_token_lifetime));
+        let new = ApiToken {
+            id: TokenId::generate(),
+            account: principal.account,
+            name: old.name,
+            permissions,
+            created_at: now,
+            expires_at: now + lifetime,
+            last_used_at: None,
+            revoked_at: None,
+        };
+        let secret = Secret::token()?;
+        let rotated = self
+            .store
+            .rotate_token(
+                token,
+                NewToken {
+                    token: new.clone(),
+                    secret: secret.hash(),
+                },
+                now,
+                &cause(scope, principal.actor()),
+            )
+            .await?;
+        if rotated {
+            Ok((new, secret))
+        } else {
+            Err(PanelError::not_found(format!(
+                "there is no live token {token}"
+            )))
+        }
     }
 
     pub async fn revoke_token(

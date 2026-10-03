@@ -195,4 +195,33 @@ pub trait IdentityStore: Send + Sync {
         now: DateTime<Utc>,
         cause: &Cause,
     ) -> Result<bool>;
+
+    /// Revokes token `old` of the new token's account and stores the new
+    /// one in its place, at once; false when the account has no such live
+    /// token.
+    async fn rotate_token(
+        &self,
+        old: TokenId,
+        new: NewToken,
+        now: DateTime<Utc>,
+        cause: &Cause,
+    ) -> Result<bool>;
+
+    /// Ends every session of `account` but `keep`; returns how many ended.
+    async fn end_sessions(
+        &self,
+        account: AccountId,
+        keep: Option<SessionId>,
+        now: DateTime<Utc>,
+        cause: &Cause,
+    ) -> Result<u64>;
+
+    /// Fails with a conflict when a role with the same identifier exists.
+    async fn create_role(&self, role: Role, cause: &Cause) -> Result<Role>;
+
+    /// Replaces a role that is not built in; not found otherwise.
+    async fn update_role(&self, role: Role, cause: &Cause) -> Result<Role>;
+
+    /// Deletes a role that is not built in and that no account holds.
+    async fn delete_role(&self, id: &str, cause: &Cause) -> Result<()>;
 }

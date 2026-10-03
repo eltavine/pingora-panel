@@ -4,8 +4,8 @@
 
 use crate::{
     memory::RecordedEvent, Account, AccountChange, AccountRequest, Client, FailurePolicy, Identity,
-    IdentitySettings, IdentityStore, Login, Permission, PermissionSet, Principal, SecretHash,
-    TokenRequest, Transport,
+    IdentitySettings, IdentityStore, Login, Permission, PermissionSet, Principal, RoleRequest,
+    SecretHash, TokenRequest, Transport,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
@@ -37,6 +37,9 @@ where
     changing_a_password_ends_the_other_sessions(fresh().await).await;
     tokens_never_exceed_their_owner(fresh().await).await;
     the_last_account_manager_cannot_be_disabled_and_disabling_ends_access(fresh().await).await;
+    custom_roles_grant_what_they_list_and_built_in_roles_stay(fresh().await).await;
+    every_other_session_of_an_account_can_end_at_once(fresh().await).await;
+    rotated_tokens_keep_their_grant_and_stop_the_old_secret(fresh().await).await;
 }
 
 const PASSWORD: &str = "glacier violin tapestry orbit";
@@ -598,4 +601,273 @@ async fn the_last_account_manager_cannot_be_disabled_and_disabling_ends_access(
             .unwrap_err();
         assert_eq!(error.code.as_str(), code);
     }
+}
+
+fn role(id: &str, permissions: &[&str]) -> RoleRequest {
+    RoleRequest {
+        id: id.into(),
+        name: format!("Role {id}"),
+        description: String::new(),
+        permissions: PermissionSet::from_names(permissions).unwrap(),
+    }
+}
+
+async fn custom_roles_grant_what_they_list_and_built_in_roles_stay(subject: impl StoreUnderTest) {
+    let harness = Harness::new(subject, IdentitySettings::default());
+    let root = harness.admin().await;
+    let identity = &harness.identity;
+    let created = identity
+        .create_role(
+            role("Deployer", &["config.read", "config.apply"]),
+            &scope(),
+            "root",
+        )
+        .await
+        .unwrap();
+    assert_eq!(created.id, "deployer");
+    assert!(!created.built_in);
+    for (request, code) in [
+        (role("deployer", &["config.read"]), ErrorCode::CONFLICT),
+        (
+            role("no way", &["config.read"]),
+            ErrorCode::INVALID_ARGUMENT,
+        ),
+        (role("empty", &[]), ErrorCode::INVALID_ARGUMENT),
+    ] {
+        let error = identity
+            .create_role(request, &scope(), "root")
+            .await
+            .unwrap_err();
+        assert_eq!(error.code.as_str(), code);
+    }
+    let built_in = identity
+        .update_role(role("administrator", &["config.read"]), &scope(), "root")
+        .await
+        .unwrap_err();
+    assert_eq!(built_in.code.as_str(), ErrorCode::PERMISSION_DENIED);
+    let missing = identity
+        .update_role(role("nobody", &["config.read"]), &scope(), "root")
+        .await
+        .unwrap_err();
+    assert_eq!(missing.code.as_str(), ErrorCode::NOT_FOUND);
+
+    let ci = identity
+        .create_account(
+            AccountRequest {
+                username: "ci".into(),
+                password: Some(PASSWORD.into()),
+                roles: vec!["deployer".into()],
+                ..AccountRequest::default()
+            },
+            &scope(),
+            "root",
+        )
+        .await
+        .unwrap();
+    let (login, principal) = harness.login("ci", Transport::Bearer).await;
+    assert_eq!(
+        principal.permissions.names(),
+        ["config.read", "config.apply"]
+    );
+    identity
+        .update_role(role("deployer", &["config.read"]), &scope(), "root")
+        .await
+        .unwrap();
+    let principal = identity
+        .authenticate_session(login.secret.expose(), Transport::Bearer)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(principal.permissions.names(), ["config.read"]);
+    assert_eq!(
+        identity
+            .roles()
+            .await
+            .unwrap()
+            .iter()
+            .find(|role| role.id == "deployer")
+            .unwrap()
+            .permissions
+            .names(),
+        ["config.read"]
+    );
+
+    let held = identity
+        .delete_role("deployer", &scope(), "root")
+        .await
+        .unwrap_err();
+    assert_eq!(held.code.as_str(), ErrorCode::CONFLICT);
+    identity
+        .update_account(
+            ci.id,
+            AccountChange {
+                roles: Some(vec!["viewer".into()]),
+                ..AccountChange::default()
+            },
+            &scope(),
+            "root",
+        )
+        .await
+        .unwrap();
+    identity
+        .delete_role("deployer", &scope(), "root")
+        .await
+        .unwrap();
+    assert!(!identity
+        .roles()
+        .await
+        .unwrap()
+        .iter()
+        .any(|role| role.id == "deployer"));
+    let built_in = identity
+        .delete_role("viewer", &scope(), "root")
+        .await
+        .unwrap_err();
+    assert_eq!(built_in.code.as_str(), ErrorCode::PERMISSION_DENIED);
+
+    // A custom role may be what lets the last enabled account manage accounts.
+    identity
+        .create_role(
+            role("keeper", &["identity.read", "identity.manage"]),
+            &scope(),
+            "root",
+        )
+        .await
+        .unwrap();
+    identity
+        .update_account(
+            ci.id,
+            AccountChange {
+                roles: Some(vec!["keeper".into()]),
+                ..AccountChange::default()
+            },
+            &scope(),
+            "root",
+        )
+        .await
+        .unwrap();
+    identity
+        .update_account(
+            root.id,
+            AccountChange {
+                disabled: Some(true),
+                ..AccountChange::default()
+            },
+            &scope(),
+            "ci",
+        )
+        .await
+        .unwrap();
+    let stripped = identity
+        .update_role(role("keeper", &["identity.read"]), &scope(), "ci")
+        .await
+        .unwrap_err();
+    assert_eq!(stripped.code.as_str(), ErrorCode::PRECONDITION_FAILED);
+    let events = harness.subject.events().await;
+    for event_type in [
+        "identity.role.created",
+        "identity.role.updated",
+        "identity.role.deleted",
+    ] {
+        assert!(
+            events.iter().any(|event| event.event_type == event_type),
+            "{event_type}"
+        );
+    }
+}
+
+async fn every_other_session_of_an_account_can_end_at_once(subject: impl StoreUnderTest) {
+    let harness = Harness::new(subject, IdentitySettings::default());
+    let root = harness.admin().await;
+    let (here, principal) = harness.login("root", Transport::Cookie).await;
+    let (elsewhere, _) = harness.login("root", Transport::Bearer).await;
+    let (third, _) = harness.login("root", Transport::Bearer).await;
+    let ended = harness
+        .identity
+        .end_sessions(root.id, principal.session(), &scope(), "root")
+        .await
+        .unwrap();
+    assert_eq!(ended, 2);
+    assert!(harness
+        .identity
+        .authenticate_session(here.secret.expose(), Transport::Cookie)
+        .await
+        .unwrap()
+        .is_some());
+    for gone in [elsewhere, third] {
+        assert!(harness
+            .identity
+            .authenticate_session(gone.secret.expose(), Transport::Bearer)
+            .await
+            .unwrap()
+            .is_none());
+    }
+    assert_eq!(harness.identity.sessions(root.id).await.unwrap().len(), 1);
+    let ended = harness.events("identity.session.ended").await;
+    assert_eq!(ended.last().unwrap()["sessions"], 2);
+    assert_eq!(
+        harness
+            .identity
+            .end_sessions(root.id, principal.session(), &scope(), "root")
+            .await
+            .unwrap(),
+        0
+    );
+}
+
+async fn rotated_tokens_keep_their_grant_and_stop_the_old_secret(subject: impl StoreUnderTest) {
+    let harness = Harness::new(subject, IdentitySettings::default());
+    harness.admin().await;
+    let (_, principal) = harness.login("root", Transport::Bearer).await;
+    let (token, old_secret) = harness
+        .identity
+        .create_token(
+            &principal,
+            TokenRequest {
+                name: "ci".into(),
+                permissions: Some(PermissionSet::from_names(&["config.read"]).unwrap()),
+                lifetime: std::time::Duration::from_secs(30 * 86_400),
+            },
+            &scope(),
+        )
+        .await
+        .unwrap();
+    harness.advance(Duration::days(1));
+    let (rotated, new_secret) = harness
+        .identity
+        .rotate_token(&principal, token.id, &scope())
+        .await
+        .unwrap();
+    assert_ne!(rotated.id, token.id);
+    assert_eq!(rotated.name, "ci");
+    assert_eq!(rotated.permissions, token.permissions);
+    assert_eq!(rotated.expires_at - rotated.created_at, Duration::days(30));
+    assert!(harness
+        .identity
+        .authenticate_token(old_secret.expose())
+        .await
+        .unwrap()
+        .is_none());
+    let renewed = harness
+        .identity
+        .authenticate_token(new_secret.expose())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(renewed.permissions.names(), ["config.read"]);
+    let again = harness
+        .identity
+        .rotate_token(&principal, token.id, &scope())
+        .await
+        .unwrap_err();
+    assert_eq!(again.code.as_str(), ErrorCode::NOT_FOUND);
+    let from_token = harness
+        .identity
+        .rotate_token(&renewed, rotated.id, &scope())
+        .await
+        .unwrap_err();
+    assert_eq!(from_token.code.as_str(), ErrorCode::PERMISSION_DENIED);
+    let event = harness.events("identity.token.rotated").await;
+    assert_eq!(event.len(), 1);
+    assert_eq!(event[0]["replaces"], token.id.to_string());
 }
