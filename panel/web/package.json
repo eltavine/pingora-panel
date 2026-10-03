@@ -19,8 +19,16 @@
     "format:check": "prettier --check --experimental-cli src/ e2e/"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.20.3",
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/lint": "^6.9.7",
+    "@codemirror/search": "^6.7.2",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.13",
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource-variable/geist-mono": "^5.3.0",
+    "@lezer/highlight": "^1.2.5",
     "@lucide/vue": "^1.49.0",
     "@tanstack/vue-query": "^5.104.0",
     "@vueuse/core": "^15.0.0",

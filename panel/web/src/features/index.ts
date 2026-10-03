@@ -1,3 +1,4 @@
+import { configStudioFeature } from './config-studio'
 import { gatewayFeature } from './gateway'
 import { listenersFeature } from './listeners'
 import { publishingFeature } from './publishing'
@@ -14,6 +15,7 @@ export const features: readonly FeatureModule[] = [
   sitesFeature,
   upstreamsFeature,
   listenersFeature,
+  configStudioFeature,
 ]
 
 export const navigationGroups: readonly { id: NavigationGroup; title: string }[] = [
