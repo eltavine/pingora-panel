@@ -108,6 +108,9 @@ enum Command {
     /// Certificates served on HTTPS listeners and domains.
     #[command(subcommand, name = "tls-profile")]
     TlsProfile(commands::gateway::TlsProfileCommand),
+    /// Certificates the panel keeps and delivers to the gateway.
+    #[command(subcommand)]
+    Certificate(commands::certificates::CertificateCommand),
     /// The draft configuration: its files, checks, plans and applying it.
     #[command(subcommand)]
     Config(commands::config::ConfigCommand),
@@ -182,6 +185,9 @@ async fn main() -> ExitCode {
             Command::Route(command) => commands::routes::run(&api, &output, command).await,
             Command::Upstream(command) => commands::upstreams::run(&api, &output, command).await,
             Command::Listener(command) => commands::gateway::listener(&api, &output, command).await,
+            Command::Certificate(command) => {
+                commands::certificates::run(&api, &output, command).await
+            }
             Command::TlsProfile(command) => {
                 commands::gateway::tls_profile(&api, &output, command).await
             }

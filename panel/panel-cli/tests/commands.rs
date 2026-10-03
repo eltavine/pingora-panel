@@ -244,6 +244,38 @@ async fn api(
         ("PATCH", "/api/v1/accounts/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b") => {
             Json(json!({"username": "ops", "disabled": body["disabled"]})).into_response()
         }
+        ("GET", "/api/v1/certificates") => Json(json!([
+            {"id": "example.com", "names": ["example.com", "*.example.com"], "status": "expiring",
+             "not_after": "2026-10-20T00:00:00Z", "issuer": "CN=Example CA", "source": "uploaded"}
+        ]))
+        .into_response(),
+        ("POST", "/api/v1/certificates") => (
+            StatusCode::CREATED,
+            [("etag", "\"1\"")],
+            Json(json!({"id": body["id"], "source": body["source"], "status": "valid"})),
+        )
+            .into_response(),
+        ("GET", "/api/v1/certificates/example.com") => with_etag(
+            "3",
+            json!({"id": "example.com", "source": "uploaded", "status": "valid",
+                   "names": ["example.com"], "fingerprint": "0a1bff", "key_algorithm": "ecdsa_p256",
+                   "key_bits": 256, "version": 3}),
+        ),
+        ("PUT", "/api/v1/certificates/example.com") => {
+            with_etag("4", json!({"id": "example.com", "version": 4}))
+        }
+        ("DELETE", "/api/v1/certificates/example.com") => StatusCode::NO_CONTENT.into_response(),
+        ("GET", "/api/v1/certificates/example.com/coverage") => Json(json!({
+            "status": "valid", "not_after": "2027-01-01T00:00:00Z",
+            "hosts": [{"host": "www.example.com", "covered": true},
+                      {"host": "example.org", "covered": false}]
+        }))
+        .into_response(),
+        ("POST", "/api/v1/certificate-inspections") => Json(json!({
+            "status": "valid", "key_matches": !body["key"].is_null(), "names": ["example.com"],
+            "fingerprint": "0a1bff"
+        }))
+        .into_response(),
         _ => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -735,4 +767,97 @@ fn roles_rotation_and_logging_out_everywhere() {
     assert!(logout.status.success(), "{}", stderr(&logout));
     assert_eq!(stub.requests("DELETE", "/api/v1/account/sessions").len(), 1);
     assert_eq!(stub.requests("DELETE", "/api/v1/session").len(), 1);
+}
+
+#[test]
+fn certificates_are_uploaded_generated_checked_and_replaced() {
+    let stub = Stub::start();
+    let files = tempfile::tempdir().unwrap();
+    let chain = files.path().join("chain.pem");
+    let key = files.path().join("key.pem");
+    std::fs::write(&chain, "CHAIN").unwrap();
+    std::fs::write(&key, "KEY").unwrap();
+    let (chain, key) = (chain.to_str().unwrap(), key.to_str().unwrap());
+    let run = |arguments: &[&str]| {
+        let output = stub.ppanel(&[&["--token", "ppat_admin", "certificate"], arguments].concat());
+        assert!(
+            output.status.success(),
+            "{arguments:?}: {}",
+            stderr(&output)
+        );
+        stdout(&output)
+    };
+
+    let listed = run(&["list"]);
+    assert!(listed.contains("example.com,*.example.com") && listed.contains("expiring"));
+    run(&["upload", "example.com", "--chain", chain, "--key", key]);
+    run(&[
+        "generate",
+        "internal",
+        "--name",
+        "intranet.example",
+        "--name",
+        "10.0.0.1",
+        "--days",
+        "30",
+    ]);
+    let created: Vec<Value> = stub
+        .requests("POST", "/api/v1/certificates")
+        .into_iter()
+        .map(|request| request.body)
+        .collect();
+    assert_eq!(
+        created,
+        [
+            json!({"source": "upload", "id": "example.com", "chain": "CHAIN", "key": "KEY"}),
+            json!({"source": "self_signed", "id": "internal",
+                   "names": ["intranet.example", "10.0.0.1"], "days": 30}),
+        ]
+    );
+
+    assert!(run(&["show", "example.com"]).contains("0A:1B:FF"));
+    run(&["replace", "example.com", "--chain", chain, "--key", key]);
+    let replaced = &stub.requests("PUT", "/api/v1/certificates/example.com")[0];
+    assert_eq!(replaced.if_match.as_deref(), Some("\"3\""));
+    assert_eq!(replaced.body, json!({"chain": "CHAIN", "key": "KEY"}));
+    run(&["delete", "example.com"]);
+    assert_eq!(
+        stub.requests("DELETE", "/api/v1/certificates/example.com")[0]
+            .if_match
+            .as_deref(),
+        Some("\"3\"")
+    );
+
+    let checked = run(&[
+        "check",
+        "example.com",
+        "--host",
+        "www.example.com",
+        "--host",
+        "example.org",
+    ]);
+    assert_eq!(
+        stub.requests("GET", "/api/v1/certificates/example.com/coverage")[0].query,
+        "hosts=www.example.com%2Cexample.org"
+    );
+    assert!(checked.contains("example.org      false"), "{checked}");
+    assert!(run(&["inspect", "--chain", chain]).contains("false"));
+    assert_eq!(
+        stub.requests("POST", "/api/v1/certificate-inspections")[0].body,
+        json!({"chain": "CHAIN"})
+    );
+
+    let unreadable = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "certificate",
+        "upload",
+        "x",
+        "--chain",
+        "/nonexistent",
+        "--key",
+        key,
+    ]);
+    assert!(!unreadable.status.success());
+    assert!(stderr(&unreadable).contains("cannot read /nonexistent"));
 }
