@@ -49,7 +49,7 @@ jobs:
       - name: Wait for every service to become ready
         run: |
           for attempt in $(seq 1 60); do
-            if curl --fail --silent --show-error http://127.0.0.1:8080/api/v1/gateway/status; then
+            if curl --fail --silent --show-error "http://127.0.0.1:9180/readyz" >/dev/null; then
               break
             fi
             sleep 5
@@ -58,36 +58,58 @@ jobs:
             curl --fail --silent --show-error "http://127.0.0.1:${port}/readyz" >/dev/null
           done
 
+      - name: Create the first account and an API token
+        run: |
+          password=$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | cut -c1-32)
+          echo "::add-mask::$password"
+          printf '%s\n' "$password" | docker compose exec -T panel-api ppanel setup \
+            --username ci --bootstrap-token-file /run/secrets/bootstrap-token --password-stdin
+          session=$(curl --fail --silent --show-error --header 'content-type: application/json' \
+            --data "{\"username\": \"ci\", \"password\": \"$password\", \"transport\": \"bearer\"}" \
+            http://127.0.0.1:8080/api/v1/session \
+            | python3 -c "import json, sys; print(json.load(sys.stdin)['secret'])")
+          echo "::add-mask::$session"
+          token=$(docker compose exec -T -e PPANEL_TOKEN="$session" panel-api ppanel -o json \
+            token create ci --days 1 \
+            | python3 -c "import json, sys; print(json.load(sys.stdin)['secret'])")
+          echo "::add-mask::$token"
+          echo "PPANEL_TOKEN=$token" >> "$GITHUB_ENV"
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            http://127.0.0.1:8080/api/v1/gateway/status)" -eq 401
+
       - name: Check publication and discovery through the API
         run: |
-          curl --fail --silent --show-error http://127.0.0.1:8080/api/v1/gateway/status
-          services=$(curl --fail --silent --show-error http://127.0.0.1:8080/api/v1/platform/services \
+          auth="Authorization: Bearer $PPANEL_TOKEN"
+          curl --fail --silent --show-error --header "$auth" http://127.0.0.1:8080/api/v1/gateway/status
+          services=$(curl --fail --silent --show-error --header "$auth" \
+            http://127.0.0.1:8080/api/v1/platform/services \
             | python3 -c "import json, sys; print(len(json.load(sys.stdin)['services']))")
           test "$services" -eq 5
           curl --fail --silent --show-error --output /dev/null http://127.0.0.1:8080/
 
       - name: Serve a site through the gateway with the command line
         run: |
-          ppanel() { docker compose exec -T panel-api ppanel --actor ci "$@"; }
+          ppanel() { docker compose exec -T -e PPANEL_TOKEN panel-api ppanel "$@"; }
           upstream=$(ppanel -o json upstream create --name console --node 127.0.0.1:8080 \
             | python3 -c "import json, sys; print(json.load(sys.stdin)['id'])")
           ppanel listener set edge --address 127.0.0.1:18080
           ppanel site create --name console --domain console.test --proxy "$upstream"
           ppanel config apply
           ppanel gateway status
+          auth="Authorization: Bearer $PPANEL_TOKEN"
           for attempt in $(seq 1 30); do
-            if curl --fail --silent --show-error --header 'Host: console.test' \
+            if curl --fail --silent --show-error --header 'Host: console.test' --header "$auth" \
               http://127.0.0.1:18080/api/v1/gateway/status; then
               break
             fi
             sleep 1
           done
-          curl --fail --silent --show-error --header 'Host: console.test' \
+          curl --fail --silent --show-error --header 'Host: console.test' --header "$auth" \
             http://127.0.0.1:18080/api/v1/gateway/status
 
       - name: Audit the changes
         run: |
-          ppanel() { docker compose exec -T panel-api ppanel --actor ci "$@"; }
+          ppanel() { docker compose exec -T -e PPANEL_TOKEN panel-api ppanel "$@"; }
           for attempt in $(seq 1 30); do
             if ppanel -o json audit list --type config.draft.applied --actor-id ci \
               | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"; then
@@ -98,6 +120,8 @@ jobs:
           ppanel -o json audit list --type config.draft.applied --actor-id ci \
             | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"
           ppanel audit list --actor-id ci
+          ppanel -o json audit list --type identity.login.succeeded --actor-id ci \
+            | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"
           ppanel audit verify
 
       - name: Show service logs
