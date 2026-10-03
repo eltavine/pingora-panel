@@ -8,6 +8,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+async-trait.workspace = true
 chrono.workspace = true
 governor.workspace = true
 axum.workspace = true
@@ -28,6 +29,5 @@ utoipa.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-async-trait.workspace = true
 panel-domain.workspace = true
 tokio.workspace = true

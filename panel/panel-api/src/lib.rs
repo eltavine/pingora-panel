@@ -25,7 +25,7 @@ mod router;
 mod routes;
 mod state;
 
-pub use access::AccessSettings;
+pub use access::{AccessAudit, AccessSettings, Refusal};
 pub use config::ApiConfig;
 pub use configuration::{
     ApplyRequest, ApplyResponse, CloneSiteRequest, DomainCheckRequest, DraftResponse,

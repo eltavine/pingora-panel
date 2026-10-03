@@ -1,21 +1,50 @@
 use super::{runtime::FakeRuntime, FakeGateway, IdentityCompiler};
-use crate::{access::ROUTES, router, AccessSettings, ApiDoc, ApiState};
+use crate::{access::ROUTES, router, AccessAudit, AccessSettings, ApiDoc, ApiState, Refusal};
+use async_trait::async_trait;
 use axum::{
     body::Body,
     http::{header, HeaderMap, Request, StatusCode},
     Router,
 };
-use panel_application::GatewayService;
-use panel_identity::{memory::MemoryIdentityStore, Identity, IdentitySettings, SecretHash};
+use panel_application::{GatewayService, RequestScope};
+use panel_identity::{
+    memory::MemoryIdentityStore, Identity, IdentitySettings, Principal, SecretHash,
+};
 use serde_json::{json, Value};
-use std::{collections::BTreeSet, num::NonZeroU32, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeSet,
+    num::NonZeroU32,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tower::ServiceExt;
 use utoipa::OpenApi;
 
 const BOOTSTRAP: &str = "the-bootstrap-token";
 const PASSWORD: &str = "glacier violin tapestry orbit";
 
+#[derive(Default)]
+struct RecordedRefusals(Mutex<Vec<(String, Refusal)>>);
+
+#[async_trait]
+impl AccessAudit for RecordedRefusals {
+    async fn denied(&self, principal: &Principal, refusal: &Refusal, _scope: &RequestScope) {
+        self.0
+            .lock()
+            .unwrap()
+            .push((principal.actor().to_owned(), refusal.clone()));
+    }
+}
+
 fn app_with(settings: AccessSettings, runtime: Arc<FakeRuntime>) -> Router {
+    app_recording(settings, runtime, Arc::default())
+}
+
+fn app_recording(
+    settings: AccessSettings,
+    runtime: Arc<FakeRuntime>,
+    refusals: Arc<RecordedRefusals>,
+) -> Router {
     let identity = Identity::new(
         Arc::new(MemoryIdentityStore::default()),
         IdentitySettings {
@@ -29,7 +58,8 @@ fn app_with(settings: AccessSettings, runtime: Arc<FakeRuntime>) -> Router {
             Arc::new(IdentityCompiler),
         )))
         .with_runtime(runtime)
-        .with_identity(identity, settings),
+        .with_identity(identity, settings)
+        .with_access_audit(refusals),
     )
 }
 
@@ -399,4 +429,79 @@ async fn logins_from_one_address_are_limited() {
     let limited = attempt().await;
     assert_eq!(limited.status, StatusCode::TOO_MANY_REQUESTS);
     assert!(limited.headers.contains_key(header::RETRY_AFTER));
+}
+
+#[tokio::test]
+async fn refusals_of_authenticated_callers_are_recorded() {
+    let refusals = Arc::new(RecordedRefusals::default());
+    let app = app_recording(
+        AccessSettings::default(),
+        Arc::default(),
+        Arc::clone(&refusals),
+    );
+    set_up(&app).await;
+    let root = bearer(&app, "root").await;
+    call(
+        &app,
+        "POST",
+        "/api/v1/accounts",
+        Some(&root),
+        Some(json!({"username": "watcher", "password": PASSWORD, "roles": ["viewer"]})),
+    )
+    .await;
+    let viewer = bearer(&app, "watcher").await;
+    assert_eq!(
+        call(&app, "GET", "/api/v1/accounts", Some(&viewer), None)
+            .await
+            .status,
+        StatusCode::FORBIDDEN
+    );
+    // Anonymous requests are refused without a record.
+    call(&app, "GET", "/api/v1/accounts", None, None).await;
+
+    let login = call(
+        &app,
+        "POST",
+        "/api/v1/session",
+        None,
+        Some(json!({"username": "root", "password": PASSWORD})),
+    )
+    .await;
+    let cookie = login.headers[header::SET_COOKIE]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    send(
+        &app,
+        build(
+            request("DELETE", "/api/v1/session", None).header(header::COOKIE, cookie),
+            None,
+        ),
+    )
+    .await;
+
+    let recorded = refusals.0.lock().unwrap().clone();
+    assert_eq!(recorded.len(), 2, "{recorded:?}");
+    assert_eq!(recorded[0].0, "watcher");
+    assert_eq!(
+        (
+            recorded[0].1.method.as_str(),
+            recorded[0].1.route.as_str(),
+            recorded[0].1.reason,
+            recorded[0].1.permission
+        ),
+        (
+            "GET",
+            "/api/v1/accounts",
+            "permission",
+            Some("identity.read")
+        )
+    );
+    assert_eq!(
+        (recorded[1].0.as_str(), recorded[1].1.reason),
+        ("root", "csrf")
+    );
 }

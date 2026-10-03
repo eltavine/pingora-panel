@@ -1,4 +1,4 @@
-use crate::access::{AccessSettings, Gate};
+use crate::access::{AccessAudit, AccessSettings, Gate};
 use panel_application::{AuditPort, ConfigurationPort, GatewayRuntimePort};
 use panel_health::HealthWatch;
 use panel_identity::Identity;
@@ -13,6 +13,7 @@ pub struct ApiState<U> {
     pub(crate) runtime: Option<Arc<dyn GatewayRuntimePort>>,
     pub(crate) audit: Option<Arc<dyn AuditPort>>,
     pub(crate) identity: Option<Arc<Gate>>,
+    pub(crate) access_audit: Option<Arc<dyn AccessAudit>>,
 }
 
 impl<U> Clone for ApiState<U> {
@@ -25,6 +26,7 @@ impl<U> Clone for ApiState<U> {
             runtime: self.runtime.clone(),
             audit: self.audit.clone(),
             identity: self.identity.clone(),
+            access_audit: self.access_audit.clone(),
         }
     }
 }
@@ -39,7 +41,15 @@ impl<U> ApiState<U> {
             runtime: None,
             audit: None,
             identity: None,
+            access_audit: None,
         }
+    }
+
+    /// Records the requests the identity guard refuses to authenticated
+    /// callers.
+    pub fn with_access_audit(mut self, audit: Arc<dyn AccessAudit>) -> Self {
+        self.access_audit = Some(audit);
+        self
     }
 
     /// Authenticates every request and authorizes it by its route's access

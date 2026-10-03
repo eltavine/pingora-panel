@@ -147,10 +147,8 @@ pub fn process(
     let audit_health = audit.health_check();
     let config_health = config.health_check();
     let events = EventLog::new(process.database(), ServiceName::new(SERVICE)?);
-    let runtime = RecordedRuntime::new(
-        Arc::new(gateway),
-        Arc::new(operations::OutboxOperations(events.clone())),
-    );
+    let operations = Arc::new(operations::OutboxOperations(events.clone()));
+    let runtime = RecordedRuntime::new(Arc::new(gateway), operations.clone());
     let store = Arc::new(PgIdentityStore::new(process.database(), events));
     let roles = roles::BuiltInRoles::new(Arc::clone(&store), bootstrap.is_some());
     let identity = Identity::new(
@@ -180,6 +178,7 @@ pub fn process(
                     .with_runtime(Arc::new(runtime))
                     .with_audit(Arc::new(audit))
                     .with_identity(identity, access)
+                    .with_access_audit(operations)
                     .with_health(running.health())
                     .with_directory(Arc::new(directory::RegistryDirectory::new(
                         running.jetstream().clone(),

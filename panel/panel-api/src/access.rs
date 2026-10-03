@@ -3,7 +3,8 @@
 //! requests of cookie sessions, checks the permission and records the
 //! caller as the request's actor. A route without an entry is refused.
 
-use crate::{error::ApiError, ApiState};
+use crate::{error::ApiError, request_context::request_scope, ApiState};
+use async_trait::async_trait;
 use axum::{
     extract::{MatchedPath, Request, State},
     http::{header, HeaderMap, HeaderValue, Method},
@@ -11,8 +12,10 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
+use panel_application::RequestScope;
 use panel_errors::PanelError;
 use panel_identity::{Client, Identity, Permission, Principal, Transport, TOKEN_PREFIX};
+use serde::Serialize;
 use std::{net::SocketAddr, num::NonZeroU32, sync::Arc, time::Duration};
 
 pub(crate) const SESSION_COOKIE: &str = "__Host-ppanel_session";
@@ -204,6 +207,24 @@ pub(crate) static ROUTES: &[(&str, &str, Access)] = &[
         Requires(AuditRead),
     ),
 ];
+
+/// A request refused to an authenticated caller.
+#[derive(Clone, Debug, Serialize)]
+pub struct Refusal {
+    pub method: String,
+    /// The route's path template, such as `/api/v1/sites/{id}`.
+    pub route: String,
+    /// `permission`, `csrf` or `cross_site`.
+    pub reason: &'static str,
+    /// The permission the route needs, when that was missing.
+    pub permission: Option<&'static str>,
+}
+
+/// Records refused requests of authenticated callers for the audit trail.
+#[async_trait]
+pub trait AccessAudit: Send + Sync {
+    async fn denied(&self, principal: &Principal, refusal: &Refusal, scope: &RequestScope);
+}
 
 pub(crate) fn access(method: &Method, path: &str) -> Option<Access> {
     let method = if method == Method::HEAD {
@@ -397,10 +418,12 @@ pub(crate) async fn guard<U: Send + Sync + 'static>(
         return next.run(request).await;
     };
     request.headers_mut().remove(ACTOR_HEADER);
-    let access = request
+    let route = request
         .extensions()
         .get::<MatchedPath>()
-        .and_then(|matched| access(request.method(), matched.as_str()));
+        .map(|matched| matched.as_str().to_owned())
+        .unwrap_or_default();
+    let access = access(request.method(), &route);
     let Some(access) = access else {
         return ApiError::new(PanelError::permission_denied(
             "the route has no access rule",
@@ -430,24 +453,43 @@ pub(crate) async fn guard<U: Send + Sync + 'static>(
         }
         Err(error) => return error.into_response(),
     };
+    let method = request.method().to_string();
+    let scope = request_scope(request.headers()).ok();
+    let refused = |reason: &'static str, permission: Option<Permission>, error: ApiError| {
+        let refusal = Refusal {
+            method: method.clone(),
+            route: route.clone(),
+            reason,
+            permission: permission.map(Permission::name),
+        };
+        let scope = scope.clone();
+        let audit = state.access_audit.clone();
+        let principal = principal.clone();
+        async move {
+            if let (Some(audit), Some(scope)) = (audit, scope) {
+                audit.denied(&principal, &refusal, &scope).await;
+            }
+            error.into_response()
+        }
+    };
     if unsafe_request && principal.csrf_token().is_some() {
         if let Err(error) = same_origin(request.headers(), &gate.settings) {
-            return error.into_response();
+            return refused("cross_site", None, error).await;
         }
         if !principal.csrf_matches(header(request.headers(), CSRF_HEADER)) {
-            return ApiError::new(PanelError::permission_denied(
+            let error = ApiError::new(PanelError::permission_denied(
                 "the request lacks the session's CSRF token",
-            ))
-            .into_response();
+            ));
+            return refused("csrf", None, error).await;
         }
     }
     if let Requires(permission) = access {
         if !principal.can(permission) {
-            return ApiError::new(PanelError::permission_denied(format!(
+            let error = ApiError::new(PanelError::permission_denied(format!(
                 "this needs the {} permission",
                 permission.name()
-            )))
-            .into_response();
+            )));
+            return refused("permission", Some(permission), error).await;
         }
     }
     if let Ok(actor) = HeaderValue::from_str(principal.actor()) {
