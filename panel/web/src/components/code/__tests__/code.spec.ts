@@ -2,7 +2,7 @@ import { StringStream } from '@codemirror/language'
 import { Text } from '@codemirror/state'
 import { describe, expect, it } from 'vitest'
 import { configurationTokens } from '../language'
-import { offsetOf, parseSpan, rangeOf } from '../spans'
+import { offsetOf, parseSpan, placeOf, rangeOf } from '../spans'
 
 describe('parseSpan', () => {
   it('reads each GNU form with an inclusive end', () => {
@@ -40,6 +40,14 @@ describe('offsets', () => {
 
   it('clamps places outside the document', () => {
     expect(offsetOf(doc, { line: 9, column: 99 })).toBe(doc.length)
+  })
+
+  it('turns offsets back into places', () => {
+    expect(placeOf(doc, 0)).toEqual({ line: 1, column: 1 })
+    expect(placeOf(doc, 20 + 10)).toEqual({ line: 2, column: 10 })
+    for (const column of [1, 7, 8, 9, 12, 24]) {
+      expect(placeOf(doc, offsetOf(doc, { line: 2, column }))).toEqual({ line: 2, column })
+    }
   })
 })
 

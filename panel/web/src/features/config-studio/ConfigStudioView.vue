@@ -11,6 +11,7 @@ import {
   FileInput,
   FileJson2,
   FilePlus2,
+  Layers,
   ListTree,
   GitCompareArrows,
   RotateCw,
@@ -25,12 +26,20 @@ import {
 import { useI18n } from 'vue-i18n'
 import { onBeforeRouteLeave } from 'vue-router'
 import { toast } from 'vue-sonner'
-import { ast, ir, type DiagnosticDetails, type SyntaxNode, type SyntaxTree } from '@/api/generated'
+import {
+  ast,
+  explain,
+  ir,
+  type DiagnosticDetails,
+  type Explanation,
+  type SyntaxNode,
+  type SyntaxTree,
+} from '@/api/generated'
 import { schemaOptions } from '@/api/generated/@tanstack/vue-query.gen'
 import ApiFailureAlert from '@/components/ApiFailureAlert.vue'
 import CodeEditor from '@/components/code/CodeEditor.vue'
 import { configurationLanguage } from '@/components/code/language'
-import { parseSpan } from '@/components/code/spans'
+import { parseSpan, type Place } from '@/components/code/spans'
 import DiagnosticList from '@/components/DiagnosticList.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -45,6 +54,7 @@ import { toApiFailure } from '@/lib/api'
 import { changeHeaders, notifyFailure, useRefreshConfiguration } from '@/lib/configuration'
 import { downloadJson } from '@/lib/download'
 import { baseContext, directiveCompletion } from './completion'
+import ExplainPanel from './ExplainPanel.vue'
 import { editorDiagnostics } from './lint'
 import NginxImportSheet from './NginxImportSheet.vue'
 import OutlineTree from './OutlineTree.vue'
@@ -59,8 +69,11 @@ const editor = useTemplateRef<InstanceType<typeof CodeEditor>>('editor')
 const reviewing = ref(false)
 const importing = ref(false)
 const naming = ref(false)
-const panel = ref<'problems' | 'outline'>('problems')
+const panel = ref<'problems' | 'outline' | 'effective'>('problems')
 const outline = ref<SyntaxTree>()
+const cursor = ref<Place>()
+const explanation = ref<Explanation>()
+let explaining = 0
 const exporting = ref(false)
 const newPath = ref('')
 
@@ -167,6 +180,33 @@ function selectNode(node: SyntaxNode) {
   }
 }
 
+async function readExplanation() {
+  if (panel.value !== 'effective' || !config.source.data.value || !cursor.value) {
+    return
+  }
+  const request = ++explaining
+  const { line, column } = cursor.value
+  try {
+    const { data } = await explain({
+      body: { files: config.files.value, file: config.active.value, line, column },
+      throwOnError: true,
+    })
+    if (request === explaining) {
+      explanation.value = data
+    }
+  } catch {
+    if (request === explaining) {
+      explanation.value = undefined
+    }
+  }
+}
+watch(panel, readExplanation)
+watch(config.active, () => {
+  cursor.value = undefined
+  explanation.value = undefined
+})
+watchDebounced([text, cursor], readExplanation, { debounce: 300 })
+
 async function exportSnapshot() {
   exporting.value = true
   try {
@@ -180,14 +220,19 @@ async function exportSnapshot() {
   }
 }
 
-async function reveal(diagnostic: DiagnosticDetails) {
-  const span = parseSpan(diagnostic.source_span)
+/** Opens the file of a `file:line.column` span and selects the span. */
+async function revealSpan(value: string | null | undefined) {
+  const span = parseSpan(value)
   if (!span || !(span.file in config.files.value)) {
     return
   }
   config.active.value = span.file
   await nextTick()
   editor.value?.reveal(span.start, span.end)
+}
+
+function reveal(diagnostic: DiagnosticDetails) {
+  void revealSpan(diagnostic.source_span)
 }
 
 const extensions = [
@@ -389,6 +434,7 @@ useEventListener(window, 'beforeunload', (event: BeforeUnloadEvent) => {
               :path="config.active.value"
               :label="t('studio.editorLabel', { path: config.active.value })"
               :extensions="extensions"
+              @cursor="cursor = $event"
             />
           </div>
         </div>
@@ -403,6 +449,10 @@ useEventListener(window, 'beforeunload', (event: BeforeUnloadEvent) => {
               <TabsTrigger value="outline">
                 <ListTree aria-hidden="true" />
                 {{ t('studio.outline') }}
+              </TabsTrigger>
+              <TabsTrigger value="effective">
+                <Layers aria-hidden="true" />
+                {{ t('studio.effective') }}
               </TabsTrigger>
             </TabsList>
             <Spinner v-if="config.checking.value" class="size-3.5" />
@@ -430,6 +480,10 @@ useEventListener(window, 'beforeunload', (event: BeforeUnloadEvent) => {
               @select="selectNode"
             />
             <p v-else class="text-muted-foreground text-sm">{{ t('studio.outlineEmpty') }}</p>
+          </TabsContent>
+          <TabsContent value="effective" class="max-h-96 overflow-y-auto">
+            <ExplainPanel v-if="explanation" :explanation="explanation" @select="revealSpan" />
+            <p v-else class="text-muted-foreground text-sm">{{ t('studio.effectiveHint') }}</p>
           </TabsContent>
         </Tabs>
       </div>

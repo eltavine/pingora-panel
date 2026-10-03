@@ -407,3 +407,76 @@ test('NGINX configuration is converted and loaded into the editor', async ({ pag
     page.getByRole('list', { name: 'Files' }).getByRole('img', { name: 'Unsaved' }),
   ).toBeVisible()
 })
+
+test('the values that apply at the cursor show where they come from', async ({ page }) => {
+  await mockDraft(page)
+  await page.route('**/api/v1/config/source', (route) =>
+    route.fulfill({
+      json: {
+        language_version: 1,
+        version: 4,
+        etag: '"draft-4"',
+        files: { 'main.conf': MAIN, 'sites/shop.conf': SHOP },
+        diagnostics: [],
+      },
+    }),
+  )
+  await page.route('**/api/v1/config/check', (route) =>
+    route.fulfill({ json: { valid: true, diagnostics: [] } }),
+  )
+  const requests: Request[] = []
+  await page.route('**/api/v1/config/explain', (route) => {
+    requests.push(route.request())
+    return route.fulfill({
+      json: {
+        block: 'server',
+        name: 'shop',
+        resource: 'sites/0b9d6c52-2f47-4d0e-9a1b-6f3c2d1e0a01',
+        source_span: 'sites/shop.conf:1.1-4.1',
+        settings: [
+          { name: 'proxy', value: 'app', source: 'here', source_span: 'sites/shop.conf:3.5-14' },
+          {
+            name: 'listen',
+            value: 'edge',
+            source: 'default',
+            rule: 'Without it, the server is served on every listener.',
+          },
+          {
+            name: 'tls_profile',
+            scope: 'shop.example',
+            value: 'edge-cert',
+            source: 'inherited',
+            from: 'listener secure',
+            source_span: 'main.conf:5.9-22',
+            rule: "A host uses its domain's tls_profile=, else its server's.",
+          },
+        ],
+      },
+    })
+  })
+
+  await page.goto('/config')
+  await page
+    .getByRole('list', { name: 'Files' })
+    .getByRole('button', { name: 'sites/shop.conf', exact: true })
+    .click()
+  await page.getByRole('tab', { name: 'Effective values' }).click()
+  await expect(page.getByText('Place the cursor in a server')).toBeVisible()
+
+  const shop = page.getByRole('textbox', { name: 'Contents of sites/shop.conf' })
+  await shop.getByText('proxy app;').click()
+  const values = page.getByRole('list', { name: 'Effective values' })
+  await expect(values.getByText('edge-cert')).toBeVisible()
+  expect(requests.at(-1)!.postDataJSON()).toMatchObject({ file: 'sites/shop.conf', line: 3 })
+  await expect(page.getByText('Site', { exact: true })).toBeVisible()
+  await expect(values.getByRole('img', { name: 'Default' })).toBeVisible()
+  await expect(
+    values.getByText('Without it, the server is served on every listener.'),
+  ).toBeVisible()
+  await expect(values.getByText('From listener secure')).toBeVisible()
+  await expect(values.getByText('shop.example')).toBeVisible()
+
+  await values.getByRole('button', { name: 'main.conf:5.9-22' }).click()
+  await expect(page.getByRole('textbox', { name: 'Contents of main.conf' })).toBeVisible()
+  await expectNoHorizontalOverflow(page)
+})

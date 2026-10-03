@@ -51,6 +51,15 @@ export function offsetOf(doc: Text, place: Place): number {
   return offset
 }
 
+/** The place of a document offset; characters outside the BMP count once. */
+export function placeOf(doc: Text, offset: number): Place {
+  const line = doc.lineAt(offset)
+  return {
+    line: line.number,
+    column: Array.from(line.text.slice(0, offset - line.from)).length + 1,
+  }
+}
+
 /** The document range a span covers, its last character included. */
 export function rangeOf(doc: Text, span: SourceSpan): { from: number; to: number } {
   const from = offsetOf(doc, span.start)

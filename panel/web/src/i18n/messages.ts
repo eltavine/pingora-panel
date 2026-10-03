@@ -544,6 +544,25 @@ const zhCN = {
     downloadIr: '下载 IR',
     irDownloaded: '已下载草稿 v{version} 编译出的 IR',
     irFailed: '草稿无法编译',
+    effective: '生效值',
+    effectiveHint:
+      '将光标放在 server、route、listener、upstream 或 tls_profile 块中，查看其中生效的值及其来源。',
+    block: {
+      main: '顶层',
+      http: 'http',
+      tls_profile: 'TLS 配置',
+      listener: '监听',
+      upstream: '上游',
+      server: '网站',
+      route: '路由',
+    },
+    source: {
+      here: '本块设置',
+      inherited: '继承',
+      default: '默认值',
+    },
+    inheritedFrom: '继承自 {block}',
+    noValue: '无',
   },
   revisions: {
     title: '配置版本',
@@ -1240,6 +1259,25 @@ const en: DeepString<Messages> = {
     downloadIr: 'Download IR',
     irDownloaded: 'Downloaded the IR of draft v{version}',
     irFailed: 'The draft does not compile',
+    effective: 'Effective values',
+    effectiveHint:
+      'Place the cursor in a server, route, listener, upstream or tls_profile block to see the values that apply there and where each comes from.',
+    block: {
+      main: 'Top level',
+      http: 'http',
+      tls_profile: 'TLS profile',
+      listener: 'Listener',
+      upstream: 'Upstream',
+      server: 'Site',
+      route: 'Route',
+    },
+    source: {
+      here: 'Set here',
+      inherited: 'Inherited',
+      default: 'Default',
+    },
+    inheritedFrom: 'From {block}',
+    noValue: 'None',
   },
   revisions: {
     title: 'Revisions',

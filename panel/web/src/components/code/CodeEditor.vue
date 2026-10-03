@@ -27,7 +27,7 @@ import {
   lineNumbers,
 } from '@codemirror/view'
 import { configurationLanguage } from './language'
-import { offsetOf, type Place } from './spans'
+import { offsetOf, placeOf, type Place } from './spans'
 import { editorHighlight, editorTheme } from './theme'
 
 const props = defineProps<{
@@ -41,7 +41,11 @@ const props = defineProps<{
   extensions?: Extension[]
 }>()
 
-const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
+const emit = defineEmits<{
+  'update:modelValue': [value: string]
+  /** Where the cursor is, whenever it moves. */
+  cursor: [place: Place]
+}>()
 
 const host = useTemplateRef<HTMLDivElement>('host')
 const editable = new Compartment()
@@ -87,6 +91,9 @@ function create(doc: string): EditorState {
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           emit('update:modelValue', update.state.doc.toString())
+        }
+        if (update.docChanged || update.selectionSet) {
+          emit('cursor', placeOf(update.state.doc, update.state.selection.main.head))
         }
       }),
       props.extensions ?? [],
