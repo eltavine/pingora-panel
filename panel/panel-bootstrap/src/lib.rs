@@ -34,6 +34,7 @@ pub const SERVICE_SCHEMAS: &[(&str, &str)] = &[
         "observability",
         "PINGORA_PANEL_OBSERVABILITY_DATABASE_PASSWORD",
     ),
+    ("audit", "PINGORA_PANEL_AUDIT_DATABASE_PASSWORD"),
 ];
 
 /// Prefix of the login role that owns each schema, as in `panel_config`.

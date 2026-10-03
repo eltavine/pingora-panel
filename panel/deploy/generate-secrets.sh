@@ -7,7 +7,7 @@ umask 077
 mkdir -p "$directory"
 chmod 700 "$directory"
 for name in postgres-admin-password identity-database-password config-database-password \
-    automation-database-password observability-database-password; do
+    automation-database-password observability-database-password audit-database-password; do
     file="$directory/$name"
     if [ ! -s "$file" ]; then
         head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | cut -c1-40 >"$file"

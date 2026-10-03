@@ -41,6 +41,7 @@ panel-api-server -> panel-control-runtime + panel-api + config-grpc-client + gat
 panel-cli (no workspace dependencies: a client of the public REST API)
 automation-service -> panel-control-runtime + panel-jobs + panel-postgres + panel-events
 observability-service -> panel-control-runtime
+audit-service -> panel-control-runtime + panel-jetstream + panel-events + panel-contracts
 panel-bootstrap -> panel-postgres + panel-jetstream + panel-pki
 ```
 
@@ -82,6 +83,7 @@ panel-bootstrap -> panel-postgres + panel-jetstream + panel-pki
 | `panel-api-server` | The `panel-api` process: public REST and web console, degraded admission and the service directory | Storage implementation, Pingora |
 | `automation-service` | PostgreSQL job store with outbox events, worker and scheduler in the `automation` schema | HTTP, Pingora |
 | `observability-service` | Service process owning the `observability` schema | Pingora |
+| `audit-service` | The audit trail: every event appended once to a hash chain in the `audit` schema, with queries and verification | HTTP, Pingora |
 | `panel-bootstrap` | Idempotent provisioning of service roles, schemas, streams and the service registry; issuance and rotation of service credentials | Application rules, Pingora |
 | `gatewayd` | Dependency construction, REST/gRPC adapter composition, bind/readiness policies, environment configuration, process clock, worker executor, the data plane, its runtime API and standard gRPC Health | Business rules |
 | `panel-cli` | The `ppanel` command line over the public REST API | Server crates, storage, Pingora |
@@ -102,8 +104,8 @@ readiness, recovery and current limits.
 
 ## Service processes
 
-`panel-api`, `config-service`, `automation-service` and `observability-service`
-are composed by `panel-control-runtime`
+`panel-api`, `config-service`, `automation-service`, `observability-service`
+and `audit-service` are composed by `panel-control-runtime`
 ([decision](../docs/adr/0007-service-processes-health-and-discovery.md)). Each
 binds an operational listener with `/livez` and `/readyz`
 (`application/health+json`) and a gRPC listener with `grpc.health.v1.Health`
@@ -117,6 +119,7 @@ with `healthcheck` to probe its own readiness, as container health checks do.
 | `config-service` | `config` | `127.0.0.1:9181` | `127.0.0.1:50061` | calls `gatewayd` at `127.0.0.1:50051` |
 | `automation-service` | `automation` | `127.0.0.1:9182` | `127.0.0.1:50062` | |
 | `observability-service` | `observability` | `127.0.0.1:9183` | `127.0.0.1:50063` | |
+| `audit-service` | `audit` | `127.0.0.1:9184` | `127.0.0.1:50064` | consumes every event |
 
 Every process reads `PINGORA_PANEL_DATABASE_URL` (its role, without password),
 `PINGORA_PANEL_DATABASE_PASSWORD` or `PINGORA_PANEL_DATABASE_PASSWORD_FILE`,
