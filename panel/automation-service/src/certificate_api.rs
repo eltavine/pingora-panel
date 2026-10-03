@@ -1,6 +1,10 @@
-//! The certificate inventory over `pingora.panel.automation.v1.Certificates`.
+//! The certificate inventory, ACME accounts and automatic certificates over
+//! `pingora.panel.automation.v1.Certificates`.
 
-use crate::certificates::{Cause, CertificateInventory};
+use crate::{
+    acme::{AccountId, AcmeAutomation, NewAutomaticCertificate},
+    certificates::{Cause, CertificateInventory},
+};
 use panel_certificates::CertificateId;
 use panel_contracts::{
     automation::v1::{self as wire, certificates_server::Certificates},
@@ -8,20 +12,24 @@ use panel_contracts::{
 };
 use panel_errors::{PanelError, Result};
 use panel_events::{RequestId, RequestScope};
+use panel_postgres::EventLog;
 use panel_service::trace_context;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tonic::{Request, Response, Status};
 use zeroize::Zeroizing;
 
 const COLLECTION: &str = "certificates";
+const ACCOUNTS: &str = "acme-accounts";
+const AUTOMATIC: &str = "acme-certificates";
 
 pub struct CertificateService {
     inventory: CertificateInventory,
+    acme: AcmeAutomation,
 }
 
 impl CertificateService {
-    pub fn new(inventory: CertificateInventory) -> Self {
-        Self { inventory }
+    pub fn new(inventory: CertificateInventory, acme: AcmeAutomation) -> Self {
+        Self { inventory, acme }
     }
 }
 
@@ -48,18 +56,29 @@ struct GenerateBody {
     days: u32,
 }
 
-/// What a request names: the inventory or one certificate in it.
+/// What a request names: the inventory, ACME accounts or automatic
+/// certificates, or one of them.
 enum Target {
     Collection,
     Certificate(CertificateId),
+    Accounts,
+    Account(AccountId),
+    Automatic,
+    AutomaticCertificate(CertificateId),
+}
+
+fn certificate_id(id: &str) -> Result<CertificateId> {
+    CertificateId::new(id).map_err(|error| PanelError::invalid_argument(error.to_string()))
 }
 
 fn target(resource: &str) -> Result<Target> {
     match resource.split_once('/') {
         None if resource == COLLECTION => Ok(Target::Collection),
-        Some((COLLECTION, id)) => CertificateId::new(id)
-            .map(Target::Certificate)
-            .map_err(|error| PanelError::invalid_argument(error.to_string())),
+        None if resource == ACCOUNTS => Ok(Target::Accounts),
+        None if resource == AUTOMATIC => Ok(Target::Automatic),
+        Some((COLLECTION, id)) => certificate_id(id).map(Target::Certificate),
+        Some((ACCOUNTS, id)) => AccountId::new(id).map(Target::Account),
+        Some((AUTOMATIC, id)) => certificate_id(id).map(Target::AutomaticCertificate),
         _ => Err(PanelError::invalid_argument(format!(
             "unknown resource {resource:?}"
         ))),
@@ -120,6 +139,20 @@ impl Certificates for CertificateService {
                     let certificate = self.inventory.get(&id).await?;
                     Ok((encode(&certificate), certificate.etag()))
                 }
+                ("acme.accounts.list", Target::Accounts) => {
+                    Ok((encode(&self.acme.accounts().await?), String::new()))
+                }
+                ("acme.accounts.get", Target::Account(id)) => {
+                    let account = self.acme.account(&id).await?;
+                    Ok((encode(&account), account.etag()))
+                }
+                ("acme.certificates.list", Target::Automatic) => {
+                    Ok((encode(&self.acme.certificates().await?), String::new()))
+                }
+                ("acme.certificates.get", Target::AutomaticCertificate(id)) => {
+                    let automatic = self.acme.certificate(&id).await?;
+                    Ok((encode(&automatic), automatic.etag()))
+                }
                 (operation, _) => Err(unknown(operation)),
             }
         }
@@ -147,9 +180,10 @@ impl Certificates for CertificateService {
         let result: Result<(Vec<u8>, String)> = async {
             let (scope, actor) = scope(request.context)?;
             let scope = scope.with_trace_context(trace);
+            let principal = EventLog::user(&actor);
             let cause = Cause {
                 scope: &scope,
-                actor: &actor,
+                principal: &principal,
             };
             let created = |certificate: panel_certificates::Certificate| {
                 (encode(&certificate), certificate.etag())
@@ -188,6 +222,31 @@ impl Certificates for CertificateService {
                 ("certificates.delete", Target::Certificate(id)) => {
                     self.inventory
                         .delete(cause, id, expected(&request.if_match)?)
+                        .await?;
+                    Ok((Vec::new(), String::new()))
+                }
+                ("acme.accounts.create", Target::Accounts) => {
+                    let account = self.acme.create_account(cause, decode(&content)?).await?;
+                    Ok((encode(&account), account.etag()))
+                }
+                ("acme.accounts.delete", Target::Account(id)) => {
+                    self.acme
+                        .delete_account(cause, id, expected(&request.if_match)?)
+                        .await?;
+                    Ok((Vec::new(), String::new()))
+                }
+                ("acme.certificates.create", Target::Automatic) => {
+                    let body: NewAutomaticCertificate = decode(&content)?;
+                    let automatic = self.acme.create_certificate(cause, body).await?;
+                    Ok((encode(&automatic), automatic.etag()))
+                }
+                ("acme.certificates.renew", Target::AutomaticCertificate(id)) => {
+                    let automatic = self.acme.renew(cause, id).await?;
+                    Ok((encode(&automatic), automatic.etag()))
+                }
+                ("acme.certificates.delete", Target::AutomaticCertificate(id)) => {
+                    self.acme
+                        .delete_certificate(cause, id, expected(&request.if_match)?)
                         .await?;
                     Ok((Vec::new(), String::new()))
                 }

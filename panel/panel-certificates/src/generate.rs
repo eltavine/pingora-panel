@@ -49,6 +49,23 @@ pub fn self_signed(names: &[String], days: u32, now: DateTime<Utc>) -> Result<Ac
     accept(&pem::encode(CERTIFICATE, certificate.der()), &key, now)
 }
 
+/// The names a certificate is requested for, checked and normalized: DNS
+/// names, wildcards or IP addresses, each listed once.
+pub fn requested_names(names: &[String]) -> Result<Vec<String>> {
+    let checked: Vec<String> = subject_names(names)?
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+    for (index, name) in checked.iter().enumerate() {
+        if checked[..index].contains(name) {
+            return Err(PanelError::validation_failed(format!(
+                "{name} is listed twice"
+            )));
+        }
+    }
+    Ok(checked)
+}
+
 /// Checks the names a certificate is requested for and gives each with its
 /// subject alternative name.
 pub(crate) fn subject_names(names: &[String]) -> Result<Vec<(String, SanType)>> {

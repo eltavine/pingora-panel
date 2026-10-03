@@ -118,6 +118,17 @@ mod tests {
     }
 
     #[test]
+    fn requested_names_are_normalized_and_listed_once() {
+        let names = [" Shop.Example ", "*.shop.example", "10.0.0.1"].map(String::from);
+        assert_eq!(
+            crate::requested_names(&names).unwrap(),
+            ["shop.example", "*.shop.example", "10.0.0.1"]
+        );
+        let twice = ["shop.example", "SHOP.example"].map(String::from);
+        assert!(crate::requested_names(&twice).is_err());
+    }
+
+    #[test]
     fn renewal_identifiers_follow_rfc_9773() {
         // The example of RFC 9773 §4.1.
         let mut authority = CertificateParams::new(Vec::<String>::new()).unwrap();

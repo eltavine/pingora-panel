@@ -10,6 +10,7 @@ publish.workspace = true
 [dependencies]
 async-trait.workspace = true
 chrono.workspace = true
+panel-acme.workspace = true
 panel-certificates.workspace = true
 panel-contracts.workspace = true
 panel-control-runtime.workspace = true
@@ -34,5 +35,6 @@ zeroize = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 async-trait.workspace = true
+panel-acme = { workspace = true, features = ["test-support"] }
 panel-context.workspace = true
 panel-postgres = { workspace = true, features = ["test-support"] }

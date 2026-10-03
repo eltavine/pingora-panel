@@ -28,6 +28,7 @@
     "automation-service": {
       "catalog": true,
       "allowed_workspace_dependencies": [
+        "panel-acme",
         "panel-certificates",
         "panel-context",
         "panel-contracts",

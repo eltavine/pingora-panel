@@ -1,13 +1,13 @@
 //! The certificate inventory.
 
 use crate::delivery::{Delivery, SecretDirectory};
-use chrono::Utc;
+use chrono::{DateTime, Duration, Utc};
 use panel_certificates::{
     accept, self_signed, Accepted, Certificate, CertificateDetails, CertificateId,
     CertificateSource,
 };
 use panel_errors::{PanelError, Result};
-use panel_events::RequestScope;
+use panel_events::{Principal, RequestScope};
 use panel_postgres::{storage_error, EventLog, PgOutbox, ServiceDatabase};
 use panel_secrets::{Sealed, SecretVault};
 use serde::Serialize;
@@ -25,11 +25,27 @@ macro_rules! columns {
     };
 }
 
+/// Days before its end at which a certificate is announced as expiring.
+const REMINDERS: [i64; 5] = [30, 14, 7, 3, 1];
+
 /// Who asked for a change.
 #[derive(Clone, Copy)]
 pub struct Cause<'a> {
     pub scope: &'a RequestScope,
-    pub actor: &'a str,
+    pub principal: &'a Principal,
+}
+
+/// The smallest reminder threshold, in days, that `left` is within; 0 once
+/// it has run out, `None` while no threshold is reached.
+fn reminder(left: Duration) -> Option<i64> {
+    if left <= Duration::zero() {
+        return Some(0);
+    }
+    REMINDERS
+        .iter()
+        .rev()
+        .copied()
+        .find(|days| left <= Duration::days(*days))
 }
 
 /// Certificates with their chains and sealed keys in the service schema.
@@ -221,6 +237,96 @@ impl CertificateInventory {
         self.refused(cause, "replace", &id, result).await
     }
 
+    /// Stores a certificate an ACME CA issued under `id`, creating it or
+    /// replacing what is there.
+    pub async fn store_issued(
+        &self,
+        cause: Cause<'_>,
+        id: &CertificateId,
+        accepted: Accepted,
+    ) -> Result<Certificate> {
+        match self.get(id).await {
+            Ok(_) => {
+                self.store_replacement(cause, id, None, CertificateSource::Acme, accepted)
+                    .await
+            }
+            Err(error) if error.code.as_str() == "NOT_FOUND" => {
+                self.create(cause, id.clone(), CertificateSource::Acme, accepted)
+                    .await
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// The chain and source of a certificate, if there is one.
+    pub async fn chain(&self, id: &CertificateId) -> Result<Option<(CertificateSource, String)>> {
+        match self.get(id).await {
+            Ok(certificate) => Ok(Some((certificate.source, certificate.chain))),
+            Err(error) if error.code.as_str() == "NOT_FOUND" => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Announces certificates that came within a reminder threshold of
+    /// their end, or ran out, as `tls.certificate.expiring`, once per
+    /// threshold and version; returns how many were announced.
+    pub async fn remind_expiring(&self, cause: Cause<'_>, now: DateTime<Utc>) -> Result<usize> {
+        let horizon = now + Duration::days(REMINDERS[0]);
+        let rows = sqlx::query(
+            "SELECT certificate_id, source, not_after, reminded_days FROM certificates \
+             WHERE not_after <= $1 ORDER BY certificate_id",
+        )
+        .bind(horizon)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(storage_error)?;
+        let mut announced = 0;
+        for row in rows {
+            let id = stored_id(&row)?;
+            let not_after: DateTime<Utc> = row.try_get("not_after").map_err(storage_error)?;
+            let reminded: Option<i32> = row.try_get("reminded_days").map_err(storage_error)?;
+            let source: String = row.try_get("source").map_err(storage_error)?;
+            let Some(days) = reminder(not_after - now) else {
+                continue;
+            };
+            if reminded.is_some_and(|reminded| i64::from(reminded) <= days) {
+                continue;
+            }
+            let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+            let claimed = sqlx::query(
+                "UPDATE certificates SET reminded_days = $2 WHERE certificate_id = $1 \
+                 AND not_after = $3 AND (reminded_days IS NULL OR reminded_days > $2)",
+            )
+            .bind(id.as_str())
+            .bind(i32::try_from(days).unwrap_or(0))
+            .bind(not_after)
+            .execute(&mut *transaction)
+            .await
+            .map_err(storage_error)?
+            .rows_affected();
+            if claimed == 0 {
+                continue;
+            }
+            self.publish(
+                &mut transaction,
+                cause,
+                "tls.certificate.expiring",
+                &id,
+                &json!({
+                    "id": id,
+                    "source": source,
+                    "not_after": not_after,
+                    "within_days": days,
+                    "expired": days == 0,
+                }),
+            )
+            .await?;
+            transaction.commit().await.map_err(storage_error)?;
+            announced += 1;
+        }
+        Ok(announced)
+    }
+
     pub async fn delete(
         &self,
         cause: Cause<'_>,
@@ -339,7 +445,8 @@ impl CertificateInventory {
         };
         sqlx::query(
             "UPDATE certificates SET source = $2, details = $3::jsonb, chain = $4, sealed_key = $5, \
-             not_after = $6, version = $7, updated_at = $8 WHERE certificate_id = $1",
+             not_after = $6, version = $7, updated_at = $8, reminded_days = NULL \
+             WHERE certificate_id = $1",
         )
         .bind(id.as_str())
         .bind(source_name(source)?)
@@ -393,11 +500,11 @@ impl CertificateInventory {
         id: &CertificateId,
         data: &T,
     ) -> Result<()> {
-        let event = self.events.event(
+        let event = self.events.event_by(
             event_type,
             (AGGREGATE, id.as_str()),
             cause.scope,
-            cause.actor,
+            cause.principal,
             data,
         )?;
         PgOutbox::append(connection, &event).await
@@ -413,11 +520,11 @@ impl CertificateInventory {
     ) -> Result<T> {
         if let Err(error) = &result {
             self.events
-                .record(
+                .record_by(
                     "tls.certificate.refused",
                     (AGGREGATE, id.as_str()),
                     cause.scope,
-                    cause.actor,
+                    cause.principal,
                     &json!({
                         "id": id,
                         "operation": operation,
@@ -503,5 +610,23 @@ impl CertificateInventory {
             deliveries.push(Delivery { id, chain, key });
         }
         directory.reconcile(deliveries).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reminders_follow_the_smallest_threshold_reached() {
+        assert_eq!(reminder(Duration::days(45)), None);
+        assert_eq!(reminder(Duration::days(30)), Some(30));
+        assert_eq!(reminder(Duration::days(20)), Some(30));
+        assert_eq!(reminder(Duration::days(10)), Some(14));
+        assert_eq!(reminder(Duration::days(5)), Some(7));
+        assert_eq!(reminder(Duration::hours(30)), Some(3));
+        assert_eq!(reminder(Duration::hours(2)), Some(1));
+        assert_eq!(reminder(Duration::zero()), Some(0));
+        assert_eq!(reminder(Duration::days(-3)), Some(0));
     }
 }

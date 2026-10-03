@@ -1,21 +1,27 @@
 #![forbid(unsafe_code)]
 
 use automation_service::{
-    Cause, CertificateInventory, CertificateService, SecretDirectory, MIGRATIONS,
+    AcmeAutomation, Cause, CertificateInventory, CertificateService, SecretDirectory, MIGRATIONS,
 };
 use chrono::Utc;
+use panel_acme::AcmeClient;
 use panel_certificates::{self_signed, Accepted, Certificate, CertificateId, CertificateSource};
 use panel_contracts::{
     automation::v1::{self as wire, certificates_server::Certificates},
     common::v1 as common,
 };
 use panel_errors::ErrorCode;
-use panel_events::{RequestId, RequestScope};
+use panel_events::{Principal, RequestId, RequestScope};
+use panel_jobs::MemoryJobStore;
 use panel_platform::ServiceName;
 use panel_postgres::{testing::TestDatabase, EventLog, ServiceDatabase};
 use panel_secrets::{EnvelopeVault, SecretVault};
 use serde_json::json;
-use std::{fs, path::Path, sync::Arc};
+use std::{
+    fs,
+    path::Path,
+    sync::{Arc, LazyLock},
+};
 use tonic::Request;
 
 fn id(value: &str) -> CertificateId {
@@ -53,6 +59,22 @@ fn inventory(
     )
 }
 
+fn automation(
+    service: &ServiceDatabase,
+    vault: Arc<dyn SecretVault>,
+    inventory: CertificateInventory,
+) -> AcmeAutomation {
+    AcmeAutomation::new(
+        service,
+        EventLog::new(service, ServiceName::new("automation-service").unwrap()),
+        Some(vault),
+        inventory,
+        Arc::new(MemoryJobStore::new()),
+        AcmeClient::default(),
+        None,
+    )
+}
+
 async fn events(service: &ServiceDatabase) -> Vec<String> {
     let types: Vec<String> = sqlx::query_scalar("SELECT event_type FROM outbox ORDER BY position")
         .fetch_all(service.pool())
@@ -80,10 +102,12 @@ fn scope() -> RequestScope {
     RequestScope::new(RequestId::new("request-1").unwrap())
 }
 
+static ALICE: LazyLock<Principal> = LazyLock::new(|| EventLog::user("alice"));
+
 fn cause(scope: &RequestScope) -> Cause<'_> {
     Cause {
         scope,
-        actor: "alice",
+        principal: &ALICE,
     }
 }
 
@@ -341,11 +365,10 @@ async fn operations_map_to_the_inventory_over_grpc() {
     let Some((_database, database)) = database().await else {
         return;
     };
-    let service = CertificateService::new(inventory(
-        &database,
-        Some(vault(&[&EnvelopeVault::generate_key().unwrap()])),
-        None,
-    ));
+    let vault = vault(&[&EnvelopeVault::generate_key().unwrap()]);
+    let inventory = inventory(&database, Some(Arc::clone(&vault)), None);
+    let acme = automation(&database, vault, inventory.clone());
+    let service = CertificateService::new(inventory, acme);
     let first = material("example.com");
 
     let uploaded = change(
@@ -435,5 +458,76 @@ async fn operations_map_to_the_inventory_over_grpc() {
     assert_eq!(
         unknown_field.error.unwrap().code,
         ErrorCode::INVALID_ARGUMENT
+    );
+}
+
+async fn reminded(service: &ServiceDatabase, id: &str) -> Option<i32> {
+    sqlx::query_scalar("SELECT reminded_days FROM certificates WHERE certificate_id = $1")
+        .bind(id)
+        .fetch_one(service.pool())
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn expiring_certificates_are_announced_once_per_threshold() {
+    let Some((_database, service)) = database().await else {
+        return;
+    };
+    let inventory = inventory(
+        &service,
+        Some(vault(&[&EnvelopeVault::generate_key().unwrap()])),
+        None,
+    );
+    let scope = scope();
+    let first = material("example.com");
+    inventory
+        .upload(cause(&scope), id("example.com"), &first.chain, &first.key)
+        .await
+        .unwrap();
+    let lasting = self_signed(&["lasting.example".to_owned()], 365, Utc::now()).unwrap();
+    inventory
+        .upload(
+            cause(&scope),
+            id("lasting.example"),
+            &lasting.chain,
+            &lasting.key,
+        )
+        .await
+        .unwrap();
+    let now = Utc::now();
+    let remind = |at| inventory.remind_expiring(cause(&scope), at);
+
+    assert_eq!(remind(now).await.unwrap(), 1);
+    assert_eq!(reminded(&service, "example.com").await, Some(30));
+    assert_eq!(remind(now).await.unwrap(), 0);
+    assert_eq!(remind(now + chrono::Duration::days(25)).await.unwrap(), 1);
+    assert_eq!(reminded(&service, "example.com").await, Some(7));
+    let expired = now + chrono::Duration::days(31);
+    assert_eq!(remind(expired).await.unwrap(), 1);
+    assert_eq!(remind(expired).await.unwrap(), 0);
+    assert_eq!(reminded(&service, "example.com").await, Some(0));
+    assert_eq!(reminded(&service, "lasting.example").await, None);
+
+    let renewed = material("example.com");
+    inventory
+        .replace(
+            cause(&scope),
+            id("example.com"),
+            None,
+            &renewed.chain,
+            &renewed.key,
+        )
+        .await
+        .unwrap();
+    assert_eq!(reminded(&service, "example.com").await, None);
+    assert_eq!(remind(now).await.unwrap(), 1);
+    assert_eq!(
+        events(&service)
+            .await
+            .iter()
+            .filter(|kind| *kind == "expiring")
+            .count(),
+        4
     );
 }

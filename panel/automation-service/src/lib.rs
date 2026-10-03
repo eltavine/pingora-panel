@@ -7,19 +7,28 @@
 //! Jobs live in the service schema and are run by a worker that leases them;
 //! a scheduler enqueues the jobs of due schedules. Certificates keep their
 //! private keys sealed with the deployment's master keys and are delivered
-//! to the gateway's secret directory. Every change is published as a
+//! to the gateway's secret directory; automatic certificates are issued and
+//! renewed by ACME CAs through jobs. Every change is published as a
 //! CloudEvent through the transactional outbox.
 
+mod acme;
 mod certificate_api;
 mod certificates;
 mod delivery;
 mod jobs;
 
+pub use acme::{
+    renewal_schedule, AccountId, AcmeAccount, AcmeAutomation, AutomaticCertificate, IssuanceState,
+    IssueHandler, LastError, NewAccount, NewAutomaticCertificate, RenewalCheckHandler, ISSUE_JOB,
+    RENEWAL_CHECK_JOB,
+};
 pub use certificate_api::CertificateService;
 pub use certificates::{Cause, CertificateInventory};
 pub use delivery::{Delivery, SecretDirectory};
 pub use jobs::PgJobStore;
 
+use chrono::Utc;
+use panel_acme::AcmeClient;
 use panel_contracts::{automation::v1::certificates_server, AUTOMATION_V1};
 use panel_control_runtime::{ControlPlaneProcess, DefaultAddresses, ProcessSettings};
 use panel_errors::Result;
@@ -56,6 +65,11 @@ pub const MIGRATIONS: &[SchemaMigration] = &[
         "certificate inventory",
         include_str!("../migrations/10100_certificates.sql"),
     ),
+    SchemaMigration::new(
+        10_200,
+        "ACME accounts, automatic certificates and expiry reminders",
+        include_str!("../migrations/10200_acme.sql"),
+    ),
 ];
 
 pub fn default_addresses() -> DefaultAddresses {
@@ -66,8 +80,17 @@ pub fn default_addresses() -> DefaultAddresses {
 }
 
 /// The handlers this build runs, by job kind.
-pub fn handlers() -> Vec<(JobKind, Arc<dyn JobHandler>)> {
-    Vec::new()
+pub fn handlers(acme: &AcmeAutomation) -> Result<Vec<(JobKind, Arc<dyn JobHandler>)>> {
+    Ok(vec![
+        (
+            JobKind::new(ISSUE_JOB)?,
+            Arc::new(IssueHandler(acme.clone())) as Arc<dyn JobHandler>,
+        ),
+        (
+            JobKind::new(RENEWAL_CHECK_JOB)?,
+            Arc::new(RenewalCheckHandler(acme.clone())),
+        ),
+    ])
 }
 
 pub fn process(
@@ -93,12 +116,22 @@ pub fn process(
         SqlIdentifier::new(SCHEMA)?,
     )?;
     let store = Arc::new(PgJobStore::new(process.database(), service.clone()));
-    let inventory = CertificateInventory::new(
+    let secret_directory = directory
+        .as_ref()
+        .map(|directory| directory.path().to_owned());
+    let events = EventLog::new(process.database(), service);
+    let inventory =
+        CertificateInventory::new(process.database(), events.clone(), vault.clone(), directory);
+    let acme = AcmeAutomation::new(
         process.database(),
-        EventLog::new(process.database(), service),
+        events,
         vault,
-        directory,
+        inventory.clone(),
+        Arc::clone(&store) as Arc<dyn JobStore>,
+        AcmeClient::default(),
+        secret_directory.as_deref(),
     );
+    let handlers = handlers(&acme)?;
     Ok(process
         .with_migrations(MIGRATIONS)
         .with_protocol(protocol_range(AUTOMATION_V1))
@@ -108,16 +141,17 @@ pub fn process(
             [ServiceName::new("panel-api")?],
         )
         .with_grpc_service(certificates_server::CertificatesServer::new(
-            CertificateService::new(inventory.clone()),
+            CertificateService::new(inventory.clone(), acme),
         ))
         .on_start(move |running| {
             running.spawn(maintain(
                 inventory,
+                Arc::clone(&store) as Arc<dyn ScheduleStore>,
                 running.migrated(),
                 running.shutdown_token(),
             ));
             let owner = format!("{SERVICE}/{}", running.descriptor().instance_id());
-            let worker = handlers().into_iter().fold(
+            let worker = handlers.into_iter().fold(
                 Worker::new(
                     Arc::clone(&store) as Arc<dyn JobStore>,
                     WorkerOptions::new(owner),
@@ -135,16 +169,25 @@ pub fn process(
         }))
 }
 
-/// Once the schema exists, seals keys again with the active master key and
-/// keeps the gateway's secret directory in line with the inventory.
+/// Once the schema exists, schedules the renewal check, seals keys again
+/// with the active master key and keeps the gateway's secret directory in
+/// line with the inventory.
 async fn maintain(
     inventory: CertificateInventory,
+    schedules: Arc<dyn ScheduleStore>,
     migrated: impl Future<Output = bool>,
     cancel: CancellationToken,
 ) {
     tokio::select! {
         () = cancel.cancelled() => return,
         ready = migrated => if !ready { return },
+    }
+    let scheduled = match renewal_schedule() {
+        Ok(schedule) => schedules.save_schedule(&schedule, Utc::now()).await,
+        Err(error) => Err(error),
+    };
+    if let Err(error) = scheduled {
+        tracing::warn!(error_code = %error.code, "certificate renewals not scheduled");
     }
     match inventory.reseal().await {
         Ok(0) => {}

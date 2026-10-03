@@ -28,6 +28,13 @@ impl EventLog {
         }
     }
 
+    /// The user an actor names, or an unknown principal.
+    pub fn user(actor: &str) -> Principal {
+        Actor::new(actor)
+            .map(Principal::user)
+            .unwrap_or_else(|_| Principal::unknown())
+    }
+
     /// An event about `aggregate`, a type and an ID, caused by `scope`.
     pub fn event<T: Serialize>(
         &self,
@@ -37,9 +44,18 @@ impl EventLog {
         actor: &str,
         data: &T,
     ) -> Result<EventEnvelope> {
-        let principal = Actor::new(actor)
-            .map(Principal::user)
-            .unwrap_or_else(|_| Principal::unknown());
+        self.event_by(event_type, aggregate, scope, &Self::user(actor), data)
+    }
+
+    /// An event about `aggregate` that `principal` caused within `scope`.
+    pub fn event_by<T: Serialize>(
+        &self,
+        event_type: &str,
+        aggregate: (&str, &str),
+        scope: &RequestScope,
+        principal: &Principal,
+        data: &T,
+    ) -> Result<EventEnvelope> {
         Ok(EventEnvelope::new(
             EventDraft::new(
                 EventType::new(event_type)?,
@@ -50,7 +66,7 @@ impl EventLog {
                 ),
                 EventPayload::json(data)?,
             ),
-            EventOrigin::scoped(self.producer.clone(), scope, principal),
+            EventOrigin::scoped(self.producer.clone(), scope, principal.clone()),
             Utc::now(),
         ))
     }
@@ -65,8 +81,22 @@ impl EventLog {
         actor: &str,
         data: &T,
     ) {
+        self.record_by(event_type, aggregate, scope, &Self::user(actor), data)
+            .await;
+    }
+
+    /// Records an event that `principal` caused on its own; see
+    /// [`record`](Self::record).
+    pub async fn record_by<T: Serialize>(
+        &self,
+        event_type: &str,
+        aggregate: (&str, &str),
+        scope: &RequestScope,
+        principal: &Principal,
+        data: &T,
+    ) {
         let result = async {
-            let event = self.event(event_type, aggregate, scope, actor, data)?;
+            let event = self.event_by(event_type, aggregate, scope, principal, data)?;
             let mut transaction = self.pool.begin().await.map_err(storage_error)?;
             PgOutbox::append(&mut transaction, &event).await?;
             transaction.commit().await.map_err(storage_error)
