@@ -347,6 +347,116 @@ async fn sites_are_edited_validated_and_applied_through_the_api() {
         .await;
     assert_eq!(draft["pending"], true);
 
+    let (source, headers) = api
+        .json(api.get("/api/v1/config/source"), StatusCode::OK)
+        .await;
+    let etag = headers["etag"].to_str().unwrap().to_owned();
+    let text = source["files"]["main.conf"].as_str().unwrap().to_owned();
+    assert!(text.contains("server_name shop.example.com;"), "{text}");
+    let (checked, _) = api
+        .json(
+            api.client
+                .post(format!("{}/api/v1/config/check", api.base))
+                .json(&json!({"files": {"main.conf": "language_version 1;\nhttp { server s { proxy nowhere; } }\n"}})),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(checked["valid"], false);
+    assert_eq!(
+        checked["diagnostics"][0]["source_span"],
+        "main.conf:2.25-31"
+    );
+    let (formatted, _) = api
+        .json(
+            api.client
+                .post(format!("{}/api/v1/config/format", api.base))
+                .json(&json!({"files": {"main.conf": "language_version 1 ;"}})),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(formatted["files"]["main.conf"], "language_version 1;\n");
+    let (schema, _) = api
+        .json(api.get("/api/v1/config/schema"), StatusCode::OK)
+        .await;
+    assert!(schema["directives"].as_array().unwrap().len() > 40);
+
+    let renamed = text.replace("shop.example.com", "store.example.com");
+    let stale = api
+        .mutate(Method::PUT, "/api/v1/config/source", "source-stale")
+        .header("if-match", "\"draft-1\"")
+        .json(&json!({"files": {"main.conf": renamed}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(stale.status(), StatusCode::PRECONDITION_FAILED);
+    let (saved, _) = api
+        .json(
+            api.mutate(Method::PUT, "/api/v1/config/source", "source")
+                .header("if-match", &etag)
+                .json(&json!({"files": {"main.conf": renamed}})),
+            StatusCode::OK,
+        )
+        .await;
+    assert!(saved["files"]["main.conf"]
+        .as_str()
+        .unwrap()
+        .contains("store.example.com"));
+    let (plan, _) = api
+        .json(api.get("/api/v1/config/plan"), StatusCode::OK)
+        .await;
+    assert!(!plan["resources"].as_array().unwrap().is_empty());
+    let (dry, _) = api
+        .json(
+            api.mutate(Method::POST, "/api/v1/config/dry-run", "dry-run"),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(dry["draft"]["pending"], true);
+    let (applied, _) = api
+        .json(
+            api.mutate(Method::POST, "/api/v1/config/apply", "apply-text")
+                .json(&json!({"note": "rename the shop"})),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(applied["revision"], 2);
+
+    let (revisions, _) = api
+        .json(api.get("/api/v1/revisions?limit=10"), StatusCode::OK)
+        .await;
+    assert_eq!(revisions["items"][0]["note"], "rename the shop");
+    assert_eq!(revisions["items"][1]["outcome"], "superseded");
+    let (diff, _) = api
+        .json(
+            api.get("/api/v1/revisions/2/diff?against=1"),
+            StatusCode::OK,
+        )
+        .await;
+    assert!(diff["files"][0]["diff"]
+        .as_str()
+        .unwrap()
+        .contains("+        server_name store.example.com;"));
+    let (noted, _) = api
+        .json(
+            api.mutate(Method::PUT, "/api/v1/revisions/1/note", "note")
+                .json(&json!({"note": "first"})),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(noted["note"], "first");
+    let (restored, _) = api
+        .json(
+            api.mutate(Method::POST, "/api/v1/revisions/1/restore", "rollback"),
+            StatusCode::OK,
+        )
+        .await;
+    let (first, _) = api
+        .json(api.get("/api/v1/revisions/1"), StatusCode::OK)
+        .await;
+    assert_eq!(restored["files"], first["files"]);
+    let missing = api.get("/api/v1/revisions/99").send().await.unwrap();
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
     server.stop().await;
     config.stop().await;
     let _ = broker

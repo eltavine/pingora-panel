@@ -11,6 +11,7 @@ publish.workspace = true
 chrono.workspace = true
 axum.workspace = true
 panel-application.workspace = true
+panel-config-dsl = { workspace = true, features = ["openapi"] }
 panel-config-model = { workspace = true, features = ["openapi"] }
 panel-errors.workspace = true
 panel-health.workspace = true

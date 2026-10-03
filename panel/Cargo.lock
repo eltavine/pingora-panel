@@ -2142,6 +2142,7 @@ dependencies = [
  "axum",
  "chrono",
  "panel-application",
+ "panel-config-dsl",
  "panel-config-model",
  "panel-domain",
  "panel-errors",

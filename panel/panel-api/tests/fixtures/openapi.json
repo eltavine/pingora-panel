@@ -372,6 +372,337 @@
         }
       }
     },
+    "/api/v1/config/check": {
+      "parameters": [
+        {
+          "name": "x-request-id",
+          "in": "header",
+          "description": "Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1
+          }
+        },
+        {
+          "name": "traceparent",
+          "in": "header",
+          "description": "W3C Trace Context parent of the caller's trace. Invalid values are ignored.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 55
+          }
+        },
+        {
+          "name": "tracestate",
+          "in": "header",
+          "description": "W3C Trace Context vendor state, propagated with a valid traceparent.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      ],
+      "post": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "Checks files without saving them.",
+        "operationId": "check",
+        "parameters": [
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigFiles"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/config/draft": {
       "parameters": [
         {
@@ -443,6 +774,2010 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DraftResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/config/dry-run": {
+      "parameters": [
+        {
+          "name": "x-request-id",
+          "in": "header",
+          "description": "Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1
+          }
+        },
+        {
+          "name": "traceparent",
+          "in": "header",
+          "description": "W3C Trace Context parent of the caller's trace. Invalid values are ignored.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 55
+          }
+        },
+        {
+          "name": "tracestate",
+          "in": "header",
+          "description": "W3C Trace Context vendor state, propagated with a valid traceparent.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      ],
+      "post": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "Compiles the draft and prepares it on the gateway without activating it.",
+        "operationId": "dry_run",
+        "parameters": [
+          {
+            "name": "x-actor",
+            "in": "header",
+            "description": "Caller-supplied actor metadata; this header does not authenticate identity.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1
+            }
+          },
+          {
+            "name": "x-deadline",
+            "in": "header",
+            "description": "Absolute request deadline in RFC 3339 format.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1
+            }
+          },
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DryRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DryRunResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/config/format": {
+      "parameters": [
+        {
+          "name": "x-request-id",
+          "in": "header",
+          "description": "Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1
+          }
+        },
+        {
+          "name": "traceparent",
+          "in": "header",
+          "description": "W3C Trace Context parent of the caller's trace. Invalid values are ignored.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 55
+          }
+        },
+        {
+          "name": "tracestate",
+          "in": "header",
+          "description": "W3C Trace Context vendor state, propagated with a valid traceparent.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      ],
+      "post": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "Formats files canonically without saving them.",
+        "operationId": "format",
+        "parameters": [
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigFiles"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormattedFiles"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/config/plan": {
+      "parameters": [
+        {
+          "name": "x-request-id",
+          "in": "header",
+          "description": "Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1
+          }
+        },
+        {
+          "name": "traceparent",
+          "in": "header",
+          "description": "W3C Trace Context parent of the caller's trace. Invalid values are ignored.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 55
+          }
+        },
+        {
+          "name": "tracestate",
+          "in": "header",
+          "description": "W3C Trace Context vendor state, propagated with a valid traceparent.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "What applying the draft would change: resources and file differences\nagainst the active revision.",
+        "operationId": "plan",
+        "parameters": [
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changes"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/config/schema": {
+      "parameters": [
+        {
+          "name": "x-request-id",
+          "in": "header",
+          "description": "Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1
+          }
+        },
+        {
+          "name": "traceparent",
+          "in": "header",
+          "description": "W3C Trace Context parent of the caller's trace. Invalid values are ignored.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 55
+          }
+        },
+        {
+          "name": "tracestate",
+          "in": "header",
+          "description": "W3C Trace Context vendor state, propagated with a valid traceparent.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "The language's directives, contexts and arguments, for editor completion.",
+        "operationId": "schema",
+        "parameters": [
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LanguageSchema"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/config/source": {
+      "parameters": [
+        {
+          "name": "x-request-id",
+          "in": "header",
+          "description": "Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1
+          }
+        },
+        {
+          "name": "traceparent",
+          "in": "header",
+          "description": "W3C Trace Context parent of the caller's trace. Invalid values are ignored.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 55
+          }
+        },
+        {
+          "name": "tracestate",
+          "in": "header",
+          "description": "W3C Trace Context vendor state, propagated with a valid traceparent.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "The draft's files in the configuration language.",
+        "operationId": "source",
+        "parameters": [
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigSource"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "Replaces the draft with files of the configuration language. Text with\nerrors is refused with their positions.",
+        "operationId": "replace_source",
+        "parameters": [
+          {
+            "name": "x-actor",
+            "in": "header",
+            "description": "Caller-supplied actor metadata; this header does not authenticate identity.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1
+            }
+          },
+          {
+            "name": "x-deadline",
+            "in": "header",
+            "description": "Absolute request deadline in RFC 3339 format.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1
+            }
+          },
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "ETag of the draft that was read",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigFiles"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigSource"
                 }
               }
             }
@@ -6693,6 +9028,1763 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ServiceListingResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/revisions": {
+      "parameters": [
+        {
+          "name": "x-request-id",
+          "in": "header",
+          "description": "Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1
+          }
+        },
+        {
+          "name": "traceparent",
+          "in": "header",
+          "description": "W3C Trace Context parent of the caller's trace. Invalid values are ignored.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 55
+          }
+        },
+        {
+          "name": "tracestate",
+          "in": "header",
+          "description": "W3C Trace Context vendor state, propagated with a valid traceparent.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "Configurations applied or attempted, newest first.",
+        "operationId": "list_revisions",
+        "parameters": [
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Lists revisions older than this one.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "At most this many, 50 by default and 500 at most.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevisionList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/revisions/{id}": {
+      "parameters": [
+        {
+          "name": "x-request-id",
+          "in": "header",
+          "description": "Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1
+          }
+        },
+        {
+          "name": "traceparent",
+          "in": "header",
+          "description": "W3C Trace Context parent of the caller's trace. Invalid values are ignored.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 55
+          }
+        },
+        {
+          "name": "tracestate",
+          "in": "header",
+          "description": "W3C Trace Context vendor state, propagated with a valid traceparent.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "A revision with its files.",
+        "operationId": "get_revision",
+        "parameters": [
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Revision number.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevisionDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/revisions/{id}/diff": {
+      "parameters": [
+        {
+          "name": "x-request-id",
+          "in": "header",
+          "description": "Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1
+          }
+        },
+        {
+          "name": "traceparent",
+          "in": "header",
+          "description": "W3C Trace Context parent of the caller's trace. Invalid values are ignored.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 55
+          }
+        },
+        {
+          "name": "tracestate",
+          "in": "header",
+          "description": "W3C Trace Context vendor state, propagated with a valid traceparent.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "What a revision changed relative to another, the draft or the active one.",
+        "operationId": "diff_revision",
+        "parameters": [
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Revision number.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "against",
+            "in": "query",
+            "description": "`previous` (the default), `active`, `draft` or a revision number.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changes"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/revisions/{id}/note": {
+      "parameters": [
+        {
+          "name": "x-request-id",
+          "in": "header",
+          "description": "Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1
+          }
+        },
+        {
+          "name": "traceparent",
+          "in": "header",
+          "description": "W3C Trace Context parent of the caller's trace. Invalid values are ignored.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 55
+          }
+        },
+        {
+          "name": "tracestate",
+          "in": "header",
+          "description": "W3C Trace Context vendor state, propagated with a valid traceparent.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      ],
+      "put": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "Sets or removes a revision's note.",
+        "operationId": "note_revision",
+        "parameters": [
+          {
+            "name": "x-actor",
+            "in": "header",
+            "description": "Caller-supplied actor metadata; this header does not authenticate identity.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1
+            }
+          },
+          {
+            "name": "x-deadline",
+            "in": "header",
+            "description": "Absolute request deadline in RFC 3339 format.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1
+            }
+          },
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Revision number.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevisionNote"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Revision"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/revisions/{id}/restore": {
+      "parameters": [
+        {
+          "name": "x-request-id",
+          "in": "header",
+          "description": "Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1
+          }
+        },
+        {
+          "name": "traceparent",
+          "in": "header",
+          "description": "W3C Trace Context parent of the caller's trace. Invalid values are ignored.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 55
+          }
+        },
+        {
+          "name": "tracestate",
+          "in": "header",
+          "description": "W3C Trace Context vendor state, propagated with a valid traceparent.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      ],
+      "post": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "Copies a revision's files into the draft, to apply them again.",
+        "operationId": "restore_revision",
+        "parameters": [
+          {
+            "name": "x-actor",
+            "in": "header",
+            "description": "Caller-supplied actor metadata; this header does not authenticate identity.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1
+            }
+          },
+          {
+            "name": "x-deadline",
+            "in": "header",
+            "description": "Absolute request deadline in RFC 3339 format.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1
+            }
+          },
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Revision number.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigSource"
                 }
               }
             }
@@ -20960,6 +25052,36 @@
           }
         }
       },
+      "Change": {
+        "type": "string",
+        "enum": [
+          "added",
+          "changed",
+          "removed"
+        ]
+      },
+      "Changes": {
+        "type": "object",
+        "description": "Everything that differs between two configurations.",
+        "required": [
+          "resources",
+          "files"
+        ],
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileChange"
+            }
+          },
+          "resources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ResourceChange"
+            }
+          }
+        }
+      },
       "CloneSiteRequest": {
         "type": "object",
         "description": "Body of `POST /sites/{id}/clone`.",
@@ -20971,6 +25093,69 @@
             "type": "string"
           }
         }
+      },
+      "ConfigFiles": {
+        "type": "object",
+        "description": "Files of the configuration language by path; `main.conf` is the entry.",
+        "required": [
+          "files"
+        ],
+        "properties": {
+          "files": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ConfigSource": {
+        "type": "object",
+        "description": "The draft in the configuration language.",
+        "required": [
+          "language_version",
+          "files",
+          "diagnostics"
+        ],
+        "properties": {
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "Warnings about the files, such as deprecated directives."
+          },
+          "files": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "language_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "Context": {
+        "type": "string",
+        "description": "The block a directive appears in.",
+        "enum": [
+          "main",
+          "http",
+          "tls_profile",
+          "listener",
+          "upstream",
+          "server",
+          "route"
+        ]
       },
       "DataPlaneListenerResponse": {
         "type": "object",
@@ -21085,6 +25270,24 @@
           }
         }
       },
+      "Deprecation": {
+        "type": "object",
+        "required": [
+          "replacement",
+          "removed_in"
+        ],
+        "properties": {
+          "removed_in": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The language version that no longer accepts the directive.",
+            "minimum": 0
+          },
+          "replacement": {
+            "type": "string"
+          }
+        }
+      },
       "DiagnosticDetails": {
         "type": "object",
         "required": [
@@ -21115,6 +25318,72 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "DirectiveSpec": {
+        "type": "object",
+        "required": [
+          "name",
+          "contexts",
+          "min_args",
+          "syntax",
+          "summary",
+          "repeatable"
+        ],
+        "properties": {
+          "block": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Context",
+                "description": "The context its block opens, for block directives."
+              }
+            ]
+          },
+          "contexts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Context"
+            }
+          },
+          "deprecated": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Deprecation"
+              }
+            ]
+          },
+          "max_args": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "`None` when any number of arguments is accepted.",
+            "minimum": 0
+          },
+          "min_args": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "repeatable": {
+            "type": "boolean",
+            "description": "Whether the directive may appear more than once in one block."
+          },
+          "summary": {
+            "type": "string"
+          },
+          "syntax": {
+            "type": "string",
+            "description": "How the arguments are written, for completion."
           }
         }
       },
@@ -21291,6 +25560,40 @@
           }
         }
       },
+      "DryRunRequest": {
+        "type": "object",
+        "properties": {
+          "expected_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Refuses if the draft changed since this version.",
+            "minimum": 0
+          }
+        }
+      },
+      "DryRunResponse": {
+        "type": "object",
+        "description": "A dry run that passed every check, the gateway's preparation included.",
+        "required": [
+          "draft",
+          "diagnostics"
+        ],
+        "properties": {
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "Warnings found on the way."
+          },
+          "draft": {
+            "$ref": "#/components/schemas/DraftResponse"
+          }
+        }
+      },
       "EndpointHealthResponse": {
         "type": "object",
         "required": [
@@ -21361,6 +25664,53 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          }
+        }
+      },
+      "FileChange": {
+        "type": "object",
+        "description": "One file that differs.",
+        "required": [
+          "path",
+          "change",
+          "diff"
+        ],
+        "properties": {
+          "change": {
+            "$ref": "#/components/schemas/Change"
+          },
+          "diff": {
+            "type": "string",
+            "description": "A unified diff of the file."
+          },
+          "path": {
+            "type": "string"
+          }
+        }
+      },
+      "FormattedFiles": {
+        "type": "object",
+        "description": "Files formatted canonically; files with syntax errors are unchanged.",
+        "required": [
+          "files",
+          "diagnostics"
+        ],
+        "properties": {
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "Syntax errors of the files left unchanged."
+          },
+          "files": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
           }
         }
       },
@@ -21453,6 +25803,27 @@
               "type": "string",
               "format": "uuid"
             }
+          }
+        }
+      },
+      "LanguageSchema": {
+        "type": "object",
+        "description": "Every directive of the language, for editors.",
+        "required": [
+          "language_version",
+          "directives"
+        ],
+        "properties": {
+          "directives": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DirectiveSpec"
+            }
+          },
+          "language_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
           }
         }
       },
@@ -21856,6 +26227,176 @@
               }
             }
           }
+        ]
+      },
+      "ResourceChange": {
+        "type": "object",
+        "description": "One resource that differs, with the difference of its canonical block.",
+        "required": [
+          "resource",
+          "change",
+          "diff"
+        ],
+        "properties": {
+          "change": {
+            "$ref": "#/components/schemas/Change"
+          },
+          "diff": {
+            "type": "string",
+            "description": "A unified diff of the resource's block."
+          },
+          "resource": {
+            "type": "string",
+            "description": "The resource path, such as `sites/<id>`."
+          }
+        }
+      },
+      "Revision": {
+        "type": "object",
+        "required": [
+          "id",
+          "draft_version",
+          "language_version",
+          "content_hash",
+          "author",
+          "created_at",
+          "outcome",
+          "outcome_at"
+        ],
+        "properties": {
+          "author": {
+            "type": "string"
+          },
+          "content_hash": {
+            "type": "string",
+            "description": "SHA-256 of its files."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "Why a rejected or failed revision did not run."
+          },
+          "draft_version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The draft version it was taken from.",
+            "minimum": 0
+          },
+          "gateway_revision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The revision number the gateway reports for it.",
+            "minimum": 0
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "language_version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/RevisionOutcome"
+          },
+          "outcome_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "snapshot_hash": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The runtime snapshot compiled from it."
+          }
+        }
+      },
+      "RevisionDetail": {
+        "type": "object",
+        "description": "A revision with its files.",
+        "required": [
+          "revision",
+          "files"
+        ],
+        "properties": {
+          "files": {
+            "type": "object",
+            "description": "The configuration's files by path.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "revision": {
+            "$ref": "#/components/schemas/Revision"
+          }
+        }
+      },
+      "RevisionList": {
+        "type": "object",
+        "description": "A page of revisions, newest first.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Revision"
+            }
+          },
+          "next_before": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Pass as `before` for the next page; absent on the last.",
+            "minimum": 0
+          }
+        }
+      },
+      "RevisionNote": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Empty or absent removes the note."
+          }
+        }
+      },
+      "RevisionOutcome": {
+        "type": "string",
+        "description": "What became of a revision.",
+        "enum": [
+          "applying",
+          "active",
+          "superseded",
+          "rejected",
+          "failed"
         ]
       },
       "Route": {

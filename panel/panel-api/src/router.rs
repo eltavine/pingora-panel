@@ -1,6 +1,7 @@
 use crate::{
     admission::{admit, Admission},
-    configuration as config, gateway_runtime as runtime, middleware, routes, ApiConfig, ApiState,
+    configuration as config, gateway_runtime as runtime, language, middleware, routes, ApiConfig,
+    ApiState,
 };
 use axum::{
     extract::DefaultBodyLimit,
@@ -128,6 +129,29 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         .route("/api/v1/config/draft", get(config::draft::<U>))
         .route("/api/v1/config/validation", get(config::validation::<U>))
         .route("/api/v1/config/apply", post(config::apply::<U>))
+        .route(
+            "/api/v1/config/source",
+            get(language::source::<U>).put(language::replace_source::<U>),
+        )
+        .route("/api/v1/config/check", post(language::check::<U>))
+        .route("/api/v1/config/format", post(language::format::<U>))
+        .route("/api/v1/config/schema", get(language::schema::<U>))
+        .route("/api/v1/config/plan", get(language::plan::<U>))
+        .route("/api/v1/config/dry-run", post(language::dry_run::<U>))
+        .route("/api/v1/revisions", get(language::list_revisions::<U>))
+        .route("/api/v1/revisions/{id}", get(language::get_revision::<U>))
+        .route(
+            "/api/v1/revisions/{id}/diff",
+            get(language::diff_revision::<U>),
+        )
+        .route(
+            "/api/v1/revisions/{id}/restore",
+            post(language::restore_revision::<U>),
+        )
+        .route(
+            "/api/v1/revisions/{id}/note",
+            put(language::note_revision::<U>),
+        )
         .route("/api/v1/openapi.json", get(routes::openapi))
         .layer(DefaultBodyLimit::max(config.max_body_bytes()))
         .with_state(state);

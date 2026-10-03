@@ -140,6 +140,7 @@
       "catalog": true,
       "allowed_workspace_dependencies": [
         "panel-application",
+        "panel-config-dsl",
         "panel-config-model",
         "panel-errors",
         "panel-health",

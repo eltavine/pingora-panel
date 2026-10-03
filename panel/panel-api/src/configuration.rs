@@ -38,7 +38,7 @@ pub(crate) static CONFIG_VERSION: HeaderName = HeaderName::from_static("x-config
 pub(crate) static CONFIG_APPLIED_VERSION: HeaderName =
     HeaderName::from_static("x-config-applied-version");
 
-fn port<U>(state: &ApiState<U>) -> Result<Arc<dyn ConfigurationPort>, ApiError> {
+pub(crate) fn port<U>(state: &ApiState<U>) -> Result<Arc<dyn ConfigurationPort>, ApiError> {
     state.configuration.clone().ok_or_else(|| {
         ApiError::new(PanelError::unavailable(
             "configuration management is not available here",
@@ -63,7 +63,7 @@ fn respond(status: StatusCode, output: ConfigurationOutput) -> Response {
     response
 }
 
-fn insert_draft(headers: &mut HeaderMap, draft: &DraftInfo) {
+pub(crate) fn insert_draft(headers: &mut HeaderMap, draft: &DraftInfo) {
     headers.insert(CONFIG_VERSION.clone(), HeaderValue::from(draft.version));
     if let Some(applied) = draft.applied_version {
         headers.insert(CONFIG_APPLIED_VERSION.clone(), HeaderValue::from(applied));
@@ -82,7 +82,7 @@ fn httpdate(time: std::time::SystemTime) -> String {
         .to_string()
 }
 
-async fn read<U>(
+pub(crate) async fn read<U>(
     state: &ApiState<U>,
     headers: &HeaderMap,
     operation: &str,
@@ -108,13 +108,13 @@ async fn read<U>(
 
 /// How a change treats `If-Match`.
 #[derive(Clone, Copy)]
-enum Precondition {
+pub(crate) enum Precondition {
     Optional,
     /// Replacing or deleting needs the representation the client last saw.
     Required,
 }
 
-async fn change<U>(
+pub(crate) async fn change<U>(
     state: &ApiState<U>,
     headers: &HeaderMap,
     operation: &str,

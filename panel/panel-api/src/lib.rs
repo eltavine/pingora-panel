@@ -14,6 +14,7 @@ mod contract;
 mod error;
 mod error_contract;
 mod gateway_runtime;
+mod language;
 mod middleware;
 mod openapi;
 mod request_context;

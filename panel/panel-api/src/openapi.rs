@@ -31,6 +31,10 @@ mod tests;
         crate::configuration::get_tls_profile, crate::configuration::put_tls_profile,
         crate::configuration::delete_tls_profile, crate::configuration::draft, crate::configuration::validation,
         crate::configuration::apply,
+        crate::language::source, crate::language::replace_source, crate::language::check,
+        crate::language::format, crate::language::schema, crate::language::plan, crate::language::dry_run,
+        crate::language::list_revisions, crate::language::get_revision, crate::language::diff_revision,
+        crate::language::restore_revision, crate::language::note_revision,
         crate::gateway_runtime::data_plane, crate::gateway_runtime::reload, crate::gateway_runtime::workers,
         crate::gateway_runtime::shutdown, crate::gateway_runtime::upstream_health, crate::gateway_runtime::drain,
         crate::gateway_runtime::restore
