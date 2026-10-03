@@ -2391,6 +2391,7 @@ dependencies = [
  "panel-domain",
  "panel-errors",
  "panel-ir",
+ "regex",
  "serde",
  "tokio",
  "uuid",

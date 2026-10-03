@@ -11,6 +11,25 @@ use std::{
     net::{IpAddr, SocketAddr},
 };
 
+/// The compiled size, and lazy DFA cache, allowed for one route regular
+/// expression; engines compile route patterns with this limit.
+pub const ROUTE_REGEX_SIZE_LIMIT: usize = 1 << 20;
+
+/// Why a route's regular expression would not compile, in one line.
+pub fn route_regex_error(pattern: &str) -> Option<String> {
+    regex::RegexBuilder::new(pattern)
+        .size_limit(ROUTE_REGEX_SIZE_LIMIT)
+        .dfa_size_limit(ROUTE_REGEX_SIZE_LIMIT)
+        .build()
+        .err()
+        .map(|error| {
+            let text = error.to_string();
+            text.lines().last().map_or(text.clone(), |line| {
+                line.trim_start_matches("error: ").to_owned()
+            })
+        })
+}
+
 const REDIRECT_STATUSES: [u16; 5] = [301, 302, 303, 307, 308];
 const MIN_HEALTH_CHECK_INTERVAL_MS: u64 = 100;
 
@@ -225,6 +244,14 @@ pub(crate) fn validate_traffic(snapshot: &RuntimeSnapshot, diagnostics: &mut Vec
                     resource,
                     format!("route {} regex must contain 1..=1024 bytes", route.id),
                 )
+            }
+            RouteMatcher::Regex { pattern } => {
+                if let Some(error) = route_regex_error(pattern) {
+                    report(
+                        resource,
+                        format!("route {} regex does not compile: {error}", route.id),
+                    );
+                }
             }
             _ => {}
         }
@@ -604,9 +631,17 @@ mod tests {
                     policy_id: "missing".into(),
                 },
             ),
+            route(
+                "pattern",
+                RouteMatcher::Regex {
+                    pattern: "^(/api".into(),
+                },
+                RouteAction::redirect("https://example.com/", 301),
+            ),
         ];
         let found = messages(&mut snapshot);
         for expected in [
+            "route pattern regex does not compile: unclosed group",
             "exact path must start with '/'",
             "redirect status 200 is not a redirection",
             "glob must start with '/'",

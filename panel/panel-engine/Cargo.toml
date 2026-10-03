@@ -12,6 +12,7 @@ async-trait.workspace = true
 panel-domain.workspace = true
 panel-errors.workspace = true
 panel-ir.workspace = true
+regex.workspace = true
 serde.workspace = true
 tokio.workspace = true
 uuid.workspace = true

@@ -407,6 +407,23 @@ http {
 }
 
 #[test]
+fn regular_expressions_are_compiled_when_read() {
+    let lowered = read(
+        "language_version 1;\nhttp {\n    server s {\n        server_name s.example;\n        route {\n            match regex \"^(/api\";\n            respond 204;\n        }\n    }\n}\n",
+    );
+    let found = messages(&lowered);
+    assert!(
+        found
+            .iter()
+            .any(|(code, span, message)| code == "VALIDATION_FAILED"
+                && span == "main.conf:5.9-8.9"
+                && message == "the regular expression \"^(/api\" does not compile: unclosed group"),
+        "{found:#?}"
+    );
+    assert!(!lowered.is_valid());
+}
+
+#[test]
 fn quotes_inside_a_parameter_are_part_of_the_value() {
     let text = "\
 language_version 1;

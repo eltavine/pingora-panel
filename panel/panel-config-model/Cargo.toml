@@ -11,15 +11,13 @@ publish.workspace = true
 base64.workspace = true
 chrono.workspace = true
 panel-domain.workspace = true
+panel-engine.workspace = true
 panel-errors.workspace = true
 panel-ir.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 utoipa = { workspace = true, optional = true }
 uuid.workspace = true
-
-[dev-dependencies]
-panel-engine.workspace = true
 
 [features]
 # JSON Schema for the HTTP contract.

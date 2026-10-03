@@ -333,6 +333,13 @@ fn validate_route(
             &resource,
             format!("{path:?} is not a valid {:?} match", route.matcher.kind),
         );
+    } else if route.matcher.kind == MatchKind::Regex {
+        if let Some(error) = panel_engine::route_regex_error(path) {
+            report.error(
+                &resource,
+                format!("the regular expression {path:?} does not compile: {error}"),
+            );
+        }
     }
     if let Some(host) = &route.matcher.host {
         if route.matcher.kind != MatchKind::Prefix {

@@ -3,6 +3,7 @@
 use bytes::Bytes;
 use globset::{GlobBuilder, GlobMatcher};
 use panel_domain::{NormalizedHost, PathPrefix, RouteId, SiteId};
+use panel_engine::ROUTE_REGEX_SIZE_LIMIT;
 use panel_errors::{PanelError, Result};
 use panel_ir::{RouteAction, RouteMatcher, RuntimeSnapshot, WwwRedirect};
 use regex::{Regex, RegexBuilder};
@@ -12,7 +13,6 @@ use std::{
     net::SocketAddr,
 };
 
-const REGEX_SIZE_LIMIT: usize = 1 << 20;
 const HTTPS_PORT: u16 = 443;
 
 pub(crate) struct RoutingTable {
@@ -319,8 +319,8 @@ fn compile_matcher(
         }
         RouteMatcher::Regex { pattern } => {
             let regex = RegexBuilder::new(pattern)
-                .size_limit(REGEX_SIZE_LIMIT)
-                .dfa_size_limit(REGEX_SIZE_LIMIT)
+                .size_limit(ROUTE_REGEX_SIZE_LIMIT)
+                .dfa_size_limit(ROUTE_REGEX_SIZE_LIMIT)
                 .build()
                 .map_err(|error| invalid(error.to_string()))?;
             (None, PathMatcher::Regex(regex))
