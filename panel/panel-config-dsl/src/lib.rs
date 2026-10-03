@@ -12,6 +12,7 @@ pub mod plan;
 pub mod print;
 pub mod schema;
 mod source;
+pub mod syntax;
 pub mod values;
 pub mod variables;
 
@@ -19,6 +20,7 @@ pub use edit::{format_files, reconcile, write_identifiers};
 pub use lower::{lower, Insertion, LowerOptions, Lowered, Origin};
 pub use print::print;
 pub use source::{Sources, ENTRY};
+pub use syntax::{syntax_tree, SyntaxNode, SyntaxTree};
 
 /// The language version this release reads and writes.
 pub const LANGUAGE_VERSION: u32 = 1;
