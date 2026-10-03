@@ -24,6 +24,7 @@ members = [
     "panel-service",
     "panel-config-json",
     "panel-config-model",
+    "panel-dsl",
     "panel-ir",
     "panel-jetstream",
     "panel-engine",
@@ -95,6 +96,7 @@ panel-config-domain = { version = "=0.1.0", path = "panel-config-domain" }
 panel-config-state-codec = { version = "=0.1.0", path = "panel-config-state-codec" }
 panel-config-json = { version = "=0.1.0", path = "panel-config-json" }
 panel-config-model = { version = "=0.1.0", path = "panel-config-model" }
+panel-dsl = { version = "=0.1.0", path = "panel-dsl" }
 panel-api = { version = "=0.1.0", path = "panel-api" }
 panel-application = { version = "=0.1.0", path = "panel-application" }
 panel-outbox = { version = "=0.1.0", path = "panel-outbox" }

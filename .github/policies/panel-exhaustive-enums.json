@@ -20,6 +20,18 @@
       "reason": "This enum was already exhaustive in the public API. Keeping it exhaustive preserves downstream matches; new extensible domain operations should expose a new opaque or non-exhaustive error type."
     },
     {
+      "package": "panel-dsl",
+      "name": "Body",
+      "owner": "pingora-panel-platform",
+      "reason": "A directive ends with ';', a block, or neither when it is malformed; the syntax has no other form, and the formatter and the language must handle each one."
+    },
+    {
+      "package": "panel-dsl",
+      "name": "Trivia",
+      "owner": "pingora-panel-platform",
+      "reason": "Between directives the syntax has only comments and blank lines; the formatter must place every kind, so a new kind is a deliberate breaking change."
+    },
+    {
       "package": "panel-errors",
       "name": "DiagnosticSeverity",
       "owner": "pingora-panel-platform",

@@ -255,6 +255,12 @@
       "catalog": true,
       "allowed_workspace_dependencies": []
     },
+    "panel-dsl": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-errors"
+      ]
+    },
     "panel-engine": {
       "catalog": true,
       "allowed_workspace_dependencies": [
@@ -406,6 +412,7 @@
       "panel-config-model",
       "panel-context",
       "panel-domain",
+      "panel-dsl",
       "panel-engine",
       "panel-errors",
       "panel-events",
