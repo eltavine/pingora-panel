@@ -38,6 +38,7 @@ pub struct TlsSettings {
     client_cert_verifier: Option<Arc<dyn ClientCertVerifier>>,
     callbacks: Option<TlsAcceptCallbacks>,
     offload_threadpool: Option<(usize, usize)>,
+    server_config: Option<Arc<ServerConfig>>,
 }
 
 pub struct Acceptor {
@@ -55,6 +56,16 @@ impl TlsSettings {
     ///
     /// Todo: Return a result instead of panicking XD
     pub fn build(self) -> Acceptor {
+        if let Some(config) = self.server_config {
+            return Acceptor {
+                acceptor: RusTlsAcceptor::from(config),
+                callbacks: self.callbacks.map(SharedTlsAcceptCallbacks::from),
+                offload: self.offload_threadpool.map(|(shards, threads_per_shard)| {
+                    OffloadRuntime::new("downstream TLS offload", shards, threads_per_shard)
+                }),
+            };
+        }
+
         // rustls 0.23+ requires an explicit CryptoProvider.
         pingora_rustls::install_default_crypto_provider();
 
@@ -200,7 +211,30 @@ impl TlsSettings {
             client_cert_verifier: None,
             callbacks: None,
             offload_threadpool: None,
+            server_config: None,
         })
+    }
+
+    /// Create [`TlsSettings`] from a runtime-constructed rustls [`ServerConfig`],
+    /// for example one with narrowed protocol versions or cipher suites.
+    ///
+    /// The configuration is used as is: certificate files, a certificate
+    /// resolver, a client certificate verifier and ALPN set on these settings
+    /// are ignored, while `callbacks` and handshake offload still apply.
+    pub fn from_server_config(
+        config: Arc<ServerConfig>,
+        callbacks: Option<TlsAcceptCallbacks>,
+    ) -> Self {
+        TlsSettings {
+            alpn_protocols: None,
+            cert_path: String::new(),
+            key_path: String::new(),
+            cert_resolver: None,
+            client_cert_verifier: None,
+            callbacks,
+            offload_threadpool: None,
+            server_config: Some(config),
+        }
     }
 
     /// Create a new [`TlsSettings`] with post-handshake callbacks.
@@ -220,6 +254,7 @@ impl TlsSettings {
             client_cert_verifier: None,
             callbacks: Some(callbacks),
             offload_threadpool: None,
+            server_config: None,
         })
     }
 }
@@ -313,6 +348,47 @@ mod tests {
             tls_stream.flush().await.unwrap();
         });
 
+        let client = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .build()
+            .unwrap();
+        let res = client.get(format!("https://{addr}")).send().await.unwrap();
+        assert_eq!(res.status(), reqwest::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_settings_from_server_config_use_it_as_is() {
+        pingora_rustls::install_default_crypto_provider();
+        let cert_path = format!("{}/tests/keys/server.crt", env!("CARGO_MANIFEST_DIR"));
+        let key_path = format!("{}/tests/keys/key.pem", env!("CARGO_MANIFEST_DIR"));
+        let (certs, key) = load_certs_and_key_files(&cert_path, &key_path)
+            .unwrap()
+            .unwrap();
+        let config = Arc::new(
+            ServerConfig::builder_with_protocol_versions(&[&version::TLS12])
+                .with_no_client_auth()
+                .with_single_cert(certs, key)
+                .unwrap(),
+        );
+        let mut settings = TlsSettings::from_server_config(Arc::clone(&config), None);
+        settings.enable_h2();
+        let acceptor = settings.build();
+        assert!(Arc::ptr_eq(acceptor.acceptor.config(), &config));
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (tcp_stream, _) = listener.accept().await.unwrap();
+            let stream: L4Stream = tcp_stream.into();
+            let mut tls_stream = acceptor.tls_handshake(stream).await.unwrap();
+            let mut buf = [0; 1024];
+            let _ = tls_stream.read(&mut buf).await.unwrap();
+            tls_stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\na")
+                .await
+                .unwrap();
+            tls_stream.flush().await.unwrap();
+        });
         let client = reqwest::Client::builder()
             .danger_accept_invalid_certs(true)
             .build()
