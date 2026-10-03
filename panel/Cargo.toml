@@ -56,6 +56,7 @@ members = [
     "audit-service",
     "automation-service",
     "observability-service",
+    "observability-grpc-client",
     "panel-bootstrap",
     "panel-api-server",
     "panel-cli",
@@ -86,6 +87,7 @@ audit-grpc-client = { version = "=0.1.0", path = "audit-grpc-client" }
 audit-service = { version = "=0.1.0", path = "audit-service" }
 automation-service = { version = "=0.1.0", path = "automation-service" }
 automation-grpc-client = { version = "=0.1.0", path = "automation-grpc-client" }
+observability-grpc-client = { version = "=0.1.0", path = "observability-grpc-client" }
 config-grpc-client = { version = "=0.1.0", path = "config-grpc-client" }
 config-proto-codec = { version = "=0.1.0", path = "config-proto-codec" }
 config-service = { version = "=0.1.0", path = "config-service" }

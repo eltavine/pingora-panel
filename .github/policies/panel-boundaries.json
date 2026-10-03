@@ -171,6 +171,15 @@
         "panel-postgres"
       ]
     },
+    "observability-grpc-client": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-application",
+        "panel-contracts",
+        "panel-errors",
+        "panel-service"
+      ]
+    },
     "observability-service": {
       "catalog": false,
       "allowed_workspace_dependencies": [

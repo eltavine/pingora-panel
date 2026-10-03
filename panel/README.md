@@ -20,12 +20,14 @@ gateway-pingora -> panel-engine::DataPlaneAdapter
 gateway-proto-codec -> panel-contracts + panel-domain + panel-ir
 panel-event-codec -> panel-contracts + panel-events
 panel-health (no workspace dependencies)
+panel-metrics (no workspace dependencies)
+panel-environment -> panel-errors
 panel-jobs -> panel-context + panel-errors
 panel-pki -> panel-context + panel-errors
 panel-tls -> panel-pki + panel-context + panel-errors
 panel-platform -> panel-context + panel-errors
 panel-platform-codec -> panel-contracts + panel-platform
-panel-service -> panel-health + panel-platform-codec + panel-contracts
+panel-service -> panel-environment + panel-health + panel-platform-codec + panel-contracts
 panel-outbox -> panel-events + panel-errors
 panel-postgres -> panel-outbox + panel-event-codec + panel-events + panel-health + panel-errors
 panel-jetstream -> panel-event-codec + panel-events + panel-health + panel-errors
@@ -33,6 +35,7 @@ gateway-grpc -> gateway-proto-codec + panel-engine::GatewayEngine
 gateway-grpc-client -> panel-application + gateway-proto-codec + panel-contracts + panel-health
 config-proto-codec -> panel-application + gateway-proto-codec + panel-contracts
 config-grpc-client -> panel-application + config-proto-codec + panel-service
+observability-grpc-client -> panel-application + panel-contracts + panel-service
 panel-control-runtime -> panel-postgres + panel-jetstream + panel-outbox + panel-service + panel-tls
 
 gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC/Proto adapters + REST/compiler adapters
@@ -40,7 +43,7 @@ config-service -> panel-control-runtime + gateway-grpc-client + panel-config-jso
 panel-api-server -> panel-control-runtime + panel-api + config-grpc-client + gateway-grpc-client
 panel-cli (no workspace dependencies: a client of the public REST API)
 automation-service -> panel-control-runtime + panel-jobs + panel-postgres + panel-events
-observability-service -> panel-control-runtime
+observability-service -> panel-control-runtime + panel-contracts + panel-domain
 audit-service -> panel-control-runtime + panel-jetstream + panel-events + panel-contracts
 panel-bootstrap -> panel-postgres + panel-jetstream + panel-pki
 ```
@@ -86,7 +89,8 @@ panel-bootstrap -> panel-postgres + panel-jetstream + panel-pki
 | `config-service` | Publication and configuration APIs, the draft configuration, PostgreSQL activation receipts and the `config` schema | HTTP, Pingora |
 | `panel-api-server` | The `panel-api` process: public REST and web console, degraded admission and the service directory | Storage implementation, Pingora |
 | `automation-service` | PostgreSQL job store with outbox events, worker and scheduler in the `automation` schema | HTTP, Pingora |
-| `observability-service` | Service process owning the `observability` schema | Pingora |
+| `observability-service` | Traffic summaries and series from Prometheus over the gateway's metrics, and the `observability` schema | Pingora |
+| `observability-grpc-client` | `TrafficPort` over `observability-service` | Storage, Pingora, metric backends |
 | `audit-service` | The audit trail: every event appended once to a hash chain in the `audit` schema, with queries and verification | HTTP, Pingora |
 | `panel-bootstrap` | Idempotent provisioning of service roles, schemas, streams and the service registry; issuance and rotation of service credentials | Application rules, Pingora |
 | `gatewayd` | Dependency construction, REST/gRPC adapter composition, bind/readiness policies, environment configuration, process clock, worker executor, the data plane, its runtime API and standard gRPC Health | Business rules |

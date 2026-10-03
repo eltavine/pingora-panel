@@ -17,6 +17,7 @@ mod operations;
 mod persistence;
 mod runtime;
 mod tls_probe;
+mod traffic;
 
 pub use audit::{AuditFilter, AuditPage, AuditPort, AuditRecord, AuditVerification};
 pub use certificates::{CertificateChange, CertificateOutput, CertificatePort, CertificateRead};
@@ -44,3 +45,7 @@ pub use runtime::{
     GatewayRuntimePort, PrivateKeyCheck, StaticRootCheck, UpstreamHealth, UpstreamHealthReport,
 };
 pub use tls_probe::{TlsProbe, TlsProbeReport, TlsProbeTarget};
+pub use traffic::{
+    Latency, RouteTraffic, StatusClasses, TrafficPoint, TrafficPort, TrafficQuery, TrafficSummary,
+    UpstreamTraffic,
+};
