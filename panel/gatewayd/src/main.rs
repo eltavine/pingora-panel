@@ -2,11 +2,15 @@
 
 use gatewayd::{initialize_observability, serve_gatewayd, GatewaydConfig, GatewaydError};
 
+/// Management traffic is light; proxied traffic runs on the data plane's
+/// own workers, sized by the configured worker count.
+const MANAGEMENT_THREADS: usize = 2;
+
 fn main() -> Result<(), GatewaydError> {
     initialize_observability();
     let config = GatewaydConfig::from_environment()?;
     let executor = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(config.worker_count().get() as usize)
+        .worker_threads(MANAGEMENT_THREADS)
         .enable_all()
         .build()?;
     executor.block_on(serve_gatewayd(config, shutdown_signal()))

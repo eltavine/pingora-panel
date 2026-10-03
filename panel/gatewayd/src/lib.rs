@@ -27,9 +27,10 @@ pub use background_tasks::{
 pub use bind_policy::{LoopbackOnlyManagementBindPolicy, ManagementBindPolicy};
 pub use config::{
     GatewayTls, GatewayWorkerCount, GatewaydConfig, BACKGROUND_TASK_SHUTDOWN_TIMEOUT_MILLIS_ENV,
-    DRAIN_TIMEOUT_MILLIS_ENV, GATEWAY_ADDRESS_ENV, MAX_GATEWAY_WORKERS, STATE_DIRECTORY_ENV,
-    TLS_DIR_ENV, TRUST_DOMAIN_ENV, WORKER_COUNT_ENV,
+    DRAIN_TIMEOUT_MILLIS_ENV, GATEWAY_ADDRESS_ENV, MAX_GATEWAY_WORKERS, SECRET_DIRECTORY_ENV,
+    STATE_DIRECTORY_ENV, STATIC_ROOT_ENV, TLS_DIR_ENV, TRUST_DOMAIN_ENV, WORKER_COUNT_ENV,
 };
+pub use gateway_pingora::{DataPlaneStatus, ListenerStatus};
 pub use health::{RuntimeHealthState, RuntimeReadiness, TonicHealthSynchronizer};
 pub use management::{
     bind_management_listener, management_router, management_router_with_config, serve_management,
@@ -45,7 +46,9 @@ use gateway_grpc::{
     DeadlineRequirement, GatewayGrpcService, GatewayRequestMetadataLimits, GatewayRequestPolicy,
     GatewayTransportPolicy, StandardGatewayRequestPolicy,
 };
-use gateway_pingora::PingoraGatewayAdapter;
+use gateway_pingora::{
+    AdapterOptions, DataPlane, DataPlaneOptions, DirectorySecrets, PingoraGatewayAdapter,
+};
 use panel_context::ServiceName;
 use panel_contracts::gateway::v1::gateway_engine_server::GatewayEngineServer;
 use panel_engine::{GatewayEngine, GatewayRuntimeInfoProvider};
@@ -59,7 +62,12 @@ use panel_gateway_runtime::{
 use panel_pki::{CredentialFiles, WorkloadIdentity};
 use panel_tls::{PeerPolicy, TlsCredentials};
 use snapshot_store_fs::{FileSnapshotStore, SnapshotStoreLimits};
-use std::{future::Future, num::NonZeroU32, path::PathBuf, sync::Arc};
+use std::{
+    future::Future,
+    num::{NonZeroU32, NonZeroUsize},
+    path::PathBuf,
+    sync::Arc,
+};
 use tokio::sync::oneshot;
 use tonic::server::NamedService;
 use tonic::transport::Server;
@@ -113,6 +121,7 @@ pub struct GatewaydRuntime {
     /// Shared engine kept private so concrete Pingora/storage types do not
     /// become part of the public runtime API.
     engine: Arc<GatewaydEngine>,
+    adapter: Arc<PingoraGatewayAdapter>,
     pub background_tasks: BackgroundTaskSupervisor,
     pub events: Arc<dyn GatewayEventSink>,
     pub event_delivery: GatewayEventDeliveryMonitor,
@@ -125,6 +134,11 @@ impl GatewaydRuntime {
     pub fn engine(&self) -> Arc<dyn GatewayEngine> {
         Arc::clone(&self.engine) as Arc<dyn GatewayEngine>
     }
+
+    /// A data plane serving whatever this runtime's engine activates.
+    pub fn data_plane(&self, options: DataPlaneOptions) -> Arc<DataPlane> {
+        DataPlane::new(Arc::clone(&self.adapter), options)
+    }
 }
 
 pub struct GatewaydServiceOptions {
@@ -136,9 +150,16 @@ pub struct GatewaydServiceOptions {
     event_buffer_capacity: usize,
     mutation_capacity: GatewayMutationCapacity,
     snapshot_store_limits: SnapshotStoreLimits,
+    adapter: AdapterOptions,
 }
 
 impl GatewaydServiceOptions {
+    /// Secrets and static content the data plane serves from.
+    pub fn with_adapter_options(mut self, adapter: AdapterOptions) -> Self {
+        self.adapter = adapter;
+        self
+    }
+
     pub fn with_transport_policy(mut self, transport_policy: GatewayTransportPolicy) -> Self {
         self.transport_policy = transport_policy;
         self
@@ -199,6 +220,7 @@ impl Default for GatewaydServiceOptions {
             event_buffer_capacity: DEFAULT_EVENT_BUFFER_CAPACITY,
             mutation_capacity: GatewayMutationCapacity::default(),
             snapshot_store_limits: GatewayResourceLimits::default().snapshot_store_limits(),
+            adapter: AdapterOptions::default(),
         }
     }
 }
@@ -279,7 +301,7 @@ pub async fn build_gateway_runtime_with_options(
             mutations_for_shutdown.wait().await;
         },
     );
-    let adapter = Arc::new(PingoraGatewayAdapter::new());
+    let adapter = Arc::new(PingoraGatewayAdapter::with_options(options.adapter));
     let store = Arc::new(
         FileSnapshotStore::open_exclusive_with_limits(
             state_directory,
@@ -312,7 +334,7 @@ pub async fn build_gateway_runtime_with_options(
     ));
     let engine = Arc::new(
         DurableGatewayEngine::restore_with_options(
-            adapter,
+            Arc::clone(&adapter),
             store,
             DurableGatewayEngineOptions::default()
                 .with_prepared_policy(options.prepared_policy)
@@ -353,6 +375,7 @@ pub async fn build_gateway_runtime_with_options(
     let task_lifetime: Arc<dyn Send + Sync> = Arc::new(background_tasks.clone());
     Ok(GatewaydRuntime {
         engine: Arc::clone(&engine),
+        adapter,
         services: GatewaydServices {
             gateway: GatewayGrpcService::with_dependencies(
                 engine,
@@ -385,6 +408,13 @@ pub async fn serve_gatewayd(
         config.worker_count().as_non_zero(),
     ));
     let resource_limits = config.resource_limits();
+    let mut adapter_options = AdapterOptions::default();
+    if let Some(directory) = config.secret_directory() {
+        adapter_options = adapter_options.with_secrets(Arc::new(DirectorySecrets::new(directory)));
+    }
+    if let Some(root) = config.static_root() {
+        adapter_options = adapter_options.with_static_root(root);
+    }
     let tracing_events: Arc<dyn GatewayEventSink> = Arc::new(TracingGatewayEventSink);
     let request_policy = Arc::new(StandardGatewayRequestPolicy::with_metadata_limits(
         resource_limits.transport_policy().request_timeout(),
@@ -402,18 +432,30 @@ pub async fn serve_gatewayd(
             .with_event_buffer_capacity(resource_limits.event_buffer_capacity())
             .with_mutation_capacity(resource_limits.mutation_capacity())
             .with_snapshot_store_limits(resource_limits.snapshot_store_limits())
-            .with_event_sink(tracing_events),
+            .with_event_sink(tracing_events)
+            .with_adapter_options(adapter_options),
     )
     .await?;
+    let data_plane = runtime.data_plane(
+        DataPlaneOptions::new(
+            NonZeroUsize::try_from(config.worker_count().as_non_zero())
+                .expect("worker counts fit in usize"),
+        )
+        .with_drain_timeout(config.shutdown_policy().drain_timeout()),
+    );
     let GatewaydRuntime {
         services,
         engine: _,
+        adapter: _,
         background_tasks,
         events,
         event_delivery,
         recovery,
         mutations: _,
     } = runtime;
+    let stop_data_plane = tokio_util::sync::CancellationToken::new();
+    let data_plane_task =
+        tokio::spawn(Arc::clone(&data_plane).run(stop_data_plane.clone().cancelled_owned()));
     let mut failure_monitor = background_tasks.failure_monitor();
     let (trigger_sender, trigger_receiver) = oneshot::channel();
     let shutdown_reason = async move {
@@ -484,6 +526,12 @@ pub async fn serve_gatewayd(
                 .await
         }
     };
+    // Proxied traffic outlives the management transport so in-flight
+    // requests finish within the drain timeout.
+    stop_data_plane.cancel();
+    if let Err(error) = data_plane_task.await {
+        tracing::error!(event = "data_plane_stop_failed", error = %error);
+    }
     let background_result = background_tasks
         .shutdown_and_join_with_policy(config.background_task_shutdown_policy())
         .await;

@@ -22,6 +22,10 @@ pub const BACKGROUND_TASK_SHUTDOWN_TIMEOUT_MILLIS_ENV: &str =
 /// management transport over mutual TLS.
 pub const TLS_DIR_ENV: &str = "PINGORA_PANEL_TLS_DIR";
 pub const TRUST_DOMAIN_ENV: &str = "PINGORA_PANEL_TRUST_DOMAIN";
+/// Directory of certificates, keys and CA bundles that snapshots name by file.
+pub const SECRET_DIRECTORY_ENV: &str = "PINGORA_PANEL_SECRET_DIR";
+/// Directory that static content roots in snapshots are relative to.
+pub const STATIC_ROOT_ENV: &str = "PINGORA_PANEL_STATIC_ROOT";
 
 pub const MAX_GATEWAY_WORKERS: u32 = 256;
 
@@ -37,6 +41,8 @@ pub struct GatewaydConfig {
     background_task_shutdown_policy: BackgroundTaskShutdownPolicy,
     resource_limits: GatewayResourceLimits,
     tls: Option<GatewayTls>,
+    secret_directory: Option<PathBuf>,
+    static_root: Option<PathBuf>,
 }
 
 /// The gateway's mutual TLS credentials and trust domain.
@@ -134,6 +140,8 @@ impl GatewaydConfig {
             .transpose()?
             .unwrap_or_default();
         let resource_limits = GatewayResourceLimits::from_lookup(&mut lookup)?;
+        let secret_directory = lookup(SECRET_DIRECTORY_ENV).map(PathBuf::from);
+        let static_root = lookup(STATIC_ROOT_ENV).map(PathBuf::from);
 
         Ok(Self {
             listen_address,
@@ -143,7 +151,17 @@ impl GatewaydConfig {
             background_task_shutdown_policy,
             resource_limits,
             tls,
+            secret_directory,
+            static_root,
         })
+    }
+
+    pub fn secret_directory(&self) -> Option<&Path> {
+        self.secret_directory.as_deref()
+    }
+
+    pub fn static_root(&self) -> Option<&Path> {
+        self.static_root.as_deref()
     }
 
     pub fn listen_address(&self) -> SocketAddr {
