@@ -82,9 +82,23 @@ pub(crate) fn label(route: &Route) -> String {
     )
 }
 
-/// Reports, by resource, passwords asked for over plain HTTP and listeners
-/// that take every peer for a proxy.
+/// Reports, by resource, passwords asked for over plain HTTP, listeners that
+/// take every peer for a proxy and TLS nodes that are not verified.
 pub(crate) fn exposure(model: &ConfigModel, report: &mut dyn FnMut(String, Diagnostic)) {
+    for upstream in model.upstreams.iter().filter(|upstream| {
+        upstream.nodes.iter().any(|node| node.tls)
+            && !(upstream.tls.verify_certificate && upstream.tls.verify_hostname)
+    }) {
+        let diagnostic = Diagnostic::warning(
+            codes::EXPOSURE,
+            format!(
+                "upstream {:?} does not verify its TLS nodes, so anyone between the gateway and them can read and change the traffic",
+                upstream.name
+            ),
+        )
+        .with_help("name the CA that signs the nodes' certificates with `tls ca=<file>` instead of turning verification off");
+        report(format!("upstreams/{}", upstream.id), diagnostic);
+    }
     for listener in &model.listeners {
         if let Some(network) = listener
             .trusted_proxies

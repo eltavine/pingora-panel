@@ -62,7 +62,8 @@ pub mod codes {
     /// take it over sets its own, nothing uses it, or a constant is never
     /// used; a warning.
     pub const NO_EFFECT: &str = "DSL_NO_EFFECT";
-    /// A setting works but exposes clients: passwords asked for over plain
-    /// HTTP, or every peer trusted as a proxy; a warning.
+    /// A setting works but exposes traffic: passwords asked for over plain
+    /// HTTP, every peer trusted as a proxy, or TLS nodes whose certificates
+    /// are not verified; a warning.
     pub const EXPOSURE: &str = "DSL_EXPOSURE";
 }

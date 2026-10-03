@@ -539,6 +539,31 @@ http {
 }
 
 #[test]
+fn unverified_tls_nodes_are_warned_about() {
+    let text = "language_version 1;\nhttp {\n    upstream app {\n        server 10.0.0.1:443 tls;\n        tls verify=off;\n    }\n    server s {\n        server_name s.example;\n        proxy app;\n    }\n}\n";
+    let lowered = read(text);
+    assert!(
+        lowered.errors().next().is_none(),
+        "{:#?}",
+        lowered.diagnostics
+    );
+    assert!(
+        messages(&lowered)
+            .iter()
+            .any(|(code, span, message)| code == codes::EXPOSURE
+                && span.starts_with("main.conf:3.")
+                && message.contains("does not verify its TLS nodes")),
+        "{:#?}",
+        lowered.diagnostics
+    );
+    let verified = read(&text.replace("        tls verify=off;\n", ""));
+    assert!(!verified
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code.as_str() == codes::EXPOSURE));
+}
+
+#[test]
 fn literal_dollars_survive_a_round_trip() {
     let text = "language_version 1;\nhttp {\n    upstream app {\n        server 10.0.0.1:80;\n    }\n    server s {\n        server_name s.example;\n        note \"uses $HOME\";\n        respond 200 \"body=cost $$5 or $$amount\";\n    }\n}\n";
     let lowered = read(text);
