@@ -7,8 +7,8 @@
 //! `identity.token.revoked` and `identity.sign_in_policy.updated`.
 
 use crate::{
-    Account, AccountId, ApiToken, PasswordSignIn, PermissionSet, Role, SecretHash, Session,
-    SessionId, TokenId, Username,
+    Account, AccountId, ApiToken, Grant, GrantId, PasswordSignIn, PermissionSet, Role, SecretHash,
+    Session, SessionId, TokenId, Username,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -175,6 +175,16 @@ pub trait IdentityStore: Send + Sync {
 
     /// Who may sign in with a password.
     async fn password_sign_in(&self) -> Result<PasswordSignIn>;
+
+    /// An account's grants, oldest first.
+    async fn grants(&self, account: AccountId) -> Result<Vec<Grant>>;
+
+    /// Records `identity.grant.created`.
+    async fn create_grant(&self, grant: Grant, cause: &Cause) -> Result<()>;
+
+    /// Records `identity.grant.deleted`; false when the account has no such
+    /// grant.
+    async fn delete_grant(&self, account: AccountId, id: GrantId, cause: &Cause) -> Result<bool>;
 
     async fn set_password_sign_in(
         &self,

@@ -9,6 +9,7 @@
 mod account;
 #[cfg(feature = "test-support")]
 pub mod conformance;
+mod grant;
 pub mod memory;
 mod password;
 mod permission;
@@ -24,6 +25,9 @@ mod throttle;
 mod workload;
 
 pub use account::{Account, AccountId, PasswordSignIn, Username};
+pub use grant::{
+    Access, Grant, GrantConditions, GrantId, GrantScope, GrantWindow, HeldGrant, SCOPABLE,
+};
 pub use password::{PasswordHasher, PasswordPolicy, PasswordProblem, Verification};
 pub use permission::{built_in_roles, Permission, PermissionSet, Role};
 pub use principal::{Credential, Principal};
@@ -35,7 +39,8 @@ pub use provider::{
 pub use providers::{ProviderDirectory, ProviderRequest, ProviderView, SecretChange};
 pub use secret::{csrf_token, Secret, SecretHash, TOKEN_PREFIX};
 pub use service::{
-    AccountRequest, Client, Identity, IdentitySettings, Login, RoleRequest, TokenRequest,
+    AccountRequest, Client, GrantRequest, Identity, IdentitySettings, Login, RoleRequest,
+    TokenRequest,
 };
 pub use session::{ApiToken, Session, SessionId, SessionPolicy, TokenId, Transport};
 pub use sign_in::{ProviderSignIns, Rechecked, SignInOption, Started, RECHECK_INTERVAL};

@@ -13,8 +13,8 @@ use panel_identity::{
         AccountChange, Attempt, Cause, Failure, IdentityStore, NewAccount, NewSession, NewToken,
         SessionGrant, StoredAccount, StoredPassword, TokenGrant,
     },
-    Account, AccountId, ApiToken, PasswordSignIn, Permission, PermissionSet, Role, SecretHash,
-    Session, SessionId, TokenId, Transport, Username,
+    Account, AccountId, ApiToken, Grant, GrantId, PasswordSignIn, Permission, PermissionSet, Role,
+    SecretHash, Session, SessionId, TokenId, Transport, Username,
 };
 use panel_postgres::{EventLog, PgOutbox, SchemaMigration, ServiceDatabase};
 use serde::Serialize;
@@ -50,6 +50,11 @@ pub const MIGRATIONS: &[SchemaMigration] = &[
         10_400,
         "workload identity trusts",
         include_str!("../migrations/10400_workload_trusts.sql"),
+    ),
+    SchemaMigration::new(
+        10_500,
+        "scoped and conditional grants",
+        include_str!("../migrations/10500_grants.sql"),
     ),
 ];
 
@@ -636,6 +641,89 @@ impl IdentityStore for PgIdentityStore {
                 .map_err(storage)?;
         PasswordSignIn::parse(&policy)
             .ok_or_else(|| PanelError::corrupt_state("the password sign-in policy is unknown"))
+    }
+
+    async fn grants(&self, account: AccountId) -> Result<Vec<Grant>> {
+        sqlx::query(
+            "SELECT id, account_id, role_id, scope::text AS scope, conditions::text AS conditions, \
+             created_at, created_by FROM grants WHERE account_id = $1 ORDER BY created_at, id",
+        )
+        .bind(account.as_uuid())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(storage)?
+        .iter()
+        .map(|row| {
+            let scope: String = get(row, "scope")?;
+            let conditions: String = get(row, "conditions")?;
+            let corrupt = |_| PanelError::corrupt_state("a stored grant is invalid");
+            Ok(Grant {
+                id: GrantId::from_uuid(get(row, "id")?),
+                account: AccountId::from_uuid(get(row, "account_id")?),
+                role: get(row, "role_id")?,
+                scope: serde_json::from_str(&scope).map_err(corrupt)?,
+                conditions: serde_json::from_str(&conditions).map_err(corrupt)?,
+                created_at: get(row, "created_at")?,
+                created_by: get(row, "created_by")?,
+            })
+        })
+        .collect()
+    }
+
+    async fn create_grant(&self, grant: Grant, cause: &Cause) -> Result<()> {
+        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        sqlx::query(
+            "INSERT INTO grants (id, account_id, role_id, scope, conditions, created_at, \
+             created_by) VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7)",
+        )
+        .bind(grant.id.as_uuid())
+        .bind(grant.account.as_uuid())
+        .bind(&grant.role)
+        .bind(json!(grant.scope).to_string())
+        .bind(json!(grant.conditions).to_string())
+        .bind(grant.created_at)
+        .bind(&grant.created_by)
+        .execute(&mut *transaction)
+        .await
+        .map_err(storage)?;
+        self.emit(
+            &mut transaction,
+            "identity.grant.created",
+            grant.account,
+            cause,
+            &json!({
+                "account": grant.account,
+                "grant": grant.id,
+                "role": grant.role,
+                "scope": grant.scope,
+                "conditions": grant.conditions,
+            }),
+        )
+        .await?;
+        transaction.commit().await.map_err(storage)
+    }
+
+    async fn delete_grant(&self, account: AccountId, id: GrantId, cause: &Cause) -> Result<bool> {
+        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        let deleted = sqlx::query("DELETE FROM grants WHERE id = $1 AND account_id = $2")
+            .bind(id.as_uuid())
+            .bind(account.as_uuid())
+            .execute(&mut *transaction)
+            .await
+            .map_err(storage)?;
+        if deleted.rows_affected() == 0 {
+            return Ok(false);
+        }
+        self.emit(
+            &mut transaction,
+            "identity.grant.deleted",
+            account,
+            cause,
+            &json!({ "account": account, "grant": id }),
+        )
+        .await?;
+        transaction.commit().await.map_err(storage)?;
+        Ok(true)
     }
 
     async fn set_password_sign_in(

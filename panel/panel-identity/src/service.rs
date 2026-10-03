@@ -8,9 +8,10 @@ use crate::{
         AccountChange, Attempt, Cause, Failure, IdentityStore, NewAccount, NewSession, NewToken,
         StoredAccount,
     },
-    Account, AccountId, ApiToken, Credential, FailurePolicy, PasswordHasher, PasswordPolicy,
-    PasswordSignIn, Permission, PermissionSet, Principal, Role, Secret, SecretHash, Session,
-    SessionId, SessionPolicy, TokenId, Transport, Username, TOKEN_PREFIX,
+    Account, AccountId, ApiToken, Credential, FailurePolicy, Grant, GrantConditions, GrantId,
+    GrantScope, HeldGrant, PasswordHasher, PasswordPolicy, PasswordSignIn, Permission,
+    PermissionSet, Principal, Role, Secret, SecretHash, Session, SessionId, SessionPolicy, TokenId,
+    Transport, Username, SCOPABLE, TOKEN_PREFIX,
 };
 use chrono::{DateTime, Utc};
 use panel_context::RequestScope;
@@ -70,6 +71,14 @@ pub struct AccountRequest {
     pub roles: Vec<String>,
     /// A service account, which never has a password.
     pub service: bool,
+}
+
+/// A role to give with a scope and conditions.
+#[derive(Clone, Debug)]
+pub struct GrantRequest {
+    pub role: String,
+    pub scope: GrantScope,
+    pub conditions: GrantConditions,
 }
 
 /// A role to create or replace.
@@ -446,6 +455,7 @@ impl Identity {
             username: grant.account.username,
             credential,
             permissions: grant.permissions,
+            grants: self.held_grants(grant.account.id).await?,
         }))
     }
 
@@ -476,6 +486,7 @@ impl Identity {
                 token: grant.token.id,
             },
             permissions: grant.token.permissions.intersection(&grant.permissions),
+            grants: Vec::new(),
         }))
     }
 
@@ -834,6 +845,95 @@ impl Identity {
             principal.actor(),
         )
         .await
+    }
+
+    /// An account's grants with their roles' permissions, for its principal.
+    async fn held_grants(&self, account: AccountId) -> Result<Vec<HeldGrant>> {
+        let grants = self.store.grants(account).await?;
+        if grants.is_empty() {
+            return Ok(Vec::new());
+        }
+        let roles = self.role_permissions(None).await?;
+        Ok(grants
+            .into_iter()
+            .map(|grant| HeldGrant {
+                permissions: roles.get(&grant.role).cloned().unwrap_or_default(),
+                scope: grant.scope,
+                conditions: grant.conditions,
+            })
+            .collect())
+    }
+
+    pub async fn grants(&self, account: AccountId) -> Result<Vec<Grant>> {
+        self.stored(account).await?;
+        self.store.grants(account).await
+    }
+
+    /// Gives an account a role with a scope and conditions.
+    pub async fn grant(
+        &self,
+        account: AccountId,
+        request: GrantRequest,
+        scope: &RequestScope,
+        actor: &str,
+    ) -> Result<Grant> {
+        self.stored(account).await?;
+        self.known_roles(std::slice::from_ref(&request.role))
+            .await?;
+        let mut problems = request.conditions.problems();
+        match &request.scope {
+            GrantScope::SiteGroup { group } if group.trim().is_empty() || group.len() > 64 => {
+                problems.push("a site group has a name of 1 to 64 characters".into());
+            }
+            GrantScope::Everything => {}
+            _ => {
+                let roles = self.role_permissions(None).await?;
+                let permissions = roles.get(&request.role).cloned().unwrap_or_default();
+                if !SCOPABLE
+                    .iter()
+                    .any(|permission| permissions.contains(*permission))
+                {
+                    problems.push(format!(
+                        "the role {} grants nothing that can be limited to sites",
+                        request.role
+                    ));
+                }
+            }
+        }
+        if !problems.is_empty() {
+            return Err(PanelError::invalid_argument(problems.join("; ")));
+        }
+        let grant = Grant {
+            id: GrantId::generate(),
+            account,
+            role: request.role,
+            scope: request.scope,
+            conditions: request.conditions,
+            created_at: self.now(),
+            created_by: actor.to_owned(),
+        };
+        self.store
+            .create_grant(grant.clone(), &cause(scope, actor))
+            .await?;
+        Ok(grant)
+    }
+
+    pub async fn revoke_grant(
+        &self,
+        account: AccountId,
+        id: GrantId,
+        scope: &RequestScope,
+        actor: &str,
+    ) -> Result<()> {
+        if self
+            .store
+            .delete_grant(account, id, &cause(scope, actor))
+            .await?
+        {
+            Ok(())
+        } else {
+            Err(PanelError::not_found(format!("there is no grant {id}")))
+        }
     }
 
     /// Issues an API token for a service account on an account manager's

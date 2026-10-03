@@ -6,10 +6,11 @@ use crate::{
     memory::RecordedEvent,
     store::{Attempt, Cause, NewAccount, NewSession},
     Account, AccountChange, AccountId, AccountRequest, ClaimNames, Client, FailurePolicy,
-    GroupRole, Identity, IdentityProvider, IdentitySettings, IdentityStore, Login, PasswordSignIn,
-    PendingSignIn, Permission, PermissionSet, Principal, ProviderLink, ProviderSignIn,
-    ProviderStore, RoleRequest, Secret, SecretHash, Session, SessionId, TokenRequest, Transport,
-    Username, VerifiedWorkload, WorkloadIdentity, WorkloadRequest, WorkloadStore, WorkloadVerifier,
+    GrantConditions, GrantRequest, GrantScope, GroupRole, Identity, IdentityProvider,
+    IdentitySettings, IdentityStore, Login, PasswordSignIn, PendingSignIn, Permission,
+    PermissionSet, Principal, ProviderLink, ProviderSignIn, ProviderStore, RoleRequest, Secret,
+    SecretHash, Session, SessionId, TokenRequest, Transport, Username, VerifiedWorkload,
+    WorkloadIdentity, WorkloadRequest, WorkloadStore, WorkloadVerifier,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
@@ -54,6 +55,7 @@ where
     break_glass_accounts_keep_password_sign_in(fresh().await).await;
     service_accounts_never_sign_in_and_get_tokens_from_managers(fresh().await).await;
     workloads_exchange_trusted_tokens_for_short_sessions(fresh().await).await;
+    grants_give_roles_with_scopes_and_conditions(fresh().await).await;
 }
 
 const PASSWORD: &str = "glacier violin tapestry orbit";
@@ -1498,4 +1500,128 @@ async fn workloads_exchange_trusted_tokens_for_short_sessions(subject: impl Stor
     ] {
         assert_eq!(harness.events(event).await.len(), count, "{event}");
     }
+}
+
+async fn grants_give_roles_with_scopes_and_conditions(subject: impl StoreUnderTest) {
+    let harness = Harness::new(subject, IdentitySettings::default());
+    harness.admin().await;
+    let keeper = harness
+        .identity
+        .create_account(
+            AccountRequest {
+                username: "keeper".into(),
+                password: Some(PASSWORD.into()),
+                roles: vec!["viewer".into()],
+                ..AccountRequest::default()
+            },
+            &scope(),
+            "root",
+        )
+        .await
+        .unwrap();
+    for (id, permissions) in [
+        ("audit-only", vec!["audit.read"]),
+        ("editor", vec!["config.read", "config.write"]),
+    ] {
+        harness
+            .identity
+            .create_role(
+                RoleRequest {
+                    id: id.into(),
+                    name: id.into(),
+                    description: String::new(),
+                    permissions: PermissionSet::from_names(&permissions).unwrap(),
+                },
+                &scope(),
+                "root",
+            )
+            .await
+            .unwrap();
+    }
+    let shop = GrantScope::SiteGroup {
+        group: "shop".into(),
+    };
+    let nothing_to_limit = harness
+        .identity
+        .grant(
+            keeper.id,
+            GrantRequest {
+                role: "audit-only".into(),
+                scope: shop.clone(),
+                conditions: GrantConditions::default(),
+            },
+            &scope(),
+            "root",
+        )
+        .await;
+    assert_eq!(
+        nothing_to_limit.unwrap_err().code.as_str(),
+        ErrorCode::INVALID_ARGUMENT
+    );
+    let grant = harness
+        .identity
+        .grant(
+            keeper.id,
+            GrantRequest {
+                role: "editor".into(),
+                scope: shop.clone(),
+                conditions: GrantConditions {
+                    networks: vec!["10.0.0.0/8".into()],
+                    ..GrantConditions::default()
+                },
+            },
+            &scope(),
+            "root",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        harness.identity.grants(keeper.id).await.unwrap(),
+        std::slice::from_ref(&grant)
+    );
+
+    let (_, principal) = harness.login("keeper", Transport::Bearer).await;
+    assert_eq!(principal.grants.len(), 1);
+    let now = *harness.now.lock().unwrap();
+    let office = principal.access(now, "10.1.1.1".parse().ok());
+    assert!(office
+        .scopes(Permission::ConfigWrite)
+        .any(|held| *held == shop));
+    assert!(!office.unrestricted.contains(Permission::ConfigWrite));
+    assert!(
+        office.unrestricted.contains(Permission::ConfigRead),
+        "viewer reads everywhere"
+    );
+    let elsewhere = principal.access(now, "203.0.113.9".parse().ok());
+    assert!(!elsewhere.holds(Permission::ConfigWrite));
+
+    assert_eq!(
+        harness
+            .identity
+            .delete_role("editor", &scope(), "root")
+            .await
+            .unwrap_err()
+            .code
+            .as_str(),
+        ErrorCode::CONFLICT,
+        "a role a grant gives stays"
+    );
+    harness
+        .identity
+        .revoke_grant(keeper.id, grant.id, &scope(), "root")
+        .await
+        .unwrap();
+    assert!(harness.identity.grants(keeper.id).await.unwrap().is_empty());
+    assert_eq!(
+        harness
+            .identity
+            .revoke_grant(keeper.id, grant.id, &scope(), "root")
+            .await
+            .unwrap_err()
+            .code
+            .as_str(),
+        ErrorCode::NOT_FOUND
+    );
+    assert_eq!(harness.events("identity.grant.created").await.len(), 1);
+    assert_eq!(harness.events("identity.grant.deleted").await.len(), 1);
 }

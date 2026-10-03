@@ -1,8 +1,11 @@
 //! An authenticated caller and what it may do.
 
 use crate::{
-    secret::same_secret, AccountId, Permission, PermissionSet, SessionId, TokenId, Username,
+    secret::same_secret, Access, AccountId, HeldGrant, Permission, PermissionSet, SessionId,
+    TokenId, Username,
 };
+use chrono::{DateTime, Utc};
+use std::net::IpAddr;
 
 /// How a request proved who it is.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -22,10 +25,19 @@ pub struct Principal {
     pub account: AccountId,
     pub username: Username,
     pub credential: Credential,
+    /// From the roles the account holds everywhere; the token's own for
+    /// API tokens.
     pub permissions: PermissionSet,
+    /// Grants with a scope or conditions; sessions only.
+    pub grants: Vec<HeldGrant>,
 }
 
 impl Principal {
+    /// What the principal may do for a request at `at` from `client`.
+    pub fn access(&self, at: DateTime<Utc>, client: Option<IpAddr>) -> Access {
+        Access::of(&self.permissions, &self.grants, at, client)
+    }
+
     pub fn can(&self, permission: Permission) -> bool {
         self.permissions.contains(permission)
     }
@@ -79,6 +91,7 @@ mod tests {
                 csrf: csrf.clone(),
             },
             permissions: PermissionSet::from_names(&["config.read"]).unwrap(),
+            grants: Vec::new(),
         };
         assert!(principal.can(Permission::ConfigRead));
         assert!(!principal.can(Permission::ConfigApply));

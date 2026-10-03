@@ -102,6 +102,7 @@ hyper-rustls = { version = "=0.27.10", default-features = false, features = ["ht
 hmac = "=0.13.0"
 idna = "=1.1.0"
 instant-acme = { version = "=0.8.5", default-features = false, features = ["hyper-rustls", "ring", "time"] }
+ipnet = "=2.12.2"
 iri-string = "=0.7.14"
 mediatype = "=0.23.0"
 mime_guess = { version = "=2.0.5", default-features = false }

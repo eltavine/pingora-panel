@@ -18,6 +18,7 @@ base64.workspace = true
 chrono.workspace = true
 getrandom.workspace = true
 hmac.workspace = true
+ipnet.workspace = true
 panel-context.workspace = true
 panel-errors.workspace = true
 panel-secrets.workspace = true
