@@ -259,7 +259,7 @@ fn action(action: &Action, model: &ConfigModel) -> Directive {
             status,
             preserve_path,
         } => {
-            let mut args = vec![status.to_string(), expanded(location)];
+            let mut args = vec![status.to_string(), location.clone()];
             if !preserve_path {
                 args.push("preserve_path=off".into());
             }
@@ -273,7 +273,7 @@ fn action(action: &Action, model: &ConfigModel) -> Directive {
         } => {
             let mut args = vec![status.to_string()];
             if let Some(body) = body {
-                args.push(format!("body={}", expanded(body)));
+                args.push(format!("body={body}"));
             }
             if let Some(content_type) = content_type {
                 args.push(format!("type={}", expanded(content_type)));

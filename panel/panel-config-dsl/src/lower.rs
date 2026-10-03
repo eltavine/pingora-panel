@@ -27,6 +27,17 @@ use std::{
 };
 use uuid::Uuid;
 
+/// How references in a value are resolved.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Expansion {
+    /// Plain text: request variables are refused.
+    Text,
+    /// A value the gateway reads per request, such as a hash key.
+    Request,
+    /// A template the gateway fills in per request.
+    Template,
+}
+
 pub struct LowerOptions<'a> {
     /// Values for `${env:NAME}`; only names with the documented prefix are read.
     pub environment: &'a BTreeMap<String, String>,
@@ -422,17 +433,29 @@ impl<'a> Lowerer<'a> {
             );
             return;
         }
-        let Some(value) = self.expand(file, &directive.args[1], &directive.args[1].value, false)
-        else {
+        let Some(value) = self.expand(
+            file,
+            &directive.args[1],
+            &directive.args[1].value,
+            Expansion::Text,
+        ) else {
             return;
         };
         let name = name.to_owned();
         self.scopes.last_mut().expect("a scope").insert(name, value);
     }
 
-    /// Resolves constants and environment references in `value`; request
-    /// variables stay as written where `request` allows them.
-    fn expand(&mut self, file: &str, arg: &Argument, value: &str, request: bool) -> Option<String> {
+    /// Resolves constants and environment references in `value`. Request
+    /// variables stay as written in [`Expansion::Request`] and
+    /// [`Expansion::Template`]; a template also keeps every other dollar
+    /// escaped, so the result reads back as the same template.
+    fn expand(
+        &mut self,
+        file: &str,
+        arg: &Argument,
+        value: &str,
+        mode: Expansion,
+    ) -> Option<String> {
         let pieces = match variables::pieces(value) {
             Ok(pieces) => pieces,
             Err(message) => {
@@ -440,10 +463,36 @@ impl<'a> Lowerer<'a> {
                 return None;
             }
         };
+        let literal = |text: &str| {
+            if mode == Expansion::Template {
+                text.replace('$', "$$")
+            } else {
+                text.to_owned()
+            }
+        };
         let mut out = String::with_capacity(value.len());
+        // A variable name is braced when a name character follows it.
+        let mut open_variable: Option<String> = None;
+        let push = |out: &mut String, open: &mut Option<String>, text: &str| {
+            if let Some(name) = open.take() {
+                if text
+                    .bytes()
+                    .next()
+                    .is_some_and(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+                {
+                    out.push_str("${");
+                    out.push_str(&name);
+                    out.push('}');
+                } else {
+                    out.push('$');
+                    out.push_str(&name);
+                }
+            }
+            out.push_str(text);
+        };
         for piece in pieces {
             match piece {
-                Piece::Text(text) => out.push_str(text),
+                Piece::Text(text) => push(&mut out, &mut open_variable, &literal(text)),
                 Piece::Environment(name) => {
                     if !name.starts_with(ENVIRONMENT_PREFIX) {
                         self.error_with_help(
@@ -458,7 +507,7 @@ impl<'a> Lowerer<'a> {
                         return None;
                     }
                     match self.options.environment.get(name) {
-                        Some(found) => out.push_str(found),
+                        Some(found) => push(&mut out, &mut open_variable, &literal(found)),
                         None => {
                             self.error(
                                 file,
@@ -473,9 +522,10 @@ impl<'a> Lowerer<'a> {
                 Piece::Variable(name) => {
                     if let Some(found) = self.scopes.iter().rev().find_map(|scope| scope.get(name))
                     {
-                        out.push_str(found);
+                        let found = literal(found);
+                        push(&mut out, &mut open_variable, &found);
                     } else if variables::is_request_variable(name) {
-                        if !request {
+                        if mode == Expansion::Text {
                             self.error(
                                 file,
                                 arg.span,
@@ -486,8 +536,8 @@ impl<'a> Lowerer<'a> {
                             );
                             return None;
                         }
-                        out.push('$');
-                        out.push_str(name);
+                        push(&mut out, &mut open_variable, "");
+                        open_variable = Some(name.to_owned());
                     } else {
                         self.error(
                             file,
@@ -500,12 +550,13 @@ impl<'a> Lowerer<'a> {
                 }
             }
         }
+        push(&mut out, &mut open_variable, "");
         Some(out)
     }
 
     /// The expanded value of a whole argument.
     fn value(&mut self, file: &str, arg: &Argument) -> Option<String> {
-        self.expand(file, arg, &arg.value.clone(), false)
+        self.expand(file, arg, &arg.value.clone(), Expansion::Text)
     }
 
     /// An argument taken literally: names, references and free text.
@@ -964,7 +1015,7 @@ impl<'a> Lowerer<'a> {
                     (Some("random"), None) => LoadBalancingPolicy::Random,
                     (Some("hash"), Some((key, key_arg))) => {
                         let Some(key) = self
-                            .expand(file, key_arg, key, true)
+                            .expand(file, key_arg, key, Expansion::Request)
                             .and_then(|key| variables::hash_key(&key))
                         else {
                             self.error_with_help(
@@ -1014,8 +1065,11 @@ impl<'a> Lowerer<'a> {
                             upstream.tls.verify_hostname =
                                 self.flag(file, arg, value).unwrap_or(true)
                         }
-                        "sni" => upstream.tls.sni = self.expand(file, arg, value, false),
-                        "ca" => upstream.tls.ca_secret_id = self.expand(file, arg, value, false),
+                        "sni" => upstream.tls.sni = self.expand(file, arg, value, Expansion::Text),
+                        "ca" => {
+                            upstream.tls.ca_secret_id =
+                                self.expand(file, arg, value, Expansion::Text)
+                        }
                         _ => {}
                     }
                 }
@@ -1144,9 +1198,9 @@ impl<'a> Lowerer<'a> {
                 "weight" => {
                     node.weight = self.number(file, arg, value, "a whole number").unwrap_or(1)
                 }
-                "sni" => node.sni = self.expand(file, arg, value, false),
+                "sni" => node.sni = self.expand(file, arg, value, Expansion::Text),
                 "note" => node.note = Some((*value).to_owned()),
-                "unix" => node.unix_socket = self.expand(file, arg, value, false),
+                "unix" => node.unix_socket = self.expand(file, arg, value, Expansion::Text),
                 "id" => match Uuid::parse_str(value) {
                     Ok(id) => node.id = id,
                     Err(_) => self.error(
@@ -1216,9 +1270,13 @@ impl<'a> Lowerer<'a> {
         };
         for (key, (value, arg)) in &params.named {
             match *key {
-                "path" => check.path = self.expand(file, arg, value, false).unwrap_or_default(),
+                "path" => {
+                    check.path = self
+                        .expand(file, arg, value, Expansion::Text)
+                        .unwrap_or_default()
+                }
                 "method" => check.method = value.to_ascii_uppercase(),
-                "host" => check.host = self.expand(file, arg, value, false),
+                "host" => check.host = self.expand(file, arg, value, Expansion::Text),
                 "interval" => check.interval_ms = self.duration(file, arg, value).unwrap_or(5_000),
                 "timeout" => check.timeout_ms = self.duration(file, arg, value).unwrap_or(1_000),
                 "rise" => {
@@ -1589,7 +1647,8 @@ impl<'a> Lowerer<'a> {
                             };
                             let host = match params.named.get("host") {
                                 Some((value, arg)) => {
-                                    let Some(value) = lowerer.expand(file, arg, value, false)
+                                    let Some(value) =
+                                        lowerer.expand(file, arg, value, Expansion::Text)
                                     else {
                                         return;
                                     };
@@ -1688,7 +1747,7 @@ impl<'a> Lowerer<'a> {
                 let mut index_files = vec!["index.html".to_owned()];
                 if let Some((value, arg)) = params.named.get("index") {
                     index_files = self
-                        .expand(file, arg, value, false)?
+                        .expand(file, arg, value, Expansion::Text)?
                         .split(',')
                         .filter(|name| !name.is_empty())
                         .map(str::to_owned)
@@ -1728,7 +1787,12 @@ impl<'a> Lowerer<'a> {
                     );
                     return None;
                 }
-                let location = self.value(file, location_arg)?;
+                let location = self.expand(
+                    file,
+                    location_arg,
+                    &location_arg.value.clone(),
+                    Expansion::Template,
+                )?;
                 let preserve_path = match params.named.get("preserve_path") {
                     Some((value, arg)) => self.flag(file, arg, value).unwrap_or(true),
                     None => true,
@@ -1762,11 +1826,13 @@ impl<'a> Lowerer<'a> {
                     );
                 }
                 let body = match params.named.get("body") {
-                    Some((value, arg)) => Some(self.expand(file, arg, value, false)?),
+                    Some((value, arg)) => {
+                        Some(self.expand(file, arg, value, Expansion::Template)?)
+                    }
                     None => None,
                 };
                 let content_type = match params.named.get("type") {
-                    Some((value, arg)) => Some(self.expand(file, arg, value, false)?),
+                    Some((value, arg)) => Some(self.expand(file, arg, value, Expansion::Text)?),
                     None => None,
                 };
                 let retry_after_seconds = match params.named.get("retry_after") {

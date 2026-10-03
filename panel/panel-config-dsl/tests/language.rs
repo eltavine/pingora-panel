@@ -285,18 +285,57 @@ fn literal_dollars_survive_a_round_trip() {
     assert!(lowered.is_valid(), "{:#?}", lowered.diagnostics);
     let site = &lowered.model.sites[0];
     assert_eq!(site.note.as_deref(), Some("uses $HOME"));
+    // Response bodies are templates, so literal dollars stay escaped.
     assert_eq!(
         site.action,
         Action::Respond {
             status: 200,
-            body: Some("cost $5 or $amount".into()),
+            body: Some("cost $$5 or $$amount".into()),
             content_type: None,
             retry_after_seconds: None
         }
     );
+    assert_eq!(
+        panel_ir::template::literal("cost $$5 or $$amount").as_deref(),
+        Some("cost $5 or $amount")
+    );
     let again = read(&print(&lowered.model));
     assert!(again.is_valid(), "{:#?}", again.diagnostics);
     assert_eq!(again.model.sites[0].action, site.action);
+}
+
+#[test]
+fn redirects_and_responses_keep_request_variables() {
+    let text = "language_version 1;\nhttp {\n    set $landing /landing;\n    server s {\n        server_name s.example;\n        return 302 https://$host$landing$uri preserve_path=off;\n        route {\n            match exact /whoami;\n            respond 200 \"body=${client_ip}x from $http_x_tenant\";\n        }\n    }\n}\n";
+    let lowered = read(text);
+    assert!(lowered.is_valid(), "{:#?}", lowered.diagnostics);
+    let site = &lowered.model.sites[0];
+    assert!(matches!(
+        &site.action,
+        Action::Redirect { location, .. } if location == "https://$host/landing$uri"
+    ));
+    assert!(matches!(
+        &site.routes[0].action,
+        Action::Respond { body: Some(body), .. } if body == "${client_ip}x from $http_x_tenant"
+    ));
+    let printed = print(&lowered.model);
+    assert!(
+        printed.contains("return 302 https://$host/landing$uri preserve_path=off;"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains("respond 200 \"body=${client_ip}x from $http_x_tenant\";"),
+        "{printed}"
+    );
+    assert_eq!(read(&printed).model.sites[0].action, site.action);
+
+    let refused = read("language_version 1;\nhttp {\n    server s {\n        server_name s.example;\n        respond 200 body=$nope;\n    }\n}\n");
+    assert!(
+        messages(&refused)
+            .iter()
+            .any(|(_, span, message)| span == "main.conf:5.21-30"
+                && message == "$nope is not defined")
+    );
 }
 
 #[test]
