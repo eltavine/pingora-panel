@@ -17,6 +17,7 @@ const route: Route = {
   priority: 10,
   match: { kind: 'prefix', path: '/api/', host: null },
   action: { type: 'proxy', upstream_id: 'b9c1' },
+  security_policy_id: 'api-limits',
 }
 
 const site: SiteView = {
@@ -29,6 +30,7 @@ const site: SiteView = {
   routes: [route],
   tags: ['prod', 'eu'],
   group: 'retail',
+  security_policy_id: 'office',
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-02T00:00:00Z',
   etag: '"abc"',
@@ -97,6 +99,9 @@ describe('site forms', () => {
     expect(input.routes).toEqual([route])
     expect(input.tags).toEqual(['prod', 'eu', 'new'])
     expect(input.tls_profile_id).toBeNull()
+    expect(input.security_policy_id).toBe('office')
+    form.securityPolicyId = ''
+    expect(siteInput(form, site).security_policy_id).toBeNull()
   })
 
   it('sends HSTS in seconds and only when it is on', () => {

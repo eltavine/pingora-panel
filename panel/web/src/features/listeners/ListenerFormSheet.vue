@@ -14,6 +14,7 @@ import FormField from '@/components/FormField.vue'
 import SwitchField from '@/components/SwitchField.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
   SelectContent,
@@ -35,6 +36,7 @@ import {
   plainHeaders,
   useRefreshConfiguration,
 } from '@/lib/configuration'
+import { REAL_IP_HEADERS } from '@/features/security/forms'
 import { RESOURCE_ID, listenerBody, listenerForm, type ListenerForm } from './forms'
 
 const NONE = '-'
@@ -172,6 +174,33 @@ function submit() {
                   :value="site.id"
                 >
                   {{ site.name }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </FormField>
+          <FormField
+            id="listener-proxies"
+            :label="t('listeners.trustedProxies')"
+            :hint="t('listeners.trustedProxiesHint')"
+          >
+            <Textarea
+              id="listener-proxies"
+              v-model="form.trustedProxies"
+              rows="2"
+              class="font-mono text-xs"
+              placeholder="10.0.0.0/8"
+            />
+          </FormField>
+          <FormField
+            v-if="form.trustedProxies.trim() !== ''"
+            id="listener-real-ip"
+            :label="t('listeners.realIpHeader')"
+          >
+            <Select v-model="form.realIpHeader">
+              <SelectTrigger id="listener-real-ip" class="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="header in REAL_IP_HEADERS" :key="header" :value="header">
+                  <span class="font-mono text-xs">{{ header }}</span>
                 </SelectItem>
               </SelectContent>
             </Select>

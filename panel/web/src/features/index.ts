@@ -7,6 +7,7 @@ import { listenersFeature } from './listeners'
 import { publishingFeature } from './publishing'
 import { receiptsFeature } from './receipts'
 import { revisionsFeature } from './revisions'
+import { securityFeature } from './security'
 import { sitesFeature } from './sites'
 import type { FeatureModule, NavigationGroup } from './types'
 import { upstreamsFeature } from './upstreams'
@@ -21,6 +22,7 @@ export const features: readonly FeatureModule[] = [
   sitesFeature,
   upstreamsFeature,
   listenersFeature,
+  securityFeature,
   certificatesFeature,
   configStudioFeature,
   identityFeature,

@@ -9,6 +9,7 @@ import {
   Pencil,
   Plus,
   Route as RouteIcon,
+  ShieldBan,
   Trash2,
 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
@@ -263,6 +264,14 @@ function target(route: RouteView): string {
               </div>
               <span v-if="route.match.host" class="text-muted-foreground font-mono text-xs">
                 {{ route.match.host }}
+              </span>
+              <span
+                v-if="route.security_policy_id"
+                class="text-muted-foreground inline-flex items-center gap-1 font-mono text-xs"
+                :title="t('security.select.label')"
+              >
+                <ShieldBan class="size-3.5" aria-hidden="true" />
+                {{ route.security_policy_id }}
               </span>
             </TableCell>
             <TableCell class="max-w-64">

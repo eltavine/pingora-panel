@@ -206,6 +206,9 @@ function confirmRemove() {
                     <Badge v-if="listener.ipv6_only" variant="secondary">{{
                       t('listeners.ipv6Only')
                     }}</Badge>
+                    <Badge v-if="listener.trusted_proxies?.length" variant="secondary">{{
+                      t('listeners.trustedProxiesCount', { count: listener.trusted_proxies.length })
+                    }}</Badge>
                   </div>
                 </TableCell>
                 <TableCell class="font-mono text-xs">{{

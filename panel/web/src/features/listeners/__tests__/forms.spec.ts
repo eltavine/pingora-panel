@@ -20,6 +20,14 @@ describe('listener forms', () => {
       ipv6_only: null,
       tls_profile_id: null,
       default_site_id: null,
+      trusted_proxies: [],
+      real_ip_header: 'x-forwarded-for',
+    })
+    form.trustedProxies = '10.0.0.0/8\n 192.0.2.7, '
+    form.realIpHeader = 'forwarded'
+    expect(listenerBody(form)).toMatchObject({
+      trusted_proxies: ['10.0.0.0/8', '192.0.2.7'],
+      real_ip_header: 'forwarded',
     })
   })
 

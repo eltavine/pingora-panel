@@ -33,6 +33,7 @@ import {
   plainHeaders,
   useRefreshConfiguration,
 } from '@/lib/configuration'
+import SecurityPolicySelect from '@/features/security/SecurityPolicySelect.vue'
 import ActionFields from './ActionFields.vue'
 import { ACTION_TYPES, MATCH_KINDS, routeForm, routeInput, type RouteForm } from './forms'
 import { actionIcons } from './presentation'
@@ -160,6 +161,12 @@ function submit() {
               </SelectContent>
             </Select>
           </FormField>
+
+          <SecurityPolicySelect
+            id="route-security-policy"
+            v-model="form.securityPolicyId"
+            :hint="t('security.select.routeHint')"
+          />
 
           <SwitchField id="route-enabled" v-model="form.enabled" :label="t('common.enabled')" />
 

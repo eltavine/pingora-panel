@@ -67,6 +67,7 @@ export interface SiteForm {
   wwwRedirect: WwwRedirect
   listenerIds: string[]
   tlsProfileId: string
+  securityPolicyId: string
   group: string
   tags: string
   note: string
@@ -80,6 +81,7 @@ export interface RouteForm {
   path: string
   host: string
   action: ActionForm
+  securityPolicyId: string
 }
 
 /** Empty text is absent, not an empty value. */
@@ -187,6 +189,7 @@ export function siteForm(site?: SiteView): SiteForm {
     wwwRedirect: site?.www_redirect ?? 'none',
     listenerIds: [...(site?.listener_ids ?? [])],
     tlsProfileId: site?.tls_profile_id ?? '',
+    securityPolicyId: site?.security_policy_id ?? '',
     group: site?.group ?? '',
     tags: (site?.tags ?? []).join(', '),
     note: site?.note ?? '',
@@ -219,6 +222,7 @@ export function siteInput(form: SiteForm, site?: SiteView): SiteInput {
     www_redirect: form.wwwRedirect,
     listener_ids: form.listenerIds,
     tls_profile_id: optionalText(form.tlsProfileId),
+    security_policy_id: optionalText(form.securityPolicyId),
     group: optionalText(form.group),
     tags: splitList(form.tags),
     note: optionalText(form.note),
@@ -233,6 +237,7 @@ export function routeInputOf(route: Route): RouteInput {
     priority: route.priority,
     match: route.match,
     action: route.action,
+    security_policy_id: route.security_policy_id ?? null,
   }
 }
 
@@ -245,6 +250,7 @@ export function routeForm(route: Route | undefined, priority: number): RouteForm
     path: route?.match.path ?? '/',
     host: route?.match.host ?? '',
     action: actionForm(route?.action),
+    securityPolicyId: route?.security_policy_id ?? '',
   }
 }
 
@@ -256,6 +262,7 @@ export function routeInput(form: RouteForm, id?: string): RouteInput {
     priority: optionalNumber(form.priority) ?? 0,
     match: { kind: form.kind, path: form.path.trim(), host: optionalText(form.host) },
     action: toAction(form.action),
+    security_policy_id: optionalText(form.securityPolicyId),
   }
 }
 

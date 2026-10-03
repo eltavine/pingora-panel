@@ -1,4 +1,4 @@
-import type { ListenerView, TlsProfileView } from '@/api/generated'
+import type { ListenerView, RealIpHeader, TlsProfileView } from '@/api/generated'
 
 export const TLS_VERSIONS = ['TLSv1.2', 'TLSv1.3'] as const
 /** The maximum version when none is named. */
@@ -32,6 +32,9 @@ export interface ListenerForm {
   ipv6Only: boolean
   tlsProfileId: string
   defaultSiteId: string
+  /** Networks, one per line. */
+  trustedProxies: string
+  realIpHeader: RealIpHeader
 }
 
 /** Where a profile's certificate comes from. */
@@ -63,6 +66,8 @@ export function listenerForm(listener?: ListenerView): ListenerForm {
     ipv6Only: listener?.ipv6_only ?? false,
     tlsProfileId: listener?.tls_profile_id ?? '',
     defaultSiteId: listener?.default_site_id ?? '',
+    trustedProxies: (listener?.trusted_proxies ?? []).join('\n'),
+    realIpHeader: listener?.real_ip_header ?? 'x-forwarded-for',
   }
 }
 
@@ -75,6 +80,11 @@ export function listenerBody(form: ListenerForm) {
     ipv6_only: form.ipv6Only ? true : null,
     tls_profile_id: form.tlsProfileId || null,
     default_site_id: form.defaultSiteId || null,
+    trusted_proxies: form.trustedProxies
+      .split(/[\s,]+/)
+      .map((network) => network.trim())
+      .filter((network) => network.length > 0),
+    real_ip_header: form.realIpHeader,
   }
 }
 

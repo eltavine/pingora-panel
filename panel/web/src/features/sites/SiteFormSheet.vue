@@ -40,6 +40,7 @@ import {
   plainHeaders,
   useRefreshConfiguration,
 } from '@/lib/configuration'
+import SecurityPolicySelect from '@/features/security/SecurityPolicySelect.vue'
 import ActionFields from './ActionFields.vue'
 import {
   PRELOAD_DAYS,
@@ -242,6 +243,12 @@ function submit() {
               </SelectContent>
             </Select>
           </FormField>
+
+          <SecurityPolicySelect
+            id="site-security-policy"
+            v-model="form.securityPolicyId"
+            :hint="t('security.select.siteHint')"
+          />
 
           <div class="grid gap-4 sm:grid-cols-2">
             <FormField id="site-group" :label="t('sites.form.group')">

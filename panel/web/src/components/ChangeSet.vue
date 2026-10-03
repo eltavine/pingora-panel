@@ -1,6 +1,16 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
-import { FileCode2, Globe, Minus, Network, PenLine, Plus, Server, ShieldCheck } from '@lucide/vue'
+import {
+  FileCode2,
+  Globe,
+  Minus,
+  Network,
+  PenLine,
+  Plus,
+  Server,
+  ShieldBan,
+  ShieldCheck,
+} from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import type { Change, Changes, ResourceChange } from '@/api/generated'
 import DiffView from '@/components/DiffView.vue'
@@ -15,10 +25,11 @@ const kinds: Record<string, Component> = {
   upstreams: Server,
   listeners: Network,
   'tls-profiles': ShieldCheck,
+  'security-policies': ShieldBan,
 }
 const changeIcons: Record<Change, Component> = { added: Plus, changed: PenLine, removed: Minus }
 
-const BLOCK = /^[ +-]\s*(?:server|upstream|listener|tls_profile)\s+(\S+)\s*\{/
+const BLOCK = /^[ +-]\s*(?:server|upstream|listener|tls_profile|security_policy)\s+(\S+)\s*\{/
 
 /** The resource's name from the first line of its block, else its path. */
 function label(change: ResourceChange): string {
