@@ -13,6 +13,7 @@ use crate::{
 };
 use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::async_trait;
+use panel_domain::RevisionId;
 use panel_engine::{validate_engine_ir, DataPlaneAdapter, EngineCapabilities, EngineCapability};
 use panel_errors::{Diagnostic, ErrorCode, PanelError, Result, ValidationReport};
 use panel_ir::RuntimeSnapshot;
@@ -21,7 +22,11 @@ use std::{
     collections::{BTreeSet, HashMap, HashSet},
     fmt,
     path::PathBuf,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU64, Ordering::Relaxed},
+        Arc,
+    },
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::watch;
 
@@ -109,6 +114,9 @@ impl AdapterOptions {
 pub struct PingoraGatewayAdapter {
     active: ActiveSnapshot,
     activations: watch::Sender<u64>,
+    /// When the active snapshot was activated, in milliseconds since the
+    /// Unix epoch; zero before the first activation.
+    activated_at: AtomicU64,
     options: AdapterOptions,
     endpoints: Arc<EndpointStates>,
     bound: Mutex<BTreeSet<SocketKey>>,
@@ -148,6 +156,7 @@ impl PingoraGatewayAdapter {
         Self {
             active: Arc::new(ArcSwapOption::empty()),
             activations: watch::channel(0).0,
+            activated_at: AtomicU64::new(0),
             options,
             endpoints: Arc::default(),
             bound: Mutex::default(),
@@ -189,6 +198,22 @@ impl PingoraGatewayAdapter {
 
     pub fn adapter_version(&self) -> &'static str {
         ADAPTER_VERSION
+    }
+
+    /// The revision of the active snapshot.
+    pub fn active_revision(&self) -> Option<RevisionId> {
+        self.active
+            .load()
+            .as_ref()
+            .map(|prepared| prepared.snapshot.revision_id)
+    }
+
+    /// When the active snapshot was activated.
+    pub fn activated_at(&self) -> Option<SystemTime> {
+        match self.activated_at.load(Relaxed) {
+            0 => None,
+            millis => Some(UNIX_EPOCH + Duration::from_millis(millis)),
+        }
     }
 
     pub fn active_snapshot(&self) -> Option<RuntimeSnapshot> {
@@ -488,6 +513,12 @@ impl DataPlaneAdapter for PingoraGatewayAdapter {
             })
             .collect();
         self.active.store(Some(prepared));
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(1, |since| {
+                u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
+            });
+        self.activated_at.store(now.max(1), Relaxed);
         self.endpoints.retain(&live);
         self.activations.send_modify(|generation| *generation += 1);
     }
@@ -496,7 +527,7 @@ impl DataPlaneAdapter for PingoraGatewayAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use panel_domain::{EndpointAddress, EndpointId, RevisionId, UpstreamPoolId};
+    use panel_domain::{EndpointAddress, EndpointId, UpstreamPoolId};
     use panel_ir::{
         CachePolicy, CapabilityRequirement, ListenerRef, UpstreamEndpoint, UpstreamPoolSpec,
     };

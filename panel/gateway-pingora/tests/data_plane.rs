@@ -4,8 +4,8 @@
 
 use base64::Engine;
 use gateway_pingora::{
-    AdapterOptions, ChallengeDirectory, DataPlane, DataPlaneOptions, DirectorySecrets,
-    GatewayMetrics, PingoraGatewayAdapter,
+    register_configuration, AdapterOptions, ChallengeDirectory, DataPlane, DataPlaneOptions,
+    DirectorySecrets, GatewayMetrics, PingoraGatewayAdapter,
 };
 use panel_domain::{
     EndpointAddress, EndpointId, NormalizedHost, PathPrefix, RevisionId, RouteId, SiteId,
@@ -404,7 +404,17 @@ async fn requests_and_upstream_attempts_are_measured() {
     let gateway_metrics = GatewayMetrics::register(&mut metrics);
     let gateway =
         Gateway::start_with(AdapterOptions::default(), snapshot, Some(gateway_metrics)).await;
+    register_configuration(&mut metrics, Arc::clone(&gateway.adapter));
     wait_for(listen).await;
+    let text = metrics.encode();
+    assert!(
+        text.contains("pingora_panel_gateway_config_revision 1\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("# TYPE pingora_panel_gateway_config_activated_timestamp_seconds gauge"),
+        "{text}"
+    );
 
     assert_eq!(
         get(listen, Some("example.com"), "/hello", "").await.status,

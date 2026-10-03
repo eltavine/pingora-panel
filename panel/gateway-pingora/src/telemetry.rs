@@ -8,14 +8,24 @@
 //! `http2_error`, `read_error`, `write_error`, `read_timeout`,
 //! `write_timeout`, `connection_closed` and `_OTHER`.
 
-use crate::{certificates::TlsVersion, routing::RoutingTable, upstream::UpstreamPool};
+use crate::{
+    adapter::PingoraGatewayAdapter, certificates::TlsVersion, routing::RoutingTable,
+    upstream::UpstreamPool,
+};
 use panel_metrics::{ErrorType, HttpClientMetrics, HttpServerMetrics, Metrics};
 use pingora_core::{Error, ErrorType as Kind};
 use prometheus_client::{
-    encoding::EncodeLabelSet,
-    metrics::{counter::Counter, family::Family, gauge::Gauge},
+    collector::Collector,
+    encoding::{DescriptorEncoder, EncodeLabelSet, EncodeMetric},
+    metrics::{
+        counter::Counter,
+        family::Family,
+        gauge::{ConstGauge, Gauge},
+        TypedMetric,
+    },
+    registry::Unit,
 };
-use std::sync::Arc;
+use std::{sync::Arc, time::UNIX_EPOCH};
 
 /// The gateway's metrics, registered once and shared by every generation of
 /// the data plane.
@@ -80,6 +90,49 @@ impl GatewayMetrics {
                 }),
             })
             .inc();
+    }
+}
+
+/// Reports the active configuration at every scrape: its revision and when
+/// it was activated.
+pub fn register_configuration(metrics: &mut Metrics, adapter: Arc<PingoraGatewayAdapter>) {
+    metrics
+        .registry()
+        .register_collector(Box::new(Configuration(adapter)));
+}
+
+struct Configuration(Arc<PingoraGatewayAdapter>);
+
+impl std::fmt::Debug for Configuration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Configuration").finish_non_exhaustive()
+    }
+}
+
+impl Collector for Configuration {
+    fn encode(&self, mut encoder: DescriptorEncoder) -> Result<(), std::fmt::Error> {
+        if let Some(revision) = self.0.active_revision() {
+            let gauge = ConstGauge::new(revision.get());
+            gauge.encode(encoder.encode_descriptor(
+                "pingora_panel_gateway_config_revision",
+                "Revision of the active configuration",
+                None,
+                ConstGauge::<u64>::TYPE,
+            )?)?;
+        }
+        if let Some(activated) = self.0.activated_at() {
+            let seconds = activated
+                .duration_since(UNIX_EPOCH)
+                .map_or(0.0, |since| since.as_secs_f64());
+            let gauge = ConstGauge::new(seconds);
+            gauge.encode(encoder.encode_descriptor(
+                "pingora_panel_gateway_config_activated_timestamp",
+                "When the active configuration was activated",
+                Some(&Unit::Seconds),
+                ConstGauge::<f64>::TYPE,
+            )?)?;
+        }
+        Ok(())
     }
 }
 
