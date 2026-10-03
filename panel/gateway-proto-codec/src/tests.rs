@@ -31,6 +31,7 @@ fn populated_snapshot_round_trips_additive_v1_fields() {
     listener.default_site_id = Some(SiteId::new("site-main").unwrap());
     listener.trusted_proxies = ["10.0.0.0/8".into()].into_iter().collect();
     listener.real_ip_header = RealIpHeader::Forwarded;
+    listener.request_head_timeout_ms = Some(15_000);
     snapshot.listeners.push(listener);
     let mut primary = DomainSpec::new(NormalizedHost::new("example.com").unwrap());
     primary.tls_profile_id = Some("tls-main".into());

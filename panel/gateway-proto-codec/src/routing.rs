@@ -50,6 +50,7 @@ pub(super) fn decode_listener(value: wire::ListenerRef) -> Result<ListenerRef> {
                 )))
             }
         },
+        request_head_timeout_ms: value.request_head_timeout_ms,
     })
 }
 
@@ -78,6 +79,7 @@ pub(super) fn encode_listener(value: &ListenerRef) -> wire::ListenerRef {
             _ => wire::RealIpHeader::XForwardedFor,
         }
         .into(),
+        request_head_timeout_ms: value.request_head_timeout_ms,
     }
 }
 

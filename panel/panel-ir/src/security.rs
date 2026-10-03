@@ -9,6 +9,10 @@ pub const REQUEST_SECURITY_CAPABILITY: &str = "request.security";
 /// Required by snapshots whose listeners trust proxies to name the client.
 pub const TRUSTED_PROXIES_CAPABILITY: &str = "listener.trusted-proxies";
 
+/// Required by snapshots whose listeners set their own request head
+/// deadline.
+pub const REQUEST_HEAD_TIMEOUT_CAPABILITY: &str = "listener.request-head-timeout";
+
 /// Restrictions a request must pass, written once and named by sites and
 /// routes; a request passes its site's policy and then its route's.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]

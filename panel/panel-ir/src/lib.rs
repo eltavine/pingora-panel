@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub use security::{
     BasicAuth, LimitedResponse, RateLimit, RateLimitKey, RealIpHeader, RefererRule, SecurityPolicy,
-    REQUEST_SECURITY_CAPABILITY, TRUSTED_PROXIES_CAPABILITY,
+    REQUEST_HEAD_TIMEOUT_CAPABILITY, REQUEST_SECURITY_CAPABILITY, TRUSTED_PROXIES_CAPABILITY,
 };
 
 pub mod security;
@@ -201,6 +201,12 @@ pub struct ListenerRef {
     pub trusted_proxies: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "RealIpHeader::is_default")]
     pub real_ip_header: RealIpHeader,
+    /// The longest a client may take to send a request head: from the
+    /// connection's start for its first request, and from the end of the
+    /// previous response for later ones. The gateway's own default applies
+    /// when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_head_timeout_ms: Option<u64>,
 }
 
 impl ListenerRef {
@@ -215,6 +221,7 @@ impl ListenerRef {
             default_site_id: None,
             trusted_proxies: BTreeSet::new(),
             real_ip_header: RealIpHeader::default(),
+            request_head_timeout_ms: None,
         }
     }
 }
