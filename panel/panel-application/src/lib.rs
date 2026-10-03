@@ -25,7 +25,8 @@ pub use configuration::{
     ConfigurationPort, ConfigurationRead, DraftInfo,
 };
 pub use context::{
-    Actor, CommandContext, IdempotencyKey, RequestDeadline, RequestId, RequestScope, TraceContext,
+    Actor, CommandContext, IdempotencyKey, RequestDeadline, RequestId, RequestScope, SiteAccess,
+    SiteScope, TraceContext,
 };
 pub use gateway::{
     AbortOutcome, ActivatedDeployment, ConfigCompiler, ConfigDocument, DeploymentOutcome,

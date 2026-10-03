@@ -2,7 +2,8 @@ use panel_errors::Result;
 use serde::{Deserialize, Serialize};
 
 pub use panel_context::{
-    Actor, IdempotencyKey, RequestDeadline, RequestId, RequestScope, TraceContext,
+    Actor, IdempotencyKey, RequestDeadline, RequestId, RequestScope, SiteAccess, SiteScope,
+    TraceContext,
 };
 
 /// Authenticated command metadata shared by every mutating surface.
@@ -15,6 +16,8 @@ pub struct CommandContext {
     idempotency_key: IdempotencyKey,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     trace_context: Option<TraceContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    site_scope: Option<SiteScope>,
 }
 
 impl CommandContext {
@@ -32,7 +35,18 @@ impl CommandContext {
             deadline,
             idempotency_key,
             trace_context: None,
+            site_scope: None,
         })
+    }
+
+    /// Limits the command to some sites.
+    pub fn with_site_scope(mut self, site_scope: Option<SiteScope>) -> Self {
+        self.site_scope = site_scope;
+        self
+    }
+
+    pub fn site_scope(&self) -> Option<&SiteScope> {
+        self.site_scope.as_ref()
     }
 
     /// Attaches the caller's W3C trace context.
@@ -70,6 +84,7 @@ impl CommandContext {
         RequestScope::new(self.request_id.clone())
             .with_correlation_id(self.correlation_id.clone())
             .with_trace_context(self.trace_context.clone())
+            .with_site_scope(self.site_scope.clone())
     }
 }
 

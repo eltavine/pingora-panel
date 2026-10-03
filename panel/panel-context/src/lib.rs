@@ -198,6 +198,49 @@ pub struct RequestScope {
     correlation_id: RequestId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     trace_context: Option<TraceContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    site_scope: Option<SiteScope>,
+}
+
+/// The sites a caller may act on with configuration permissions it holds
+/// only for some of them (ADR 0021). Absent from a request when the caller
+/// may act on every site.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SiteScope {
+    /// Permissions held for every site, such as `config.read`.
+    #[serde(default)]
+    pub unrestricted: Vec<String>,
+    #[serde(default)]
+    pub limited: Vec<SiteAccess>,
+}
+
+/// A permission held for some site groups and sites.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SiteAccess {
+    pub permission: String,
+    #[serde(default)]
+    pub groups: Vec<String>,
+    /// Site IDs.
+    #[serde(default)]
+    pub sites: Vec<String>,
+}
+
+impl SiteScope {
+    /// Whether `permission` is held for every site.
+    pub fn everywhere(&self, permission: &str) -> bool {
+        self.unrestricted.iter().any(|held| held == permission)
+    }
+
+    /// Whether `permission` is held for the site `id` in `group`.
+    pub fn covers(&self, permission: &str, id: &str, group: Option<&str>) -> bool {
+        self.everywhere(permission)
+            || self.limited.iter().any(|access| {
+                access.permission == permission
+                    && (access.sites.iter().any(|site| site == id)
+                        || group
+                            .is_some_and(|group| access.groups.iter().any(|held| held == group)))
+            })
+    }
 }
 
 impl RequestScope {
@@ -207,7 +250,18 @@ impl RequestScope {
             correlation_id: request_id.clone(),
             request_id,
             trace_context: None,
+            site_scope: None,
         }
+    }
+
+    /// Limits the request to some sites.
+    pub fn with_site_scope(mut self, site_scope: Option<SiteScope>) -> Self {
+        self.site_scope = site_scope;
+        self
+    }
+
+    pub fn site_scope(&self) -> Option<&SiteScope> {
+        self.site_scope.as_ref()
     }
 
     pub fn with_correlation_id(mut self, correlation_id: RequestId) -> Self {
@@ -251,6 +305,23 @@ mod tests {
         assert!(Actor::new("").is_err());
         assert!(serde_json::from_str::<IdempotencyKey>("\"\"").is_err());
         assert!(serde_json::from_str::<Actor>("\"operator@example.com\"").is_ok());
+    }
+
+    #[test]
+    fn site_scopes_cover_groups_and_sites() {
+        let scope = SiteScope {
+            unrestricted: vec!["config.read".into()],
+            limited: vec![SiteAccess {
+                permission: "config.write".into(),
+                groups: vec!["shop".into()],
+                sites: vec!["s-1".into()],
+            }],
+        };
+        assert!(scope.covers("config.read", "any", None));
+        assert!(scope.covers("config.write", "s-2", Some("shop")));
+        assert!(scope.covers("config.write", "s-1", None));
+        assert!(!scope.covers("config.write", "s-3", Some("intranet")));
+        assert!(!scope.covers("config.apply", "s-1", Some("shop")));
     }
 
     #[test]

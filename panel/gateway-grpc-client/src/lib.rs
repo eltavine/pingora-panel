@@ -254,6 +254,7 @@ fn context(value: &CommandContext) -> common::RequestContext {
         deadline: value.deadline().as_str().into(),
         idempotency_key: value.idempotency_key().as_str().into(),
         schema_version: CONTEXT_SCHEMA_VERSION.into(),
+        site_scope: None,
     }
 }
 
@@ -265,6 +266,7 @@ fn query_context(scope: &RequestScope) -> common::RequestContext {
         deadline: String::new(),
         idempotency_key: String::new(),
         schema_version: CONTEXT_SCHEMA_VERSION.into(),
+        site_scope: None,
     }
 }
 

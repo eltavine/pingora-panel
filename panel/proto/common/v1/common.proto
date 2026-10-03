@@ -28,6 +28,23 @@ message RequestContext {
   string deadline = 4;
   string idempotency_key = 5;
   string schema_version = 6;
+  // Limits the caller to some sites (ADR 0021); absent when it may act on
+  // every site.
+  SiteScope site_scope = 7;
+}
+
+// Configuration permissions a caller holds only for some sites.
+message SiteScope {
+  // Permissions held for every site, such as `config.read`.
+  repeated string unrestricted = 1;
+  repeated SiteAccess limited = 2;
+}
+
+message SiteAccess {
+  string permission = 1;
+  repeated string groups = 2;
+  // Site IDs.
+  repeated string sites = 3;
 }
 
 enum DiagnosticSeverity {

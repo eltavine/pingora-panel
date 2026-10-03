@@ -563,6 +563,7 @@ mod tests {
             deadline: deadline.into(),
             idempotency_key: "mutation-1".into(),
             schema_version: panel_contracts::PROTOCOL_VERSION.into(),
+            site_scope: None,
         }
     }
 

@@ -676,6 +676,7 @@ mod tests {
                 String::new()
             },
             schema_version: panel_contracts::PROTOCOL_VERSION.into(),
+            site_scope: None,
         }
     }
 

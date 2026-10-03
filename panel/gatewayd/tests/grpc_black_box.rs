@@ -255,6 +255,7 @@ fn context(request_id: &str, idempotency_key: Option<&str>) -> common::RequestCo
         deadline: String::new(),
         idempotency_key: idempotency_key.unwrap_or_default().into(),
         schema_version: panel_contracts::PROTOCOL_VERSION.into(),
+        site_scope: None,
     }
 }
 

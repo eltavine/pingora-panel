@@ -7,7 +7,7 @@ use gateway_proto_codec::{decode_hash, encode_hash};
 use panel_application::{
     AbortOutcome, ActivatedDeployment, CommandContext, ConfigDocument, DeploymentOutcome,
     GatewayStatus, IdempotencyKey, IdempotencyLookup, IdempotencyRecord, PreparedDeployment,
-    RequestDeadline, RequestId, RequestScope, TraceContext,
+    RequestDeadline, RequestId, RequestScope, SiteAccess, SiteScope, TraceContext,
 };
 use panel_contracts::{
     common::v1 as common,
@@ -42,6 +42,37 @@ pub fn encode_command(context: &CommandContext) -> common::RequestContext {
         deadline: context.deadline().as_str().into(),
         idempotency_key: context.idempotency_key().as_str().into(),
         schema_version: PROTOCOL_VERSION.into(),
+        site_scope: context.site_scope().map(encode_site_scope),
+    }
+}
+
+fn encode_site_scope(scope: &SiteScope) -> common::SiteScope {
+    common::SiteScope {
+        unrestricted: scope.unrestricted.clone(),
+        limited: scope
+            .limited
+            .iter()
+            .map(|access| common::SiteAccess {
+                permission: access.permission.clone(),
+                groups: access.groups.clone(),
+                sites: access.sites.clone(),
+            })
+            .collect(),
+    }
+}
+
+fn decode_site_scope(scope: common::SiteScope) -> SiteScope {
+    SiteScope {
+        unrestricted: scope.unrestricted,
+        limited: scope
+            .limited
+            .into_iter()
+            .map(|access| SiteAccess {
+                permission: access.permission,
+                groups: access.groups,
+                sites: access.sites,
+            })
+            .collect(),
     }
 }
 
@@ -64,7 +95,8 @@ pub fn decode_command(
         RequestDeadline::new(value.deadline)?,
         IdempotencyKey::new(value.idempotency_key)?,
     )?
-    .with_trace_context(trace))
+    .with_trace_context(trace)
+    .with_site_scope(value.site_scope.map(decode_site_scope)))
 }
 
 pub fn encode_scope(scope: &RequestScope) -> common::RequestContext {
@@ -75,6 +107,7 @@ pub fn encode_scope(scope: &RequestScope) -> common::RequestContext {
         deadline: String::new(),
         idempotency_key: String::new(),
         schema_version: PROTOCOL_VERSION.into(),
+        site_scope: scope.site_scope().map(encode_site_scope),
     }
 }
 
@@ -84,7 +117,9 @@ pub fn decode_scope(
     trace: Option<TraceContext>,
 ) -> Result<RequestScope> {
     let value = value.ok_or_else(|| PanelError::invalid_argument("request context is required"))?;
-    let scope = RequestScope::new(RequestId::new(value.request_id)?).with_trace_context(trace);
+    let scope = RequestScope::new(RequestId::new(value.request_id)?)
+        .with_trace_context(trace)
+        .with_site_scope(value.site_scope.map(decode_site_scope));
     Ok(if value.correlation_id.is_empty() {
         scope
     } else {
@@ -268,6 +303,41 @@ pub fn decode_error(value: Option<common::Error>) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn site_scopes_travel_with_commands_and_queries() {
+        let scope = SiteScope {
+            unrestricted: vec!["config.read".into()],
+            limited: vec![SiteAccess {
+                permission: "config.write".into(),
+                groups: vec!["shop".into()],
+                sites: Vec::new(),
+            }],
+        };
+        let command = CommandContext::new(
+            RequestId::new("request-1").unwrap(),
+            RequestId::new("flow-1").unwrap(),
+            "keeper",
+            RequestDeadline::new("2099-01-01T00:00:00Z").unwrap(),
+            IdempotencyKey::new("key-1").unwrap(),
+        )
+        .unwrap()
+        .with_site_scope(Some(scope.clone()));
+        let decoded = decode_command(Some(encode_command(&command)), None).unwrap();
+        assert_eq!(decoded.site_scope(), Some(&scope));
+        assert_eq!(decoded.scope().site_scope(), Some(&scope));
+        let query = RequestScope::new(RequestId::new("request-2").unwrap())
+            .with_site_scope(Some(scope.clone()));
+        let decoded = decode_scope(Some(encode_scope(&query)), None).unwrap();
+        assert_eq!(decoded.site_scope(), Some(&scope));
+        let everywhere = RequestScope::new(RequestId::new("request-3").unwrap());
+        assert_eq!(
+            decode_scope(Some(encode_scope(&everywhere)), None)
+                .unwrap()
+                .site_scope(),
+            None
+        );
+    }
     use super::*;
     use panel_application::ContentHash;
     use panel_errors::Diagnostic;

@@ -714,6 +714,7 @@ mod composition_tests {
                     deadline: String::new(),
                     idempotency_key: String::new(),
                     schema_version: panel_contracts::PROTOCOL_VERSION.into(),
+                    site_scope: None,
                 }),
             }))
             .await
@@ -770,6 +771,7 @@ mod composition_tests {
                     deadline: String::new(),
                     idempotency_key: String::new(),
                     schema_version: panel_contracts::PROTOCOL_VERSION.into(),
+                    site_scope: None,
                 }),
             }))
             .await

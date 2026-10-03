@@ -177,6 +177,7 @@ fn context_with_policy(
         deadline: deadline.into(),
         idempotency_key: idempotency_key.into(),
         schema_version: panel_contracts::PROTOCOL_VERSION.into(),
+        site_scope: None,
     }
 }
 

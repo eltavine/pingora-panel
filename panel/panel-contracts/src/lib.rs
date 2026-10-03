@@ -176,6 +176,7 @@ mod tests {
             deadline: "2026-08-27T12:00:00Z".into(),
             idempotency_key: "idempotency-1".into(),
             schema_version: "v1".into(),
+            site_scope: None,
         };
         let decoded =
             common::v1::RequestContext::decode(original.encode_to_vec().as_slice()).unwrap();

@@ -126,6 +126,7 @@ impl CertificatePort for AutomationClient {
                 deadline: context.deadline().as_str().into(),
                 idempotency_key: context.idempotency_key().as_str().into(),
                 schema_version: PROTOCOL_VERSION.into(),
+                site_scope: None,
             }),
             operation: change.operation,
             resource: change.resource,
