@@ -1,10 +1,10 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use panel_errors::{PanelError, Result};
+use panel_event_contracts::automation::v1 as event;
 use panel_events::{
     Actor, AggregateId, AggregateRef, AggregateType, EventDraft, EventEnvelope, EventOrigin,
-    EventPayload, EventType, EventVersion, IdempotencyKey, Principal, RequestId, RequestScope,
-    ServiceName,
+    IdempotencyKey, Principal, RequestId, RequestScope, ServiceName,
 };
 use panel_jobs::{
     CancelOutcome, ClaimRequest, Enqueued, Finish, Job, JobError, JobId, JobKind, JobOrigin,
@@ -12,7 +12,6 @@ use panel_jobs::{
     Renewal, Schedule, ScheduleName, ScheduleStore,
 };
 use panel_postgres::{storage_error, PgOutbox, ServiceDatabase};
-use serde_json::json;
 use sqlx::{postgres::PgRow, PgConnection, PgPool, Row};
 use std::{str::FromStr, time::Duration};
 
@@ -47,6 +46,37 @@ pub struct PgJobStore {
 
 fn seconds(value: Duration) -> f64 {
     value.as_secs_f64()
+}
+
+/// What changed about a job; each change is an event type.
+#[derive(Clone, Copy)]
+enum Change {
+    Queued,
+    Started,
+    Progressed,
+    Succeeded,
+    Retrying,
+    Failed,
+    Cancelled,
+}
+
+/// A job as its events carry it.
+fn job_data(job: &Job) -> event::Job {
+    event::Job {
+        job_id: job.id.to_string(),
+        kind: job.kind.as_str().to_owned(),
+        state: job.state.as_str().to_owned(),
+        attempt: job.attempts,
+        max_attempts: job.max_attempts,
+        progress: job.progress.as_ref().map(|progress| event::Progress {
+            percent: u32::from(progress.percent()),
+            message: progress.message().to_owned(),
+        }),
+        error: job.last_error.as_ref().map(|error| event::JobError {
+            code: error.code.clone(),
+            message: error.message.clone(),
+        }),
+    }
 }
 
 fn count(value: u32) -> Result<i32> {
@@ -110,33 +140,27 @@ impl PgJobStore {
         }
     }
 
-    fn event(&self, job: &Job, change: &str) -> Result<EventEnvelope> {
-        let mut data = json!({
-            "job_id": job.id.to_string(),
-            "kind": job.kind.as_str(),
-            "state": job.state.as_str(),
-            "attempt": job.attempts,
-            "max_attempts": job.max_attempts,
-        });
-        if let Some(progress) = &job.progress {
-            data["progress"] =
-                json!({ "percent": progress.percent(), "message": progress.message() });
-        }
-        if let Some(error) = &job.last_error {
-            data["error"] = json!({ "code": error.code, "message": error.message });
-        }
+    fn event(&self, job: &Job, change: Change) -> Result<EventEnvelope> {
+        let aggregate = AggregateRef::new(
+            AggregateType::new("job")?,
+            AggregateId::new(job.id.to_string())?,
+        );
+        let job_data = Some(job_data(job));
+        let draft = match change {
+            Change::Queued => EventDraft::of(aggregate, &event::JobQueued { job: job_data }),
+            Change::Started => EventDraft::of(aggregate, &event::JobStarted { job: job_data }),
+            Change::Progressed => {
+                EventDraft::of(aggregate, &event::JobProgressed { job: job_data })
+            }
+            Change::Succeeded => EventDraft::of(aggregate, &event::JobSucceeded { job: job_data }),
+            Change::Retrying => EventDraft::of(aggregate, &event::JobRetrying { job: job_data }),
+            Change::Failed => EventDraft::of(aggregate, &event::JobFailed { job: job_data }),
+            Change::Cancelled => EventDraft::of(aggregate, &event::JobCancelled { job: job_data }),
+        }?;
         let scope = RequestScope::new(job.origin.causation_id.clone())
             .with_correlation_id(job.origin.correlation_id.clone());
         Ok(EventEnvelope::new(
-            EventDraft::new(
-                EventType::new(format!("automation.job.{change}"))?,
-                EventVersion::V1,
-                AggregateRef::new(
-                    AggregateType::new("job")?,
-                    AggregateId::new(job.id.to_string())?,
-                ),
-                EventPayload::json(&data)?,
-            ),
+            draft,
             EventOrigin::scoped(
                 self.producer.clone(),
                 &scope,
@@ -146,7 +170,12 @@ impl PgJobStore {
         ))
     }
 
-    async fn publish(&self, connection: &mut PgConnection, job: &Job, change: &str) -> Result<()> {
+    async fn publish(
+        &self,
+        connection: &mut PgConnection,
+        job: &Job,
+        change: Change,
+    ) -> Result<()> {
         PgOutbox::append(connection, &self.event(job, change)?).await
     }
 
@@ -175,7 +204,7 @@ impl PgJobStore {
         .map_err(storage_error)?;
         if let Some(row) = inserted {
             let job = job(&row)?;
-            self.publish(connection, &job, "queued").await?;
+            self.publish(connection, &job, Change::Queued).await?;
             return Ok(Enqueued {
                 job_id: job.id,
                 created: true,
@@ -233,9 +262,9 @@ impl JobStore for PgJobStore {
         for row in &settled {
             let job = job(row)?;
             let change = if job.state == JobState::Cancelled {
-                "cancelled"
+                Change::Cancelled
             } else {
-                "failed"
+                Change::Failed
             };
             self.publish(&mut transaction, &job, change).await?;
         }
@@ -265,7 +294,8 @@ impl JobStore for PgJobStore {
         let mut leases = Vec::with_capacity(claimed.len());
         for row in &claimed {
             let job = job(row)?;
-            self.publish(&mut transaction, &job, "started").await?;
+            self.publish(&mut transaction, &job, Change::Started)
+                .await?;
             let expires_at: DateTime<Utc> =
                 row.try_get("lease_expires_at").map_err(storage_error)?;
             leases.push(Lease {
@@ -319,7 +349,7 @@ impl JobStore for PgJobStore {
         let Some(row) = updated else {
             return Ok(false);
         };
-        self.publish(&mut transaction, &job(&row)?, "progressed")
+        self.publish(&mut transaction, &job(&row)?, Change::Progressed)
             .await?;
         transaction.commit().await.map_err(storage_error)?;
         Ok(true)
@@ -327,10 +357,10 @@ impl JobStore for PgJobStore {
 
     async fn finish(&self, lease: &Lease, finish: Finish) -> Result<bool> {
         let (state, change, run_after, error) = match &finish {
-            Finish::Succeeded => ("succeeded", "succeeded", None, None),
-            Finish::Cancelled => ("cancelled", "cancelled", None, None),
-            Finish::Retry { at, error } => ("retrying", "retrying", Some(*at), Some(error)),
-            Finish::Failed { error } => ("failed", "failed", None, Some(error)),
+            Finish::Succeeded => ("succeeded", Change::Succeeded, None, None),
+            Finish::Cancelled => ("cancelled", Change::Cancelled, None, None),
+            Finish::Retry { at, error } => ("retrying", Change::Retrying, Some(*at), Some(error)),
+            Finish::Failed { error } => ("failed", Change::Failed, None, Some(error)),
             _ => return Err(PanelError::unsupported_capability("unknown job outcome")),
         };
         let mut transaction = self.pool.begin().await.map_err(storage_error)?;
@@ -388,7 +418,7 @@ impl JobStore for PgJobStore {
                 .fetch_one(&mut *transaction)
                 .await
                 .map_err(storage_error)?;
-                self.publish(&mut transaction, &job(&row)?, "cancelled")
+                self.publish(&mut transaction, &job(&row)?, Change::Cancelled)
                     .await?;
                 CancelOutcome::Cancelled
             }

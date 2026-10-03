@@ -4,6 +4,7 @@
 use crate::{
     certificates::{Cause, CertificateInventory},
     dns::DnsProviders,
+    events::refused,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
@@ -16,7 +17,8 @@ use panel_certificates::{
     ACME_CHALLENGE_DIRECTORY,
 };
 use panel_errors::{PanelError, Result};
-use panel_events::{Actor, IdempotencyKey, Principal, RequestScope};
+use panel_event_contracts::tls::v1 as event;
+use panel_events::{Actor, EventData, IdempotencyKey, Principal, RequestScope};
 use panel_jobs::{
     Job, JobContext, JobHandler, JobKind, JobOrigin, JobSpec, JobStore, JobTemplate, Recurrence,
     Schedule, ScheduleName,
@@ -556,23 +558,22 @@ impl AcmeAutomation {
             self.publish(
                 &mut transaction,
                 cause,
-                "tls.acme.account.created",
                 (ACCOUNT, id.as_str()),
-                &json!({
-                    "id": created.id,
-                    "directory": created.directory,
-                    "url": created.url,
-                    "external_account_key_id": created.external_account_key_id,
-                }),
+                &event::AcmeAccountCreated {
+                    id: created.id.as_str().to_owned(),
+                    directory: created.directory.clone(),
+                    url: created.url.clone(),
+                    external_account_key_id: created.external_account_key_id.clone(),
+                },
             )
             .await?;
             transaction.commit().await.map_err(storage_error)?;
             Ok(created)
         }
         .await;
-        self.refused(
+        refused::<event::AcmeAccountRefused, _>(
+            &self.events,
             cause,
-            "tls.acme.account.refused",
             (ACCOUNT, id.as_str()),
             "create",
             result,
@@ -624,17 +625,19 @@ impl AcmeAutomation {
             self.publish(
                 &mut transaction,
                 cause,
-                "tls.acme.account.deleted",
                 (ACCOUNT, id.as_str()),
-                &json!({ "id": id, "directory": current.directory }),
+                &event::AcmeAccountDeleted {
+                    id: id.as_str().to_owned(),
+                    directory: current.directory,
+                },
             )
             .await?;
             transaction.commit().await.map_err(storage_error)
         }
         .await;
-        self.refused(
+        refused::<event::AcmeAccountRefused, _>(
+            &self.events,
             cause,
-            "tls.acme.account.refused",
             (ACCOUNT, id.as_str()),
             "delete",
             result,
@@ -732,15 +735,14 @@ impl AcmeAutomation {
             self.publish(
                 &mut transaction,
                 cause,
-                "tls.acme.certificate.created",
                 (AUTOMATIC, id.as_str()),
-                &json!({
-                    "id": id,
-                    "account": body.account,
-                    "names": names,
-                    "challenge": body.challenge,
-                    "dns_provider": body.dns_provider,
-                }),
+                &event::AcmeCertificateCreated {
+                    id: id.to_string(),
+                    account: body.account.as_str().to_owned(),
+                    names: names.clone(),
+                    challenge: body.challenge.as_str().to_owned(),
+                    dns_provider: body.dns_provider.clone(),
+                },
             )
             .await?;
             transaction.commit().await.map_err(storage_error)?;
@@ -748,9 +750,9 @@ impl AcmeAutomation {
             self.certificate(&id).await
         }
         .await;
-        self.refused(
+        refused::<event::AcmeCertificateRefused, _>(
+            &self.events,
             cause,
-            "tls.acme.certificate.refused",
             (AUTOMATIC, id.as_str()),
             "create",
             result,
@@ -781,9 +783,8 @@ impl AcmeAutomation {
             self.publish(
                 &mut transaction,
                 cause,
-                "tls.acme.certificate.renewal_requested",
                 (AUTOMATIC, id.as_str()),
-                &json!({ "id": id }),
+                &event::AcmeCertificateRenewalRequested { id: id.to_string() },
             )
             .await?;
             transaction.commit().await.map_err(storage_error)?;
@@ -791,9 +792,9 @@ impl AcmeAutomation {
             self.certificate(&id).await
         }
         .await;
-        self.refused(
+        refused::<event::AcmeCertificateRefused, _>(
+            &self.events,
             cause,
-            "tls.acme.certificate.refused",
             (AUTOMATIC, id.as_str()),
             "renew",
             result,
@@ -831,17 +832,16 @@ impl AcmeAutomation {
             self.publish(
                 &mut transaction,
                 cause,
-                "tls.acme.certificate.deleted",
                 (AUTOMATIC, id.as_str()),
-                &json!({ "id": id }),
+                &event::AcmeCertificateDeleted { id: id.to_string() },
             )
             .await?;
             transaction.commit().await.map_err(storage_error)
         }
         .await;
-        self.refused(
+        refused::<event::AcmeCertificateRefused, _>(
+            &self.events,
             cause,
-            "tls.acme.certificate.refused",
             (AUTOMATIC, id.as_str()),
             "delete",
             result,
@@ -944,16 +944,15 @@ impl AcmeAutomation {
                 self.publish(
                     &mut transaction,
                     cause,
-                    "tls.acme.certificate.failed",
                     (AUTOMATIC, id.as_str()),
-                    &json!({
-                        "id": id,
-                        "names": names,
-                        "failures": failures,
-                        "code": error.code.as_str(),
-                        "message": error.message,
-                        "next_attempt_at": next,
-                    }),
+                    &event::AcmeCertificateFailed {
+                        id: id.to_string(),
+                        names,
+                        failures,
+                        code: error.code.as_str().to_owned(),
+                        message: error.message.clone(),
+                        next_attempt_at: Some(next.into()),
+                    },
                 )
                 .await?;
                 transaction.commit().await.map_err(storage_error)?;
@@ -1149,50 +1148,17 @@ impl AcmeAutomation {
         Ok(())
     }
 
-    async fn publish<T: Serialize>(
+    async fn publish<E: EventData>(
         &self,
         connection: &mut PgConnection,
         cause: Cause<'_>,
-        event_type: &str,
         aggregate: (&str, &str),
-        data: &T,
+        data: &E,
     ) -> Result<()> {
-        let event = self.events.event_named_by(
-            event_type,
-            aggregate,
-            cause.scope,
-            cause.principal,
-            data,
-        )?;
+        let event = self
+            .events
+            .event_by(aggregate, cause.scope, cause.principal, data)?;
         PgOutbox::append(connection, &event).await
-    }
-
-    /// Records a refused change; what it changed is unchanged.
-    async fn refused<T>(
-        &self,
-        cause: Cause<'_>,
-        event_type: &str,
-        aggregate: (&str, &str),
-        operation: &str,
-        result: Result<T>,
-    ) -> Result<T> {
-        if let Err(error) = &result {
-            self.events
-                .record_named_by(
-                    event_type,
-                    aggregate,
-                    cause.scope,
-                    cause.principal,
-                    &json!({
-                        "id": aggregate.1,
-                        "operation": operation,
-                        "code": error.code.as_str(),
-                        "message": error.message,
-                    }),
-                )
-                .await;
-        }
-        result
     }
 }
 

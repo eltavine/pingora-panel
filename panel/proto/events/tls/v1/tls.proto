@@ -1,0 +1,151 @@
+syntax = "proto3";
+
+// The data of certificate events (ADR 0015, ADR 0016). Each message is the
+// data of one event type, named in its comment; events carry it as JSON in
+// the proto3 JSON mapping, with the field names below.
+package pingora.panel.events.tls.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// `tls.certificate.created`
+message CertificateCreated {
+  string id = 1;
+  // `uploaded`, `self_signed` or `acme`.
+  string source = 2;
+  repeated string names = 3;
+  google.protobuf.Timestamp not_after = 4;
+  // SHA-256 of the leaf certificate.
+  string fingerprint = 5;
+  uint64 version = 6;
+}
+
+// `tls.certificate.replaced`
+message CertificateReplaced {
+  string id = 1;
+  string source = 2;
+  repeated string names = 3;
+  google.protobuf.Timestamp not_after = 4;
+  string fingerprint = 5;
+  uint64 version = 6;
+  string previous_fingerprint = 7;
+}
+
+// `tls.certificate.deleted`
+message CertificateDeleted {
+  string id = 1;
+  string fingerprint = 2;
+}
+
+// `tls.certificate.expiring`: a reminder before a certificate expires.
+message CertificateExpiring {
+  string id = 1;
+  string source = 2;
+  google.protobuf.Timestamp not_after = 3;
+  uint32 within_days = 4;
+  bool expired = 5;
+}
+
+// `tls.certificate.refused`
+message CertificateRefused {
+  string id = 1;
+  // `upload`, `generate`, `replace` or `delete`.
+  string operation = 2;
+  string code = 3;
+  string message = 4;
+}
+
+// `tls.acme.account.created`
+message AcmeAccountCreated {
+  string id = 1;
+  string directory = 2;
+  // The account's URL at the CA.
+  string url = 3;
+  optional string external_account_key_id = 4;
+}
+
+// `tls.acme.account.deleted`
+message AcmeAccountDeleted {
+  string id = 1;
+  string directory = 2;
+}
+
+// `tls.acme.account.refused`
+message AcmeAccountRefused {
+  string id = 1;
+  string operation = 2;
+  string code = 3;
+  string message = 4;
+}
+
+// `tls.acme.certificate.created`
+message AcmeCertificateCreated {
+  string id = 1;
+  string account = 2;
+  repeated string names = 3;
+  // `http-01` or `dns-01`.
+  string challenge = 4;
+  optional string dns_provider = 5;
+}
+
+// `tls.acme.certificate.renewal_requested`
+message AcmeCertificateRenewalRequested {
+  string id = 1;
+}
+
+// `tls.acme.certificate.deleted`
+message AcmeCertificateDeleted {
+  string id = 1;
+}
+
+// `tls.acme.certificate.failed`: an issuance attempt failed and will be
+// tried again.
+message AcmeCertificateFailed {
+  string id = 1;
+  repeated string names = 2;
+  uint32 failures = 3;
+  string code = 4;
+  string message = 5;
+  google.protobuf.Timestamp next_attempt_at = 6;
+}
+
+// `tls.acme.certificate.refused`
+message AcmeCertificateRefused {
+  string id = 1;
+  string operation = 2;
+  string code = 3;
+  string message = 4;
+}
+
+// `tls.acme.dns_provider.created`
+message DnsProviderCreated {
+  string id = 1;
+  // Such as `rfc2136`.
+  string kind = 2;
+  string server = 3;
+  repeated string zones = 4;
+  string key_name = 5;
+  uint64 version = 6;
+}
+
+// `tls.acme.dns_provider.updated`
+message DnsProviderUpdated {
+  string id = 1;
+  string kind = 2;
+  string server = 3;
+  repeated string zones = 4;
+  string key_name = 5;
+  uint64 version = 6;
+}
+
+// `tls.acme.dns_provider.deleted`
+message DnsProviderDeleted {
+  string id = 1;
+}
+
+// `tls.acme.dns_provider.refused`
+message DnsProviderRefused {
+  string id = 1;
+  string operation = 2;
+  string code = 3;
+  string message = 4;
+}

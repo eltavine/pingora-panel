@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+// The data of job events (ADR 0008): every change of a job carries the job
+// as it is after the change. Each message is the data of one event type,
+// named in its comment; events carry it as JSON in the proto3 JSON mapping,
+// with the field names below.
+package pingora.panel.events.automation.v1;
+
+// How far a running job got.
+message Progress {
+  uint32 percent = 1;
+  string message = 2;
+}
+
+// Why the last attempt failed.
+message JobError {
+  string code = 1;
+  string message = 2;
+}
+
+// A job after a change.
+message Job {
+  string job_id = 1;
+  string kind = 2;
+  // Such as `queued`, `running`, `retrying`, `succeeded`, `failed` or
+  // `cancelled`.
+  string state = 3;
+  uint32 attempt = 4;
+  uint32 max_attempts = 5;
+  Progress progress = 6;
+  JobError error = 7;
+}
+
+// `automation.job.queued`
+message JobQueued {
+  Job job = 1;
+}
+
+// `automation.job.started`
+message JobStarted {
+  Job job = 1;
+}
+
+// `automation.job.progressed`
+message JobProgressed {
+  Job job = 1;
+}
+
+// `automation.job.succeeded`
+message JobSucceeded {
+  Job job = 1;
+}
+
+// `automation.job.retrying`
+message JobRetrying {
+  Job job = 1;
+}
+
+// `automation.job.failed`
+message JobFailed {
+  Job job = 1;
+}
+
+// `automation.job.cancelled`
+message JobCancelled {
+  Job job = 1;
+}

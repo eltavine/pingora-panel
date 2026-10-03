@@ -16,6 +16,7 @@ panel-certificates.workspace = true
 panel-contracts.workspace = true
 panel-control-runtime.workspace = true
 panel-errors.workspace = true
+panel-event-contracts.workspace = true
 panel-events.workspace = true
 panel-jobs.workspace = true
 panel-platform.workspace = true

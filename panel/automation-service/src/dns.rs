@@ -2,20 +2,45 @@
 //! Their settings are public; their secrets are sealed with the master keys
 //! and never returned.
 
-use crate::{acme::slug, certificates::Cause};
+use crate::{acme::slug, certificates::Cause, events::refused};
 use chrono::{DateTime, Utc};
 use dns_rfc2136::{Algorithm, Rfc2136, Rfc2136Settings};
 use panel_acme::{Dns01, DnsProvider};
 use panel_errors::{PanelError, Result};
+use panel_event_contracts::tls::v1 as event;
+use panel_events::EventData;
 use panel_postgres::{storage_error, EventLog, PgOutbox, ServiceDatabase};
 use panel_secrets::{Sealed, SecretVault};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use sqlx::{postgres::PgRow, PgConnection, PgPool, Row};
 use std::{sync::Arc, time::Duration};
 use zeroize::Zeroizing;
 
 const AGGREGATE: &str = "dns_provider";
+
+fn provider_created(provider: &DnsProviderRecord) -> event::DnsProviderCreated {
+    event::DnsProviderCreated {
+        id: provider.id.clone(),
+        kind: provider.kind.clone(),
+        server: provider.rfc2136.server.clone(),
+        zones: provider.rfc2136.zones.clone(),
+        key_name: provider.rfc2136.key_name.clone(),
+        version: provider.version,
+    }
+}
+
+fn provider_updated(provider: &DnsProviderRecord) -> event::DnsProviderUpdated {
+    let created = provider_created(provider);
+    event::DnsProviderUpdated {
+        id: created.id,
+        kind: created.kind,
+        server: created.server,
+        zones: created.zones,
+        key_name: created.key_name,
+        version: created.version,
+    }
+}
 const MAX_PROPAGATION_SECONDS: u32 = 3600;
 
 fn default_propagation() -> u32 {
@@ -254,7 +279,7 @@ impl DnsProviders {
                 created_at: now,
                 updated_at: now,
             };
-            self.publish(&mut transaction, cause, "tls.acme.dns_provider.created", &created)
+            self.publish(&mut transaction, cause, &created.id, &provider_created(&created))
                 .await?;
             transaction.commit().await.map_err(storage_error)?;
             Ok(created)
@@ -331,8 +356,8 @@ impl DnsProviders {
             self.publish(
                 &mut transaction,
                 cause,
-                "tls.acme.dns_provider.updated",
-                &updated,
+                &updated.id,
+                &provider_updated(&updated),
             )
             .await?;
             transaction.commit().await.map_err(storage_error)?;
@@ -380,14 +405,13 @@ impl DnsProviders {
                 .execute(&mut *transaction)
                 .await
                 .map_err(storage_error)?;
-            let event = self.events.event_named_by(
-                "tls.acme.dns_provider.deleted",
-                (AGGREGATE, id),
-                cause.scope,
-                cause.principal,
-                &json!({ "id": id }),
-            )?;
-            PgOutbox::append(&mut transaction, &event).await?;
+            self.publish(
+                &mut transaction,
+                cause,
+                id,
+                &event::DnsProviderDeleted { id: id.to_owned() },
+            )
+            .await?;
             transaction.commit().await.map_err(storage_error)
         }
         .await;
@@ -423,27 +447,16 @@ impl DnsProviders {
         ))
     }
 
-    async fn publish(
+    async fn publish<E: EventData>(
         &self,
         connection: &mut PgConnection,
         cause: Cause<'_>,
-        event_type: &str,
-        provider: &DnsProviderRecord,
+        id: &str,
+        data: &E,
     ) -> Result<()> {
-        let event = self.events.event_named_by(
-            event_type,
-            (AGGREGATE, &provider.id),
-            cause.scope,
-            cause.principal,
-            &json!({
-                "id": provider.id,
-                "kind": provider.kind,
-                "server": provider.rfc2136.server,
-                "zones": provider.rfc2136.zones,
-                "key_name": provider.rfc2136.key_name,
-                "version": provider.version,
-            }),
-        )?;
+        let event = self
+            .events
+            .event_by((AGGREGATE, id), cause.scope, cause.principal, data)?;
         PgOutbox::append(connection, &event).await
     }
 
@@ -454,22 +467,13 @@ impl DnsProviders {
         operation: &str,
         result: Result<T>,
     ) -> Result<T> {
-        if let Err(error) = &result {
-            self.events
-                .record_named_by(
-                    "tls.acme.dns_provider.refused",
-                    (AGGREGATE, id),
-                    cause.scope,
-                    cause.principal,
-                    &json!({
-                        "id": id,
-                        "operation": operation,
-                        "code": error.code.as_str(),
-                        "message": error.message,
-                    }),
-                )
-                .await;
-        }
-        result
+        refused::<event::DnsProviderRefused, _>(
+            &self.events,
+            cause,
+            (AGGREGATE, id),
+            operation,
+            result,
+        )
+        .await
     }
 }

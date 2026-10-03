@@ -16,6 +16,7 @@ mod certificate_api;
 mod certificates;
 mod delivery;
 mod dns;
+mod events;
 mod jobs;
 
 pub use acme::{

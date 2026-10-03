@@ -1,17 +1,20 @@
 //! The certificate inventory.
 
-use crate::delivery::{Delivery, SecretDirectory};
+use crate::{
+    delivery::{Delivery, SecretDirectory},
+    events::refused,
+};
 use chrono::{DateTime, Duration, Utc};
 use panel_certificates::{
     accept, self_signed, Accepted, Certificate, CertificateDetails, CertificateId,
     CertificateSource,
 };
 use panel_errors::{PanelError, Result};
-use panel_events::{Principal, RequestScope};
+use panel_event_contracts::tls::v1 as event;
+use panel_events::{EventData, Principal, RequestScope};
 use panel_postgres::{storage_error, EventLog, PgOutbox, ServiceDatabase};
 use panel_secrets::{Sealed, SecretVault};
-use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::Value;
 use sqlx::{postgres::PgRow, PgConnection, PgPool, Row};
 use std::sync::Arc;
 use zeroize::Zeroizing;
@@ -103,14 +106,14 @@ fn source_name(source: CertificateSource) -> Result<String> {
     }
 }
 
-fn summary(certificate: &Certificate) -> Value {
-    json!({
-        "id": certificate.id,
-        "source": certificate.source,
-        "names": certificate.details.names,
-        "not_after": certificate.details.not_after,
-        "fingerprint": certificate.details.fingerprint,
-        "version": certificate.version,
+fn created(certificate: &Certificate) -> Result<event::CertificateCreated> {
+    Ok(event::CertificateCreated {
+        id: certificate.id.to_string(),
+        source: source_name(certificate.source)?,
+        names: certificate.details.names.clone(),
+        not_after: Some(certificate.details.not_after.into()),
+        fingerprint: certificate.details.fingerprint.clone(),
+        version: certificate.version,
     })
 }
 
@@ -310,15 +313,14 @@ impl CertificateInventory {
             self.publish(
                 &mut transaction,
                 cause,
-                "tls.certificate.expiring",
                 &id,
-                &json!({
-                    "id": id,
-                    "source": source,
-                    "not_after": not_after,
-                    "within_days": days,
-                    "expired": days == 0,
-                }),
+                &event::CertificateExpiring {
+                    id: id.to_string(),
+                    source,
+                    not_after: Some(not_after.into()),
+                    within_days: u32::try_from(days).unwrap_or(0),
+                    expired: days == 0,
+                },
             )
             .await?;
             transaction.commit().await.map_err(storage_error)?;
@@ -342,12 +344,13 @@ impl CertificateInventory {
                 .execute(&mut *transaction)
                 .await
                 .map_err(storage_error)?;
-            self.publish(
-                &mut transaction,
+            self.publish(&mut transaction,
                 cause,
-                "tls.certificate.deleted",
                 &id,
-                &json!({ "id": id, "fingerprint": current.details.fingerprint }),
+                &event::CertificateDeleted {
+                    id: id.to_string(),
+                    fingerprint: current.details.fingerprint.clone(),
+                },
             )
             .await?;
             transaction.commit().await.map_err(storage_error)?;
@@ -409,9 +412,8 @@ impl CertificateInventory {
         self.publish(
             &mut transaction,
             cause,
-            "tls.certificate.created",
             &certificate.id,
-            &summary(&certificate),
+            &created(&certificate)?,
         )
         .await?;
         transaction.commit().await.map_err(storage_error)?;
@@ -462,16 +464,17 @@ impl CertificateInventory {
         .execute(&mut *transaction)
         .await
         .map_err(storage_error)?;
-        let mut data = summary(&certificate);
-        data["previous_fingerprint"] = json!(current.details.fingerprint);
-        self.publish(
-            &mut transaction,
-            cause,
-            "tls.certificate.replaced",
-            id,
-            &data,
-        )
-        .await?;
+        let summary = created(&certificate)?;
+        let data = event::CertificateReplaced {
+            id: summary.id,
+            source: summary.source,
+            names: summary.names,
+            not_after: summary.not_after,
+            fingerprint: summary.fingerprint,
+            version: summary.version,
+            previous_fingerprint: current.details.fingerprint.clone(),
+        };
+        self.publish(&mut transaction, cause, id, &data).await?;
         transaction.commit().await.map_err(storage_error)?;
         self.deliver(&certificate, accepted.key).await;
         Ok(certificate)
@@ -492,25 +495,19 @@ impl CertificateInventory {
         .ok_or_else(|| PanelError::not_found(format!("there is no certificate {id}")))
     }
 
-    async fn publish<T: Serialize>(
+    async fn publish<E: EventData>(
         &self,
         connection: &mut PgConnection,
         cause: Cause<'_>,
-        event_type: &str,
         id: &CertificateId,
-        data: &T,
+        data: &E,
     ) -> Result<()> {
-        let event = self.events.event_named_by(
-            event_type,
-            (AGGREGATE, id.as_str()),
-            cause.scope,
-            cause.principal,
-            data,
-        )?;
+        let event =
+            self.events
+                .event_by((AGGREGATE, id.as_str()), cause.scope, cause.principal, data)?;
         PgOutbox::append(connection, &event).await
     }
 
-    /// Records a refused change; what it changed is unchanged.
     async fn refused<T>(
         &self,
         cause: Cause<'_>,
@@ -518,23 +515,14 @@ impl CertificateInventory {
         id: &CertificateId,
         result: Result<T>,
     ) -> Result<T> {
-        if let Err(error) = &result {
-            self.events
-                .record_named_by(
-                    "tls.certificate.refused",
-                    (AGGREGATE, id.as_str()),
-                    cause.scope,
-                    cause.principal,
-                    &json!({
-                        "id": id,
-                        "operation": operation,
-                        "code": error.code.as_str(),
-                        "message": error.message,
-                    }),
-                )
-                .await;
-        }
-        result
+        refused::<event::CertificateRefused, _>(
+            &self.events,
+            cause,
+            (AGGREGATE, id.as_str()),
+            operation,
+            result,
+        )
+        .await
     }
 
     /// Delivers a committed change; a failure leaves it to the next

@@ -23,9 +23,11 @@ macro_rules! packages {
 }
 
 packages! {
+    automation => "pingora.panel.events.automation.v1",
     config => "pingora.panel.events.config.v1",
     gateway => "pingora.panel.events.gateway.v1",
     identity => "pingora.panel.events.identity.v1",
+    tls => "pingora.panel.events.tls.v1",
 }
 
 macro_rules! event_types {
@@ -49,6 +51,13 @@ macro_rules! event_types {
 }
 
 event_types! {
+    automation::v1::JobQueued => "automation.job.queued",
+    automation::v1::JobStarted => "automation.job.started",
+    automation::v1::JobProgressed => "automation.job.progressed",
+    automation::v1::JobSucceeded => "automation.job.succeeded",
+    automation::v1::JobRetrying => "automation.job.retrying",
+    automation::v1::JobFailed => "automation.job.failed",
+    automation::v1::JobCancelled => "automation.job.cancelled",
     config::v1::DraftChanged => "config.draft.changed",
     config::v1::DraftApplied => "config.draft.applied",
     config::v1::ApplyChecked => "config.apply.checked",
@@ -93,6 +102,23 @@ event_types! {
     identity::v1::WorkloadTrustCreated => "identity.workload_trust.created",
     identity::v1::WorkloadTrustUpdated => "identity.workload_trust.updated",
     identity::v1::WorkloadTrustDeleted => "identity.workload_trust.deleted",
+    tls::v1::CertificateCreated => "tls.certificate.created",
+    tls::v1::CertificateReplaced => "tls.certificate.replaced",
+    tls::v1::CertificateDeleted => "tls.certificate.deleted",
+    tls::v1::CertificateExpiring => "tls.certificate.expiring",
+    tls::v1::CertificateRefused => "tls.certificate.refused",
+    tls::v1::AcmeAccountCreated => "tls.acme.account.created",
+    tls::v1::AcmeAccountDeleted => "tls.acme.account.deleted",
+    tls::v1::AcmeAccountRefused => "tls.acme.account.refused",
+    tls::v1::AcmeCertificateCreated => "tls.acme.certificate.created",
+    tls::v1::AcmeCertificateRenewalRequested => "tls.acme.certificate.renewal_requested",
+    tls::v1::AcmeCertificateDeleted => "tls.acme.certificate.deleted",
+    tls::v1::AcmeCertificateFailed => "tls.acme.certificate.failed",
+    tls::v1::AcmeCertificateRefused => "tls.acme.certificate.refused",
+    tls::v1::DnsProviderCreated => "tls.acme.dns_provider.created",
+    tls::v1::DnsProviderUpdated => "tls.acme.dns_provider.updated",
+    tls::v1::DnsProviderDeleted => "tls.acme.dns_provider.deleted",
+    tls::v1::DnsProviderRefused => "tls.acme.dns_provider.refused",
 }
 
 #[cfg(test)]

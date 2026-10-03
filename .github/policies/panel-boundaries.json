@@ -35,6 +35,7 @@
         "panel-contracts",
         "panel-control-runtime",
         "panel-errors",
+        "panel-event-contracts",
         "panel-events",
         "panel-jobs",
         "panel-platform",
