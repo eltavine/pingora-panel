@@ -723,3 +723,74 @@ test('workload identities let programs act as service accounts', async ({ page }
     enabled: true,
   })
 })
+
+test('accounts are granted roles for a site group under conditions', async ({ page }) => {
+  await setUp(page)
+  await signIn(page)
+  const changes: Request[] = []
+  let granted: object[] = []
+  await page.route('**/api/v1/roles', (route) =>
+    route.fulfill({
+      json: [
+        ...roles,
+        {
+          id: 'operator',
+          name: 'Operator',
+          description: '',
+          permissions: ['config.write'],
+          built_in: true,
+        },
+      ],
+    }),
+  )
+  await page.route('**/api/v1/accounts', (route) => route.fulfill({ json: [viewer] }))
+  await page.route(`**/api/v1/accounts/${viewer.id}/sessions`, (route) =>
+    route.fulfill({ json: [] }),
+  )
+  await page.route(`**/api/v1/accounts/${viewer.id}/tokens`, (route) => route.fulfill({ json: [] }))
+  await page.route(`**/api/v1/accounts/${viewer.id}/grants`, (route) => {
+    if (route.request().method() === 'POST') {
+      changes.push(route.request())
+      const grant = {
+        id: 'g-1',
+        ...route.request().postDataJSON(),
+        created_at: '2026-10-03T00:00:00Z',
+        created_by: 'root',
+      }
+      granted = [grant]
+      return route.fulfill({ status: 201, json: grant })
+    }
+    return route.fulfill({ json: granted })
+  })
+  await page.route(`**/api/v1/accounts/${viewer.id}/grants/g-1`, (route) => {
+    changes.push(route.request())
+    granted = []
+    return route.fulfill({ status: 204 })
+  })
+
+  await page.goto('/accounts')
+  await page
+    .getByRole('row', { name: /watcher/ })
+    .getByRole('button', { name: 'Actions' })
+    .click()
+  await page.getByRole('menuitem', { name: 'Sessions and tokens' }).click()
+  const sheet = page.getByRole('dialog')
+  await expect(sheet.getByText('No grants besides the account’s roles.')).toBeVisible()
+  await sheet.getByRole('button', { name: 'Add grant' }).click()
+  await sheet.getByRole('combobox', { name: 'Role' }).click()
+  await page.getByRole('option', { name: 'Operator' }).click()
+  await sheet.getByLabel('Site group name').fill('shop')
+  await sheet.getByLabel('From networks (optional)').fill('10.0.0.0/8')
+  await sheet.getByRole('button', { name: 'Grant', exact: true }).click()
+  await expect(page.getByText('Grant added')).toBeVisible()
+  expect(changes[0]!.postDataJSON()).toEqual({
+    role: 'operator',
+    scope: { kind: 'site_group', group: 'shop' },
+    conditions: { not_after: null, networks: ['10.0.0.0/8'], windows: [] },
+  })
+  await expect(sheet.getByText('site group shop')).toBeVisible()
+  await expect(sheet.getByText('from 10.0.0.0/8')).toBeVisible()
+  await sheet.getByRole('button', { name: 'Revoke grant' }).click()
+  await expect(page.getByText('Grant revoked')).toBeVisible()
+  expect(changes[1]!.method()).toBe('DELETE')
+})

@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
 import { notifyFailure } from '@/lib/configuration'
+import GrantsSection from './GrantsSection.vue'
 import SessionTable from './SessionTable.vue'
 import TokenTable from './TokenTable.vue'
 
@@ -128,6 +129,7 @@ function revoke(token: TokenView) {
           />
           <p v-else class="text-muted-foreground text-sm">{{ t('account.noTokens') }}</p>
         </section>
+        <GrantsSection :account="account" :can-manage="canManage" />
       </div>
     </SheetContent>
   </Sheet>
