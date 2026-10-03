@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { Waypoints } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
@@ -14,16 +15,27 @@ import {
   SidebarRail,
 } from '@/components/ui/sidebar'
 import { features, navigationGroups } from '@/features'
+import { useSession } from '@/lib/session'
 
 const { t } = useI18n()
 const route = useRoute()
+const { can } = useSession()
 
-const groups = navigationGroups.map((group) => ({
-  ...group,
-  items: features
-    .filter((feature) => feature.group === group.id)
-    .flatMap((feature) => feature.navigation),
-}))
+const groups = computed(() =>
+  navigationGroups
+    .map((group) => ({
+      ...group,
+      items: features
+        .filter((feature) => feature.group === group.id)
+        .flatMap((feature) =>
+          feature.navigation.filter((item) => {
+            const permission = item.permission ?? feature.permission
+            return !permission || can(permission)
+          }),
+        ),
+    }))
+    .filter((group) => group.items.length > 0),
+)
 
 function isActive(to: string) {
   return to === '/' ? route.path === '/' : route.path.startsWith(to)

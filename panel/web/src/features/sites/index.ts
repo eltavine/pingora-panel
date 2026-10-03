@@ -4,6 +4,7 @@ import type { FeatureModule } from '@/features/types'
 export const sitesFeature: FeatureModule = {
   id: 'sites',
   group: 'configure',
+  permission: 'config.read',
   routes: [
     {
       path: 'sites',

@@ -4,6 +4,7 @@ import type { FeatureModule } from '@/features/types'
 export const listenersFeature: FeatureModule = {
   id: 'listeners',
   group: 'configure',
+  permission: 'config.read',
   routes: [
     {
       path: 'listeners',

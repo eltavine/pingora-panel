@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Request } from '@playwright/test'
+import { signIn } from './support'
 
 const SITE_ID = '0b9d6c52-2f47-4d0e-9a1b-6f3c2d1e0a01'
 const UPSTREAM_ID = '7e1f0c3a-5b2d-4c8e-9f60-1a2b3c4d5e6f'
@@ -84,6 +85,7 @@ async function mockConfiguration(page: Page, pending = false) {
 }
 
 test.beforeEach(async ({ page }) => {
+  await signIn(page)
   await useEnglish(page)
   await page.addInitScript(() => {
     const violations: string[] = []

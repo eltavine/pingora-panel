@@ -8,9 +8,11 @@ export interface NavigationItem {
   title: string
   icon: Component
   to: string
+  /** Shown only to accounts with this permission; the feature's by default. */
+  permission?: string
 }
 
-export type NavigationGroup = 'operate' | 'configure'
+export type NavigationGroup = 'operate' | 'configure' | 'administer'
 
 /**
  * A self-contained console feature. The shell renders whatever features
@@ -19,6 +21,8 @@ export type NavigationGroup = 'operate' | 'configure'
 export interface FeatureModule {
   id: string
   group: NavigationGroup
+  /** The API permission its pages need; a route's `meta.permission` overrides it. */
+  permission?: string
   routes: RouteRecordRaw[]
   navigation: NavigationItem[]
 }

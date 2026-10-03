@@ -13,6 +13,7 @@ import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/s
 import DraftStatus from '@/components/DraftStatus.vue'
 import AppSidebar from './AppSidebar.vue'
 import PreferencesMenu from './PreferencesMenu.vue'
+import UserMenu from './UserMenu.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -42,6 +43,7 @@ const title = computed(() =>
         </Breadcrumb>
         <DraftStatus />
         <PreferencesMenu />
+        <UserMenu />
       </header>
       <main class="mx-auto w-full max-w-6xl flex-1 p-4 md:p-6">
         <RouterView />

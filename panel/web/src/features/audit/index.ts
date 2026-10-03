@@ -4,6 +4,7 @@ import type { FeatureModule } from '@/features/types'
 export const auditFeature: FeatureModule = {
   id: 'audit',
   group: 'operate',
+  permission: 'audit.read',
   routes: [
     {
       path: 'audit',

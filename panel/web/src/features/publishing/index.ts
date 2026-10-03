@@ -4,6 +4,7 @@ import type { FeatureModule } from '@/features/types'
 export const publishingFeature: FeatureModule = {
   id: 'publishing',
   group: 'operate',
+  permission: 'gateway.publish',
   routes: [
     {
       path: 'publish',

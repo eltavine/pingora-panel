@@ -4,6 +4,7 @@ import type { FeatureModule } from '@/features/types'
 export const upstreamsFeature: FeatureModule = {
   id: 'upstreams',
   group: 'configure',
+  permission: 'config.read',
   routes: [
     {
       path: 'upstreams',

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { signIn } from './support'
 
 function auditEvent(sequence: number, event_type: string, data: Record<string, unknown>) {
   return {
@@ -36,6 +37,7 @@ const events = [
 ]
 
 async function setUp(page: Page) {
+  await signIn(page)
   await page.addInitScript(() => {
     window.localStorage.setItem('pingora-panel.locale', 'en')
     const violations: string[] = []

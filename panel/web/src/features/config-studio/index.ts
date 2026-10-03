@@ -4,6 +4,7 @@ import type { FeatureModule } from '@/features/types'
 export const configStudioFeature: FeatureModule = {
   id: 'config-studio',
   group: 'configure',
+  permission: 'config.read',
   routes: [
     {
       path: 'config',

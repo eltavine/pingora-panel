@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page, type Request } from '@playwright/test'
+import { signIn } from './support'
 
 const MAIN = `language_version 1;
 
@@ -108,6 +109,7 @@ async function mockDraft(page: Page) {
 }
 
 test.beforeEach(async ({ page }) => {
+  await signIn(page)
   await useEnglish(page)
   await page.addInitScript(() => {
     const violations: string[] = []

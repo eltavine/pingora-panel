@@ -4,6 +4,7 @@ import type { FeatureModule } from '@/features/types'
 export const revisionsFeature: FeatureModule = {
   id: 'revisions',
   group: 'operate',
+  permission: 'config.read',
   routes: [
     {
       path: 'revisions',

@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Request } from '@playwright/test'
+import { signIn } from './support'
 
 const ACTIVE_HASH = 'a'.repeat(64)
 const NEXT_HASH = 'b'.repeat(64)
@@ -29,6 +30,7 @@ async function expectNoHorizontalOverflow(page: Page) {
 }
 
 test.beforeEach(async ({ page }) => {
+  await signIn(page)
   await useEnglish(page)
   // The preview server sends the production Content Security Policy; any
   // violation means the console would break when served by the API.
