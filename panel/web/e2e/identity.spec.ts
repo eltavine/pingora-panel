@@ -391,3 +391,119 @@ test('tokens rotate and other sessions end from the account settings', async ({ 
   expect(requests.map((request) => request.method())).toEqual(['DELETE', 'POST'])
   expect(requests.every((request) => request.headers()['x-csrf-token'] === CSRF_TOKEN)).toBe(true)
 })
+
+test('the sign-in page offers identity providers and explains their failures', async ({ page }) => {
+  await setUp(page)
+  await page.route('**/api/v1/session', (route) =>
+    route.fulfill(problem(401, 'UNAUTHENTICATED', 'log in or present an API token')),
+  )
+  await page.route('**/api/v1/setup', (route) => route.fulfill({ json: { required: false } }))
+  await page.route('**/api/v1/auth/providers', (route) =>
+    route.fulfill({ json: [{ id: 'corp', display_name: 'Corporate' }] }),
+  )
+
+  await page.goto('/login?next=/sites&sign_in_error=conflict')
+  await expect(page.getByRole('alert')).toContainText('A local account already has your username')
+  await expect(page.getByRole('link', { name: 'Continue with Corporate' })).toHaveAttribute(
+    'href',
+    '/api/v1/auth/oidc/corp/start?return_to=%2Fsites',
+  )
+
+  await page.goto('/login?sign_in_error=Call%20this%20number')
+  await expect(page.getByRole('alert')).toContainText(
+    'Signing in through the identity provider failed',
+  )
+  await expect(page.getByText('Call this number')).toHaveCount(0)
+})
+
+test('administrators connect identity providers', async ({ page }) => {
+  await setUp(page)
+  await signIn(page)
+  const changes: Request[] = []
+  const corp = {
+    id: 'corp',
+    display_name: 'Corporate',
+    issuer: 'https://id.example',
+    client_id: 'panel',
+    has_client_secret: true,
+    scopes: ['profile', 'email'],
+    claims: {
+      username: 'preferred_username',
+      display_name: 'name',
+      email: 'email',
+      groups: 'groups',
+    },
+    group_roles: [{ group: 'ops', role: 'viewer' }],
+    create_accounts: true,
+    enabled: true,
+    created_at: '2026-10-03T00:00:00.000Z',
+    updated_at: '2026-10-03T00:00:00.000Z',
+  }
+  await page.route('**/api/v1/roles', (route) => route.fulfill({ json: roles }))
+  await page.route('**/api/v1/identity-providers', (route) => route.fulfill({ json: [corp] }))
+  await page.route('**/api/v1/identity-providers/*', (route) => {
+    changes.push(route.request())
+    if (route.request().method() === 'DELETE') {
+      return route.fulfill({ status: 204 })
+    }
+    const body = route.request().postDataJSON()
+    const id = new URL(route.request().url()).pathname.split('/').pop()
+    return route.fulfill({
+      status: id === 'corp' ? 200 : 201,
+      json: { ...corp, ...body, id, has_client_secret: body.client_secret !== null },
+    })
+  })
+
+  await page.goto('/identity-providers')
+  await expect(page.getByRole('heading', { name: 'Sign-in providers' })).toBeVisible()
+  const row = page.getByRole('row', { name: /Corporate/ })
+  await expect(row.getByText('Creates accounts')).toBeVisible()
+  await expect(row.getByText('ops → viewer')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Add provider' }).click()
+  const sheet = page.getByRole('dialog')
+  await sheet.getByLabel('Identifier').fill('okta')
+  await sheet.getByLabel('Name', { exact: true }).fill('Okta')
+  await sheet.getByLabel('Issuer URL').fill('https://example.okta.com')
+  await expect(sheet.getByText(/\/api\/v1\/auth\/oidc\/okta\/callback$/)).toBeVisible()
+  await sheet.getByLabel('Client ID').fill('panel')
+  await sheet.getByLabel('Client secret', { exact: true }).fill('s3cret')
+  await sheet.getByRole('button', { name: 'Add mapping' }).click()
+  await sheet.getByLabel('Group', { exact: true }).fill('admins')
+  await sheet.getByRole('combobox', { name: 'Role' }).click()
+  await page.getByRole('option', { name: 'Administrator' }).click()
+  await sheet.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByText('Saved the provider Okta')).toBeVisible()
+  expect(new URL(changes[0]!.url()).pathname).toBe('/api/v1/identity-providers/okta')
+  expect(changes[0]!.postDataJSON()).toEqual({
+    display_name: 'Okta',
+    issuer: 'https://example.okta.com',
+    client_id: 'panel',
+    client_secret: 's3cret',
+    scopes: ['profile', 'email'],
+    claims: {
+      username: 'preferred_username',
+      display_name: 'name',
+      email: 'email',
+      groups: 'groups',
+    },
+    group_roles: [{ group: 'admins', role: 'administrator' }],
+    create_accounts: false,
+    enabled: true,
+  })
+  expect(changes[0]!.headers()['x-csrf-token']).toBe(CSRF_TOKEN)
+
+  await row.getByRole('button', { name: 'Edit' }).click()
+  await expect(sheet.getByText('Leave empty to keep the current secret.')).toBeVisible()
+  await sheet.getByRole('switch', { name: 'Enabled' }).click()
+  await sheet.getByRole('button', { name: 'Save' }).click()
+  await expect(page.getByText('Saved the provider Corporate')).toBeVisible()
+  const edited = changes[1]!.postDataJSON()
+  expect(edited.enabled).toBe(false)
+  expect('client_secret' in edited).toBe(false)
+
+  await row.getByRole('button', { name: 'Delete' }).click()
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click()
+  await expect(page.getByText('Provider deleted')).toBeVisible()
+  expect(changes[2]!.method()).toBe('DELETE')
+})

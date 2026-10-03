@@ -1,27 +1,42 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { CircleAlert, LogIn } from '@lucide/vue'
+import { computed, ref } from 'vue'
+import { useQuery } from '@tanstack/vue-query'
+import { CircleAlert, Fingerprint, LogIn } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { login } from '@/api/generated'
+import { signInOptionsOptions } from '@/api/generated/@tanstack/vue-query.gen'
 import FormField from '@/components/FormField.vue'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Separator } from '@/components/ui/separator'
 import { Spinner } from '@/components/ui/spinner'
 import { adoptSession } from '@/lib/session'
 import AuthCard from './AuthCard.vue'
 import { signInProblem } from './failures'
 import PasswordInput from './PasswordInput.vue'
 import { returnPath } from './presentation'
+import { startUrl } from './providers'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const username = ref('')
 const password = ref('')
 const busy = ref(false)
 const problem = ref<string>()
+const providers = useQuery({ ...signInOptionsOptions(), retry: false })
+const next = computed(() => returnPath(route.query.next))
+/** Why signing in through a provider failed, in the console's own words. */
+const providerProblem = computed(() => {
+  const code = route.query.sign_in_error
+  if (typeof code !== 'string') {
+    return undefined
+  }
+  const key = `auth.providerErrors.${code}`
+  return te(key) ? t(key) : t('auth.providerErrors.default')
+})
 
 async function submit() {
   busy.value = true
@@ -32,7 +47,7 @@ async function submit() {
       throwOnError: true,
     })
     adoptSession(data)
-    await router.replace(returnPath(route.query.next))
+    await router.replace(next.value)
   } catch (error) {
     problem.value = signInProblem(error, t)
     password.value = ''
@@ -45,9 +60,9 @@ async function submit() {
 <template>
   <AuthCard :title="t('auth.title')" :description="t('auth.subtitle')">
     <form class="flex flex-col gap-4" @submit.prevent="submit">
-      <Alert v-if="problem" variant="destructive" role="alert">
+      <Alert v-if="problem ?? providerProblem" variant="destructive" role="alert">
         <CircleAlert aria-hidden="true" />
-        <AlertDescription>{{ problem }}</AlertDescription>
+        <AlertDescription>{{ problem ?? providerProblem }}</AlertDescription>
       </Alert>
       <FormField id="login-username" :label="t('auth.username')">
         <Input
@@ -68,6 +83,24 @@ async function submit() {
         <LogIn v-else data-icon="inline-start" aria-hidden="true" />
         {{ t('auth.submit') }}
       </Button>
+      <template v-if="providers.data.value?.length">
+        <div class="text-muted-foreground flex items-center gap-3 text-xs">
+          <Separator class="flex-1" />
+          {{ t('auth.or') }}
+          <Separator class="flex-1" />
+        </div>
+        <Button
+          v-for="provider in providers.data.value"
+          :key="provider.id"
+          variant="outline"
+          as-child
+        >
+          <a :href="startUrl(provider.id, next)">
+            <Fingerprint data-icon="inline-start" aria-hidden="true" />
+            {{ t('auth.continueWith', { name: provider.display_name }) }}
+          </a>
+        </Button>
+      </template>
     </form>
   </AuthCard>
 </template>

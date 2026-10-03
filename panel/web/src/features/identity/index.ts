@@ -1,4 +1,4 @@
-import { Shield, Users } from '@lucide/vue'
+import { Fingerprint, Shield, Users } from '@lucide/vue'
 import type { FeatureModule } from '@/features/types'
 
 export const identityFeature: FeatureModule = {
@@ -25,9 +25,21 @@ export const identityFeature: FeatureModule = {
       component: () => import('./RolesView.vue'),
       meta: { title: 'nav.roles' },
     },
+    {
+      path: 'identity-providers',
+      name: 'identity-providers',
+      component: () => import('./IdentityProvidersView.vue'),
+      meta: { title: 'nav.identityProviders' },
+    },
   ],
   navigation: [
     { id: 'accounts', title: 'nav.accounts', icon: Users, to: '/accounts' },
     { id: 'roles', title: 'nav.roles', icon: Shield, to: '/roles' },
+    {
+      id: 'identity-providers',
+      title: 'nav.identityProviders',
+      icon: Fingerprint,
+      to: '/identity-providers',
+    },
   ],
 }
