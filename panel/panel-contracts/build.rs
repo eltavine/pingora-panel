@@ -14,6 +14,7 @@ fn main() {
         .btree_map(".io.cloudevents.v1.CloudEvent.attributes")
         .compile_protos(
             &[
+                "../proto/audit/v1/audit.proto",
                 "../proto/common/v1/common.proto",
                 "../proto/config/v1/config.proto",
                 "../proto/config/v1/configuration.proto",

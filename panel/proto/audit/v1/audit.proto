@@ -1,0 +1,97 @@
+syntax = "proto3";
+
+package pingora.panel.audit.v1;
+
+import "common/v1/common.proto";
+import "google/protobuf/timestamp.proto";
+
+// Reads the audit trail: every change and every refused or failed attempt,
+// recorded once from the domain events of all services in one hash chain.
+service AuditQuery {
+  rpc List(ListRequest) returns (ListResponse);
+  rpc Get(GetRequest) returns (GetResponse);
+  rpc Verify(VerifyRequest) returns (VerifyResponse);
+}
+
+// One audited event.
+message AuditRecord {
+  // Position in the chain, from 1.
+  uint64 sequence = 1;
+  // CloudEvents `id` of the event.
+  string event_id = 2;
+  // CloudEvents `source`, the producing service.
+  string source = 3;
+  // For example `config.draft.changed`.
+  string event_type = 4;
+  uint32 event_version = 5;
+  // `<aggregate type>/<aggregate id>`.
+  string subject = 6;
+  google.protobuf.Timestamp occurred_at = 7;
+  google.protobuf.Timestamp recorded_at = 8;
+  // How the actor was identified, such as `user` or `service`.
+  string actor_type = 9;
+  string actor_id = 10;
+  string correlation_id = 11;
+  string causation_id = 12;
+  string idempotency_key = 13;
+  string traceparent = 14;
+  // Event data as JSON.
+  bytes data = 15;
+  // Hex SHA-256 of the previous record's hash and this record's canonical form.
+  string hash = 16;
+  // Empty for the first record.
+  string previous_hash = 17;
+}
+
+message ListRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  // Only records older than this sequence.
+  optional uint64 before = 2;
+  // At most this many; the service bounds it.
+  uint32 limit = 3;
+  string actor_id = 4;
+  // An event type, or a prefix ending in `.` such as `config.`.
+  string event_type = 5;
+  string subject = 6;
+  string correlation_id = 7;
+  google.protobuf.Timestamp since = 8;
+  google.protobuf.Timestamp until = 9;
+}
+
+message ListResponse {
+  // Newest first.
+  repeated AuditRecord records = 1;
+  // Pass as `before` for the next page; absent on the last.
+  optional uint64 next_before = 2;
+  .pingora.panel.common.v1.Error error = 3;
+}
+
+message GetRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  uint64 sequence = 2;
+}
+
+message GetResponse {
+  AuditRecord record = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message VerifyRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  // The first record to check; the whole chain when absent.
+  optional uint64 from = 2;
+  // The last record to check; the head when absent.
+  optional uint64 to = 3;
+}
+
+message VerifyResponse {
+  // Whether every checked record matches its hash and the checkpoints.
+  bool intact = 1;
+  uint64 checked = 2;
+  // The first record that does not match, when one does not.
+  optional uint64 first_mismatch = 3;
+  // The head of the chain when verified.
+  uint64 head_sequence = 4;
+  string head_hash = 5;
+  .pingora.panel.common.v1.Error error = 6;
+}

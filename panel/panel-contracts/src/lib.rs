@@ -7,6 +7,12 @@
 
 pub mod pingora {
     pub mod panel {
+        pub mod audit {
+            pub mod v1 {
+                tonic::include_proto!("pingora.panel.audit.v1");
+            }
+        }
+
         pub mod common {
             pub mod v1 {
                 tonic::include_proto!("pingora.panel.common.v1");
@@ -33,7 +39,7 @@ pub mod pingora {
     }
 }
 
-pub use pingora::panel::{common, config, gateway, platform};
+pub use pingora::panel::{audit, common, config, gateway, platform};
 
 /// The CloudEvents Protobuf format, generated from the vendored official schema.
 pub mod cloudevents {
@@ -55,6 +61,12 @@ pub struct ProtocolRevisions {
     pub min: u32,
     pub max: u32,
 }
+
+pub const AUDIT_V1: ProtocolRevisions = ProtocolRevisions {
+    package: "pingora.panel.audit.v1",
+    min: 1,
+    max: 1,
+};
 
 pub const CONFIG_V1: ProtocolRevisions = ProtocolRevisions {
     package: "pingora.panel.config.v1",
