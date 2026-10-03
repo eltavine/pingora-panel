@@ -17,6 +17,7 @@ use tower::ServiceExt;
 
 mod access;
 mod admission;
+mod certificates;
 mod conditional;
 mod platform;
 mod request_identity;

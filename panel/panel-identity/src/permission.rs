@@ -15,6 +15,8 @@ pub enum Permission {
     ConfigRead,
     ConfigWrite,
     ConfigApply,
+    CertificateRead,
+    CertificateManage,
     AuditRead,
     PlatformRead,
     IdentityRead,
@@ -52,6 +54,16 @@ const CATALOG: &[(Permission, &str, &str)] = &[
         Permission::ConfigApply,
         "config.apply",
         "Apply the draft to the gateway, run dry runs and roll back.",
+    ),
+    (
+        Permission::CertificateRead,
+        "certificate.read",
+        "Read certificates, their names, validity and fingerprints, and check the hosts they cover.",
+    ),
+    (
+        Permission::CertificateManage,
+        "certificate.manage",
+        "Upload, generate, replace and delete certificates; private keys are never returned.",
     ),
     (
         Permission::AuditRead,
@@ -207,13 +219,15 @@ pub fn built_in_roles() -> Vec<Role> {
         role(
             "operator",
             "Operator",
-            "Changes and applies configuration and operates the gateway.",
+            "Changes and applies configuration, manages certificates and operates the gateway.",
             [
                 GatewayRead,
                 GatewayOperate,
                 ConfigRead,
                 ConfigWrite,
                 ConfigApply,
+                CertificateRead,
+                CertificateManage,
                 PlatformRead,
             ]
             .into_iter()
@@ -222,18 +236,19 @@ pub fn built_in_roles() -> Vec<Role> {
         role(
             "viewer",
             "Viewer",
-            "Reads configuration and the gateway's state.",
-            [GatewayRead, ConfigRead, PlatformRead]
+            "Reads configuration, certificates and the gateway's state.",
+            [GatewayRead, ConfigRead, CertificateRead, PlatformRead]
                 .into_iter()
                 .collect(),
         ),
         role(
             "auditor",
             "Auditor",
-            "Reads the audit trail, configuration and accounts.",
+            "Reads the audit trail, configuration, certificates and accounts.",
             [
                 AuditRead,
                 ConfigRead,
+                CertificateRead,
                 GatewayRead,
                 PlatformRead,
                 IdentityRead,

@@ -15,6 +15,7 @@ path = "src/main.rs"
 async-nats.workspace = true
 async-trait.workspace = true
 audit-grpc-client.workspace = true
+automation-grpc-client.workspace = true
 axum.workspace = true
 config-grpc-client.workspace = true
 gateway-grpc-client.workspace = true
@@ -37,6 +38,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 audit-service.workspace = true
+automation-service.workspace = true
 tempfile.workspace = true
 chrono.workspace = true
 config-grpc-client.workspace = true
@@ -46,10 +48,12 @@ panel-context.workspace = true
 panel-contracts.workspace = true
 panel-domain.workspace = true
 panel-engine.workspace = true
+panel-certificates.workspace = true
 panel-ir.workspace = true
 panel-jetstream = { workspace = true, features = ["test-support"] }
 panel-pki.workspace = true
 panel-postgres = { workspace = true, features = ["test-support"] }
+panel-secrets.workspace = true
 panel-tls.workspace = true
 reqwest.workspace = true
 tokio-stream.workspace = true

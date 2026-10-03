@@ -36,6 +36,10 @@ mod tests;
         crate::audit::list_audit_events,
         crate::audit::get_audit_event,
         crate::audit::verify_audit_events,
+        crate::certificates::list_certificates, crate::certificates::create_certificate,
+        crate::certificates::get_certificate, crate::certificates::replace_certificate,
+        crate::certificates::delete_certificate, crate::certificates::certificate_coverage,
+        crate::certificates::inspect_certificate,
         crate::language::ast,
         crate::language::explain,
         crate::language::ir,
@@ -63,6 +67,7 @@ mod tests;
         (name = "configuration", description = "Sites, domains, routes, upstreams, listeners and TLS profiles, edited as a draft and applied to the gateway"),
         (name = "gateway", description = "The running gateway: data plane, workers, shutdown and upstream health"),
         (name = "audit", description = "Every change and every refused or failed attempt, in a tamper-evident hash chain"),
+        (name = "certificates", description = "Server certificates whose private keys stay sealed with the panel and are delivered to the gateway"),
         (name = "identity", description = "Setup, login sessions, API tokens, accounts, roles and permissions")
     ),
     modifiers(&HttpConventions),

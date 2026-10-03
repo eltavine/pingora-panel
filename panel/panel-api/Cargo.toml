@@ -13,8 +13,10 @@ chrono.workspace = true
 governor.workspace = true
 axum.workspace = true
 panel-application.workspace = true
+panel-certificates = { workspace = true, features = ["openapi"] }
 panel-config-dsl = { workspace = true, features = ["openapi"] }
 panel-config-model = { workspace = true, features = ["openapi"] }
+panel-domain.workspace = true
 panel-errors.workspace = true
 panel-health.workspace = true
 panel-identity.workspace = true
@@ -27,6 +29,7 @@ tower.workspace = true
 tracing.workspace = true
 utoipa.workspace = true
 uuid.workspace = true
+zeroize = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 panel-domain.workspace = true

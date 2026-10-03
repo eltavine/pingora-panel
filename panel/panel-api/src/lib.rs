@@ -9,6 +9,7 @@
 mod access;
 mod admission;
 mod audit;
+mod certificates;
 mod conditional;
 mod config;
 mod configuration;

@@ -2297,6 +2297,7 @@ dependencies = [
  "chrono",
  "governor",
  "panel-application",
+ "panel-certificates",
  "panel-config-dsl",
  "panel-config-model",
  "panel-domain",
@@ -2313,6 +2314,7 @@ dependencies = [
  "tracing",
  "utoipa",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
@@ -2323,6 +2325,8 @@ dependencies = [
  "async-trait",
  "audit-grpc-client",
  "audit-service",
+ "automation-grpc-client",
+ "automation-service",
  "axum",
  "chrono",
  "config-grpc-client",
@@ -2332,6 +2336,7 @@ dependencies = [
  "identity-postgres",
  "panel-api",
  "panel-application",
+ "panel-certificates",
  "panel-context",
  "panel-contracts",
  "panel-control-runtime",
@@ -2345,6 +2350,7 @@ dependencies = [
  "panel-pki",
  "panel-platform",
  "panel-postgres",
+ "panel-secrets",
  "panel-service",
  "panel-tls",
  "reqwest",

@@ -209,6 +209,33 @@ pub(crate) static ROUTES: &[(&str, &str, Access)] = &[
         Requires(ConfigWrite),
     ),
     ("PUT", "/api/v1/revisions/{id}/note", Requires(ConfigWrite)),
+    ("GET", "/api/v1/certificates", Requires(CertificateRead)),
+    ("POST", "/api/v1/certificates", Requires(CertificateManage)),
+    (
+        "GET",
+        "/api/v1/certificates/{id}",
+        Requires(CertificateRead),
+    ),
+    (
+        "PUT",
+        "/api/v1/certificates/{id}",
+        Requires(CertificateManage),
+    ),
+    (
+        "DELETE",
+        "/api/v1/certificates/{id}",
+        Requires(CertificateManage),
+    ),
+    (
+        "GET",
+        "/api/v1/certificates/{id}/coverage",
+        Requires(CertificateRead),
+    ),
+    (
+        "POST",
+        "/api/v1/certificate-inspections",
+        Requires(CertificateManage),
+    ),
     ("GET", "/api/v1/audit-events", Requires(AuditRead)),
     ("GET", "/api/v1/audit-events/verify", Requires(AuditRead)),
     (

@@ -26,7 +26,7 @@
       ]
     },
     "automation-service": {
-      "catalog": false,
+      "catalog": true,
       "allowed_workspace_dependencies": [
         "panel-certificates",
         "panel-context",
@@ -178,8 +178,10 @@
       "catalog": true,
       "allowed_workspace_dependencies": [
         "panel-application",
+        "panel-certificates",
         "panel-config-dsl",
         "panel-config-model",
+        "panel-domain",
         "panel-errors",
         "panel-health",
         "panel-identity",
@@ -192,6 +194,8 @@
       "allowed_workspace_dependencies": [
         "audit-grpc-client",
         "audit-service",
+        "automation-grpc-client",
+        "automation-service",
         "config-grpc-client",
         "config-service",
         "gateway-grpc",
@@ -199,6 +203,7 @@
         "identity-postgres",
         "panel-api",
         "panel-application",
+        "panel-certificates",
         "panel-context",
         "panel-contracts",
         "panel-control-runtime",
@@ -212,6 +217,7 @@
         "panel-pki",
         "panel-platform",
         "panel-postgres",
+        "panel-secrets",
         "panel-service",
         "panel-tls"
       ]

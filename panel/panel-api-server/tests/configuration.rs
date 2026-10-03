@@ -10,7 +10,7 @@ use panel_control_runtime::{
     ProcessSettings, RunningProcess, DATABASE_PASSWORD_ENV, DATABASE_URL_ENV, NATS_URL_ENV,
 };
 use panel_engine::{EngineCapability, FakeGatewayEngine};
-use panel_health::HealthStatus;
+use panel_health::ServiceMode;
 use panel_jetstream::testing::{TestBroker, NATS_URL_ENV as TEST_NATS_URL_ENV};
 use panel_postgres::testing::TestDatabase;
 use panel_service::Environment;
@@ -66,10 +66,12 @@ fn local(settings: ProcessSettings) -> ProcessSettings {
         .with_health_interval(Duration::from_millis(50))
 }
 
+/// Serving reads and writes; optional dependencies a test does not start
+/// may still be reported as failing.
 async fn ready(process: &RunningProcess) {
     let mut health = process.health();
     tokio::time::timeout(Duration::from_secs(20), async {
-        while health.current().status() != HealthStatus::Pass {
+        while health.current().mode() != ServiceMode::Normal {
             assert!(health.changed().await);
         }
     })

@@ -16,7 +16,7 @@ use panel_control_runtime::{
 };
 use panel_domain::RevisionId;
 use panel_engine::FakeGatewayEngine;
-use panel_health::HealthStatus;
+use panel_health::ServiceMode;
 use panel_ir::{RuntimeSnapshot, IR_SCHEMA_VERSION};
 use panel_jetstream::testing::{TestBroker, NATS_URL_ENV as TEST_NATS_URL_ENV};
 use panel_pki::{
@@ -112,10 +112,12 @@ fn environment(values: Vec<(&'static str, String)>) -> Environment<'static> {
     Environment::from_lookup(move |name| values.get(name).cloned())
 }
 
+/// Serving reads and writes; optional dependencies a test does not start
+/// may still be reported as failing.
 async fn ready(process: &RunningProcess) {
     let mut health = process.health();
     tokio::time::timeout(Duration::from_secs(20), async {
-        while health.current().status() != HealthStatus::Pass {
+        while health.current().mode() != ServiceMode::Normal {
             assert!(health.changed().await);
         }
     })
