@@ -1,7 +1,8 @@
 use super::*;
 use panel_application::{
-    DataPlaneListener, DataPlaneState, EndpointHealth, GatewayRuntimePort, RequestScope,
-    UpstreamHealth, UpstreamHealthReport,
+    DataPlaneListener, DataPlaneState, EndpointHealth, EscapingLink, FileChecks,
+    GatewayRuntimePort, PrivateKeyCheck, RequestScope, StaticRootCheck, UpstreamHealth,
+    UpstreamHealthReport,
 };
 use std::sync::Mutex;
 
@@ -70,6 +71,22 @@ impl GatewayRuntimePort for FakeRuntime {
         report.upstreams = vec![upstream(false)];
         report.active_revision_id = Some(7);
         Ok(report)
+    }
+
+    async fn file_checks(&self, _scope: RequestScope) -> Result<FileChecks> {
+        let mut key = PrivateKeyCheck::new("shop.key");
+        key.tls_profile_ids = vec!["shop".into()];
+        key.mode = Some(0o644);
+        let mut root = StaticRootCheck::new("docs", "docs");
+        root.inside = true;
+        root.escaping_links = vec![EscapingLink::new("old", "/etc")];
+        root.entries_checked = 3;
+        let mut checks = FileChecks::default();
+        checks.checked_at = Some(std::time::UNIX_EPOCH);
+        checks.active_revision_id = Some(7);
+        checks.private_keys = vec![key];
+        checks.static_roots = vec![root];
+        Ok(checks)
     }
 
     async fn set_endpoint_drained(
@@ -212,6 +229,27 @@ async fn upstream_health_and_drains_use_model_identifiers() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     assert!(runtime.calls.lock().unwrap()[0].ends_with("true"));
+}
+
+#[tokio::test]
+async fn file_checks_report_keys_and_roots() {
+    let app = runtime_app(Arc::new(FakeRuntime::default()));
+    let response = app
+        .oneshot(
+            Request::get("/api/v1/gateway/file-checks")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = json(response).await;
+    assert_eq!(body["checked_at"], "1970-01-01T00:00:00.000Z");
+    assert_eq!(body["private_keys"][0]["mode"], "0644");
+    assert_eq!(body["private_keys"][0]["owner_only"], false);
+    assert_eq!(
+        body["static_roots"][0]["escaping_links"][0]["target"],
+        "/etc"
+    );
 }
 
 #[tokio::test]

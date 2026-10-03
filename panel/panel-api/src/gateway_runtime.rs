@@ -1,5 +1,5 @@
 //! Operations on the running gateway: its data plane, worker count,
-//! shutdown, upstream health and drained nodes.
+//! shutdown, upstream health, drained nodes and file checks.
 
 use crate::{
     error::ApiError,
@@ -14,8 +14,8 @@ use axum::{
 };
 use chrono::{DateTime, SecondsFormat, Utc};
 use panel_application::{
-    DataPlaneState, EndpointHealth, GatewayRuntimePort, GatewayUseCases, UpstreamHealth,
-    UpstreamHealthReport,
+    DataPlaneState, EndpointHealth, FileChecks, GatewayRuntimePort, GatewayUseCases,
+    PrivateKeyCheck, StaticRootCheck, UpstreamHealth, UpstreamHealthReport,
 };
 use panel_errors::PanelError;
 use serde::{Deserialize, Serialize};
@@ -169,6 +169,99 @@ impl From<UpstreamHealthReport> for UpstreamHealthReportResponse {
     }
 }
 
+/// A TLS private key in the gateway's secret directory.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct PrivateKeyCheckResponse {
+    pub file: String,
+    /// TLS profiles serving it.
+    pub tls_profile_ids: Vec<String>,
+    /// Octal Unix permission bits, such as `0600`, where the platform has
+    /// them.
+    pub mode: Option<String>,
+    /// Whether only the gateway's user may read or write the file.
+    pub owner_only: bool,
+    /// Why the file could not be inspected.
+    pub error: Option<String>,
+}
+
+impl From<PrivateKeyCheck> for PrivateKeyCheckResponse {
+    fn from(check: PrivateKeyCheck) -> Self {
+        Self {
+            file: check.file,
+            tls_profile_ids: check.tls_profile_ids,
+            mode: check.mode.map(|mode| format!("{mode:04o}")),
+            owner_only: check.owner_only,
+            error: check.error,
+        }
+    }
+}
+
+/// A link below a static root that leads out of it; it is not served.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct EscapingLinkResponse {
+    /// The link, relative to the root.
+    pub path: String,
+    pub target: String,
+}
+
+/// A static site's root directory.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct StaticRootCheckResponse {
+    /// The static content the root serves.
+    pub id: String,
+    pub root: String,
+    /// Whether the root resolves to a directory inside the static content
+    /// root.
+    pub inside: bool,
+    pub escaping_links: Vec<EscapingLinkResponse>,
+    pub entries_checked: u32,
+    /// Whether the root holds more entries than one check looks at.
+    pub truncated: bool,
+    pub error: Option<String>,
+}
+
+impl From<StaticRootCheck> for StaticRootCheckResponse {
+    fn from(check: StaticRootCheck) -> Self {
+        Self {
+            id: check.id,
+            root: check.root,
+            inside: check.inside,
+            escaping_links: check
+                .escaping_links
+                .into_iter()
+                .map(|link| EscapingLinkResponse {
+                    path: link.path,
+                    target: link.target,
+                })
+                .collect(),
+            entries_checked: check.entries_checked,
+            truncated: check.truncated,
+            error: check.error,
+        }
+    }
+}
+
+/// What the gateway finds in the files the active configuration serves
+/// from.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct FileChecksResponse {
+    pub checked_at: Option<String>,
+    pub active_revision_id: Option<u64>,
+    pub private_keys: Vec<PrivateKeyCheckResponse>,
+    pub static_roots: Vec<StaticRootCheckResponse>,
+}
+
+impl From<FileChecks> for FileChecksResponse {
+    fn from(checks: FileChecks) -> Self {
+        Self {
+            checked_at: rfc3339(checks.checked_at),
+            active_revision_id: checks.active_revision_id,
+            private_keys: checks.private_keys.into_iter().map(Into::into).collect(),
+            static_roots: checks.static_roots.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkerCountRequest {
@@ -253,6 +346,18 @@ pub(crate) async fn upstream_health<U: GatewayUseCases>(
 ) -> Result<Json<UpstreamHealthReportResponse>, ApiError> {
     let scope = request_scope(&headers)?;
     Ok(Json(port(&state)?.upstream_health(scope).await?.into()))
+}
+
+/// Whether TLS private keys may be read only by their owner and static
+/// roots stay inside the static content root.
+#[utoipa::path(get, path = "/api/v1/gateway/file-checks", params(QueryHeaders),
+    responses((status = 200, body = FileChecksResponse)), tag = "gateway")]
+pub(crate) async fn file_checks<U: GatewayUseCases>(
+    State(state): State<ApiState<U>>,
+    headers: HeaderMap,
+) -> Result<Json<FileChecksResponse>, ApiError> {
+    let scope = request_scope(&headers)?;
+    Ok(Json(port(&state)?.file_checks(scope).await?.into()))
 }
 
 /// Takes a node out of rotation until it is restored; this survives restarts.

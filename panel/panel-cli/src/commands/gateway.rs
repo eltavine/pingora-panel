@@ -1,6 +1,6 @@
 use crate::{
     client::{Api, CliError, Result},
-    output::{text, Column, Output},
+    output::{text, Column, Format, Output},
 };
 use clap::Subcommand;
 use reqwest::Method;
@@ -119,7 +119,53 @@ pub(crate) enum GatewayCommand {
         #[arg(long)]
         yes: bool,
     },
+    /// Checks that TLS private keys may be read only by their owner and
+    /// that static roots stay inside the static content root.
+    Files,
 }
+
+fn yes_no(value: &Value) -> String {
+    if value.as_bool().unwrap_or_default() {
+        "yes".into()
+    } else {
+        "no".into()
+    }
+}
+
+const KEY_CHECKS: &[Column] = &[
+    ("PRIVATE KEY", |key| text(&key["file"])),
+    ("MODE", |key| text(&key["mode"])),
+    ("OWNER ONLY", |key| yes_no(&key["owner_only"])),
+    ("TLS PROFILES", |key| text(&key["tls_profile_ids"])),
+    ("PROBLEM", |key| text(&key["error"])),
+];
+
+const ROOT_CHECKS: &[Column] = &[
+    ("STATIC ROOT", |root| text(&root["root"])),
+    ("INSIDE", |root| yes_no(&root["inside"])),
+    ("LINKS OUT", |root| {
+        root["escaping_links"]
+            .as_array()
+            .map(|links| {
+                links
+                    .iter()
+                    .map(|link| format!("{} -> {}", text(&link["path"]), text(&link["target"])))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .filter(|links| !links.is_empty())
+            .unwrap_or_else(|| "-".into())
+    }),
+    ("ENTRIES", |root| {
+        let more = if root["truncated"].as_bool().unwrap_or_default() {
+            "+"
+        } else {
+            ""
+        };
+        format!("{}{more}", text(&root["entries_checked"]))
+    }),
+    ("PROBLEM", |root| text(&root["error"])),
+];
 
 const LISTENERS: &[Column] = &[
     ("ID", |listener| text(&listener["id"])),
@@ -400,6 +446,19 @@ pub async fn gateway(api: &Api, output: &Output, command: GatewayCommand) -> Res
                 .await?
                 .body;
             output.done("The gateway is draining and will stop", &reply);
+        }
+        GatewayCommand::Files => {
+            let checks = api.get("/api/v1/gateway/file-checks", &[]).await?.body;
+            match output.format {
+                Format::Json => output.json(&checks),
+                Format::Table => {
+                    output.list(&checks["private_keys"], KEY_CHECKS);
+                    if !output.quiet {
+                        println!();
+                    }
+                    output.list(&checks["static_roots"], ROOT_CHECKS);
+                }
+            }
         }
     }
     Ok(())

@@ -36,6 +36,10 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         .route("/api/v1/gateway/workers", put(runtime::workers::<U>))
         .route("/api/v1/gateway/shutdown", post(runtime::shutdown::<U>))
         .route(
+            "/api/v1/gateway/file-checks",
+            get(runtime::file_checks::<U>),
+        )
+        .route(
             "/api/v1/upstreams/health",
             get(runtime::upstream_health::<U>),
         )

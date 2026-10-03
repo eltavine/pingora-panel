@@ -17,6 +17,7 @@ import CopyValue from '@/components/CopyValue.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import StatusIndicator from '@/components/StatusIndicator.vue'
 import DataPlaneCard from './DataPlaneCard.vue'
+import FileChecksCard from './FileChecksCard.vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
@@ -151,5 +152,6 @@ const updatedAt = computed(() =>
     </template>
 
     <DataPlaneCard v-if="status.data.value" />
+    <FileChecksCard v-if="status.data.value" />
   </div>
 </template>

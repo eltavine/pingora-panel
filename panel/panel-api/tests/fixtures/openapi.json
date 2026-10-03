@@ -19771,6 +19771,327 @@
         }
       }
     },
+    "/api/v1/gateway/file-checks": {
+      "parameters": [
+        {
+          "name": "x-request-id",
+          "in": "header",
+          "description": "Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1
+          }
+        },
+        {
+          "name": "traceparent",
+          "in": "header",
+          "description": "W3C Trace Context parent of the caller's trace. Invalid values are ignored.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 55
+          }
+        },
+        {
+          "name": "tracestate",
+          "in": "header",
+          "description": "W3C Trace Context vendor state, propagated with a valid traceparent.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "gateway"
+        ],
+        "summary": "Whether TLS private keys may be read only by their owner and static\nroots stay inside the static content root.",
+        "operationId": "file_checks",
+        "parameters": [
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileChecksResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/gateway/prepare": {
       "parameters": [
         {
@@ -45405,6 +45726,23 @@
           }
         }
       },
+      "EscapingLinkResponse": {
+        "type": "object",
+        "description": "A link below a static root that leads out of it; it is not served.",
+        "required": [
+          "path",
+          "target"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "The link, relative to the root."
+          },
+          "target": {
+            "type": "string"
+          }
+        }
+      },
       "ExplainRequest": {
         "type": "object",
         "description": "Files and a position in one of them.",
@@ -45513,6 +45851,42 @@
           },
           "path": {
             "type": "string"
+          }
+        }
+      },
+      "FileChecksResponse": {
+        "type": "object",
+        "description": "What the gateway finds in the files the active configuration serves\nfrom.",
+        "required": [
+          "private_keys",
+          "static_roots"
+        ],
+        "properties": {
+          "active_revision_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "checked_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "private_keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PrivateKeyCheckResponse"
+            }
+          },
+          "static_roots": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StaticRootCheckResponse"
+            }
           }
         }
       },
@@ -46437,6 +46811,45 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0
+          }
+        }
+      },
+      "PrivateKeyCheckResponse": {
+        "type": "object",
+        "description": "A TLS private key in the gateway's secret directory.",
+        "required": [
+          "file",
+          "tls_profile_ids",
+          "owner_only"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the file could not be inspected."
+          },
+          "file": {
+            "type": "string"
+          },
+          "mode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Octal Unix permission bits, such as `0600`, where the platform has\nthem."
+          },
+          "owner_only": {
+            "type": "boolean",
+            "description": "Whether only the gateway's user may read or write the file."
+          },
+          "tls_profile_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "TLS profiles serving it."
           }
         }
       },
@@ -47958,6 +48371,52 @@
           },
           "snapshot": {
             "description": "Versioned source document interpreted by the injected ConfigCompiler."
+          }
+        }
+      },
+      "StaticRootCheckResponse": {
+        "type": "object",
+        "description": "A static site's root directory.",
+        "required": [
+          "id",
+          "root",
+          "inside",
+          "escaping_links",
+          "entries_checked",
+          "truncated"
+        ],
+        "properties": {
+          "entries_checked": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "escaping_links": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EscapingLinkResponse"
+            }
+          },
+          "id": {
+            "type": "string",
+            "description": "The static content the root serves."
+          },
+          "inside": {
+            "type": "boolean",
+            "description": "Whether the root resolves to a directory inside the static content\nroot."
+          },
+          "root": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "Whether the root holds more entries than one check looks at."
           }
         }
       },

@@ -77,6 +77,42 @@ test('the overview reports readiness and the active configuration', async ({ pag
   await expectNoHorizontalOverflow(page)
 })
 
+test('file checks point at exposed keys and links out of static roots', async ({ page }) => {
+  await mockStatus(page)
+  await page.route('**/api/v1/gateway/data-plane', (route) =>
+    route.fulfill({ json: { generation: 1, worker_count: 2, listeners: [] } }),
+  )
+  await page.route('**/api/v1/gateway/file-checks', (route) =>
+    route.fulfill({
+      json: {
+        checked_at: '2026-10-03T08:00:00.000Z',
+        active_revision_id: 6,
+        private_keys: [
+          { file: 'edge.key', tls_profile_ids: ['edge'], mode: '0600', owner_only: true },
+          { file: 'legacy.key', tls_profile_ids: ['legacy'], mode: '0644', owner_only: false },
+        ],
+        static_roots: [
+          {
+            id: 'docs',
+            root: 'docs',
+            inside: true,
+            escaping_links: [{ path: 'old/etc', target: '/etc' }],
+            entries_checked: 12,
+            truncated: false,
+          },
+        ],
+      },
+    }),
+  )
+  await page.goto('/')
+
+  await expect(page.getByText('2 problems')).toBeVisible()
+  await expect(page.getByText('Readable by others')).toBeVisible()
+  await expect(page.getByText('Owner only')).toBeVisible()
+  await expect(page.getByText('old/etc → /etc')).toBeVisible()
+  await expectNoHorizontalOverflow(page)
+})
+
 test('an unreachable API is reported with a retry action', async ({ page }) => {
   await page.route('**/api/v1/gateway/status', (route) => route.abort('connectionrefused'))
   await page.goto('/')

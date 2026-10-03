@@ -247,6 +247,15 @@ async fn api(
         ("PUT", "/api/v1/tls-profiles/edge") => Json(body.clone()).into_response(),
         ("PUT", "/api/v1/security-policies/office") => Json(body.clone()).into_response(),
         ("PUT", "/api/v1/listeners/edge") => Json(body.clone()).into_response(),
+        ("GET", "/api/v1/gateway/file-checks") => Json(json!({
+            "checked_at": "2026-10-03T00:00:00.000Z", "active_revision_id": 7,
+            "private_keys": [{"file": "shop.key", "tls_profile_ids": ["shop"], "mode": "0644",
+                              "owner_only": false, "error": null}],
+            "static_roots": [{"id": "docs", "root": "docs", "inside": true,
+                              "escaping_links": [{"path": "old", "target": "/etc"}],
+                              "entries_checked": 3, "truncated": false, "error": null}]
+        }))
+        .into_response(),
         ("GET", "/api/v1/security-policies") => Json(json!([
             {"id": "office", "allowed_cidrs": ["10.0.0.0/8"], "basic_auth": {"realm": "Staff", "users_secret_id": "staff.htpasswd"},
              "rate_limits": [{"key": {"kind": "client_address"}, "requests": 10, "per_seconds": 1}],
@@ -1269,6 +1278,20 @@ fn listeners_name_trusted_proxies_and_head_deadlines() {
     assert_eq!(body["trusted_proxies"], json!(["10.0.0.0/8", "192.0.2.7"]));
     assert_eq!(body["real_ip_header"], "x-real-ip");
     assert_eq!(body["request_head_timeout_seconds"], 15);
+}
+
+#[test]
+fn gateway_files_are_checked() {
+    let stub = Stub::start();
+    let checked = stub.ppanel(&["--token", "ppat_admin", "gateway", "files"]);
+    assert!(checked.status.success(), "{}", stderr(&checked));
+    let table = String::from_utf8_lossy(&checked.stdout);
+    for expected in ["shop.key", "0644", "old -> /etc", "STATIC ROOT"] {
+        assert!(table.contains(expected), "{expected}: {table}");
+    }
+    assert!(table
+        .lines()
+        .any(|line| line.starts_with("shop.key") && line.contains(" no ")));
 }
 
 #[test]
