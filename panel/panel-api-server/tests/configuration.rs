@@ -768,6 +768,7 @@ async fn person(api: &Api, username: &str, roles: &[&str]) -> Api {
             .parse()
             .unwrap(),
     );
+    let _ = rustls::crypto::ring::default_provider().install_default();
     Api {
         client: Client::builder().default_headers(headers).build().unwrap(),
         base: api.base.clone(),

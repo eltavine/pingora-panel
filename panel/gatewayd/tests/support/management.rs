@@ -37,6 +37,7 @@ impl ManagementServer {
         let task = tokio::spawn(serve_management(listener, router, async {
             let _ = receiver.await;
         }));
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let client = Client::builder()
             .no_proxy()
             .timeout(Duration::from_secs(5))

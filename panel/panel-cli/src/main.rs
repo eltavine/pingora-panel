@@ -154,6 +154,7 @@ enum Command {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let cli = Cli::parse();
     if let Command::Completion { shell } = cli.command {
         clap_complete::generate(shell, &mut Cli::command(), "ppanel", &mut std::io::stdout());

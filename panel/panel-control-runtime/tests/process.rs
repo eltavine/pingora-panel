@@ -102,13 +102,11 @@ async fn a_ready_process_serves_registers_relays_and_deregisters() {
         async move { health.current().status() == HealthStatus::Pass }
     })
     .await;
-    let readiness: serde_json::Value =
-        reqwest::get(format!("http://{}/readyz", process.ops_address()))
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
+    let readiness: serde_json::Value = get(format!("http://{}/readyz", process.ops_address()))
+        .await
+        .json()
+        .await
+        .unwrap();
     assert_eq!(readiness["status"], "pass");
     assert_eq!(readiness["serviceId"], "config-service");
     for check in ["schema", "postgresql", "nats"] {
@@ -197,16 +195,19 @@ async fn an_unreachable_database_keeps_the_process_unavailable_but_stoppable() {
     let report = health.current();
     assert_eq!(report.status(), HealthStatus::Fail);
     assert_eq!(report.mode(), ServiceMode::Unavailable);
-    let response = reqwest::get(format!("http://{}/readyz", process.ops_address()))
-        .await
-        .unwrap();
+    let response = get(format!("http://{}/readyz", process.ops_address())).await;
     assert_eq!(response.status(), 503);
-    let liveness = reqwest::get(format!("http://{}/livez", process.ops_address()))
-        .await
-        .unwrap();
+    let liveness = get(format!("http://{}/livez", process.ops_address())).await;
     assert_eq!(liveness.status(), 200);
 
     tokio::time::timeout(Duration::from_secs(10), process.stop())
         .await
         .expect("stopping does not wait for unreachable dependencies");
+}
+
+/// GETs `url` once the panel's ring provider is installed, which reqwest
+/// needs to set up TLS even for plain HTTP.
+async fn get(url: String) -> reqwest::Response {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    reqwest::get(url).await.unwrap()
 }

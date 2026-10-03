@@ -34,6 +34,19 @@ pub(crate) enum CliError {
 }
 
 impl CliError {
+    /// A transport failure with its causes, such as a certificate the
+    /// system does not trust.
+    pub fn transport(error: impl std::error::Error) -> Self {
+        let mut message = error.to_string();
+        let mut cause = error.source();
+        while let Some(source) = cause {
+            message.push_str(": ");
+            message.push_str(&source.to_string());
+            cause = source.source();
+        }
+        Self::Transport(message)
+    }
+
     pub fn exit(&self) -> ExitCode {
         let code = match self {
             Self::Usage(_) => 2,
@@ -122,7 +135,7 @@ impl Api {
             .timeout(timeout)
             .user_agent(concat!("ppanel/", env!("CARGO_PKG_VERSION")))
             .build()
-            .map_err(|error| CliError::Transport(error.to_string()))?;
+            .map_err(CliError::transport)?;
         Ok(Self {
             http,
             base: base.trim_end_matches('/').to_owned(),
@@ -186,20 +199,14 @@ impl Api {
             Some(credential) => request.bearer_auth(credential),
             None => request,
         };
-        let response = request
-            .send()
-            .await
-            .map_err(|error| CliError::Transport(error.to_string()))?;
+        let response = request.send().await.map_err(CliError::transport)?;
         let status = response.status();
         let etag = response
             .headers()
             .get(header::ETAG)
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned);
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|error| CliError::Transport(error.to_string()))?;
+        let bytes = response.bytes().await.map_err(CliError::transport)?;
         let body = if bytes.is_empty() {
             Value::Null
         } else {

@@ -115,6 +115,7 @@ impl Pebble {
 
     /// TXT records in the DNS test server Pebble resolves through.
     pub fn dns(&self) -> TestDns {
+        let _ = rustls::crypto::ring::default_provider().install_default();
         TestDns {
             management: self.dns.trim_end_matches('/').to_owned(),
             client: reqwest::Client::new(),

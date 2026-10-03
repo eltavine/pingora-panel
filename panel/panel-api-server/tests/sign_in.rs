@@ -131,6 +131,7 @@ async fn people_sign_in_through_an_identity_provider() {
     };
     let base = &server.base;
     let provider = TestProvider::start("panel", Some("client-secret")).await;
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let browser = Client::builder().redirect(Policy::none()).build().unwrap();
     let admin = support::signed_in(base).await;
     let created = admin

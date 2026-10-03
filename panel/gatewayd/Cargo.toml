@@ -45,5 +45,6 @@ panel-config-json.workspace = true
 panel-health.workspace = true
 panel-persistence-memory.workspace = true
 reqwest.workspace = true
+rustls.workspace = true
 tokio-stream.workspace = true
 uuid.workspace = true

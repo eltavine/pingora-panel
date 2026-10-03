@@ -41,5 +41,6 @@ pub async fn signed_in(base: &str) -> Client {
         AUTHORIZATION,
         HeaderValue::from_str(&format!("Bearer {secret}")).unwrap(),
     );
+    let _ = rustls::crypto::ring::default_provider().install_default();
     Client::builder().default_headers(headers).build().unwrap()
 }

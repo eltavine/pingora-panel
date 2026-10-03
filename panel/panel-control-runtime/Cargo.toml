@@ -37,4 +37,5 @@ panel-events.workspace = true
 panel-jetstream = { workspace = true, features = ["test-support"] }
 panel-postgres = { workspace = true, features = ["test-support"] }
 reqwest.workspace = true
+rustls.workspace = true
 serde_json.workspace = true
