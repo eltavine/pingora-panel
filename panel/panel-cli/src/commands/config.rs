@@ -8,7 +8,10 @@ use crate::{
 use clap::Subcommand;
 use reqwest::{Method, StatusCode};
 use serde_json::{json, Map, Value};
-use std::path::{Component, Path, PathBuf};
+use std::{
+    collections::BTreeSet,
+    path::{Component, Path, PathBuf},
+};
 
 /// The file every configuration starts from.
 const ENTRY: &str = "main.conf";
@@ -81,6 +84,15 @@ pub(crate) enum ConfigCommand {
         /// The file to show.
         #[arg(long, default_value = ENTRY)]
         file: String,
+    },
+    /// What applies in the server, route, listener, upstream or TLS profile
+    /// written at a position, and where each value comes from.
+    Explain {
+        /// The position, as FILE:LINE or FILE:LINE.COLUMN.
+        at: String,
+        /// A file read as `main.conf`, or a directory of `.conf` files; the
+        /// draft by default.
+        path: Option<PathBuf>,
     },
     /// The runtime snapshot the saved draft compiles to, as JSON.
     Ir,
@@ -155,6 +167,19 @@ pub(crate) fn read_files(path: &Path) -> Result<Map<String, Value>> {
         files.insert(ENTRY.into(), json!(text));
     }
     Ok(files)
+}
+
+/// The file, 1-based line and column of `FILE:LINE` or `FILE:LINE.COLUMN`.
+fn position(at: &str) -> Result<(String, usize, usize)> {
+    let invalid = || CliError::Usage(format!("{at:?} is not FILE:LINE or FILE:LINE.COLUMN"));
+    let (file, place) = at.rsplit_once(':').ok_or_else(invalid)?;
+    let (line, column) = place.split_once('.').unwrap_or((place, "1"));
+    match (line.parse(), column.parse()) {
+        (Ok(line), Ok(column)) if !file.is_empty() && line > 0 && column > 0 => {
+            Ok((file.to_owned(), line, column))
+        }
+        _ => Err(invalid()),
+    }
 }
 
 /// Every UTF-8 file below `directory` by its relative path, for NGINX
@@ -592,6 +617,65 @@ pub async fn run(api: &Api, output: &Output, command: ConfigCommand) -> Result<(
             }
             print_diagnostics(&tree["diagnostics"]);
         }
+        ConfigCommand::Explain { at, path } => {
+            let (file, line, column) = position(&at)?;
+            let files = draft_files(api, path).await?;
+            let explained = api
+                .post_read(
+                    "/api/v1/config/explain",
+                    &json!({ "files": files, "file": file, "line": line, "column": column }),
+                )
+                .await?
+                .body;
+            if output.format == Format::Json {
+                output.json(&explained);
+                return Ok(());
+            }
+            if output.quiet {
+                return Ok(());
+            }
+            let name = explained["name"]
+                .as_str()
+                .map(|name| format!(" {name}"))
+                .unwrap_or_default();
+            println!(
+                "{}{name} at {}",
+                text(&explained["block"]),
+                text(&explained["source_span"])
+            );
+            output.list(
+                &explained["settings"],
+                &[
+                    ("SETTING", |setting| text(&setting["name"])),
+                    ("FOR", |setting| text(&setting["scope"])),
+                    ("VALUE", |setting| match text(&setting["value"]) {
+                        value if value.is_empty() => "-".into(),
+                        value => value,
+                    }),
+                    ("FROM", |setting| match setting["source"].as_str() {
+                        Some("inherited") => text(&setting["from"]),
+                        Some(source) => source.into(),
+                        None => "-".into(),
+                    }),
+                    ("AT", |setting| text(&setting["source_span"])),
+                ],
+            );
+            let mut explained_rules = BTreeSet::new();
+            for setting in explained["settings"].as_array().into_iter().flatten() {
+                if let (Some(name), Some(rule), false) = (
+                    setting["name"].as_str(),
+                    setting["rule"].as_str(),
+                    setting["source"] == "here",
+                ) {
+                    if explained_rules.is_empty() {
+                        println!();
+                    }
+                    if explained_rules.insert(name) {
+                        println!("{name}: {rule}");
+                    }
+                }
+            }
+        }
         ConfigCommand::Ir => {
             let snapshot = api.get("/api/v1/config/ir", &[]).await?.body;
             if !output.quiet {
@@ -684,5 +768,26 @@ mod tests {
         let mut names: Vec<_> = files.keys().cloned().collect();
         names.sort();
         assert_eq!(names, ["main.conf", "sites/shop.conf"]);
+    }
+
+    #[test]
+    fn positions_are_written_as_in_diagnostics() {
+        assert_eq!(
+            position("sites/shop.conf:12.9").unwrap(),
+            ("sites/shop.conf".to_owned(), 12, 9)
+        );
+        assert_eq!(
+            position("main.conf:3").unwrap(),
+            ("main.conf".to_owned(), 3, 1)
+        );
+        for invalid in [
+            "main.conf",
+            ":3",
+            "main.conf:0",
+            "main.conf:3.0",
+            "main.conf:x",
+        ] {
+            assert!(position(invalid).is_err(), "{invalid}");
+        }
     }
 }

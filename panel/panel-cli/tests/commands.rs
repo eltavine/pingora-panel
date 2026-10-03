@@ -95,6 +95,23 @@ async fn api(
             "diagnostics": []
         }))
         .into_response(),
+        ("POST", "/api/v1/config/explain") => Json(json!({
+            "block": "route", "name": "api", "resource": "sites/s/routes/r",
+            "source_span": "sites/shop.conf:4.5-7.5",
+            "settings": [
+                {"name": "match", "value": "prefix /api", "source": "here",
+                 "source_span": "sites/shop.conf:5.9-26"},
+                {"name": "https_redirect", "value": "on", "source": "inherited",
+                 "from": "server shop", "source_span": "sites/shop.conf:2.5-22",
+                 "rule": "Off when not written; applies to every host and route of the server."},
+                {"name": "tls_profile", "scope": "shop.example", "value": "edge",
+                 "source": "inherited", "from": "listener secure",
+                 "source_span": "main.conf:9.9-25", "rule": "A host uses its domain's tls_profile=."},
+                {"name": "priority", "value": "10", "source": "default",
+                 "rule": "Without it, routes take 10, 20, 30 and so on in the order they are written."}
+            ]
+        }))
+        .into_response(),
         ("GET", "/api/v1/config/ir") => {
             Json(json!({"schema_version": "panel.ir.v1", "listeners": [], "sites": []})).into_response()
         }
@@ -318,6 +335,70 @@ fn syntax_trees_and_snapshots_are_printed() {
     let snapshot = stub.ppanel(&["config", "ir"]);
     let snapshot: Value = serde_json::from_slice(&snapshot.stdout).unwrap();
     assert_eq!(snapshot["schema_version"], "panel.ir.v1");
+}
+
+#[test]
+fn explain_shows_where_each_value_comes_from() {
+    let stub = Stub::start();
+    let explained = stub.ppanel(&["config", "explain", "sites/shop.conf:5.12"]);
+    assert!(explained.status.success(), "{}", stderr(&explained));
+    let request = &stub.requests("POST", "/api/v1/config/explain")[0].body;
+    assert_eq!(
+        (&request["file"], &request["line"], &request["column"]),
+        (&json!("sites/shop.conf"), &json!(5), &json!(12))
+    );
+    assert_eq!(request["files"]["sites/shop.conf"], SHOP);
+    let printed = stdout(&explained);
+    let lines: Vec<&str> = printed.lines().collect();
+    assert_eq!(lines[0], "route api at sites/shop.conf:4.5-7.5");
+    let row = |name: &str| {
+        lines
+            .iter()
+            .find(|line| line.starts_with(name))
+            .map(|line| line.split_whitespace().collect::<Vec<_>>())
+            .unwrap_or_else(|| panic!("no {name} in {printed}"))
+    };
+    assert_eq!(
+        row("match"),
+        [
+            "match",
+            "-",
+            "prefix",
+            "/api",
+            "here",
+            "sites/shop.conf:5.9-26"
+        ]
+    );
+    assert_eq!(
+        row("https_redirect"),
+        [
+            "https_redirect",
+            "-",
+            "on",
+            "server",
+            "shop",
+            "sites/shop.conf:2.5-22"
+        ]
+    );
+    assert_eq!(
+        row("tls_profile"),
+        [
+            "tls_profile",
+            "shop.example",
+            "edge",
+            "listener",
+            "secure",
+            "main.conf:9.9-25"
+        ]
+    );
+    assert_eq!(row("priority"), ["priority", "-", "10", "default", "-"]);
+    assert!(printed.contains(
+        "\npriority: Without it, routes take 10, 20, 30 and so on in the order they are written.\n"
+    ));
+    assert!(!printed.contains("match:"));
+
+    let invalid = stub.ppanel(&["config", "explain", "shop.conf"]);
+    assert_eq!(invalid.status.code(), Some(2), "{}", stderr(&invalid));
 }
 
 #[test]
