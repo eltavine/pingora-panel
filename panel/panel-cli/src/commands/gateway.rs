@@ -39,6 +39,14 @@ pub(crate) enum ListenerCommand {
     },
     /// Removes a listener no site uses.
     Delete { id: String },
+    /// Connects to an HTTPS listener for a host as a client would and shows
+    /// what it sees.
+    Check {
+        id: String,
+        /// The host to ask for.
+        #[arg(long)]
+        host: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -126,6 +134,51 @@ const PROFILES: &[Column] = &[
     ("ALPN", |profile| text(&profile["alpn"])),
 ];
 
+/// Each version and whether the listener accepts it alone.
+fn versions(check: &Value) -> String {
+    check["versions"]
+        .as_array()
+        .map(|versions| {
+            versions
+                .iter()
+                .map(|version| {
+                    format!(
+                        "{} {}",
+                        text(&version["version"]),
+                        if version["accepted"] == true {
+                            "yes"
+                        } else {
+                            "no"
+                        }
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_else(|| "-".into())
+}
+
+const TLS_CHECK: &[Column] = &[
+    ("ADDRESS", |check| text(&check["address"])),
+    ("PROTOCOL", |check| text(&check["protocol"])),
+    ("CIPHER", |check| text(&check["cipher_suite"])),
+    ("ALPN", |check| text(&check["alpn"])),
+    ("VERSIONS", versions),
+    ("HANDSHAKE", |check| {
+        format!("{} ms", text(&check["handshake_ms"]))
+    }),
+    ("CERTIFICATE", |check| {
+        text(&check["certificate"]["subject"])
+    }),
+    ("NAMES", |check| text(&check["certificate"]["names"])),
+    ("COVERS HOST", |check| text(&check["covers_host"])),
+    ("STATUS", |check| text(&check["certificate_status"])),
+    ("NOT AFTER", |check| {
+        text(&check["certificate"]["not_after"])
+    }),
+    ("HSTS", |check| text(&check["strict_transport_security"])),
+];
+
 /// The current entity tag of a resource, or none when it does not exist yet.
 async fn existing(api: &Api, path: &str) -> Result<Option<String>> {
     match api.get(path, &[]).await {
@@ -180,6 +233,16 @@ pub async fn listener(api: &Api, output: &Output, command: ListenerCommand) -> R
                 .await?
                 .body;
             output.done(&format!("Deleted listener {id}"), &reply);
+        }
+        ListenerCommand::Check { id, host } => {
+            let checked = api
+                .post_read(
+                    "/api/v1/tls-checks",
+                    &json!({ "listener": id, "host": host }),
+                )
+                .await?
+                .body;
+            output.item(&checked, TLS_CHECK);
         }
     }
     Ok(())

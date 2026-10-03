@@ -245,6 +245,18 @@ async fn api(
             Json(json!({"username": "ops", "disabled": body["disabled"]})).into_response()
         }
         ("PUT", "/api/v1/tls-profiles/edge") => Json(body.clone()).into_response(),
+        ("POST", "/api/v1/tls-checks") => Json(json!({
+            "listener": body["listener"], "address": "127.0.0.1:8443", "host": body["host"],
+            "protocol": "TLSv1.3", "cipher_suite": "TLS13_AES_256_GCM_SHA384", "alpn": "h2",
+            "handshake_ms": 3,
+            "versions": [{"version": "TLSv1.2", "accepted": false},
+                         {"version": "TLSv1.3", "accepted": true}],
+            "certificate": {"subject": "CN=shop.example", "names": ["shop.example"],
+                            "not_after": "2027-01-01T00:00:00Z"},
+            "certificate_status": "valid", "covers_host": true, "http_status": null,
+            "strict_transport_security": "max-age=31536000"
+        }))
+        .into_response(),
         ("POST", "/api/v1/sites") => (
             StatusCode::CREATED,
             Json(json!({"id": "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a60", "name": body["name"]})),
@@ -941,4 +953,32 @@ fn tls_profiles_narrow_handshakes() {
     );
     assert_eq!(body["session_resumption"], false);
     assert_eq!(body["ocsp_stapling"], false);
+}
+
+#[test]
+fn listeners_are_checked_as_clients_see_them() {
+    let stub = Stub::start();
+    let checked = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "listener",
+        "check",
+        "https",
+        "--host",
+        "shop.example",
+    ]);
+    assert!(checked.status.success(), "{}", stderr(&checked));
+    assert_eq!(
+        stub.requests("POST", "/api/v1/tls-checks")[0].body,
+        json!({"listener": "https", "host": "shop.example"})
+    );
+    let shown = stdout(&checked);
+    for expected in [
+        "TLS13_AES_256_GCM_SHA384",
+        "TLSv1.2 no, TLSv1.3 yes",
+        "max-age=31536000",
+        "3 ms",
+    ] {
+        assert!(shown.contains(expected), "{expected}: {shown}");
+    }
 }
