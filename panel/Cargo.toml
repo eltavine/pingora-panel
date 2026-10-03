@@ -18,6 +18,7 @@ members = [
     "identity-postgres",
     "panel-outbox",
     "panel-pki",
+    "panel-secrets",
     "panel-tls",
     "panel-platform",
     "panel-platform-codec",
@@ -114,6 +115,7 @@ identity-postgres = { version = "=0.1.0", path = "identity-postgres" }
 panel-outbox = { version = "=0.1.0", path = "panel-outbox" }
 panel-persistence-memory = { version = "=0.1.0", path = "panel-persistence-memory" }
 panel-pki = { version = "=0.1.0", path = "panel-pki" }
+panel-secrets = { version = "=0.1.0", path = "panel-secrets" }
 panel-tls = { version = "=0.1.0", path = "panel-tls" }
 panel-platform = { version = "=0.1.0", path = "panel-platform" }
 panel-platform-codec = { version = "=0.1.0", path = "panel-platform-codec" }
@@ -152,6 +154,7 @@ tokio-rustls = { version = "=0.26.6", default-features = false, features = ["rin
 tokio-stream = { version = "=0.1.19", features = ["net"] }
 tokio-util = { version = "=0.7.19", features = ["rt"] }
 tower = { version = "=0.5.3", features = ["util"] }
+ring = "=0.17.14"
 rcgen = { version = "=0.14.10", default-features = false, features = ["crypto", "ring"] }
 reqwest = { version = "=0.13.4", default-features = false, features = ["json"] }
 rrule = "=0.14.0"
@@ -166,6 +169,7 @@ tonic-prost = "=0.14.6"
 tonic-prost-build = "=0.14.6"
 unicode-normalization = "=0.1.25"
 uuid = { version = "=1.18.1", features = ["serde", "v4", "v7"] }
+zeroize = "=1.9.0"
 zxcvbn = { version = "=3.1.1", default-features = false }
 libc = "=0.2.189"
 tracing = "=0.1.44"

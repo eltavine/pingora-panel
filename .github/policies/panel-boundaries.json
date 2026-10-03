@@ -458,6 +458,12 @@
         "panel-errors",
         "panel-ir"
       ]
+    },
+    "panel-secrets": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-errors"
+      ]
     }
   },
   "rules": {
