@@ -350,6 +350,12 @@
         "panel-events"
       ]
     },
+    "panel-event-contracts": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-events"
+      ]
+    },
     "panel-events": {
       "catalog": true,
       "allowed_workspace_dependencies": [
@@ -375,6 +381,8 @@
       "allowed_workspace_dependencies": [
         "panel-context",
         "panel-errors",
+        "panel-event-contracts",
+        "panel-events",
         "panel-schedule",
         "panel-secrets"
       ]

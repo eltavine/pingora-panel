@@ -208,7 +208,7 @@ impl PgApprovals {
     ) -> Result<()> {
         let event = self
             .events
-            .event(event_type, aggregate, scope, actor, data)?;
+            .event_named(event_type, aggregate, scope, actor, data)?;
         PgOutbox::append(transaction, &event).await
     }
 

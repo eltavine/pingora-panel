@@ -2,7 +2,7 @@
 //! a durable store would record so tests can check them.
 
 use crate::{
-    built_in_roles,
+    built_in_roles, events,
     store::{
         AccountChange, AccountStore, Attempt, Cause, Failure, GrantStore, NewAccount, NewSession,
         NewToken, RoleStore, SessionGrant, SessionStore, SignInPolicyStore, StoredAccount,
@@ -15,7 +15,8 @@ use crate::{
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use panel_errors::{PanelError, Result};
-use serde_json::{json, Value};
+use panel_events::EventData;
+use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
     sync::Mutex,
@@ -99,11 +100,11 @@ fn permissions(state: &State, account: &Account) -> PermissionSet {
         })
 }
 
-fn record(state: &mut State, event_type: &str, cause: &Cause, data: Value) {
+fn record<E: EventData>(state: &mut State, cause: &Cause, data: &E) {
     state.events.push(RecordedEvent {
-        event_type: event_type.into(),
+        event_type: E::TYPE.into(),
         actor: cause.actor.clone(),
-        data,
+        data: serde_json::to_value(data).expect("event data serializes"),
     });
 }
 
@@ -171,12 +172,7 @@ impl AccountStore for MemoryIdentityStore {
                 retry_after: None,
             }),
         });
-        record(
-            &mut state,
-            "identity.account.created",
-            cause,
-            json!({ "account": account.id, "username": account.username, "roles": account.roles }),
-        );
+        record(&mut state, cause, &events::account_created(&account));
         Ok(account)
     }
 
@@ -245,12 +241,7 @@ impl AccountStore for MemoryIdentityStore {
                 }
             }
         }
-        record(
-            &mut state,
-            "identity.account.updated",
-            cause,
-            json!({ "account": id, "disabled": change.disabled, "roles": change.roles, "break_glass": change.break_glass, "unlocked": change.unlock }),
-        );
+        record(&mut state, cause, &events::account_updated(id, &change));
         Ok(account)
     }
 
@@ -272,12 +263,7 @@ impl AccountStore for MemoryIdentityStore {
         stored.account.locked = false;
         stored.account.password_changed_at = Some(now);
         end_sessions(&mut state, id, keep, now);
-        record(
-            &mut state,
-            "identity.password.changed",
-            cause,
-            json!({ "account": id }),
-        );
+        record(&mut state, cause, &events::password_changed(id));
         Ok(())
     }
 
@@ -299,9 +285,8 @@ impl AccountStore for MemoryIdentityStore {
         stored.account.locked |= failure.lock;
         record(
             &mut state,
-            "identity.login.failed",
             cause,
-            json!({ "attempt": attempt, "reason": "wrong_password", "failures": failure.failures, "locked": failure.lock }),
+            &events::wrong_password(attempt, &failure),
         );
         Ok(())
     }
@@ -309,9 +294,8 @@ impl AccountStore for MemoryIdentityStore {
     async fn login_refused(&self, attempt: &Attempt, reason: &str, cause: &Cause) {
         record(
             &mut self.state(),
-            "identity.login.failed",
             cause,
-            json!({ "attempt": attempt, "reason": reason }),
+            &events::login_refused(attempt, reason),
         );
     }
 }
@@ -331,21 +315,19 @@ impl SessionStore for MemoryIdentityStore {
             password.retry_after = None;
         }
         stored.account.last_login_at = Some(new.session.created_at);
-        let event = json!({
-            "attempt": attempt,
-            "session": new.session.id,
-            "transport": new.session.transport,
-        });
-        state.sessions.push((new.session, new.secret));
         if attempt.break_glass {
             record(
                 &mut state,
-                "identity.break_glass.used",
                 cause,
-                event.clone(),
+                &events::break_glass_used(attempt, &new.session),
             );
         }
-        record(&mut state, "identity.login.succeeded", cause, event);
+        record(
+            &mut state,
+            cause,
+            &events::login_succeeded(attempt, &new.session),
+        );
+        state.sessions.push((new.session, new.secret));
         Ok(())
     }
 
@@ -408,9 +390,8 @@ impl SessionStore for MemoryIdentityStore {
         session.revoked_at = Some(now);
         record(
             &mut state,
-            "identity.session.ended",
             cause,
-            json!({ "account": account, "session": id, "reason": reason }),
+            &events::session_ended(account, id, reason),
         );
         Ok(true)
     }
@@ -434,12 +415,7 @@ impl SessionStore for MemoryIdentityStore {
             }
         }
         if ended > 0 {
-            record(
-                &mut state,
-                "identity.session.ended",
-                cause,
-                json!({ "account": account, "reason": "revoked", "sessions": ended }),
-            );
+            record(&mut state, cause, &events::sessions_revoked(account, ended));
         }
         Ok(ended)
     }
@@ -449,15 +425,8 @@ impl SessionStore for MemoryIdentityStore {
 impl TokenStore for MemoryIdentityStore {
     async fn create_token(&self, new: NewToken, cause: &Cause) -> Result<()> {
         let mut state = self.state();
-        let event = json!({
-            "account": new.token.account,
-            "token": new.token.id,
-            "name": new.token.name,
-            "permissions": new.token.permissions,
-            "expires_at": new.token.expires_at,
-        });
+        record(&mut state, cause, &events::token_created(&new.token));
         state.tokens.push((new.token, new.secret));
-        record(&mut state, "identity.token.created", cause, event);
         Ok(())
     }
 
@@ -517,12 +486,7 @@ impl TokenStore for MemoryIdentityStore {
             return Ok(false);
         };
         token.revoked_at = Some(now);
-        record(
-            &mut state,
-            "identity.token.revoked",
-            cause,
-            json!({ "account": account, "token": id }),
-        );
+        record(&mut state, cause, &events::token_revoked(account, id));
         Ok(true)
     }
 
@@ -541,9 +505,8 @@ impl TokenStore for MemoryIdentityStore {
             return Ok(false);
         };
         token.revoked_at = Some(now);
-        let event = json!({ "account": account, "token": new.token.id, "replaces": old });
+        record(&mut state, cause, &events::token_rotated(&new.token, old));
         state.tokens.push((new.token, new.secret));
-        record(&mut state, "identity.token.rotated", cause, event);
         Ok(true)
     }
 }
@@ -560,12 +523,7 @@ impl RoleStore for MemoryIdentityStore {
             return Err(PanelError::conflict(format!("the role {} exists", role.id)));
         }
         state.roles.push(role.clone());
-        record(
-            &mut state,
-            "identity.role.created",
-            cause,
-            json!({ "role": role.id, "permissions": role.permissions }),
-        );
+        record(&mut state, cause, &events::role_created(&role));
         Ok(role)
     }
 
@@ -582,12 +540,7 @@ impl RoleStore for MemoryIdentityStore {
             )));
         };
         *existing = role.clone();
-        record(
-            &mut state,
-            "identity.role.updated",
-            cause,
-            json!({ "role": role.id, "permissions": role.permissions }),
-        );
+        record(&mut state, cause, &events::role_updated(&role));
         Ok(role)
     }
 
@@ -614,12 +567,7 @@ impl RoleStore for MemoryIdentityStore {
             )));
         }
         state.roles.retain(|role| role.id != id);
-        record(
-            &mut state,
-            "identity.role.deleted",
-            cause,
-            json!({ "role": id }),
-        );
+        record(&mut state, cause, &events::role_deleted(id));
         Ok(())
     }
 }
@@ -638,9 +586,8 @@ impl GrantStore for MemoryIdentityStore {
 
     async fn create_grant(&self, grant: Grant, cause: &Cause) -> Result<()> {
         let mut state = self.state();
-        let data = json!({ "account": grant.account, "grant": grant.id, "role": grant.role, "scope": grant.scope, "conditions": grant.conditions });
+        record(&mut state, cause, &events::grant_created(&grant));
         state.grants.push(grant);
-        record(&mut state, "identity.grant.created", cause, data);
         Ok(())
     }
 
@@ -653,12 +600,7 @@ impl GrantStore for MemoryIdentityStore {
         if state.grants.len() == before {
             return Ok(false);
         }
-        record(
-            &mut state,
-            "identity.grant.deleted",
-            cause,
-            json!({ "account": account, "grant": id }),
-        );
+        record(&mut state, cause, &events::grant_deleted(account, id));
         Ok(true)
     }
 }
@@ -677,12 +619,7 @@ impl SignInPolicyStore for MemoryIdentityStore {
     ) -> Result<()> {
         let mut state = self.state();
         state.password_sign_in = policy;
-        record(
-            &mut state,
-            "identity.sign_in_policy.updated",
-            cause,
-            json!({ "password_sign_in": policy }),
-        );
+        record(&mut state, cause, &events::sign_in_policy_updated(policy));
         Ok(())
     }
 }
@@ -706,7 +643,10 @@ impl ProviderStore for MemoryIdentityStore {
 
     async fn put_provider(&self, provider: IdentityProvider, cause: &Cause) -> Result<bool> {
         let mut state = self.state();
-        let data = json!({ "provider": provider.id, "issuer": provider.issuer, "enabled": provider.enabled });
+        let (created_event, updated_event) = (
+            events::provider_created(&provider),
+            events::provider_updated(&provider),
+        );
         let created = match state
             .providers
             .iter_mut()
@@ -724,15 +664,14 @@ impl ProviderStore for MemoryIdentityStore {
                 true
             }
         };
-        if !data["enabled"].as_bool().unwrap_or(true) {
-            end_provider_sessions(&mut state, data["provider"].as_str().unwrap_or_default());
+        if !created_event.enabled {
+            end_provider_sessions(&mut state, &created_event.provider);
         }
-        let event = if created {
-            "identity.provider.created"
+        if created {
+            record(&mut state, cause, &created_event);
         } else {
-            "identity.provider.updated"
-        };
-        record(&mut state, event, cause, data);
+            record(&mut state, cause, &updated_event);
+        }
         Ok(created)
     }
 
@@ -749,12 +688,7 @@ impl ProviderStore for MemoryIdentityStore {
         state.pending.retain(|pending| pending.provider != id);
         end_provider_sessions(&mut state, id);
         state.provider_sessions.retain(|row| row.provider != id);
-        record(
-            &mut state,
-            "identity.provider.deleted",
-            cause,
-            json!({ "provider": id }),
-        );
+        record(&mut state, cause, &events::provider_deleted(id));
         Ok(())
     }
 
@@ -833,9 +767,12 @@ impl ProviderStore for MemoryIdentityStore {
             });
             record(
                 &mut state,
-                "identity.account.created",
                 cause,
-                json!({ "account": account.id, "username": account.username, "provider": sign_in.link.provider }),
+                &events::provider_account_created(
+                    account.id,
+                    &account.username,
+                    &sign_in.link.provider,
+                ),
             );
         }
         let stored = account_mut(&mut state, sign_in.link.account)?;
@@ -852,12 +789,8 @@ impl ProviderStore for MemoryIdentityStore {
         state
             .links
             .retain(|kept| !(kept.provider == link.provider && kept.subject == link.subject));
-        let event = json!({
-            "attempt": attempt,
-            "provider": link.provider,
-            "session": sign_in.session.session.id,
-            "transport": sign_in.session.session.transport,
-        });
+        let event =
+            events::provider_login_succeeded(attempt, &sign_in.session.session, &link.provider);
         state.provider_sessions.push(ProviderSessionRow {
             session: sign_in.session.session.id,
             provider: link.provider.clone(),
@@ -868,7 +801,7 @@ impl ProviderStore for MemoryIdentityStore {
         state
             .sessions
             .push((sign_in.session.session, sign_in.session.secret));
-        record(&mut state, "identity.login.succeeded", cause, event);
+        record(&mut state, cause, &event);
         Ok(account)
     }
 
@@ -956,7 +889,10 @@ impl WorkloadStore for MemoryIdentityStore {
 
     async fn put_trust(&self, trust: WorkloadTrust, cause: &Cause) -> Result<bool> {
         let mut state = self.state();
-        let data = json!({ "workload_identity": trust.id, "account": trust.account, "issuer": trust.issuer });
+        let (created_event, updated_event) = (
+            events::workload_trust_created(&trust),
+            events::workload_trust_updated(&trust),
+        );
         let created = match state.trusts.iter_mut().find(|kept| kept.id == trust.id) {
             Some(kept) => {
                 *kept = trust;
@@ -967,12 +903,11 @@ impl WorkloadStore for MemoryIdentityStore {
                 true
             }
         };
-        let event = if created {
-            "identity.workload_trust.created"
+        if created {
+            record(&mut state, cause, &created_event);
         } else {
-            "identity.workload_trust.updated"
-        };
-        record(&mut state, event, cause, data);
+            record(&mut state, cause, &updated_event);
+        }
         Ok(created)
     }
 
@@ -985,12 +920,7 @@ impl WorkloadStore for MemoryIdentityStore {
                 "there is no workload identity {id}"
             )));
         }
-        record(
-            &mut state,
-            "identity.workload_trust.deleted",
-            cause,
-            json!({ "workload_identity": id }),
-        );
+        record(&mut state, cause, &events::workload_trust_deleted(id));
         Ok(())
     }
 }

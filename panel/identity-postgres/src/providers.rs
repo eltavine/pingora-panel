@@ -4,6 +4,7 @@ use super::{storage, PgIdentityStore};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use panel_errors::{PanelError, Result};
+use panel_identity::events;
 use panel_identity::{
     store::{Attempt, Cause},
     Account, AccountId, ClaimNames, GroupRole, IdentityProvider, PendingSignIn, ProviderLink,
@@ -100,18 +101,23 @@ impl ProviderStore for PgIdentityStore {
         if !provider.enabled {
             end_sessions(&mut transaction, &provider.id, "provider_disabled").await?;
         }
-        self.emit_on(
-            &mut transaction,
-            if created {
-                "identity.provider.created"
-            } else {
-                "identity.provider.updated"
-            },
-            ("provider", &provider.id),
-            cause,
-            &json!({ "provider": provider.id, "issuer": provider.issuer, "enabled": provider.enabled }),
-        )
-        .await?;
+        if created {
+            self.emit_on(
+                &mut transaction,
+                ("provider", &provider.id),
+                cause,
+                &events::provider_created(&provider),
+            )
+            .await?;
+        } else {
+            self.emit_on(
+                &mut transaction,
+                ("provider", &provider.id),
+                cause,
+                &events::provider_updated(&provider),
+            )
+            .await?;
+        }
         transaction.commit().await.map_err(storage)?;
         Ok(created)
     }
@@ -131,10 +137,9 @@ impl ProviderStore for PgIdentityStore {
         }
         self.emit_on(
             &mut transaction,
-            "identity.provider.deleted",
             ("provider", id),
             cause,
-            &json!({ "provider": id }),
+            &events::provider_deleted(id),
         )
         .await?;
         transaction.commit().await.map_err(storage)
@@ -241,10 +246,9 @@ impl ProviderStore for PgIdentityStore {
             })?;
             self.emit(
                 &mut transaction,
-                "identity.account.created",
                 new.id,
                 cause,
-                &json!({ "account": new.id, "username": new.username, "provider": sign_in.link.provider }),
+                &events::provider_account_created(new.id, &new.username, &sign_in.link.provider),
             )
             .await?;
         }
@@ -335,15 +339,9 @@ impl ProviderStore for PgIdentityStore {
             .map_err(storage)?;
         self.emit(
             &mut transaction,
-            "identity.login.succeeded",
             account_id,
             cause,
-            &json!({
-                "attempt": attempt,
-                "provider": sign_in.link.provider,
-                "session": session.id,
-                "transport": session.transport,
-            }),
+            &events::provider_login_succeeded(attempt, session, &sign_in.link.provider),
         )
         .await?;
         let account = Self::reread(&mut transaction, account_id).await?;

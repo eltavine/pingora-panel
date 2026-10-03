@@ -7,6 +7,8 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use panel_errors::{PanelError, Result};
+use panel_events::EventData;
+use panel_identity::events;
 use panel_identity::{
     built_in_roles,
     store::{
@@ -18,7 +20,6 @@ use panel_identity::{
     SecretHash, Session, SessionId, TokenId, Transport, Username,
 };
 use panel_postgres::{EventLog, PgOutbox, SchemaMigration, ServiceDatabase};
-use serde::Serialize;
 use serde_json::json;
 use sqlx::{postgres::PgRow, PgConnection, PgPool, Row};
 use std::sync::LazyLock;
@@ -229,35 +230,27 @@ impl PgIdentityStore {
         transaction.commit().await.map_err(storage)
     }
 
-    async fn emit<T: Serialize>(
+    async fn emit<E: EventData>(
         &self,
         connection: &mut PgConnection,
-        event_type: &str,
         account: AccountId,
         cause: &Cause,
-        data: &T,
+        data: &E,
     ) -> Result<()> {
-        self.emit_on(
-            connection,
-            event_type,
-            ("account", &account.to_string()),
-            cause,
-            data,
-        )
-        .await
+        self.emit_on(connection, ("account", &account.to_string()), cause, data)
+            .await
     }
 
-    async fn emit_on<T: Serialize>(
+    async fn emit_on<E: EventData>(
         &self,
         connection: &mut PgConnection,
-        event_type: &str,
         aggregate: (&str, &str),
         cause: &Cause,
-        data: &T,
+        data: &E,
     ) -> Result<()> {
         let event = self
             .events
-            .event(event_type, aggregate, &cause.scope, &cause.actor, data)?;
+            .event(aggregate, &cause.scope, &cause.actor, data)?;
         PgOutbox::append(connection, &event).await
     }
 
@@ -347,10 +340,9 @@ impl AccountStore for PgIdentityStore {
         let account = Self::reread(&mut transaction, new.id).await?;
         self.emit(
             &mut transaction,
-            "identity.account.created",
             account.id,
             cause,
-            &json!({ "account": account.id, "username": account.username, "roles": account.roles }),
+            &events::account_created(&account),
         )
         .await?;
         transaction.commit().await.map_err(storage)?;
@@ -444,17 +436,9 @@ impl AccountStore for PgIdentityStore {
         let account = Self::reread(&mut transaction, id).await?;
         self.emit(
             &mut transaction,
-            "identity.account.updated",
             id,
             cause,
-            &json!({
-                "account": id,
-                "display_name": change.display_name,
-                "disabled": change.disabled,
-                "roles": change.roles,
-                "break_glass": change.break_glass,
-                "unlocked": change.unlock,
-            }),
+            &events::account_updated(id, &change),
         )
         .await?;
         transaction.commit().await.map_err(storage)?;
@@ -484,14 +468,8 @@ impl AccountStore for PgIdentityStore {
             return Err(PanelError::not_found(format!("there is no account {id}")));
         }
         Self::end_all(&mut transaction, id, keep, "password_changed", now).await?;
-        self.emit(
-            &mut transaction,
-            "identity.password.changed",
-            id,
-            cause,
-            &json!({ "account": id }),
-        )
-        .await?;
+        self.emit(&mut transaction, id, cause, &events::password_changed(id))
+            .await?;
         transaction.commit().await.map_err(storage)
     }
 
@@ -519,15 +497,9 @@ impl AccountStore for PgIdentityStore {
         .map_err(storage)?;
         self.emit(
             &mut transaction,
-            "identity.login.failed",
             failure.account,
             cause,
-            &json!({
-                "attempt": attempt,
-                "reason": "wrong_password",
-                "failures": failure.failures,
-                "locked": failure.lock,
-            }),
+            &events::wrong_password(attempt, &failure),
         )
         .await?;
         transaction.commit().await.map_err(storage)
@@ -541,11 +513,10 @@ impl AccountStore for PgIdentityStore {
         };
         self.events
             .record(
-                "identity.login.failed",
                 ("login", &subject),
                 &cause.scope,
                 &cause.actor,
-                &json!({ "attempt": attempt, "reason": reason }),
+                &events::login_refused(attempt, reason),
             )
             .await;
     }
@@ -590,27 +561,20 @@ impl SessionStore for PgIdentityStore {
             .execute(&mut *transaction)
             .await
             .map_err(storage)?;
-        let login = json!({
-            "attempt": attempt,
-            "session": session.id,
-            "transport": session.transport,
-        });
         if attempt.break_glass {
             self.emit(
                 &mut transaction,
-                "identity.break_glass.used",
                 session.account,
                 cause,
-                &login,
+                &events::break_glass_used(attempt, session),
             )
             .await?;
         }
         self.emit(
             &mut transaction,
-            "identity.login.succeeded",
             session.account,
             cause,
-            &login,
+            &events::login_succeeded(attempt, session),
         )
         .await?;
         transaction.commit().await.map_err(storage)
@@ -677,10 +641,9 @@ impl SessionStore for PgIdentityStore {
         if ended {
             self.emit(
                 &mut transaction,
-                "identity.session.ended",
                 account,
                 cause,
-                &json!({ "account": account, "session": id, "reason": reason }),
+                &events::session_ended(account, id, reason),
             )
             .await?;
         }
@@ -710,10 +673,9 @@ impl SessionStore for PgIdentityStore {
         if ended > 0 {
             self.emit(
                 &mut transaction,
-                "identity.session.ended",
                 account,
                 cause,
-                &json!({ "account": account, "reason": "revoked", "sessions": ended }),
+                &events::sessions_revoked(account, ended),
             )
             .await?;
         }
@@ -743,16 +705,9 @@ impl TokenStore for PgIdentityStore {
         .map_err(storage)?;
         self.emit(
             &mut transaction,
-            "identity.token.created",
             token.account,
             cause,
-            &json!({
-                "account": token.account,
-                "token": token.id,
-                "name": token.name,
-                "permissions": token.permissions,
-                "expires_at": token.expires_at,
-            }),
+            &events::token_created(token),
         )
         .await?;
         transaction.commit().await.map_err(storage)
@@ -816,10 +771,9 @@ impl TokenStore for PgIdentityStore {
         if revoked {
             self.emit(
                 &mut transaction,
-                "identity.token.revoked",
                 account,
                 cause,
-                &json!({ "account": account, "token": id }),
+                &events::token_revoked(account, id),
             )
             .await?;
         }
@@ -867,10 +821,9 @@ impl TokenStore for PgIdentityStore {
         .map_err(storage)?;
         self.emit(
             &mut transaction,
-            "identity.token.rotated",
             token.account,
             cause,
-            &json!({ "account": token.account, "token": token.id, "replaces": old }),
+            &events::token_rotated(token, old),
         )
         .await?;
         transaction.commit().await.map_err(storage)?;
@@ -921,10 +874,9 @@ impl RoleStore for PgIdentityStore {
         })?;
         self.emit_on(
             &mut transaction,
-            "identity.role.created",
             ("role", &role.id),
             cause,
-            &json!({ "role": role.id, "permissions": role.permissions }),
+            &events::role_created(&role),
         )
         .await?;
         transaction.commit().await.map_err(storage)?;
@@ -952,10 +904,9 @@ impl RoleStore for PgIdentityStore {
         }
         self.emit_on(
             &mut transaction,
-            "identity.role.updated",
             ("role", &role.id),
             cause,
-            &json!({ "role": role.id, "permissions": role.permissions }),
+            &events::role_updated(&role),
         )
         .await?;
         transaction.commit().await.map_err(storage)?;
@@ -981,10 +932,9 @@ impl RoleStore for PgIdentityStore {
         }
         self.emit_on(
             &mut transaction,
-            "identity.role.deleted",
             ("role", id),
             cause,
-            &json!({ "role": id }),
+            &events::role_deleted(id),
         )
         .await?;
         transaction.commit().await.map_err(storage)
@@ -1038,16 +988,9 @@ impl GrantStore for PgIdentityStore {
         .map_err(storage)?;
         self.emit(
             &mut transaction,
-            "identity.grant.created",
             grant.account,
             cause,
-            &json!({
-                "account": grant.account,
-                "grant": grant.id,
-                "role": grant.role,
-                "scope": grant.scope,
-                "conditions": grant.conditions,
-            }),
+            &events::grant_created(&grant),
         )
         .await?;
         transaction.commit().await.map_err(storage)
@@ -1066,10 +1009,9 @@ impl GrantStore for PgIdentityStore {
         }
         self.emit(
             &mut transaction,
-            "identity.grant.deleted",
             account,
             cause,
-            &json!({ "account": account, "grant": id }),
+            &events::grant_deleted(account, id),
         )
         .await?;
         transaction.commit().await.map_err(storage)?;
@@ -1106,10 +1048,9 @@ impl SignInPolicyStore for PgIdentityStore {
         .map_err(storage)?;
         self.emit_on(
             &mut transaction,
-            "identity.sign_in_policy.updated",
             ("sign_in_policy", "password"),
             cause,
-            &json!({ "password_sign_in": policy }),
+            &events::sign_in_policy_updated(policy),
         )
         .await?;
         transaction.commit().await.map_err(storage)

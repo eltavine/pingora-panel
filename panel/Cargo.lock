@@ -1993,7 +1993,6 @@ dependencies = [
  "panel-events",
  "panel-identity",
  "panel-postgres",
- "serde",
  "serde_json",
  "sqlx",
  "tokio",
@@ -2914,6 +2913,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "panel-event-contracts"
+version = "0.1.0"
+dependencies = [
+ "panel-events",
+ "pbjson",
+ "pbjson-build",
+ "pbjson-types",
+ "prost",
+ "prost-build",
+ "protoc-bin-vendored",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "panel-events"
 version = "0.1.0"
 dependencies = [
@@ -2969,6 +2983,8 @@ dependencies = [
  "ipnet",
  "panel-context",
  "panel-errors",
+ "panel-event-contracts",
+ "panel-events",
  "panel-identity",
  "panel-schedule",
  "panel-secrets",
@@ -3239,6 +3255,43 @@ checksum = "aab41826031698d6ffcd9cff78ef56ef998e39dc7e5067cdfebe373842d4723b"
 dependencies = [
  "getrandom 0.4.3",
  "phc",
+]
+
+[[package]]
+name = "pbjson"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8edd1efdd8ab23ba9cb9ace3d9987a72663d5d7c9f74fa00b51d6213645cf6c"
+dependencies = [
+ "base64 0.22.1",
+ "serde",
+]
+
+[[package]]
+name = "pbjson-build"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ed4d5c6ae95e08ac768883c8401cf0e8deb4e6e1d6a4e1fd3d2ec4f0ec63200"
+dependencies = [
+ "heck 0.5.0",
+ "itertools",
+ "prost",
+ "prost-types",
+]
+
+[[package]]
+name = "pbjson-types"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a14e2757d877c0f607a82ce1b8560e224370f159d66c5d52eb55ea187ef0350e"
+dependencies = [
+ "bytes",
+ "chrono",
+ "pbjson",
+ "pbjson-build",
+ "prost",
+ "prost-build",
+ "serde",
 ]
 
 [[package]]

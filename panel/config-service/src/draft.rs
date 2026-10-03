@@ -151,7 +151,7 @@ impl PgDrafts {
         .execute(&mut *transaction)
         .await
         .map_err(storage_error)?;
-        let event = self.events.event(
+        let event = self.events.event_named(
             "config.draft.changed",
             DRAFT,
             request.scope,
@@ -195,7 +195,7 @@ impl PgDrafts {
         .execute(&mut *transaction)
         .await
         .map_err(storage_error)?;
-        let event = self.events.event(
+        let event = self.events.event_named(
             "config.draft.applied",
             DRAFT,
             scope,

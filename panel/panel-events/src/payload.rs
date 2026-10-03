@@ -17,6 +17,17 @@ pub const PROTOBUF_TYPE_URL_PREFIX: &str = "https://type.googleapis.com/";
 const MAX_CONTENT_TYPE_BYTES: usize = 255;
 const MAX_SCHEMA_BYTES: usize = 512;
 
+/// The data of one event type: its name, and the schema its JSON follows.
+pub trait EventData: Serialize {
+    /// Such as `identity.account.created`.
+    const TYPE: &'static str;
+
+    /// The data's `dataschema`, an absolute URI, when it has one.
+    fn schema() -> Option<String> {
+        None
+    }
+}
+
 /// Event data with its CloudEvents `datacontenttype` and `dataschema`.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct EventPayload {
@@ -59,6 +70,15 @@ impl EventPayload {
             PanelError::invalid_argument(format!("event data is not serializable: {error}"))
         })?;
         Self::new(JSON_MEDIA_TYPE, data)
+    }
+
+    /// The JSON of `data`, with its `dataschema` when it has one.
+    pub fn of<E: EventData>(data: &E) -> Result<Self> {
+        let payload = Self::json(data)?;
+        match E::schema() {
+            Some(schema) => payload.with_schema(schema),
+            None => Ok(payload),
+        }
     }
 
     /// Wraps a binary protobuf message identified by its fully qualified name.

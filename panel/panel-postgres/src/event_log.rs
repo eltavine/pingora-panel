@@ -7,8 +7,8 @@ use crate::{storage_error, PgOutbox, ServiceDatabase};
 use chrono::Utc;
 use panel_errors::Result;
 use panel_events::{
-    Actor, AggregateId, AggregateRef, AggregateType, EventDraft, EventEnvelope, EventOrigin,
-    EventPayload, EventType, EventVersion, Principal, RequestScope, ServiceName,
+    Actor, AggregateId, AggregateRef, AggregateType, EventData, EventDraft, EventEnvelope,
+    EventOrigin, EventPayload, EventType, EventVersion, Principal, RequestScope, ServiceName,
 };
 use serde::Serialize;
 use sqlx::PgPool;
@@ -36,7 +36,61 @@ impl EventLog {
     }
 
     /// An event about `aggregate`, a type and an ID, caused by `scope`.
-    pub fn event<T: Serialize>(
+    pub fn event<E: EventData>(
+        &self,
+        aggregate: (&str, &str),
+        scope: &RequestScope,
+        actor: &str,
+        data: &E,
+    ) -> Result<EventEnvelope> {
+        self.event_by(aggregate, scope, &Self::user(actor), data)
+    }
+
+    /// An event about `aggregate` that `principal` caused within `scope`.
+    pub fn event_by<E: EventData>(
+        &self,
+        aggregate: (&str, &str),
+        scope: &RequestScope,
+        principal: &Principal,
+        data: &E,
+    ) -> Result<EventEnvelope> {
+        self.envelope(
+            E::TYPE,
+            aggregate,
+            scope,
+            principal,
+            EventPayload::of(data)?,
+        )
+    }
+
+    /// Records an event on its own. What it describes already happened, so
+    /// a failure is logged rather than returned.
+    pub async fn record<E: EventData>(
+        &self,
+        aggregate: (&str, &str),
+        scope: &RequestScope,
+        actor: &str,
+        data: &E,
+    ) {
+        self.record_by(aggregate, scope, &Self::user(actor), data)
+            .await;
+    }
+
+    /// Records an event that `principal` caused on its own; see
+    /// [`record`](Self::record).
+    pub async fn record_by<E: EventData>(
+        &self,
+        aggregate: (&str, &str),
+        scope: &RequestScope,
+        principal: &Principal,
+        data: &E,
+    ) {
+        let event = self.event_by(aggregate, scope, principal, data);
+        self.append_alone(E::TYPE, event).await;
+    }
+
+    /// An event whose data has no definition yet.
+    pub fn event_named<T: Serialize>(
         &self,
         event_type: &str,
         aggregate: (&str, &str),
@@ -44,17 +98,61 @@ impl EventLog {
         actor: &str,
         data: &T,
     ) -> Result<EventEnvelope> {
-        self.event_by(event_type, aggregate, scope, &Self::user(actor), data)
+        self.event_named_by(event_type, aggregate, scope, &Self::user(actor), data)
     }
 
-    /// An event about `aggregate` that `principal` caused within `scope`.
-    pub fn event_by<T: Serialize>(
+    /// An event whose data has no definition yet, caused by `principal`.
+    pub fn event_named_by<T: Serialize>(
         &self,
         event_type: &str,
         aggregate: (&str, &str),
         scope: &RequestScope,
         principal: &Principal,
         data: &T,
+    ) -> Result<EventEnvelope> {
+        self.envelope(
+            event_type,
+            aggregate,
+            scope,
+            principal,
+            EventPayload::json(data)?,
+        )
+    }
+
+    /// Records an event whose data has no definition yet on its own.
+    pub async fn record_named<T: Serialize>(
+        &self,
+        event_type: &str,
+        aggregate: (&str, &str),
+        scope: &RequestScope,
+        actor: &str,
+        data: &T,
+    ) {
+        self.record_named_by(event_type, aggregate, scope, &Self::user(actor), data)
+            .await;
+    }
+
+    /// Records an event whose data has no definition yet on its own, caused
+    /// by `principal`.
+    pub async fn record_named_by<T: Serialize>(
+        &self,
+        event_type: &str,
+        aggregate: (&str, &str),
+        scope: &RequestScope,
+        principal: &Principal,
+        data: &T,
+    ) {
+        let event = self.event_named_by(event_type, aggregate, scope, principal, data);
+        self.append_alone(event_type, event).await;
+    }
+
+    fn envelope(
+        &self,
+        event_type: &str,
+        aggregate: (&str, &str),
+        scope: &RequestScope,
+        principal: &Principal,
+        payload: EventPayload,
     ) -> Result<EventEnvelope> {
         Ok(EventEnvelope::new(
             EventDraft::new(
@@ -64,39 +162,16 @@ impl EventLog {
                     AggregateType::new(aggregate.0)?,
                     AggregateId::new(aggregate.1)?,
                 ),
-                EventPayload::json(data)?,
+                payload,
             ),
             EventOrigin::scoped(self.producer.clone(), scope, principal.clone()),
             Utc::now(),
         ))
     }
 
-    /// Records an event on its own. What it describes already happened, so
-    /// a failure is logged rather than returned.
-    pub async fn record<T: Serialize>(
-        &self,
-        event_type: &str,
-        aggregate: (&str, &str),
-        scope: &RequestScope,
-        actor: &str,
-        data: &T,
-    ) {
-        self.record_by(event_type, aggregate, scope, &Self::user(actor), data)
-            .await;
-    }
-
-    /// Records an event that `principal` caused on its own; see
-    /// [`record`](Self::record).
-    pub async fn record_by<T: Serialize>(
-        &self,
-        event_type: &str,
-        aggregate: (&str, &str),
-        scope: &RequestScope,
-        principal: &Principal,
-        data: &T,
-    ) {
+    async fn append_alone(&self, event_type: &str, event: Result<EventEnvelope>) {
         let result = async {
-            let event = self.event_by(event_type, aggregate, scope, principal, data)?;
+            let event = event?;
             let mut transaction = self.pool.begin().await.map_err(storage_error)?;
             PgOutbox::append(&mut transaction, &event).await?;
             transaction.commit().await.map_err(storage_error)

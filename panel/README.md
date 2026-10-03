@@ -53,6 +53,7 @@ panel-bootstrap -> panel-postgres + panel-jetstream + panel-pki
 | `panel-context` | Request scope, W3C Trace Context, correlation, idempotency and actor identifiers shared by requests, commands and events | Domain, transport, storage, Pingora |
 | `panel-domain` | Validated value objects | IR, transport, storage, Pingora |
 | `panel-events` | CloudEvents-aligned event model, publisher/handler ports and idempotent consumption | Event formats, brokers, storage, Pingora |
+| `panel-event-contracts` | Event data generated from `proto/events`: one message per event type, written as proto3 JSON | Transports, storage, domain rules |
 | `panel-event-codec` | CloudEvents Protobuf, JSON and binary-mode representations | Brokers, storage, application rules, Pingora |
 | `panel-health` | Health checks, impact-based readiness aggregation, service mode and `application/health+json` documents | Transports, drivers, Pingora |
 | `panel-platform` | Service descriptors, protocol revision ranges and negotiation, capability directory and registration ports | Transports, registries, Pingora |

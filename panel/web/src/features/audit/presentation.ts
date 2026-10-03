@@ -82,6 +82,10 @@ function list(value: unknown): string {
   return Array.isArray(value) ? value.map(text).join(', ') : text(value)
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 function host(value: unknown): string {
   try {
     return new URL(text(value)).host
@@ -130,7 +134,7 @@ export function summaryOf(event: AuditEvent, t: Translate): string {
         data.disabled === true && t('audit.summary.disabled'),
         data.disabled === false && t('audit.summary.enabled'),
         data.unlocked === true && t('audit.summary.unlocked'),
-        Array.isArray(data.roles) && list(data.roles),
+        isRecord(data.roles) && list(data.roles.names),
       ]
         .filter(Boolean)
         .join(' · ')

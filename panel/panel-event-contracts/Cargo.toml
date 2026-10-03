@@ -1,0 +1,27 @@
+[package]
+name = "panel-event-contracts"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+panel-events.workspace = true
+pbjson.workspace = true
+pbjson-types.workspace = true
+prost.workspace = true
+serde.workspace = true
+
+[build-dependencies]
+pbjson-build.workspace = true
+prost-build.workspace = true
+protoc-bin-vendored = "=3.2.0"
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[package.metadata.cargo-machete]
+# Referenced only by the generated JSON mappings.
+ignored = ["pbjson", "pbjson-types", "serde"]

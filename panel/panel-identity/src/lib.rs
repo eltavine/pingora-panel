@@ -9,6 +9,7 @@
 mod account;
 #[cfg(feature = "test-support")]
 pub mod conformance;
+pub mod events;
 mod grant;
 pub mod memory;
 mod password;

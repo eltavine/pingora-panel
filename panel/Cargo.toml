@@ -7,6 +7,7 @@ members = [
     "panel-contracts",
     "panel-errors",
     "panel-events",
+    "panel-event-contracts",
     "panel-event-codec",
     "panel-health",
     "panel-jobs",
@@ -111,10 +112,14 @@ iri-string = "=0.7.14"
 mediatype = "=0.23.0"
 mime_guess = { version = "=2.0.5", default-features = false }
 parking_lot = "=0.12.5"
+pbjson = "=0.9.0"
+pbjson-build = "=0.9.0"
+pbjson-types = "=0.9.0"
 pbkdf2 = { version = "=0.13.0", default-features = false, features = ["hmac"] }
 pem = "=4.0.0"
 percent-encoding = "=2.3.2"
 prost = "=0.14.4"
+prost-build = "=0.14.4"
 prost-types = "=0.14.4"
 panel-context = { version = "=0.1.0", path = "panel-context" }
 panel-control-runtime = { version = "=0.1.0", path = "panel-control-runtime" }
@@ -147,6 +152,7 @@ panel-engine = { version = "=0.2.0", path = "panel-engine" }
 panel-errors = { version = "=0.1.0", path = "panel-errors" }
 panel-event-codec = { version = "=0.1.0", path = "panel-event-codec" }
 panel-events = { version = "=0.1.0", path = "panel-events" }
+panel-event-contracts = { version = "=0.1.0", path = "panel-event-contracts" }
 panel-health = { version = "=0.1.0", path = "panel-health" }
 panel-gateway-runtime = { version = "=0.2.0", path = "panel-gateway-runtime" }
 panel-ir = { version = "=0.1.0", path = "panel-ir" }

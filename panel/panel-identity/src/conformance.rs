@@ -1110,7 +1110,9 @@ async fn providers_link_accounts_and_keep_sign_ins_once(subject: impl StoreUnder
         assert_eq!(harness.events(event).await.len(), count, "{event}");
     }
     let logins = harness.events("identity.login.succeeded").await;
-    assert!(logins.iter().any(|login| login["provider"] == "corp"));
+    assert!(logins
+        .iter()
+        .any(|login| login["attempt"]["provider"] == "corp"));
 }
 
 async fn break_glass_accounts_keep_password_sign_in(subject: impl StoreUnderTest) {

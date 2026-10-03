@@ -58,7 +58,7 @@ impl RecordingUseCases {
             ),
         };
         self.events
-            .record(
+            .record_named(
                 &event_type,
                 SNAPSHOT,
                 &context.scope(),

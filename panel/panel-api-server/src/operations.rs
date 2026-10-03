@@ -20,7 +20,7 @@ impl OperationLog for OutboxOperations {
         data: Value,
     ) {
         self.0
-            .record(event_type, target, &context.scope(), context.actor(), &data)
+            .record_named(event_type, target, &context.scope(), context.actor(), &data)
             .await;
     }
 }
@@ -29,7 +29,7 @@ impl OperationLog for OutboxOperations {
 impl AccessAudit for OutboxOperations {
     async fn denied(&self, principal: &Principal, refusal: &Refusal, scope: &RequestScope) {
         self.0
-            .record(
+            .record_named(
                 "identity.access.denied",
                 ("account", &principal.account.to_string()),
                 scope,

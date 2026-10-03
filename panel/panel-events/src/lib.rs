@@ -28,7 +28,7 @@ pub use panel_context::{
     Actor, IdempotencyKey, RequestId, RequestScope, TraceContext, TRACESTATE_PROPAGATION_LIMIT,
 };
 pub use payload::{
-    EventPayload, JSON_MEDIA_TYPE, MAX_DATA_BYTES, MAX_EVENT_BYTES, PROTOBUF_MEDIA_TYPE,
+    EventData, EventPayload, JSON_MEDIA_TYPE, MAX_DATA_BYTES, MAX_EVENT_BYTES, PROTOBUF_MEDIA_TYPE,
     PROTOBUF_TYPE_URL_PREFIX,
 };
 pub use principal::{Principal, PrincipalKind};

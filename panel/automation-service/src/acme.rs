@@ -1157,9 +1157,13 @@ impl AcmeAutomation {
         aggregate: (&str, &str),
         data: &T,
     ) -> Result<()> {
-        let event =
-            self.events
-                .event_by(event_type, aggregate, cause.scope, cause.principal, data)?;
+        let event = self.events.event_named_by(
+            event_type,
+            aggregate,
+            cause.scope,
+            cause.principal,
+            data,
+        )?;
         PgOutbox::append(connection, &event).await
     }
 
@@ -1174,7 +1178,7 @@ impl AcmeAutomation {
     ) -> Result<T> {
         if let Err(error) = &result {
             self.events
-                .record_by(
+                .record_named_by(
                     event_type,
                     aggregate,
                     cause.scope,

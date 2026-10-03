@@ -227,7 +227,7 @@ impl ConfigurationService {
             ),
         };
         self.events
-            .record(event_type, DRAFT, &context.scope(), context.actor(), &data)
+            .record_named(event_type, DRAFT, &context.scope(), context.actor(), &data)
             .await;
     }
 
@@ -710,7 +710,7 @@ impl Configuration for ConfigurationService {
                 let id = revision_id(&request.resource)?;
                 let revision = self.revisions.set_note(id, note).await?;
                 self.events
-                    .record(
+                    .record_named(
                         "config.revision.noted",
                         ("revision", &id.to_string()),
                         &context.scope(),
@@ -792,7 +792,7 @@ impl Configuration for ConfigurationService {
         .await;
         if let Err(error) = &result {
             self.events
-                .record(
+                .record_named(
                     "config.change.refused",
                     DRAFT,
                     &context.scope(),

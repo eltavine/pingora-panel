@@ -380,7 +380,7 @@ impl DnsProviders {
                 .execute(&mut *transaction)
                 .await
                 .map_err(storage_error)?;
-            let event = self.events.event_by(
+            let event = self.events.event_named_by(
                 "tls.acme.dns_provider.deleted",
                 (AGGREGATE, id),
                 cause.scope,
@@ -430,7 +430,7 @@ impl DnsProviders {
         event_type: &str,
         provider: &DnsProviderRecord,
     ) -> Result<()> {
-        let event = self.events.event_by(
+        let event = self.events.event_named_by(
             event_type,
             (AGGREGATE, &provider.id),
             cause.scope,
@@ -456,7 +456,7 @@ impl DnsProviders {
     ) -> Result<T> {
         if let Err(error) = &result {
             self.events
-                .record_by(
+                .record_named_by(
                     "tls.acme.dns_provider.refused",
                     (AGGREGATE, id),
                     cause.scope,

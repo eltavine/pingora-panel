@@ -55,7 +55,10 @@ describe('audit presentation', () => {
       ),
     ).toBe('root · 192.0.2.7 · wrong_password')
     expect(
-      summaryOf(event('identity.account.updated', { disabled: true, roles: ['viewer'] }), t),
+      summaryOf(
+        event('identity.account.updated', { disabled: true, roles: { names: ['viewer'] } }),
+        t,
+      ),
     ).toBe('audit.summary.disabled · viewer')
     expect(
       summaryOf(

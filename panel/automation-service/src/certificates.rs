@@ -500,7 +500,7 @@ impl CertificateInventory {
         id: &CertificateId,
         data: &T,
     ) -> Result<()> {
-        let event = self.events.event_by(
+        let event = self.events.event_named_by(
             event_type,
             (AGGREGATE, id.as_str()),
             cause.scope,
@@ -520,7 +520,7 @@ impl CertificateInventory {
     ) -> Result<T> {
         if let Err(error) = &result {
             self.events
-                .record_by(
+                .record_named_by(
                     "tls.certificate.refused",
                     (AGGREGATE, id.as_str()),
                     cause.scope,

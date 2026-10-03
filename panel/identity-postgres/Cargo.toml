@@ -11,15 +11,14 @@ publish.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 panel-errors.workspace = true
+panel-events.workspace = true
 panel-identity.workspace = true
 panel-postgres.workspace = true
-serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 
 [dev-dependencies]
 panel-event-codec.workspace = true
-panel-events.workspace = true
 panel-identity = { workspace = true, features = ["test-support"] }
 panel-postgres = { workspace = true, features = ["test-support"] }
 tokio.workspace = true

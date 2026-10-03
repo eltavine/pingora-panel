@@ -1,0 +1,218 @@
+syntax = "proto3";
+
+// The data of identity events (ADR 0013, ADR 0014). Each message is the data
+// of one event type, named in its comment; events carry it as JSON in the
+// proto3 JSON mapping, with the field names below.
+package pingora.panel.events.identity.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// A sign-in attempt.
+message Attempt {
+  string username = 1;
+  // The identity provider the person signed in through.
+  optional string provider = 2;
+  // The account is a break-glass account.
+  bool break_glass = 3;
+  optional string client_address = 4;
+  optional string user_agent = 5;
+}
+
+// `identity.account.created`
+message AccountCreated {
+  string account = 1;
+  string username = 2;
+  repeated string roles = 3;
+  // Set when a sign-in through this provider created the account.
+  optional string provider = 4;
+}
+
+// Roles given to an account.
+message Roles {
+  repeated string names = 1;
+}
+
+// `identity.account.updated`: only what changed is set.
+message AccountUpdated {
+  string account = 1;
+  // Empty when the display name was cleared.
+  optional string display_name = 2;
+  optional bool disabled = 3;
+  optional Roles roles = 4;
+  optional bool break_glass = 5;
+  // The account's sign-in lock was lifted.
+  bool unlocked = 6;
+}
+
+// `identity.password.changed`
+message PasswordChanged {
+  string account = 1;
+}
+
+// `identity.login.failed`: a wrong password, or a sign-in refused before any
+// password was checked.
+message LoginFailed {
+  Attempt attempt = 1;
+  // Such as `wrong_password`, `unknown`, `disabled`, `locked` or `waiting`.
+  string reason = 2;
+  // Consecutive failures of the account, after a wrong password.
+  optional uint32 failures = 3;
+  // The failure locked the account.
+  optional bool locked = 4;
+}
+
+// `identity.login.succeeded`
+message LoginSucceeded {
+  Attempt attempt = 1;
+  string session = 2;
+  // `cookie` or `bearer`.
+  string transport = 3;
+}
+
+// `identity.break_glass.used`: a break-glass account signed in.
+message BreakGlassUsed {
+  Attempt attempt = 1;
+  string session = 2;
+  string transport = 3;
+}
+
+// `identity.session.ended`: one session, or every session of the account.
+message SessionEnded {
+  string account = 1;
+  optional string session = 2;
+  string reason = 3;
+  // How many sessions ended when every session of the account did.
+  optional uint32 sessions = 4;
+}
+
+// `identity.token.created`
+message TokenCreated {
+  string account = 1;
+  string token = 2;
+  string name = 3;
+  repeated string permissions = 4;
+  google.protobuf.Timestamp expires_at = 5;
+}
+
+// `identity.token.revoked`
+message TokenRevoked {
+  string account = 1;
+  string token = 2;
+}
+
+// `identity.token.rotated`
+message TokenRotated {
+  string account = 1;
+  string token = 2;
+  // The token the new one replaces.
+  string replaces = 3;
+}
+
+// `identity.role.created`
+message RoleCreated {
+  string role = 1;
+  repeated string permissions = 2;
+}
+
+// `identity.role.updated`
+message RoleUpdated {
+  string role = 1;
+  repeated string permissions = 2;
+}
+
+// `identity.role.deleted`
+message RoleDeleted {
+  string role = 1;
+}
+
+// Where a grant applies (ADR 0021).
+message GrantScope {
+  // `everything`, `site_group` or `site`.
+  string kind = 1;
+  optional string group = 2;
+  optional string site = 3;
+}
+
+// Recurring periods: each opens at an occurrence of an RFC 5545 recurrence
+// and lasts `minutes`.
+message Window {
+  string recurrence = 1;
+  uint32 minutes = 2;
+}
+
+// When a grant counts.
+message GrantConditions {
+  google.protobuf.Timestamp not_after = 1;
+  repeated string networks = 2;
+  repeated Window windows = 3;
+}
+
+// `identity.grant.created`
+message GrantCreated {
+  string account = 1;
+  string grant = 2;
+  string role = 3;
+  GrantScope scope = 4;
+  GrantConditions conditions = 5;
+}
+
+// `identity.grant.deleted`
+message GrantDeleted {
+  string account = 1;
+  string grant = 2;
+}
+
+// `identity.sign_in_policy.updated`
+message SignInPolicyUpdated {
+  // `everyone` or `break_glass_only`.
+  string password_sign_in = 1;
+}
+
+// `identity.provider.created`
+message ProviderCreated {
+  string provider = 1;
+  string issuer = 2;
+  bool enabled = 3;
+}
+
+// `identity.provider.updated`
+message ProviderUpdated {
+  string provider = 1;
+  string issuer = 2;
+  bool enabled = 3;
+}
+
+// `identity.provider.deleted`
+message ProviderDeleted {
+  string provider = 1;
+}
+
+// `identity.workload_trust.created`: whose tokens a workload identity trusts
+// for which service account.
+message WorkloadTrustCreated {
+  string workload_identity = 1;
+  string account = 2;
+  string issuer = 3;
+  string audience = 4;
+  string subject = 5;
+  map<string, string> claims = 6;
+  uint32 session_minutes = 7;
+  bool enabled = 8;
+}
+
+// `identity.workload_trust.updated`
+message WorkloadTrustUpdated {
+  string workload_identity = 1;
+  string account = 2;
+  string issuer = 3;
+  string audience = 4;
+  string subject = 5;
+  map<string, string> claims = 6;
+  uint32 session_minutes = 7;
+  bool enabled = 8;
+}
+
+// `identity.workload_trust.deleted`
+message WorkloadTrustDeleted {
+  string workload_identity = 1;
+}

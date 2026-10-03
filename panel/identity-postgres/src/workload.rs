@@ -3,6 +3,7 @@
 use super::{storage, PgIdentityStore};
 use async_trait::async_trait;
 use panel_errors::{PanelError, Result};
+use panel_identity::events;
 use panel_identity::{store::Cause, AccountId, WorkloadStore, WorkloadTrust};
 use serde_json::json;
 use sqlx::{postgres::PgRow, Row};
@@ -23,19 +24,6 @@ fn trust(row: &PgRow) -> Result<WorkloadTrust> {
         enabled: row.try_get("enabled").map_err(storage)?,
         created_at: row.try_get("created_at").map_err(storage)?,
         updated_at: row.try_get("updated_at").map_err(storage)?,
-    })
-}
-
-fn summary(trust: &WorkloadTrust) -> serde_json::Value {
-    json!({
-        "workload_identity": trust.id,
-        "account": trust.account,
-        "issuer": trust.issuer,
-        "audience": trust.audience,
-        "subject": trust.subject,
-        "claims": trust.claims,
-        "session_minutes": trust.session_minutes,
-        "enabled": trust.enabled,
     })
 }
 
@@ -80,18 +68,23 @@ impl WorkloadStore for PgIdentityStore {
         .fetch_one(&mut *transaction)
         .await
         .map_err(storage)?;
-        self.emit_on(
-            &mut transaction,
-            if created {
-                "identity.workload_trust.created"
-            } else {
-                "identity.workload_trust.updated"
-            },
-            ("workload_trust", &trust.id),
-            cause,
-            &summary(&trust),
-        )
-        .await?;
+        if created {
+            self.emit_on(
+                &mut transaction,
+                ("workload_trust", &trust.id),
+                cause,
+                &events::workload_trust_created(&trust),
+            )
+            .await?;
+        } else {
+            self.emit_on(
+                &mut transaction,
+                ("workload_trust", &trust.id),
+                cause,
+                &events::workload_trust_updated(&trust),
+            )
+            .await?;
+        }
         transaction.commit().await.map_err(storage)?;
         Ok(created)
     }
@@ -110,10 +103,9 @@ impl WorkloadStore for PgIdentityStore {
         }
         self.emit_on(
             &mut transaction,
-            "identity.workload_trust.deleted",
             ("workload_trust", id),
             cause,
-            &json!({ "workload_identity": id }),
+            &events::workload_trust_deleted(id),
         )
         .await?;
         transaction.commit().await.map_err(storage)
