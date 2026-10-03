@@ -62,6 +62,9 @@ pub(crate) enum SiteCommand {
         /// Redirect plain HTTP to the site's HTTPS listener.
         #[arg(long)]
         https_redirect: bool,
+        /// Serve the site's domains over HTTPS with this TLS profile.
+        #[arg(long)]
+        tls_profile: Option<String>,
         /// Create the site stopped.
         #[arg(long)]
         disabled: bool,
@@ -305,6 +308,7 @@ pub async fn run(api: &Api, output: &Output, command: SiteCommand) -> Result<()>
             group,
             note,
             https_redirect,
+            tls_profile,
             disabled,
         } => {
             let body = match file {
@@ -318,6 +322,7 @@ pub async fn run(api: &Api, output: &Output, command: SiteCommand) -> Result<()>
                     "group": group,
                     "note": note,
                     "https_redirect": https_redirect,
+                    "tls_profile_id": tls_profile,
                 }),
             };
             let site = api

@@ -244,6 +244,11 @@ async fn api(
         ("PATCH", "/api/v1/accounts/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b") => {
             Json(json!({"username": "ops", "disabled": body["disabled"]})).into_response()
         }
+        ("POST", "/api/v1/sites") => (
+            StatusCode::CREATED,
+            Json(json!({"id": "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a60", "name": body["name"]})),
+        )
+            .into_response(),
         ("GET", "/api/v1/certificates") => Json(json!([
             {"id": "example.com", "names": ["example.com", "*.example.com"], "status": "expiring",
              "not_after": "2026-10-20T00:00:00Z", "issuer": "CN=Example CA", "source": "uploaded"}
@@ -860,4 +865,28 @@ fn certificates_are_uploaded_generated_checked_and_replaced() {
     ]);
     assert!(!unreadable.status.success());
     assert!(stderr(&unreadable).contains("cannot read /nonexistent"));
+}
+
+#[test]
+fn sites_are_created_serving_https() {
+    let stub = Stub::start();
+    let created = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "site",
+        "create",
+        "--name",
+        "shop",
+        "--domain",
+        "shop.example",
+        "--proxy",
+        "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b",
+        "--https-redirect",
+        "--tls-profile",
+        "edge",
+    ]);
+    assert!(created.status.success(), "{}", stderr(&created));
+    let body = &stub.requests("POST", "/api/v1/sites")[0].body;
+    assert_eq!(body["tls_profile_id"], "edge");
+    assert_eq!(body["https_redirect"], true);
 }
