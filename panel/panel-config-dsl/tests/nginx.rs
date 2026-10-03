@@ -206,6 +206,28 @@ fn the_documented_subset_converts_and_everything_else_is_reported() {
 }
 
 #[test]
+fn absolute_includes_find_a_copied_configuration() {
+    let files = BTreeMap::from([
+        (
+            "nginx/nginx.conf".to_owned(),
+            "http {\n    include /etc/nginx/conf.d/*.conf;\n}\n".to_owned(),
+        ),
+        (
+            "nginx/conf.d/site.conf".to_owned(),
+            "server {\n    listen 8081;\n    server_name copy.example;\n    return 204;\n}\n"
+                .to_owned(),
+        ),
+    ]);
+    let imported = import_nginx(&files, "nginx/nginx.conf").unwrap();
+    assert!(imported.report.is_empty(), "{:#?}", imported.report);
+    assert!(imported
+        .sources
+        .get("main.conf")
+        .unwrap()
+        .contains("server_name copy.example;"));
+}
+
+#[test]
 fn a_missing_entry_is_refused() {
     assert!(import_nginx(&files(), "nginx.conf").is_err());
 }

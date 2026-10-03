@@ -9,7 +9,8 @@ use panel_application::{
     ActivatedDeployment, CommandContext, ConfigDocument, ContentHash, GatewayUseCases,
 };
 use panel_config_dsl::{
-    format_files, plan::changes, schema::DIRECTIVES, syntax_tree, Sources, ENTRY, LANGUAGE_VERSION,
+    format_files, import_nginx, plan::changes, schema::DIRECTIVES, syntax_tree, Sources, ENTRY,
+    LANGUAGE_VERSION,
 };
 use panel_config_model::{compile, ConfigModel, Revision, RevisionDetail, RevisionList};
 use panel_contracts::config::v1::{self as wire, configuration_server::Configuration};
@@ -51,6 +52,13 @@ enum Applied {
 #[serde(deny_unknown_fields)]
 struct FilesBody {
     files: BTreeMap<String, String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NginxBody {
+    files: BTreeMap<String, String>,
+    entry: String,
 }
 
 #[derive(Deserialize)]
@@ -277,6 +285,21 @@ impl ConfigurationService {
                 let tree = syntax_tree(&language::sources(body.files)?, &file)
                     .ok_or_else(|| PanelError::not_found(format!("there is no file {file:?}")))?;
                 json_output(&tree, String::new())
+            }
+            ("config.import.nginx", "config") => {
+                let body: NginxBody = decode(parameters)?;
+                let imported =
+                    import_nginx(&body.files, &body.entry).map_err(PanelError::invalid_argument)?;
+                let lowered = language::read(&imported.sources, Some(&draft.model), Utc::now());
+                json_output(
+                    &json!({
+                        "files": imported.sources,
+                        "report": imported.report,
+                        "valid": lowered.is_valid(),
+                        "diagnostics": lowered.diagnostics,
+                    }),
+                    String::new(),
+                )
             }
             ("config.ir", "config") => {
                 let lowered = language::read(&draft.sources, Some(&draft.model), Utc::now());

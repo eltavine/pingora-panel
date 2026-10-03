@@ -65,6 +65,27 @@ pub struct SyntaxRequest {
     pub file: Option<String>,
 }
 
+/// NGINX configuration files and the one to start from.
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct NginxImportRequest {
+    /// File contents by path; includes resolve among them.
+    pub files: BTreeMap<String, String>,
+    /// The main file, such as `nginx.conf`.
+    pub entry: String,
+}
+
+/// NGINX configuration converted to the language.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct NginxImportResponse {
+    pub files: BTreeMap<String, String>,
+    /// Directives not carried over, or carried over with another meaning,
+    /// at their position in the NGINX files.
+    pub report: Vec<DiagnosticDetails>,
+    /// Whether the converted files check cleanly.
+    pub valid: bool,
+    pub diagnostics: Vec<DiagnosticDetails>,
+}
+
 /// Every directive of the language, for editors.
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct LanguageSchema {
@@ -207,6 +228,26 @@ pub(crate) async fn ast<U: GatewayUseCases>(
         &state,
         &headers,
         "config.ast",
+        "config".into(),
+        Some(&request),
+    )
+    .await
+}
+
+/// Converts NGINX configuration to the language without saving it, with a
+/// report of everything that did not carry over.
+#[utoipa::path(post, path = "/api/v1/config/import/nginx", request_body = NginxImportRequest,
+    params(QueryHeaders), responses((status = 200, body = NginxImportResponse)), tag = "configuration")]
+pub(crate) async fn import_nginx<U: GatewayUseCases>(
+    State(state): State<ApiState<U>>,
+    headers: HeaderMap,
+    payload: Result<Json<NginxImportRequest>, JsonRejection>,
+) -> Result<Response, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from_json)?;
+    read(
+        &state,
+        &headers,
+        "config.import.nginx",
         "config".into(),
         Some(&request),
     )

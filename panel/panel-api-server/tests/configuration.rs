@@ -411,6 +411,24 @@ async fn sites_are_edited_validated_and_applied_through_the_api() {
         )
         .await;
     assert_eq!(tree["directives"][0]["span"], "main.conf:1.1-19");
+    let (imported, _) = api
+        .json(
+            api.client
+                .post(format!("{}/api/v1/config/import/nginx", api.base))
+                .json(&json!({
+                    "entry": "nginx.conf",
+                    "files": {"nginx.conf": "events {}\nhttp {\n    server {\n        listen 8081;\n        server_name import.example;\n        location / { proxy_pass http://127.0.0.1:9000; }\n    }\n}\n"}
+                })),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(imported["valid"], true, "{imported}");
+    assert!(imported["files"]["main.conf"]
+        .as_str()
+        .unwrap()
+        .contains("server_name import.example;"));
+    assert_eq!(imported["report"][0]["code"], "NGINX_UNSUPPORTED");
+    assert_eq!(imported["report"][0]["source_span"], "nginx.conf:1.1-9");
     let (ir, _) = api.json(api.get("/api/v1/config/ir"), StatusCode::OK).await;
     assert_eq!(ir["sites"].as_array().unwrap().len(), 1);
 

@@ -242,10 +242,11 @@ impl<'a> Importer<'a> {
         out
     }
 
-    /// Provided files an include pattern names: as written, or relative to
-    /// the directory of the entry file, where NGINX resolves relative paths.
+    /// Provided files an include pattern names: as written, relative to the
+    /// directory of the entry file, where NGINX resolves relative paths, or
+    /// by the trailing part of an absolute path, for a copied configuration.
     fn resolve(&self, pattern: &str) -> Vec<String> {
-        let candidates = [
+        let direct = [
             pattern.to_owned(),
             format!("{}{pattern}", self.entry_directory),
             pattern
@@ -253,6 +254,25 @@ impl<'a> Importer<'a> {
                 .unwrap_or(pattern)
                 .to_owned(),
         ];
+        let found = self.matching(direct);
+        if !found.is_empty() || !pattern.starts_with('/') {
+            return found;
+        }
+        // The longest trailing part that names provided files.
+        let parts: Vec<&str> = pattern.split('/').filter(|part| !part.is_empty()).collect();
+        (1..parts.len())
+            .map(|start| {
+                self.matching([format!(
+                    "{}{}",
+                    self.entry_directory,
+                    parts[start..].join("/")
+                )])
+            })
+            .find(|found| !found.is_empty())
+            .unwrap_or_default()
+    }
+
+    fn matching(&self, candidates: impl IntoIterator<Item = String>) -> Vec<String> {
         let mut found = BTreeSet::new();
         for candidate in candidates {
             let Ok(glob) = GlobBuilder::new(&candidate).literal_separator(true).build() else {
