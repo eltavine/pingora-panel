@@ -1,0 +1,211 @@
+#![forbid(unsafe_code)]
+
+use chrono::Utc;
+use panel_config_dsl::{import_nginx, lower, nginx::codes, LowerOptions};
+use panel_config_model::{Action, MatchKind};
+use std::collections::BTreeMap;
+
+const NGINX: &str = "\
+user nginx;
+worker_processes auto;
+events {
+    worker_connections 1024;
+}
+
+http {
+    include mime.types;
+    sendfile on;
+
+    upstream app {
+        least_conn;
+        server 10.0.0.11:8080 weight=3 max_fails=3 fail_timeout=30s;
+        server 10.0.0.12 backup;
+        keepalive 32;
+    }
+
+    include conf.d/*.conf;
+}
+";
+
+const SHOP: &str = r#"server {
+    listen 80 default_server;
+    listen [::]:80;
+    server_name shop.example www.shop.example;
+    root /var/www/shop;
+    index index.html;
+
+    location = /healthz { return 204; }
+    location ^~ /static/ { root /var/www/assets; }
+    location ~* \.(png|jpg)$ { expires 30d; root /var/www/images; }
+    location /api/ { proxy_pass http://app; proxy_set_header Host $host; }
+    location /v1/ { proxy_pass http://app/v2/; }
+    location / { try_files $uri $uri/ /index.html; }
+}
+
+server {
+    listen 443 ssl;
+    server_name shop.example;
+    ssl_certificate /etc/ssl/shop.pem;
+}
+
+server {
+    listen 8080;
+    server_name legacy.example;
+    location / { proxy_pass http://127.0.0.1:9000; }
+    location /old { return 301 https://shop.example/new; }
+    location /maintenance { return 503 "back soon"; }
+    return 301 https://$host$request_uri;
+}
+"#;
+
+fn files() -> BTreeMap<String, String> {
+    BTreeMap::from([
+        ("/etc/nginx/nginx.conf".to_owned(), NGINX.to_owned()),
+        ("/etc/nginx/conf.d/shop.conf".to_owned(), SHOP.to_owned()),
+    ])
+}
+
+#[test]
+fn the_documented_subset_converts_and_everything_else_is_reported() {
+    let imported = import_nginx(&files(), "/etc/nginx/nginx.conf").unwrap();
+    let text = imported.sources.get("main.conf").unwrap();
+    let environment = BTreeMap::new();
+    let lowered = lower(
+        &imported.sources,
+        &LowerOptions {
+            environment: &environment,
+            previous: None,
+            now: Utc::now(),
+        },
+    );
+    assert!(
+        lowered
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.severity != panel_errors::DiagnosticSeverity::Error),
+        "{:#?}\n{text}",
+        lowered.diagnostics
+    );
+    let model = lowered.model;
+
+    let listeners: Vec<_> = model
+        .listeners
+        .iter()
+        .map(|listener| (listener.id.as_str(), listener.address.as_str()))
+        .collect();
+    assert_eq!(
+        listeners,
+        [
+            ("http-80", "0.0.0.0:80"),
+            ("http-8080", "0.0.0.0:8080"),
+            ("http-v6-80", "[::]:80")
+        ],
+        "{text}"
+    );
+    assert_eq!(model.listeners[2].ipv6_only, Some(true));
+    assert_eq!(model.upstreams.len(), 2, "{text}");
+    let app = &model.upstreams[0];
+    assert_eq!(app.name, "app");
+    assert_eq!(app.nodes[0].weight, 3);
+    assert_eq!(app.nodes[1].port, 80);
+    assert!(app.nodes[1].backup);
+    assert_eq!(
+        app.passive_health
+            .as_ref()
+            .map(|policy| policy.failure_threshold),
+        Some(3)
+    );
+
+    assert_eq!(model.sites.len(), 2, "{text}");
+    let shop = &model.sites[0];
+    assert_eq!(shop.name, "shop-example");
+    assert_eq!(shop.domains.len(), 2);
+    assert!(
+        matches!(&shop.action, Action::Static { root, spa_fallback: true, .. } if root == "shop")
+    );
+    let routes: Vec<_> = shop
+        .routes
+        .iter()
+        .map(|route| (route.matcher.kind, route.matcher.path.as_str()))
+        .collect();
+    assert_eq!(
+        routes,
+        [
+            (MatchKind::Exact, "/healthz"),
+            (MatchKind::Prefix, "/static/"),
+            (MatchKind::Regex, r"(?i)\.(png|jpg)$"),
+            (MatchKind::Prefix, "/api/"),
+        ],
+        "{text}"
+    );
+    let legacy = &model.sites[1];
+    assert!(legacy.https_redirect);
+    assert!(matches!(&legacy.action, Action::Proxy { .. }));
+    assert_eq!(legacy.routes.len(), 2);
+
+    let report: Vec<_> = imported
+        .report
+        .iter()
+        .map(|diagnostic| {
+            (
+                diagnostic.code.as_str(),
+                diagnostic.source_span.clone().unwrap_or_default(),
+                diagnostic.message.as_str(),
+            )
+        })
+        .collect();
+    for (code, span, message) in [
+        (
+            codes::UNSUPPORTED,
+            "/etc/nginx/nginx.conf:1.1-11",
+            "'user' is not carried over: the gateway manages its own processes",
+        ),
+        (
+            codes::UNSUPPORTED,
+            "/etc/nginx/nginx.conf:8.5-23",
+            "the included file \"mime.types\" was not provided",
+        ),
+        (
+            codes::UNSUPPORTED,
+            "/etc/nginx/nginx.conf:9.5-16",
+            "'sendfile' is not supported",
+        ),
+        (
+            codes::UNSUPPORTED,
+            "/etc/nginx/nginx.conf:12.9-19",
+            "'least_conn' is not supported in an upstream",
+        ),
+        (
+            codes::CHANGED,
+            "/etc/nginx/nginx.conf:15.9-21",
+            "'keepalive' turns connection reuse on; its pool size is not carried over",
+        ),
+        (
+            codes::UNSUPPORTED,
+            "/etc/nginx/conf.d/shop.conf:10.32-43",
+            "'expires' is not supported in a location",
+        ),
+        (
+            codes::UNSUPPORTED,
+            "/etc/nginx/conf.d/shop.conf:12.21-46",
+            "\"http://app/v2/\" rewrites the request path or uses variables, which is not supported",
+        ),
+        (
+            codes::UNSUPPORTED,
+            "/etc/nginx/conf.d/shop.conf:16.1-20.1",
+            "the server \"shop-example-2\" only listens with TLS and is not carried over",
+        ),
+    ] {
+        assert!(
+            report
+                .iter()
+                .any(|(c, s, m)| *c == code && s == span && *m == message),
+            "missing {code} {span} {message}\n{report:#?}"
+        );
+    }
+}
+
+#[test]
+fn a_missing_entry_is_refused() {
+    assert!(import_nginx(&files(), "nginx.conf").is_err());
+}

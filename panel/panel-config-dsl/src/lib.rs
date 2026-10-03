@@ -8,6 +8,7 @@
 mod checks;
 mod edit;
 mod lower;
+pub mod nginx;
 pub mod plan;
 pub mod print;
 pub mod schema;
@@ -18,6 +19,7 @@ pub mod variables;
 
 pub use edit::{format_files, reconcile, write_identifiers};
 pub use lower::{lower, Insertion, LowerOptions, Lowered, Origin};
+pub use nginx::{import_nginx, NginxImport};
 pub use print::print;
 pub use source::{Sources, ENTRY};
 pub use syntax::{syntax_tree, SyntaxNode, SyntaxTree};
