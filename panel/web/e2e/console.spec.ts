@@ -50,12 +50,28 @@ test.afterEach(async ({ page }) => {
 
 test('the overview reports readiness and the active configuration', async ({ page }) => {
   await mockStatus(page)
+  await page.route('**/api/v1/gateway/data-plane', (route) =>
+    route.fulfill({
+      json: {
+        generation: 3,
+        worker_count: 4,
+        uptime_seconds: 3_720,
+        gateway_version: '0.2.0',
+        engine_version: '0.9.0',
+        adapter_version: 'pingora-v1',
+        listeners: [{ id: 'public', address: '0.0.0.0:443', tls: true, http1: true, http2: true }],
+      },
+    }),
+  )
   await page.goto('/')
 
   await expect(page.getByRole('heading', { name: 'Gateway overview' })).toBeVisible()
   await expect(page.getByRole('status').filter({ hasText: 'Ready' })).toBeVisible()
-  await expect(page.getByText('pingora-v1')).toBeVisible()
+  await expect(page.getByText('pingora-v1').first()).toBeVisible()
   await expect(page.getByTitle(ACTIVE_HASH)).toBeVisible()
+  await expect(page.getByText('1h 2m')).toBeVisible()
+  await expect(page.getByLabel('Workers')).toHaveValue('4')
+  await expect(page.getByText('0.0.0.0:443')).toBeVisible()
   await expectNoHorizontalOverflow(page)
 })
 
