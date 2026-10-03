@@ -211,6 +211,7 @@ services:
       PINGORA_PANEL_DATABASE_URL: postgres://panel_observability@127.0.0.1:5432/pingora_panel
       PINGORA_PANEL_DATABASE_PASSWORD_FILE: /run/secrets/observability-database-password
       PINGORA_PANEL_TLS_DIR: /var/lib/pingora-panel/credentials/observability-service
+      PINGORA_PANEL_PROMETHEUS_URL: http://127.0.0.1:9090
     secrets: [observability-database-password]
     volumes:
       - credentials-observability-service:/var/lib/pingora-panel/credentials/observability-service:ro

@@ -131,14 +131,15 @@ with `healthcheck` to probe its own readiness, as container health checks do.
 | `panel-api` | `identity` | `127.0.0.1:9180` | `127.0.0.1:50060` | public HTTP `127.0.0.1:8080` |
 | `config-service` | `config` | `127.0.0.1:9181` | `127.0.0.1:50061` | calls `gatewayd` at `127.0.0.1:50051` |
 | `automation-service` | `automation` | `127.0.0.1:9182` | `127.0.0.1:50062` | |
-| `observability-service` | `observability` | `127.0.0.1:9183` | `127.0.0.1:50063` | |
+| `observability-service` | `observability` | `127.0.0.1:9183` | `127.0.0.1:50063` | queries Prometheus at `127.0.0.1:9090` |
 | `audit-service` | `audit` | `127.0.0.1:9184` | `127.0.0.1:50064` | consumes every event |
 
 Every process reads `PINGORA_PANEL_DATABASE_URL` (its role, without password),
 `PINGORA_PANEL_DATABASE_PASSWORD` or `PINGORA_PANEL_DATABASE_PASSWORD_FILE`,
 `PINGORA_PANEL_NATS_URL`, and optionally `PINGORA_PANEL_OPS_ADDR`,
 `PINGORA_PANEL_GRPC_ADDR` and `PINGORA_PANEL_HEALTH_INTERVAL_MS`.
-`config-service` also reads `PINGORA_PANEL_GATEWAY_URL`; `panel-api` reads
+`config-service` also reads `PINGORA_PANEL_GATEWAY_URL`;
+`observability-service` reads `PINGORA_PANEL_PROMETHEUS_URL`; `panel-api` reads
 `PINGORA_PANEL_HTTP_ADDR`, `PINGORA_PANEL_CONFIG_URL`,
 `PINGORA_PANEL_GATEWAY_URL` for the gateway's runtime API,
 `PINGORA_PANEL_WEB_ROOT`, the directory of the built console, and the

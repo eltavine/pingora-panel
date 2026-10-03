@@ -1127,6 +1127,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "enum-as-inner"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1e6a265c649f3f5979b601d26f1d05ada116434c87741c9493cb56218f76cbc"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2480,11 +2492,22 @@ dependencies = [
 name = "observability-service"
 version = "0.1.0"
 dependencies = [
+ "axum",
+ "panel-contracts",
  "panel-control-runtime",
+ "panel-domain",
  "panel-errors",
  "panel-platform",
+ "panel-platform-codec",
  "panel-postgres",
  "panel-service",
+ "prometheus-http-query",
+ "prost-types",
+ "reqwest",
+ "rustls",
+ "serde_json",
+ "tokio",
+ "tonic",
 ]
 
 [[package]]
@@ -3743,6 +3766,20 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.5",
+]
+
+[[package]]
+name = "prometheus-http-query"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "936d26139d1671e3281b77333edfd37b1d76b1953123721942e9385ec5aeee00"
+dependencies = [
+ "enum-as-inner",
+ "mime",
+ "reqwest",
+ "serde",
+ "time",
+ "url",
 ]
 
 [[package]]
@@ -5472,6 +5509,7 @@ dependencies = [
  "idna",
  "percent-encoding",
  "serde",
+ "serde_derive",
 ]
 
 [[package]]

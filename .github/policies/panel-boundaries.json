@@ -174,9 +174,12 @@
     "observability-service": {
       "catalog": false,
       "allowed_workspace_dependencies": [
+        "panel-contracts",
         "panel-control-runtime",
+        "panel-domain",
         "panel-errors",
         "panel-platform",
+        "panel-platform-codec",
         "panel-postgres",
         "panel-service"
       ]
