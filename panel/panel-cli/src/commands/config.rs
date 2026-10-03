@@ -52,6 +52,25 @@ pub(crate) enum ConfigCommand {
         #[arg(long)]
         write: bool,
     },
+    /// Converts NGINX configuration to the language, reporting every
+    /// directive that does not carry over.
+    ImportNginx {
+        /// The main NGINX file, read with the files of its directory, or a
+        /// directory holding `--entry`.
+        path: PathBuf,
+        /// The main file within a directory.
+        #[arg(long, default_value = "nginx.conf")]
+        entry: String,
+        /// Write the converted files to this directory.
+        #[arg(long, conflicts_with = "save")]
+        dir: Option<PathBuf>,
+        /// Replace the draft with the converted files.
+        #[arg(long)]
+        save: bool,
+        /// With --save, refuse if the draft changed since this version.
+        #[arg(long, requires = "save")]
+        expected_version: Option<u64>,
+    },
     /// The directives of the configuration language.
     Schema,
     /// The syntax tree of a file: its directives as the language reads them.
@@ -134,6 +153,40 @@ pub(crate) fn read_files(path: &Path) -> Result<Map<String, Value>> {
     } else {
         let text = std::fs::read_to_string(path).map_err(unreadable)?;
         files.insert(ENTRY.into(), json!(text));
+    }
+    Ok(files)
+}
+
+/// Every UTF-8 file below `directory` by its relative path, for NGINX
+/// configuration whose includes may name any file.
+fn read_tree(directory: &Path) -> Result<Map<String, Value>> {
+    let unreadable = |error: std::io::Error| {
+        CliError::Usage(format!("cannot read {}: {error}", directory.display()))
+    };
+    let mut files = Map::new();
+    let mut pending = vec![directory.to_path_buf()];
+    while let Some(current) = pending.pop() {
+        for entry in std::fs::read_dir(&current).map_err(unreadable)? {
+            let path = entry.map_err(unreadable)?.path();
+            if path
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with('.'))
+            {
+                continue;
+            }
+            if path.is_dir() {
+                pending.push(path);
+            } else if let Ok(text) = std::fs::read_to_string(&path) {
+                let relative = path
+                    .strip_prefix(directory)
+                    .expect("entries are below the directory")
+                    .components()
+                    .map(|component| component.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                files.insert(relative, json!(text));
+            }
+        }
     }
     Ok(files)
 }
@@ -432,6 +485,77 @@ pub async fn run(api: &Api, output: &Output, command: ConfigCommand) -> Result<(
                 .is_some_and(|diagnostics| !diagnostics.is_empty())
             {
                 return Err(rejected("some files have syntax errors"));
+            }
+        }
+        ConfigCommand::ImportNginx {
+            path,
+            entry,
+            dir,
+            save,
+            expected_version,
+        } => {
+            let (directory, entry) = if path.is_dir() {
+                (path.clone(), entry)
+            } else {
+                let name = path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                (
+                    path.parent()
+                        .filter(|parent| !parent.as_os_str().is_empty())
+                        .map_or_else(|| PathBuf::from("."), Path::to_path_buf),
+                    name,
+                )
+            };
+            let files = read_tree(&directory)?;
+            if !files.contains_key(&entry) {
+                return Err(CliError::Usage(format!(
+                    "{} has no {entry}",
+                    directory.display()
+                )));
+            }
+            let imported = api
+                .post_read(
+                    "/api/v1/config/import/nginx",
+                    &json!({ "files": files, "entry": entry }),
+                )
+                .await?
+                .body;
+            print_diagnostics(&imported["report"]);
+            if imported["valid"] != true {
+                print_diagnostics(&imported["diagnostics"]);
+                return Err(rejected("the converted configuration has errors"));
+            }
+            let converted = imported["files"].as_object().cloned().unwrap_or_default();
+            if let Some(dir) = dir {
+                write_files(&dir, &converted)?;
+                output.done(
+                    &format!("Wrote {} files to {}", converted.len(), dir.display()),
+                    &imported,
+                );
+            } else if save {
+                let if_match = expected_version.map(|version| format!("\"draft-{version}\""));
+                let saved = api
+                    .change(
+                        Method::PUT,
+                        "/api/v1/config/source",
+                        Some(&json!({ "files": converted })),
+                        if_match.as_deref(),
+                    )
+                    .await?
+                    .body;
+                output.done(
+                    &format!(
+                        "Saved the converted configuration as draft {}",
+                        text(&saved["version"])
+                    ),
+                    &saved,
+                );
+            } else if output.format == Format::Json {
+                output.json(&imported);
+            } else if !output.quiet {
+                print!("{}", text(&converted[ENTRY]));
             }
         }
         ConfigCommand::Schema => {

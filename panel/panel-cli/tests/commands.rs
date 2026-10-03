@@ -105,6 +105,16 @@ async fn api(
         ("GET", "/api/v1/config/plan") | ("GET", "/api/v1/revisions/3/diff") => {
             Json(changes).into_response()
         }
+        ("POST", "/api/v1/config/import/nginx") => Json(json!({
+            "files": {"main.conf": MAIN},
+            "report": [{
+                "code": "NGINX_UNSUPPORTED", "severity": "WARNING",
+                "source_span": "nginx.conf:1.1-9", "message": "'events' is not carried over"
+            }],
+            "valid": true,
+            "diagnostics": []
+        }))
+        .into_response(),
         ("GET", "/api/v1/audit-events") => Json(json!({
             "items": [{
                 "sequence": 2, "occurred_at": "2026-10-03T10:00:00.000001Z", "actor_id": "ops",
@@ -308,6 +318,49 @@ fn syntax_trees_and_snapshots_are_printed() {
     let snapshot = stub.ppanel(&["config", "ir"]);
     let snapshot: Value = serde_json::from_slice(&snapshot.stdout).unwrap();
     assert_eq!(snapshot["schema_version"], "panel.ir.v1");
+}
+
+#[test]
+fn nginx_configuration_is_converted_with_its_report() {
+    let stub = Stub::start();
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(directory.path().join("conf.d")).unwrap();
+    std::fs::write(
+        directory.path().join("nginx.conf"),
+        "events {}\nhttp { include conf.d/*.conf; }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        directory.path().join("conf.d/site.conf"),
+        "server { return 204; }\n",
+    )
+    .unwrap();
+    let entry = directory.path().join("nginx.conf");
+
+    let converted = stub.ppanel(&["config", "import-nginx", entry.to_str().unwrap()]);
+    assert!(converted.status.success(), "{}", stderr(&converted));
+    assert_eq!(stdout(&converted), MAIN);
+    assert!(stderr(&converted)
+        .contains("nginx.conf:1.1-9: warning: 'events' is not carried over [NGINX_UNSUPPORTED]"));
+    let request = &stub.requests("POST", "/api/v1/config/import/nginx")[0].body;
+    assert_eq!(request["entry"], "nginx.conf");
+    assert_eq!(
+        request["files"]["conf.d/site.conf"],
+        "server { return 204; }\n"
+    );
+
+    let saved = stub.ppanel(&[
+        "config",
+        "import-nginx",
+        directory.path().to_str().unwrap(),
+        "--save",
+        "--expected-version",
+        "4",
+    ]);
+    assert!(saved.status.success(), "{}", stderr(&saved));
+    let put = &stub.requests("PUT", "/api/v1/config/source")[0];
+    assert_eq!(put.if_match.as_deref(), Some("\"draft-4\""));
+    assert_eq!(put.body["files"]["main.conf"], MAIN);
 }
 
 #[test]

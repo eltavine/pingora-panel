@@ -205,6 +205,15 @@ mod tests {
                 "sites/shop.conf",
             ],
             vec!["ppanel", "config", "ir"],
+            vec!["ppanel", "config", "import-nginx", "/etc/nginx", "--save"],
+            vec![
+                "ppanel",
+                "config",
+                "import-nginx",
+                "nginx.conf",
+                "--dir",
+                "conf",
+            ],
             vec![
                 "ppanel", "config", "rollback", "--to", "4", "--reason", "errors",
             ],
