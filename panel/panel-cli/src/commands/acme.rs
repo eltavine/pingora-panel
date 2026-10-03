@@ -21,6 +21,94 @@ pub(crate) enum AcmeCommand {
         #[command(subcommand)]
         command: AutomaticCommand,
     },
+    /// DNS servers that publish DNS-01 records.
+    #[command(name = "dns-provider")]
+    DnsProvider {
+        #[command(subcommand)]
+        command: DnsProviderCommand,
+    },
+}
+
+/// Where an RFC 2136 provider sends updates.
+#[derive(clap::Args)]
+pub(crate) struct Rfc2136Flags {
+    /// The zones' primary server as host:port.
+    #[arg(long)]
+    server: String,
+    /// A zone the key may update, such as example.com; repeatable.
+    #[arg(long = "zone", required = true)]
+    zones: Vec<String>,
+    /// The name of the TSIG key.
+    #[arg(long)]
+    key_name: String,
+    #[arg(long, value_enum, default_value_t = TsigAlgorithm::HmacSha256)]
+    algorithm: TsigAlgorithm,
+    /// TTL of published records in seconds.
+    #[arg(long)]
+    ttl: Option<u32>,
+    /// Seconds to wait for records to reach every authoritative server.
+    #[arg(long)]
+    propagation: Option<u32>,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub(crate) enum TsigAlgorithm {
+    #[value(name = "hmac-sha256")]
+    HmacSha256,
+    #[value(name = "hmac-sha512")]
+    HmacSha512,
+}
+
+impl TsigAlgorithm {
+    fn name(self) -> &'static str {
+        match self {
+            Self::HmacSha256 => "hmac-sha256",
+            Self::HmacSha512 => "hmac-sha512",
+        }
+    }
+}
+
+impl Rfc2136Flags {
+    fn settings(&self) -> serde_json::Value {
+        let mut settings = json!({
+            "server": self.server,
+            "zones": self.zones,
+            "key_name": self.key_name,
+            "algorithm": self.algorithm.name(),
+        });
+        if let Some(ttl) = self.ttl {
+            settings["ttl"] = json!(ttl);
+        }
+        settings
+    }
+}
+
+#[derive(Subcommand)]
+pub(crate) enum DnsProviderCommand {
+    /// Every DNS provider.
+    List,
+    /// A DNS provider's settings; its secret is never shown.
+    Show { id: String },
+    /// Keeps an RFC 2136 primary that accepts updates signed with a TSIG key.
+    Add {
+        /// Lowercase letters, digits and hyphens, such as primary-ns.
+        id: String,
+        #[command(flatten)]
+        rfc2136: Rfc2136Flags,
+        /// File with the base64 TSIG secret, as in BIND key files.
+        #[arg(long)]
+        secret_file: PathBuf,
+    },
+    /// Changes a provider's settings, and its secret when a file is given.
+    Update {
+        id: String,
+        #[command(flatten)]
+        rfc2136: Rfc2136Flags,
+        #[arg(long)]
+        secret_file: Option<PathBuf>,
+    },
+    /// Forgets a provider no automatic certificate uses.
+    Delete { id: String },
 }
 
 #[derive(Subcommand)]
@@ -97,6 +185,9 @@ pub(crate) enum AutomaticCommand {
         names: Vec<String>,
         #[arg(long, value_enum, default_value_t = Challenge::Http01)]
         challenge: Challenge,
+        /// The DNS provider that publishes the records of dns-01.
+        #[arg(long)]
+        dns_provider: Option<String>,
     },
     /// Issues an automatic certificate again now.
     Renew { id: String },
@@ -124,6 +215,30 @@ fn directory(value: &str) -> String {
         .find(|(name, _)| *name == value)
         .map_or_else(|| value.to_owned(), |(_, url)| (*url).to_owned())
 }
+
+const DNS_PROVIDERS: &[Column] = &[
+    ("ID", |provider| text(&provider["id"])),
+    ("KIND", |provider| text(&provider["kind"])),
+    ("SERVER", |provider| text(&provider["rfc2136"]["server"])),
+    ("ZONES", |provider| text(&provider["rfc2136"]["zones"])),
+    ("KEY", |provider| text(&provider["rfc2136"]["key_name"])),
+];
+
+const DNS_PROVIDER: &[Column] = &[
+    ("ID", |provider| text(&provider["id"])),
+    ("KIND", |provider| text(&provider["kind"])),
+    ("SERVER", |provider| text(&provider["rfc2136"]["server"])),
+    ("ZONES", |provider| text(&provider["rfc2136"]["zones"])),
+    ("KEY", |provider| text(&provider["rfc2136"]["key_name"])),
+    ("ALGORITHM", |provider| {
+        text(&provider["rfc2136"]["algorithm"])
+    }),
+    ("TTL", |provider| text(&provider["rfc2136"]["ttl"])),
+    ("PROPAGATION", |provider| {
+        text(&provider["propagation_seconds"])
+    }),
+    ("VERSION", |provider| text(&provider["version"])),
+];
 
 const ACCOUNTS: &[Column] = &[
     ("ID", |account| text(&account["id"])),
@@ -165,6 +280,9 @@ const AUTOMATIC_DETAIL: &[Column] = &[
     ("NAMES", |certificate| text(&certificate["names"])),
     ("ACCOUNT", |certificate| text(&certificate["account"])),
     ("CHALLENGE", |certificate| text(&certificate["challenge"])),
+    ("DNS PROVIDER", |certificate| {
+        text(&certificate["dns_provider"])
+    }),
     ("RENEW AFTER", |certificate| {
         text(&certificate["renew_after"])
     }),
@@ -270,13 +388,17 @@ async fn automatic(api: &Api, output: &Output, command: AutomaticCommand) -> Res
             account,
             names,
             challenge,
+            dns_provider,
         } => {
-            let body = json!({
+            let mut body = json!({
                 "id": id,
                 "account": account,
                 "names": names,
                 "challenge": challenge.name(),
             });
+            if let Some(provider) = dns_provider {
+                body["dns_provider"] = json!(provider);
+            }
             let certificate = api
                 .change(Method::POST, "/api/v1/acme-certificates", Some(&body), None)
                 .await?
@@ -317,10 +439,77 @@ async fn automatic(api: &Api, output: &Output, command: AutomaticCommand) -> Res
     Ok(())
 }
 
+async fn dns_providers(api: &Api, output: &Output, command: DnsProviderCommand) -> Result<()> {
+    match command {
+        DnsProviderCommand::List => output.list(
+            &api.get("/api/v1/dns-providers", &[]).await?.body,
+            DNS_PROVIDERS,
+        ),
+        DnsProviderCommand::Show { id } => {
+            let provider = api
+                .get(&format!("/api/v1/dns-providers/{id}"), &[])
+                .await?
+                .body;
+            output.item(&provider, DNS_PROVIDER);
+        }
+        DnsProviderCommand::Add {
+            id,
+            rfc2136,
+            secret_file,
+        } => {
+            let mut body = json!({
+                "id": id,
+                "kind": "rfc2136",
+                "rfc2136": rfc2136.settings(),
+                "secret": read(&secret_file)?.trim(),
+            });
+            if let Some(seconds) = rfc2136.propagation {
+                body["propagation_seconds"] = json!(seconds);
+            }
+            let provider = api
+                .change(Method::POST, "/api/v1/dns-providers", Some(&body), None)
+                .await?
+                .body;
+            output.done(&format!("Added DNS provider {id}"), &provider);
+        }
+        DnsProviderCommand::Update {
+            id,
+            rfc2136,
+            secret_file,
+        } => {
+            let path = format!("/api/v1/dns-providers/{id}");
+            let mut body = json!({ "rfc2136": rfc2136.settings() });
+            if let Some(file) = secret_file {
+                body["secret"] = json!(read(&file)?.trim());
+            }
+            if let Some(seconds) = rfc2136.propagation {
+                body["propagation_seconds"] = json!(seconds);
+            }
+            let tag = etag(api, &path).await?;
+            let provider = api
+                .change(Method::PUT, &path, Some(&body), Some(&tag))
+                .await?
+                .body;
+            output.done(&format!("Updated DNS provider {id}"), &provider);
+        }
+        DnsProviderCommand::Delete { id } => {
+            let path = format!("/api/v1/dns-providers/{id}");
+            let tag = etag(api, &path).await?;
+            let reply = api
+                .change(Method::DELETE, &path, None, Some(&tag))
+                .await?
+                .body;
+            output.done(&format!("Deleted DNS provider {id}"), &reply);
+        }
+    }
+    Ok(())
+}
+
 pub async fn run(api: &Api, output: &Output, command: AcmeCommand) -> Result<()> {
     match command {
         AcmeCommand::Account { command } => accounts(api, output, command).await,
         AcmeCommand::Certificate { command } => automatic(api, output, command).await,
+        AcmeCommand::DnsProvider { command } => dns_providers(api, output, command).await,
     }
 }
 

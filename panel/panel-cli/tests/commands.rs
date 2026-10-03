@@ -333,6 +333,29 @@ async fn api(
         ("DELETE", "/api/v1/acme-certificates/example.com") => {
             StatusCode::NO_CONTENT.into_response()
         }
+        ("GET", "/api/v1/dns-providers") => Json(json!([
+            {"id": "primary-ns", "kind": "rfc2136",
+             "rfc2136": {"server": "ns1.example.com:53", "zones": ["example.com"],
+                         "key_name": "acme-update", "algorithm": "hmac-sha256"}}
+        ]))
+        .into_response(),
+        ("POST", "/api/v1/dns-providers") => (
+            StatusCode::CREATED,
+            [("etag", "\"1\"")],
+            Json(json!({"id": body["id"], "kind": "rfc2136", "version": 1})),
+        )
+            .into_response(),
+        ("GET", "/api/v1/dns-providers/primary-ns") => with_etag(
+            "2",
+            json!({"id": "primary-ns", "kind": "rfc2136", "propagation_seconds": 30,
+                   "rfc2136": {"server": "ns1.example.com:53", "zones": ["example.com"],
+                               "key_name": "acme-update", "algorithm": "hmac-sha256"},
+                   "version": 2}),
+        ),
+        ("PUT", "/api/v1/dns-providers/primary-ns") => {
+            with_etag("3", json!({"id": "primary-ns", "version": 3}))
+        }
+        ("DELETE", "/api/v1/dns-providers/primary-ns") => StatusCode::NO_CONTENT.into_response(),
         ("POST", "/api/v1/certificate-inspections") => Json(json!({
             "status": "valid", "key_matches": !body["key"].is_null(), "names": ["example.com"],
             "fingerprint": "0a1bff"
@@ -1014,6 +1037,70 @@ fn acme_accounts_register_and_certificates_renew() {
             .if_match
             .as_deref(),
         Some("\"4\"")
+    );
+
+    let secret = files.path().join("tsig.key");
+    std::fs::write(&secret, "c2VjcmV0\n").unwrap();
+    let secret = secret.to_str().unwrap();
+    assert!(run(&["dns-provider", "list"]).contains("ns1.example.com:53"));
+    run(&[
+        "dns-provider",
+        "add",
+        "primary-ns",
+        "--server",
+        "ns1.example.com:53",
+        "--zone",
+        "example.com",
+        "--key-name",
+        "acme-update",
+        "--secret-file",
+        secret,
+        "--propagation",
+        "45",
+    ]);
+    assert_eq!(
+        stub.requests("POST", "/api/v1/dns-providers")[0].body,
+        json!({"id": "primary-ns", "kind": "rfc2136", "secret": "c2VjcmV0",
+               "propagation_seconds": 45,
+               "rfc2136": {"server": "ns1.example.com:53", "zones": ["example.com"],
+                           "key_name": "acme-update", "algorithm": "hmac-sha256"}})
+    );
+    assert!(run(&["dns-provider", "show", "primary-ns"]).contains("acme-update"));
+    run(&[
+        "dns-provider",
+        "update",
+        "primary-ns",
+        "--server",
+        "ns2.example.com:53",
+        "--zone",
+        "example.com",
+        "--key-name",
+        "acme-update",
+        "--algorithm",
+        "hmac-sha512",
+    ]);
+    let updated = &stub.requests("PUT", "/api/v1/dns-providers/primary-ns")[0];
+    assert_eq!(updated.if_match.as_deref(), Some("\"2\""));
+    assert!(updated.body.get("secret").is_none(), "the secret stays");
+    assert_eq!(updated.body["rfc2136"]["algorithm"], "hmac-sha512");
+    run(&["dns-provider", "delete", "primary-ns"]);
+    run(&[
+        "certificate",
+        "request",
+        "wild.example.com",
+        "--account",
+        "letsencrypt",
+        "--name",
+        "*.example.com",
+        "--challenge",
+        "dns-01",
+        "--dns-provider",
+        "primary-ns",
+    ]);
+    assert_eq!(
+        stub.requests("POST", "/api/v1/acme-certificates")[1].body,
+        json!({"id": "wild.example.com", "account": "letsencrypt", "names": ["*.example.com"],
+               "challenge": "dns-01", "dns_provider": "primary-ns"})
     );
 }
 
