@@ -135,7 +135,9 @@ Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交
 
 0.3 配置语言与版本（`SITE-034`～`SITE-045` 及上列 `DSL-*`）已在 REST API、`ppanel` CLI 与 Web 控制台实现：草稿以 `main.conf` 为入口的语言文件编辑，支持检查、格式化、补全 Schema、语法树、计划与 Diff、IR 导出、试运行，以及记录作者、备注与结果、可比较和一键回滚的配置版本；同样在操作审计（`AUDIT-*`）与权限（`IAM-*`）验收完成前不得标记为 `Verified`。请求变量（`DSL-010`～`DSL-017`）可用于重定向目标与响应内容，由网关按请求求值，并以 `action.template` 能力协商，无法求值的网关拒绝快照；Size 与 IP/CIDR 类型（`DSL-023`、`DSL-024`）已能解析、尚无指令使用，因此为 `In Progress`；Nginx 子集导入与迁移报告（`DSL-043`～`DSL-045`）按 ADR 0012 所列子集转换，并在 API、CLI 与控制台逐条报告未转换或含义改变的指令及其位置；继承规则写在 Schema 中，Explain（`DSL-034`）按位置列出块内每个生效值及其来源（本块、外层块或监听、默认值），无效设置给出警告；Lua 脚本引用（`DSL-042`）仍为 `Planned`。
 
-0.3 审计（`AUDIT-001`、`AUDIT-003`、`AUDIT-004`）已由 `audit-service` 实现：各服务通过事务性 Outbox 发布每次变更及被拒绝或失败的尝试，审计服务按来源与事件 ID 幂等写入带检查点、只追加的 SHA-256 哈希链，并在 REST API、`ppanel audit` 与控制台审计日志中提供筛选、详情与完整性校验。证书操作审计（`AUDIT-005`）已覆盖 TLS Profile 变更，证书签发与续期随 `TLS-*` 补齐，因此为 `In Progress`；登录审计（`AUDIT-002`）随 `IAM-*` 的登录实现，Docker 操作审计（`AUDIT-006`）随 `CTR-*` 实现，仍为 `Planned`。
+0.3 审计（`AUDIT-001`、`AUDIT-003`、`AUDIT-004`）已由 `audit-service` 实现：各服务通过事务性 Outbox 发布每次变更及被拒绝或失败的尝试，审计服务按来源与事件 ID 幂等写入带检查点、只追加的 SHA-256 哈希链，并在 REST API、`ppanel audit` 与控制台审计日志中提供筛选、详情与完整性校验。证书操作审计（`AUDIT-005`）已覆盖 TLS Profile 变更，证书签发与续期随 `TLS-*` 补齐，因此为 `In Progress`；登录审计（`AUDIT-002`）已随 0.4 的登录实现；Docker 操作审计（`AUDIT-006`）随 `CTR-*` 实现，仍为 `Planned`。
+
+0.4 身份与访问（`IAM-001`～`IAM-014`、`IAM-025`、`IAM-028`、`IAM-029`）已在 REST API、`ppanel` 与 Web 控制台实现：部署生成的一次性引导令牌创建首个管理员；密码遵循 NIST SP 800-63B-4（至少 15 个字符、NFC 规范化、按强度估计拒绝常见与可预测的密码、以 Argon2id 加 pepper 存储、连续失败后递增等待并在第 100 次锁定），每个客户端地址的登录尝试另有限流；浏览器会话使用 `Secure`、`HttpOnly`、`SameSite=Strict` 的 `__Host-` Cookie 与由会话密钥派生的 CSRF 令牌，并拒绝跨站请求；命令行使用 Bearer 会话或以 `ppat_` 开头、权限不超过所有者的 API 令牌；每条路由在一张表中声明所需权限，内置管理员、运维、只读与审计角色。登录、失败登录、账户与令牌变更以及拒绝已登录调用者的请求都进入审计（`AUDIT-002`、`SEC-035`）。自定义角色（`IAM-024`）、Site Group 范围与条件绑定（`IAM-026`、`IAM-027`）、全局登出与令牌轮换（`IAM-030`、`IAM-031`）、OIDC 与 Break-glass（`IAM-015`～`IAM-023`）、服务账户与工作负载身份（`IAM-032`、`IAM-033`）以及审批（`IAM-034`～`IAM-038`）仍为 `Planned`。
 
 ### 3.2 目标仓库边界
 
@@ -1119,7 +1121,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | SEC-032 | 392 | Symlink 策略 | 0.4 | A/C/G | Operator | policy-engine | 执行“Symlink 策略”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | SEC-033 | 393 | 配置危险项警告 | 0.4 | A/C/G | Operator | policy-engine | 执行“配置危险项警告”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | AUDIT-001 | 394 | 操作审计日志 | 0.3 | A/C/G | Auditor | audit writer | 执行“操作审计日志”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
-| AUDIT-002 | 395 | 登录审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“登录审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| AUDIT-002 | 395 | 登录审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“登录审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | AUDIT-003 | 396 | 配置修改审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“配置修改审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | AUDIT-004 | 397 | 配置发布审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“配置发布审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | AUDIT-005 | 398 | 证书操作审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“证书操作审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
@@ -1278,21 +1280,21 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | API-003 | 551 | Web GUI | 0.8 | A/C/G | Operator | panel-api | 执行“Web GUI”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | API-004 | 552 | Web GUI 与 CLI 共用 Service Layer | 0.8 | A/C/G | Operator | panel-api | 执行“Web GUI 与 CLI 共用 Service Layer”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
 | API-005 | 553 | WebSocket 实时状态 | 0.8 | A/S | Viewer | panel-api | 在公共接口完成“WebSocket 实时状态”；OpenAPI/协议契约可渲染并通过兼容性检查。 | Planned | No |
-| IAM-001 | 554 | 登录认证 | 0.4 | A/C/G | Administrator | identity | 执行“登录认证”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| IAM-002 | 555 | Session 管理 | 0.4 | A/C/G | Administrator | identity | 执行“Session 管理”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| IAM-003 | 556 | API Token | 0.4 | A/C/G | Administrator | identity | 执行“API Token”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| IAM-004 | 557 | Token 权限范围 | 0.4 | A/C/G | Administrator | identity | 执行“Token 权限范围”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| IAM-005 | 558 | 管理员账户 | 0.4 | A/C/G | Administrator | identity | 执行“管理员账户”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| IAM-006 | 559 | 只读账户 | 0.4 | A/C/G | Administrator | identity | 执行“只读账户”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| IAM-007 | 560 | 基础 RBAC | 0.4 | A/C/G | Administrator | identity | 执行“基础 RBAC”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| IAM-008 | 561 | 修改密码 | 0.4 | A/C/G | Administrator | identity | 执行“修改密码”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| IAM-009 | 562 | 登录限流 | 0.4 | A/C/G | Administrator | identity | 执行“登录限流”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| IAM-010 | 563 | 登录失败锁定 | 0.4 | A/C/G | Administrator | identity | 执行“登录失败锁定”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| IAM-011 | 564 | CSRF 防护 | 0.4 | A/C/G | Administrator | identity | 执行“CSRF 防护”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| IAM-012 | 565 | SameSite Cookie | 0.4 | A/C/G | Administrator | identity | 执行“SameSite Cookie”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| IAM-013 | 566 | Secure Cookie | 0.4 | A/C/G | Administrator | identity | 执行“Secure Cookie”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| IAM-001 | 554 | 登录认证 | 0.4 | A/C/G | Administrator | identity | 执行“登录认证”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| IAM-002 | 555 | Session 管理 | 0.4 | A/C/G | Administrator | identity | 执行“Session 管理”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| IAM-003 | 556 | API Token | 0.4 | A/C/G | Administrator | identity | 执行“API Token”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| IAM-004 | 557 | Token 权限范围 | 0.4 | A/C/G | Administrator | identity | 执行“Token 权限范围”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| IAM-005 | 558 | 管理员账户 | 0.4 | A/C/G | Administrator | identity | 执行“管理员账户”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| IAM-006 | 559 | 只读账户 | 0.4 | A/C/G | Administrator | identity | 执行“只读账户”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| IAM-007 | 560 | 基础 RBAC | 0.4 | A/C/G | Administrator | identity | 执行“基础 RBAC”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| IAM-008 | 561 | 修改密码 | 0.4 | A/C/G | Administrator | identity | 执行“修改密码”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| IAM-009 | 562 | 登录限流 | 0.4 | A/C/G | Administrator | identity | 执行“登录限流”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| IAM-010 | 563 | 登录失败锁定 | 0.4 | A/C/G | Administrator | identity | 执行“登录失败锁定”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| IAM-011 | 564 | CSRF 防护 | 0.4 | A/C/G | Administrator | identity | 执行“CSRF 防护”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| IAM-012 | 565 | SameSite Cookie | 0.4 | A/C/G | Administrator | identity | 执行“SameSite Cookie”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| IAM-013 | 566 | Secure Cookie | 0.4 | A/C/G | Administrator | identity | 执行“Secure Cookie”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | SEC-034 | 567 | 后端监听 localhost/Unix Socket | 0.4 | A/C/G | Operator | policy-engine | 执行“后端监听 localhost/Unix Socket”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-035 | 568 | Web API 操作审计 | 0.4 | A/C/G | Operator | policy-engine | 执行“Web API 操作审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
+| SEC-035 | 568 | Web API 操作审计 | 0.4 | A/C/G | Operator | policy-engine | 执行“Web API 操作审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | GUI-001 | 569 | UI 配置编辑器 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“UI 配置编辑器”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | In Progress | No |
 | GUI-002 | 570 | UI DSL Monaco 高亮 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“UI DSL Monaco 高亮”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Planned | No |
 | GUI-003 | 571 | UI Lua Monaco 高亮 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“UI Lua Monaco 高亮”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Planned | No |
@@ -1305,7 +1307,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | GUI-010 | 578 | UI 回滚确认 | 0.8 | A/C/G | Operator | web | 执行“UI 回滚确认”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
 | GUI-011 | 579 | 暗色模式 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“暗色模式”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Implemented | No |
 | GUI-012 | 580 | 响应式布局 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“响应式布局”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Implemented | No |
-| IAM-014 | - | 一次性 Bootstrap Token | 0.4 | A/C/G/I | Administrator | identity | 执行“一次性 Bootstrap Token”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| IAM-014 | - | 一次性 Bootstrap Token | 0.4 | A/C/G/I | Administrator | identity | 执行“一次性 Bootstrap Token”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | IAM-015 | - | OIDC Provider 创建与更新 | 0.4 | A/C/G/I | Administrator | identity | 执行“OIDC Provider 创建与更新”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | IAM-016 | - | OIDC Authorization Code + PKCE | 0.4 | A/C/G/I | Administrator | identity | 执行“OIDC Authorization Code + PKCE”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | IAM-017 | - | OIDC Issuer/Audience 校验 | 0.4 | A/C/G/I | Administrator | identity | 执行“OIDC Issuer/Audience 校验”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
@@ -1316,11 +1318,11 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | IAM-022 | - | Break-glass 本地管理员 | 0.4 | A/C/G/I | Administrator | identity | 执行“Break-glass 本地管理员”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | IAM-023 | - | Break-glass 使用高优先级告警 | 0.4 | A/C/G/I | Administrator | identity | 执行“Break-glass 使用高优先级告警”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | IAM-024 | - | 角色 CRUD | 0.4 | A/C/G/I | Administrator | identity | 执行“角色 CRUD”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| IAM-025 | - | 权限目录查询 | 0.4 | A/C/G/I | Administrator | identity | 查询“权限目录查询”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
+| IAM-025 | - | 权限目录查询 | 0.4 | A/C/G/I | Administrator | identity | 查询“权限目录查询”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
 | IAM-026 | - | Site Group 资源范围 | 0.4 | A/C/G/I | Administrator | identity | 执行“Site Group 资源范围”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | IAM-027 | - | 条件式 Role Binding | 0.4 | A/C/G/I | Administrator | identity | 执行“条件式 Role Binding”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| IAM-028 | - | 活动 Session 列表 | 0.4 | A/C/G/I | Administrator | identity | 查询“活动 Session 列表”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| IAM-029 | - | Session 单项撤销 | 0.4 | A/C/G/I | Administrator | identity | 执行“Session 单项撤销”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| IAM-028 | - | 活动 Session 列表 | 0.4 | A/C/G/I | Administrator | identity | 查询“活动 Session 列表”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| IAM-029 | - | Session 单项撤销 | 0.4 | A/C/G/I | Administrator | identity | 执行“Session 单项撤销”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | IAM-030 | - | 用户全局登出 | 0.4 | A/C/G/I | Administrator | identity | 执行“用户全局登出”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | IAM-031 | - | API Token 轮换 | 0.4 | A/C/G/I | Administrator | identity | 执行“API Token 轮换”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | IAM-032 | - | Service Account | 0.4 | A/C/G/I | Administrator | identity | 执行“Service Account”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
@@ -1419,7 +1421,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | 新增团队/平台需求 | 105 |
 | 总 Feature ID | 685 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
-| 当前 `Implemented` | 212（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-022`、`DSL-025`～`DSL-034`、`DSL-035`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`、`AUDIT-003`、`AUDIT-004`） |
+| 当前 `Implemented` | 231（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-022`、`DSL-025`～`DSL-034`、`DSL-035`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-004`；身份：`IAM-001`～`IAM-014`、`IAM-025`、`IAM-028`、`IAM-029`；安全：`SEC-035`） |
 | 1.0 要求 `Verified` | 685 |
 
 分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 47、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。

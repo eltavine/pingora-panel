@@ -127,9 +127,11 @@ Every process reads `PINGORA_PANEL_DATABASE_URL` (its role, without password),
 `PINGORA_PANEL_GRPC_ADDR` and `PINGORA_PANEL_HEALTH_INTERVAL_MS`.
 `config-service` also reads `PINGORA_PANEL_GATEWAY_URL`; `panel-api` reads
 `PINGORA_PANEL_HTTP_ADDR`, `PINGORA_PANEL_CONFIG_URL`,
-`PINGORA_PANEL_GATEWAY_URL` for the gateway's runtime API and
-`PINGORA_PANEL_WEB_ROOT`, the directory of the built console. Plaintext
-listeners must stay on loopback until internal transports are authenticated.
+`PINGORA_PANEL_GATEWAY_URL` for the gateway's runtime API,
+`PINGORA_PANEL_WEB_ROOT`, the directory of the built console, and the
+identity settings described under [Accounts and access](#accounts-and-access).
+Plaintext listeners must stay on loopback until internal transports are
+authenticated.
 
 Internal gRPC runs over mutual TLS once a service has credentials
 ([decision](../docs/adr/0009-internal-mutual-tls.md)): set
@@ -198,10 +200,11 @@ with `/api/v1/upstreams/health` and node `drain`, operate the running
 gateway.
 
 `ppanel` covers the same operations from a shell. It reads the API address
-from `--api` or `PPANEL_API` and records `--actor` or `PPANEL_ACTOR` with each
-change:
+from `--api` or `PPANEL_API` and authenticates with the session
+`ppanel login` keeps, or with an API token from `--token` or `PPANEL_TOKEN`:
 
 ```sh
+ppanel login --username admin
 ppanel upstream create --name app --node 10.0.0.11:8080,weight=2
 ppanel listener set http --address 0.0.0.0:80
 ppanel site create --name shop --domain shop.example --proxy <upstream-id>
@@ -293,6 +296,54 @@ ppanel audit verify
 
 The console's audit log filters the same records, follows one request's
 events and verifies the chain.
+
+## Accounts and access
+
+Every request to `panel-api` is authenticated and authorized
+([decision](../docs/adr/0014-identity-and-access.md)). While no account
+exists, `POST /api/v1/setup` creates the first Administrator with the
+one-time bootstrap token from `PINGORA_PANEL_BOOTSTRAP_TOKEN` (or `_FILE`);
+the Compose installation generates it in `secrets/bootstrap-token`.
+Passwords have at least 15 characters, are refused when common, predictable
+or built from the account's names, and are stored as Argon2id hashes keyed
+with the pepper in `PINGORA_PANEL_PASSWORD_PEPPER` (or `_FILE`). Failed
+logins make the account wait, doubling from 30 seconds after the fifth to an
+hour, and the hundredth locks the password until an Administrator unlocks
+it; logins are also limited per client address.
+
+`POST /api/v1/session` logs in. Browsers receive a `__Host-ppanel_session`
+cookie that is `Secure`, `HttpOnly` and `SameSite=Strict`, and send the
+session's CSRF token in `x-csrf-token` with every unsafe request; requests
+from another site are refused. The command line asks for a bearer session
+instead. Sessions end after an hour without activity or a day after login
+(`PINGORA_PANEL_SESSION_IDLE_MS`, `PINGORA_PANEL_SESSION_LIFETIME_MS`), on
+logout, and when the password changes or the account is disabled. When the
+console is reached through a proxy, `PINGORA_PANEL_PUBLIC_ORIGINS` lists its
+origins for browsers that send no `Sec-Fetch-Site`.
+
+Each route requires a permission from the catalog at
+`GET /api/v1/permissions`. The built-in roles grant Administrator every
+permission, Operator configuration changes and gateway operations, Viewer
+reading, and Auditor reading with the audit trail and accounts.
+`/api/v1/account` manages the caller's password, sessions and API tokens;
+tokens start with `ppat_`, are shown once, expire within a year and never
+hold permissions their owner lacks. `/api/v1/accounts` and `/api/v1/roles`
+administer accounts, their roles, sessions and tokens. Logins, failed
+logins, account and token changes, and requests refused to a signed-in
+caller are recorded in the audit trail.
+
+```sh
+ppanel setup --username admin --bootstrap-token-file secrets/bootstrap-token
+ppanel login --username admin
+ppanel whoami
+ppanel account create ops --role operator --with-password
+ppanel token create ci --permission config.read --permission config.apply --days 30
+PPANEL_TOKEN=ppat_... ppanel config apply
+```
+
+The console asks for a login, or for the first administrator while none
+exists, shows only the pages the account may use, and offers account
+settings and account administration.
 
 ## Activation invariant
 
