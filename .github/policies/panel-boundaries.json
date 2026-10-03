@@ -478,6 +478,13 @@
         "panel-errors"
       ]
     },
+    "dns-rfc2136": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-acme",
+        "panel-errors"
+      ]
+    },
     "panel-acme": {
       "catalog": true,
       "allowed_workspace_dependencies": [
