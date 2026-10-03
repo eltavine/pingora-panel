@@ -419,6 +419,13 @@ and TLS 1.3 tickets, stays on unless `session_resumption off;`, and
 on HTTPS responses only; `preload` requires `include_subdomains` and a
 `max_age` of at least a year, as browsers' preload lists do.
 
+`/api/v1/gateway/file-checks`, `ppanel gateway files` and the console's
+gateway overview report whether each private key the active TLS profiles
+name may be read only by its owner, with its permission bits, and whether
+each static root resolves inside the static content root, listing links
+below a root that lead out of it — those are not served. The check looks at
+up to 10,000 entries per root and needs `gateway.read`.
+
 `/api/v1/tls-checks`, `ppanel listener check` and the console's listener page
 connect to a configured TLS listener as a client and report the negotiated
 version, cipher suite and ALPN, which versions it accepts on their own, the

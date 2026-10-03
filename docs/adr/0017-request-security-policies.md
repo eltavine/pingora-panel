@@ -70,8 +70,10 @@ password files.
   own deadline.
 - **Checks.** Validation warns about dangerous settings: Basic
   authentication on listeners without TLS, every address trusted as a proxy
-  and upstreams that do not verify their TLS nodes. The gateway refuses
-  private keys that others than their owner may read.
+  and upstreams that do not verify their TLS nodes. The gateway reports,
+  on request, private keys that others than their owner may read and links
+  that lead out of static roots, so files placed by hand are not refused
+  outright.
 
 ## Consequences
 
