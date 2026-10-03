@@ -42,6 +42,7 @@ uuid.workspace = true
 http-body-util.workspace = true
 hyper = { workspace = true, features = ["http2"] }
 hyper-util = { workspace = true, features = ["http2"] }
+pem.workspace = true
 rcgen.workspace = true
 tempfile.workspace = true
 tokio-rustls.workspace = true

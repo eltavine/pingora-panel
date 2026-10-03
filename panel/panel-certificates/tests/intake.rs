@@ -1,4 +1,3 @@
-use base64::{engine::general_purpose::STANDARD, Engine};
 use chrono::{DateTime, Duration, Utc};
 use panel_certificates::{
     accept, describe, describe_der, self_signed, CertificateStatus, KeyAlgorithm,
@@ -24,10 +23,7 @@ fn host(name: &str) -> NormalizedHost {
 }
 
 fn pem(label: &str, der: &[u8]) -> String {
-    format!(
-        "-----BEGIN {label}-----\n{}\n-----END {label}-----\n",
-        STANDARD.encode(der)
-    )
+    ::pem::encode(&::pem::Pem::new(label, der))
 }
 
 fn timestamp(value: DateTime<Utc>) -> OffsetDateTime {

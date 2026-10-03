@@ -878,16 +878,7 @@ async fn request_heads_must_arrive_in_time() {
 }
 
 fn pem(label: &str, der: &[u8]) -> String {
-    let encoded = base64::engine::general_purpose::STANDARD.encode(der);
-    let lines: Vec<_> = encoded
-        .as_bytes()
-        .chunks(64)
-        .map(|line| std::str::from_utf8(line).unwrap())
-        .collect();
-    format!(
-        "-----BEGIN {label}-----\n{}\n-----END {label}-----\n",
-        lines.join("\n")
-    )
+    ::pem::encode(&::pem::Pem::new(label, der))
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -1,6 +1,5 @@
 //! PEM as the gateway reads it (RFC 7468).
 
-use base64::{engine::general_purpose::STANDARD, Engine};
 use panel_errors::{PanelError, Result};
 use rustls_pki_types::pem::{self, SectionKind};
 
@@ -32,14 +31,10 @@ pub(crate) fn label(kind: SectionKind) -> &'static str {
     }
 }
 
-/// Textual encoding with 64-character lines.
+/// Textual encoding with LF line endings on every platform.
 pub(crate) fn encode(label: &str, der: &[u8]) -> String {
-    let encoded = STANDARD.encode(der);
-    let mut text = format!("-----BEGIN {label}-----\n");
-    for line in encoded.as_bytes().chunks(64) {
-        text.push_str(std::str::from_utf8(line).unwrap_or_default());
-        text.push('\n');
-    }
-    text.push_str(&format!("-----END {label}-----\n"));
-    text
+    ::pem::encode_config(
+        &::pem::Pem::new(label, der),
+        ::pem::EncodeConfig::new().set_line_ending(::pem::LineEnding::LF),
+    )
 }

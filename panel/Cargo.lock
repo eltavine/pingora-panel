@@ -1400,6 +1400,7 @@ dependencies = [
  "panel-errors",
  "panel-ir",
  "parking_lot",
+ "pem",
  "percent-encoding",
  "pingora-core",
  "pingora-http",
@@ -2642,6 +2643,7 @@ dependencies = [
  "hex",
  "panel-domain",
  "panel-errors",
+ "pem",
  "rcgen",
  "rustls",
  "rustls-pki-types",
@@ -2999,11 +3001,11 @@ dependencies = [
 name = "panel-pki"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
  "chrono",
  "getrandom 0.4.3",
  "panel-context",
  "panel-errors",
+ "pem",
  "rcgen",
  "rustls-pki-types",
  "rustls-webpki",

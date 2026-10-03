@@ -8,11 +8,11 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
-base64.workspace = true
 chrono.workspace = true
 getrandom.workspace = true
 panel-context.workspace = true
 panel-errors.workspace = true
+pem.workspace = true
 rcgen.workspace = true
 rustls-pki-types.workspace = true
 time.workspace = true

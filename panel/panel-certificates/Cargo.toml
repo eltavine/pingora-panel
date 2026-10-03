@@ -18,6 +18,7 @@ base64.workspace = true
 hex.workspace = true
 panel-domain.workspace = true
 panel-errors.workspace = true
+pem.workspace = true
 rcgen.workspace = true
 rustls.workspace = true
 rustls-pki-types.workspace = true
