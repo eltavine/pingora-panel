@@ -353,6 +353,53 @@ The console asks for a login, or for the first administrator while none
 exists, shows only the pages the account may use, and offers account
 settings and the administration of accounts and roles.
 
+## Certificates
+
+`automation-service` keeps the certificate inventory
+([decision](../docs/adr/0015-certificates-and-secret-material.md)). A
+certificate is uploaded as a PEM chain, leaf first, with the leaf's
+unencrypted private key — PKCS#8, PKCS#1 or SEC1; RSA of at least 2048 bits,
+ECDSA P-256 or P-384, or Ed25519 — or generated with a new ECDSA P-256 key
+and signed by it. Uploads are checked the way the gateway loads them: the key
+must belong to the leaf, each certificate must be issued by the next, and
+expired certificates are refused. Private keys are sealed with AES-256-GCM
+under the master keys in `PINGORA_PANEL_MASTER_KEYS` (or `_FILE`), one
+base64-encoded 256-bit key per line. The first seals new keys and the others
+still open older ones, which are sealed again with the first at start, so a
+master key is retired by adding a new first line, restarting, and then
+removing the old line. Without master keys, certificates cannot be stored.
+
+Every certificate is written to the gateway's secret directory,
+`PINGORA_PANEL_GATEWAY_SECRET_DIR`, as `cert-<id>.pem` and `cert-<id>.key`,
+readable only by their owner, and the directory is compared with the
+inventory every minute. A TLS profile names one with `certificate_id` —
+`certificate_id <id>;` in the configuration language — instead of naming
+files placed by hand. Replacing a certificate, for example with a renewed
+one, changes what the gateway serves within seconds without applying a new
+revision; files that do not load leave the previous certificate in place.
+
+`/api/v1/certificates` lists, uploads, generates, replaces and deletes
+certificates and reports where each stands: `valid`, `expiring` within 30
+days, `expired` or `not_yet_valid`. `/api/v1/certificates/{id}/coverage`
+checks which hosts one covers by its subject alternative names, as RFC 9525
+matches them, and `/api/v1/certificate-inspections` checks a chain and key
+without storing them. Private keys are never returned. Reading needs
+`certificate.read`, which every built-in role grants; changing needs
+`certificate.manage`, which Operators and Administrators hold. Every change
+and every refused change is recorded in the audit trail.
+
+```sh
+ppanel certificate generate intranet --name intranet.example --name '*.intranet.example'
+ppanel certificate upload example.com --chain fullchain.pem --key privkey.pem
+ppanel certificate check example.com --host www.example.com
+ppanel tls-profile set edge --certificate-id example.com
+ppanel certificate replace example.com --chain renewed.pem --key renewed.key
+```
+
+The console's Certificates page offers the same, with fingerprints, the
+chain and a host check, and the TLS profile form picks a certificate of the
+inventory.
+
 ## Activation invariant
 
 All fallible work required to build and durably publish the activation occurs
@@ -485,8 +532,13 @@ and every service's credentials, `pki` renews them, and `bootstrap`
 provisions roles, schemas, streams and the service registry before the
 services start; internal gRPC runs over mutual TLS. Each service mounts only
 its own credential volume, read-only, and runs with a read-only root file
-system, no capabilities and `no-new-privileges`. Passwords are generated
-into `deploy/secrets/` (never committed) and mounted as Compose secrets.
+system, no capabilities and `no-new-privileges`. Passwords, the bootstrap
+token, the password pepper and the master key that seals certificate keys
+are generated into `deploy/secrets/` (never committed) and mounted as
+Compose secrets; back the master key up with the database, since stored
+private keys cannot be opened without it. `automation-service` writes
+certificates into the `gateway-secrets` volume, which the gateway mounts
+read-only.
 The `panel-deploy` workflow builds the image and checks the running
 installation through its API.
 
