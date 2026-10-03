@@ -56,6 +56,9 @@ pub(crate) enum TokenCommand {
     },
     /// Revokes one of your API tokens.
     Revoke { id: String },
+    /// Replaces one of your API tokens by one with a new secret, printed
+    /// once; the old secret stops working at once.
+    Rotate { id: String },
 }
 
 #[derive(Subcommand)]
@@ -105,10 +108,24 @@ pub(crate) enum AccountCommand {
     Sessions { account: String },
     /// Ends a session of an account.
     EndSession { account: String, session: String },
+    /// Ends every session of an account.
+    EndSessions { account: String },
     /// An account's API tokens.
     Tokens { account: String },
     /// Revokes an API token of an account.
     RevokeToken { account: String, token: String },
+}
+
+/// What a custom role is.
+#[derive(Args, Clone, Debug)]
+pub(crate) struct RoleFields {
+    #[arg(long)]
+    name: String,
+    #[arg(long, default_value = "")]
+    description: String,
+    /// A permission it grants; see `ppanel role permissions`.
+    #[arg(long = "permission", required = true)]
+    permissions: Vec<String>,
 }
 
 #[derive(Subcommand)]
@@ -117,6 +134,20 @@ pub(crate) enum RoleCommand {
     List,
     /// The permissions roles grant.
     Permissions,
+    /// Creates a role.
+    Create {
+        id: String,
+        #[command(flatten)]
+        fields: RoleFields,
+    },
+    /// Replaces a role that is not built in.
+    Update {
+        id: String,
+        #[command(flatten)]
+        fields: RoleFields,
+    },
+    /// Deletes a role that is not built in and that no account holds.
+    Delete { id: String },
 }
 
 const ACCOUNTS: &[Column] = &[
@@ -262,7 +293,12 @@ pub(crate) async fn logout(
     api: &Api,
     output: &Output,
     credentials: Option<&Credentials>,
+    everywhere: bool,
 ) -> Result<()> {
+    if everywhere {
+        api.change(Method::DELETE, "/api/v1/account/sessions", None, None)
+            .await?;
+    }
     let ended = api
         .change(Method::DELETE, "/api/v1/session", None, None)
         .await;
@@ -361,6 +397,25 @@ pub(crate) async fn token(api: &Api, output: &Output, command: TokenCommand) -> 
             )
             .await?;
             output.done("Token revoked", &Value::Null);
+        }
+        TokenCommand::Rotate { id } => {
+            let rotated = api
+                .change(
+                    Method::POST,
+                    &format!("/api/v1/account/tokens/{id}/rotate"),
+                    None,
+                    None,
+                )
+                .await?
+                .body;
+            output.done(
+                &format!(
+                    "{}\nThis is the only time the token is shown; it expires {}. The old one no longer works.",
+                    text(&rotated["secret"]),
+                    text(&rotated["token"]["expires_at"])
+                ),
+                &rotated,
+            );
         }
     }
     Ok(())
@@ -484,6 +539,19 @@ pub(crate) async fn account(api: &Api, output: &Output, command: AccountCommand)
             .await?;
             output.done("Session ended", &Value::Null);
         }
+        AccountCommand::EndSessions { account } => {
+            let id = account_id(api, &account).await?;
+            let ended = api
+                .change(
+                    Method::DELETE,
+                    &format!("/api/v1/accounts/{id}/sessions"),
+                    None,
+                    None,
+                )
+                .await?
+                .body;
+            output.done(&format!("Ended {} sessions", text(&ended["ended"])), &ended);
+        }
         AccountCommand::Tokens { account } => {
             let id = account_id(api, &account).await?;
             let tokens = api
@@ -516,6 +584,50 @@ pub(crate) async fn role(api: &Api, output: &Output, command: RoleCommand) -> Re
         RoleCommand::Permissions => {
             let permissions = api.get("/api/v1/permissions", &[]).await?.body;
             output.list(&permissions, PERMISSIONS);
+        }
+        RoleCommand::Create { id, fields } => {
+            let created = api
+                .change(
+                    Method::POST,
+                    "/api/v1/roles",
+                    Some(&json!({
+                        "id": id,
+                        "name": fields.name,
+                        "description": fields.description,
+                        "permissions": fields.permissions,
+                    })),
+                    None,
+                )
+                .await?
+                .body;
+            output.done(
+                &format!("Created the role {}", text(&created["id"])),
+                &created,
+            );
+        }
+        RoleCommand::Update { id, fields } => {
+            let updated = api
+                .change(
+                    Method::PUT,
+                    &format!("/api/v1/roles/{id}"),
+                    Some(&json!({
+                        "name": fields.name,
+                        "description": fields.description,
+                        "permissions": fields.permissions,
+                    })),
+                    None,
+                )
+                .await?
+                .body;
+            output.done(
+                &format!("Updated the role {}", text(&updated["id"])),
+                &updated,
+            );
+        }
+        RoleCommand::Delete { id } => {
+            api.change(Method::DELETE, &format!("/api/v1/roles/{id}"), None, None)
+                .await?;
+            output.done(&format!("Deleted the role {id}"), &Value::Null);
         }
     }
     Ok(())

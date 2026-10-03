@@ -69,7 +69,11 @@ enum Command {
         input: SecretInput,
     },
     /// Ends the kept session.
-    Logout,
+    Logout {
+        /// End every other session of your account too.
+        #[arg(long)]
+        everywhere: bool,
+    },
     /// The account in use, its roles and permissions.
     Whoami,
     /// Changes your password; your other sessions end.
@@ -163,8 +167,8 @@ async fn main() -> ExitCode {
                 commands::identity::login(&api, &output, credentials.as_ref(), username, &input)
                     .await
             }
-            Command::Logout => {
-                commands::identity::logout(&api, &output, credentials.as_ref()).await
+            Command::Logout { everywhere } => {
+                commands::identity::logout(&api, &output, credentials.as_ref(), everywhere).await
             }
             Command::Whoami => commands::identity::whoami(&api, &output).await,
             Command::Password { input } => {
@@ -316,6 +320,27 @@ mod tests {
             ],
             vec!["ppanel", "account", "end-session", "ops", "0190a1b2"],
             vec!["ppanel", "role", "permissions"],
+            vec![
+                "ppanel",
+                "role",
+                "create",
+                "deployer",
+                "--name",
+                "Deployer",
+                "--permission",
+                "config.read",
+                "--permission",
+                "config.apply",
+            ],
+            vec!["ppanel", "role", "delete", "deployer"],
+            vec![
+                "ppanel",
+                "token",
+                "rotate",
+                "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b",
+            ],
+            vec!["ppanel", "account", "end-sessions", "ops"],
+            vec!["ppanel", "logout", "--everywhere"],
             vec![
                 "ppanel",
                 "config",

@@ -215,6 +215,19 @@ async fn api(
             }
         }
         ("DELETE", "/api/v1/session") => StatusCode::NO_CONTENT.into_response(),
+        ("DELETE", "/api/v1/account/sessions") => Json(json!({"ended": 2})).into_response(),
+        ("POST", "/api/v1/roles") => (
+            StatusCode::CREATED,
+            Json(json!({"id": body["id"], "name": body["name"], "permissions": body["permissions"],
+                        "description": "", "built_in": false})),
+        )
+            .into_response(),
+        ("POST", "/api/v1/account/tokens/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5c/rotate") => (
+            StatusCode::CREATED,
+            Json(json!({"token": {"name": "ci", "expires_at": "2026-11-02T08:00:00Z"},
+                        "secret": "ppat_rotated"})),
+        )
+            .into_response(),
         ("POST", "/api/v1/account/tokens") => (
             StatusCode::CREATED,
             Json(json!({
@@ -673,4 +686,53 @@ fn logging_in_keeps_a_session_for_later_commands() {
     assert_eq!(stub.requests("DELETE", "/api/v1/session").len(), 1);
     let again = stub.ppanel(&["whoami"]);
     assert_eq!(again.status.code(), Some(7));
+}
+
+#[test]
+fn roles_rotation_and_logging_out_everywhere() {
+    let stub = Stub::start();
+    let role = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "role",
+        "create",
+        "deployer",
+        "--name",
+        "Deployer",
+        "--permission",
+        "config.read",
+        "--permission",
+        "config.apply",
+    ]);
+    assert!(role.status.success(), "{}", stderr(&role));
+    assert_eq!(
+        stub.requests("POST", "/api/v1/roles")[0].body,
+        json!({"id": "deployer", "name": "Deployer", "description": "",
+               "permissions": ["config.read", "config.apply"]})
+    );
+    let missing = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "role",
+        "create",
+        "x",
+        "--name",
+        "X",
+    ]);
+    assert_eq!(missing.status.code(), Some(2));
+
+    let rotated = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "token",
+        "rotate",
+        "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5c",
+    ]);
+    assert!(rotated.status.success(), "{}", stderr(&rotated));
+    assert!(stdout(&rotated).starts_with("ppat_rotated\n"));
+
+    let logout = stub.ppanel(&["--token", "ppat_admin", "logout", "--everywhere"]);
+    assert!(logout.status.success(), "{}", stderr(&logout));
+    assert_eq!(stub.requests("DELETE", "/api/v1/account/sessions").len(), 1);
+    assert_eq!(stub.requests("DELETE", "/api/v1/session").len(), 1);
 }
