@@ -1,3 +1,4 @@
+import { auditFeature } from './audit'
 import { configStudioFeature } from './config-studio'
 import { gatewayFeature } from './gateway'
 import { listenersFeature } from './listeners'
@@ -14,6 +15,7 @@ export const features: readonly FeatureModule[] = [
   revisionsFeature,
   publishingFeature,
   receiptsFeature,
+  auditFeature,
   sitesFeature,
   upstreamsFeature,
   listenersFeature,
