@@ -38,16 +38,6 @@
           "expires_on": "2027-03-01"
         },
         {
-          "crate": "core-foundation",
-          "versions": [
-            "0.9.4",
-            "0.10.1"
-          ],
-          "owner": "pingora-panel-platform",
-          "reason": "Inherited transitive duplicate with no unified release line: 0.9.4 via security-framework 2 in rustls-native-certs 0.7 (pingora-rustls); 0.10.1 via security-framework 3 in rustls-native-certs 0.8 (async-nats). Built only for Apple targets.",
-          "expires_on": "2027-03-01"
-        },
-        {
           "crate": "cpufeatures",
           "versions": [
             "0.2.17",
@@ -138,7 +128,7 @@
             "0.2.1"
           ],
           "owner": "pingora-panel-platform",
-          "reason": "Inherited transitive duplicate with no unified release line: 0.1.6 via pingora-core; 0.2.1 via rustls-native-certs in async-nats.",
+          "reason": "Inherited transitive duplicate with no unified release line: 0.1.6 via pingora-core; 0.2.1 via rustls-native-certs in pingora-rustls and async-nats.",
           "expires_on": "2027-03-01"
         },
         {
@@ -169,26 +159,6 @@
           ],
           "owner": "pingora-panel-platform",
           "reason": "Inherited transitive duplicate with no unified release line: 0.6.4 via rand 0.8; 0.10.1 via rand 0.10 and getrandom 0.4.",
-          "expires_on": "2027-03-01"
-        },
-        {
-          "crate": "rustls-native-certs",
-          "versions": [
-            "0.7.3",
-            "0.8.4"
-          ],
-          "owner": "pingora-panel-platform",
-          "reason": "Inherited transitive duplicate with no unified release line: 0.7.3 via pingora-rustls; 0.8.4 via async-nats.",
-          "expires_on": "2027-03-01"
-        },
-        {
-          "crate": "security-framework",
-          "versions": [
-            "2.11.1",
-            "3.7.0"
-          ],
-          "owner": "pingora-panel-platform",
-          "reason": "Inherited transitive duplicate with no unified release line: 2.11.1 via rustls-native-certs 0.7 (pingora-rustls); 3.7.0 via rustls-native-certs 0.8 (async-nats). Built only for Apple targets.",
           "expires_on": "2027-03-01"
         },
         {
@@ -279,18 +249,6 @@
           ],
           "owner": "pingora-panel-platform",
           "reason": "Inherited transitive duplicate with no unified release line: 7.3.0 via zstd 0.13 in pingora-header-serde; 8.0.0 via zstd 0.14 in pingora-core.",
-          "expires_on": "2027-03-01"
-        }
-      ],
-      "unmaintained": [
-        {
-          "advisory_id": "RUSTSEC-2025-0134",
-          "crate": "rustls-pemfile",
-          "versions": [
-            "2.2.0"
-          ],
-          "owner": "pingora-panel-security",
-          "reason": "rustls-pemfile is archived in favour of rustls-pki-types PEM parsing; it reaches the build only through pingora-rustls and its rustls-native-certs 0.7, and panel code parses PEM with rustls-pki-types.",
           "expires_on": "2027-03-01"
         }
       ]
