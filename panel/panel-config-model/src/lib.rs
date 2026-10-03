@@ -11,6 +11,7 @@ mod compile;
 mod edit;
 mod model;
 mod query;
+mod revisions;
 mod validate;
 mod views;
 
@@ -24,6 +25,7 @@ pub use query::{
     abnormal_sites, query_sites, serves_https, site_status, summarize, SitePage, SiteQuery,
     SiteSort, SiteStatus, SiteSummary, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE,
 };
+pub use revisions::{Revision, RevisionDetail, RevisionList, RevisionOutcome};
 pub use validate::validate;
 pub use views::{
     BatchAction, BatchRequest, DomainCheck, DomainOwner, DomainView, ListenerView, RouteView,
