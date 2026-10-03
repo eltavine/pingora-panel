@@ -1,6 +1,6 @@
 //! Immutable routing tables compiled before a snapshot becomes active.
 
-use bytes::Bytes;
+use crate::template::Template;
 use globset::{GlobBuilder, GlobMatcher};
 use panel_domain::{NormalizedHost, PathPrefix, RouteId, SiteId};
 use panel_engine::ROUTE_REGEX_SIZE_LIMIT;
@@ -61,13 +61,13 @@ pub(crate) enum RouteTarget {
     Proxy(usize),
     Static(usize),
     Redirect {
-        location: String,
+        location: Template,
         status: u16,
         preserve_path: bool,
     },
     Respond {
         status: u16,
-        body: Bytes,
+        body: Template,
         content_type: Option<String>,
         retry_after: Option<u32>,
     },
@@ -288,6 +288,10 @@ fn host_matches(pattern: &NormalizedHost, host: &str) -> bool {
     }
 }
 
+fn template_error(route: &RouteId, error: &str) -> PanelError {
+    PanelError::validation_failed(format!("route {route} has an invalid template: {error}"))
+}
+
 fn compile_matcher(
     route: &RouteId,
     matcher: &RouteMatcher,
@@ -356,7 +360,7 @@ fn compile_target(
             status,
             preserve_path,
         } => RouteTarget::Redirect {
-            location: location.clone(),
+            location: Template::parse(location).map_err(|error| template_error(route, &error))?,
             status: *status,
             preserve_path: *preserve_path,
         },
@@ -367,7 +371,8 @@ fn compile_target(
             retry_after_seconds,
         } => RouteTarget::Respond {
             status: *status,
-            body: body.clone().map(Bytes::from).unwrap_or_default(),
+            body: Template::parse(body.as_deref().unwrap_or_default())
+                .map_err(|error| template_error(route, &error))?,
             content_type: content_type.clone(),
             retry_after: *retry_after_seconds,
         },

@@ -29,6 +29,7 @@ const CAPABILITIES: &[&str] = &[
     "action.redirect",
     "action.respond",
     "action.static",
+    "action.template",
     "activation.cas",
     "listener.http",
     "listener.http2",

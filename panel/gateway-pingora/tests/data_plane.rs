@@ -12,8 +12,9 @@ use panel_domain::{
 };
 use panel_engine::DataPlaneAdapter;
 use panel_ir::{
-    DomainSpec, ListenerRef, RouteAction, RouteMatcher, RouteSpec, RuntimeSnapshot, SiteSpec,
-    StaticContentPolicy, TlsProfile, UpstreamEndpoint, UpstreamPoolSpec, WwwRedirect,
+    template::TEMPLATE_CAPABILITY, CapabilityRequirement, DomainSpec, ListenerRef, RouteAction,
+    RouteMatcher, RouteSpec, RuntimeSnapshot, SiteSpec, StaticContentPolicy, TlsProfile,
+    UpstreamEndpoint, UpstreamPoolSpec, WwwRedirect,
 };
 use std::{
     collections::{BTreeSet, HashMap},
@@ -251,7 +252,30 @@ async fn proxies_redirects_responds_and_rejects_on_plain_http() {
                 retry_after_seconds: Some(120),
             },
         ),
+        route(
+            "whoami",
+            1,
+            RouteMatcher::ExactPath {
+                path: "/whoami".into(),
+            },
+            RouteAction::respond(
+                200,
+                Some(
+                    "$method $scheme://$host$uri from $client_ip id=$request_id tenant=$http_x_tenant costs $$5"
+                        .into(),
+                ),
+            ),
+        ),
+        route(
+            "landing",
+            1,
+            RouteMatcher::ExactPath { path: "/go".into() },
+            RouteAction::redirect("https://$host/landing$uri", 302),
+        ),
     ];
+    snapshot
+        .required_capabilities
+        .push(CapabilityRequirement::new(TEMPLATE_CAPABILITY, "1"));
     let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
     wait_for(listen).await;
 
@@ -297,6 +321,25 @@ async fn proxies_redirects_responds_and_rejects_on_plain_http() {
     assert_eq!(response.status, 503);
     assert_eq!(response.headers["retry-after"], "120");
     assert_eq!(response.body, b"back soon");
+
+    let response = get(
+        listen,
+        Some("Example.com"),
+        "/whoami?q=1",
+        "x-request-id: req-42\r\nx-tenant: acme\r\n",
+    )
+    .await;
+    assert_eq!(response.status, 200);
+    assert_eq!(
+        String::from_utf8(response.body).unwrap(),
+        "GET http://example.com/whoami from 127.0.0.1 id=req-42 tenant=acme costs $5"
+    );
+    let response = get(listen, Some("example.com"), "/go?q=1", "").await;
+    assert_eq!(response.status, 302);
+    assert_eq!(
+        response.headers["location"],
+        "https://example.com/landing/go"
+    );
 
     gateway.stop().await;
     assert!(TcpStream::connect(listen).await.is_err());

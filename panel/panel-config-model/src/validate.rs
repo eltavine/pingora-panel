@@ -5,6 +5,7 @@
 use crate::model::{Action, ConfigModel, MatchKind, Route, Site};
 use panel_domain::EndpointAddress;
 use panel_errors::{Diagnostic, ErrorCode};
+use panel_ir::template::parse_template;
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     net::SocketAddr,
@@ -390,12 +391,17 @@ fn check_action(action: &Action, resource: &str, upstreams: &BTreeSet<Uuid>, rep
             if !REDIRECT_STATUSES.contains(status) {
                 report.error(resource, format!("{status} is not a redirect status"));
             }
-            let absolute = location.starts_with("https://") || location.starts_with("http://");
+            let absolute = ["https://", "http://", "$scheme://", "${scheme}://"]
+                .iter()
+                .any(|prefix| location.starts_with(prefix));
             if !(absolute || location.starts_with('/')) || location.contains(char::is_whitespace) {
                 report.error(
                     resource,
                     "the redirect target must be an absolute URL or path",
                 );
+            }
+            if let Err(error) = parse_template(location) {
+                report.error(resource, format!("the redirect target is invalid: {error}"));
             }
         }
         Action::Respond {
@@ -415,6 +421,9 @@ fn check_action(action: &Action, resource: &str, upstreams: &BTreeSet<Uuid>, rep
             }
             if body.as_ref().is_some_and(|body| body.len() > 64 * 1024) {
                 report.error(resource, "the response body exceeds 64 KiB");
+            }
+            if let Some(Err(error)) = body.as_deref().map(parse_template) {
+                report.error(resource, format!("the response body is invalid: {error}"));
             }
         }
         Action::Proxy { .. } => {}

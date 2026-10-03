@@ -3,6 +3,7 @@
 
 use panel_errors::{Diagnostic, ErrorCode};
 use panel_ir::{
+    template::{parse_template, uses_variables, TEMPLATE_CAPABILITY},
     ActiveHealthCheck, HealthCheckProtocol, ListenerRef, LoadBalancingPolicy, RouteAction,
     RouteMatcher, RuntimeSnapshot, UpstreamPoolSpec,
 };
@@ -34,6 +35,10 @@ const REDIRECT_STATUSES: [u16; 5] = [301, 302, 303, 307, 308];
 const MIN_HEALTH_CHECK_INTERVAL_MS: u64 = 100;
 
 pub(crate) fn validate_traffic(snapshot: &RuntimeSnapshot, diagnostics: &mut Vec<Diagnostic>) {
+    let templates_declared = snapshot
+        .required_capabilities()
+        .iter()
+        .any(|capability| capability.name == TEMPLATE_CAPABILITY);
     let mut report = |resource: &str, message: String| {
         diagnostics
             .push(Diagnostic::error(ErrorCode::VALIDATION_FAILED, message).with_resource(resource));
@@ -254,6 +259,29 @@ pub(crate) fn validate_traffic(snapshot: &RuntimeSnapshot, diagnostics: &mut Vec
                 }
             }
             _ => {}
+        }
+        let templates: Vec<&str> = match &route.action {
+            RouteAction::Redirect { location, .. } => vec![location.as_str()],
+            RouteAction::Respond {
+                body: Some(body), ..
+            } => vec![body.as_str()],
+            _ => Vec::new(),
+        };
+        for template in templates {
+            match parse_template(template) {
+                Err(error) => report(
+                    resource,
+                    format!("route {} has an invalid template: {error}", route.id),
+                ),
+                Ok(_) if uses_variables(template) && !templates_declared => report(
+                    resource,
+                    format!(
+                        "route {} uses request variables without requiring {TEMPLATE_CAPABILITY}",
+                        route.id
+                    ),
+                ),
+                Ok(_) => {}
+            }
         }
         match &route.action {
             RouteAction::Redirect {

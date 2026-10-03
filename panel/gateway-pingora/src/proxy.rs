@@ -9,10 +9,10 @@ use crate::{
     path, responses,
     routing::{RouteTarget, SiteRoutes},
     static_files,
+    template::Facts,
     upstream::{EndpointLease, UpstreamPool},
 };
 use async_trait::async_trait;
-use bytes::Bytes;
 use http::header;
 use pingora_core::{upstreams::peer::HttpPeer, Error, ErrorType};
 use pingora_http::{RequestHeader, ResponseHeader};
@@ -200,6 +200,9 @@ impl ProxyHttp for PanelProxy {
                 status,
                 preserve_path,
             } => {
+                let rendered =
+                    location.render(&facts(session, host_name, &path, self.listener.tls));
+                let location = String::from_utf8_lossy(&rendered).into_owned();
                 let location = if *preserve_path {
                     let target = session
                         .req_header()
@@ -208,7 +211,7 @@ impl ProxyHttp for PanelProxy {
                         .map_or("/", |value| value.as_str());
                     format!("{}{target}", location.trim_end_matches('/'))
                 } else {
-                    location.clone()
+                    location
                 };
                 responses::redirect(session, *status, &location).await?;
                 Ok(true)
@@ -219,6 +222,7 @@ impl ProxyHttp for PanelProxy {
                 content_type,
                 retry_after,
             } => {
+                let body = body.render(&facts(session, host_name, &path, self.listener.tls));
                 let retry_after = retry_after.map(|seconds| seconds.to_string());
                 let mut headers = Vec::with_capacity(2);
                 if let Some(content_type) = content_type {
@@ -229,7 +233,7 @@ impl ProxyHttp for PanelProxy {
                 if let Some(retry_after) = &retry_after {
                     headers.push((header::RETRY_AFTER, retry_after.as_str()));
                 }
-                responses::send(session, *status, &headers, Bytes::clone(body)).await?;
+                responses::send(session, *status, &headers, body).await?;
                 Ok(true)
             }
         }
@@ -418,6 +422,18 @@ impl PanelProxy {
             }
             _ => None,
         }
+    }
+}
+
+/// What a template may name about the request being answered.
+fn facts<'a>(session: &'a Session, host: &'a str, path: &'a str, tls: bool) -> Facts<'a> {
+    Facts {
+        host,
+        uri: path,
+        method: session.req_header().method.as_str(),
+        scheme: if tls { "https" } else { "http" },
+        client_ip: client_address(session).map(|address| address.ip()),
+        headers: &session.req_header().headers,
     }
 }
 

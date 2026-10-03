@@ -5,6 +5,7 @@ use panel_domain::{
     EndpointAddress, EndpointId, PathPrefix, RevisionId, RouteId, SiteId, UpstreamPoolId,
 };
 use panel_errors::{Diagnostic, ErrorCode};
+use panel_ir::template::{uses_variables, TEMPLATE_CAPABILITY};
 use panel_ir::{
     CapabilityRequirement, DomainSpec, ListenerRef, LoadBalancingPolicy, RetryPolicy, RouteAction,
     RouteMatcher, RouteSpec, RuntimeSnapshot, SiteSpec, StaticContentPolicy, UpstreamEndpoint,
@@ -292,6 +293,9 @@ impl Compiler {
                 preserve_path,
             } => {
                 self.capabilities.insert("action.redirect");
+                if uses_variables(location) {
+                    self.capabilities.insert(TEMPLATE_CAPABILITY);
+                }
                 RouteAction::Redirect {
                     location: location.clone(),
                     status: *status,
@@ -305,6 +309,9 @@ impl Compiler {
                 retry_after_seconds,
             } => {
                 self.capabilities.insert("action.respond");
+                if body.as_deref().is_some_and(uses_variables) {
+                    self.capabilities.insert(TEMPLATE_CAPABILITY);
+                }
                 RouteAction::Respond {
                     status: *status,
                     body: body.clone(),

@@ -17,6 +17,7 @@ mod responses;
 mod routing;
 mod secrets;
 mod static_files;
+mod template;
 mod upstream;
 
 pub use adapter::{AdapterOptions, PingoraGatewayAdapter, PreparedPingoraSnapshot};
