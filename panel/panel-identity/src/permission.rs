@@ -15,6 +15,9 @@ pub enum Permission {
     ConfigRead,
     ConfigWrite,
     ConfigApply,
+    ApprovalManage,
+    ApprovalDecide,
+    ApprovalBypass,
     CertificateRead,
     CertificateManage,
     AuditRead,
@@ -54,6 +57,21 @@ const CATALOG: &[(Permission, &str, &str)] = &[
         Permission::ConfigApply,
         "config.apply",
         "Apply the draft to the gateway, run dry runs and roll back.",
+    ),
+    (
+        Permission::ApprovalManage,
+        "approval.manage",
+        "Create, change and delete the policies that decide which changes need approval.",
+    ),
+    (
+        Permission::ApprovalDecide,
+        "approval.decide",
+        "Approve or reject changes other people asked to apply.",
+    ),
+    (
+        Permission::ApprovalBypass,
+        "approval.bypass",
+        "Apply a change without its approvals in an emergency, giving a reason and an incident.",
     ),
     (
         Permission::CertificateRead,
@@ -219,13 +237,14 @@ pub fn built_in_roles() -> Vec<Role> {
         role(
             "operator",
             "Operator",
-            "Changes and applies configuration, manages certificates and operates the gateway.",
+            "Changes and applies configuration, decides on others' changes, manages certificates and operates the gateway.",
             [
                 GatewayRead,
                 GatewayOperate,
                 ConfigRead,
                 ConfigWrite,
                 ConfigApply,
+                ApprovalDecide,
                 CertificateRead,
                 CertificateManage,
                 PlatformRead,

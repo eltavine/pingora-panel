@@ -947,6 +947,9 @@ const zhCN = {
     platform_read: '读取控制面服务',
     identity_read: '读取账户、角色与会话',
     identity_manage: '创建、修改、停用与解锁账户，分配角色并结束会话',
+    approval_manage: '创建、修改与删除决定哪些变更需要审批的策略',
+    approval_decide: '批准或拒绝他人申请应用的变更',
+    approval_bypass: '紧急情况下不经审批应用变更，须填写理由与事件编号',
     certificate_read: '读取证书及其域名、有效期与指纹，检查覆盖的域名',
     certificate_manage: '上传、生成、替换与删除证书；私钥不会被返回',
   },
@@ -2283,6 +2286,9 @@ const en: DeepString<Messages> = {
     platform_read: 'Read the services of the control plane',
     identity_read: 'Read accounts, roles and sessions',
     identity_manage: 'Create, change, disable and unlock accounts, grant roles and end sessions',
+    approval_manage: 'Create, change and delete the policies that decide which changes need approval',
+    approval_decide: 'Approve or reject changes other people asked to apply',
+    approval_bypass: 'Apply a change without its approvals in an emergency, giving a reason and an incident',
     certificate_read:
       'Read certificates, their names, validity and fingerprints, and check the hosts they cover',
     certificate_manage:
