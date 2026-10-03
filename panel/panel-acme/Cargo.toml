@@ -1,0 +1,37 @@
+[package]
+name = "panel-acme"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# Pebble, Let's Encrypt's test CA, for integration tests.
+test-support = ["dep:reqwest", "tokio/io-util", "tokio/net"]
+
+[dependencies]
+async-trait.workspace = true
+base64.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+getrandom.workspace = true
+hyper-rustls.workspace = true
+hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2"] }
+instant-acme.workspace = true
+panel-certificates.workspace = true
+panel-errors.workspace = true
+reqwest = { workspace = true, optional = true }
+rustls.workspace = true
+rustls-platform-verifier.workspace = true
+rustls-pki-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+panel-acme = { workspace = true, features = ["test-support"] }

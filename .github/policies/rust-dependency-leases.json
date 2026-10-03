@@ -28,6 +28,16 @@
       "enforcement": "identity",
       "duplicates": [
         {
+          "crate": "base64",
+          "versions": [
+            "0.22.1",
+            "0.23.1"
+          ],
+          "owner": "pingora-panel-platform",
+          "reason": "instant-acme 0.8 always enables rcgen's PEM support with its ring backend, and pem 4 is on base64 0.23 while tonic, sqlx, reqwest and the vendored Pingora tree are on base64 0.22. 0.22.1 via the workspace; 0.23.1 via pem 4.",
+          "expires_on": "2027-03-01"
+        },
+        {
           "crate": "blake2",
           "versions": [
             "0.10.6",

@@ -476,6 +476,13 @@
         "panel-errors"
       ]
     },
+    "panel-acme": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-certificates",
+        "panel-errors"
+      ]
+    },
     "panel-certificates": {
       "catalog": true,
       "allowed_workspace_dependencies": [

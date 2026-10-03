@@ -194,14 +194,24 @@ jobs:
           docker logs nats
           exit 1
 
-      - name: Run storage and broker adapter tests
-        run: >-
-          cargo test
-          --manifest-path panel/Cargo.toml
-          --package panel-postgres
-          --package panel-jetstream
-          --all-features
-          --locked
+      # Pebble, Let's Encrypt's test CA, from pinned release binaries.
+      - name: Start Pebble
+        env:
+          PANEL_DEV_TOOLS_DIR: ${{ runner.temp }}/panel-tools
+        run: panel/scripts/dev-services.sh acme
+
+      - name: Run storage, broker and ACME adapter tests
+        env:
+          PANEL_DEV_TOOLS_DIR: ${{ runner.temp }}/panel-tools
+        run: |
+          eval "$(panel/scripts/dev-services.sh env | grep PANEL_TEST_ACME_)"
+          cargo test \
+            --manifest-path panel/Cargo.toml \
+            --package panel-postgres \
+            --package panel-jetstream \
+            --package panel-acme \
+            --all-features \
+            --locked
 
   feature-matrix:
     name: Panel feature powerset
