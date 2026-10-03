@@ -378,6 +378,10 @@ ppanel traffic summary --site shop --route checkout --window 15m
 ppanel traffic series --window 1d --step 15m
 ```
 
+The console's traffic page shows the same figures for a chosen window and
+site, charts the request rate, server errors and latency, and reads them
+again every 30 seconds.
+
 ## Accounts and access
 
 Every request to `panel-api` is authenticated and authorized

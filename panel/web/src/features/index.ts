@@ -10,12 +10,14 @@ import { receiptsFeature } from './receipts'
 import { revisionsFeature } from './revisions'
 import { securityFeature } from './security'
 import { sitesFeature } from './sites'
+import { trafficFeature } from './traffic'
 import type { FeatureModule, NavigationGroup } from './types'
 import { upstreamsFeature } from './upstreams'
 
 /** Every console feature, in navigation order. */
 export const features: readonly FeatureModule[] = [
   gatewayFeature,
+  trafficFeature,
   revisionsFeature,
   publishingFeature,
   approvalsFeature,

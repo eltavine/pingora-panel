@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 const props = defineProps<{
   icon: Component
   label: string
-  value?: number
+  value?: number | string
   active?: boolean
   /** A figure only: renders without the button role. */
   passive?: boolean
