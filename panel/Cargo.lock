@@ -2576,6 +2576,7 @@ dependencies = [
  "base64",
  "chrono",
  "getrandom 0.4.3",
+ "hmac",
  "panel-context",
  "panel-errors",
  "panel-identity",

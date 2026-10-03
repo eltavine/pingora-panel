@@ -1,6 +1,7 @@
 //! Random secrets and the hashes stored in their place.
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use hmac::{Hmac, KeyInit, Mac};
 use panel_errors::{PanelError, Result};
 use sha2::{Digest, Sha256};
 use std::fmt;
@@ -8,6 +9,21 @@ use subtle::ConstantTimeEq;
 
 /// API tokens start with this, so they are recognizable wherever they leak.
 pub const TOKEN_PREFIX: &str = "ppat_";
+
+/// The CSRF token of a cookie session: an HMAC of a fixed label keyed with
+/// the session's secret. It is bound to the session, the server can
+/// recompute it from the cookie, and nobody without the cookie can.
+pub fn csrf_token(session_secret: &str) -> String {
+    let mut mac = Hmac::<Sha256>::new_from_slice(session_secret.as_bytes())
+        .expect("HMAC accepts keys of any length");
+    mac.update(b"pingora-panel csrf v1");
+    URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
+}
+
+/// Whether two texts are equal, compared in constant time for equal lengths.
+pub fn same_secret(left: &str, right: &str) -> bool {
+    left.as_bytes().ct_eq(right.as_bytes()).into()
+}
 
 /// 256 random bits as unpadded base64url text. Only its hash is stored.
 #[derive(Clone, Eq, PartialEq)]
@@ -96,5 +112,16 @@ mod tests {
             token.hash()
         );
         assert!(SecretHash::from_bytes(&[0; 4]).is_err());
+    }
+
+    #[test]
+    fn csrf_tokens_follow_their_session() {
+        let session = Secret::generate().unwrap();
+        let token = csrf_token(session.expose());
+        assert_eq!(token, csrf_token(session.expose()));
+        assert_ne!(token, csrf_token(Secret::generate().unwrap().expose()));
+        assert_eq!(token.len(), 43);
+        assert!(same_secret(&token, &csrf_token(session.expose())));
+        assert!(!same_secret(&token, "forged"));
     }
 }

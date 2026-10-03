@@ -43,7 +43,7 @@ const PERMISSIONS: &str = "ARRAY(SELECT DISTINCT p FROM role_bindings b \
 
 const SESSION: &str = "s.id AS session_id, s.account_id AS session_account, s.transport, \
      s.created_at AS session_created_at, s.last_seen_at, s.expires_at AS session_expires_at, \
-     s.client_address, s.user_agent, s.revoked_at AS session_revoked_at, s.csrf_hash";
+     s.client_address, s.user_agent, s.revoked_at AS session_revoked_at";
 
 const TOKEN: &str = "t.id AS token_id, t.account_id AS token_account, t.name AS token_name, \
      t.permissions AS token_permissions, t.created_at AS token_created_at, \
@@ -528,14 +528,13 @@ impl IdentityStore for PgIdentityStore {
         let session = &new.session;
         let mut transaction = self.pool.begin().await.map_err(storage)?;
         sqlx::query(
-            "INSERT INTO sessions (id, account_id, secret_hash, csrf_hash, transport, created_at, \
+            "INSERT INTO sessions (id, account_id, secret_hash, transport, created_at, \
              last_seen_at, expires_at, client_address, user_agent) \
-             VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8, $9)",
+             VALUES ($1, $2, $3, $4, $5, $5, $6, $7, $8)",
         )
         .bind(session.id.as_uuid())
         .bind(session.account.as_uuid())
         .bind(new.secret.as_bytes().as_slice())
-        .bind(new.csrf.as_bytes().as_slice())
         .bind(session.transport.as_str())
         .bind(session.created_at)
         .bind(session.expires_at)
@@ -581,10 +580,8 @@ impl IdentityStore for PgIdentityStore {
         else {
             return Ok(None);
         };
-        let csrf: Vec<u8> = get(&row, "csrf_hash")?;
         Ok(Some(SessionGrant {
             session: session(&row)?,
-            csrf: SecretHash::from_bytes(&csrf)?,
             account: account(&row)?,
             permissions: permissions(get(&row, "permissions")?),
         }))

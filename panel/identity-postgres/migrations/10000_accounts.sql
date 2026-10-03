@@ -37,7 +37,6 @@ CREATE TABLE sessions (
     id uuid PRIMARY KEY,
     account_id uuid NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
     secret_hash bytea NOT NULL UNIQUE CHECK (octet_length(secret_hash) = 32),
-    csrf_hash bytea NOT NULL CHECK (octet_length(csrf_hash) = 32),
     transport text NOT NULL CHECK (transport IN ('cookie', 'bearer')),
     created_at timestamptz NOT NULL,
     last_seen_at timestamptz NOT NULL,

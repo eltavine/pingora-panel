@@ -45,8 +45,11 @@ Storage, Session Management and CSRF Prevention cheat sheets.
 - **CSRF.** Unsafe requests authenticated by the cookie must carry the
   session's CSRF token in `x-csrf-token`, compared in constant time, must
   not come from another site according to `Sec-Fetch-Site`, and, without
-  that header, must carry an `Origin` equal to the panel's own. Bearer
-  credentials are not sent by browsers on their own and skip these checks.
+  that header, must carry an `Origin` equal to the panel's own. The token
+  is an HMAC of a fixed label keyed with the session secret: bound to the
+  session, recomputed from the cookie and returned with the current
+  session, and unknowable without the cookie. Bearer credentials are not
+  sent by browsers on their own and skip these checks.
 - **API tokens.** Tokens are `ppat_` followed by 256 random bits, shown once,
   stored as SHA-256 hashes, and have a name, an expiry of at most a year and
   a set of permissions that can only narrow their owner's. Revoking or

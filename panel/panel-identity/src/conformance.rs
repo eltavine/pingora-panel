@@ -171,7 +171,8 @@ async fn sessions_carry_their_transport_and_csrf_token_and_end(subject: impl Sto
     let harness = Harness::new(subject, IdentitySettings::default());
     harness.admin().await;
     let (login, principal) = harness.login("root", Transport::Cookie).await;
-    assert!(principal.csrf_matches(Some(login.csrf.expose())));
+    assert!(principal.csrf_matches(Some(&login.csrf)));
+    assert_eq!(principal.csrf_token(), Some(login.csrf.as_str()));
     assert!(!principal.csrf_matches(None));
     assert_eq!(principal.actor(), "root");
     assert!(harness

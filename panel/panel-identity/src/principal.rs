@@ -1,16 +1,15 @@
 //! An authenticated caller and what it may do.
 
-use crate::{AccountId, Permission, PermissionSet, SecretHash, SessionId, TokenId, Username};
+use crate::{
+    secret::same_secret, AccountId, Permission, PermissionSet, SessionId, TokenId, Username,
+};
 
 /// How a request proved who it is.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum Credential {
-    /// A session cookie; unsafe requests must also present its CSRF token.
-    SessionCookie {
-        session: SessionId,
-        csrf: SecretHash,
-    },
+    /// A session cookie; unsafe requests must also present `csrf`.
+    SessionCookie { session: SessionId, csrf: String },
     /// A session secret sent as a bearer token.
     SessionBearer { session: SessionId },
     /// An API token.
@@ -45,14 +44,20 @@ impl Principal {
         }
     }
 
+    /// The CSRF token unsafe requests of a cookie session carry.
+    pub fn csrf_token(&self) -> Option<&str> {
+        match &self.credential {
+            Credential::SessionCookie { csrf, .. } => Some(csrf),
+            _ => None,
+        }
+    }
+
     /// Whether `presented` is this session's CSRF token; always true for
     /// credentials the browser does not send by itself.
     pub fn csrf_matches(&self, presented: Option<&str>) -> bool {
-        match &self.credential {
-            Credential::SessionCookie { csrf, .. } => {
-                presented.is_some_and(|token| SecretHash::of(token).matches(csrf))
-            }
-            _ => true,
+        match self.csrf_token() {
+            Some(expected) => presented.is_some_and(|token| same_secret(token, expected)),
+            None => true,
         }
     }
 }
@@ -60,29 +65,33 @@ impl Principal {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{csrf_token, Secret};
 
     #[test]
     fn only_cookie_sessions_need_their_csrf_token() {
-        let csrf = crate::Secret::generate().unwrap();
+        let secret = Secret::generate().unwrap();
+        let csrf = csrf_token(secret.expose());
         let mut principal = Principal {
             account: AccountId::generate(),
             username: Username::new("alice").unwrap(),
             credential: Credential::SessionCookie {
                 session: SessionId::generate(),
-                csrf: csrf.hash(),
+                csrf: csrf.clone(),
             },
             permissions: PermissionSet::from_names(&["config.read"]).unwrap(),
         };
         assert!(principal.can(Permission::ConfigRead));
         assert!(!principal.can(Permission::ConfigApply));
-        assert!(principal.csrf_matches(Some(csrf.expose())));
+        assert!(principal.csrf_matches(Some(&csrf)));
         assert!(!principal.csrf_matches(Some("forged")));
         assert!(!principal.csrf_matches(None));
+        assert_eq!(principal.csrf_token(), Some(csrf.as_str()));
         assert_eq!(principal.actor(), "alice");
         principal.credential = Credential::Token {
             token: TokenId::generate(),
         };
         assert!(principal.csrf_matches(None));
         assert_eq!(principal.session(), None);
+        assert_eq!(principal.csrf_token(), None);
     }
 }

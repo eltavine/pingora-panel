@@ -27,7 +27,7 @@ pub struct RecordedEvent {
 #[derive(Default)]
 struct State {
     accounts: Vec<StoredAccount>,
-    sessions: Vec<(Session, SecretHash, SecretHash)>,
+    sessions: Vec<(Session, SecretHash)>,
     tokens: Vec<(ApiToken, SecretHash)>,
     events: Vec<RecordedEvent>,
 }
@@ -81,7 +81,7 @@ fn end_sessions(
     keep: Option<SessionId>,
     now: DateTime<Utc>,
 ) {
-    for (session, _, _) in &mut state.sessions {
+    for (session, _) in &mut state.sessions {
         if session.account == account && Some(session.id) != keep && session.revoked_at.is_none() {
             session.revoked_at = Some(now);
         }
@@ -300,17 +300,17 @@ impl IdentityStore for MemoryIdentityStore {
             "session": new.session.id,
             "transport": new.session.transport,
         });
-        state.sessions.push((new.session, new.secret, new.csrf));
+        state.sessions.push((new.session, new.secret));
         record(&mut state, "identity.login.succeeded", cause, event);
         Ok(())
     }
 
     async fn session(&self, secret: &SecretHash) -> Result<Option<SessionGrant>> {
         let state = self.state();
-        let Some((session, _, csrf)) = state
+        let Some((session, _)) = state
             .sessions
             .iter()
-            .find(|(_, stored, _)| stored.matches(secret))
+            .find(|(_, stored)| stored.matches(secret))
         else {
             return Ok(None);
         };
@@ -323,14 +323,13 @@ impl IdentityStore for MemoryIdentityStore {
         };
         Ok(Some(SessionGrant {
             session: session.clone(),
-            csrf: *csrf,
             account: stored.account.clone(),
             permissions: self.permissions(&stored.account),
         }))
     }
 
     async fn touch_session(&self, id: SessionId, at: DateTime<Utc>) -> Result<()> {
-        for (session, _, _) in &mut self.state().sessions {
+        for (session, _) in &mut self.state().sessions {
             if session.id == id {
                 session.last_seen_at = at;
             }
@@ -343,8 +342,8 @@ impl IdentityStore for MemoryIdentityStore {
             .state()
             .sessions
             .iter()
-            .filter(|(session, _, _)| session.account == account && session.revoked_at.is_none())
-            .map(|(session, _, _)| session.clone())
+            .filter(|(session, _)| session.account == account && session.revoked_at.is_none())
+            .map(|(session, _)| session.clone())
             .collect())
     }
 
@@ -357,7 +356,7 @@ impl IdentityStore for MemoryIdentityStore {
         cause: &Cause,
     ) -> Result<bool> {
         let mut state = self.state();
-        let Some((session, _, _)) = state.sessions.iter_mut().find(|(session, _, _)| {
+        let Some((session, _)) = state.sessions.iter_mut().find(|(session, _)| {
             session.id == id && session.account == account && session.revoked_at.is_none()
         }) else {
             return Ok(false);

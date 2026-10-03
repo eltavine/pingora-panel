@@ -2,6 +2,7 @@
 //! authenticating requests, passwords, sessions, tokens and accounts.
 
 use crate::{
+    csrf_token,
     password::Verification,
     store::{
         AccountChange, Attempt, Cause, Failure, IdentityStore, NewAccount, NewSession, NewToken,
@@ -55,7 +56,7 @@ pub struct Login {
     pub session: Session,
     pub secret: Secret,
     /// Sent back in `x-csrf-token` with unsafe requests of cookie sessions.
-    pub csrf: Secret,
+    pub csrf: String,
     pub account: Account,
 }
 
@@ -281,7 +282,6 @@ impl Identity {
                     self.store.rehash_password(account.id, hash).await?;
                 }
                 let secret = Secret::generate()?;
-                let csrf = Secret::generate()?;
                 let session = Session {
                     id: SessionId::generate(),
                     account: account.id,
@@ -298,7 +298,6 @@ impl Identity {
                         NewSession {
                             session: session.clone(),
                             secret: secret.hash(),
-                            csrf: csrf.hash(),
                         },
                         &attempt,
                         &cause,
@@ -306,8 +305,8 @@ impl Identity {
                     .await?;
                 Ok(Login {
                     session,
+                    csrf: csrf_token(secret.expose()),
                     secret,
-                    csrf,
                     account,
                 })
             }
@@ -337,7 +336,7 @@ impl Identity {
         let credential = match transport {
             Transport::Cookie => Credential::SessionCookie {
                 session: grant.session.id,
-                csrf: grant.csrf,
+                csrf: csrf_token(secret),
             },
             Transport::Bearer => Credential::SessionBearer {
                 session: grant.session.id,

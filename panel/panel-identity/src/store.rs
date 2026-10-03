@@ -86,14 +86,12 @@ pub struct Failure {
 pub struct NewSession {
     pub session: Session,
     pub secret: SecretHash,
-    pub csrf: SecretHash,
 }
 
 /// A session found by its secret, with what authenticating needs.
 #[derive(Clone, Debug)]
 pub struct SessionGrant {
     pub session: Session,
-    pub csrf: SecretHash,
     pub account: Account,
     pub permissions: PermissionSet,
 }
