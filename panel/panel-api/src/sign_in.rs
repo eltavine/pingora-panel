@@ -16,8 +16,8 @@ use axum::{
 use chrono::{DateTime, SecondsFormat, Utc};
 use panel_errors::PanelError;
 use panel_identity::{
-    ClaimNames, GroupRole, Principal, ProviderDirectory, ProviderRequest, ProviderSignIns,
-    ProviderView, SecretChange, Transport,
+    ClaimNames, GroupRole, PasswordSignIn, Principal, ProviderDirectory, ProviderRequest,
+    ProviderSignIns, ProviderView, SecretChange, Transport,
 };
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{net::SocketAddr, sync::Arc};
@@ -422,4 +422,66 @@ pub(crate) async fn finish_sign_in<U>(
         .headers_mut()
         .append(header::SET_COOKIE, sign_in_cookie(None));
     Ok(response)
+}
+
+/// Who may sign in with a password.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum PasswordSignInMode {
+    Everyone,
+    /// Everyone else signs in through an identity provider.
+    BreakGlassOnly,
+}
+
+/// How people may sign in.
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SignInPolicy {
+    pub password_sign_in: PasswordSignInMode,
+}
+
+impl From<PasswordSignIn> for SignInPolicy {
+    fn from(policy: PasswordSignIn) -> Self {
+        Self {
+            password_sign_in: match policy {
+                PasswordSignIn::BreakGlassOnly => PasswordSignInMode::BreakGlassOnly,
+                _ => PasswordSignInMode::Everyone,
+            },
+        }
+    }
+}
+
+/// How people may sign in.
+#[utoipa::path(get, path = "/api/v1/sign-in-policy",
+    responses((status = 200, body = SignInPolicy)), tag = "identity")]
+pub(crate) async fn get_sign_in_policy<U>(
+    State(state): State<ApiState<U>>,
+) -> Result<Json<SignInPolicy>, ApiError> {
+    Ok(Json(
+        access(&state)?.directory.password_sign_in().await?.into(),
+    ))
+}
+
+/// Limits password sign-in to break-glass accounts, which needs an enabled
+/// identity provider and an enabled break-glass account that can manage
+/// accounts, or opens it to everyone again.
+#[utoipa::path(put, path = "/api/v1/sign-in-policy", request_body = SignInPolicy,
+    responses((status = 200, body = SignInPolicy)), tag = "identity")]
+pub(crate) async fn put_sign_in_policy<U>(
+    State(state): State<ApiState<U>>,
+    headers: HeaderMap,
+    Extension(principal): Extension<Principal>,
+    payload: Result<Json<SignInPolicy>, JsonRejection>,
+) -> Result<Json<SignInPolicy>, ApiError> {
+    let Json(policy) = payload.map_err(ApiError::from_json)?;
+    let policy = match policy.password_sign_in {
+        PasswordSignInMode::Everyone => PasswordSignIn::Everyone,
+        PasswordSignInMode::BreakGlassOnly => PasswordSignIn::BreakGlassOnly,
+    };
+    access(&state)?
+        .directory
+        .set_password_sign_in(policy, &request_scope(&headers)?, principal.actor())
+        .await?;
+    Ok(Json(policy.into()))
 }

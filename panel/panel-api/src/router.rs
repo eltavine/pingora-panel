@@ -316,6 +316,10 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
                 .put(sign_in::put_identity_provider::<U>)
                 .delete(sign_in::delete_identity_provider::<U>),
         )
+        .route(
+            "/api/v1/sign-in-policy",
+            get(sign_in::get_sign_in_policy::<U>).put(sign_in::put_sign_in_policy::<U>),
+        )
         .route("/api/v1/auth/providers", get(sign_in::sign_in_options::<U>))
         .route(
             "/api/v1/auth/oidc/{id}/start",

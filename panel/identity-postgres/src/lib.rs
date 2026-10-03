@@ -13,8 +13,8 @@ use panel_identity::{
         AccountChange, Attempt, Cause, Failure, IdentityStore, NewAccount, NewSession, NewToken,
         SessionGrant, StoredAccount, StoredPassword, TokenGrant,
     },
-    Account, AccountId, ApiToken, Permission, PermissionSet, Role, SecretHash, Session, SessionId,
-    TokenId, Transport, Username,
+    Account, AccountId, ApiToken, PasswordSignIn, Permission, PermissionSet, Role, SecretHash,
+    Session, SessionId, TokenId, Transport, Username,
 };
 use panel_postgres::{EventLog, PgOutbox, SchemaMigration, ServiceDatabase};
 use serde::Serialize;
@@ -35,14 +35,19 @@ pub const MIGRATIONS: &[SchemaMigration] = &[
         "identity providers, their links and sign-ins",
         include_str!("../migrations/10100_identity_providers.sql"),
     ),
+    SchemaMigration::new(
+        10_200,
+        "break-glass accounts and the password sign-in policy",
+        include_str!("../migrations/10200_break_glass.sql"),
+    ),
 ];
 
 /// Ended sessions are deleted this many days after they expire.
 const SESSION_RETENTION_DAYS: i64 = 30;
 
-const ACCOUNT: &str = "a.id, a.username, a.display_name, a.disabled, a.locked, a.created_at, \
-     a.updated_at, a.last_login_at, a.password_changed_at, a.password_hash, a.failures, \
-     a.retry_after, \
+const ACCOUNT: &str = "a.id, a.username, a.display_name, a.disabled, a.locked, a.break_glass, \
+     a.created_at, a.updated_at, a.last_login_at, a.password_changed_at, a.password_hash, \
+     a.failures, a.retry_after, \
      ARRAY(SELECT b.role_id FROM role_bindings b WHERE b.account_id = a.id ORDER BY b.role_id) \
      AS roles";
 
@@ -119,6 +124,7 @@ fn account(row: &PgRow) -> Result<Account> {
         disabled: get(row, "disabled")?,
         locked: get(row, "locked")?,
         roles: get(row, "roles")?,
+        break_glass: get(row, "break_glass")?,
         created_at: get(row, "created_at")?,
         updated_at: get(row, "updated_at")?,
         last_login_at: get(row, "last_login_at")?,
@@ -393,6 +399,7 @@ impl IdentityStore for PgIdentityStore {
              locked = locked AND NOT $5, \
              failures = CASE WHEN $5 THEN 0 ELSE failures END, \
              retry_after = CASE WHEN $5 THEN NULL ELSE retry_after END, \
+             break_glass = COALESCE($7, break_glass), \
              updated_at = $6 \
              WHERE id = $1",
         )
@@ -402,6 +409,7 @@ impl IdentityStore for PgIdentityStore {
         .bind(change.disabled)
         .bind(change.unlock)
         .bind(now)
+        .bind(change.break_glass)
         .execute(&mut *transaction)
         .await
         .map_err(storage)?;
@@ -445,6 +453,7 @@ impl IdentityStore for PgIdentityStore {
                 "display_name": change.display_name,
                 "disabled": change.disabled,
                 "roles": change.roles,
+                "break_glass": change.break_glass,
                 "unlocked": change.unlock,
             }),
         )
@@ -579,16 +588,63 @@ impl IdentityStore for PgIdentityStore {
             .execute(&mut *transaction)
             .await
             .map_err(storage)?;
+        let login = json!({
+            "attempt": attempt,
+            "session": session.id,
+            "transport": session.transport,
+        });
+        if attempt.break_glass {
+            self.emit(
+                &mut transaction,
+                "identity.break_glass.used",
+                session.account,
+                cause,
+                &login,
+            )
+            .await?;
+        }
         self.emit(
             &mut transaction,
             "identity.login.succeeded",
             session.account,
             cause,
-            &json!({
-                "attempt": attempt,
-                "session": session.id,
-                "transport": session.transport,
-            }),
+            &login,
+        )
+        .await?;
+        transaction.commit().await.map_err(storage)
+    }
+
+    async fn password_sign_in(&self) -> Result<PasswordSignIn> {
+        let policy: String =
+            sqlx::query_scalar("SELECT password_sign_in FROM sign_in_policy WHERE singleton")
+                .fetch_one(&self.pool)
+                .await
+                .map_err(storage)?;
+        PasswordSignIn::parse(&policy)
+            .ok_or_else(|| PanelError::corrupt_state("the password sign-in policy is unknown"))
+    }
+
+    async fn set_password_sign_in(
+        &self,
+        policy: PasswordSignIn,
+        now: DateTime<Utc>,
+        cause: &Cause,
+    ) -> Result<()> {
+        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        sqlx::query(
+            "UPDATE sign_in_policy SET password_sign_in = $1, updated_at = $2 WHERE singleton",
+        )
+        .bind(policy.as_str())
+        .bind(now)
+        .execute(&mut *transaction)
+        .await
+        .map_err(storage)?;
+        self.emit_on(
+            &mut transaction,
+            "identity.sign_in_policy.updated",
+            ("sign_in_policy", "password"),
+            cause,
+            &json!({ "password_sign_in": policy }),
         )
         .await?;
         transaction.commit().await.map_err(storage)

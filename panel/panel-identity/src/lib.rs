@@ -22,7 +22,7 @@ mod sign_in;
 pub mod store;
 mod throttle;
 
-pub use account::{Account, AccountId, Username};
+pub use account::{Account, AccountId, PasswordSignIn, Username};
 pub use password::{PasswordHasher, PasswordPolicy, PasswordProblem, Verification};
 pub use permission::{built_in_roles, Permission, PermissionSet, Role};
 pub use principal::{Credential, Principal};

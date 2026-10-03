@@ -7,9 +7,9 @@ use crate::{
         AccountChange, Attempt, Cause, Failure, IdentityStore, NewAccount, NewSession, NewToken,
         SessionGrant, StoredAccount, StoredPassword, TokenGrant,
     },
-    Account, AccountId, ApiToken, IdentityProvider, PendingSignIn, PermissionSet, ProviderLink,
-    ProviderSession, ProviderSignIn, ProviderStore, Role, SecretHash, Session, SessionId, TokenId,
-    Username,
+    Account, AccountId, ApiToken, IdentityProvider, PasswordSignIn, PendingSignIn, PermissionSet,
+    ProviderLink, ProviderSession, ProviderSignIn, ProviderStore, Role, SecretHash, Session,
+    SessionId, TokenId, Username,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -38,6 +38,7 @@ struct State {
     links: Vec<ProviderLink>,
     /// Sessions signed in through a provider, with the sealed refresh token.
     provider_sessions: Vec<ProviderSessionRow>,
+    password_sign_in: PasswordSignIn,
     events: Vec<RecordedEvent>,
 }
 
@@ -64,6 +65,7 @@ impl Default for MemoryIdentityStore {
                 pending: Vec::new(),
                 links: Vec::new(),
                 provider_sessions: Vec::new(),
+                password_sign_in: PasswordSignIn::default(),
                 events: Vec::new(),
             }),
         }
@@ -153,6 +155,7 @@ impl IdentityStore for MemoryIdentityStore {
             disabled: false,
             locked: false,
             roles: new.roles,
+            break_glass: false,
             created_at: new.now,
             updated_at: new.now,
             last_login_at: None,
@@ -220,6 +223,9 @@ impl IdentityStore for MemoryIdentityStore {
         if let Some(roles) = change.roles.clone() {
             stored.account.roles = roles;
         }
+        if let Some(break_glass) = change.break_glass {
+            stored.account.break_glass = break_glass;
+        }
         if change.unlock {
             stored.account.locked = false;
             if let Some(password) = &mut stored.password {
@@ -241,7 +247,7 @@ impl IdentityStore for MemoryIdentityStore {
             &mut state,
             "identity.account.updated",
             cause,
-            json!({ "account": id, "disabled": change.disabled, "roles": change.roles, "unlocked": change.unlock }),
+            json!({ "account": id, "disabled": change.disabled, "roles": change.roles, "break_glass": change.break_glass, "unlocked": change.unlock }),
         );
         Ok(account)
     }
@@ -326,7 +332,36 @@ impl IdentityStore for MemoryIdentityStore {
             "transport": new.session.transport,
         });
         state.sessions.push((new.session, new.secret));
+        if attempt.break_glass {
+            record(
+                &mut state,
+                "identity.break_glass.used",
+                cause,
+                event.clone(),
+            );
+        }
         record(&mut state, "identity.login.succeeded", cause, event);
+        Ok(())
+    }
+
+    async fn password_sign_in(&self) -> Result<PasswordSignIn> {
+        Ok(self.state().password_sign_in)
+    }
+
+    async fn set_password_sign_in(
+        &self,
+        policy: PasswordSignIn,
+        _now: DateTime<Utc>,
+        cause: &Cause,
+    ) -> Result<()> {
+        let mut state = self.state();
+        state.password_sign_in = policy;
+        record(
+            &mut state,
+            "identity.sign_in_policy.updated",
+            cause,
+            json!({ "password_sign_in": policy }),
+        );
         Ok(())
     }
 
@@ -727,6 +762,7 @@ impl ProviderStore for MemoryIdentityStore {
                 disabled: false,
                 locked: false,
                 roles: Vec::new(),
+                break_glass: false,
                 created_at: now,
                 updated_at: now,
                 last_login_at: None,

@@ -94,10 +94,43 @@ pub struct Account {
     pub locked: bool,
     /// The roles it holds, by identifier.
     pub roles: Vec<String>,
+    /// Keeps password sign-in when it is limited to break-glass accounts;
+    /// every sign-in with it is recorded for review.
+    pub break_glass: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub last_login_at: Option<DateTime<Utc>>,
     pub password_changed_at: Option<DateTime<Utc>>,
+}
+
+/// Who may sign in with a password.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum PasswordSignIn {
+    /// Every account that has a password.
+    #[default]
+    Everyone,
+    /// Break-glass accounts only; everyone else signs in through an identity
+    /// provider.
+    BreakGlassOnly,
+}
+
+impl PasswordSignIn {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Everyone => "everyone",
+            Self::BreakGlassOnly => "break_glass_only",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "everyone" => Some(Self::Everyone),
+            "break_glass_only" => Some(Self::BreakGlassOnly),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]

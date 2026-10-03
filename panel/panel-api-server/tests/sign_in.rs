@@ -136,6 +136,59 @@ async fn people_sign_in_through_an_identity_provider() {
     assert_eq!(created["has_client_secret"], true);
     assert!(created.get("client_secret").is_none());
 
+    let limit = || {
+        admin
+            .put(format!("{base}/api/v1/sign-in-policy"))
+            .json(&json!({"password_sign_in": "break_glass_only"}))
+            .send()
+    };
+    assert_eq!(
+        limit().await.unwrap().status(),
+        StatusCode::PRECONDITION_FAILED,
+        "a break-glass account must be able to manage accounts first"
+    );
+    let accounts: Value = admin
+        .get(format!("{base}/api/v1/accounts"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let operator = accounts[0]["id"].as_str().unwrap().to_owned();
+    let marked: Value = admin
+        .patch(format!("{base}/api/v1/accounts/{operator}"))
+        .json(&json!({"break_glass": true}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(marked["break_glass"], true);
+    assert_eq!(limit().await.unwrap().status(), StatusCode::OK);
+    let created = admin
+        .post(format!("{base}/api/v1/accounts"))
+        .json(&json!({"username": "viewer", "password": support::PASSWORD, "roles": ["viewer"]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let password_login = |username: &'static str| {
+        browser
+            .post(format!("{base}/api/v1/session"))
+            .json(&json!({"username": username, "password": support::PASSWORD, "transport": "bearer"}))
+            .send()
+    };
+    assert_eq!(
+        password_login("viewer").await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        password_login("operator").await.unwrap().status(),
+        StatusCode::CREATED
+    );
+
     let options: Value = browser
         .get(format!("{base}/api/v1/auth/providers"))
         .send()

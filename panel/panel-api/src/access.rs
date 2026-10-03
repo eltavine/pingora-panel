@@ -106,6 +106,8 @@ pub(crate) static ROUTES: &[(&str, &str, Access)] = &[
         "/api/v1/identity-providers/{id}",
         Requires(IdentityManage),
     ),
+    ("GET", "/api/v1/sign-in-policy", Requires(IdentityRead)),
+    ("PUT", "/api/v1/sign-in-policy", Requires(IdentityManage)),
     ("GET", "/api/v1/auth/providers", Public),
     ("GET", "/api/v1/auth/oidc/{id}/start", Public),
     ("GET", "/api/v1/auth/oidc/{id}/callback", Public),

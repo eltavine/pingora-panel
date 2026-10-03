@@ -50,7 +50,7 @@ pub use openapi::ApiDoc;
 pub use router::{router, router_with_config};
 pub use sign_in::{
     ClaimNamesBody, GroupRoleBody, IdentityProviderInput, IdentityProviderResponse,
-    SignInOptionResponse,
+    PasswordSignInMode, SignInOptionResponse, SignInPolicy,
 };
 pub use state::ApiState;
 

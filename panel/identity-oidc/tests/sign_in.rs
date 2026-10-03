@@ -8,8 +8,9 @@ use panel_context::{RequestId, RequestScope};
 use panel_identity::{
     memory::MemoryIdentityStore,
     store::{Cause, NewAccount},
-    AccountId, ClaimNames, Client, GroupRole, IdentityStore, ProviderDirectory, ProviderRequest,
-    ProviderSignIns, ProviderStore, Rechecked, SecretChange, SessionPolicy, Transport, Username,
+    AccountId, ClaimNames, Client, GroupRole, IdentityStore, PasswordSignIn, ProviderDirectory,
+    ProviderRequest, ProviderSignIns, ProviderStore, Rechecked, SecretChange, SessionPolicy,
+    Transport, Username,
 };
 use panel_secrets::EnvelopeVault;
 use serde_json::json;
@@ -241,6 +242,43 @@ async fn people_get_accounts_roles_and_sessions_from_their_provider() {
         "{events:?}"
     );
 
+    // Password sign-in is limited only while a break-glass account can still
+    // manage accounts.
+    let request = scope();
+    let limit = || directory.set_password_sign_in(PasswordSignIn::BreakGlassOnly, &request, "root");
+    assert_eq!(
+        limit().await.unwrap_err().code.as_str(),
+        "PRECONDITION_FAILED"
+    );
+    let root = store
+        .account_named(&Username::new("root").unwrap())
+        .await
+        .unwrap()
+        .unwrap()
+        .account;
+    store
+        .update_account(
+            root.id,
+            panel_identity::AccountChange {
+                break_glass: Some(true),
+                ..Default::default()
+            },
+            Utc::now(),
+            &Cause {
+                scope: scope(),
+                actor: "root".into(),
+            },
+        )
+        .await
+        .unwrap();
+    limit().await.unwrap();
+    assert_eq!(
+        directory.password_sign_in().await.unwrap(),
+        PasswordSignIn::BreakGlassOnly
+    );
+    provider.sign_in_as("u-1", json!({"preferred_username": "alice"}));
+    assert!(sign_in("/").await.is_ok(), "providers still sign people in");
+
     // The provider is asked about sessions every fifteen minutes; it rotates
     // refresh tokens, so the second recheck works only with the kept ones.
     let at = |minutes| {
@@ -251,13 +289,13 @@ async fn people_get_accounts_roles_and_sessions_from_their_provider() {
     let rechecked = at(16).recheck().await.unwrap();
     assert_eq!(
         (rechecked.kept, rechecked.ended, rechecked.unanswered),
-        (4, 0, 0)
+        (5, 0, 0)
     );
     assert_eq!(at(16).recheck().await.unwrap(), Rechecked::default());
-    assert_eq!(at(32).recheck().await.unwrap().kept, 4);
+    assert_eq!(at(32).recheck().await.unwrap().kept, 5);
     provider.disable("u-1");
     let rechecked = at(48).recheck().await.unwrap();
-    assert_eq!((rechecked.kept, rechecked.ended), (0, 4));
+    assert_eq!((rechecked.kept, rechecked.ended), (0, 5));
     let grant = store.session(&login.secret.hash()).await.unwrap().unwrap();
     assert!(grant.session.revoked_at.is_some());
     let ended = store
@@ -265,5 +303,5 @@ async fn people_get_accounts_roles_and_sessions_from_their_provider() {
         .into_iter()
         .filter(|event| event.event_type == "identity.session.ended")
         .count();
-    assert_eq!(ended, 4);
+    assert_eq!(ended, 5);
 }

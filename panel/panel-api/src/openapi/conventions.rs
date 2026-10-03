@@ -18,7 +18,7 @@ pub(super) struct HttpConventions;
 
 /// Response enums whose values grow with the product, such as the blocks of
 /// the configuration language; clients must accept values they do not know.
-const EXTENSIBLE_ENUMS: &[&str] = &["Context"];
+const EXTENSIBLE_ENUMS: &[&str] = &["Context", "PasswordSignInMode"];
 
 impl Modify for HttpConventions {
     fn modify(&self, document: &mut openapi::OpenApi) {

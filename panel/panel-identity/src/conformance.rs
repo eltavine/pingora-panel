@@ -6,9 +6,10 @@ use crate::{
     memory::RecordedEvent,
     store::{Attempt, Cause, NewAccount, NewSession},
     Account, AccountChange, AccountId, AccountRequest, ClaimNames, Client, FailurePolicy,
-    GroupRole, Identity, IdentityProvider, IdentitySettings, IdentityStore, Login, PendingSignIn,
-    Permission, PermissionSet, Principal, ProviderLink, ProviderSignIn, ProviderStore, RoleRequest,
-    Secret, SecretHash, Session, SessionId, TokenRequest, Transport, Username,
+    GroupRole, Identity, IdentityProvider, IdentitySettings, IdentityStore, Login, PasswordSignIn,
+    PendingSignIn, Permission, PermissionSet, Principal, ProviderLink, ProviderSignIn,
+    ProviderStore, RoleRequest, Secret, SecretHash, Session, SessionId, TokenRequest, Transport,
+    Username,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
@@ -47,6 +48,7 @@ where
     every_other_session_of_an_account_can_end_at_once(fresh().await).await;
     rotated_tokens_keep_their_grant_and_stop_the_old_secret(fresh().await).await;
     providers_link_accounts_and_keep_sign_ins_once(fresh().await).await;
+    break_glass_accounts_keep_password_sign_in(fresh().await).await;
 }
 
 const PASSWORD: &str = "glacier violin tapestry orbit";
@@ -943,6 +945,7 @@ async fn providers_link_accounts_and_keep_sign_ins_once(subject: impl StoreUnder
     let attempt = Attempt {
         username: "alice".into(),
         provider: Some("corp".into()),
+        break_glass: false,
         client_address: None,
         user_agent: None,
     };
@@ -1100,4 +1103,111 @@ async fn providers_link_accounts_and_keep_sign_ins_once(subject: impl StoreUnder
     }
     let logins = harness.events("identity.login.succeeded").await;
     assert!(logins.iter().any(|login| login["provider"] == "corp"));
+}
+
+async fn break_glass_accounts_keep_password_sign_in(subject: impl StoreUnderTest) {
+    let harness = Harness::new(subject, IdentitySettings::default());
+    let root = harness.admin().await;
+    let store = harness.subject.store();
+    harness
+        .identity
+        .create_account(
+            AccountRequest {
+                username: "ops".into(),
+                password: Some(PASSWORD.into()),
+                roles: vec!["operator".into()],
+                ..AccountRequest::default()
+            },
+            &scope(),
+            "root",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        store.password_sign_in().await.unwrap(),
+        PasswordSignIn::Everyone
+    );
+    let marked = harness
+        .identity
+        .update_account(
+            root.id,
+            AccountChange {
+                break_glass: Some(true),
+                ..AccountChange::default()
+            },
+            &scope(),
+            "root",
+        )
+        .await
+        .unwrap();
+    assert!(marked.break_glass);
+    assert!(
+        store
+            .account(root.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .account
+            .break_glass
+    );
+
+    let cause = Cause {
+        scope: scope(),
+        actor: "root".into(),
+    };
+    let now = *harness.now.lock().unwrap();
+    store
+        .set_password_sign_in(PasswordSignIn::BreakGlassOnly, now, &cause)
+        .await
+        .unwrap();
+    assert_eq!(
+        store.password_sign_in().await.unwrap(),
+        PasswordSignIn::BreakGlassOnly
+    );
+    let refused = harness
+        .identity
+        .login("ops", PASSWORD, Transport::Cookie, &client(), &scope())
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code.as_str(), ErrorCode::PERMISSION_DENIED);
+    let failed = harness.events("identity.login.failed").await;
+    assert!(failed
+        .iter()
+        .any(|failure| failure["reason"] == "password_sign_in_limited"));
+
+    harness.login("root", Transport::Cookie).await;
+    let used = harness.events("identity.break_glass.used").await;
+    assert_eq!(used.len(), 1, "every break-glass sign-in is recorded");
+    assert_eq!(used[0]["attempt"]["break_glass"], true);
+
+    let unmarked = harness
+        .identity
+        .update_account(
+            root.id,
+            AccountChange {
+                break_glass: Some(false),
+                ..AccountChange::default()
+            },
+            &scope(),
+            "root",
+        )
+        .await;
+    assert_eq!(
+        unmarked.unwrap_err().code.as_str(),
+        ErrorCode::PRECONDITION_FAILED,
+        "someone must keep a way in while providers alone admit everyone else"
+    );
+
+    store
+        .set_password_sign_in(PasswordSignIn::Everyone, now, &cause)
+        .await
+        .unwrap();
+    harness.login("ops", Transport::Cookie).await;
+    assert_eq!(
+        harness
+            .events("identity.sign_in_policy.updated")
+            .await
+            .len(),
+        2
+    );
 }

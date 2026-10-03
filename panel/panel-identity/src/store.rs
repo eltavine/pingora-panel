@@ -2,12 +2,13 @@
 //! in the same transaction, named after what happened:
 //! `identity.account.created`, `identity.account.updated`,
 //! `identity.password.changed`, `identity.login.succeeded`,
-//! `identity.login.failed`, `identity.session.ended`,
-//! `identity.token.created` and `identity.token.revoked`.
+//! `identity.break_glass.used`, `identity.login.failed`,
+//! `identity.session.ended`, `identity.token.created`,
+//! `identity.token.revoked` and `identity.sign_in_policy.updated`.
 
 use crate::{
-    Account, AccountId, ApiToken, PermissionSet, Role, SecretHash, Session, SessionId, TokenId,
-    Username,
+    Account, AccountId, ApiToken, PasswordSignIn, PermissionSet, Role, SecretHash, Session,
+    SessionId, TokenId, Username,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -59,6 +60,7 @@ pub struct AccountChange {
     /// Disabling also ends the account's sessions and revokes its tokens.
     pub disabled: Option<bool>,
     pub roles: Option<Vec<String>>,
+    pub break_glass: Option<bool>,
     /// Clears failed logins and re-enables a locked password.
     pub unlock: bool,
 }
@@ -70,6 +72,10 @@ pub struct Attempt {
     /// The identity provider the person signed in through.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
+    /// The account is a break-glass account; a successful sign-in with it is
+    /// also recorded as `identity.break_glass.used`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub break_glass: bool,
     pub client_address: Option<String>,
     pub user_agent: Option<String>,
 }
@@ -157,11 +163,22 @@ pub trait IdentityStore: Send + Sync {
     /// account: unknown, disabled, locked or waiting. Best effort.
     async fn login_refused(&self, attempt: &Attempt, reason: &str, cause: &Cause);
 
-    /// Stores the session, clears failed logins and records the login.
+    /// Stores the session, clears failed logins and records the login, and
+    /// the use of a break-glass account with it.
     async fn create_session(
         &self,
         session: NewSession,
         attempt: &Attempt,
+        cause: &Cause,
+    ) -> Result<()>;
+
+    /// Who may sign in with a password.
+    async fn password_sign_in(&self) -> Result<PasswordSignIn>;
+
+    async fn set_password_sign_in(
+        &self,
+        policy: PasswordSignIn,
+        now: DateTime<Utc>,
         cause: &Cause,
     ) -> Result<()>;
 

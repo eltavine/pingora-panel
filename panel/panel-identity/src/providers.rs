@@ -2,7 +2,8 @@
 //! before they are enabled, with the client secret sealed and never shown.
 
 use crate::{
-    service::cause, ClaimNames, GroupRole, IdentityProvider, IdentityStore, OpenIdConnect,
+    service::{cause, ensure_managers, role_permissions},
+    ClaimNames, GroupRole, IdentityProvider, IdentityStore, OpenIdConnect, PasswordSignIn,
     ProviderSettings, ProviderStore,
 };
 use chrono::{DateTime, Utc};
@@ -210,6 +211,47 @@ impl ProviderDirectory {
             .put_provider(provider.clone(), &cause(scope, actor))
             .await?;
         Ok((ProviderView::from(&provider), created))
+    }
+
+    /// Who may sign in with a password.
+    pub async fn password_sign_in(&self) -> Result<PasswordSignIn> {
+        self.identity.password_sign_in().await
+    }
+
+    /// Limits password sign-in to break-glass accounts, or opens it to
+    /// everyone again. Limiting it needs an enabled provider for everyone
+    /// else, and an enabled break-glass account that can manage accounts.
+    pub async fn set_password_sign_in(
+        &self,
+        policy: PasswordSignIn,
+        scope: &RequestScope,
+        actor: &str,
+    ) -> Result<()> {
+        if policy == PasswordSignIn::BreakGlassOnly {
+            let providers = self.providers.providers().await?;
+            if !providers.iter().any(|provider| provider.enabled) {
+                return Err(PanelError::precondition_failed(
+                    "enable an identity provider before limiting password sign-in",
+                ));
+            }
+            let permissions = role_permissions(self.identity.as_ref()).await?;
+            let break_glass: Vec<(bool, Vec<String>)> = self
+                .identity
+                .accounts()
+                .await?
+                .into_iter()
+                .filter(|account| account.break_glass)
+                .map(|account| (account.disabled, account.roles))
+                .collect();
+            ensure_managers(&break_glass, &permissions).map_err(|_| {
+                PanelError::precondition_failed(
+                    "mark an enabled account that can manage accounts as break-glass first",
+                )
+            })?;
+        }
+        self.identity
+            .set_password_sign_in(policy, (self.clock)(), &cause(scope, actor))
+            .await
     }
 
     pub async fn delete(&self, id: &str, scope: &RequestScope, actor: &str) -> Result<()> {

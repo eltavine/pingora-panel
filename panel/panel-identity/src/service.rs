@@ -9,8 +9,8 @@ use crate::{
         StoredAccount,
     },
     Account, AccountId, ApiToken, Credential, FailurePolicy, PasswordHasher, PasswordPolicy,
-    Permission, PermissionSet, Principal, Role, Secret, SecretHash, Session, SessionId,
-    SessionPolicy, TokenId, Transport, Username, TOKEN_PREFIX,
+    PasswordSignIn, Permission, PermissionSet, Principal, Role, Secret, SecretHash, Session,
+    SessionId, SessionPolicy, TokenId, Transport, Username, TOKEN_PREFIX,
 };
 use chrono::{DateTime, Utc};
 use panel_context::RequestScope;
@@ -303,8 +303,9 @@ impl Identity {
         client: &Client,
         scope: &RequestScope,
     ) -> Result<Login> {
-        let attempt = Attempt {
+        let mut attempt = Attempt {
             provider: None,
+            break_glass: false,
             username: username.chars().take(Username::MAX_LEN).collect(),
             client_address: client.address.clone(),
             user_agent: client.user_agent.clone(),
@@ -361,6 +362,17 @@ impl Identity {
                 Err(invalid_login())
             }
             Verification::Matches { outdated } => {
+                if !account.break_glass
+                    && self.store.password_sign_in().await? == PasswordSignIn::BreakGlassOnly
+                {
+                    self.store
+                        .login_refused(&attempt, "password_sign_in_limited", &cause)
+                        .await;
+                    return Err(PanelError::permission_denied(
+                        "password sign-in is limited to break-glass accounts; continue with your identity provider",
+                    ));
+                }
+                attempt.break_glass = account.break_glass;
                 if outdated {
                     let hash = self.hasher.hash(password).await?;
                     self.store.rehash_password(account.id, hash).await?;
@@ -613,20 +625,35 @@ impl Identity {
             return Err(PanelError::not_found(format!("there is no account {id}")));
         }
         let roles = self.role_permissions(None).await?;
-        let after: Vec<(bool, Vec<String>)> = accounts
+        let after: Vec<(bool, bool, Vec<String>)> = accounts
             .into_iter()
             .map(|account| {
                 if account.id == id {
                     (
                         change.disabled.unwrap_or(account.disabled),
+                        change.break_glass.unwrap_or(account.break_glass),
                         change.roles.clone().unwrap_or(account.roles),
                     )
                 } else {
-                    (account.disabled, account.roles)
+                    (account.disabled, account.break_glass, account.roles)
                 }
             })
             .collect();
-        ensure_managers(&after, &roles)?;
+        let managers = |break_glass_only: bool| -> Vec<(bool, Vec<String>)> {
+            after
+                .iter()
+                .filter(|(_, break_glass, _)| *break_glass || !break_glass_only)
+                .map(|(disabled, _, held)| (*disabled, held.clone()))
+                .collect()
+        };
+        ensure_managers(&managers(false), &roles)?;
+        if self.store.password_sign_in().await? == PasswordSignIn::BreakGlassOnly {
+            ensure_managers(&managers(true), &roles).map_err(|_| {
+                PanelError::precondition_failed(
+                    "password sign-in is limited to break-glass accounts, so an enabled one must stay able to manage accounts",
+                )
+            })?;
+        }
         self.store
             .update_account(id, change, self.now(), &cause(scope, actor))
             .await

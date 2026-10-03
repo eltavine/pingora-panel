@@ -74,7 +74,8 @@ mod tests;
         crate::identity::end_other_sessions, crate::identity::end_account_sessions,
         crate::identity::rotate_token, crate::sign_in::list_identity_providers, crate::sign_in::get_identity_provider,
         crate::sign_in::put_identity_provider, crate::sign_in::delete_identity_provider, crate::sign_in::sign_in_options,
-        crate::sign_in::start_sign_in, crate::sign_in::finish_sign_in
+        crate::sign_in::start_sign_in, crate::sign_in::finish_sign_in,
+        crate::sign_in::get_sign_in_policy, crate::sign_in::put_sign_in_policy
     ),
     tags(
         (name = "configuration", description = "Sites, domains, routes, upstreams, listeners and TLS profiles, edited as a draft and applied to the gateway"),

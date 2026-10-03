@@ -233,6 +233,7 @@ impl ProviderSignIns {
             attempt: Attempt {
                 username: String::new(),
                 provider: Some(provider.to_owned()),
+                break_glass: false,
                 client_address: client.address.clone(),
                 user_agent: client.user_agent.clone(),
             },

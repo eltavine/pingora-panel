@@ -37,6 +37,9 @@ pub struct AccountView {
     /// Too many failed logins locked the password until it is unlocked.
     pub locked: bool,
     pub roles: Vec<String>,
+    /// Keeps password sign-in when it is limited to break-glass accounts;
+    /// every sign-in with it is recorded as `identity.break_glass.used`.
+    pub break_glass: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub last_login_at: Option<DateTime<Utc>>,
@@ -52,6 +55,7 @@ impl From<Account> for AccountView {
             disabled: account.disabled,
             locked: account.locked,
             roles: account.roles,
+            break_glass: account.break_glass,
             created_at: account.created_at,
             updated_at: account.updated_at,
             last_login_at: account.last_login_at,
@@ -255,6 +259,8 @@ pub struct AccountPatch {
     pub disabled: Option<bool>,
     #[serde(default)]
     pub roles: Option<Vec<String>>,
+    #[serde(default)]
+    pub break_glass: Option<bool>,
     /// Clears failed logins and re-enables a locked password.
     #[serde(default)]
     pub unlock: bool,
@@ -731,6 +737,7 @@ pub(crate) async fn update_account<U>(
                     .map(|name| Some(name).filter(|name| !name.trim().is_empty())),
                 disabled: request.disabled,
                 roles: request.roles,
+                break_glass: request.break_glass,
                 unlock: request.unlock,
             },
             &request_scope(&headers)?,
