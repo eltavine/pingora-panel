@@ -133,6 +133,8 @@ Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交
 上述状态只覆盖 Initial Foundation，不把面板完整功能目录误写为已实现。
 0.2 网关核心各项已在 REST API、`ppanel` CLI 与 Web 控制台实现，并由模块、集成、真实进程与浏览器端到端测试覆盖，因此标记为 `Implemented`。其验收中的操作审计与权限检查分别随 `AUDIT-*`（0.3）与 `IAM-*`（0.4）完成；在此之前这些功能不得标记为 `Verified`。
 
+0.3 配置语言与版本（`SITE-034`～`SITE-045` 及上列 `DSL-*`）已在 REST API、`ppanel` CLI 与 Web 控制台实现：草稿以 `main.conf` 为入口的语言文件编辑，支持检查、格式化、补全 Schema、语法树、计划与 Diff、IR 导出、试运行，以及记录作者、备注与结果、可比较和一键回滚的配置版本；同样在操作审计（`AUDIT-*`）与权限（`IAM-*`）验收完成前不得标记为 `Verified`。请求变量（`DSL-010`～`DSL-017`）已在语言中识别与校验、运行时模板尚未实现，Size 与 IP/CIDR 类型（`DSL-023`、`DSL-024`）已能解析、尚无指令使用，因此为 `In Progress`；继承检查（`DSL-034`）、Lua 脚本引用（`DSL-042`）与 Nginx 子集导入和迁移报告（`DSL-043`～`DSL-045`）仍为 `Planned`。
+
 ### 3.2 目标仓库边界
 
 Pingora 上游 crates 继续保留在根 workspace，以便固定版本、审计源码、紧急打补丁和进行兼容测试。产品代码统一进入 `panel/` 边界。只有 `panel/gateway-pingora` 可以在 `Cargo.toml` 中依赖 `pingora-*`；其他产品 crate 只能依赖稳定的 `GatewayEngine` port 与 Engine-neutral IR。
@@ -754,18 +756,18 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | SITE-031 | 31 | 批量停止 | 0.2 | A/C/G | Operator | config-service | 执行“批量停止”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | SITE-032 | 32 | 批量删除 | 0.2 | A/C/G | Operator | config-service | 执行“批量删除”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | SITE-033 | 33 | 批量验证配置 | 0.2 | A/C/G | Operator | config-service | 执行“批量验证配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
-| SITE-034 | 34 | 网站配置草稿 | 0.3 | A/C/G | Operator | config-service | 执行“网站配置草稿”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| SITE-035 | 35 | 草稿保存 | 0.3 | A/C/G | Operator | config-service | 执行“草稿保存”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| SITE-036 | 36 | 草稿预览 | 0.3 | A/C/G | Viewer | config-service | 查询“草稿预览”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | Yes |
-| SITE-037 | 37 | 草稿与生效配置 Diff | 0.3 | A/C/G | Viewer | config-service | 查询“草稿与生效配置 Diff”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | Yes |
-| SITE-038 | 38 | 配置版本历史 | 0.3 | A/C/G | Operator | config-service | 执行“配置版本历史”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| SITE-039 | 39 | 配置版本备注 | 0.3 | A/C/G | Operator | config-service | 执行“配置版本备注”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| SITE-040 | 40 | 一键回滚配置 | 0.3 | A/C/G | Operator | config-service | 执行“一键回滚配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| SITE-041 | 41 | 配置合法性检查 | 0.3 | A/C/G | Operator | config-service | 执行“配置合法性检查”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| SITE-042 | 42 | 配置语义检查 | 0.3 | A/C/G | Operator | config-service | 执行“配置语义检查”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| SITE-043 | 43 | 配置冲突检查 | 0.3 | A/C/G | Operator | config-service | 执行“配置冲突检查”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| SITE-044 | 44 | 配置 Dry-run | 0.3 | A/C/G | Operator | config-service | 执行“配置 Dry-run”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| SITE-045 | 45 | 配置原子发布 | 0.3 | A/C/G | Operator | config-service | 执行“配置原子发布”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
+| SITE-034 | 34 | 网站配置草稿 | 0.3 | A/C/G | Operator | config-service | 执行“网站配置草稿”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| SITE-035 | 35 | 草稿保存 | 0.3 | A/C/G | Operator | config-service | 执行“草稿保存”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| SITE-036 | 36 | 草稿预览 | 0.3 | A/C/G | Viewer | config-service | 查询“草稿预览”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | Yes |
+| SITE-037 | 37 | 草稿与生效配置 Diff | 0.3 | A/C/G | Viewer | config-service | 查询“草稿与生效配置 Diff”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | Yes |
+| SITE-038 | 38 | 配置版本历史 | 0.3 | A/C/G | Operator | config-service | 执行“配置版本历史”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| SITE-039 | 39 | 配置版本备注 | 0.3 | A/C/G | Operator | config-service | 执行“配置版本备注”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| SITE-040 | 40 | 一键回滚配置 | 0.3 | A/C/G | Operator | config-service | 执行“一键回滚配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| SITE-041 | 41 | 配置合法性检查 | 0.3 | A/C/G | Operator | config-service | 执行“配置合法性检查”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| SITE-042 | 42 | 配置语义检查 | 0.3 | A/C/G | Operator | config-service | 执行“配置语义检查”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| SITE-043 | 43 | 配置冲突检查 | 0.3 | A/C/G | Operator | config-service | 执行“配置冲突检查”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| SITE-044 | 44 | 配置 Dry-run | 0.3 | A/C/G | Operator | config-service | 执行“配置 Dry-run”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| SITE-045 | 45 | 配置原子发布 | 0.3 | A/C/G | Operator | config-service | 执行“配置原子发布”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | GATE-001 | 46 | Pingora graceful reload | 0.2 | I | Operator | gatewayd | 执行“Pingora graceful reload”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | GATE-002 | 47 | Pingora graceful shutdown | 0.2 | I | Operator | gatewayd | 执行“Pingora graceful shutdown”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | GATE-003 | 48 | Pingora 服务状态 | 0.2 | I | Viewer | gatewayd | 查询“Pingora 服务状态”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
@@ -984,56 +986,56 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | TLS-031 | 261 | SSL Session 复用 | 0.4 | A/C/G | Operator | automation-service | 执行“SSL Session 复用”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | TLS-032 | 262 | Certificate Hot Reload | 0.4 | A/C/G | Operator | automation-service | 执行“Certificate Hot Reload”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | TLS-033 | 263 | TLS 配置测试 | 0.4 | A/C/G | Operator | automation-service | 执行“TLS 配置测试”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-001 | 264 | Nginx 风格主配置文件 | 0.3 | A/C/G | Operator | config-compiler | 执行“Nginx 风格主配置文件”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-002 | 265 | `http {}` 顶级块 | 0.3 | A/C/G | Operator | config-compiler | 执行“'http {}' 顶级块”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-003 | 266 | `server {}` 站点块 | 0.3 | A/C/G | Operator | config-compiler | 执行“'server {}' 站点块”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-004 | 267 | `upstream {}` 上游块 | 0.3 | A/C/G | Operator | config-compiler | 执行“'upstream {}' 上游块”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-005 | 268 | `location` 兼容别名 | 0.3 | A/C/G | Operator | config-compiler | 执行“'location' 兼容别名”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-006 | 269 | 改进版 `route` 块 | 0.3 | A/C/G | Operator | config-compiler | 执行“改进版 'route' 块”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-007 | 270 | `include` | 0.3 | A/C/G | Operator | config-compiler | 执行“'include'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-008 | 271 | `set` 变量 | 0.3 | A/C/G | Operator | config-compiler | 执行“'set' 变量”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-009 | 272 | 环境变量引用 | 0.3 | A/C/G | Operator | config-compiler | 执行“环境变量引用”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-010 | 273 | 内置请求变量 | 0.3 | A/C/G | Operator | config-compiler | 执行“内置请求变量”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-011 | 274 | `$host` | 0.3 | A/C/G | Operator | config-compiler | 执行“'$host'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-012 | 275 | `$uri` | 0.3 | A/C/G | Operator | config-compiler | 执行“'$uri'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-013 | 276 | `$method` | 0.3 | A/C/G | Operator | config-compiler | 执行“'$method'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-014 | 277 | `$scheme` | 0.3 | A/C/G | Operator | config-compiler | 执行“'$scheme'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-015 | 278 | `$client_ip` | 0.3 | A/C/G | Operator | config-compiler | 执行“'$client_ip'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-016 | 279 | `$request_id` | 0.3 | A/C/G | Operator | config-compiler | 执行“'$request_id'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-017 | 280 | `$upstream_addr` | 0.3 | A/C/G | Operator | config-compiler | 执行“'$upstream_addr'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-018 | 281 | 配置注释 | 0.3 | A/C/G | Operator | config-compiler | 执行“配置注释”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-019 | 282 | 字符串转义 | 0.3 | A/C/G | Operator | config-compiler | 执行“字符串转义”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-020 | 283 | 数字类型 | 0.3 | A/C/G | Operator | config-compiler | 执行“数字类型”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-021 | 284 | 布尔类型 | 0.3 | A/C/G | Operator | config-compiler | 执行“布尔类型”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-022 | 285 | Duration 类型 | 0.3 | A/C/G | Operator | config-compiler | 执行“Duration 类型”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-023 | 286 | Size 类型 | 0.3 | A/C/G | Operator | config-compiler | 执行“Size 类型”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-024 | 287 | IP/CIDR 类型 | 0.3 | A/C/G | Operator | config-compiler | 执行“IP/CIDR 类型”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-025 | 288 | 数组参数 | 0.3 | A/C/G | Operator | config-compiler | 执行“数组参数”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-026 | 289 | `key=value` 命名参数 | 0.3 | A/C/G | Operator | config-compiler | 执行“'key=value' 命名参数”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DSL-027 | 290 | DSL AST 查看 | 0.3 | A/C/G | Viewer | config-compiler | 查询“DSL AST 查看”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | Yes |
-| DSL-028 | 291 | DSL 格式化 | 0.3 | A/C/G | Operator | config-compiler | 执行“DSL 格式化”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| DSL-029 | 292 | DSL 自动补全 Schema | 0.3 | A/C/G | Operator | config-compiler | 执行“DSL 自动补全 Schema”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| DSL-030 | 293 | DSL 错误行列提示 | 0.3 | A/C/G | Operator | config-compiler | 执行“DSL 错误行列提示”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| DSL-031 | 294 | 未知指令检测 | 0.3 | A/C/G | Operator | config-compiler | 执行“未知指令检测”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| DSL-032 | 295 | Deprecated 指令提示 | 0.3 | A/C/G | Operator | config-compiler | 执行“Deprecated 指令提示”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| DSL-033 | 296 | 配置作用域检查 | 0.3 | A/C/G | Operator | config-compiler | 执行“配置作用域检查”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
+| DSL-001 | 264 | Nginx 风格主配置文件 | 0.3 | A/C/G | Operator | config-compiler | 执行“Nginx 风格主配置文件”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DSL-002 | 265 | `http {}` 顶级块 | 0.3 | A/C/G | Operator | config-compiler | 执行“'http {}' 顶级块”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DSL-003 | 266 | `server {}` 站点块 | 0.3 | A/C/G | Operator | config-compiler | 执行“'server {}' 站点块”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DSL-004 | 267 | `upstream {}` 上游块 | 0.3 | A/C/G | Operator | config-compiler | 执行“'upstream {}' 上游块”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DSL-005 | 268 | `location` 兼容别名 | 0.3 | A/C/G | Operator | config-compiler | 执行“'location' 兼容别名”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DSL-006 | 269 | 改进版 `route` 块 | 0.3 | A/C/G | Operator | config-compiler | 执行“改进版 'route' 块”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DSL-007 | 270 | `include` | 0.3 | A/C/G | Operator | config-compiler | 执行“'include'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DSL-008 | 271 | `set` 变量 | 0.3 | A/C/G | Operator | config-compiler | 执行“'set' 变量”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DSL-009 | 272 | 环境变量引用 | 0.3 | A/C/G | Operator | config-compiler | 执行“环境变量引用”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DSL-010 | 273 | 内置请求变量 | 0.3 | A/C/G | Operator | config-compiler | 执行“内置请求变量”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
+| DSL-011 | 274 | `$host` | 0.3 | A/C/G | Operator | config-compiler | 执行“'$host'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
+| DSL-012 | 275 | `$uri` | 0.3 | A/C/G | Operator | config-compiler | 执行“'$uri'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
+| DSL-013 | 276 | `$method` | 0.3 | A/C/G | Operator | config-compiler | 执行“'$method'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
+| DSL-014 | 277 | `$scheme` | 0.3 | A/C/G | Operator | config-compiler | 执行“'$scheme'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
+| DSL-015 | 278 | `$client_ip` | 0.3 | A/C/G | Operator | config-compiler | 执行“'$client_ip'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
+| DSL-016 | 279 | `$request_id` | 0.3 | A/C/G | Operator | config-compiler | 执行“'$request_id'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
+| DSL-017 | 280 | `$upstream_addr` | 0.3 | A/C/G | Operator | config-compiler | 执行“'$upstream_addr'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
+| DSL-018 | 281 | 配置注释 | 0.3 | A/C/G | Operator | config-compiler | 执行“配置注释”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DSL-019 | 282 | 字符串转义 | 0.3 | A/C/G | Operator | config-compiler | 执行“字符串转义”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DSL-020 | 283 | 数字类型 | 0.3 | A/C/G | Operator | config-compiler | 执行“数字类型”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DSL-021 | 284 | 布尔类型 | 0.3 | A/C/G | Operator | config-compiler | 执行“布尔类型”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DSL-022 | 285 | Duration 类型 | 0.3 | A/C/G | Operator | config-compiler | 执行“Duration 类型”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DSL-023 | 286 | Size 类型 | 0.3 | A/C/G | Operator | config-compiler | 执行“Size 类型”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
+| DSL-024 | 287 | IP/CIDR 类型 | 0.3 | A/C/G | Operator | config-compiler | 执行“IP/CIDR 类型”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
+| DSL-025 | 288 | 数组参数 | 0.3 | A/C/G | Operator | config-compiler | 执行“数组参数”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DSL-026 | 289 | `key=value` 命名参数 | 0.3 | A/C/G | Operator | config-compiler | 执行“'key=value' 命名参数”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DSL-027 | 290 | DSL AST 查看 | 0.3 | A/C/G | Viewer | config-compiler | 查询“DSL AST 查看”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | Yes |
+| DSL-028 | 291 | DSL 格式化 | 0.3 | A/C/G | Operator | config-compiler | 执行“DSL 格式化”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| DSL-029 | 292 | DSL 自动补全 Schema | 0.3 | A/C/G | Operator | config-compiler | 执行“DSL 自动补全 Schema”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| DSL-030 | 293 | DSL 错误行列提示 | 0.3 | A/C/G | Operator | config-compiler | 执行“DSL 错误行列提示”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| DSL-031 | 294 | 未知指令检测 | 0.3 | A/C/G | Operator | config-compiler | 执行“未知指令检测”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| DSL-032 | 295 | Deprecated 指令提示 | 0.3 | A/C/G | Operator | config-compiler | 执行“Deprecated 指令提示”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| DSL-033 | 296 | 配置作用域检查 | 0.3 | A/C/G | Operator | config-compiler | 执行“配置作用域检查”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | DSL-034 | 297 | 配置继承检查 | 0.3 | A/C/G | Operator | config-compiler | 执行“配置继承检查”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| DSL-035 | 298 | 循环 include 检测 | 0.3 | A/C/G | Operator | config-compiler | 执行“循环 include 检测”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| DSL-036 | 299 | 重复 server_name 检测 | 0.3 | A/C/G | Operator | config-compiler | 执行“重复 server_name 检测”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| DSL-037 | 300 | 路由遮蔽检测 | 0.3 | A/C/G | Operator | config-compiler | 执行“路由遮蔽检测”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| DSL-038 | 301 | 永远无法命中路由检测 | 0.3 | A/C/G | Viewer | config-compiler | 查询“永远无法命中路由检测”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | Yes |
-| DSL-039 | 302 | 正则表达式预编译检查 | 0.3 | A/C/G | Viewer | config-compiler | 查询“正则表达式预编译检查”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | Yes |
-| DSL-040 | 303 | Upstream 引用完整性检查 | 0.3 | A/C/G | Operator | config-compiler | 执行“Upstream 引用完整性检查”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| DSL-041 | 304 | Certificate 引用完整性检查 | 0.3 | A/C/G | Viewer | config-compiler | 查询“Certificate 引用完整性检查”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | Yes |
+| DSL-035 | 298 | 循环 include 检测 | 0.3 | A/C/G | Operator | config-compiler | 执行“循环 include 检测”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| DSL-036 | 299 | 重复 server_name 检测 | 0.3 | A/C/G | Operator | config-compiler | 执行“重复 server_name 检测”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| DSL-037 | 300 | 路由遮蔽检测 | 0.3 | A/C/G | Operator | config-compiler | 执行“路由遮蔽检测”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| DSL-038 | 301 | 永远无法命中路由检测 | 0.3 | A/C/G | Viewer | config-compiler | 查询“永远无法命中路由检测”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | Yes |
+| DSL-039 | 302 | 正则表达式预编译检查 | 0.3 | A/C/G | Viewer | config-compiler | 查询“正则表达式预编译检查”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | Yes |
+| DSL-040 | 303 | Upstream 引用完整性检查 | 0.3 | A/C/G | Operator | config-compiler | 执行“Upstream 引用完整性检查”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| DSL-041 | 304 | Certificate 引用完整性检查 | 0.3 | A/C/G | Viewer | config-compiler | 查询“Certificate 引用完整性检查”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | Yes |
 | DSL-042 | 305 | Lua Script 引用完整性检查 | 0.3 | A/C/G | Viewer | config-compiler | 查询“Lua Script 引用完整性检查”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | Yes |
 | DSL-043 | 306 | Nginx 子集配置导入 | 0.3 | A/C/G | Operator | config-compiler | 执行“Nginx 子集配置导入”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
 | DSL-044 | 307 | Nginx 子集迁移报告 | 0.3 | A/C/G | Operator | config-compiler | 执行“Nginx 子集迁移报告”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
 | DSL-045 | 308 | 不支持 Nginx Directive 报告 | 0.3 | A/C/G | Operator | config-compiler | 执行“不支持 Nginx Directive 报告”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| DSL-046 | 309 | DSL 转规范化 IR | 0.3 | A/C/G | Operator | config-compiler | 执行“DSL 转规范化 IR”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| DSL-047 | 310 | IR JSON 导出 | 0.3 | A/C/G | Operator | config-compiler | 执行“IR JSON 导出”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| DSL-048 | 311 | 配置 Hash | 0.3 | A/C/G | Operator | config-compiler | 执行“配置 Hash”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| DSL-049 | 312 | 配置原子 Snapshot | 0.3 | A/C/G | Operator | config-compiler | 执行“配置原子 Snapshot”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| DSL-050 | 313 | 配置 Snapshot 回滚 | 0.3 | A/C/G | Operator | config-compiler | 执行“配置 Snapshot 回滚”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
+| DSL-046 | 309 | DSL 转规范化 IR | 0.3 | A/C/G | Operator | config-compiler | 执行“DSL 转规范化 IR”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| DSL-047 | 310 | IR JSON 导出 | 0.3 | A/C/G | Operator | config-compiler | 执行“IR JSON 导出”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| DSL-048 | 311 | 配置 Hash | 0.3 | A/C/G | Operator | config-compiler | 执行“配置 Hash”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| DSL-049 | 312 | 配置原子 Snapshot | 0.3 | A/C/G | Operator | config-compiler | 执行“配置原子 Snapshot”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| DSL-050 | 313 | 配置 Snapshot 回滚 | 0.3 | A/C/G | Operator | config-compiler | 执行“配置 Snapshot 回滚”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | LUA-001 | 314 | Lua 总开关 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 总开关”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | LUA-002 | 315 | Lua 脚本库 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 脚本库”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | LUA-003 | 316 | Lua 在线编辑器 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 在线编辑器”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
@@ -1415,7 +1417,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | 新增团队/平台需求 | 105 |
 | 总 Feature ID | 685 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
-| 当前 `Implemented` | 150（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`） |
+| 当前 `Implemented` | 197（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-009`、`DSL-018`～`DSL-022`、`DSL-025`～`DSL-033`、`DSL-035`～`DSL-041`、`DSL-046`～`DSL-050`） |
 | 1.0 要求 `Verified` | 685 |
 
 分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 47、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。

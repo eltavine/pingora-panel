@@ -212,6 +212,43 @@ completion script. Exit codes distinguish usage errors (2), missing resources
 (3), conflicts and failed preconditions (4), rejected changes (5), an
 unavailable service (6) and denied requests (7) from other failures (1).
 
+
+## Configuration language and revisions
+
+The draft is also a set of files in the configuration language
+([decision](../docs/adr/0012-configuration-language-and-revisions.md)), with
+`main.conf` as the entry. `GET /api/v1/config/source` returns them with the
+draft version and entity tag, and `PUT` replaces them once they check
+cleanly; changes through the resource endpoints rewrite only the blocks they
+touch, so comments and layout survive. `POST /api/v1/config/check`,
+`/format` and `/ast` work on files without saving them, and diagnostics
+carry `file:line.column` positions. `GET /api/v1/config/schema` describes
+every directive for editors, `GET /api/v1/config/plan` lists the resources
+and file lines the draft changes relative to the active revision,
+`GET /api/v1/config/ir` returns the runtime snapshot it compiles to, and
+`POST /api/v1/config/dry-run` prepares that snapshot on the gateway without
+activating it. Every apply records a revision with its files, author, note
+and outcome under `/api/v1/revisions`; a revision can be compared with
+another, the active one or the draft, annotated, and restored into the
+draft.
+
+```sh
+ppanel config export --dir conf
+ppanel config check conf
+ppanel config fmt conf --write
+ppanel config import conf --expected-version 3
+ppanel config plan
+ppanel config apply --dry-run
+ppanel config apply --note "launch the shop"
+ppanel revision list
+ppanel revision diff 4 --against active
+ppanel config rollback --to 3 --reason "errors after launch"
+```
+
+The console edits the same files with highlighting, completion for the
+block being edited, problems checked as the text changes and an outline,
+and shows revisions with their differences, notes and rollback.
+
 ## Activation invariant
 
 All fallible work required to build and durably publish the activation occurs
