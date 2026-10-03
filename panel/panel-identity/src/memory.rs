@@ -7,8 +7,8 @@ use crate::{
         AccountChange, Attempt, Cause, Failure, IdentityStore, NewAccount, NewSession, NewToken,
         SessionGrant, StoredAccount, StoredPassword, TokenGrant,
     },
-    Account, AccountId, ApiToken, PermissionSet, Role, SecretHash, Session, SessionId, TokenId,
-    Username,
+    Account, AccountId, ApiToken, IdentityProvider, PendingSignIn, PermissionSet, ProviderLink,
+    ProviderSignIn, ProviderStore, Role, SecretHash, Session, SessionId, TokenId, Username,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -29,6 +29,11 @@ struct State {
     accounts: Vec<StoredAccount>,
     sessions: Vec<(Session, SecretHash)>,
     tokens: Vec<(ApiToken, SecretHash)>,
+    providers: Vec<IdentityProvider>,
+    pending: Vec<PendingSignIn>,
+    links: Vec<ProviderLink>,
+    /// Sessions signed in through a provider, with the sealed refresh token.
+    provider_sessions: Vec<(SessionId, String, Option<String>)>,
     events: Vec<RecordedEvent>,
 }
 
@@ -44,6 +49,10 @@ impl Default for MemoryIdentityStore {
                 accounts: Vec::new(),
                 sessions: Vec::new(),
                 tokens: Vec::new(),
+                providers: Vec::new(),
+                pending: Vec::new(),
+                links: Vec::new(),
+                provider_sessions: Vec::new(),
                 events: Vec::new(),
             }),
         }
@@ -571,5 +580,183 @@ impl IdentityStore for MemoryIdentityStore {
             json!({ "role": id }),
         );
         Ok(())
+    }
+}
+
+#[async_trait]
+impl ProviderStore for MemoryIdentityStore {
+    async fn providers(&self) -> Result<Vec<IdentityProvider>> {
+        let mut providers = self.state().providers.clone();
+        providers.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(providers)
+    }
+
+    async fn provider(&self, id: &str) -> Result<Option<IdentityProvider>> {
+        Ok(self
+            .state()
+            .providers
+            .iter()
+            .find(|provider| provider.id == id)
+            .cloned())
+    }
+
+    async fn put_provider(&self, provider: IdentityProvider, cause: &Cause) -> Result<bool> {
+        let mut state = self.state();
+        let data = json!({ "provider": provider.id, "issuer": provider.issuer, "enabled": provider.enabled });
+        let created = match state
+            .providers
+            .iter_mut()
+            .find(|existing| existing.id == provider.id)
+        {
+            Some(existing) => {
+                *existing = IdentityProvider {
+                    created_at: existing.created_at,
+                    ..provider
+                };
+                false
+            }
+            None => {
+                state.providers.push(provider);
+                true
+            }
+        };
+        let event = if created {
+            "identity.provider.created"
+        } else {
+            "identity.provider.updated"
+        };
+        record(&mut state, event, cause, data);
+        Ok(created)
+    }
+
+    async fn delete_provider(&self, id: &str, cause: &Cause) -> Result<()> {
+        let mut state = self.state();
+        let before = state.providers.len();
+        state.providers.retain(|provider| provider.id != id);
+        if state.providers.len() == before {
+            return Err(PanelError::not_found(format!(
+                "there is no identity provider {id}"
+            )));
+        }
+        state.links.retain(|link| link.provider != id);
+        state.pending.retain(|pending| pending.provider != id);
+        record(
+            &mut state,
+            "identity.provider.deleted",
+            cause,
+            json!({ "provider": id }),
+        );
+        Ok(())
+    }
+
+    async fn save_sign_in(&self, pending: PendingSignIn) -> Result<()> {
+        let mut state = self.state();
+        let now = pending.expires_at;
+        state
+            .pending
+            .retain(|kept| kept.expires_at > now - chrono::Duration::hours(1));
+        state.pending.push(pending);
+        Ok(())
+    }
+
+    async fn take_sign_in(
+        &self,
+        state_hash: &SecretHash,
+        now: DateTime<Utc>,
+    ) -> Result<Option<PendingSignIn>> {
+        let mut state = self.state();
+        let Some(index) = state
+            .pending
+            .iter()
+            .position(|pending| pending.state.matches(state_hash))
+        else {
+            return Ok(None);
+        };
+        let pending = state.pending.remove(index);
+        Ok((pending.expires_at > now).then_some(pending))
+    }
+
+    async fn link(&self, provider: &str, subject: &str) -> Result<Option<ProviderLink>> {
+        Ok(self
+            .state()
+            .links
+            .iter()
+            .find(|link| link.provider == provider && link.subject == subject)
+            .cloned())
+    }
+
+    async fn sign_in_with_provider(
+        &self,
+        sign_in: ProviderSignIn,
+        attempt: &Attempt,
+        cause: &Cause,
+    ) -> Result<Account> {
+        let mut state = self.state();
+        let now = sign_in.session.session.created_at;
+        if let Some(new) = sign_in.new_account {
+            if state
+                .accounts
+                .iter()
+                .any(|stored| stored.account.username == new.username)
+            {
+                return Err(PanelError::conflict(format!(
+                    "the username {} is taken",
+                    new.username
+                )));
+            }
+            let account = Account {
+                id: new.id,
+                username: new.username,
+                display_name: new.display_name,
+                disabled: false,
+                locked: false,
+                roles: Vec::new(),
+                created_at: now,
+                updated_at: now,
+                last_login_at: None,
+                password_changed_at: None,
+            };
+            state.accounts.push(StoredAccount {
+                account: account.clone(),
+                password: None,
+            });
+            record(
+                &mut state,
+                "identity.account.created",
+                cause,
+                json!({ "account": account.id, "username": account.username, "provider": sign_in.link.provider }),
+            );
+        }
+        let stored = account_mut(&mut state, sign_in.link.account)?;
+        if stored.account.disabled {
+            return Err(PanelError::permission_denied("the account is disabled"));
+        }
+        if stored.account.roles != sign_in.roles {
+            stored.account.roles = sign_in.roles;
+            stored.account.updated_at = now;
+        }
+        stored.account.last_login_at = Some(now);
+        let account = stored.account.clone();
+        let link = sign_in.link;
+        state
+            .links
+            .retain(|kept| !(kept.provider == link.provider && kept.subject == link.subject));
+        let event = json!({
+            "attempt": attempt,
+            "provider": link.provider,
+            "session": sign_in.session.session.id,
+            "transport": sign_in.session.session.transport,
+        });
+        state.provider_sessions.push((
+            sign_in.session.session.id,
+            link.provider.clone(),
+            sign_in.refresh_token,
+        ));
+        state.links.push(link);
+        state
+            .sessions
+            .push((sign_in.session.session, sign_in.session.secret));
+        record(&mut state, "identity.login.succeeded", cause, event);
+        Ok(account)
     }
 }

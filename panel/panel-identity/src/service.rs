@@ -118,7 +118,7 @@ impl RoleRequest {
 
 /// Refuses a state in which no enabled account, given as whether it is
 /// disabled and the roles it holds, can manage accounts.
-fn ensure_managers(
+pub(crate) fn ensure_managers(
     accounts: &[(bool, Vec<String>)],
     roles: &BTreeMap<String, PermissionSet>,
 ) -> Result<()> {
@@ -164,7 +164,19 @@ fn invalid_login() -> PanelError {
     PanelError::unauthenticated("invalid username or password")
 }
 
-fn cause(scope: &RequestScope, actor: &str) -> Cause {
+/// The permissions of every role, by its identifier.
+pub(crate) async fn role_permissions(
+    store: &dyn IdentityStore,
+) -> Result<BTreeMap<String, PermissionSet>> {
+    Ok(store
+        .roles()
+        .await?
+        .into_iter()
+        .map(|role| (role.id, role.permissions))
+        .collect())
+}
+
+pub(crate) fn cause(scope: &RequestScope, actor: &str) -> Cause {
     Cause {
         scope: scope.clone(),
         actor: actor.to_owned(),
@@ -625,13 +637,7 @@ impl Identity {
         &self,
         replaced: Option<&Role>,
     ) -> Result<BTreeMap<String, PermissionSet>> {
-        let mut roles: BTreeMap<String, PermissionSet> = self
-            .store
-            .roles()
-            .await?
-            .into_iter()
-            .map(|role| (role.id, role.permissions))
-            .collect();
+        let mut roles = role_permissions(self.store.as_ref()).await?;
         if let Some(role) = replaced {
             roles.insert(role.id.clone(), role.permissions.clone());
         }

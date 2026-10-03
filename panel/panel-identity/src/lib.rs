@@ -14,9 +14,11 @@ mod password;
 mod permission;
 mod principal;
 mod provider;
+mod providers;
 mod secret;
 mod service;
 mod session;
+mod sign_in;
 pub mod store;
 mod throttle;
 
@@ -24,11 +26,16 @@ pub use account::{Account, AccountId, Username};
 pub use password::{PasswordHasher, PasswordPolicy, PasswordProblem, Verification};
 pub use permission::{built_in_roles, Permission, PermissionSet, Role};
 pub use principal::{Credential, Principal};
-pub use provider::{OpenIdConnect, ProviderSettings, Refreshed, SignInRequest, SignedIn};
+pub use provider::{
+    ClaimNames, GroupRole, IdentityProvider, OpenIdConnect, PendingSignIn, ProviderLink,
+    ProviderSettings, ProviderSignIn, ProviderStore, Refreshed, SignInRequest, SignedIn,
+};
+pub use providers::{ProviderDirectory, ProviderRequest, ProviderView, SecretChange};
 pub use secret::{csrf_token, Secret, SecretHash, TOKEN_PREFIX};
 pub use service::{
     AccountRequest, Client, Identity, IdentitySettings, Login, RoleRequest, TokenRequest,
 };
 pub use session::{ApiToken, Session, SessionId, SessionPolicy, TokenId, Transport};
+pub use sign_in::{ProviderSignIns, SignInOption, Started};
 pub use store::{AccountChange, Cause, IdentityStore};
 pub use throttle::FailurePolicy;
