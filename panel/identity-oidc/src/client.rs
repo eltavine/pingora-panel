@@ -2,10 +2,9 @@
 //! PKCE, the code exchange, ID token validation and refreshing.
 
 use crate::{
-    http::{self, Http, UNRESERVED},
+    http::{self, Http},
     jose,
 };
-use ::http::{HeaderValue, StatusCode};
 use async_trait::async_trait;
 use base64::{
     engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
@@ -17,13 +16,11 @@ use panel_identity::{
     OpenIdConnect, ProviderSettings, Refreshed, SignInRequest, SignedIn, VerifiedWorkload,
     WorkloadVerifier,
 };
-use percent_encoding::utf8_percent_encode;
+use reqwest::{header::HeaderValue, StatusCode, Url};
 use ring::{
     digest::{digest, SHA256},
     rand::{SecureRandom, SystemRandom},
 };
-use rustls::{crypto::ring as provider, ClientConfig};
-use rustls_platform_verifier::BuilderVerifierExt;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use std::{
@@ -85,17 +82,10 @@ pub struct OidcClient {
 impl OidcClient {
     /// A client trusting the platform's certificate authorities.
     pub fn new(timeout: Duration) -> Result<Self> {
-        let provider = Arc::new(provider::default_provider());
-        let tls = ClientConfig::builder_with_provider(provider)
-            .with_safe_default_protocol_versions()
-            .map_err(|error| PanelError::internal(format!("TLS client setup: {error}")))?
-            .with_platform_verifier()
-            .map_err(|error| {
-                PanelError::unavailable(format!("the system's trusted roots: {error}"))
-            })?
-            .with_no_client_auth();
         Ok(Self {
-            http: Http::new(tls, timeout),
+            http: Http::new(timeout).map_err(|error| {
+                PanelError::unavailable(format!("the HTTP client cannot start: {error}"))
+            })?,
             random: SystemRandom::new(),
             cache: Mutex::new(HashMap::new()),
         })
@@ -127,20 +117,24 @@ impl OidcClient {
         let verifier = self.random_value()?;
         let challenge = URL_SAFE_NO_PAD.encode(digest(&SHA256, verifier.as_bytes()));
         let scope = scopes(&settings.scopes);
-        let endpoint = &provider.metadata.authorization_endpoint;
-        let separator = if endpoint.contains('?') { '&' } else { '?' };
-        let query = http::encode(&[
-            ("response_type", "code"),
-            ("client_id", settings.client_id.as_str()),
-            ("redirect_uri", settings.redirect_uri.as_str()),
-            ("scope", scope.as_str()),
-            ("state", state.as_str()),
-            ("nonce", nonce.as_str()),
-            ("code_challenge", challenge.as_str()),
-            ("code_challenge_method", "S256"),
-        ]);
+        let url = Url::parse_with_params(
+            &provider.metadata.authorization_endpoint,
+            [
+                ("response_type", "code"),
+                ("client_id", settings.client_id.as_str()),
+                ("redirect_uri", settings.redirect_uri.as_str()),
+                ("scope", scope.as_str()),
+                ("state", state.as_str()),
+                ("nonce", nonce.as_str()),
+                ("code_challenge", challenge.as_str()),
+                ("code_challenge_method", "S256"),
+            ],
+        )
+        .map_err(|error| {
+            PanelError::validation_failed(format!("the authorization endpoint: {error}"))
+        })?;
         Ok(SignInRequest {
-            url: format!("{endpoint}{separator}{query}"),
+            url: url.into(),
             state,
             nonce,
             verifier,
@@ -250,8 +244,8 @@ impl OidcClient {
                 // RFC 6749 §2.3.1 encodes both before Basic authentication.
                 let credentials = format!(
                     "{}:{}",
-                    utf8_percent_encode(&settings.client_id, UNRESERVED),
-                    utf8_percent_encode(secret, UNRESERVED)
+                    http::form_component(&settings.client_id),
+                    http::form_component(secret)
                 );
                 let mut value =
                     HeaderValue::try_from(format!("Basic {}", STANDARD.encode(credentials)))

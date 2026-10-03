@@ -47,7 +47,7 @@ async fn people_sign_in_with_pkce_and_lose_access_with_the_provider() {
 
         let request = client.sign_in_request(&settings).await.unwrap();
         assert!(request.url.contains("code_challenge_method=S256"));
-        assert!(request.url.contains("scope=openid%20profile%20email"));
+        assert!(request.url.contains("scope=openid+profile+email"));
         let callback = authorize(&request.url).await;
         assert_eq!(callback["state"], request.state);
         let wrong_nonce = client

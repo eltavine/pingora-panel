@@ -14,7 +14,6 @@ use base64::{
     Engine,
 };
 use jsonwebtoken::{Algorithm, Header};
-use percent_encoding::percent_decode_str;
 use ring::{
     digest::{digest, SHA256},
     rand::{SecureRandom, SystemRandom},
@@ -163,7 +162,12 @@ impl Provider {
             .and_then(|value| value.strip_prefix("Basic "))
             .and_then(|value| STANDARD.decode(value).ok())
             .and_then(|value| String::from_utf8(value).ok());
-        let decode = |value: &str| percent_decode_str(value).decode_utf8_lossy().into_owned();
+        let decode = |value: &str| {
+            url::form_urlencoded::parse(value.as_bytes())
+                .map(|(decoded, _)| decoded.into_owned())
+                .next()
+                .unwrap_or_default()
+        };
         match basic.as_deref().and_then(|value| value.split_once(':')) {
             Some((id, password)) => decode(id) == self.client_id && decode(password) == *secret,
             None => {

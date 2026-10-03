@@ -1,69 +1,40 @@
-//! HTTP to providers over rustls with ring, the panel's TLS stack, without
-//! following redirects and with a bound on what a provider may send back.
+//! HTTP to providers through `reqwest` on rustls with ring, the panel's TLS
+//! stack, honoring proxy settings, without following redirects and with a
+//! bound on what a provider may send back.
 
 use bytes::Bytes;
-use http::{header, HeaderValue, Method, Request, StatusCode, Uri};
-use http_body_util::{BodyExt, Full, Limited};
-use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
-use hyper_util::{
-    client::legacy::{connect::HttpConnector, Client},
-    rt::TokioExecutor,
+use reqwest::{
+    header::{self, HeaderValue},
+    redirect, Client, RequestBuilder, StatusCode,
 };
-use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
-use rustls::ClientConfig;
-use std::time::Duration;
+use std::{error::Error, time::Duration};
+use url::{Host, Url};
 
 /// The largest answer read from a provider.
 const MAX_BODY: usize = 1 << 20;
 
-/// Characters left as they are in form values and query parameters.
-pub(crate) const UNRESERVED: &AsciiSet = &NON_ALPHANUMERIC
-    .remove(b'-')
-    .remove(b'.')
-    .remove(b'_')
-    .remove(b'~');
-
-pub(crate) fn encode(pairs: &[(&str, &str)]) -> String {
-    pairs
-        .iter()
-        .map(|(key, value)| {
-            format!(
-                "{}={}",
-                utf8_percent_encode(key, UNRESERVED),
-                utf8_percent_encode(value, UNRESERVED)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("&")
-}
-
 pub(crate) struct Http {
-    client: Client<HttpsConnector<HttpConnector>, Full<Bytes>>,
-    timeout: Duration,
+    client: Client,
 }
 
 impl Http {
-    pub(crate) fn new(tls: ClientConfig, timeout: Duration) -> Self {
-        let connector = HttpsConnectorBuilder::new()
-            .with_tls_config(tls)
-            .https_or_http()
-            .enable_http1()
-            .enable_http2()
-            .build();
-        Self {
-            client: Client::builder(TokioExecutor::new()).build(connector),
-            timeout,
-        }
+    pub(crate) fn new(timeout: Duration) -> Result<Self, String> {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        Client::builder()
+            .redirect(redirect::Policy::none())
+            .timeout(timeout)
+            .build()
+            .map(|client| Self { client })
+            .map_err(|error| causes(&error))
     }
 
     pub(crate) async fn get(&self, uri: &str) -> Result<(StatusCode, Bytes), String> {
-        let request = Request::builder()
-            .method(Method::GET)
-            .uri(uri)
-            .header(header::ACCEPT, "application/json")
-            .body(Full::default())
-            .map_err(|error| error.to_string())?;
-        self.send(request).await
+        self.send(
+            self.client
+                .get(uri)
+                .header(header::ACCEPT, "application/json"),
+        )
+        .await
     }
 
     pub(crate) async fn post_form(
@@ -72,64 +43,62 @@ impl Http {
         form: &[(&str, &str)],
         authorization: Option<HeaderValue>,
     ) -> Result<(StatusCode, Bytes), String> {
-        let mut request = Request::builder()
-            .method(Method::POST)
-            .uri(uri)
+        let mut request = self
+            .client
+            .post(uri)
             .header(header::ACCEPT, "application/json")
-            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+            .form(form);
         if let Some(authorization) = authorization {
             request = request.header(header::AUTHORIZATION, authorization);
         }
-        let request = request
-            .body(Full::new(Bytes::from(encode(form))))
-            .map_err(|error| error.to_string())?;
         self.send(request).await
     }
 
-    async fn send(&self, request: Request<Full<Bytes>>) -> Result<(StatusCode, Bytes), String> {
-        let exchange = async {
-            let response = self
-                .client
-                .request(request)
-                .await
-                .map_err(|error| error.to_string())?;
-            let status = response.status();
-            let body = Limited::new(response.into_body(), MAX_BODY)
-                .collect()
-                .await
-                .map_err(|error| error.to_string())?
-                .to_bytes();
-            Ok((status, body))
-        };
-        tokio::time::timeout(self.timeout, exchange)
-            .await
-            .unwrap_or_else(|_| {
-                Err(format!(
-                    "no answer within {} seconds",
-                    self.timeout.as_secs()
-                ))
-            })
+    async fn send(&self, request: RequestBuilder) -> Result<(StatusCode, Bytes), String> {
+        let mut response = request.send().await.map_err(|error| causes(&error))?;
+        let status = response.status();
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|error| causes(&error))? {
+            if body.len() + chunk.len() > MAX_BODY {
+                return Err(format!("the answer is larger than {MAX_BODY} bytes"));
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok((status, body.into()))
     }
 }
 
-/// Whether `uri` is an absolute HTTPS URI, or HTTP on loopback.
+/// An error with its causes, such as a certificate the system does not
+/// trust.
+fn causes(error: &dyn Error) -> String {
+    let mut message = error.to_string();
+    let mut cause = error.source();
+    while let Some(source) = cause {
+        message.push_str(": ");
+        message.push_str(&source.to_string());
+        cause = source.source();
+    }
+    message
+}
+
+/// Whether `uri` is an absolute HTTPS URL, or HTTP on loopback.
 pub(crate) fn secure(uri: &str) -> bool {
-    let Ok(parsed) = uri.parse::<Uri>() else {
+    let Ok(url) = Url::parse(uri) else {
         return false;
     };
-    let loopback = parsed.host().is_some_and(|host| {
-        host == "localhost"
-            || host
-                .trim_start_matches('[')
-                .trim_end_matches(']')
-                .parse::<std::net::IpAddr>()
-                .is_ok_and(|address| address.is_loopback())
-    });
-    match parsed.scheme_str() {
-        Some("https") => parsed.host().is_some(),
-        Some("http") => loopback,
+    match (url.scheme(), url.host()) {
+        ("https", Some(_)) => true,
+        ("http", Some(Host::Domain(domain))) => domain == "localhost",
+        ("http", Some(Host::Ipv4(address))) => address.is_loopback(),
+        ("http", Some(Host::Ipv6(address))) => address.is_loopback(),
         _ => false,
     }
+}
+
+/// A form component (RFC 6749 Appendix B), as client credentials are
+/// encoded before Basic authentication.
+pub(crate) fn form_component(value: &str) -> String {
+    url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
 }
 
 #[cfg(test)]
@@ -145,9 +114,6 @@ mod tests {
         assert!(!secure("http://id.example"));
         assert!(!secure("ftp://id.example"));
         assert!(!secure("/relative"));
-        assert_eq!(
-            encode(&[("scope", "openid profile"), ("a&b", "c=d/é")]),
-            "scope=openid%20profile&a%26b=c%3Dd%2F%C3%A9"
-        );
+        assert_eq!(form_component("a b&c=d/é"), "a+b%26c%3Dd%2F%C3%A9");
     }
 }
