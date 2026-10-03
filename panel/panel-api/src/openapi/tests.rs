@@ -15,11 +15,13 @@ fn mutation_headers_describe_the_actual_request_requirements() {
         "/api/v1/gateway/abort",
     ] {
         let params = doc["paths"][path]["post"]["parameters"].as_array().unwrap();
-        for name in ["x-actor", "x-deadline", "Idempotency-Key"] {
+        for name in ["x-deadline", "Idempotency-Key"] {
             let parameter = params.iter().find(|p| p["name"] == name).unwrap();
             assert_eq!(parameter["in"], "header");
             assert_eq!(parameter["required"], true);
         }
+        // The actor is the authenticated caller, never a header.
+        assert!(!params.iter().any(|p| p["name"] == "x-actor"));
         let correlation = params
             .iter()
             .find(|p| p["name"] == "x-correlation-id")

@@ -9,12 +9,14 @@ publish.workspace = true
 
 [dependencies]
 chrono.workspace = true
+governor.workspace = true
 axum.workspace = true
 panel-application.workspace = true
 panel-config-dsl = { workspace = true, features = ["openapi"] }
 panel-config-model = { workspace = true, features = ["openapi"] }
 panel-errors.workspace = true
 panel-health.workspace = true
+panel-identity.workspace = true
 panel-ir = { workspace = true, features = ["openapi"] }
 panel-platform.workspace = true
 serde.workspace = true

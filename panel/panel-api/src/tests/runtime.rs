@@ -6,8 +6,8 @@ use panel_application::{
 use std::sync::Mutex;
 
 #[derive(Default)]
-struct FakeRuntime {
-    calls: Mutex<Vec<String>>,
+pub(super) struct FakeRuntime {
+    pub(super) calls: Mutex<Vec<String>>,
 }
 
 fn state(workers: u32) -> DataPlaneState {

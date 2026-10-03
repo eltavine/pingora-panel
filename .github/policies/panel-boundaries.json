@@ -178,6 +178,7 @@
         "panel-config-model",
         "panel-errors",
         "panel-health",
+        "panel-identity",
         "panel-ir",
         "panel-platform"
       ]

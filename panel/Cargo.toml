@@ -81,6 +81,7 @@ gateway-proto-codec = { version = "=0.1.0", path = "gateway-proto-codec" }
 gateway-pingora = { version = "=0.1.0", path = "gateway-pingora" }
 getrandom = "=0.4.3"
 globset = { version = "=0.4.20", default-features = false }
+governor = { version = "=0.10.4", default-features = false, features = ["std"] }
 hex = "=0.4.3"
 http = "=1.5.0"
 http-body-util = "=0.1.5"

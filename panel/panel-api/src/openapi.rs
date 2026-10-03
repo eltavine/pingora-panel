@@ -44,12 +44,23 @@ mod tests;
         crate::language::restore_revision, crate::language::note_revision,
         crate::gateway_runtime::data_plane, crate::gateway_runtime::reload, crate::gateway_runtime::workers,
         crate::gateway_runtime::shutdown, crate::gateway_runtime::upstream_health, crate::gateway_runtime::drain,
-        crate::gateway_runtime::restore
+        crate::gateway_runtime::restore,
+        crate::identity::setup_status, crate::identity::setup, crate::identity::login,
+        crate::identity::session, crate::identity::logout, crate::identity::permissions,
+        crate::identity::change_password, crate::identity::own_sessions,
+        crate::identity::end_own_session, crate::identity::own_tokens,
+        crate::identity::create_token, crate::identity::revoke_own_token,
+        crate::identity::list_accounts, crate::identity::create_account,
+        crate::identity::get_account, crate::identity::update_account,
+        crate::identity::reset_password, crate::identity::account_sessions,
+        crate::identity::end_account_session, crate::identity::account_tokens,
+        crate::identity::revoke_account_token, crate::identity::list_roles
     ),
     tags(
         (name = "configuration", description = "Sites, domains, routes, upstreams, listeners and TLS profiles, edited as a draft and applied to the gateway"),
         (name = "gateway", description = "The running gateway: data plane, workers, shutdown and upstream health"),
-        (name = "audit", description = "Every change and every refused or failed attempt, in a tamper-evident hash chain")
+        (name = "audit", description = "Every change and every refused or failed attempt, in a tamper-evident hash chain"),
+        (name = "identity", description = "Setup, login sessions, API tokens, accounts, roles and permissions")
     ),
     modifiers(&HttpConventions),
     components(schemas(

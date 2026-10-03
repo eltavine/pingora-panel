@@ -1,5 +1,7 @@
+use crate::access::{AccessSettings, Gate};
 use panel_application::{AuditPort, ConfigurationPort, GatewayRuntimePort};
 use panel_health::HealthWatch;
+use panel_identity::Identity;
 use panel_platform::ServiceDirectory;
 use std::sync::Arc;
 
@@ -10,6 +12,7 @@ pub struct ApiState<U> {
     pub(crate) configuration: Option<Arc<dyn ConfigurationPort>>,
     pub(crate) runtime: Option<Arc<dyn GatewayRuntimePort>>,
     pub(crate) audit: Option<Arc<dyn AuditPort>>,
+    pub(crate) identity: Option<Arc<Gate>>,
 }
 
 impl<U> Clone for ApiState<U> {
@@ -21,6 +24,7 @@ impl<U> Clone for ApiState<U> {
             configuration: self.configuration.clone(),
             runtime: self.runtime.clone(),
             audit: self.audit.clone(),
+            identity: self.identity.clone(),
         }
     }
 }
@@ -34,7 +38,16 @@ impl<U> ApiState<U> {
             configuration: None,
             runtime: None,
             audit: None,
+            identity: None,
         }
+    }
+
+    /// Authenticates every request and authorizes it by its route's access
+    /// rule, recording the caller as the actor. Without it the API trusts
+    /// its network and takes the actor from `x-actor`.
+    pub fn with_identity(mut self, identity: Identity, settings: AccessSettings) -> Self {
+        self.identity = Some(Gate::new(identity, settings));
+        self
     }
 
     /// Serves data plane status, reloads, workers, shutdown and upstream health.

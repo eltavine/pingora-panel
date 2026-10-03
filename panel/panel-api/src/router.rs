@@ -1,12 +1,13 @@
 use crate::{
+    access,
     admission::{admit, Admission},
-    audit, configuration as config, gateway_runtime as runtime, language, middleware, routes,
-    ApiConfig, ApiState,
+    audit, configuration as config, gateway_runtime as runtime, identity, language, middleware,
+    routes, ApiConfig, ApiState,
 };
 use axum::{
     extract::DefaultBodyLimit,
-    middleware::from_fn,
-    routing::{get, post, put},
+    middleware::{from_fn, from_fn_with_state},
+    routing::{delete, get, post, put},
     Router,
 };
 use panel_application::GatewayUseCases;
@@ -169,6 +170,64 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
             get(audit::get_audit_event::<U>),
         )
         .route("/api/v1/openapi.json", get(routes::openapi))
+        .route(
+            "/api/v1/setup",
+            get(identity::setup_status::<U>).post(identity::setup::<U>),
+        )
+        .route(
+            "/api/v1/session",
+            get(identity::session::<U>)
+                .post(identity::login::<U>)
+                .delete(identity::logout::<U>),
+        )
+        .route("/api/v1/permissions", get(identity::permissions))
+        .route(
+            "/api/v1/account/password",
+            put(identity::change_password::<U>),
+        )
+        .route("/api/v1/account/sessions", get(identity::own_sessions::<U>))
+        .route(
+            "/api/v1/account/sessions/{id}",
+            delete(identity::end_own_session::<U>),
+        )
+        .route(
+            "/api/v1/account/tokens",
+            get(identity::own_tokens::<U>).post(identity::create_token::<U>),
+        )
+        .route(
+            "/api/v1/account/tokens/{id}",
+            delete(identity::revoke_own_token::<U>),
+        )
+        .route(
+            "/api/v1/accounts",
+            get(identity::list_accounts::<U>).post(identity::create_account::<U>),
+        )
+        .route(
+            "/api/v1/accounts/{id}",
+            get(identity::get_account::<U>).patch(identity::update_account::<U>),
+        )
+        .route(
+            "/api/v1/accounts/{id}/password",
+            put(identity::reset_password::<U>),
+        )
+        .route(
+            "/api/v1/accounts/{id}/sessions",
+            get(identity::account_sessions::<U>),
+        )
+        .route(
+            "/api/v1/accounts/{id}/sessions/{session}",
+            delete(identity::end_account_session::<U>),
+        )
+        .route(
+            "/api/v1/accounts/{id}/tokens",
+            get(identity::account_tokens::<U>),
+        )
+        .route(
+            "/api/v1/accounts/{id}/tokens/{token}",
+            delete(identity::revoke_account_token::<U>),
+        )
+        .route("/api/v1/roles", get(identity::list_roles::<U>))
+        .route_layer(from_fn_with_state(state.clone(), access::guard::<U>))
         .layer(DefaultBodyLimit::max(config.max_body_bytes()))
         .with_state(state);
     let router = match admission {

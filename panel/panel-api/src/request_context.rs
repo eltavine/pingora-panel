@@ -60,11 +60,12 @@ pub(crate) fn request_scope(headers: &HeaderMap) -> Result<RequestScope, ApiErro
 
 /// Metadata accepted by mutating endpoints. The same type defines the
 /// OpenAPI headers and carries their parsed values to application validation.
+/// The actor is the authenticated caller; an API that does not authenticate
+/// callers reads it from `x-actor`.
 #[derive(utoipa::IntoParams)]
 #[into_params(parameter_in = Header)]
 pub(crate) struct MutationHeaders {
-    /// Caller-supplied actor metadata; this header does not authenticate identity.
-    #[param(rename = "x-actor", min_length = 1, max_length = 256)]
+    #[param(ignore)]
     actor: String,
     /// Absolute request deadline in RFC 3339 format.
     #[param(rename = "x-deadline")]
