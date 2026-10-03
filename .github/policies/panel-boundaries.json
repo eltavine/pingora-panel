@@ -464,6 +464,13 @@
       "allowed_workspace_dependencies": [
         "panel-errors"
       ]
+    },
+    "panel-certificates": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-domain",
+        "panel-errors"
+      ]
     }
   },
   "rules": {

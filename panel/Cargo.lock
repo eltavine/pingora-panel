@@ -2369,6 +2369,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "panel-certificates"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "chrono",
+ "getrandom 0.4.3",
+ "hex",
+ "panel-domain",
+ "panel-errors",
+ "rcgen",
+ "rustls",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "time",
+ "utoipa",
+ "x509-parser 0.16.0",
+ "zeroize",
+]
+
+[[package]]
 name = "panel-cli"
 version = "0.1.0"
 dependencies = [

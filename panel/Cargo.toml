@@ -18,6 +18,7 @@ members = [
     "identity-postgres",
     "panel-outbox",
     "panel-pki",
+    "panel-certificates",
     "panel-secrets",
     "panel-tls",
     "panel-platform",
@@ -115,6 +116,7 @@ identity-postgres = { version = "=0.1.0", path = "identity-postgres" }
 panel-outbox = { version = "=0.1.0", path = "panel-outbox" }
 panel-persistence-memory = { version = "=0.1.0", path = "panel-persistence-memory" }
 panel-pki = { version = "=0.1.0", path = "panel-pki" }
+panel-certificates = { version = "=0.1.0", path = "panel-certificates" }
 panel-secrets = { version = "=0.1.0", path = "panel-secrets" }
 panel-tls = { version = "=0.1.0", path = "panel-tls" }
 panel-platform = { version = "=0.1.0", path = "panel-platform" }
@@ -169,6 +171,7 @@ tonic-prost = "=0.14.6"
 tonic-prost-build = "=0.14.6"
 unicode-normalization = "=0.1.25"
 uuid = { version = "=1.18.1", features = ["serde", "v4", "v7"] }
+x509-parser = "=0.16.0"
 zeroize = "=1.9.0"
 zxcvbn = { version = "=3.1.1", default-features = false }
 libc = "=0.2.189"
