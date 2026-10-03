@@ -66,6 +66,24 @@ jobs:
           test "$services" -eq 4
           curl --fail --silent --show-error --output /dev/null http://127.0.0.1:8080/
 
+      - name: Serve a site through the gateway with the command line
+        run: |
+          ppanel() { docker compose exec -T panel-api ppanel --actor ci "$@"; }
+          upstream=$(ppanel -o json upstream create --name console --node 127.0.0.1:8080 \
+            | python3 -c "import json, sys; print(json.load(sys.stdin)['id'])")
+          ppanel listener set edge --address 127.0.0.1:18080
+          ppanel site create --name console --domain console.test --proxy "$upstream"
+          ppanel config apply
+          ppanel gateway status
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error --header 'Host: console.test' \
+              http://127.0.0.1:18080/api/v1/gateway/status; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+
       - name: Show service logs
         if: failure()
         run: docker compose logs --no-color
