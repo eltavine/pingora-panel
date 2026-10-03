@@ -85,6 +85,7 @@ automation-grpc-client = { version = "=0.1.0", path = "automation-grpc-client" }
 config-grpc-client = { version = "=0.1.0", path = "config-grpc-client" }
 config-proto-codec = { version = "=0.1.0", path = "config-proto-codec" }
 config-service = { version = "=0.1.0", path = "config-service" }
+cookie = { version = "=0.18.2", default-features = false }
 gateway-grpc = { version = "=0.1.0", path = "gateway-grpc" }
 gateway-grpc-client = { version = "=0.1.0", path = "gateway-grpc-client" }
 gateway-proto-codec = { version = "=0.1.0", path = "gateway-proto-codec" }

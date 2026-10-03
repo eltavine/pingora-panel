@@ -2,6 +2,7 @@
 //! filled in for each request.
 
 use bytes::Bytes;
+use cookie::Cookie;
 use http::HeaderMap;
 use panel_ir::template::{parse_template, RequestVariable, TemplatePart};
 use std::net::IpAddr;
@@ -66,11 +67,10 @@ fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {
         .get_all(http::header::COOKIE)
         .iter()
         .filter_map(|value| value.to_str().ok())
-        .flat_map(|value| value.split(';'))
-        .find_map(|pair| {
-            let (key, value) = pair.trim().split_once('=')?;
-            (key == name).then(|| value.to_owned())
-        })
+        .flat_map(Cookie::split_parse)
+        .filter_map(Result::ok)
+        .find(|cookie| cookie.name() == name)
+        .map(|cookie| cookie.value().to_owned())
 }
 
 /// The request's own ID when it is a short visible token, otherwise a new one.

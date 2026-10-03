@@ -13,6 +13,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::Utc;
+use cookie::{Cookie, SameSite};
 use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
 use panel_application::RequestScope;
 use panel_application::{SiteAccess, SiteScope};
@@ -545,28 +546,41 @@ fn header(headers: &HeaderMap, name: impl header::AsHeaderName) -> Option<&str> 
 }
 
 /// The value of cookie `name` among the request's cookies.
-pub(crate) fn cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+pub(crate) fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {
     headers
         .get_all(header::COOKIE)
         .iter()
         .filter_map(|value| value.to_str().ok())
-        .flat_map(|value| value.split(';'))
-        .filter_map(|pair| pair.trim().split_once('='))
-        .find(|(key, _)| *key == name)
-        .map(|(_, value)| value)
+        .flat_map(Cookie::split_parse)
+        .filter_map(Result::ok)
+        .find(|cookie| cookie.name() == name)
+        .map(|cookie| cookie.value().to_owned())
         .filter(|value| !value.is_empty())
+}
+
+/// A `Set-Cookie` value for a `__Host-` cookie holding `value` for
+/// `max_age`, or clearing it. The prefix requires `Secure` and `Path=/`.
+pub(crate) fn host_cookie(
+    name: &'static str,
+    value: Option<&str>,
+    same_site: SameSite,
+    max_age: Duration,
+) -> HeaderValue {
+    let (value, max_age) = value.map_or(("", Duration::ZERO), |value| (value, max_age));
+    let cookie = Cookie::build((name, value))
+        .path("/")
+        .secure(true)
+        .http_only(true)
+        .same_site(same_site)
+        .max_age(cookie::time::Duration::seconds(
+            i64::try_from(max_age.as_secs()).unwrap_or(i64::MAX),
+        ));
+    HeaderValue::from_str(&cookie.to_string()).expect("cookie values are header-safe")
 }
 
 /// A `Set-Cookie` value holding the session for `max_age`, or clearing it.
 pub(crate) fn session_cookie(secret: Option<&str>, max_age: Duration) -> HeaderValue {
-    let (value, max_age) = match secret {
-        Some(secret) => (secret, max_age.as_secs()),
-        None => ("", 0),
-    };
-    HeaderValue::from_str(&format!(
-        "{SESSION_COOKIE}={value}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age={max_age}"
-    ))
-    .expect("cookie values are header-safe")
+    host_cookie(SESSION_COOKIE, secret, SameSite::Strict, max_age)
 }
 
 /// Where a request comes from: the peer, or the last forwarded address
@@ -640,7 +654,7 @@ async fn authenticate(
     }
     match cookie(headers, SESSION_COOKIE) {
         Some(secret) => Ok(identity
-            .authenticate_session(secret, Transport::Cookie)
+            .authenticate_session(&secret, Transport::Cookie)
             .await?),
         None => Ok(None),
     }

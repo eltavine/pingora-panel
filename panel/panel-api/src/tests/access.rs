@@ -295,11 +295,13 @@ async fn cookie_sessions_need_their_csrf_token_and_the_same_site() {
     .await;
     assert_eq!(login.status, StatusCode::CREATED, "{}", login.body);
     let set_cookie = login.headers[header::SET_COOKIE].to_str().unwrap();
-    assert!(
-        set_cookie.starts_with("__Host-ppanel_session="),
+    let parsed = cookie::Cookie::parse(set_cookie).unwrap();
+    assert_eq!(parsed.name(), "__Host-ppanel_session", "{set_cookie}");
+    assert_eq!(
+        parsed.max_age(),
+        Some(cookie::time::Duration::days(1)),
         "{set_cookie}"
     );
-    assert!(set_cookie.ends_with("; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=86400"));
     assert!(login.body["secret"].is_null());
     assert_eq!(login.headers[header::CACHE_CONTROL], "no-store");
     let cookie = set_cookie.split(';').next().unwrap().to_owned();
@@ -393,10 +395,10 @@ async fn cookie_sessions_need_their_csrf_token_and_the_same_site() {
     )
     .await;
     assert_eq!(logout.status, StatusCode::NO_CONTENT);
-    assert!(logout.headers[header::SET_COOKIE]
-        .to_str()
-        .unwrap()
-        .ends_with("Max-Age=0"));
+    let cleared =
+        cookie::Cookie::parse(logout.headers[header::SET_COOKIE].to_str().unwrap()).unwrap();
+    assert_eq!(cleared.value(), "");
+    assert_eq!(cleared.max_age(), Some(cookie::time::Duration::ZERO));
     let ended = send(
         &app,
         build(with_cookie("GET", "/api/v1/session", None), None),

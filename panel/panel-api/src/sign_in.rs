@@ -2,7 +2,7 @@
 //! authorization code flow (ADR 0018).
 
 use crate::{
-    access::{client, cookie, session_cookie},
+    access::{client, cookie, host_cookie, session_cookie},
     error::ApiError,
     request_context::request_scope,
     ApiState,
@@ -14,18 +14,19 @@ use axum::{
     Extension, Json,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
+use cookie::SameSite;
 use panel_errors::PanelError;
 use panel_identity::{
     ClaimNames, GroupRole, PasswordSignIn, Principal, ProviderDirectory, ProviderRequest,
     ProviderSignIns, ProviderView, SecretChange, Transport,
 };
 use serde::{Deserialize, Deserializer, Serialize};
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 use utoipa::{IntoParams, ToSchema};
 
 /// The cookie that binds a sign-in to the browser that started it.
 const SIGN_IN_COOKIE: &str = "__Host-ppanel_sign_in";
-const SIGN_IN_COOKIE_SECONDS: u64 = 600;
+const SIGN_IN_COOKIE_LIFETIME: Duration = Duration::from_secs(600);
 
 /// Identity providers and sign-ins through them.
 pub(crate) struct ProviderAccess {
@@ -317,15 +318,15 @@ fn see_other(location: &str) -> Result<Response, ApiError> {
     Ok((StatusCode::SEE_OTHER, [(header::LOCATION, location)]).into_response())
 }
 
+/// The browser's half of a sign-in. `Lax`, because the provider sends the
+/// browser back with a cross-site navigation.
 fn sign_in_cookie(state: Option<&str>) -> HeaderValue {
-    let (value, max_age) = match state {
-        Some(state) => (state, SIGN_IN_COOKIE_SECONDS),
-        None => ("", 0),
-    };
-    HeaderValue::from_str(&format!(
-        "{SIGN_IN_COOKIE}={value}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age={max_age}"
-    ))
-    .expect("sign-in states are header-safe")
+    host_cookie(
+        SIGN_IN_COOKIE,
+        state,
+        SameSite::Lax,
+        SIGN_IN_COOKIE_LIFETIME,
+    )
 }
 
 /// Sends the browser to the provider to sign in.
@@ -367,9 +368,7 @@ pub(crate) async fn finish_sign_in<U>(
     Path(path): Path<ProviderPath>,
     Query(query): Query<CallbackQuery>,
 ) -> Result<Response, ApiError> {
-    let browser_state = cookie(&headers, SIGN_IN_COOKIE)
-        .unwrap_or_default()
-        .to_owned();
+    let browser_state = cookie(&headers, SIGN_IN_COOKIE).unwrap_or_default();
     let outcome = async {
         if let Some(error) = &query.error {
             return Err(ApiError::new(PanelError::permission_denied(format!(
@@ -489,26 +488,31 @@ pub(crate) async fn put_sign_in_policy<U>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
+    use cookie::Cookie;
 
     #[test]
     fn host_prefixed_cookies_are_secure_and_cover_the_whole_host() {
-        for cookie in [
-            sign_in_cookie(Some("state")),
-            sign_in_cookie(None),
-            session_cookie(Some("secret"), Duration::from_secs(60)),
-            session_cookie(None, Duration::ZERO),
+        for (value, same_site, max_age) in [
+            (sign_in_cookie(Some("state")), SameSite::Lax, 600),
+            (sign_in_cookie(None), SameSite::Lax, 0),
+            (
+                session_cookie(Some("secret"), Duration::from_secs(60)),
+                SameSite::Strict,
+                60,
+            ),
+            (session_cookie(None, Duration::ZERO), SameSite::Strict, 0),
         ] {
-            let text = cookie.to_str().unwrap();
-            let attributes: Vec<&str> = text.split("; ").skip(1).collect();
-            assert!(text.starts_with("__Host-"), "{text}");
-            assert!(attributes.contains(&"Secure"), "{text}");
-            assert!(attributes.contains(&"Path=/"), "{text}");
-            assert!(
-                !attributes
-                    .iter()
-                    .any(|attribute| attribute.starts_with("Domain=")),
-                "{text}"
+            let cookie = Cookie::parse(value.to_str().unwrap()).unwrap();
+            assert!(cookie.name().starts_with("__Host-"), "{cookie}");
+            assert_eq!(cookie.secure(), Some(true), "{cookie}");
+            assert_eq!(cookie.http_only(), Some(true), "{cookie}");
+            assert_eq!(cookie.path(), Some("/"), "{cookie}");
+            assert_eq!(cookie.domain(), None, "{cookie}");
+            assert_eq!(cookie.same_site(), Some(same_site), "{cookie}");
+            assert_eq!(
+                cookie.max_age().map(|age| age.whole_seconds()),
+                Some(max_age),
+                "{cookie}"
             );
         }
     }

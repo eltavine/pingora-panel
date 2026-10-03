@@ -858,6 +858,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "cookie"
+version = "0.18.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a373e3602691c3cdea496d2f0ee5935151e6168fe87739483c463db1b2f2f87"
+dependencies = [
+ "time",
+ "version_check",
+]
+
+[[package]]
 name = "core-foundation"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1387,6 +1397,7 @@ dependencies = [
  "base64 0.22.1",
  "bcrypt",
  "bytes",
+ "cookie",
  "getrandom 0.4.3",
  "globset",
  "governor",
@@ -2524,6 +2535,7 @@ dependencies = [
  "async-trait",
  "axum",
  "chrono",
+ "cookie",
  "governor",
  "httpdate",
  "panel-application",
