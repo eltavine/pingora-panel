@@ -1,0 +1,25 @@
+[package]
+name = "panel-config-dsl"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+chrono.workspace = true
+globset.workspace = true
+panel-config-model.workspace = true
+panel-domain.workspace = true
+panel-dsl.workspace = true
+panel-errors.workspace = true
+panel-ir.workspace = true
+regex.workspace = true
+serde.workspace = true
+utoipa = { workspace = true, optional = true }
+uuid.workspace = true
+
+[features]
+# JSON Schema for the HTTP contract.
+openapi = ["dep:utoipa"]

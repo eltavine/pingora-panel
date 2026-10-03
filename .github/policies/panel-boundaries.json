@@ -199,6 +199,16 @@
       "catalog": true,
       "allowed_workspace_dependencies": []
     },
+    "panel-config-dsl": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-config-model",
+        "panel-domain",
+        "panel-dsl",
+        "panel-errors",
+        "panel-ir"
+      ]
+    },
     "panel-config-json": {
       "catalog": true,
       "allowed_workspace_dependencies": [
@@ -409,6 +419,7 @@
     "engine_transport_storage_neutral_members": [
       "panel-application",
       "panel-config-domain",
+      "panel-config-dsl",
       "panel-config-model",
       "panel-context",
       "panel-domain",

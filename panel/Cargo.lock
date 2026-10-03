@@ -2249,6 +2249,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "panel-config-dsl"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "globset",
+ "panel-config-model",
+ "panel-domain",
+ "panel-dsl",
+ "panel-errors",
+ "panel-ir",
+ "regex",
+ "serde",
+ "utoipa",
+ "uuid",
+]
+
+[[package]]
 name = "panel-config-json"
 version = "0.1.0"
 dependencies = [
