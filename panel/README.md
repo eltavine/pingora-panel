@@ -230,7 +230,10 @@ every directive for editors, `GET /api/v1/config/plan` lists the resources
 and file lines the draft changes relative to the active revision,
 `GET /api/v1/config/ir` returns the runtime snapshot it compiles to, and
 `POST /api/v1/config/dry-run` prepares that snapshot on the gateway without
-activating it. Every apply records a revision with its files, author, note
+activating it. `POST /api/v1/config/import/nginx` converts the documented
+NGINX subset — `server`, `listen`, `server_name`, `location`, `proxy_pass`,
+`root`, `index`, `try_files`, `return` and `upstream` — and reports every
+directive it did not carry over at its position. Every apply records a revision with its files, author, note
 and outcome under `/api/v1/revisions`; a revision can be compared with
 another, the active one or the draft, annotated, and restored into the
 draft.
@@ -246,11 +249,13 @@ ppanel config apply --note "launch the shop"
 ppanel revision list
 ppanel revision diff 4 --against active
 ppanel config rollback --to 3 --reason "errors after launch"
+ppanel config import-nginx /etc/nginx/nginx.conf --dir conf
 ```
 
 The console edits the same files with highlighting, completion for the
 block being edited, problems checked as the text changes and an outline,
-and shows revisions with their differences, notes and rollback.
+imports NGINX configuration for review, and shows revisions with their
+differences, notes and rollback.
 
 ## Audit trail
 

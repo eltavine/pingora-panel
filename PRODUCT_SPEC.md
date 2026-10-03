@@ -133,7 +133,7 @@ Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交
 上述状态只覆盖 Initial Foundation，不把面板完整功能目录误写为已实现。
 0.2 网关核心各项已在 REST API、`ppanel` CLI 与 Web 控制台实现，并由模块、集成、真实进程与浏览器端到端测试覆盖，因此标记为 `Implemented`。其验收中的操作审计与权限检查分别随 `AUDIT-*`（0.3）与 `IAM-*`（0.4）完成；在此之前这些功能不得标记为 `Verified`。
 
-0.3 配置语言与版本（`SITE-034`～`SITE-045` 及上列 `DSL-*`）已在 REST API、`ppanel` CLI 与 Web 控制台实现：草稿以 `main.conf` 为入口的语言文件编辑，支持检查、格式化、补全 Schema、语法树、计划与 Diff、IR 导出、试运行，以及记录作者、备注与结果、可比较和一键回滚的配置版本；同样在操作审计（`AUDIT-*`）与权限（`IAM-*`）验收完成前不得标记为 `Verified`。请求变量（`DSL-010`～`DSL-017`）已在语言中识别与校验、运行时模板尚未实现，Size 与 IP/CIDR 类型（`DSL-023`、`DSL-024`）已能解析、尚无指令使用，因此为 `In Progress`；继承检查（`DSL-034`）、Lua 脚本引用（`DSL-042`）与 Nginx 子集导入和迁移报告（`DSL-043`～`DSL-045`）仍为 `Planned`。
+0.3 配置语言与版本（`SITE-034`～`SITE-045` 及上列 `DSL-*`）已在 REST API、`ppanel` CLI 与 Web 控制台实现：草稿以 `main.conf` 为入口的语言文件编辑，支持检查、格式化、补全 Schema、语法树、计划与 Diff、IR 导出、试运行，以及记录作者、备注与结果、可比较和一键回滚的配置版本；同样在操作审计（`AUDIT-*`）与权限（`IAM-*`）验收完成前不得标记为 `Verified`。请求变量（`DSL-010`～`DSL-017`）已在语言中识别与校验、运行时模板尚未实现，Size 与 IP/CIDR 类型（`DSL-023`、`DSL-024`）已能解析、尚无指令使用，因此为 `In Progress`；Nginx 子集导入与迁移报告（`DSL-043`～`DSL-045`）按 ADR 0012 所列子集转换，并在 API、CLI 与控制台逐条报告未转换或含义改变的指令及其位置；继承检查（`DSL-034`）与 Lua 脚本引用（`DSL-042`）仍为 `Planned`。
 
 0.3 审计（`AUDIT-001`、`AUDIT-003`、`AUDIT-004`）已由 `audit-service` 实现：各服务通过事务性 Outbox 发布每次变更及被拒绝或失败的尝试，审计服务按来源与事件 ID 幂等写入带检查点、只追加的 SHA-256 哈希链，并在 REST API、`ppanel audit` 与控制台审计日志中提供筛选、详情与完整性校验。证书操作审计（`AUDIT-005`）已覆盖 TLS Profile 变更，证书签发与续期随 `TLS-*` 补齐，因此为 `In Progress`；登录审计（`AUDIT-002`）随 `IAM-*` 的登录实现，Docker 操作审计（`AUDIT-006`）随 `CTR-*` 实现，仍为 `Planned`。
 
@@ -1030,9 +1030,9 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | DSL-040 | 303 | Upstream 引用完整性检查 | 0.3 | A/C/G | Operator | config-compiler | 执行“Upstream 引用完整性检查”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | DSL-041 | 304 | Certificate 引用完整性检查 | 0.3 | A/C/G | Viewer | config-compiler | 查询“Certificate 引用完整性检查”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | Yes |
 | DSL-042 | 305 | Lua Script 引用完整性检查 | 0.3 | A/C/G | Viewer | config-compiler | 查询“Lua Script 引用完整性检查”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | Yes |
-| DSL-043 | 306 | Nginx 子集配置导入 | 0.3 | A/C/G | Operator | config-compiler | 执行“Nginx 子集配置导入”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| DSL-044 | 307 | Nginx 子集迁移报告 | 0.3 | A/C/G | Operator | config-compiler | 执行“Nginx 子集迁移报告”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| DSL-045 | 308 | 不支持 Nginx Directive 报告 | 0.3 | A/C/G | Operator | config-compiler | 执行“不支持 Nginx Directive 报告”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
+| DSL-043 | 306 | Nginx 子集配置导入 | 0.3 | A/C/G | Operator | config-compiler | 执行“Nginx 子集配置导入”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| DSL-044 | 307 | Nginx 子集迁移报告 | 0.3 | A/C/G | Operator | config-compiler | 执行“Nginx 子集迁移报告”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| DSL-045 | 308 | 不支持 Nginx Directive 报告 | 0.3 | A/C/G | Operator | config-compiler | 执行“不支持 Nginx Directive 报告”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | DSL-046 | 309 | DSL 转规范化 IR | 0.3 | A/C/G | Operator | config-compiler | 执行“DSL 转规范化 IR”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | DSL-047 | 310 | IR JSON 导出 | 0.3 | A/C/G | Operator | config-compiler | 执行“IR JSON 导出”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | DSL-048 | 311 | 配置 Hash | 0.3 | A/C/G | Operator | config-compiler | 执行“配置 Hash”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
@@ -1419,7 +1419,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | 新增团队/平台需求 | 105 |
 | 总 Feature ID | 685 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
-| 当前 `Implemented` | 200（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-009`、`DSL-018`～`DSL-022`、`DSL-025`～`DSL-033`、`DSL-035`～`DSL-041`、`DSL-046`～`DSL-050`；审计：`AUDIT-001`、`AUDIT-003`、`AUDIT-004`） |
+| 当前 `Implemented` | 203（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-009`、`DSL-018`～`DSL-022`、`DSL-025`～`DSL-033`、`DSL-035`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`、`AUDIT-003`、`AUDIT-004`） |
 | 1.0 要求 `Verified` | 685 |
 
 分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 47、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。
