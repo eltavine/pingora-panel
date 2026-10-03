@@ -10,7 +10,8 @@ panel-events -> panel-context + panel-errors
 panel-ir -> panel-domain
 panel-engine -> panel-errors + panel-domain + panel-ir
 panel-application -> panel-context + panel-errors + panel-domain + panel-ir
-panel-api -> panel-application + panel-errors
+panel-config-model -> panel-domain + panel-errors + panel-ir
+panel-api -> panel-application + panel-config-model + panel-errors
 panel-config-json -> panel-application + panel-errors + panel-ir
 
 panel-gateway-runtime -> panel-engine ports
@@ -35,8 +36,9 @@ config-grpc-client -> panel-application + config-proto-codec + panel-service
 panel-control-runtime -> panel-postgres + panel-jetstream + panel-outbox + panel-service + panel-tls
 
 gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC/Proto adapters + REST/compiler adapters
-config-service -> panel-control-runtime + gateway-grpc-client + panel-config-json + config-proto-codec
-panel-api-server -> panel-control-runtime + panel-api + config-grpc-client
+config-service -> panel-control-runtime + gateway-grpc-client + panel-config-json + panel-config-model + config-proto-codec
+panel-api-server -> panel-control-runtime + panel-api + config-grpc-client + gateway-grpc-client
+panel-cli (no workspace dependencies: a client of the public REST API)
 automation-service -> panel-control-runtime + panel-jobs + panel-postgres + panel-events
 observability-service -> panel-control-runtime
 panel-bootstrap -> panel-postgres + panel-jetstream + panel-pki
@@ -67,26 +69,34 @@ panel-bootstrap -> panel-postgres + panel-jetstream + panel-pki
 | `panel-application` | Request context, format-neutral config document, use-case orchestration and persistence ports | HTTP, Proto, storage implementation, Pingora |
 | `panel-api` | Axum HTTP mapping, body limits, request-ID propagation, RFC 9457 Problem Details and OpenAPI projection | Pingora, storage, identity implementation, generated Proto, use-case orchestration |
 | `panel-config-json` | JSON `ConfigCompiler` adapter with schema and document limits | HTTP, Proto, storage, Pingora, application orchestration |
+| `panel-config-model` | The editable configuration document: listeners, TLS profiles, upstreams and sites with domains and routes; validation, queries, checked edits and compilation into the IR | HTTP, Proto, storage, Pingora |
 | `panel-gateway-runtime` | Prepare/Activate/CAS/LKG orchestration | Tonic, filesystem, Pingora |
 | `snapshot-store-fs` | Versioned JSON records, fsync and atomic rename | Tonic, Pingora, runtime policy |
-| `gateway-pingora` | Compile IR into private Pingora values and atomic `ArcSwap` publication | Proto, filesystem, control-plane policy |
+| `gateway-pingora` | Compile IR into private Pingora values with atomic `ArcSwap` publication, and run the data plane: listener generations, virtual hosts, routes, TLS, static files and upstream pools with health | Proto, control-plane policy |
 | `gateway-proto-codec` | Shared Proto/IR conversion used by client and server | Engine, server, client, Pingora, filesystem |
 | `gateway-grpc` | Runtime-info projection, request policy and Tonic service | Pingora, filesystem, environment |
 | `config-proto-codec` | Protobuf form of the configuration publication contract | Storage, transports, Pingora |
 | `config-grpc-client` | `GatewayUseCases` over `config-service`'s publication API | Storage, Pingora |
 | `gateway-grpc-client` | Tonic client adapter implementing `panel-application::GatewayPort`, and the gateway health check | HTTP, storage, identity, generated Proto outside this adapter |
-| `config-service` | Publication API, PostgreSQL activation receipts and the `config` schema | HTTP, Pingora |
+| `config-service` | Publication and configuration APIs, the draft configuration, PostgreSQL activation receipts and the `config` schema | HTTP, Pingora |
 | `panel-api-server` | The `panel-api` process: public REST and web console, degraded admission and the service directory | Storage implementation, Pingora |
 | `automation-service` | PostgreSQL job store with outbox events, worker and scheduler in the `automation` schema | HTTP, Pingora |
 | `observability-service` | Service process owning the `observability` schema | Pingora |
 | `panel-bootstrap` | Idempotent provisioning of service roles, schemas, streams and the service registry; issuance and rotation of service credentials | Application rules, Pingora |
-| `gatewayd` | Dependency construction, REST/gRPC adapter composition, bind/readiness policies, environment configuration, process clock, worker executor and standard gRPC Health | Business rules |
+| `gatewayd` | Dependency construction, REST/gRPC adapter composition, bind/readiness policies, environment configuration, process clock, worker executor, the data plane, its runtime API and standard gRPC Health | Business rules |
+| `panel-cli` | The `ppanel` command line over the public REST API | Server crates, storage, Pingora |
 
 `.github/scripts/check-panel-boundaries.sh` enforces these direct dependency rules in CI.
 `gatewayd::build_gateway_transport` is the single composition factory used by both the production process and TCP black-box tests, preventing test-only dependency graphs from drifting away from production.
 
-`gatewayd` starts the loopback gRPC management transport; no Pingora traffic
-listener exists yet. See the
+`gatewayd` serves the listeners of the active configuration through Pingora
+([decision](../docs/adr/0010-pingora-data-plane.md)) next to its gRPC
+management transport. TLS profiles name certificate and key files in
+`PINGORA_PANEL_SECRET_DIR`, static sites live below
+`PINGORA_PANEL_STATIC_ROOT`, `PINGORA_PANEL_WORKERS` sets the initial worker
+count and `PINGORA_PANEL_DRAIN_TIMEOUT_MS` bounds how long a replaced
+generation finishes in-flight requests. Worker counts and node drains set at
+runtime persist in the state directory and survive restarts. See the
 [gateway foundation runbook](../docs/gateway-foundation-runbook.md) for startup,
 readiness, recovery and current limits.
 
@@ -113,7 +123,8 @@ Every process reads `PINGORA_PANEL_DATABASE_URL` (its role, without password),
 `PINGORA_PANEL_NATS_URL`, and optionally `PINGORA_PANEL_OPS_ADDR`,
 `PINGORA_PANEL_GRPC_ADDR` and `PINGORA_PANEL_HEALTH_INTERVAL_MS`.
 `config-service` also reads `PINGORA_PANEL_GATEWAY_URL`; `panel-api` reads
-`PINGORA_PANEL_HTTP_ADDR`, `PINGORA_PANEL_CONFIG_URL` and
+`PINGORA_PANEL_HTTP_ADDR`, `PINGORA_PANEL_CONFIG_URL`,
+`PINGORA_PANEL_GATEWAY_URL` for the gateway's runtime API and
 `PINGORA_PANEL_WEB_ROOT`, the directory of the built console. Plaintext
 listeners must stay on loopback until internal transports are authenticated.
 
@@ -166,6 +177,40 @@ changes with `503 Service Unavailable`, `Retry-After` and a retryable
 `UNAVAILABLE` problem; a failing required dependency makes it unavailable.
 `GET /api/v1/platform/services` lists live instances with their versions,
 protocol revisions and capabilities.
+
+## Configuration, command line and gateway operations
+
+Operators edit one draft configuration and apply it as a whole
+([decision](../docs/adr/0011-configuration-model-and-apply.md)). Under
+`/api/v1`, `sites` (with `domains` and `routes`), `upstreams` (with
+`nodes`), `listeners` and `tls-profiles` are resources with entity tags:
+replacing or deleting one requires `If-Match`, and every change requires an
+`Idempotency-Key`. A change that would introduce a validation error is
+refused with its diagnostics. `GET /api/v1/config/draft` reports the draft
+version and whether the gateway runs it, `GET /api/v1/config/validation`
+checks the draft or chosen sites, and `POST /api/v1/config/apply` compiles
+the expected draft version and activates it with compare-and-swap.
+`/api/v1/gateway/data-plane`, `/reload`, `/workers` and `/shutdown`, together
+with `/api/v1/upstreams/health` and node `drain`, operate the running
+gateway.
+
+`ppanel` covers the same operations from a shell. It reads the API address
+from `--api` or `PPANEL_API` and records `--actor` or `PPANEL_ACTOR` with each
+change:
+
+```sh
+ppanel upstream create --name app --node 10.0.0.11:8080,weight=2
+ppanel listener set http --address 0.0.0.0:80
+ppanel site create --name shop --domain shop.example --proxy <upstream-id>
+ppanel route add <site-id> --match exact:/healthz --respond 204
+ppanel config apply
+ppanel upstream health
+```
+
+`-o json` prints machine-readable output and `completion <shell>` prints a
+completion script. Exit codes distinguish usage errors (2), missing resources
+(3), conflicts and failed preconditions (4), rejected changes (5), an
+unavailable service (6) and denied requests (7) from other failures (1).
 
 ## Activation invariant
 

@@ -1,26 +1,27 @@
-# Gateway foundation: startup and diagnosis
+# Gateway: startup and diagnosis
 
-This page describes the current internal gateway process. It is an operator
-reference for the foundation stage, not a claim that the public control plane
-or a production proxy listener is ready.
+This page describes the gateway process for operators: how it starts, what
+its readiness means and how it recovers.
 
 ## What starts today
 
-`gatewayd` starts one plaintext, loopback-only gRPC management listener. Its
-standard gRPC Health service and Gateway service share a durable engine backed
-by the state directory. The binary does not bind the Axum REST router or a
-Pingora traffic listener. The REST router is available through
-`gatewayd::management_router_with_config` for authenticated future composition
-and for tests. A Health `SERVING` response means the management engine can
-accept mutations; it does not mean a website is receiving traffic.
+`gatewayd` starts a gRPC management listener, loopback-only unless it serves
+mutual TLS, and the Pingora data plane. The standard gRPC Health service, the
+Gateway service and the GatewayRuntime service share a durable engine backed
+by the state directory. A Health `SERVING` response means the engine can
+accept mutations; whether websites receive traffic depends on the listeners
+of the active configuration, which the GatewayRuntime service and
+`ppanel gateway status` report.
 
-The adapter currently compiles supported HTTP/HTTPS upstream peers and an
-immutable Host/PathPrefix route decision table scoped to each site's declared
-domains. Routes without a site domain, or with a Host matcher outside that
-site's domains, fail validation. Other IR nodes, including
-listeners and TLS profiles, fail capability validation before Prepare.
-Lower route priority values win; equal priorities choose the longer path
-prefix, then an explicit Host matcher, then the stable route ID.
+The data plane serves the active snapshot's listeners, virtual hosts,
+routes, TLS profiles, static content and upstream pools, as described in
+[the data plane decision](adr/0010-pingora-data-plane.md). Snapshots that
+need anything the adapter does not declare, such as HTTP/3 listeners or Unix
+socket upstreams, fail capability validation before Prepare, and listener
+addresses another process holds fail Prepare with a diagnostic. Lower route
+priority values win; equal priorities prefer exact paths, then globs,
+regular expressions and prefixes, longer patterns, an explicit Host matcher
+and finally the stable route ID.
 
 ## Local startup
 
@@ -32,10 +33,14 @@ cargo run --manifest-path panel/Cargo.toml --package gatewayd
 ```
 
 `PINGORA_PANEL_GATEWAY_ADDR` must be a numeric IPv4 or IPv6 loopback address
-until an authenticated transport policy is composed. `PINGORA_PANEL_WORKERS`
-must be in `1..=256`. The state directory needs durable storage and exclusive
-ownership by one gateway process. A second process using the same directory
-fails to acquire the lease.
+unless `PINGORA_PANEL_TLS_DIR` provides mutual TLS credentials.
+`PINGORA_PANEL_WORKERS` must be in `1..=256`; a worker count set at runtime
+replaces it and persists in the state directory, as do node drains.
+`PINGORA_PANEL_SECRET_DIR` holds the certificate and key files TLS profiles
+name, and `PINGORA_PANEL_STATIC_ROOT` the directories static sites serve.
+The state directory needs durable storage and exclusive ownership by one
+gateway process. A second process using the same directory fails to acquire
+the lease.
 
 ## Reading readiness and recovery
 
@@ -44,7 +49,13 @@ fails to acquire the lease.
   remains available for diagnosis.
 - On shutdown, Health switches to `NOT_SERVING`, new mutations stop, and
   admitted mutations drain before the process exits. The drain window is set
-  with `PINGORA_PANEL_DRAIN_TIMEOUT_MS` and is at most 300 seconds.
+  with `PINGORA_PANEL_DRAIN_TIMEOUT_MS` and is at most 300 seconds; it also
+  bounds how long a replaced data plane generation finishes in-flight
+  requests.
+- The data plane state lists the generation, workers and served listeners.
+  When the active configuration's listeners cannot be served, for example
+  because another process took a port, the state carries the error and the
+  gateway retries until it can.
 - Status includes active revision and hash, prepared count, adapter and schema
   versions, worker count, uptime, recovery count, degraded transitions, and
   unknown commit outcomes. Compare the active hash with the caller's expected
