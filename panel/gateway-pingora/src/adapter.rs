@@ -320,9 +320,14 @@ impl PingoraGatewayAdapter {
     }
 
     /// Detects port conflicts with other processes before activation. Ports
-    /// this gateway already holds are resolved when the listener set changes.
+    /// this gateway holds, or binds for the active snapshot once the data
+    /// plane catches up with an activation, are resolved when the listener
+    /// set changes.
     fn check_bindable(&self, listeners: &[ListenerPlan]) -> Result<()> {
-        let bound = self.bound.lock().clone();
+        let mut bound = self.bound.lock().clone();
+        if let Some(active) = self.active_prepared() {
+            bound.extend(active.listeners.iter().map(|plan| plan.socket.clone()));
+        }
         let diagnostics: Vec<_> = listeners
             .iter()
             .filter(|plan| {
@@ -500,6 +505,26 @@ mod tests {
         assert!(error.diagnostics[0]
             .message
             .contains("listener http cannot use"));
+    }
+
+    #[tokio::test]
+    async fn ports_of_the_active_snapshot_count_as_held() {
+        let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = free.local_addr().unwrap().to_string();
+        drop(free);
+        let snapshot = |revision| {
+            let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(revision));
+            snapshot
+                .listeners
+                .push(ListenerRef::new("http", address.clone()));
+            snapshot.refresh_content_hash();
+            snapshot
+        };
+        let adapter = PingoraGatewayAdapter::new();
+        adapter.activate(Arc::new(adapter.prepare(snapshot(1)).await.unwrap()));
+        // The data plane binds the active listeners before it reports them.
+        let _held = std::net::TcpListener::bind(&address).unwrap();
+        adapter.prepare(snapshot(2)).await.unwrap();
     }
 
     /// Reserved feature gates must never widen the advertised capability set,
