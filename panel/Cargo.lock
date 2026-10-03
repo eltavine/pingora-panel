@@ -2672,6 +2672,7 @@ dependencies = [
  "gateway-grpc-client",
  "identity-oidc",
  "identity-postgres",
+ "observability-grpc-client",
  "panel-acme",
  "panel-api",
  "panel-application",

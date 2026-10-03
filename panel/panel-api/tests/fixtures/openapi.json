@@ -47872,6 +47872,717 @@
         }
       }
     },
+    "/api/v1/traffic": {
+      "parameters": [
+        {
+          "name": "x-request-id",
+          "in": "header",
+          "description": "Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1
+          }
+        },
+        {
+          "name": "traceparent",
+          "in": "header",
+          "description": "W3C Trace Context parent of the caller's trace. Invalid values are ignored.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 55
+          }
+        },
+        {
+          "name": "tracestate",
+          "in": "header",
+          "description": "W3C Trace Context vendor state, propagated with a valid traceparent.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "traffic"
+        ],
+        "summary": "What the gateway served over a window, for every site, one site or one\nroute.",
+        "operationId": "traffic_summary",
+        "parameters": [
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          },
+          {
+            "name": "site",
+            "in": "query",
+            "description": "Only the requests of this site.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "route",
+            "in": "query",
+            "description": "Only the requests of this route; needs `site`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "window",
+            "in": "query",
+            "description": "How far back to look, in seconds: an hour by default, at least a\nminute and at most 31 days.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrafficSummaryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/traffic/series": {
+      "parameters": [
+        {
+          "name": "x-request-id",
+          "in": "header",
+          "description": "Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1
+          }
+        },
+        {
+          "name": "traceparent",
+          "in": "header",
+          "description": "W3C Trace Context parent of the caller's trace. Invalid values are ignored.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 55
+          }
+        },
+        {
+          "name": "tracestate",
+          "in": "header",
+          "description": "W3C Trace Context vendor state, propagated with a valid traceparent.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "traffic"
+        ],
+        "summary": "The request rate, server errors and 95th percentile latency over a\nwindow, for charts.",
+        "operationId": "traffic_series",
+        "parameters": [
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          },
+          {
+            "name": "site",
+            "in": "query",
+            "description": "Only the requests of this site.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "route",
+            "in": "query",
+            "description": "Only the requests of this route; needs `site`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "window",
+            "in": "query",
+            "description": "How far back to look, in seconds: an hour by default, at least a\nminute and at most 31 days.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "step",
+            "in": "query",
+            "description": "Seconds between points; the service keeps a window to at most 720\npoints.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrafficSeriesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/upstreams": {
       "parameters": [
         {
@@ -55635,6 +56346,40 @@
           }
         }
       },
+      "LatencyQuantiles": {
+        "type": "object",
+        "description": "Latency quantiles in seconds; absent when no request was measured.",
+        "properties": {
+          "p50": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "p90": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "p95": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "p99": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          }
+        }
+      },
       "LimitedResponse": {
         "type": "object",
         "description": "The answer to requests over a limit.",
@@ -57165,6 +57910,27 @@
           }
         }
       },
+      "RouteTrafficItem": {
+        "type": "object",
+        "description": "Requests one route served.",
+        "required": [
+          "site",
+          "route",
+          "requests"
+        ],
+        "properties": {
+          "requests": {
+            "type": "number",
+            "format": "double"
+          },
+          "route": {
+            "type": "string"
+          },
+          "site": {
+            "type": "string"
+          }
+        }
+      },
       "RouteView": {
         "allOf": [
           {
@@ -58071,6 +58837,44 @@
           }
         }
       },
+      "StatusCounts": {
+        "type": "object",
+        "description": "Requests by the class of their status code.",
+        "required": [
+          "informational",
+          "success",
+          "redirection",
+          "client_error",
+          "server_error"
+        ],
+        "properties": {
+          "client_error": {
+            "type": "number",
+            "format": "double",
+            "description": "4xx."
+          },
+          "informational": {
+            "type": "number",
+            "format": "double",
+            "description": "1xx."
+          },
+          "redirection": {
+            "type": "number",
+            "format": "double",
+            "description": "3xx."
+          },
+          "server_error": {
+            "type": "number",
+            "format": "double",
+            "description": "5xx."
+          },
+          "success": {
+            "type": "number",
+            "format": "double",
+            "description": "2xx."
+          }
+        }
+      },
       "StrictTransportSecurity": {
         "type": "object",
         "description": "An HTTP Strict Transport Security policy (RFC 6797 §6.1).",
@@ -58487,6 +59291,148 @@
           }
         }
       },
+      "TrafficPointItem": {
+        "type": "object",
+        "description": "The traffic at one moment, averaged over one step.",
+        "required": [
+          "at",
+          "requests_per_second",
+          "server_errors_per_second"
+        ],
+        "properties": {
+          "at": {
+            "type": "string",
+            "description": "RFC 3339."
+          },
+          "p95": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Seconds; absent when no request was measured."
+          },
+          "requests_per_second": {
+            "type": "number",
+            "format": "double"
+          },
+          "server_errors_per_second": {
+            "type": "number",
+            "format": "double",
+            "description": "Requests answered with a 5xx status per second."
+          }
+        }
+      },
+      "TrafficSeriesResponse": {
+        "type": "object",
+        "description": "The traffic over a window, oldest point first.",
+        "required": [
+          "points"
+        ],
+        "properties": {
+          "points": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrafficPointItem"
+            }
+          }
+        }
+      },
+      "TrafficSummaryResponse": {
+        "type": "object",
+        "description": "What the gateway served over a window.",
+        "required": [
+          "window_seconds",
+          "requests",
+          "requests_per_second",
+          "statuses",
+          "latency",
+          "bytes_received",
+          "bytes_sent",
+          "open_connections",
+          "tls_handshakes",
+          "upstreams",
+          "routes"
+        ],
+        "properties": {
+          "activated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When that configuration was activated, RFC 3339."
+          },
+          "bytes_received": {
+            "type": "number",
+            "format": "double",
+            "description": "Request body bytes received."
+          },
+          "bytes_sent": {
+            "type": "number",
+            "format": "double",
+            "description": "Response body bytes sent."
+          },
+          "latency": {
+            "$ref": "#/components/schemas/LatencyQuantiles"
+          },
+          "observed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When the figures were read, RFC 3339."
+          },
+          "open_connections": {
+            "type": "number",
+            "format": "double",
+            "description": "Client connections open now."
+          },
+          "requests": {
+            "type": "number",
+            "format": "double"
+          },
+          "requests_per_second": {
+            "type": "number",
+            "format": "double"
+          },
+          "revision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The revision of the gateway's active configuration.",
+            "minimum": 0
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteTrafficItem"
+            },
+            "description": "Busiest first, at most 20."
+          },
+          "statuses": {
+            "$ref": "#/components/schemas/StatusCounts"
+          },
+          "tls_handshakes": {
+            "type": "number",
+            "format": "double"
+          },
+          "upstreams": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpstreamTrafficItem"
+            },
+            "description": "Busiest first."
+          },
+          "window_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The window the figures cover, in seconds.",
+            "minimum": 0
+          }
+        }
+      },
       "TsigAlgorithm": {
         "type": "string",
         "description": "A TSIG algorithm (RFC 8945).",
@@ -58827,6 +59773,33 @@
         },
         "additionalProperties": false
       },
+      "UpstreamTrafficItem": {
+        "type": "object",
+        "description": "Requests the gateway sent to one upstream.",
+        "required": [
+          "upstream",
+          "requests",
+          "error_ratio",
+          "latency"
+        ],
+        "properties": {
+          "error_ratio": {
+            "type": "number",
+            "format": "double",
+            "description": "The share of attempts that failed, from 0 to 1."
+          },
+          "latency": {
+            "$ref": "#/components/schemas/LatencyQuantiles"
+          },
+          "requests": {
+            "type": "number",
+            "format": "double"
+          },
+          "upstream": {
+            "type": "string"
+          }
+        }
+      },
       "UpstreamView": {
         "allOf": [
           {
@@ -59111,6 +60084,10 @@
     {
       "name": "gateway",
       "description": "The running gateway: data plane, workers, shutdown and upstream health"
+    },
+    {
+      "name": "traffic",
+      "description": "What the gateway served, from its metrics: requests, status classes, latency, traffic, connections, upstreams and routes"
     },
     {
       "name": "audit",

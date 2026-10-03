@@ -30,6 +30,7 @@ mod routes;
 mod sign_in;
 mod state;
 mod tls_checks;
+mod traffic;
 mod workload;
 
 pub use access::{AccessAudit, AccessSettings, Refusal};

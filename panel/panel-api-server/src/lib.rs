@@ -23,6 +23,7 @@ use config_grpc_client::{ConfigClientConfig, ConfigPublicationClient};
 use gateway_grpc_client::{GatewayGrpcClient, GatewayGrpcClientConfig};
 use identity_oidc::OidcClient;
 use identity_postgres::PgIdentityStore;
+use observability_grpc_client::ObservabilityClient;
 use panel_api::{router_with_config, AccessSettings, ApiConfig, ApiState};
 use panel_application::RecordedRuntime;
 use panel_control_runtime::{ControlPlaneProcess, DefaultAddresses, ProcessSettings};
@@ -49,6 +50,8 @@ pub const HTTP_ADDRESS_ENV: &str = "PINGORA_PANEL_HTTP_ADDR";
 pub const CONFIG_URL_ENV: &str = "PINGORA_PANEL_CONFIG_URL";
 /// `audit-service`, which serves the audit trail.
 pub const AUDIT_URL_ENV: &str = "PINGORA_PANEL_AUDIT_URL";
+/// `observability-service`, which reads what the gateway served.
+pub const OBSERVABILITY_URL_ENV: &str = "PINGORA_PANEL_OBSERVABILITY_URL";
 /// `automation-service`, which keeps the certificate inventory.
 pub const AUTOMATION_URL_ENV: &str = "PINGORA_PANEL_AUTOMATION_URL";
 /// The gateway's runtime API, for data plane operations and upstream health.
@@ -82,6 +85,7 @@ const DEFAULT_HTTP_ADDRESS: SocketAddr =
     SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 8080);
 const DEFAULT_CONFIG_URL: &str = "http://127.0.0.1:50061";
 const DEFAULT_AUDIT_URL: &str = "http://127.0.0.1:50064";
+const DEFAULT_OBSERVABILITY_URL: &str = "http://127.0.0.1:50063";
 const DEFAULT_AUTOMATION_URL: &str = "http://127.0.0.1:50062";
 const DEFAULT_GATEWAY_URL: &str = "http://127.0.0.1:50051";
 const DEFAULT_WEB_ROOT: &str = "/usr/share/pingora-panel/web";
@@ -112,6 +116,9 @@ pub fn process(
     let automation_url = env
         .string(AUTOMATION_URL_ENV)?
         .unwrap_or_else(|| DEFAULT_AUTOMATION_URL.into());
+    let observability_url = env
+        .string(OBSERVABILITY_URL_ENV)?
+        .unwrap_or_else(|| DEFAULT_OBSERVABILITY_URL.into());
     let web_root = PathBuf::from(
         env.string(WEB_ROOT_ENV)?
             .unwrap_or_else(|| DEFAULT_WEB_ROOT.into()),
@@ -173,7 +180,15 @@ pub fn process(
             Some(channel) => AutomationClient::from_channel(channel),
             None => AutomationClient::connect_lazy(automation_url)?,
         };
+    let observability = match process.peer_channel(
+        &observability_url,
+        ServiceName::new("observability-service")?,
+    )? {
+        Some(channel) => ObservabilityClient::from_channel(channel),
+        None => ObservabilityClient::connect_lazy(observability_url)?,
+    };
     let audit_health = audit.health_check();
+    let observability_health = observability.health_check();
     let automation_health = automation.health_check();
     let config_health = config.health_check();
     let events = EventLog::new(process.database(), ServiceName::new(SERVICE)?);
@@ -204,6 +219,7 @@ pub fn process(
         .with_check(Arc::new(config_health), Impact::Degrading)
         .with_check(Arc::new(audit_health), Impact::Informational)
         .with_check(Arc::new(automation_health), Impact::Informational)
+        .with_check(Arc::new(observability_health), Impact::Informational)
         .on_start(move |running| {
             let config = Arc::new(config);
             let state = ApiState::new(Arc::clone(&config))
@@ -211,6 +227,7 @@ pub fn process(
                 .with_runtime(Arc::new(runtime))
                 .with_audit(Arc::new(audit))
                 .with_certificates(Arc::new(automation))
+                .with_traffic(Arc::new(observability))
                 .with_tls_probe(Arc::new(RustlsProbe::default()))
                 .with_identity(identity, access)
                 .with_access_audit(operations)

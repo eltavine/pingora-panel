@@ -441,6 +441,8 @@ pub(crate) static ROUTES: &[(&str, &str, Access)] = &[
         Requires(CertificateManage),
     ),
     ("POST", "/api/v1/tls-checks", Requires(GatewayRead)),
+    ("GET", "/api/v1/traffic", Requires(GatewayRead)),
+    ("GET", "/api/v1/traffic/series", Requires(GatewayRead)),
     ("GET", "/api/v1/audit-events", Requires(AuditRead)),
     ("GET", "/api/v1/audit-events/verify", Requires(AuditRead)),
     (

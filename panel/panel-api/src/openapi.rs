@@ -35,6 +35,8 @@ mod tests;
         crate::configuration::apply,
         crate::language::source, crate::language::replace_source, crate::language::check,
         crate::language::format, crate::language::schema,
+        crate::traffic::traffic_summary,
+        crate::traffic::traffic_series,
         crate::audit::list_audit_events,
         crate::audit::get_audit_event,
         crate::audit::verify_audit_events,
@@ -90,6 +92,7 @@ mod tests;
         (name = "configuration", description = "Sites, domains, routes, upstreams, listeners and TLS profiles, edited as a draft and applied to the gateway"),
         (name = "approvals", description = "Policies that ask other people to approve covered changes before they are applied, and the requests they open"),
         (name = "gateway", description = "The running gateway: data plane, workers, shutdown and upstream health"),
+        (name = "traffic", description = "What the gateway served, from its metrics: requests, status classes, latency, traffic, connections, upstreams and routes"),
         (name = "audit", description = "Every change and every refused or failed attempt, in a tamper-evident hash chain"),
         (name = "certificates", description = "Server certificates whose private keys stay sealed with the panel and are delivered to the gateway, and the ACME accounts and automatic certificates that keep some of them issued and renewed"),
         (name = "identity", description = "Setup, login sessions, API tokens, accounts, roles and permissions")

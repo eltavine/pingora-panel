@@ -3,7 +3,7 @@ use crate::{
     sign_in::ProviderAccess,
 };
 use panel_application::{
-    AuditPort, CertificatePort, ConfigurationPort, GatewayRuntimePort, TlsProbe,
+    AuditPort, CertificatePort, ConfigurationPort, GatewayRuntimePort, TlsProbe, TrafficPort,
 };
 use panel_health::HealthWatch;
 use panel_identity::{Identity, ProviderDirectory, ProviderSignIns, WorkloadIdentity};
@@ -19,6 +19,7 @@ pub struct ApiState<U> {
     pub(crate) audit: Option<Arc<dyn AuditPort>>,
     pub(crate) certificates: Option<Arc<dyn CertificatePort>>,
     pub(crate) tls_probe: Option<Arc<dyn TlsProbe>>,
+    pub(crate) traffic: Option<Arc<dyn TrafficPort>>,
     pub(crate) identity: Option<Arc<Gate>>,
     pub(crate) providers: Option<Arc<ProviderAccess>>,
     pub(crate) workloads: Option<Arc<WorkloadIdentity>>,
@@ -36,6 +37,7 @@ impl<U> Clone for ApiState<U> {
             audit: self.audit.clone(),
             certificates: self.certificates.clone(),
             tls_probe: self.tls_probe.clone(),
+            traffic: self.traffic.clone(),
             identity: self.identity.clone(),
             providers: self.providers.clone(),
             workloads: self.workloads.clone(),
@@ -55,6 +57,7 @@ impl<U> ApiState<U> {
             audit: None,
             certificates: None,
             tls_probe: None,
+            traffic: None,
             identity: None,
             providers: None,
             workloads: None,
@@ -107,6 +110,12 @@ impl<U> ApiState<U> {
     /// Serves the audit trail under `/api/v1/audit-events`.
     pub fn with_audit(mut self, audit: Arc<dyn AuditPort>) -> Self {
         self.audit = Some(audit);
+        self
+    }
+
+    /// Serves what the gateway served under `/api/v1/traffic`.
+    pub fn with_traffic(mut self, traffic: Arc<dyn TrafficPort>) -> Self {
+        self.traffic = Some(traffic);
         self
     }
 

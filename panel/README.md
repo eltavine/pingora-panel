@@ -146,6 +146,7 @@ Every process reads `PINGORA_PANEL_DATABASE_URL` (its role, without password),
 `observability-service` reads `PINGORA_PANEL_PROMETHEUS_URL`; `panel-api` reads
 `PINGORA_PANEL_HTTP_ADDR`, `PINGORA_PANEL_CONFIG_URL`,
 `PINGORA_PANEL_GATEWAY_URL` for the gateway's runtime API,
+`PINGORA_PANEL_OBSERVABILITY_URL` for its traffic,
 `PINGORA_PANEL_WEB_ROOT`, the directory of the built console, and the
 identity settings described under [Accounts and access](#accounts-and-access).
 Plaintext listeners must stay on loopback until internal transports are
