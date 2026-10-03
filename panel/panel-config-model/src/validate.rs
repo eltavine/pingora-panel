@@ -3,7 +3,7 @@
 //! snapshot; this layer exists so problems point at the resource to fix.
 
 use crate::model::{Action, ConfigModel, MatchKind, Route, Site};
-use panel_domain::EndpointAddress;
+use panel_domain::{EndpointAddress, IpNetwork};
 use panel_errors::{Diagnostic, ErrorCode};
 use panel_ir::template::parse_template;
 use panel_ir::tls::{suite_version, SuiteVersion, PROTOCOLS};
@@ -343,7 +343,7 @@ fn validate_listeners<'a>(
         for proxy in listener
             .trusted_proxies
             .iter()
-            .filter(|proxy| !crate::security::is_cidr(proxy))
+            .filter(|proxy| IpNetwork::new(proxy).is_err())
         {
             report.error(
                 &resource,

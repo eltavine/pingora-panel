@@ -2,9 +2,10 @@
 
 //! Domain value objects. This crate deliberately has no transport or engine dependency.
 
+use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{fmt, net::IpAddr};
+use std::{fmt, net::IpAddr, str::FromStr};
 use thiserror::Error;
 
 #[derive(Debug, Error, Clone, Eq, PartialEq)]
@@ -354,6 +355,41 @@ impl<'de> Deserialize<'de> for EndpointAddress {
     }
 }
 
+/// An IP network such as `10.0.0.0/8` or `2001:db8::/32`; a single address
+/// is the network of that host alone.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct IpNetwork(IpNet);
+
+impl IpNetwork {
+    pub fn new(value: &str) -> Result<Self, DomainError> {
+        value
+            .parse::<IpNet>()
+            .or_else(|_| value.parse::<IpAddr>().map(IpNet::from))
+            .map(Self)
+            .map_err(|_| {
+                DomainError::Invalid(format!("{value:?} is not a network such as 10.0.0.0/8"))
+            })
+    }
+
+    pub fn contains(&self, address: IpAddr) -> bool {
+        self.0.contains(&address)
+    }
+}
+
+impl fmt::Display for IpNetwork {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl FromStr for IpNetwork {
+    type Err = DomainError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::new(value)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RevisionRef {
     pub revision_id: RevisionId,
@@ -448,6 +484,28 @@ mod tests {
         );
         assert_eq!(PathPrefix::new("/api/").unwrap().as_str(), "/api");
         assert!(PathPrefix::new("relative").is_err());
+    }
+
+    #[test]
+    fn networks_are_cidr_blocks_or_single_addresses() {
+        let private = IpNetwork::new("10.0.0.0/8").unwrap();
+        assert!(private.contains("10.1.2.3".parse().unwrap()));
+        assert!(!private.contains("11.0.0.1".parse().unwrap()));
+        assert!(!private.contains("::1".parse().unwrap()));
+        let host = IpNetwork::new("192.0.2.1").unwrap();
+        assert_eq!(host.to_string(), "192.0.2.1/32");
+        assert!(host.contains("192.0.2.1".parse().unwrap()));
+        assert!(IpNetwork::new("2001:db8::/32").is_ok());
+        for invalid in [
+            "10.0.0.0/33",
+            "10.0.0.0/",
+            "10.0.0.0/+8",
+            "host/8",
+            "::/129",
+            " 10.0.0.0/8",
+        ] {
+            assert!(IpNetwork::new(invalid).is_err(), "{invalid}");
+        }
     }
 
     #[test]

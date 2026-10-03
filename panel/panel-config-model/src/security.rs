@@ -2,9 +2,9 @@
 //! hold, how they are checked and what the gateway receives.
 
 use crate::validate::is_token;
+use panel_domain::IpNetwork;
 use panel_ir::{BasicAuth, LimitedResponse, RateLimit, RateLimitKey, RefererRule};
 use serde::{Deserialize, Serialize};
-use std::net::IpAddr;
 
 /// The longest wait between body reads a policy may set.
 pub const MAX_BODY_TIMEOUT_SECONDS: u64 = 3600;
@@ -102,7 +102,7 @@ impl SecurityPolicy {
     pub fn problems(&self) -> Vec<String> {
         let mut problems = Vec::new();
         for cidr in self.allowed_cidrs.iter().chain(&self.denied_cidrs) {
-            if !is_cidr(cidr) {
+            if IpNetwork::new(cidr).is_err() {
                 problems.push(format!("{cidr:?} is not a CIDR network such as 10.0.0.0/8"));
             }
         }
@@ -200,22 +200,6 @@ impl SecurityPolicy {
 /// RFC 9110 §5.6.2 token characters.
 fn is_tchar(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte)
-}
-
-/// A network such as `10.0.0.0/8`, or a single address.
-pub(crate) fn is_cidr(value: &str) -> bool {
-    let (address, prefix) = value
-        .split_once('/')
-        .map_or((value, None), |(address, prefix)| (address, Some(prefix)));
-    let Ok(address) = address.parse::<IpAddr>() else {
-        return false;
-    };
-    let max = if address.is_ipv4() { 32 } else { 128 };
-    prefix.is_none_or(|bits| {
-        !bits.is_empty()
-            && bits.bytes().all(|byte| byte.is_ascii_digit())
-            && bits.parse::<u8>().is_ok_and(|bits| bits <= max)
-    })
 }
 
 #[cfg(test)]

@@ -9,7 +9,7 @@ use crate::{
     variables,
 };
 use panel_config_model::SecurityPolicy;
-use panel_domain::NormalizedHost;
+use panel_domain::{IpNetwork, NormalizedHost};
 use panel_dsl::{Argument, Directive};
 use panel_ir::{BasicAuth, LimitedResponse, RateLimit, RateLimitKey, RealIpHeader, RefererRule};
 use std::collections::BTreeSet;
@@ -223,7 +223,7 @@ impl Lowerer<'_> {
             let Some(value) = self.value(file, arg) else {
                 continue;
             };
-            if values::parse_cidr(&value).is_some() {
+            if IpNetwork::new(&value).is_ok() {
                 networks.push(value);
             } else {
                 self.error_with_help(

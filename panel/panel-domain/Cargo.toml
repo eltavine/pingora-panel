@@ -10,6 +10,7 @@ publish.workspace = true
 [dependencies]
 hex.workspace = true
 idna.workspace = true
+ipnet.workspace = true
 serde.workspace = true
 sha2.workspace = true
 thiserror.workspace = true

@@ -5,6 +5,7 @@
 use crate::secrets::SecretSource;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use http::{header, HeaderName, Method};
+use panel_domain::IpNetwork;
 use panel_errors::{PanelError, Result};
 use panel_ir::{RateLimitKey, RealIpHeader, SecurityPolicy};
 use parking_lot::Mutex;
@@ -33,64 +34,29 @@ static CREDENTIAL_SALT: LazyLock<[u8; 32]> = LazyLock::new(|| {
     salt
 });
 
-/// Client networks in CIDR notation, compared as numbers.
+/// Client networks in CIDR notation.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub(crate) struct Networks {
-    v4: Vec<(u32, u32)>,
-    v6: Vec<(u128, u128)>,
-}
+pub(crate) struct Networks(Vec<IpNetwork>);
 
 impl Networks {
     pub(crate) fn parse<'a>(cidrs: impl IntoIterator<Item = &'a String>) -> Result<Self> {
-        let mut networks = Self::default();
-        for cidr in cidrs {
-            let invalid =
-                || PanelError::validation_failed(format!("{cidr:?} is not a CIDR network"));
-            let (address, prefix) = match cidr.split_once('/') {
-                Some((address, prefix)) => (address, Some(prefix)),
-                None => (cidr.as_str(), None),
-            };
-            match address.trim().parse::<IpAddr>().map_err(|_| invalid())? {
-                IpAddr::V4(address) => {
-                    let bits: u32 = prefix.map_or(Ok(32), str::parse).map_err(|_| invalid())?;
-                    if bits > 32 {
-                        return Err(invalid());
-                    }
-                    let mask = u32::MAX.checked_shl(32 - bits).unwrap_or(0);
-                    networks.v4.push((u32::from(address) & mask, mask));
-                }
-                IpAddr::V6(address) => {
-                    let bits: u32 = prefix.map_or(Ok(128), str::parse).map_err(|_| invalid())?;
-                    if bits > 128 {
-                        return Err(invalid());
-                    }
-                    let mask = u128::MAX.checked_shl(128 - bits).unwrap_or(0);
-                    networks.v6.push((u128::from(address) & mask, mask));
-                }
-            }
-        }
-        Ok(networks)
+        cidrs
+            .into_iter()
+            .map(|cidr| {
+                IpNetwork::new(cidr.trim())
+                    .map_err(|error| PanelError::validation_failed(error.to_string()))
+            })
+            .collect::<Result<_>>()
+            .map(Self)
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.v4.is_empty() && self.v6.is_empty()
+        self.0.is_empty()
     }
 
     pub(crate) fn contains(&self, address: IpAddr) -> bool {
-        match canonical(address) {
-            IpAddr::V4(address) => {
-                let address = u32::from(address);
-                self.v4
-                    .iter()
-                    .any(|(network, mask)| address & mask == *network)
-            }
-            IpAddr::V6(address) => {
-                let address = u128::from(address);
-                self.v6
-                    .iter()
-                    .any(|(network, mask)| address & mask == *network)
-            }
-        }
+        let address = canonical(address);
+        self.0.iter().any(|network| network.contains(address))
     }
 }
 

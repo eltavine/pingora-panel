@@ -2,10 +2,7 @@
 //! `key=value` parameters.
 
 use panel_dsl::Argument;
-use std::{
-    collections::BTreeMap,
-    net::{IpAddr, SocketAddr},
-};
+use std::{collections::BTreeMap, net::SocketAddr};
 
 /// `on` or `off`; `true` and `false` are accepted as well.
 pub fn parse_bool(value: &str) -> Option<bool> {
@@ -109,25 +106,6 @@ pub fn print_size(bytes: u64) -> String {
         )
 }
 
-/// An IP network such as `10.0.0.0/8` or `2001:db8::/32`; a bare address is
-/// a single host.
-pub fn parse_cidr(value: &str) -> Option<(IpAddr, u8)> {
-    let (address, prefix) = match value.split_once('/') {
-        Some((address, prefix)) => (address, Some(prefix)),
-        None => (value, None),
-    };
-    let address: IpAddr = address.parse().ok()?;
-    let max = if address.is_ipv4() { 32 } else { 128 };
-    let prefix = match prefix {
-        Some(prefix) if !prefix.is_empty() && prefix.bytes().all(|byte| byte.is_ascii_digit()) => {
-            prefix.parse::<u8>().ok().filter(|prefix| *prefix <= max)?
-        }
-        Some(_) => return None,
-        None => max,
-    };
-    Some((address, prefix))
-}
-
 pub fn parse_socket_address(value: &str) -> Option<SocketAddr> {
     value.parse().ok()
 }
@@ -222,16 +200,7 @@ mod tests {
     }
 
     #[test]
-    fn networks_and_booleans() {
-        assert_eq!(
-            parse_cidr("10.0.0.0/8"),
-            Some(("10.0.0.0".parse().unwrap(), 8))
-        );
-        assert_eq!(parse_cidr("2001:db8::/32").unwrap().1, 32);
-        assert_eq!(parse_cidr("192.0.2.1").unwrap().1, 32);
-        for invalid in ["10.0.0.0/33", "10.0.0.0/", "host/8", "::/129"] {
-            assert_eq!(parse_cidr(invalid), None, "{invalid}");
-        }
+    fn booleans() {
         assert_eq!(parse_bool("on"), Some(true));
         assert_eq!(parse_bool("false"), Some(false));
         assert_eq!(parse_bool("yes"), None);
