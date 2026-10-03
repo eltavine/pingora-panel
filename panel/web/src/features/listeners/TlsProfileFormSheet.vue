@@ -10,6 +10,7 @@ import {
   putTlsProfileMutation,
 } from '@/api/generated/@tanstack/vue-query.gen'
 import FormField from '@/components/FormField.vue'
+import SwitchField from '@/components/SwitchField.vue'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -38,6 +39,8 @@ import {
 import { useSession } from '@/lib/session'
 import {
   ALPN_PROTOCOLS,
+  CIPHER_SUITES,
+  NEWEST,
   RESOURCE_ID,
   TLS_VERSIONS,
   tlsProfileBody,
@@ -75,6 +78,13 @@ const idError = computed(() => {
   }
   return props.taken.includes(form.id) ? t('listeners.idTaken') : null
 })
+
+function toggleSuite(suite: string, checked: boolean | 'indeterminate') {
+  form.cipherSuites =
+    checked === true
+      ? [...form.cipherSuites, suite]
+      : form.cipherSuites.filter((value) => value !== suite)
+}
 
 function toggleAlpn(protocol: string, checked: boolean | 'indeterminate') {
   form.alpn =
@@ -200,16 +210,57 @@ function submit() {
               </FormField>
             </TabsContent>
           </Tabs>
-          <FormField id="profile-min" :label="t('listeners.profiles.minProtocol')">
-            <Select v-model="form.minProtocol">
-              <SelectTrigger id="profile-min" class="w-full"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem v-for="version in TLS_VERSIONS" :key="version" :value="version">
-                  {{ version }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </FormField>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <FormField id="profile-min" :label="t('listeners.profiles.minProtocol')">
+              <Select v-model="form.minProtocol">
+                <SelectTrigger id="profile-min" class="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem v-for="version in TLS_VERSIONS" :key="version" :value="version">
+                    {{ version }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </FormField>
+            <FormField id="profile-max" :label="t('listeners.profiles.maxProtocol')">
+              <Select v-model="form.maxProtocol">
+                <SelectTrigger id="profile-max" class="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem :value="NEWEST">{{ t('listeners.profiles.newest') }}</SelectItem>
+                  <SelectItem v-for="version in TLS_VERSIONS" :key="version" :value="version">
+                    {{ version }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </FormField>
+          </div>
+          <fieldset class="flex flex-col gap-2">
+            <legend class="mb-1.5 text-sm font-medium">
+              {{ t('listeners.profiles.ciphers') }}
+            </legend>
+            <template v-for="(suites, version) in CIPHER_SUITES" :key="version">
+              <span class="text-muted-foreground text-xs font-medium">{{ version }}</span>
+              <label v-for="suite in suites" :key="suite" class="flex items-center gap-2 text-sm">
+                <Checkbox
+                  :model-value="form.cipherSuites.includes(suite)"
+                  @update:model-value="toggleSuite(suite, $event)"
+                />
+                <span class="font-mono text-xs break-all">{{ suite }}</span>
+              </label>
+            </template>
+            <p class="text-muted-foreground text-xs">{{ t('listeners.profiles.ciphersHint') }}</p>
+          </fieldset>
+          <SwitchField
+            id="profile-resumption"
+            v-model="form.sessionResumption"
+            :label="t('listeners.profiles.sessionResumption')"
+            :hint="t('listeners.profiles.sessionResumptionHint')"
+          />
+          <SwitchField
+            id="profile-ocsp"
+            v-model="form.ocspStapling"
+            :label="t('listeners.profiles.ocspStapling')"
+            :hint="t('listeners.profiles.ocspReserved')"
+          />
           <fieldset class="flex flex-col gap-2">
             <legend class="mb-1.5 text-sm font-medium">{{ t('listeners.profiles.alpn') }}</legend>
             <label

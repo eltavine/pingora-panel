@@ -195,12 +195,20 @@ test('TLS profiles serve certificates of the inventory', async ({ page }) => {
   await expect(sheet.getByRole('button', { name: 'Save' })).toBeDisabled()
   await sheet.getByRole('combobox', { name: 'Certificate' }).click()
   await page.getByRole('option', { name: /example\.com/ }).click()
+  await sheet.getByRole('combobox', { name: 'Maximum TLS version' }).click()
+  await page.getByRole('option', { name: 'TLSv1.2' }).click()
+  await sheet.getByRole('checkbox', { name: 'TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256' }).click()
+  await sheet.getByRole('switch', { name: 'Session resumption' }).click()
   await sheet.getByRole('button', { name: 'Save' }).click()
   await expect(page.getByText('Saved TLS profile edge')).toBeVisible()
   expect(saved[0]!.postDataJSON()).toEqual({
     id: 'edge',
     certificate_id: 'example.com',
     min_protocol: 'TLSv1.2',
+    max_protocol: 'TLSv1.2',
+    cipher_suites: ['TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256'],
+    session_resumption: false,
+    ocsp_stapling: false,
     alpn: ['h2', 'http/1.1'],
   })
 })

@@ -1,6 +1,24 @@
 import type { ListenerView, TlsProfileView } from '@/api/generated'
 
 export const TLS_VERSIONS = ['TLSv1.2', 'TLSv1.3'] as const
+/** The maximum version when none is named. */
+export const NEWEST = 'newest'
+/** Cipher suites a profile may name, by IANA name and TLS version. */
+export const CIPHER_SUITES = {
+  'TLSv1.3': [
+    'TLS13_AES_256_GCM_SHA384',
+    'TLS13_AES_128_GCM_SHA256',
+    'TLS13_CHACHA20_POLY1305_SHA256',
+  ],
+  'TLSv1.2': [
+    'TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384',
+    'TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256',
+    'TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256',
+    'TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384',
+    'TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256',
+    'TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256',
+  ],
+} as const
 export const ALPN_PROTOCOLS = ['h2', 'http/1.1'] as const
 export const RESOURCE_ID = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/
 
@@ -26,6 +44,11 @@ export interface TlsProfileForm {
   certificateSecretId: string
   privateKeySecretId: string
   minProtocol: string
+  /** {@link NEWEST} names no maximum. */
+  maxProtocol: string
+  cipherSuites: string[]
+  sessionResumption: boolean
+  ocspStapling: boolean
   alpn: string[]
 }
 
@@ -63,6 +86,10 @@ export function tlsProfileForm(profile?: TlsProfileView): TlsProfileForm {
     certificateSecretId: profile?.certificate_secret_id ?? '',
     privateKeySecretId: profile?.private_key_secret_id ?? '',
     minProtocol: profile?.min_protocol ?? 'TLSv1.2',
+    maxProtocol: profile?.max_protocol ?? NEWEST,
+    cipherSuites: [...(profile?.cipher_suites ?? [])],
+    sessionResumption: profile?.session_resumption ?? true,
+    ocspStapling: profile?.ocsp_stapling ?? false,
     alpn: [...(profile?.alpn ?? ['h2', 'http/1.1'])],
   }
 }
@@ -79,6 +106,10 @@ export function tlsProfileBody(form: TlsProfileForm) {
     id: form.id.trim(),
     ...certificate,
     min_protocol: form.minProtocol,
+    max_protocol: form.maxProtocol === NEWEST ? null : form.maxProtocol,
+    cipher_suites: [...form.cipherSuites],
+    session_resumption: form.sessionResumption,
+    ocsp_stapling: form.ocspStapling,
     alpn: [...form.alpn],
   }
 }

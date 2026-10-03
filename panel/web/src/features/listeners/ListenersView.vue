@@ -256,7 +256,7 @@ function confirmRemove() {
               <TableRow>
                 <TableHead>{{ t('listeners.id') }}</TableHead>
                 <TableHead>{{ t('listeners.profiles.inventoryCertificate') }}</TableHead>
-                <TableHead>{{ t('listeners.profiles.minProtocol') }}</TableHead>
+                <TableHead>{{ t('listeners.profiles.versions') }}</TableHead>
                 <TableHead>{{ t('listeners.profiles.alpn') }}</TableHead>
                 <TableHead class="w-20"
                   ><span class="sr-only">{{ t('common.actions') }}</span></TableHead
@@ -275,7 +275,9 @@ function confirmRemove() {
                     >{{ profile.certificate_secret_id }} · {{ profile.private_key_secret_id }}</span
                   >
                 </TableCell>
-                <TableCell>{{ profile.min_protocol }}</TableCell>
+                <TableCell class="text-xs whitespace-nowrap"
+                  >{{ profile.min_protocol }} – {{ profile.max_protocol ?? 'TLSv1.3' }}</TableCell
+                >
                 <TableCell>
                   <div class="flex flex-wrap gap-1">
                     <Badge v-for="protocol in profile.alpn" :key="protocol" variant="outline">{{

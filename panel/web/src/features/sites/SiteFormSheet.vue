@@ -42,6 +42,7 @@ import {
 } from '@/lib/configuration'
 import ActionFields from './ActionFields.vue'
 import {
+  PRELOAD_DAYS,
   SITE_KINDS,
   WWW_REDIRECTS,
   siteForm,
@@ -80,6 +81,9 @@ const kind = computed<SiteKind>({
     SITE_KINDS.find((value) => siteKindAction[value] === form.action.type) ?? 'reverse_proxy',
   set: (value) => (form.action.type = siteKindAction[value]),
 })
+const preloadReady = computed(
+  () => form.hsts.includeSubdomains && Number(form.hsts.maxAgeDays) >= PRELOAD_DAYS,
+)
 const profile = computed({
   get: () => form.tlsProfileId || NO_PROFILE,
   set: (value: string) => (form.tlsProfileId = value === NO_PROFILE ? '' : value),
@@ -152,6 +156,38 @@ function submit() {
             v-model="form.httpsRedirect"
             :label="t('sites.form.httpsRedirect')"
           />
+          <SwitchField
+            id="site-hsts"
+            v-model="form.hsts.enabled"
+            :label="t('sites.form.hsts')"
+            :hint="t('sites.form.hstsHint')"
+          />
+          <div v-if="form.hsts.enabled" class="flex flex-col gap-3 rounded-md border p-3">
+            <FormField id="site-hsts-age" :label="t('sites.form.hstsMaxAge')">
+              <Input
+                id="site-hsts-age"
+                v-model="form.hsts.maxAgeDays"
+                type="number"
+                min="0"
+                class="w-32"
+              />
+            </FormField>
+            <label class="flex items-center gap-2 text-sm">
+              <Checkbox v-model="form.hsts.includeSubdomains" />
+              {{ t('sites.form.hstsSubdomains') }}
+            </label>
+            <label class="flex items-center gap-2 text-sm">
+              <Checkbox v-model="form.hsts.preload" />
+              {{ t('sites.form.hstsPreload') }}
+            </label>
+            <p
+              v-if="form.hsts.preload"
+              class="text-xs"
+              :class="preloadReady ? 'text-muted-foreground' : 'text-destructive'"
+            >
+              {{ t('sites.form.hstsPreloadHint') }}
+            </p>
+          </div>
 
           <FormField id="site-www" :label="t('sites.form.wwwRedirect')">
             <Select v-model="form.wwwRedirect">

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { RESOURCE_ID, listenerBody, listenerForm, tlsProfileBody, tlsProfileForm } from '../forms'
+import {
+  NEWEST,
+  RESOURCE_ID,
+  listenerBody,
+  listenerForm,
+  tlsProfileBody,
+  tlsProfileForm,
+} from '../forms'
 
 describe('listener forms', () => {
   it('leaves IPv6-only and empty references unset', () => {
@@ -36,6 +43,10 @@ describe('TLS profile forms', () => {
       certificate_secret_id: 'example.crt',
       private_key_secret_id: 'example.key',
       min_protocol: 'TLSv1.2',
+      max_protocol: null,
+      cipher_suites: [],
+      session_resumption: true,
+      ocsp_stapling: false,
       alpn: ['h2', 'http/1.1'],
     })
   })
@@ -50,6 +61,10 @@ describe('TLS profile forms', () => {
       id: 'edge',
       certificate_id: 'example.com',
       min_protocol: 'TLSv1.2',
+      max_protocol: null,
+      cipher_suites: [],
+      session_resumption: true,
+      ocsp_stapling: false,
       alpn: ['h2', 'http/1.1'],
     })
     const files = tlsProfileForm({
@@ -71,5 +86,32 @@ describe('TLS profile forms', () => {
       etag: '"1"',
     })
     expect(managed.source).toBe('inventory')
+  })
+
+  it('caps versions, names cipher suites and turns resumption off', () => {
+    const form = tlsProfileForm()
+    form.id = 'strict'
+    form.certificateId = 'example.com'
+    form.maxProtocol = 'TLSv1.2'
+    form.cipherSuites = ['TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256']
+    form.sessionResumption = false
+    expect(tlsProfileBody(form)).toMatchObject({
+      max_protocol: 'TLSv1.2',
+      cipher_suites: ['TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256'],
+      session_resumption: false,
+    })
+    const saved = tlsProfileForm({
+      id: 'strict',
+      certificate_secret_id: '',
+      private_key_secret_id: '',
+      min_protocol: 'TLSv1.2',
+      max_protocol: 'TLSv1.2',
+      cipher_suites: ['TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256'],
+      session_resumption: false,
+      alpn: [],
+      etag: '"1"',
+    })
+    expect([saved.maxProtocol, saved.sessionResumption]).toEqual(['TLSv1.2', false])
+    expect(tlsProfileForm().maxProtocol).toBe(NEWEST)
   })
 })

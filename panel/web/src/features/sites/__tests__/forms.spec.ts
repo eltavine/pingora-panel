@@ -98,6 +98,30 @@ describe('site forms', () => {
     expect(input.tags).toEqual(['prod', 'eu', 'new'])
     expect(input.tls_profile_id).toBeNull()
   })
+
+  it('sends HSTS in seconds and only when it is on', () => {
+    const form = siteForm()
+    form.name = 'Shop'
+    form.action.upstreamId = 'u1'
+    expect(siteInput(form).hsts).toBeNull()
+    form.hsts.enabled = true
+    form.hsts.includeSubdomains = true
+    expect(siteInput(form).hsts).toEqual({
+      max_age_seconds: 31_536_000,
+      include_subdomains: true,
+      preload: false,
+    })
+    const strict = siteForm({
+      ...site,
+      hsts: { max_age_seconds: 63_072_000, include_subdomains: true, preload: true },
+    })
+    expect(strict.hsts).toEqual({
+      enabled: true,
+      maxAgeDays: 730,
+      includeSubdomains: true,
+      preload: true,
+    })
+  })
 })
 
 describe('route forms', () => {

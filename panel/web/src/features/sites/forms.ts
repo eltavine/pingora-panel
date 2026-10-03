@@ -46,11 +46,24 @@ export interface ActionForm {
   retryAfter: number | string
 }
 
+/** Strict-Transport-Security as the form edits it, in days. */
+export interface HstsForm {
+  enabled: boolean
+  maxAgeDays: number | string
+  includeSubdomains: boolean
+  preload: boolean
+}
+
+const DAY_SECONDS = 86_400
+/** Browsers' preload lists accept a year or more. */
+export const PRELOAD_DAYS = 365
+
 export interface SiteForm {
   name: string
   action: ActionForm
   domains: string
   httpsRedirect: boolean
+  hsts: HstsForm
   wwwRedirect: WwwRedirect
   listenerIds: string[]
   tlsProfileId: string
@@ -165,6 +178,12 @@ export function siteForm(site?: SiteView): SiteForm {
     action: actionForm(site?.action),
     domains: '',
     httpsRedirect: site?.https_redirect ?? false,
+    hsts: {
+      enabled: Boolean(site?.hsts),
+      maxAgeDays: site?.hsts ? Math.round(site.hsts.max_age_seconds / DAY_SECONDS) : PRELOAD_DAYS,
+      includeSubdomains: site?.hsts?.include_subdomains ?? false,
+      preload: site?.hsts?.preload ?? false,
+    },
     wwwRedirect: site?.www_redirect ?? 'none',
     listenerIds: [...(site?.listener_ids ?? [])],
     tlsProfileId: site?.tls_profile_id ?? '',
@@ -190,6 +209,13 @@ export function siteInput(form: SiteForm, site?: SiteView): SiteInput {
       : hosts.map((host, index) => ({ host, primary: index === 0, enabled: true })),
     routes: site ? (site.routes ?? []).map(routeInputOf) : [],
     https_redirect: form.httpsRedirect,
+    hsts: form.hsts.enabled
+      ? {
+          max_age_seconds: (optionalNumber(form.hsts.maxAgeDays) ?? 0) * DAY_SECONDS,
+          include_subdomains: form.hsts.includeSubdomains,
+          preload: form.hsts.preload,
+        }
+      : null,
     www_redirect: form.wwwRedirect,
     listener_ids: form.listenerIds,
     tls_profile_id: optionalText(form.tlsProfileId),
