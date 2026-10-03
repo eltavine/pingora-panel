@@ -1396,7 +1396,7 @@ dependencies = [
 
 [[package]]
 name = "gateway-pingora"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arc-swap",
  "argon2",
@@ -2574,7 +2574,7 @@ dependencies = [
 
 [[package]]
 name = "panel-api"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -2664,7 +2664,7 @@ dependencies = [
 
 [[package]]
 name = "panel-application"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "panel-context",
@@ -3004,7 +3004,7 @@ dependencies = [
 
 [[package]]
 name = "panel-ir"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "panel-domain",
  "serde",
