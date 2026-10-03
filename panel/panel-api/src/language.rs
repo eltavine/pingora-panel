@@ -33,6 +33,10 @@ pub struct ConfigFiles {
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct ConfigSource {
     pub language_version: u32,
+    /// The draft version these files are.
+    pub version: u64,
+    /// The draft's entity tag, for `If-Match` when replacing the files.
+    pub etag: String,
     pub files: BTreeMap<String, String>,
     /// Warnings about the files, such as deprecated directives.
     pub diagnostics: Vec<DiagnosticDetails>,

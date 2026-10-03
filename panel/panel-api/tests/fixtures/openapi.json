@@ -25136,6 +25136,8 @@
         "description": "The draft in the configuration language.",
         "required": [
           "language_version",
+          "version",
+          "etag",
           "files",
           "diagnostics"
         ],
@@ -25146,6 +25148,10 @@
               "$ref": "#/components/schemas/DiagnosticDetails"
             },
             "description": "Warnings about the files, such as deprecated directives."
+          },
+          "etag": {
+            "type": "string",
+            "description": "The draft's entity tag, for `If-Match` when replacing the files."
           },
           "files": {
             "type": "object",
@@ -25159,6 +25165,12 @@
           "language_version": {
             "type": "integer",
             "format": "int32",
+            "minimum": 0
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The draft version these files are.",
             "minimum": 0
           }
         }

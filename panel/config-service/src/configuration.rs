@@ -182,6 +182,8 @@ impl ConfigurationService {
                 json_output(
                     &json!({
                         "language_version": LANGUAGE_VERSION,
+                        "version": draft.version,
+                        "etag": draft_etag(draft.version),
                         "files": draft.sources,
                         "diagnostics": warnings(&lowered.diagnostics),
                     }),
@@ -528,6 +530,8 @@ impl Configuration for ConfigurationService {
                             let (model, written, warnings) = language::replace(&sources, &draft.model)?;
                             let content = serde_json::to_vec(&json!({
                                 "language_version": LANGUAGE_VERSION,
+                                "version": draft.version + 1,
+                                "etag": next_etag,
                                 "files": written,
                                 "diagnostics": warnings,
                             }))

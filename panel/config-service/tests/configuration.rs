@@ -346,6 +346,7 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
         "language_version 1;\n\nhttp {\n}\n"
     );
     assert_eq!(source.etag.as_deref(), Some("\"draft-0\""));
+    assert_eq!(json(&source.content)["etag"], "\"draft-0\"");
 
     let invalid = client
         .read(scope(), read("config.check", "config", json!({"files": {"main.conf": "language_version 1;\nhttp {\n    server s { proxy nowhere; }\n}\n"}})))
@@ -409,6 +410,7 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
     saved.if_match = Some("\"draft-0\"".into());
     let saved = client.change(command("text"), saved).await.unwrap();
     assert_eq!(saved.etag.as_deref(), Some("\"draft-1\""));
+    assert_eq!(json(&saved.content)["version"], 1);
     let text = json(&saved.content)["files"]["main.conf"]
         .as_str()
         .unwrap()
