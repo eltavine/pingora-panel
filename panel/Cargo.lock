@@ -1918,6 +1918,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "identity-oidc"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "panel-errors",
+ "ring",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "identity-postgres"
 version = "0.1.0"
 dependencies = [

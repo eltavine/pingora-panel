@@ -479,6 +479,12 @@
         "panel-errors"
       ]
     },
+    "identity-oidc": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-errors"
+      ]
+    },
     "dns-rfc2136": {
       "catalog": true,
       "allowed_workspace_dependencies": [

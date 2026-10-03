@@ -21,6 +21,7 @@ members = [
     "panel-certificates",
     "panel-acme",
     "dns-rfc2136",
+    "identity-oidc",
     "panel-secrets",
     "panel-tls",
     "panel-platform",
@@ -128,6 +129,7 @@ panel-pki = { version = "=0.1.0", path = "panel-pki" }
 panel-certificates = { version = "=0.1.0", path = "panel-certificates" }
 panel-acme = { version = "=0.1.0", path = "panel-acme" }
 dns-rfc2136 = { version = "=0.1.0", path = "dns-rfc2136" }
+identity-oidc = { version = "=0.1.0", path = "identity-oidc" }
 panel-secrets = { version = "=0.1.0", path = "panel-secrets" }
 panel-tls = { version = "=0.1.0", path = "panel-tls" }
 panel-platform = { version = "=0.1.0", path = "panel-platform" }
