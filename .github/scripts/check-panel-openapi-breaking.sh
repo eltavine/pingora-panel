@@ -33,5 +33,7 @@ fi
 baseline_spec="$(mktemp "${TMPDIR:-/tmp}/pingora-panel-openapi.XXXXXX.json")"
 trap 'rm -f -- "$baseline_spec"' EXIT
 git -C "$repo_root" show "${baseline_ref}:${spec_path}" >"$baseline_spec"
-oasdiff breaking --allow-external-refs=false --fail-on ERR \
+# Views flatten their resource into an allOf; comparing the merged schema
+# judges what a response guarantees rather than how it is composed.
+oasdiff breaking --allow-external-refs=false --flatten-allof --fail-on ERR \
   "$baseline_spec" "$repo_root/$spec_path"
