@@ -29,6 +29,7 @@ mod routes;
 mod sign_in;
 mod state;
 mod tls_checks;
+mod workload;
 
 pub use access::{AccessAudit, AccessSettings, Refusal};
 pub use approvals::Rejection;
@@ -55,6 +56,9 @@ pub use sign_in::{
     PasswordSignInMode, SignInOptionResponse, SignInPolicy,
 };
 pub use state::ApiState;
+pub use workload::{
+    WorkloadExchange, WorkloadIdentityInput, WorkloadIdentityResponse, WorkloadSession,
+};
 
 #[cfg(test)]
 mod tests;

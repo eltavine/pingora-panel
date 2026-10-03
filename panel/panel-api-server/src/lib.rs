@@ -30,7 +30,7 @@ use panel_errors::{PanelError, Result};
 use panel_health::Impact;
 use panel_identity::{
     Identity, IdentitySettings, OpenIdConnect, ProviderDirectory, ProviderSignIns, SecretHash,
-    SessionPolicy,
+    SessionPolicy, WorkloadIdentity,
 };
 use panel_platform::ServiceName;
 use panel_postgres::{EventLog, SqlIdentifier};
@@ -181,7 +181,9 @@ pub fn process(
     let runtime = RecordedRuntime::new(Arc::new(gateway), operations.clone());
     let store = Arc::new(PgIdentityStore::new(process.database(), events));
     let roles = roles::BuiltInRoles::new(Arc::clone(&store), bootstrap.is_some());
-    let providers = identity_providers(&store, vault, origins.first().cloned(), sessions)?;
+    let oidc = Arc::new(OidcClient::new(PROVIDER_TIMEOUT)?);
+    let workloads = WorkloadIdentity::new(store.clone(), store.clone(), oidc.clone());
+    let providers = identity_providers(&store, oidc, vault, origins.first().cloned(), sessions);
     let identity = Identity::new(
         store,
         IdentitySettings {
@@ -223,6 +225,7 @@ pub fn process(
             {
                 running.spawn(recheck_sessions(sign_ins, running.shutdown_token()));
             }
+            let state = state.with_workload_identity(workloads);
             let state = match providers {
                 Some((directory, sign_ins)) => state.with_identity_providers(directory, sign_ins),
                 None => state,
@@ -243,16 +246,16 @@ pub fn process(
 /// through them a public origin for people to return to.
 fn identity_providers(
     store: &Arc<PgIdentityStore>,
+    connect: Arc<dyn OpenIdConnect>,
     vault: Option<EnvelopeVault>,
     public_origin: Option<String>,
     sessions: SessionPolicy,
-) -> Result<Option<(ProviderDirectory, Option<ProviderSignIns>)>> {
+) -> Option<(ProviderDirectory, Option<ProviderSignIns>)> {
     let Some(vault) = vault else {
         tracing::warn!("{MASTER_KEYS_ENV} is not set; identity providers are not available");
-        return Ok(None);
+        return None;
     };
     let vault: Arc<dyn SecretVault> = Arc::new(vault);
-    let connect: Arc<dyn OpenIdConnect> = Arc::new(OidcClient::new(PROVIDER_TIMEOUT)?);
     let directory = ProviderDirectory::new(
         store.clone(),
         store.clone(),
@@ -263,7 +266,7 @@ fn identity_providers(
         tracing::warn!(
             "{PUBLIC_ORIGINS_ENV} is not set; nobody can sign in through identity providers"
         );
-        return Ok(Some((directory, None)));
+        return Some((directory, None));
     };
     let sign_ins = ProviderSignIns::new(
         directory.clone(),
@@ -274,7 +277,7 @@ fn identity_providers(
         origin,
         sessions,
     );
-    Ok(Some((directory, Some(sign_ins))))
+    Some((directory, Some(sign_ins)))
 }
 
 /// Asks providers about the sessions signed in through them, until shutdown.

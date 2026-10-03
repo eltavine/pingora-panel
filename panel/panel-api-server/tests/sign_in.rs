@@ -61,15 +61,21 @@ fn on_server(base: &str, location: &str) -> String {
     format!("{base}{}?{}", url.path(), url.query().unwrap())
 }
 
-#[tokio::test]
-async fn people_sign_in_through_an_identity_provider() {
+/// The API with its identity database, answering on `base`.
+struct Server {
+    base: String,
+    _api: panel_control_runtime::RunningProcess,
+    _broker: TestBroker,
+    _database: TestDatabase,
+}
+
+async fn server() -> Option<Server> {
     let (Some(mut database), Some(broker)) =
         (TestDatabase::create().await, TestBroker::create().await)
     else {
-        return;
+        return None;
     };
     let secrets = database.bootstrap(&[("identity", "identity")]).await;
-    let provider = TestProvider::start("panel", Some("client-secret")).await;
     let http = free_port();
     let mut env = environment(vec![
         (DATABASE_URL_ENV, database.service_url("identity")),
@@ -92,16 +98,15 @@ async fn people_sign_in_through_an_identity_provider() {
             "127.0.0.1:0".parse().unwrap(),
             "127.0.0.1:0".parse().unwrap(),
         );
-    let _api = panel_api_server::process(&mut env, settings)
+    let api = panel_api_server::process(&mut env, settings)
         .unwrap()
         .with_jetstream_settings((*broker.settings).clone())
         .start()
         .await
         .unwrap();
     let base = format!("http://{http}");
-    let browser = Client::builder().redirect(Policy::none()).build().unwrap();
     for _ in 0..200 {
-        if browser
+        if Client::new()
             .get(format!("{base}/api/v1/setup"))
             .send()
             .await
@@ -111,8 +116,23 @@ async fn people_sign_in_through_an_identity_provider() {
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+    Some(Server {
+        base,
+        _api: api,
+        _broker: broker,
+        _database: database,
+    })
+}
 
-    let admin = support::signed_in(&base).await;
+#[tokio::test]
+async fn people_sign_in_through_an_identity_provider() {
+    let Some(server) = server().await else {
+        return;
+    };
+    let base = &server.base;
+    let provider = TestProvider::start("panel", Some("client-secret")).await;
+    let browser = Client::builder().redirect(Policy::none()).build().unwrap();
+    let admin = support::signed_in(base).await;
     let created = admin
         .put(format!("{base}/api/v1/identity-providers/corp"))
         .json(&json!({
@@ -217,7 +237,7 @@ async fn people_sign_in_through_an_identity_provider() {
     let state_cookie = set_cookie(&start, "__Host-ppanel_sign_in");
     let authorized = browser.get(location(&start)).send().await.unwrap();
     assert_eq!(authorized.status(), StatusCode::SEE_OTHER);
-    let callback = on_server(&base, &location(&authorized));
+    let callback = on_server(base, &location(&authorized));
 
     let stranger = browser.get(&callback).send().await.unwrap();
     assert_eq!(stranger.status(), StatusCode::SEE_OTHER);
@@ -237,7 +257,7 @@ async fn people_sign_in_through_an_identity_provider() {
     let state_cookie_2 = set_cookie(&start, "__Host-ppanel_sign_in");
     assert_ne!(state_cookie, state_cookie_2);
     let authorized = browser.get(location(&start)).send().await.unwrap();
-    let callback = on_server(&base, &location(&authorized));
+    let callback = on_server(base, &location(&authorized));
     let finished = browser
         .get(&callback)
         .header(COOKIE, &state_cookie_2)
@@ -287,4 +307,102 @@ async fn people_sign_in_through_an_identity_provider() {
         .await
         .unwrap();
     assert_eq!(ended.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn ci_jobs_act_as_service_accounts_with_their_own_tokens() {
+    let Some(server) = server().await else {
+        return;
+    };
+    let base = &server.base;
+    let ci = TestProvider::start("ci", None).await;
+    let admin = support::signed_in(base).await;
+    let created = admin
+        .post(format!("{base}/api/v1/accounts"))
+        .json(&json!({"username": "deployer", "roles": ["operator"], "service": true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let account: Value = created.json().await.unwrap();
+    assert_eq!(account["service"], true);
+    let trust = admin
+        .put(format!("{base}/api/v1/workload-identities/shop"))
+        .json(&json!({
+            "account_id": account["id"],
+            "issuer": ci.issuer,
+            "audience": "pingora-panel",
+            "subject": "repo:shop/site:*",
+            "claims": {"repository": "shop/site"},
+            "session_minutes": 10,
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        trust.status(),
+        StatusCode::CREATED,
+        "{}",
+        trust.text().await.unwrap()
+    );
+
+    let exchange = |token: String| {
+        Client::new()
+            .post(format!("{base}/api/v1/auth/workload"))
+            .json(&json!({ "token": token }))
+            .send()
+    };
+    let job = json!({
+        "sub": "repo:shop/site:ref:refs/heads/main",
+        "aud": "pingora-panel",
+        "repository": "shop/site",
+    });
+    let session = exchange(ci.workload_token(job.clone())).await.unwrap();
+    assert_eq!(session.status(), StatusCode::CREATED);
+    assert_eq!(session.headers()["cache-control"], "no-store");
+    let session: Value = session.json().await.unwrap();
+    assert_eq!(session["account"], "deployer");
+    let bearer = format!("Bearer {}", session["secret"].as_str().unwrap());
+    let current: Value = Client::new()
+        .get(format!("{base}/api/v1/session"))
+        .header("authorization", &bearer)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(current["account"]["username"], "deployer");
+    assert!(current["permissions"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("config.apply")));
+    let minted = Client::new()
+        .post(format!("{base}/api/v1/account/tokens"))
+        .header("authorization", &bearer)
+        .json(&json!({"name": "escape", "expires_in_days": 30}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(minted.status(), StatusCode::FORBIDDEN);
+
+    let mut other = job.clone();
+    other["repository"] = json!("shop/other");
+    let refused = exchange(ci.workload_token(other)).await.unwrap();
+    assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+    let forged = exchange("not-a-token".into()).await.unwrap();
+    assert_eq!(forged.status(), StatusCode::UNAUTHORIZED);
+
+    let issued = admin
+        .post(format!(
+            "{base}/api/v1/accounts/{}/tokens",
+            account["id"].as_str().unwrap()
+        ))
+        .json(&json!({"name": "nightly", "expires_in_days": 7}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(issued.status(), StatusCode::CREATED);
+    let issued: Value = issued.json().await.unwrap();
+    assert!(issued["secret"].as_str().unwrap().starts_with("ppat_"));
 }

@@ -357,7 +357,7 @@ pub(crate) struct AccountTokenPath {
 
 type Peer = Option<Extension<ConnectInfo<SocketAddr>>>;
 
-fn gate<U>(state: &ApiState<U>) -> Result<Arc<Gate>, ApiError> {
+pub(crate) fn gate<U>(state: &ApiState<U>) -> Result<Arc<Gate>, ApiError> {
     state.identity.clone().ok_or_else(|| {
         ApiError::new(PanelError::unavailable(
             "this API does not authenticate callers",

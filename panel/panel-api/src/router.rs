@@ -2,7 +2,7 @@ use crate::{
     access, acme,
     admission::{admit, Admission},
     approvals, audit, certificates, configuration as config, gateway_runtime as runtime, identity,
-    language, middleware, routes, sign_in, tls_checks, ApiConfig, ApiState,
+    language, middleware, routes, sign_in, tls_checks, workload, ApiConfig, ApiState,
 };
 use axum::{
     extract::DefaultBodyLimit,
@@ -353,6 +353,20 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         .route(
             "/api/v1/sign-in-policy",
             get(sign_in::get_sign_in_policy::<U>).put(sign_in::put_sign_in_policy::<U>),
+        )
+        .route(
+            "/api/v1/workload-identities",
+            get(workload::list_workload_identities::<U>),
+        )
+        .route(
+            "/api/v1/workload-identities/{id}",
+            get(workload::get_workload_identity::<U>)
+                .put(workload::put_workload_identity::<U>)
+                .delete(workload::delete_workload_identity::<U>),
+        )
+        .route(
+            "/api/v1/auth/workload",
+            post(workload::exchange_workload_token::<U>),
         )
         .route("/api/v1/auth/providers", get(sign_in::sign_in_options::<U>))
         .route(

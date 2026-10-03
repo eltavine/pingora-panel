@@ -81,7 +81,9 @@ mod tests;
         crate::approvals::put_approval_policy, crate::approvals::delete_approval_policy,
         crate::approvals::list_approval_requests, crate::approvals::get_approval_request,
         crate::approvals::approve_request, crate::approvals::reject_request, crate::approvals::revoke_approval,
-        crate::approvals::withdraw_request
+        crate::approvals::withdraw_request, crate::workload::list_workload_identities,
+        crate::workload::get_workload_identity, crate::workload::put_workload_identity,
+        crate::workload::delete_workload_identity, crate::workload::exchange_workload_token
     ),
     tags(
         (name = "configuration", description = "Sites, domains, routes, upstreams, listeners and TLS profiles, edited as a draft and applied to the gateway"),

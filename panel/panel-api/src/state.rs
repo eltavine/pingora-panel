@@ -6,7 +6,7 @@ use panel_application::{
     AuditPort, CertificatePort, ConfigurationPort, GatewayRuntimePort, TlsProbe,
 };
 use panel_health::HealthWatch;
-use panel_identity::{Identity, ProviderDirectory, ProviderSignIns};
+use panel_identity::{Identity, ProviderDirectory, ProviderSignIns, WorkloadIdentity};
 use panel_platform::ServiceDirectory;
 use std::sync::Arc;
 
@@ -21,6 +21,7 @@ pub struct ApiState<U> {
     pub(crate) tls_probe: Option<Arc<dyn TlsProbe>>,
     pub(crate) identity: Option<Arc<Gate>>,
     pub(crate) providers: Option<Arc<ProviderAccess>>,
+    pub(crate) workloads: Option<Arc<WorkloadIdentity>>,
     pub(crate) access_audit: Option<Arc<dyn AccessAudit>>,
 }
 
@@ -37,6 +38,7 @@ impl<U> Clone for ApiState<U> {
             tls_probe: self.tls_probe.clone(),
             identity: self.identity.clone(),
             providers: self.providers.clone(),
+            workloads: self.workloads.clone(),
             access_audit: self.access_audit.clone(),
         }
     }
@@ -55,6 +57,7 @@ impl<U> ApiState<U> {
             tls_probe: None,
             identity: None,
             providers: None,
+            workloads: None,
             access_audit: None,
         }
     }
@@ -70,6 +73,13 @@ impl<U> ApiState<U> {
             directory,
             sign_ins,
         }));
+        self
+    }
+
+    /// Keeps workload identities and exchanges workload tokens for
+    /// sessions of service accounts.
+    pub fn with_workload_identity(mut self, workloads: WorkloadIdentity) -> Self {
+        self.workloads = Some(Arc::new(workloads));
         self
     }
 
