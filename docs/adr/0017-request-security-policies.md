@@ -45,12 +45,14 @@ password files.
   request body (413, from `Content-Length` before anything is forwarded and
   while streaming otherwise) and the time between body reads (408, as RFC
   9110 has it for a request that does not arrive in time).
-- **Rate limits.** A policy may hold token buckets keyed by client address,
+- **Rate limits.** A policy may hold rate limits keyed by client address,
   host, route or a request header, each with a rate and a burst, and a cap
-  on concurrent requests per client address. Requests over a limit get 429
-  with `Retry-After`, or the policy's own status and body. Buckets live in
-  the gateway's memory, sharded and pruned when idle; they are per gateway
-  process and start full after a restart.
+  on concurrent requests per client address. Rate limits use the generic
+  cell rate algorithm of `governor`, the leaky bucket nginx's `limit_req`
+  describes, as the management API's sign-in limit does. Requests over a
+  limit get 429 with `Retry-After`, or the policy's own status and body.
+  Limiter state lives in the gateway's memory, sharded and pruned when
+  idle; it is per gateway process and starts fresh after a restart.
 - **Client addresses.** A listener may name trusted proxy networks and
   where they put the client address: `X-Forwarded-For`, `X-Real-IP` or
   `Forwarded`. The client is the rightmost address not in a trusted network,

@@ -4,6 +4,12 @@
 
 use crate::secrets::SecretSource;
 use base64::{engine::general_purpose::STANDARD, Engine};
+use governor::{
+    clock::{Clock, DefaultClock},
+    middleware::NoOpMiddleware,
+    state::keyed::HashMapStateStore,
+    Quota, RateLimiter,
+};
 use http::{header, HeaderName, Method};
 use panel_domain::IpNetwork;
 use panel_errors::{PanelError, Result};
@@ -16,6 +22,7 @@ use std::{
     collections::{hash_map::DefaultHasher, BTreeSet, HashMap},
     hash::{Hash, Hasher},
     net::IpAddr,
+    num::NonZeroU32,
     sync::{Arc, LazyLock, Weak},
     time::{Duration, Instant},
 };
@@ -24,7 +31,7 @@ use std::{
 const VERIFIED_FOR: Duration = Duration::from_secs(300);
 const MAX_VERIFIED: usize = 4096;
 const SHARDS: usize = 64;
-/// Buckets per shard before idle ones are dropped.
+/// Keys per rate limit shard before idle ones are dropped.
 const MAX_KEYS_PER_SHARD: usize = 4096;
 
 /// Salts the digests of remembered credentials for this process.
@@ -200,55 +207,53 @@ struct Concurrency {
     counts: Mutex<HashMap<IpAddr, u64>>,
 }
 
-struct Bucket {
-    tokens: f64,
-    updated: Instant,
-}
+type KeyedLimiter<C> =
+    RateLimiter<String, HashMapStateStore<String>, C, NoOpMiddleware<<C as Clock>::Instant>>;
 
-/// Token buckets of one rate limit, sharded by key.
-struct Buckets {
-    /// Tokens added per second.
-    rate: f64,
-    capacity: f64,
-    shards: Vec<Mutex<HashMap<String, Bucket>>>,
+/// One rate limit's GCRA state (the leaky bucket of nginx `limit_req`),
+/// sharded by key.
+struct Buckets<C: Clock = DefaultClock> {
+    shards: Box<[KeyedLimiter<C>]>,
+    clock: C,
 }
 
 impl Buckets {
     fn new(requests: u64, per_seconds: u64, burst: u64) -> Self {
+        Self::with_clock(requests, per_seconds, burst, DefaultClock::default())
+    }
+}
+
+impl<C: Clock + Clone> Buckets<C> {
+    fn with_clock(requests: u64, per_seconds: u64, burst: u64, clock: C) -> Self {
+        let period = u128::from(per_seconds) * 1_000_000_000 / u128::from(requests.max(1));
+        let burst = u32::try_from(burst.saturating_add(1))
+            .ok()
+            .and_then(NonZeroU32::new)
+            .unwrap_or(NonZeroU32::MAX);
+        let quota = Quota::with_period(Duration::from_nanos(
+            u64::try_from(period).unwrap_or(u64::MAX),
+        ))
+        .unwrap_or_else(|| Quota::per_second(NonZeroU32::MAX))
+        .allow_burst(burst);
         Self {
-            rate: requests as f64 / per_seconds.max(1) as f64,
-            capacity: 1.0 + burst as f64,
-            shards: (0..SHARDS).map(|_| Mutex::new(HashMap::new())).collect(),
+            shards: (0..SHARDS)
+                .map(|_| RateLimiter::hashmap_with_clock(quota, clock.clone()))
+                .collect(),
+            clock,
         }
     }
 
-    /// Takes a token for `key`, or tells how long until one is there.
-    fn take(&self, key: &str, now: Instant) -> std::result::Result<(), Duration> {
+    /// Admits a request for `key`, or tells how long until one would be.
+    fn take(&self, key: String) -> std::result::Result<(), Duration> {
         let mut hasher = DefaultHasher::new();
         key.hash(&mut hasher);
         let shard = &self.shards[(hasher.finish() as usize) % SHARDS];
-        let mut buckets = shard.lock();
-        if buckets.len() >= MAX_KEYS_PER_SHARD && !buckets.contains_key(key) {
-            let (rate, capacity) = (self.rate, self.capacity);
-            buckets.retain(|_, bucket| {
-                bucket.tokens + now.duration_since(bucket.updated).as_secs_f64() * rate < capacity
-            });
+        if shard.len() >= MAX_KEYS_PER_SHARD {
+            shard.retain_recent();
         }
-        let bucket = buckets.entry(key.to_owned()).or_insert(Bucket {
-            tokens: self.capacity,
-            updated: now,
-        });
-        let elapsed = now.duration_since(bucket.updated).as_secs_f64();
-        bucket.tokens = (bucket.tokens + elapsed * self.rate).min(self.capacity);
-        bucket.updated = now;
-        if bucket.tokens >= 1.0 {
-            bucket.tokens -= 1.0;
-            Ok(())
-        } else if self.rate > 0.0 {
-            Err(Duration::from_secs_f64((1.0 - bucket.tokens) / self.rate))
-        } else {
-            Err(Duration::from_secs(60))
-        }
+        shard
+            .check_key(&key)
+            .map_err(|not_until| not_until.wait_time_from(self.clock.now()))
     }
 }
 
@@ -675,7 +680,6 @@ impl SecurityGate {
                     .map_or(limit, |current| current.min(limit)),
             );
         }
-        let now = Instant::now();
         for limiter in &self.limiters {
             let key = match &limiter.key {
                 RateLimitKey::ClientAddress => request.client.to_string(),
@@ -689,7 +693,7 @@ impl SecurityGate {
                     .to_owned(),
                 _ => String::new(),
             };
-            if let Err(wait) = limiter.buckets.take(&key, now) {
+            if let Err(wait) = limiter.buckets.take(key) {
                 return Err(self.limited("too many requests".into(), Some(wait)));
             }
         }
@@ -725,6 +729,7 @@ impl SecurityGate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use governor::clock::FakeRelativeClock;
 
     fn networks(cidrs: &[&str]) -> Networks {
         let cidrs: Vec<String> = cidrs.iter().map(|cidr| (*cidr).to_owned()).collect();
@@ -786,16 +791,16 @@ mod tests {
 
     #[test]
     fn buckets_admit_the_burst_then_the_rate() {
-        let buckets = Buckets::new(2, 1, 1);
-        let start = Instant::now();
-        assert!(buckets.take("a", start).is_ok());
-        assert!(buckets.take("a", start).is_ok());
-        let wait = buckets.take("a", start).unwrap_err();
+        let clock = FakeRelativeClock::default();
+        let buckets = Buckets::with_clock(2, 1, 1, clock.clone());
+        assert!(buckets.take("a".into()).is_ok());
+        assert!(buckets.take("a".into()).is_ok());
+        let wait = buckets.take("a".into()).unwrap_err();
         assert!(wait <= Duration::from_millis(500) && wait > Duration::ZERO);
-        assert!(buckets.take("b", start).is_ok(), "keys are separate");
-        assert!(buckets
-            .take("a", start + Duration::from_millis(500))
-            .is_ok());
+        assert!(buckets.take("b".into()).is_ok(), "keys are separate");
+        clock.advance(Duration::from_millis(500));
+        assert!(buckets.take("a".into()).is_ok());
+        assert!(buckets.take("a".into()).is_err());
     }
 
     #[test]

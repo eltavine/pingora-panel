@@ -15,6 +15,7 @@ base64.workspace = true
 bcrypt.workspace = true
 bytes.workspace = true
 getrandom.workspace = true
+governor.workspace = true
 globset.workspace = true
 http.workspace = true
 httpdate.workspace = true
