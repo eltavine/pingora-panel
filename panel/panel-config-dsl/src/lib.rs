@@ -15,7 +15,7 @@ mod source;
 pub mod values;
 pub mod variables;
 
-pub use edit::{reconcile, write_identifiers};
+pub use edit::{format_files, reconcile, write_identifiers};
 pub use lower::{lower, Insertion, LowerOptions, Lowered, Origin};
 pub use print::print;
 pub use source::{Sources, ENTRY};

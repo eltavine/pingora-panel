@@ -179,6 +179,22 @@ fn append(text: &str, blocks: &[&Directive]) -> String {
     }
 }
 
+/// Each file formatted canonically; files with syntax errors stay as they
+/// are, and their errors are returned.
+pub fn format_files(sources: &Sources) -> (Sources, Vec<panel_errors::Diagnostic>) {
+    let mut formatted = sources.clone();
+    let mut diagnostics = Vec::new();
+    for (path, text) in sources.files() {
+        let parsed = panel_dsl::parse(path, text);
+        if parsed.is_valid() {
+            formatted.insert(path, panel_dsl::format(&parsed.document));
+        } else {
+            diagnostics.extend(parsed.diagnostics);
+        }
+    }
+    (formatted, diagnostics)
+}
+
 /// The files with identifiers assigned while reading them written in.
 pub fn write_identifiers(sources: &Sources, insertions: &[Insertion]) -> Sources {
     let mut by_file: BTreeMap<&str, Vec<(Range<usize>, String)>> = BTreeMap::new();

@@ -6,6 +6,7 @@ use serde::Serialize;
 
 /// The block a directive appears in.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Context {
@@ -33,6 +34,7 @@ impl Context {
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct Deprecation {
     pub replacement: &'static str,
     /// The language version that no longer accepts the directive.
@@ -40,6 +42,7 @@ pub struct Deprecation {
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct DirectiveSpec {
     pub name: &'static str,
     pub contexts: &'static [Context],

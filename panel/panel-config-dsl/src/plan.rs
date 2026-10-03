@@ -39,6 +39,22 @@ pub struct FileChange {
     pub diff: String,
 }
 
+/// Everything that differs between two configurations.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Changes {
+    pub resources: Vec<ResourceChange>,
+    pub files: Vec<FileChange>,
+}
+
+/// The resource and file changes from `current` to `next`.
+pub fn changes(current: (&ConfigModel, &Sources), next: (&ConfigModel, &Sources)) -> Changes {
+    Changes {
+        resources: plan(current.0, next.0),
+        files: diff_files(current.1, next.1),
+    }
+}
+
 fn unified(old: &str, new: &str, old_name: &str, new_name: &str) -> String {
     TextDiff::from_lines(old, new)
         .unified_diff()
