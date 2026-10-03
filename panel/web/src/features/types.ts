@@ -10,7 +10,7 @@ export interface NavigationItem {
   to: string
 }
 
-export type NavigationGroup = 'operate'
+export type NavigationGroup = 'operate' | 'configure'
 
 /**
  * A self-contained console feature. The shell renders whatever features

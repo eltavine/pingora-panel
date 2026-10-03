@@ -16,13 +16,20 @@ if (!LOCALES.includes(stored.value)) {
 }
 
 const time = { hour: '2-digit', minute: '2-digit', second: '2-digit' } as const
+const datetime = {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+} as const
 
 export const i18n = createI18n({
   legacy: false,
   locale: stored.value,
   fallbackLocale: 'en',
   messages,
-  datetimeFormats: { 'zh-CN': { time }, en: { time } },
+  datetimeFormats: { 'zh-CN': { time, datetime }, en: { time, datetime } },
 })
 
 watch(
