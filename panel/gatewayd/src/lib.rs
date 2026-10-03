@@ -15,6 +15,8 @@ mod management;
 mod observability;
 mod resource_limits;
 mod runtime_info;
+mod runtime_service;
+mod runtime_settings;
 mod shutdown;
 mod shutdown_trigger;
 
@@ -50,7 +52,10 @@ use gateway_pingora::{
     AdapterOptions, DataPlane, DataPlaneOptions, DirectorySecrets, PingoraGatewayAdapter,
 };
 use panel_context::ServiceName;
-use panel_contracts::gateway::v1::gateway_engine_server::GatewayEngineServer;
+use panel_contracts::gateway::v1::{
+    gateway_engine_server::GatewayEngineServer,
+    gateway_runtime_server::{self, GatewayRuntimeServer},
+};
 use panel_engine::{GatewayEngine, GatewayRuntimeInfoProvider};
 use panel_errors::Result;
 use panel_gateway_runtime::{
@@ -423,7 +428,7 @@ pub async fn serve_gatewayd(
     )?);
     let runtime = build_gateway_runtime_with_options(
         config.state_directory().to_path_buf(),
-        runtime_info,
+        Arc::clone(&runtime_info) as Arc<dyn GatewayRuntimeInfoProvider>,
         GatewaydServiceOptions::default()
             .with_transport_policy(resource_limits.transport_policy())
             .with_prepared_policy(Arc::new(resource_limits.prepared_snapshot_budget()))
@@ -436,13 +441,38 @@ pub async fn serve_gatewayd(
             .with_adapter_options(adapter_options),
     )
     .await?;
-    let data_plane = runtime.data_plane(
-        DataPlaneOptions::new(
+    // Operator changes made at runtime outlive restarts.
+    let settings = Arc::new(runtime_settings::RuntimeSettingsStore::new(
+        config.state_directory(),
+    ));
+    let saved = settings.load().await?;
+    runtime.adapter.restore_drained(saved.drained);
+    let workers = saved
+        .worker_count
+        .filter(|workers| *workers <= MAX_GATEWAY_WORKERS)
+        .and_then(|workers| NonZeroUsize::new(workers as usize))
+        .unwrap_or_else(|| {
             NonZeroUsize::try_from(config.worker_count().as_non_zero())
-                .expect("worker counts fit in usize"),
-        )
-        .with_drain_timeout(config.shutdown_policy().drain_timeout()),
+                .expect("worker counts fit in usize")
+        });
+    let data_plane = runtime.data_plane(
+        DataPlaneOptions::new(workers).with_drain_timeout(config.shutdown_policy().drain_timeout()),
     );
+    let operator_stop = tokio_util::sync::CancellationToken::new();
+    let runtime_service = GatewayRuntimeServer::new(runtime_service::GatewayRuntimeService {
+        plane: Arc::clone(&data_plane),
+        adapter: Arc::clone(&runtime.adapter),
+        engine: runtime.engine(),
+        runtime_info,
+        settings,
+        shutdown: operator_stop.clone(),
+    });
+    let shutdown = async move {
+        tokio::select! {
+            () = shutdown => {}
+            () = operator_stop.cancelled() => {}
+        }
+    };
     let GatewaydRuntime {
         services,
         engine: _,
@@ -501,11 +531,19 @@ pub async fn serve_gatewayd(
             let result = Server::builder()
                 .concurrency_limit_per_connection(transport_policy.max_concurrent_requests())
                 .timeout(transport_policy.request_timeout())
-                .layer(PeerPolicy::new(tls.trust_domain.clone()).allow(
-                    gateway_service_name(),
-                    [ServiceName::new("config-service")?],
-                ))
+                .layer(
+                    PeerPolicy::new(tls.trust_domain.clone())
+                        .allow(
+                            gateway_service_name(),
+                            [ServiceName::new("config-service")?],
+                        )
+                        .allow(
+                            gateway_runtime_server::SERVICE_NAME,
+                            [ServiceName::new("panel-api")?],
+                        ),
+                )
                 .add_service(transport_policy.gateway_server(services.gateway()))
+                .add_service(runtime_service)
                 .add_service(services.health())
                 .serve_with_incoming_shutdown(
                     panel_tls::incoming(listener, credentials, TLS_HANDSHAKE_TIMEOUT),
@@ -521,6 +559,7 @@ pub async fn serve_gatewayd(
                 .concurrency_limit_per_connection(transport_policy.max_concurrent_requests())
                 .timeout(transport_policy.request_timeout())
                 .add_service(transport_policy.gateway_server(services.gateway()))
+                .add_service(runtime_service)
                 .add_service(services.health())
                 .serve_with_shutdown(config.listen_address(), shutdown)
                 .await
