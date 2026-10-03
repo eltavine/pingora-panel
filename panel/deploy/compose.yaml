@@ -237,7 +237,9 @@ services:
       PINGORA_PANEL_BOOTSTRAP_TOKEN_FILE: /run/secrets/bootstrap-token
       # Keys password hashes; replacing it invalidates every password.
       PINGORA_PANEL_PASSWORD_PEPPER_FILE: /run/secrets/password-pepper
-    secrets: [identity-database-password, bootstrap-token, password-pepper]
+      # Seals identity provider secrets and refresh tokens.
+      PINGORA_PANEL_MASTER_KEYS_FILE: /run/secrets/master-keys
+    secrets: [identity-database-password, bootstrap-token, password-pepper, master-keys]
     volumes:
       - credentials-panel-api:/var/lib/pingora-panel/credentials/panel-api:ro
     healthcheck:

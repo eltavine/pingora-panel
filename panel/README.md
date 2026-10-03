@@ -362,6 +362,34 @@ The console asks for a login, or for the first administrator while none
 exists, shows only the pages the account may use, and offers account
 settings and the administration of accounts and roles.
 
+People can also sign in through OpenID Connect identity providers
+([decision](../docs/adr/0018-identity-provider-sign-in.md)).
+`/api/v1/identity-providers` keeps each provider's issuer, client, scopes,
+the claims to read and the roles its groups receive; client secrets are
+sealed with the master keys in `PINGORA_PANEL_MASTER_KEYS` (or `_FILE`) and
+never returned, and an enabled provider is checked against its discovery
+document before it is saved. The sign-in page lists the enabled providers;
+`/api/v1/auth/oidc/{id}/start` sends the browser to one with the
+authorization code flow, PKCE, a nonce and a state bound to the browser by a
+short-lived cookie, and the callback at
+`{first public origin}/api/v1/auth/oidc/{id}/callback` verifies the ID token
+(issuer, audience, signature, lifetime and nonce) before it opens a session.
+People are linked to accounts by provider and subject; when the provider
+allows it, an unknown person gets an account named after the username claim,
+and a name already taken is refused. Roles from group mappings are
+recalculated at every sign-in, while roles granted by hand stay. Every
+fifteen minutes the provider is asked about each session through its
+refresh token, and sessions it refuses end; disabling or deleting a provider
+ends its sessions at once. Refused sign-ins are recorded as failed logins
+with the provider and the reason.
+
+```sh
+ppanel identity-provider set corp --name "Corporate SSO" \
+  --issuer https://id.example.com/realms/main --client-id panel \
+  --client-secret-file corp-client-secret --group-role ops=operator --create-accounts
+ppanel identity-provider list
+```
+
 ## Certificates
 
 `automation-service` keeps the certificate inventory
