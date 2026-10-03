@@ -1,4 +1,4 @@
-use crate::{AggregateRef, EventPayload, EventType, Principal, ServiceName};
+use crate::{AggregateRef, EventData, EventPayload, EventType, Principal, ServiceName};
 use chrono::{DateTime, Utc};
 use panel_context::{IdempotencyKey, RequestId, RequestScope, TraceContext};
 use panel_errors::{PanelError, Result};
@@ -157,6 +157,16 @@ impl EventDraft {
             aggregate,
             payload,
         }
+    }
+
+    /// A draft of `data`, of its type and version.
+    pub fn of<E: EventData>(aggregate: AggregateRef, data: &E) -> Result<Self> {
+        Ok(Self::new(
+            EventType::new(E::TYPE)?,
+            E::VERSION,
+            aggregate,
+            EventPayload::of(data)?,
+        ))
     }
 }
 

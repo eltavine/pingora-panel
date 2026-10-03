@@ -1,3 +1,4 @@
+use crate::EventVersion;
 use iri_string::types::UriStr;
 use mediatype::{MediaType, Name, ReadParams};
 use panel_errors::{PanelError, Result};
@@ -21,6 +22,10 @@ const MAX_SCHEMA_BYTES: usize = 512;
 pub trait EventData: Serialize {
     /// Such as `identity.account.created`.
     const TYPE: &'static str;
+
+    /// The version of the data's shape; a change consumers cannot read is
+    /// a new version.
+    const VERSION: EventVersion = EventVersion::V1;
 
     /// The data's `dataschema`, an absolute URI, when it has one.
     fn schema() -> Option<String> {

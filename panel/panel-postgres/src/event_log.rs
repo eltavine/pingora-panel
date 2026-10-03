@@ -54,13 +54,8 @@ impl EventLog {
         principal: &Principal,
         data: &E,
     ) -> Result<EventEnvelope> {
-        self.envelope(
-            E::TYPE,
-            aggregate,
-            scope,
-            principal,
-            EventPayload::of(data)?,
-        )
+        let draft = EventDraft::of(aggregate_ref(aggregate)?, data)?;
+        Ok(self.envelope(draft, scope, principal))
     }
 
     /// Records an event on its own. What it describes already happened, so
@@ -110,13 +105,13 @@ impl EventLog {
         principal: &Principal,
         data: &T,
     ) -> Result<EventEnvelope> {
-        self.envelope(
-            event_type,
-            aggregate,
-            scope,
-            principal,
+        let draft = EventDraft::new(
+            EventType::new(event_type)?,
+            EventVersion::V1,
+            aggregate_ref(aggregate)?,
             EventPayload::json(data)?,
-        )
+        );
+        Ok(self.envelope(draft, scope, principal))
     }
 
     /// Records an event whose data has no definition yet on its own.
@@ -148,25 +143,15 @@ impl EventLog {
 
     fn envelope(
         &self,
-        event_type: &str,
-        aggregate: (&str, &str),
+        draft: EventDraft,
         scope: &RequestScope,
         principal: &Principal,
-        payload: EventPayload,
-    ) -> Result<EventEnvelope> {
-        Ok(EventEnvelope::new(
-            EventDraft::new(
-                EventType::new(event_type)?,
-                EventVersion::V1,
-                AggregateRef::new(
-                    AggregateType::new(aggregate.0)?,
-                    AggregateId::new(aggregate.1)?,
-                ),
-                payload,
-            ),
+    ) -> EventEnvelope {
+        EventEnvelope::new(
+            draft,
             EventOrigin::scoped(self.producer.clone(), scope, principal.clone()),
             Utc::now(),
-        ))
+        )
     }
 
     async fn append_alone(&self, event_type: &str, event: Result<EventEnvelope>) {
@@ -181,4 +166,11 @@ impl EventLog {
             tracing::warn!(error_code = %error.code, event_type, "event not recorded");
         }
     }
+}
+
+fn aggregate_ref((kind, id): (&str, &str)) -> Result<AggregateRef> {
+    Ok(AggregateRef::new(
+        AggregateType::new(kind)?,
+        AggregateId::new(id)?,
+    ))
 }
