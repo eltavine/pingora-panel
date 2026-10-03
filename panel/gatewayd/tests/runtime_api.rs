@@ -6,7 +6,8 @@
 
 use gateway_grpc_client::{GatewayGrpcClient, GatewayGrpcClientConfig};
 use gatewayd::{
-    DRAIN_TIMEOUT_MILLIS_ENV, GATEWAY_ADDRESS_ENV, STATE_DIRECTORY_ENV, WORKER_COUNT_ENV,
+    DRAIN_TIMEOUT_MILLIS_ENV, GATEWAY_ADDRESS_ENV, OPS_ADDRESS_ENV, STATE_DIRECTORY_ENV,
+    WORKER_COUNT_ENV,
 };
 use panel_application::{
     CommandContext, GatewayPort, GatewayRuntimePort, IdempotencyKey, RequestDeadline, RequestId,
@@ -26,6 +27,7 @@ use std::{
     process::{Child, Command},
     time::{Duration, Instant},
 };
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 fn reserve() -> SocketAddr {
     TcpListener::bind("127.0.0.1:0")
@@ -37,10 +39,11 @@ fn reserve() -> SocketAddr {
 struct Gateway(Child);
 
 impl Gateway {
-    fn spawn(address: SocketAddr, state: &Path) -> Self {
+    fn spawn(address: SocketAddr, ops: SocketAddr, state: &Path) -> Self {
         Self(
             Command::new(env!("CARGO_BIN_EXE_gatewayd"))
                 .env(GATEWAY_ADDRESS_ENV, address.to_string())
+                .env(OPS_ADDRESS_ENV, ops.to_string())
                 .env(STATE_DIRECTORY_ENV, state)
                 .env(WORKER_COUNT_ENV, "2")
                 .env(DRAIN_TIMEOUT_MILLIS_ENV, "300")
@@ -122,6 +125,18 @@ fn snapshot(listen: SocketAddr) -> RuntimeSnapshot {
     snapshot
 }
 
+/// The metrics the gateway serves on its operational listener.
+async fn scrape(ops: SocketAddr) -> String {
+    let mut stream = tokio::net::TcpStream::connect(ops).await.unwrap();
+    stream
+        .write_all(b"GET /metrics HTTP/1.1\r\nhost: localhost\r\nconnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).await.unwrap();
+    response
+}
+
 async fn connect(address: SocketAddr) -> GatewayGrpcClient {
     let client = GatewayGrpcClient::connect_lazy(
         format!("http://{address}"),
@@ -141,7 +156,8 @@ async fn runtime_operations_persist_and_shut_the_gateway_down() {
     let state = tempfile::tempdir().unwrap();
     let management = reserve();
     let listen = reserve();
-    let mut gateway = Gateway::spawn(management, state.path());
+    let ops = reserve();
+    let mut gateway = Gateway::spawn(management, ops, state.path());
     let client = connect(management).await;
 
     let prepared = client
@@ -168,6 +184,12 @@ async fn runtime_operations_persist_and_shut_the_gateway_down() {
     assert_eq!(plane.worker_count, 2);
     assert_eq!(plane.active_revision_id, Some(1));
     assert_eq!(plane.engine_version, "0.9.0");
+    let metrics = scrape(ops).await;
+    assert!(metrics.starts_with("HTTP/1.1 200"), "{metrics}");
+    assert!(
+        metrics.contains("pingora_panel_gateway_config_revision 1\n"),
+        "{metrics}"
+    );
 
     let reloaded = client.reload(command("reload")).await.unwrap();
     assert_eq!(reloaded.generation, plane.generation + 1);
@@ -201,7 +223,7 @@ async fn runtime_operations_persist_and_shut_the_gateway_down() {
     client.shutdown(command("shutdown")).await.unwrap();
     assert_eq!(gateway.exit_code().await, Some(0));
 
-    let mut gateway = Gateway::spawn(management, state.path());
+    let mut gateway = Gateway::spawn(management, ops, state.path());
     let client = connect(management).await;
     let mut plane = client.data_plane(scope()).await.unwrap();
     for _ in 0..100 {

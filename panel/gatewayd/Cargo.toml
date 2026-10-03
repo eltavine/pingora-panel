@@ -21,9 +21,11 @@ panel-context.workspace = true
 panel-contracts.workspace = true
 panel-domain.workspace = true
 panel-engine.workspace = true
+panel-environment.workspace = true
 panel-errors.workspace = true
 panel-gateway-runtime.workspace = true
 panel-ir.workspace = true
+panel-metrics.workspace = true
 panel-pki.workspace = true
 panel-tls.workspace = true
 prost-types.workspace = true
@@ -41,10 +43,12 @@ tracing.workspace = true
 
 [dev-dependencies]
 gateway-grpc-client.workspace = true
+http-body-util.workspace = true
 panel-config-json.workspace = true
 panel-health.workspace = true
 panel-persistence-memory.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
 tokio-stream.workspace = true
+tower.workspace = true
 uuid.workspace = true

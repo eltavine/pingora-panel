@@ -150,10 +150,12 @@
         "panel-contracts",
         "panel-domain",
         "panel-engine",
+        "panel-environment",
         "panel-errors",
         "panel-gateway-runtime",
         "panel-health",
         "panel-ir",
+        "panel-metrics",
         "panel-pki",
         "panel-tls",
         "snapshot-store-fs"

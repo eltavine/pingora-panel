@@ -2,7 +2,9 @@ use crate::{
     BackgroundTaskShutdownPolicy, GatewayResourceLimits, LoopbackOnlyManagementBindPolicy,
     ManagementBindPolicy, ShutdownPolicy,
 };
+use panel_environment::Environment;
 use panel_errors::{PanelError, Result};
+use panel_metrics::ScrapeToken;
 use panel_pki::TrustDomain;
 use std::{
     ffi::{OsStr, OsString},
@@ -26,10 +28,16 @@ pub const TRUST_DOMAIN_ENV: &str = "PINGORA_PANEL_TRUST_DOMAIN";
 pub const SECRET_DIRECTORY_ENV: &str = "PINGORA_PANEL_SECRET_DIR";
 /// Directory that static content roots in snapshots are relative to.
 pub const STATIC_ROOT_ENV: &str = "PINGORA_PANEL_STATIC_ROOT";
+/// The operational HTTP listener, which serves `/metrics`.
+pub const OPS_ADDRESS_ENV: &str = "PINGORA_PANEL_OPS_ADDR";
+/// The bearer token scrapes of `/metrics` present, or with `_FILE`, a file
+/// holding it. Required when the operational listener is not on loopback.
+pub const METRICS_TOKEN_ENV: &str = "PINGORA_PANEL_METRICS_TOKEN";
 
 pub const MAX_GATEWAY_WORKERS: u32 = 256;
 
 const DEFAULT_LISTEN_ADDRESS: &str = "127.0.0.1:50051";
+const DEFAULT_OPS_ADDRESS: ([u8; 4], u16) = ([127, 0, 0, 1], 9185);
 const DEFAULT_STATE_DIRECTORY: &str = "/var/lib/pingora-panel/gateway";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -43,6 +51,8 @@ pub struct GatewaydConfig {
     tls: Option<GatewayTls>,
     secret_directory: Option<PathBuf>,
     static_root: Option<PathBuf>,
+    ops_address: SocketAddr,
+    metrics_token: ScrapeToken,
 }
 
 /// The gateway's mutual TLS credentials and trust domain.
@@ -142,6 +152,18 @@ impl GatewaydConfig {
         let resource_limits = GatewayResourceLimits::from_lookup(&mut lookup)?;
         let secret_directory = lookup(SECRET_DIRECTORY_ENV).map(PathBuf::from);
         let static_root = lookup(STATIC_ROOT_ENV).map(PathBuf::from);
+        let mut environment = Environment::from_lookup(&mut lookup);
+        let ops_address =
+            environment.socket_addr(OPS_ADDRESS_ENV, SocketAddr::from(DEFAULT_OPS_ADDRESS))?;
+        let metrics_token = environment
+            .secret(METRICS_TOKEN_ENV)?
+            .map(ScrapeToken::bearer)
+            .unwrap_or_default();
+        if !ops_address.ip().is_loopback() && !metrics_token.is_required() {
+            return Err(PanelError::invalid_argument(format!(
+                "{METRICS_TOKEN_ENV} is required when {OPS_ADDRESS_ENV} is not a loopback address"
+            )));
+        }
 
         Ok(Self {
             listen_address,
@@ -153,7 +175,17 @@ impl GatewaydConfig {
             tls,
             secret_directory,
             static_root,
+            ops_address,
+            metrics_token,
         })
+    }
+
+    pub fn ops_address(&self) -> SocketAddr {
+        self.ops_address
+    }
+
+    pub fn metrics_token(&self) -> &ScrapeToken {
+        &self.metrics_token
     }
 
     pub fn secret_directory(&self) -> Option<&Path> {
@@ -288,6 +320,27 @@ mod tests {
             config.background_task_shutdown_policy().total_timeout(),
             Duration::from_millis(750)
         );
+    }
+
+    #[test]
+    fn metrics_need_a_token_off_loopback() {
+        let config = GatewaydConfig::from_lookup(|_| None).unwrap();
+        assert_eq!(config.ops_address(), "127.0.0.1:9185".parse().unwrap());
+        assert!(!config.metrics_token().is_required());
+
+        let error = GatewaydConfig::from_lookup(|key| {
+            (key == OPS_ADDRESS_ENV).then(|| OsString::from("0.0.0.0:9185"))
+        })
+        .unwrap_err();
+        assert!(error.message.contains(METRICS_TOKEN_ENV), "{error}");
+
+        let values = HashMap::from([
+            (OPS_ADDRESS_ENV, OsString::from("0.0.0.0:9185")),
+            (METRICS_TOKEN_ENV, OsString::from("scrape-secret")),
+        ]);
+        let config = GatewaydConfig::from_lookup(|key| values.get(key).cloned()).unwrap();
+        assert!(config.metrics_token().is_required());
+        assert!(!format!("{config:?}").contains("scrape-secret"));
     }
 
     #[test]

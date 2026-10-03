@@ -106,7 +106,12 @@ file inside the site's root; others are not served —
 `PINGORA_PANEL_WORKERS` sets the initial worker
 count and `PINGORA_PANEL_DRAIN_TIMEOUT_MS` bounds how long a replaced
 generation finishes in-flight requests. Worker counts and node drains set at
-runtime persist in the state directory and survive restarts. See the
+runtime persist in the state directory and survive restarts. Prometheus
+scrapes the gateway's metrics
+([decision](../docs/adr/0022-metrics-logs-and-traces.md)) from `/metrics` on
+`PINGORA_PANEL_OPS_ADDR`, `127.0.0.1:9185` by default; off loopback, scrapes
+must present `PINGORA_PANEL_METRICS_TOKEN` (or the file
+`PINGORA_PANEL_METRICS_TOKEN_FILE` names) as a bearer token. See the
 [gateway foundation runbook](../docs/gateway-foundation-runbook.md) for startup,
 readiness, recovery and current limits.
 

@@ -13,6 +13,7 @@ mod failure_latch;
 mod health;
 mod management;
 mod observability;
+mod ops;
 mod resource_limits;
 mod runtime_info;
 mod runtime_service;
@@ -29,8 +30,9 @@ pub use background_tasks::{
 pub use bind_policy::{LoopbackOnlyManagementBindPolicy, ManagementBindPolicy};
 pub use config::{
     GatewayTls, GatewayWorkerCount, GatewaydConfig, BACKGROUND_TASK_SHUTDOWN_TIMEOUT_MILLIS_ENV,
-    DRAIN_TIMEOUT_MILLIS_ENV, GATEWAY_ADDRESS_ENV, MAX_GATEWAY_WORKERS, SECRET_DIRECTORY_ENV,
-    STATE_DIRECTORY_ENV, STATIC_ROOT_ENV, TLS_DIR_ENV, TRUST_DOMAIN_ENV, WORKER_COUNT_ENV,
+    DRAIN_TIMEOUT_MILLIS_ENV, GATEWAY_ADDRESS_ENV, MAX_GATEWAY_WORKERS, METRICS_TOKEN_ENV,
+    OPS_ADDRESS_ENV, SECRET_DIRECTORY_ENV, STATE_DIRECTORY_ENV, STATIC_ROOT_ENV, TLS_DIR_ENV,
+    TRUST_DOMAIN_ENV, WORKER_COUNT_ENV,
 };
 pub use gateway_pingora::{DataPlaneStatus, ListenerStatus};
 pub use health::{RuntimeHealthState, RuntimeReadiness, TonicHealthSynchronizer};
@@ -39,6 +41,7 @@ pub use management::{
     EngineGatewayPort,
 };
 pub use observability::{initialize_observability, TracingGatewayEventSink};
+pub use ops::ops_router;
 pub use resource_limits::*;
 pub use runtime_info::ProcessRuntimeInfo;
 pub use shutdown::{ReadinessGate, ShutdownCoordinator, ShutdownPolicy, TonicHealthReadinessGate};
@@ -49,8 +52,8 @@ use gateway_grpc::{
     GatewayTransportPolicy, StandardGatewayRequestPolicy,
 };
 use gateway_pingora::{
-    AdapterOptions, ChallengeDirectory, DataPlane, DataPlaneOptions, DirectorySecrets,
-    PingoraGatewayAdapter,
+    register_configuration, AdapterOptions, ChallengeDirectory, DataPlane, DataPlaneOptions,
+    DirectorySecrets, GatewayMetrics, PingoraGatewayAdapter,
 };
 use panel_context::ServiceName;
 use panel_contracts::gateway::v1::{
@@ -66,6 +69,7 @@ use panel_gateway_runtime::{
     GatewayMutationCapacity, GatewayMutationExecutor, GatewayRecoveryMonitor,
     PreparedSnapshotAdmissionPolicy, PreparedSnapshotBudget,
 };
+use panel_metrics::Metrics;
 use panel_pki::{CredentialFiles, WorkloadIdentity};
 use panel_tls::{PeerPolicy, TlsCredentials};
 use snapshot_store_fs::{FileSnapshotStore, SnapshotStoreLimits};
@@ -468,9 +472,30 @@ pub async fn serve_gatewayd(
             NonZeroUsize::try_from(config.worker_count().as_non_zero())
                 .expect("worker counts fit in usize")
         });
+    let mut metrics = Metrics::new();
+    let gateway_metrics = GatewayMetrics::register(&mut metrics);
+    register_configuration(&mut metrics, Arc::clone(&runtime.adapter));
     let data_plane = runtime.data_plane(
-        DataPlaneOptions::new(workers).with_drain_timeout(config.shutdown_policy().drain_timeout()),
+        DataPlaneOptions::new(workers)
+            .with_drain_timeout(config.shutdown_policy().drain_timeout())
+            .with_metrics(gateway_metrics),
     );
+    let ops_listener = tokio::net::TcpListener::bind(config.ops_address())
+        .await
+        .map_err(|error| {
+            panel_errors::PanelError::precondition_failed(format!(
+                "cannot bind {}: {error}",
+                config.ops_address()
+            ))
+        })?;
+    let stop_ops = tokio_util::sync::CancellationToken::new();
+    let ops_router = ops::ops_router(Arc::new(metrics), config.metrics_token().clone());
+    let ops_stopped = stop_ops.clone().cancelled_owned();
+    let ops_task = tokio::spawn(async move {
+        axum::serve(ops_listener, ops_router)
+            .with_graceful_shutdown(ops_stopped)
+            .await
+    });
     let operator_stop = tokio_util::sync::CancellationToken::new();
     let runtime_service = GatewayRuntimeServer::new(runtime_service::GatewayRuntimeService {
         plane: Arc::clone(&data_plane),
@@ -581,6 +606,12 @@ pub async fn serve_gatewayd(
     // Proxied traffic outlives the management transport so in-flight
     // requests finish within the drain timeout.
     stop_data_plane.cancel();
+    stop_ops.cancel();
+    match ops_task.await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => tracing::error!(event = "ops_listener_failed", error = %error),
+        Err(error) => tracing::error!(event = "ops_listener_stop_failed", error = %error),
+    }
     if let Err(error) = data_plane_task.await {
         tracing::error!(event = "data_plane_stop_failed", error = %error);
     }

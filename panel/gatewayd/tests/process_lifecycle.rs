@@ -5,7 +5,7 @@ use gateway_proto_codec::encode_snapshot;
 use gatewayd::{
     DEADLINE_REQUIREMENT_ENV, DRAIN_TIMEOUT_MILLIS_ENV, GATEWAY_ADDRESS_ENV,
     GRPC_MAX_DECODING_MESSAGE_BYTES_ENV, MAX_PREPARED_SNAPSHOTS_ENV, MAX_REQUEST_ID_BYTES_ENV,
-    STATE_DIRECTORY_ENV, WORKER_COUNT_ENV,
+    OPS_ADDRESS_ENV, STATE_DIRECTORY_ENV, WORKER_COUNT_ENV,
 };
 use panel_contracts::{
     common::v1 as common,
@@ -63,6 +63,7 @@ impl GatewayProcess {
         let mut command = Command::new(env!("CARGO_BIN_EXE_gatewayd"));
         command
             .env(GATEWAY_ADDRESS_ENV, address.to_string())
+            .env(OPS_ADDRESS_ENV, "127.0.0.1:0")
             .env(STATE_DIRECTORY_ENV, state_directory)
             .env(WORKER_COUNT_ENV, "2")
             .env(DRAIN_TIMEOUT_MILLIS_ENV, "300");
