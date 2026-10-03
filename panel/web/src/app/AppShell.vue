@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/breadcrumb'
 import { Separator } from '@/components/ui/separator'
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
+import DraftStatus from '@/components/DraftStatus.vue'
 import AppSidebar from './AppSidebar.vue'
 import PreferencesMenu from './PreferencesMenu.vue'
 
@@ -39,6 +40,7 @@ const title = computed(() =>
             </BreadcrumbItem>
           </BreadcrumbList>
         </Breadcrumb>
+        <DraftStatus />
         <PreferencesMenu />
       </header>
       <main class="mx-auto w-full max-w-6xl flex-1 p-4 md:p-6">
