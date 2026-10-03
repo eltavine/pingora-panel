@@ -244,6 +244,7 @@ async fn api(
         ("PATCH", "/api/v1/accounts/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b") => {
             Json(json!({"username": "ops", "disabled": body["disabled"]})).into_response()
         }
+        ("PUT", "/api/v1/tls-profiles/edge") => Json(body.clone()).into_response(),
         ("POST", "/api/v1/sites") => (
             StatusCode::CREATED,
             Json(json!({"id": "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a60", "name": body["name"]})),
@@ -889,4 +890,55 @@ fn sites_are_created_serving_https() {
     let body = &stub.requests("POST", "/api/v1/sites")[0].body;
     assert_eq!(body["tls_profile_id"], "edge");
     assert_eq!(body["https_redirect"], true);
+    assert_eq!(body["hsts"], Value::Null);
+
+    let strict = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "site",
+        "create",
+        "--name",
+        "strict",
+        "--proxy",
+        "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b",
+        "--hsts-max-age",
+        "31536000",
+        "--hsts-include-subdomains",
+    ]);
+    assert!(strict.status.success(), "{}", stderr(&strict));
+    assert_eq!(
+        stub.requests("POST", "/api/v1/sites")[1].body["hsts"],
+        json!({"max_age_seconds": 31_536_000, "include_subdomains": true, "preload": false})
+    );
+    let orphan = stub.ppanel(&["site", "create", "--name", "x", "--hsts-preload"]);
+    assert_eq!(orphan.status.code(), Some(2));
+}
+
+#[test]
+fn tls_profiles_narrow_handshakes() {
+    let stub = Stub::start();
+    let saved = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "tls-profile",
+        "set",
+        "edge",
+        "--certificate-id",
+        "example.com",
+        "--max-protocol",
+        "TLSv1.2",
+        "--cipher",
+        "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+        "--no-session-resumption",
+    ]);
+    assert!(saved.status.success(), "{}", stderr(&saved));
+    let body = &stub.requests("PUT", "/api/v1/tls-profiles/edge")[0].body;
+    assert_eq!(body["certificate_id"], "example.com");
+    assert_eq!(body["max_protocol"], "TLSv1.2");
+    assert_eq!(
+        body["cipher_suites"],
+        json!(["TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256"])
+    );
+    assert_eq!(body["session_resumption"], false);
+    assert_eq!(body["ocsp_stapling"], false);
 }

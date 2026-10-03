@@ -62,6 +62,20 @@ pub(crate) enum TlsProfileCommand {
         key: Option<String>,
         #[arg(long, default_value = "TLSv1.2")]
         min_protocol: String,
+        /// The newest TLS version accepted; the newest supported without it.
+        #[arg(long)]
+        max_protocol: Option<String>,
+        /// A cipher suite accepted, by IANA name such as
+        /// TLS13_AES_256_GCM_SHA384; repeatable. Without it, every supported
+        /// suite.
+        #[arg(long = "cipher")]
+        ciphers: Vec<String>,
+        /// Refuse resuming sessions by session IDs and tickets.
+        #[arg(long)]
+        no_session_resumption: bool,
+        /// Reserved: recorded, but no OCSP responses are stapled yet.
+        #[arg(long)]
+        ocsp_stapling: bool,
         /// Protocol a listener using this profile offers through ALPN, h2 or
         /// http/1.1; repeatable. Without it the listener offers all it enables.
         #[arg(long = "alpn")]
@@ -108,6 +122,7 @@ const PROFILES: &[Column] = &[
     }),
     ("KEY", |profile| text(&profile["private_key_secret_id"])),
     ("MIN TLS", |profile| text(&profile["min_protocol"])),
+    ("MAX TLS", |profile| text(&profile["max_protocol"])),
     ("ALPN", |profile| text(&profile["alpn"])),
 ];
 
@@ -187,6 +202,10 @@ pub async fn tls_profile(api: &Api, output: &Output, command: TlsProfileCommand)
             certificate,
             key,
             min_protocol,
+            max_protocol,
+            ciphers,
+            no_session_resumption,
+            ocsp_stapling,
             alpn,
         } => {
             let path = format!("/api/v1/tls-profiles/{id}");
@@ -197,6 +216,10 @@ pub async fn tls_profile(api: &Api, output: &Output, command: TlsProfileCommand)
                 "certificate_secret_id": certificate.unwrap_or_default(),
                 "private_key_secret_id": key.unwrap_or_default(),
                 "min_protocol": min_protocol,
+                "max_protocol": max_protocol,
+                "cipher_suites": ciphers,
+                "session_resumption": !no_session_resumption,
+                "ocsp_stapling": ocsp_stapling,
                 "alpn": alpn,
             });
             let profile = api

@@ -65,6 +65,15 @@ pub(crate) enum SiteCommand {
         /// Serve the site's domains over HTTPS with this TLS profile.
         #[arg(long)]
         tls_profile: Option<String>,
+        /// Send Strict-Transport-Security over HTTPS for this many seconds.
+        #[arg(long, value_name = "SECONDS")]
+        hsts_max_age: Option<u64>,
+        /// Let the HSTS policy cover subdomains too.
+        #[arg(long, requires = "hsts_max_age")]
+        hsts_include_subdomains: bool,
+        /// Consent to browsers' HSTS preload lists.
+        #[arg(long, requires = "hsts_max_age")]
+        hsts_preload: bool,
         /// Create the site stopped.
         #[arg(long)]
         disabled: bool,
@@ -309,6 +318,9 @@ pub async fn run(api: &Api, output: &Output, command: SiteCommand) -> Result<()>
             note,
             https_redirect,
             tls_profile,
+            hsts_max_age,
+            hsts_include_subdomains,
+            hsts_preload,
             disabled,
         } => {
             let body = match file {
@@ -323,6 +335,11 @@ pub async fn run(api: &Api, output: &Output, command: SiteCommand) -> Result<()>
                     "note": note,
                     "https_redirect": https_redirect,
                     "tls_profile_id": tls_profile,
+                    "hsts": hsts_max_age.map(|max_age| json!({
+                        "max_age_seconds": max_age,
+                        "include_subdomains": hsts_include_subdomains,
+                        "preload": hsts_preload,
+                    })),
                 }),
             };
             let site = api
