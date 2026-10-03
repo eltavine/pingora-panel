@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package pingora.panel.config.v1;
+
+import "common/v1/common.proto";
+import "config/v1/config.proto";
+import "google/protobuf/timestamp.proto";
+
+// Reads and edits the draft configuration and publishes it to the gateway.
+//
+// Resources travel as JSON documents of the configuration model
+// (`pingora.panel.config/v1`), so the model can gain fields without changing
+// this contract. Every request names one operation from a closed set, which
+// permissions and audit records refer to.
+service Configuration {
+  rpc Read(ReadRequest) returns (ReadResponse);
+  rpc Change(ChangeRequest) returns (ChangeResponse);
+  rpc Apply(ApplyRequest) returns (ApplyResponse);
+}
+
+// The draft as a whole.
+message Draft {
+  // Increases with every change.
+  uint64 version = 1;
+  google.protobuf.Timestamp updated_at = 2;
+  // The draft version the gateway runs, when one has been applied.
+  optional uint64 applied_version = 3;
+  google.protobuf.Timestamp applied_at = 4;
+}
+
+message ReadRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  // For example `sites.list`, `sites.get` or `upstreams.list`.
+  string operation = 2;
+  // Resource path such as `sites/{id}` or `upstreams/{id}/nodes`.
+  string resource = 3;
+  // Operation parameters as a JSON object, such as list filters.
+  bytes parameters = 4;
+}
+
+message ReadResponse {
+  // The result as JSON.
+  bytes content = 1;
+  // Entity tag of a single resource, for conditional changes.
+  string etag = 2;
+  Draft draft = 3;
+  .pingora.panel.common.v1.Error error = 4;
+}
+
+message ChangeRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  // For example `sites.create`, `sites.replace` or `domains.import`.
+  string operation = 2;
+  string resource = 3;
+  // Entity tag the target must still have (RFC 9110 §13.1.1); empty skips the check.
+  string if_match = 4;
+  // The request body as JSON.
+  bytes content = 5;
+}
+
+message ChangeResponse {
+  bytes content = 1;
+  string etag = 2;
+  Draft draft = 3;
+  .pingora.panel.common.v1.Error error = 4;
+}
+
+message ApplyRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  // Refuses to apply if the draft has changed since this version; zero skips the check.
+  uint64 expected_version = 2;
+}
+
+message ApplyResponse {
+  Draft draft = 1;
+  ActivatedDeployment deployment = 2;
+  // Present when the draft was refused before reaching the gateway.
+  ValidationReport report = 3;
+  .pingora.panel.common.v1.Error error = 4;
+}
