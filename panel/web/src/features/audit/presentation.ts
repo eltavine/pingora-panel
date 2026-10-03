@@ -28,7 +28,15 @@ export const KNOWN_TYPES = [
   'identity.session.ended',
   'identity.token.created',
   'identity.token.revoked',
+  'identity.token.rotated',
+  'identity.role.created',
+  'identity.role.updated',
+  'identity.role.deleted',
   'identity.access.denied',
+  'tls.certificate.created',
+  'tls.certificate.replaced',
+  'tls.certificate.deleted',
+  'tls.certificate.refused',
 ] as const
 
 export type KnownType = (typeof KNOWN_TYPES)[number]
@@ -113,6 +121,24 @@ export function summaryOf(event: AuditEvent, t: Translate): string {
       return text(data.reason)
     case 'identity.token.created':
       return `${text(data.name)} · ${list(data.permissions)}`
+    case 'identity.token.rotated':
+      return `${text(data.replaces).slice(0, 8)} → ${text(data.token).slice(0, 8)}`
+    case 'identity.role.created':
+    case 'identity.role.updated':
+      return `${text(data.role)} · ${list(data.permissions)}`
+    case 'identity.role.deleted':
+      return text(data.role)
+    case 'tls.certificate.created':
+      return `${text(data.id)} · ${list(data.names)} · ${text(data.source)}`
+    case 'tls.certificate.replaced':
+      return `${text(data.id)} · v${text(data.version)} · ${list(data.names)}`
+    case 'tls.certificate.deleted':
+      return text(data.id)
+    case 'tls.certificate.refused':
+      return [`${text(data.operation)} ${text(data.id)}`, data.code, data.message]
+        .map(text)
+        .filter(Boolean)
+        .join(' · ')
     case 'identity.access.denied':
       return [`${text(data.method)} ${text(data.route)}`, data.permission ?? data.reason]
         .map(text)

@@ -98,4 +98,47 @@ describe('audit presentation', () => {
     )
     expect(summaryOf(event('other.event', { a: 1 }), t)).toBe('{"a":1}')
   })
+
+  it('summarizes roles, token rotations and certificates', () => {
+    expect(
+      summaryOf(
+        event('identity.role.created', {
+          role: 'deployer',
+          permissions: ['config.read', 'config.apply'],
+        }),
+        t,
+      ),
+    ).toBe('deployer · config.read, config.apply')
+    expect(
+      summaryOf(
+        event('identity.token.rotated', {
+          token: '0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a71',
+          replaces: '0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a70',
+        }),
+        t,
+      ),
+    ).toBe('0190a1b2 → 0190a1b2')
+    expect(
+      summaryOf(
+        event('tls.certificate.created', {
+          id: 'example.com',
+          names: ['example.com', '*.example.com'],
+          source: 'uploaded',
+        }),
+        t,
+      ),
+    ).toBe('example.com · example.com, *.example.com · uploaded')
+    expect(
+      summaryOf(
+        event('tls.certificate.refused', {
+          id: 'example.com',
+          operation: 'replace',
+          code: 'VALIDATION_FAILED',
+          message: 'the certificate expired',
+        }),
+        t,
+      ),
+    ).toBe('replace example.com · VALIDATION_FAILED · the certificate expired')
+    expect(toneOf('tls.certificate.refused')).toBe('negative')
+  })
 })
