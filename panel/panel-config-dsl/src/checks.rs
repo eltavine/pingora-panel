@@ -74,7 +74,7 @@ fn covers(first: &Route, later: &Route) -> bool {
     }
 }
 
-fn label(route: &Route) -> String {
+pub(crate) fn label(route: &Route) -> String {
     route.name.as_ref().map_or_else(
         || format!("{:?}", route.matcher.path),
         |name| format!("{name:?}"),

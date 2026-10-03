@@ -57,6 +57,8 @@ pub struct DirectiveSpec {
     /// Whether the directive may appear more than once in one block.
     pub repeatable: bool,
     pub deprecated: Option<Deprecation>,
+    /// Where the value comes from when the directive is not written here.
+    pub inheritance: Option<&'static str>,
 }
 
 use Context::*;
@@ -65,7 +67,7 @@ const ACTION_CONTEXTS: &[Context] = &[Server, Route];
 
 macro_rules! spec {
     ($name:literal in $contexts:expr, $block:expr, $min:literal..$max:expr, $repeat:literal,
-     $syntax:literal, $summary:literal) => {
+     $syntax:literal, $summary:literal $(, inherits $rule:literal)?) => {
         DirectiveSpec {
             name: $name,
             contexts: $contexts,
@@ -76,8 +78,11 @@ macro_rules! spec {
             summary: $summary,
             repeatable: $repeat,
             deprecated: None,
+            inheritance: spec!(@rule $($rule)?),
         }
     };
+    (@rule) => { None };
+    (@rule $rule:literal) => { Some($rule) };
 }
 
 pub static DIRECTIVES: &[DirectiveSpec] = &[
@@ -86,7 +91,8 @@ pub static DIRECTIVES: &[DirectiveSpec] = &[
     spec!("include" in &[Main, Http, Server, Upstream], None, 1..Some(1), true,
         "include sites/*.conf;", "Reads directives from other files of the configuration."),
     spec!("set" in &[Http, Server, Route], None, 2..Some(2), true,
-        "set $name value;", "Defines a constant for this block and the blocks inside it."),
+        "set $name value;", "Defines a constant for this block and the blocks inside it.",
+        inherits "Visible in this block and the blocks inside it; a set in an inner block replaces it there."),
     spec!("http" in &[Main], Some(Http), 0..Some(0), false,
         "http { ... }", "Holds the listeners, TLS profiles, upstreams and servers."),
     spec!("tls_profile" in &[Http], Some(TlsProfile), 1..Some(1), true,
@@ -96,21 +102,27 @@ pub static DIRECTIVES: &[DirectiveSpec] = &[
     spec!("key" in &[TlsProfile], None, 1..Some(1), false,
         "key <file>;", "File name of the PEM private key."),
     spec!("min_protocol" in &[TlsProfile], None, 1..Some(1), false,
-        "min_protocol TLSv1.2|TLSv1.3;", "The oldest TLS version accepted."),
+        "min_protocol TLSv1.2|TLSv1.3;", "The oldest TLS version accepted.",
+        inherits "TLSv1.2 when not written."),
     spec!("alpn" in &[TlsProfile], None, 1..None, false,
-        "alpn h2 http/1.1;", "Protocols a listener using the profile offers; all it enables by default."),
+        "alpn h2 http/1.1;", "Protocols a listener using the profile offers; all it enables by default.",
+        inherits "Without it, a listener offers every protocol it serves."),
     spec!("listener" in &[Http], Some(Listener), 1..Some(1), true,
         "listener <id> { ... }", "A socket the gateway accepts connections on."),
     spec!("address" in &[Listener], None, 1..Some(1), false,
         "address 0.0.0.0:80;", "The IP address and port."),
     spec!("protocols" in &[Listener], None, 1..Some(3), false,
-        "protocols http1 http2;", "The HTTP versions served; http3 is reserved."),
+        "protocols http1 http2;", "The HTTP versions served; http3 is reserved.",
+        inherits "HTTP/1.1 and HTTP/2 when not written."),
     spec!("tls_profile" in &[Listener, Server], None, 1..Some(1), false,
-        "tls_profile <id>;", "Serves HTTPS with this profile's certificate by default."),
+        "tls_profile <id>;", "Serves HTTPS with this profile's certificate by default.",
+        inherits "A host uses its domain's tls_profile=, else its server's tls_profile, else that of the listener the connection arrives on; a listener without one serves plain HTTP."),
     spec!("reuse_port" in &[Listener], None, 1..Some(1), false,
-        "reuse_port on|off;", "Sets SO_REUSEPORT on the socket."),
+        "reuse_port on|off;", "Sets SO_REUSEPORT on the socket.",
+        inherits "Off when not written."),
     spec!("ipv6_only" in &[Listener], None, 1..Some(1), false,
-        "ipv6_only on|off;", "For IPv6 addresses, whether IPv4 connections are refused."),
+        "ipv6_only on|off;", "For IPv6 addresses, whether IPv4 connections are refused.",
+        inherits "The operating system's setting when not written."),
     spec!("default_server" in &[Listener], None, 1..Some(1), false,
         "default_server <server>;", "Serves hosts no server claims; they get 421 otherwise."),
     spec!("upstream" in &[Http], Some(Upstream), 1..Some(1), true,
@@ -122,12 +134,15 @@ pub static DIRECTIVES: &[DirectiveSpec] = &[
         "A backend node."),
     spec!("balance" in &[Upstream], None, 1..Some(2), false,
         "balance round_robin|random|hash [key=$client_ip|$uri|$http_<name>|$cookie_<name>];",
-        "How requests are spread over the nodes."),
+        "How requests are spread over the nodes.",
+        inherits "round_robin when not written."),
     spec!("host_header" in &[Upstream], None, 1..Some(1), false,
-        "host_header <host>;", "Replaces the client's Host when forwarding."),
+        "host_header <host>;", "Replaces the client's Host when forwarding.",
+        inherits "The client's Host is kept when not written; health checks without host= send this one."),
     spec!("tls" in &[Upstream], None, 1..None, false,
         "tls [verify=on|off] [verify_hostname=on|off] [sni=<name>] [ca=<file>];",
-        "How TLS nodes are verified."),
+        "How TLS nodes are verified.",
+        inherits "Nodes with the tls flag send their own sni=, else this sni=, else their host name; certificates and host names are verified unless turned off."),
     spec!("connect_timeout" in &[Upstream], None, 1..Some(1), false,
         "connect_timeout 5s;", "How long connecting to a node may take."),
     spec!("read_timeout" in &[Upstream], None, 1..Some(1), false,
@@ -137,11 +152,14 @@ pub static DIRECTIVES: &[DirectiveSpec] = &[
     spec!("idle_timeout" in &[Upstream], None, 1..Some(1), false,
         "idle_timeout 60s;", "How long an idle pooled connection is kept."),
     spec!("keepalive" in &[Upstream], None, 1..Some(1), false,
-        "keepalive on|off;", "Whether connections to nodes are reused."),
+        "keepalive on|off;", "Whether connections to nodes are reused.",
+        inherits "On when not written."),
     spec!("max_connections" in &[Upstream], None, 1..Some(1), false,
-        "max_connections 100;", "Concurrent requests per node; busy nodes are skipped."),
+        "max_connections 100;", "Concurrent requests per node; busy nodes are skipped.",
+        inherits "Unlimited when not written."),
     spec!("http2" in &[Upstream], None, 1..Some(1), false,
-        "http2 on|off;", "Speaks HTTP/2 to TLS nodes that negotiate it."),
+        "http2 on|off;", "Speaks HTTP/2 to TLS nodes that negotiate it.",
+        inherits "Off when not written; only nodes with the tls flag negotiate it."),
     spec!("health_check" in &[Upstream], None, 1..None, false,
         "health_check http|tcp [path=/] [method=GET|HEAD] [host=<name>] [interval=5s] [timeout=1s] [rise=2] [fall=3] [status=200,204];",
         "Probes every node and takes failing ones out of rotation."),
@@ -158,13 +176,17 @@ pub static DIRECTIVES: &[DirectiveSpec] = &[
     spec!("domain" in &[Server], None, 1..None, true,
         "domain <host> [primary] [alias] [off] [tls_profile=<id>];", "One host with all of its settings."),
     spec!("listen" in &[Server], None, 1..None, false,
-        "listen <listener> ...;", "The listeners serving the server; all of them by default."),
+        "listen <listener> ...;", "The listeners serving the server; all of them by default.",
+        inherits "Without it, the server is served on every listener; its routes are served wherever it is."),
     spec!("https_redirect" in &[Server], None, 1..Some(1), false,
-        "https_redirect on|off;", "Redirects plain HTTP requests to HTTPS."),
+        "https_redirect on|off;", "Redirects plain HTTP requests to HTTPS.",
+        inherits "Off when not written; applies to every host and route of the server."),
     spec!("www_redirect" in &[Server], None, 1..Some(1), false,
-        "www_redirect off|add|remove;", "Adds or removes the www label with a redirect."),
+        "www_redirect off|add|remove;", "Adds or removes the www label with a redirect.",
+        inherits "Off when not written; applies to every host and route of the server."),
     spec!("enabled" in &[Server, Route], None, 1..Some(1), false,
-        "enabled on|off;", "Whether it serves traffic."),
+        "enabled on|off;", "Whether it serves traffic.",
+        inherits "On when not written; a route serves only while its server is enabled too."),
     spec!("group" in &[Server], None, 1..Some(1), false,
         "group <name>;", "A group to file the server under."),
     spec!("tags" in &[Server], None, 1..None, false,
@@ -183,7 +205,8 @@ pub static DIRECTIVES: &[DirectiveSpec] = &[
     spec!("match" in &[Route], None, 2..Some(3), false,
         "match exact|prefix|glob|regex <path> [host=<host>];", "The requests the route takes."),
     spec!("priority" in &[Route], None, 1..Some(1), false,
-        "priority <n>;", "Lower priorities are evaluated first."),
+        "priority <n>;", "Lower priorities are evaluated first.",
+        inherits "Without it, routes take 10, 20, 30 and so on in the order they are written."),
     DirectiveSpec {
         deprecated: Some(Deprecation {
             replacement: "route",

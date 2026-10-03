@@ -68,15 +68,42 @@ pub struct Insertion {
     pub text: String,
 }
 
+/// A directive written in a block.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Written {
+    pub directive: &'static str,
+    pub file: String,
+    /// From the directive's name through its `;`.
+    pub span: Span,
+}
+
+/// A constant visible in a block.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Constant {
+    pub name: String,
+    pub value: String,
+    pub file: String,
+    /// The `set` directive.
+    pub span: Span,
+    /// The resource path of the block that sets it, or `http`.
+    pub block: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct Lowered {
     pub model: ConfigModel,
     pub diagnostics: Vec<Diagnostic>,
     /// Where each resource is written, by its resource path such as
-    /// `sites/<id>` or `sites/<id>/routes/<id>`.
+    /// `sites/<id>`, `sites/<id>/routes/<id>`, `sites/<id>/domains/<host>`
+    /// or `upstreams/<id>/nodes/<id>`.
     pub origins: BTreeMap<String, Origin>,
     /// Identifiers assigned to blocks and nodes written without one.
     pub insertions: Vec<Insertion>,
+    /// The directives of each block other than blocks, `include` and `set`,
+    /// by resource path, in the order they are read.
+    pub written: BTreeMap<String, Vec<Written>>,
+    /// The constants visible at the end of each block, by resource path.
+    pub constants: BTreeMap<String, Vec<Constant>>,
 }
 
 impl Lowered {
@@ -126,6 +153,20 @@ struct ListenerDraft {
     default_server: Option<(String, String, Span)>,
 }
 
+struct Defined {
+    value: String,
+    file: String,
+    span: Span,
+    used: bool,
+}
+
+/// A block being read and the constants it sets.
+struct Scope {
+    /// The block's resource path, `http`, or empty at the top level.
+    block: String,
+    constants: BTreeMap<String, Defined>,
+}
+
 struct Lowerer<'a> {
     sources: &'a Sources,
     options: &'a LowerOptions<'a>,
@@ -133,13 +174,15 @@ struct Lowerer<'a> {
     indexes: BTreeMap<String, LineIndex>,
     diagnostics: Vec<Diagnostic>,
     includes: Vec<String>,
-    scopes: Vec<BTreeMap<String, String>>,
+    scopes: Vec<Scope>,
     profiles: Vec<(TlsProfile, Origin)>,
     listeners: Vec<ListenerDraft>,
     upstreams: Vec<(Upstream, Origin)>,
     servers: Vec<ServerDraft>,
     origins: BTreeMap<String, Origin>,
     insertions: Vec<Insertion>,
+    written: BTreeMap<String, Vec<Written>>,
+    constants: BTreeMap<String, Vec<Constant>>,
 }
 
 type Handler<'h, 'a> =
@@ -154,13 +197,18 @@ impl<'a> Lowerer<'a> {
             indexes: BTreeMap::new(),
             diagnostics: Vec::new(),
             includes: Vec::new(),
-            scopes: vec![BTreeMap::new()],
+            scopes: vec![Scope {
+                block: String::new(),
+                constants: BTreeMap::new(),
+            }],
             profiles: Vec::new(),
             listeners: Vec::new(),
             upstreams: Vec::new(),
             servers: Vec::new(),
             origins: BTreeMap::new(),
             insertions: Vec::new(),
+            written: BTreeMap::new(),
+            constants: BTreeMap::new(),
         };
         for (path, text) in sources.files() {
             let parsed = panel_dsl::parse(path, text);
@@ -336,7 +384,20 @@ impl<'a> Lowerer<'a> {
             match name {
                 "include" => self.include(file, directive, context, seen, handle),
                 "set" => self.set(file, directive),
-                _ => handle(self, file, directive, spec, depth),
+                _ => {
+                    let block = &self.scopes.last().expect("a scope").block;
+                    if spec.block.is_none() && !block.is_empty() {
+                        self.written
+                            .entry(block.clone())
+                            .or_default()
+                            .push(Written {
+                                directive: spec.name,
+                                file: file.to_owned(),
+                                span: directive.span,
+                            });
+                    }
+                    handle(self, file, directive, spec, depth)
+                }
             }
         }
     }
@@ -441,8 +502,44 @@ impl<'a> Lowerer<'a> {
         ) else {
             return;
         };
-        let name = name.to_owned();
-        self.scopes.last_mut().expect("a scope").insert(name, value);
+        let replaced = self.scopes.last_mut().expect("a scope").constants.insert(
+            name.to_owned(),
+            Defined {
+                value,
+                file: file.to_owned(),
+                span: directive.span,
+                used: false,
+            },
+        );
+        if let Some(unused) = replaced.filter(|replaced| !replaced.used) {
+            let diagnostic = Diagnostic::warning(
+                codes::NO_EFFECT,
+                format!("this value of ${name} is never used: it is set again before any use"),
+            )
+            .with_help("remove this set");
+            self.report(diagnostic, &unused.file, unused.span);
+        }
+    }
+
+    /// Every constant visible in the innermost block; inner ones replace
+    /// outer ones of the same name.
+    fn visible(&self) -> Vec<Constant> {
+        let mut visible = BTreeMap::new();
+        for scope in &self.scopes {
+            for (name, defined) in &scope.constants {
+                visible.insert(
+                    name.clone(),
+                    Constant {
+                        name: name.clone(),
+                        value: defined.value.clone(),
+                        file: defined.file.clone(),
+                        span: defined.span,
+                        block: scope.block.clone(),
+                    },
+                );
+            }
+        }
+        visible.into_values().collect()
     }
 
     /// Resolves constants and environment references in `value`. Request
@@ -520,9 +617,14 @@ impl<'a> Lowerer<'a> {
                     }
                 }
                 Piece::Variable(name) => {
-                    if let Some(found) = self.scopes.iter().rev().find_map(|scope| scope.get(name))
+                    if let Some(found) = self
+                        .scopes
+                        .iter_mut()
+                        .rev()
+                        .find_map(|scope| scope.constants.get_mut(name))
                     {
-                        let found = literal(found);
+                        found.used = true;
+                        let found = literal(&found.value);
                         push(&mut out, &mut open_variable, &found);
                     } else if variables::is_request_variable(name) {
                         if mode == Expansion::Text {
@@ -577,17 +679,31 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    fn with_scope(&mut self, run: impl FnOnce(&mut Self)) {
-        self.scopes.push(BTreeMap::new());
+    /// Reads a block, `block` being its resource path, in a scope of its own.
+    fn with_scope(&mut self, block: String, run: impl FnOnce(&mut Self)) {
+        self.scopes.push(Scope {
+            block,
+            constants: BTreeMap::new(),
+        });
         run(self);
-        self.scopes.pop();
+        let visible = self.visible();
+        let scope = self.scopes.pop().expect("a scope");
+        for (name, defined) in scope.constants.into_iter().filter(|(_, d)| !d.used) {
+            let diagnostic =
+                Diagnostic::warning(codes::NO_EFFECT, format!("${name} is never used"))
+                    .with_help(format!("remove the set, or refer to it as ${name}"));
+            self.report(diagnostic, &defined.file, defined.span);
+        }
+        if !visible.is_empty() {
+            self.constants.insert(scope.block, visible);
+        }
     }
 
     fn http(&mut self, file: &str, directive: &Directive, depth: usize) {
         let Some(block) = directive.block() else {
             return;
         };
-        self.with_scope(|lowerer| {
+        self.with_scope("http".into(), |lowerer| {
             let mut seen = BTreeSet::new();
             lowerer.each(
                 file,
@@ -748,7 +864,7 @@ impl<'a> Lowerer<'a> {
         let Some(block) = directive.block() else {
             return;
         };
-        self.with_scope(|lowerer| {
+        self.with_scope(format!("tls-profiles/{}", profile.id), |lowerer| {
             let mut seen = BTreeSet::new();
             lowerer.each(
                 file,
@@ -844,7 +960,7 @@ impl<'a> Lowerer<'a> {
         let Some(block) = directive.block() else {
             return;
         };
-        self.with_scope(|lowerer| {
+        self.with_scope(format!("listeners/{}", listener.id), |lowerer| {
             let mut seen = BTreeSet::new();
             lowerer.each(
                 file,
@@ -960,7 +1076,7 @@ impl<'a> Lowerer<'a> {
         let Some(block) = directive.block() else {
             return;
         };
-        self.with_scope(|lowerer| {
+        self.with_scope(format!("upstreams/{}", upstream.id), |lowerer| {
             let mut seen = BTreeSet::new();
             lowerer.each(
                 file,
@@ -968,8 +1084,8 @@ impl<'a> Lowerer<'a> {
                 Context::Upstream,
                 depth + 1,
                 &mut seen,
-                &mut |lowerer, file, directive, spec, _| {
-                    lowerer.upstream_directive(file, directive, spec, &mut upstream);
+                &mut |lowerer, file, directive, spec, depth| {
+                    lowerer.upstream_directive(file, directive, spec, depth, &mut upstream);
                 },
             );
         });
@@ -984,6 +1100,7 @@ impl<'a> Lowerer<'a> {
         file: &str,
         directive: &Directive,
         spec: &DirectiveSpec,
+        depth: usize,
         upstream: &mut Upstream,
     ) {
         let arg = &directive.args[0];
@@ -1003,6 +1120,10 @@ impl<'a> Lowerer<'a> {
                             format!("node id {} is used twice", node.id),
                         );
                     } else {
+                        self.origins.insert(
+                            format!("upstreams/{}/nodes/{}", upstream.id, node.id),
+                            Self::origin(file, directive, depth),
+                        );
                         upstream.nodes.push(node);
                     }
                 }
@@ -1347,7 +1468,7 @@ impl<'a> Lowerer<'a> {
             return;
         };
         let mut explicit_primary = false;
-        self.with_scope(|lowerer| {
+        self.with_scope(format!("sites/{}", draft.site.id), |lowerer| {
             let mut seen = BTreeSet::new();
             lowerer.each(
                 file,
@@ -1391,7 +1512,14 @@ impl<'a> Lowerer<'a> {
         self.servers.push(draft);
     }
 
-    fn add_domain(&mut self, file: &str, arg: &Argument, draft: &mut ServerDraft, domain: Domain) {
+    /// Adds a domain written at `origin`, whose host is `arg`.
+    fn add_domain(
+        &mut self,
+        arg: &Argument,
+        origin: Origin,
+        draft: &mut ServerDraft,
+        domain: Domain,
+    ) {
         if draft
             .site
             .domains
@@ -1399,12 +1527,16 @@ impl<'a> Lowerer<'a> {
             .any(|other| other.host == domain.host)
         {
             self.error(
-                file,
+                &origin.file,
                 arg.span,
                 codes::DUPLICATE,
                 format!("{} is listed twice in this server", domain.host),
             );
         } else {
+            self.origins.insert(
+                format!("sites/{}/domains/{}", draft.site.id, domain.host),
+                origin,
+            );
             draft.site.domains.push(domain);
         }
     }
@@ -1434,7 +1566,13 @@ impl<'a> Lowerer<'a> {
                             redirect: spec.name == "alias",
                             tls_profile_id: None,
                         };
-                        self.add_domain(file, arg, draft, domain);
+                        let origin = Origin {
+                            file: file.to_owned(),
+                            span: arg.span,
+                            outer: arg.span,
+                            depth,
+                        };
+                        self.add_domain(arg, origin, draft, domain);
                     }
                 }
             }
@@ -1477,7 +1615,12 @@ impl<'a> Lowerer<'a> {
                 if let Some((value, _)) = params.named.get("tls_profile") {
                     domain.tls_profile_id = Some((*value).to_owned());
                 }
-                self.add_domain(file, host_arg, draft, domain);
+                self.add_domain(
+                    host_arg,
+                    Self::origin(file, directive, depth),
+                    draft,
+                    domain,
+                );
             }
             "listen" => draft
                 .site
@@ -1597,102 +1740,107 @@ impl<'a> Lowerer<'a> {
             draft.route.name = Some(Self::literal(name));
         }
         let block = directive.block()?;
-        self.with_scope(|lowerer| {
-            let mut seen = BTreeSet::new();
-            lowerer.each(
-                file,
-                &block.directives,
-                Context::Route,
-                depth + 1,
-                &mut seen,
-                &mut |lowerer, file, directive, spec, _| {
-                    let arg = &directive.args.first();
-                    match spec.name {
-                        "id" => {}
-                        "match" => {
-                            let params = Params::split(&directive.args);
-                            lowerer.only_params(file, &params, &["host"]);
-                            let [kind_arg, path_arg] = params.positional.as_slice() else {
-                                lowerer.error_with_help(
-                                    file,
-                                    directive.span,
-                                    codes::ARGUMENTS,
-                                    "a match is a kind and a path",
-                                    format!("write it as `{}`", spec.syntax),
-                                );
-                                return;
-                            };
-                            let kind = match kind_arg.value.as_str() {
-                                "exact" => MatchKind::Exact,
-                                "prefix" => MatchKind::Prefix,
-                                "glob" => MatchKind::Glob,
-                                "regex" => MatchKind::Regex,
-                                other => {
-                                    lowerer.error(
+        self.with_scope(
+            format!("sites/{}/routes/{}", site.id, draft.route.id),
+            |lowerer| {
+                let mut seen = BTreeSet::new();
+                lowerer.each(
+                    file,
+                    &block.directives,
+                    Context::Route,
+                    depth + 1,
+                    &mut seen,
+                    &mut |lowerer, file, directive, spec, _| {
+                        let arg = &directive.args.first();
+                        match spec.name {
+                            "id" => {}
+                            "match" => {
+                                let params = Params::split(&directive.args);
+                                lowerer.only_params(file, &params, &["host"]);
+                                let [kind_arg, path_arg] = params.positional.as_slice() else {
+                                    lowerer.error_with_help(
                                         file,
-                                        kind_arg.span,
-                                        codes::TYPE,
-                                        format!("{other:?} is not exact, prefix, glob or regex"),
+                                        directive.span,
+                                        codes::ARGUMENTS,
+                                        "a match is a kind and a path",
+                                        format!("write it as `{}`", spec.syntax),
                                     );
                                     return;
-                                }
-                            };
-                            let path = if kind == MatchKind::Regex {
-                                path_arg.value.clone()
-                            } else {
-                                match lowerer.value(file, path_arg) {
-                                    Some(path) => path,
-                                    None => return,
-                                }
-                            };
-                            let host = match params.named.get("host") {
-                                Some((value, arg)) => {
-                                    let Some(value) =
-                                        lowerer.expand(file, arg, value, Expansion::Text)
-                                    else {
+                                };
+                                let kind = match kind_arg.value.as_str() {
+                                    "exact" => MatchKind::Exact,
+                                    "prefix" => MatchKind::Prefix,
+                                    "glob" => MatchKind::Glob,
+                                    "regex" => MatchKind::Regex,
+                                    other => {
+                                        lowerer.error(
+                                            file,
+                                            kind_arg.span,
+                                            codes::TYPE,
+                                            format!(
+                                                "{other:?} is not exact, prefix, glob or regex"
+                                            ),
+                                        );
                                         return;
-                                    };
-                                    lowerer.host(file, arg, &value)
+                                    }
+                                };
+                                let path = if kind == MatchKind::Regex {
+                                    path_arg.value.clone()
+                                } else {
+                                    match lowerer.value(file, path_arg) {
+                                        Some(path) => path,
+                                        None => return,
+                                    }
+                                };
+                                let host = match params.named.get("host") {
+                                    Some((value, arg)) => {
+                                        let Some(value) =
+                                            lowerer.expand(file, arg, value, Expansion::Text)
+                                        else {
+                                            return;
+                                        };
+                                        lowerer.host(file, arg, &value)
+                                    }
+                                    None => None,
+                                };
+                                draft.route.matcher = RouteMatch { kind, path, host };
+                                matched = true;
+                            }
+                            "priority" => {
+                                if let Some(arg) = arg {
+                                    if let Some(value) = lowerer.value(file, arg) {
+                                        draft.route.priority = lowerer
+                                            .number(file, arg, &value, "a whole number")
+                                            .unwrap_or_default();
+                                        draft.priority_set = true;
+                                    }
                                 }
-                                None => None,
-                            };
-                            draft.route.matcher = RouteMatch { kind, path, host };
-                            matched = true;
-                        }
-                        "priority" => {
-                            if let Some(arg) = arg {
-                                if let Some(value) = lowerer.value(file, arg) {
-                                    draft.route.priority = lowerer
-                                        .number(file, arg, &value, "a whole number")
-                                        .unwrap_or_default();
-                                    draft.priority_set = true;
+                            }
+                            "enabled" => {
+                                draft.route.enabled = arg
+                                    .and_then(|arg| lowerer.bool_arg(file, arg))
+                                    .unwrap_or(true)
+                            }
+                            action => {
+                                let Some(found) = lowerer.action(file, directive, action) else {
+                                    return;
+                                };
+                                if draft.action.is_some() {
+                                    lowerer.error(
+                                        file,
+                                        directive.name.span,
+                                        codes::DUPLICATE,
+                                        "the route already has an action",
+                                    );
+                                } else {
+                                    draft.action = Some(found);
                                 }
                             }
                         }
-                        "enabled" => {
-                            draft.route.enabled = arg
-                                .and_then(|arg| lowerer.bool_arg(file, arg))
-                                .unwrap_or(true)
-                        }
-                        action => {
-                            let Some(found) = lowerer.action(file, directive, action) else {
-                                return;
-                            };
-                            if draft.action.is_some() {
-                                lowerer.error(
-                                    file,
-                                    directive.name.span,
-                                    codes::DUPLICATE,
-                                    "the route already has an action",
-                                );
-                            } else {
-                                draft.action = Some(found);
-                            }
-                        }
-                    }
-                },
-            );
-        });
+                    },
+                );
+            },
+        );
         if !matched {
             self.error_with_help(
                 file,
@@ -1970,11 +2118,18 @@ impl<'a> Lowerer<'a> {
                 None => self.diagnostics.push(diagnostic),
             }
         });
+        for (file, span, diagnostic) in
+            crate::inheritance::check(&model, &self.written, &self.origins)
+        {
+            self.report(diagnostic, &file, span);
+        }
         Lowered {
             model,
             diagnostics: self.diagnostics,
             origins: self.origins,
             insertions: self.insertions,
+            written: self.written,
+            constants: self.constants,
         }
     }
 

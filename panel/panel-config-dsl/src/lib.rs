@@ -7,6 +7,8 @@
 
 mod checks;
 mod edit;
+pub mod explain;
+mod inheritance;
 mod lower;
 pub mod nginx;
 pub mod plan;
@@ -18,7 +20,8 @@ pub mod values;
 pub mod variables;
 
 pub use edit::{format_files, reconcile, write_identifiers};
-pub use lower::{lower, Insertion, LowerOptions, Lowered, Origin};
+pub use explain::{explain, Explanation};
+pub use lower::{lower, Constant, Insertion, LowerOptions, Lowered, Origin, Written};
 pub use nginx::{import_nginx, NginxImport};
 pub use print::print;
 pub use source::{Sources, ENTRY};
@@ -55,4 +58,8 @@ pub mod codes {
     pub const UNREACHABLE_ROUTE: &str = "DSL_UNREACHABLE_ROUTE";
     /// Quotes inside an argument are part of its value; a warning.
     pub const QUOTES: &str = "DSL_QUOTES";
+    /// A setting has no effect where it is written: every block that would
+    /// take it over sets its own, nothing uses it, or a constant is never
+    /// used; a warning.
+    pub const NO_EFFECT: &str = "DSL_NO_EFFECT";
 }
