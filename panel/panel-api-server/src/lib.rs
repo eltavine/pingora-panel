@@ -82,8 +82,10 @@ pub fn process(
         .with_database_impact(Impact::Degrading)
         .with_check(Arc::new(config_health), Impact::Degrading)
         .on_start(move |running| {
+            let config = Arc::new(config);
             let api = router_with_config(
-                ApiState::new(Arc::new(config))
+                ApiState::new(Arc::clone(&config))
+                    .with_configuration(config)
                     .with_health(running.health())
                     .with_directory(Arc::new(directory::RegistryDirectory::new(
                         running.jetstream().clone(),
