@@ -324,13 +324,17 @@ origins for browsers that send no `Sec-Fetch-Site`.
 Each route requires a permission from the catalog at
 `GET /api/v1/permissions`. The built-in roles grant Administrator every
 permission, Operator configuration changes and gateway operations, Viewer
-reading, and Auditor reading with the audit trail and accounts.
-`/api/v1/account` manages the caller's password, sessions and API tokens;
-tokens start with `ppat_`, are shown once, expire within a year and never
-hold permissions their owner lacks. `/api/v1/accounts` and `/api/v1/roles`
-administer accounts, their roles, sessions and tokens. Logins, failed
-logins, account and token changes, and requests refused to a signed-in
-caller are recorded in the audit trail.
+reading, and Auditor reading with the audit trail and accounts; they cannot
+change. Administrators compose further roles from the catalog and delete
+those no account holds. `/api/v1/account` manages the caller's password,
+sessions and API tokens; tokens start with `ppat_`, are shown once, expire
+within a year and never hold permissions their owner lacks. Rotating a token
+issues a new secret with the same permissions and lifetime and stops the old
+one at once, and a user can end every other session of their account.
+`/api/v1/accounts` and `/api/v1/roles` administer accounts, their roles,
+sessions and tokens, and custom roles. Logins, failed logins, account, role
+and token changes, and requests refused to a signed-in caller are recorded
+in the audit trail.
 
 ```sh
 ppanel setup --username admin --bootstrap-token-file secrets/bootstrap-token
@@ -339,11 +343,15 @@ ppanel whoami
 ppanel account create ops --role operator --with-password
 ppanel token create ci --permission config.read --permission config.apply --days 30
 PPANEL_TOKEN=ppat_... ppanel config apply
+ppanel token rotate <token-id>
+ppanel role create deployer --name Deployer --permission config.read --permission config.apply
+ppanel account end-sessions ops
+ppanel logout --everywhere
 ```
 
 The console asks for a login, or for the first administrator while none
 exists, shows only the pages the account may use, and offers account
-settings and account administration.
+settings and the administration of accounts and roles.
 
 ## Activation invariant
 

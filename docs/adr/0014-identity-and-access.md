@@ -53,12 +53,17 @@ Storage, Session Management and CSRF Prevention cheat sheets.
 - **API tokens.** Tokens are `ppat_` followed by 256 random bits, shown once,
   stored as SHA-256 hashes, and have a name, an expiry of at most a year and
   a set of permissions that can only narrow their owner's. Revoking or
-  disabling the owner ends them.
+  disabling the owner ends them. Rotating a token revokes it and issues a
+  new secret with the same permissions, still narrowed to the owner's, and
+  the same lifetime in one transaction.
 - **Authorization.** Permissions are named actions such as `config.read`
   or `config.apply`, listed in one catalog with their descriptions. Roles
   are sets of permissions stored as data; the built-in Administrator,
   Operator, Viewer and Auditor roles are seeded rows that code never refers
-  to by name. A binding grants a role to an account globally. Every route
+  to by name. Administrators add custom roles from the catalog; built-in
+  roles cannot change, a role an account holds cannot be deleted, and no
+  change may leave the panel without an enabled account able to manage
+  accounts. A binding grants a role to an account globally. Every route
   of the API declares the permission it needs in one table; a route without
   an entry is refused, and a request is allowed only when the principal
   holds the permission.

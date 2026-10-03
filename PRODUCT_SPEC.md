@@ -137,7 +137,7 @@ Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交
 
 0.3 审计（`AUDIT-001`、`AUDIT-003`、`AUDIT-004`）已由 `audit-service` 实现：各服务通过事务性 Outbox 发布每次变更及被拒绝或失败的尝试，审计服务按来源与事件 ID 幂等写入带检查点、只追加的 SHA-256 哈希链，并在 REST API、`ppanel audit` 与控制台审计日志中提供筛选、详情与完整性校验。证书操作审计（`AUDIT-005`）已覆盖 TLS Profile 变更，证书签发与续期随 `TLS-*` 补齐，因此为 `In Progress`；登录审计（`AUDIT-002`）已随 0.4 的登录实现；Docker 操作审计（`AUDIT-006`）随 `CTR-*` 实现，仍为 `Planned`。
 
-0.4 身份与访问（`IAM-001`～`IAM-014`、`IAM-025`、`IAM-028`、`IAM-029`）已在 REST API、`ppanel` 与 Web 控制台实现：部署生成的一次性引导令牌创建首个管理员；密码遵循 NIST SP 800-63B-4（至少 15 个字符、NFC 规范化、按强度估计拒绝常见与可预测的密码、以 Argon2id 加 pepper 存储、连续失败后递增等待并在第 100 次锁定），每个客户端地址的登录尝试另有限流；浏览器会话使用 `Secure`、`HttpOnly`、`SameSite=Strict` 的 `__Host-` Cookie 与由会话密钥派生的 CSRF 令牌，并拒绝跨站请求；命令行使用 Bearer 会话或以 `ppat_` 开头、权限不超过所有者的 API 令牌；每条路由在一张表中声明所需权限，内置管理员、运维、只读与审计角色。登录、失败登录、账户与令牌变更以及拒绝已登录调用者的请求都进入审计（`AUDIT-002`、`SEC-035`）。自定义角色（`IAM-024`）、Site Group 范围与条件绑定（`IAM-026`、`IAM-027`）、全局登出与令牌轮换（`IAM-030`、`IAM-031`）、OIDC 与 Break-glass（`IAM-015`～`IAM-023`）、服务账户与工作负载身份（`IAM-032`、`IAM-033`）以及审批（`IAM-034`～`IAM-038`）仍为 `Planned`。
+0.4 身份与访问（`IAM-001`～`IAM-014`、`IAM-024`、`IAM-025`、`IAM-028`～`IAM-031`）已在 REST API、`ppanel` 与 Web 控制台实现：部署生成的一次性引导令牌创建首个管理员；密码遵循 NIST SP 800-63B-4（至少 15 个字符、NFC 规范化、按强度估计拒绝常见与可预测的密码、以 Argon2id 加 pepper 存储、连续失败后递增等待并在第 100 次锁定），每个客户端地址的登录尝试另有限流；浏览器会话使用 `Secure`、`HttpOnly`、`SameSite=Strict` 的 `__Host-` Cookie 与由会话密钥派生的 CSRF 令牌，并拒绝跨站请求；命令行使用 Bearer 会话或以 `ppat_` 开头、权限不超过所有者的 API 令牌；每条路由在一张表中声明所需权限，内置管理员、运维、只读与审计角色，管理员可从权限目录组合自定义角色；用户可一次结束其他全部会话，管理员可结束任一账户的全部会话；API 令牌可轮换，新令牌沿用原令牌的权限与有效时长，旧密钥立即失效。登录、失败登录、账户、角色与令牌变更以及拒绝已登录调用者的请求都进入审计（`AUDIT-002`、`SEC-035`）。Site Group 范围与条件绑定（`IAM-026`、`IAM-027`）、OIDC 与 Break-glass（`IAM-015`～`IAM-023`）、服务账户与工作负载身份（`IAM-032`、`IAM-033`）以及审批（`IAM-034`～`IAM-038`）仍为 `Planned`。
 
 ### 3.2 目标仓库边界
 
@@ -1317,14 +1317,14 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | IAM-021 | - | OIDC 用户停权同步 | 0.4 | A/C/G/I | Administrator | identity | 执行“OIDC 用户停权同步”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | IAM-022 | - | Break-glass 本地管理员 | 0.4 | A/C/G/I | Administrator | identity | 执行“Break-glass 本地管理员”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | IAM-023 | - | Break-glass 使用高优先级告警 | 0.4 | A/C/G/I | Administrator | identity | 执行“Break-glass 使用高优先级告警”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| IAM-024 | - | 角色 CRUD | 0.4 | A/C/G/I | Administrator | identity | 执行“角色 CRUD”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| IAM-024 | - | 角色 CRUD | 0.4 | A/C/G/I | Administrator | identity | 执行“角色 CRUD”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | IAM-025 | - | 权限目录查询 | 0.4 | A/C/G/I | Administrator | identity | 查询“权限目录查询”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
 | IAM-026 | - | Site Group 资源范围 | 0.4 | A/C/G/I | Administrator | identity | 执行“Site Group 资源范围”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | IAM-027 | - | 条件式 Role Binding | 0.4 | A/C/G/I | Administrator | identity | 执行“条件式 Role Binding”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | IAM-028 | - | 活动 Session 列表 | 0.4 | A/C/G/I | Administrator | identity | 查询“活动 Session 列表”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
 | IAM-029 | - | Session 单项撤销 | 0.4 | A/C/G/I | Administrator | identity | 执行“Session 单项撤销”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
-| IAM-030 | - | 用户全局登出 | 0.4 | A/C/G/I | Administrator | identity | 执行“用户全局登出”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| IAM-031 | - | API Token 轮换 | 0.4 | A/C/G/I | Administrator | identity | 执行“API Token 轮换”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| IAM-030 | - | 用户全局登出 | 0.4 | A/C/G/I | Administrator | identity | 执行“用户全局登出”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| IAM-031 | - | API Token 轮换 | 0.4 | A/C/G/I | Administrator | identity | 执行“API Token 轮换”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | IAM-032 | - | Service Account | 0.4 | A/C/G/I | Administrator | identity | 执行“Service Account”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | IAM-033 | - | OIDC Workload Identity | 0.4 | A/C/G/I | Administrator | identity | 执行“OIDC Workload Identity”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | IAM-034 | - | 审批策略 CRUD | 0.4 | A/C/G/I | Administrator | identity | 执行“审批策略 CRUD”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
@@ -1421,7 +1421,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | 新增团队/平台需求 | 105 |
 | 总 Feature ID | 685 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
-| 当前 `Implemented` | 231（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-022`、`DSL-025`～`DSL-034`、`DSL-035`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-004`；身份：`IAM-001`～`IAM-014`、`IAM-025`、`IAM-028`、`IAM-029`；安全：`SEC-035`） |
+| 当前 `Implemented` | 234（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-022`、`DSL-025`～`DSL-034`、`DSL-035`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-004`；身份：`IAM-001`～`IAM-014`、`IAM-024`、`IAM-025`、`IAM-028`～`IAM-031`；安全：`SEC-035`） |
 | 1.0 要求 `Verified` | 685 |
 
 分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 47、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。
