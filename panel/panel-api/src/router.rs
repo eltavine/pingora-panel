@@ -1,8 +1,8 @@
 use crate::{
     access, acme,
     admission::{admit, Admission},
-    audit, certificates, configuration as config, gateway_runtime as runtime, identity, language,
-    middleware, routes, sign_in, tls_checks, ApiConfig, ApiState,
+    approvals, audit, certificates, configuration as config, gateway_runtime as runtime, identity,
+    language, middleware, routes, sign_in, tls_checks, ApiConfig, ApiState,
 };
 use axum::{
     extract::DefaultBodyLimit,
@@ -144,6 +144,40 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         .route("/api/v1/config/draft", get(config::draft::<U>))
         .route("/api/v1/config/validation", get(config::validation::<U>))
         .route("/api/v1/config/apply", post(config::apply::<U>))
+        .route(
+            "/api/v1/approval-policies",
+            get(approvals::list_approval_policies::<U>),
+        )
+        .route(
+            "/api/v1/approval-policies/{id}",
+            get(approvals::get_approval_policy::<U>)
+                .put(approvals::put_approval_policy::<U>)
+                .delete(approvals::delete_approval_policy::<U>),
+        )
+        .route(
+            "/api/v1/approvals",
+            get(approvals::list_approval_requests::<U>),
+        )
+        .route(
+            "/api/v1/approvals/{id}",
+            get(approvals::get_approval_request::<U>),
+        )
+        .route(
+            "/api/v1/approvals/{id}/approve",
+            post(approvals::approve_request::<U>),
+        )
+        .route(
+            "/api/v1/approvals/{id}/reject",
+            post(approvals::reject_request::<U>),
+        )
+        .route(
+            "/api/v1/approvals/{id}/revoke",
+            post(approvals::revoke_approval::<U>),
+        )
+        .route(
+            "/api/v1/approvals/{id}/withdraw",
+            post(approvals::withdraw_request::<U>),
+        )
         .route(
             "/api/v1/config/source",
             get(language::source::<U>).put(language::replace_source::<U>),

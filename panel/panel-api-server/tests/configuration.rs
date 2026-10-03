@@ -111,12 +111,23 @@ impl Api {
     }
 }
 
-#[tokio::test]
-async fn sites_are_edited_validated_and_applied_through_the_api() {
+/// config-service, audit-service and the API with a signed-in
+/// Administrator, `operator`.
+struct Stack {
+    api: Api,
+    config: RunningProcess,
+    audit: RunningProcess,
+    server: RunningProcess,
+    database: TestDatabase,
+    broker: TestBroker,
+    _web: tempfile::TempDir,
+}
+
+async fn stack() -> Option<Stack> {
     let (Some(mut database), Some(broker)) =
         (TestDatabase::create().await, TestBroker::create().await)
     else {
-        return;
+        return None;
     };
     let secrets = database
         .bootstrap(&[
@@ -198,6 +209,38 @@ async fn sites_are_edited_validated_and_applied_through_the_api() {
         client: support::signed_in(&base).await,
         base,
     };
+    Some(Stack {
+        api,
+        config,
+        audit,
+        server,
+        database,
+        broker,
+        _web: web,
+    })
+}
+
+impl Stack {
+    async fn stop(self) {
+        self.server.stop().await;
+        self.audit.stop().await;
+        self.config.stop().await;
+        let _ = self
+            .broker
+            .context
+            .delete_key_value(self.broker.settings.service_bucket())
+            .await;
+        self.database.drop().await;
+        self.broker.drop().await;
+    }
+}
+
+#[tokio::test]
+async fn sites_are_edited_validated_and_applied_through_the_api() {
+    let Some(stack) = stack().await else {
+        return;
+    };
+    let api = &stack.api;
     use reqwest::Method;
 
     let (listener, _) = api
@@ -698,13 +741,146 @@ async fn sites_are_edited_validated_and_applied_through_the_api() {
         .await;
     assert_eq!(applied["draft"]["pending"], false);
 
-    server.stop().await;
-    audit.stop().await;
-    config.stop().await;
-    let _ = broker
-        .context
-        .delete_key_value(broker.settings.service_bucket())
+    stack.stop().await;
+}
+
+/// A client signed in as a new account with `roles`.
+async fn person(api: &Api, username: &str, roles: &[&str]) -> Api {
+    api.json(
+        api.client
+            .post(format!("{}/api/v1/accounts", api.base))
+            .json(&json!({"username": username, "password": support::PASSWORD, "roles": roles})),
+        StatusCode::CREATED,
+    )
+    .await;
+    let (login, _) = api
+        .json(
+            Client::new()
+                .post(format!("{}/api/v1/session", api.base))
+                .json(&json!({"username": username, "password": support::PASSWORD, "transport": "bearer"})),
+            StatusCode::CREATED,
+        )
         .await;
-    database.drop().await;
-    broker.drop().await;
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::AUTHORIZATION,
+        format!("Bearer {}", login["secret"].as_str().unwrap())
+            .parse()
+            .unwrap(),
+    );
+    Api {
+        client: Client::builder().default_headers(headers).build().unwrap(),
+        base: api.base.clone(),
+    }
+}
+
+#[tokio::test]
+async fn covered_changes_wait_for_another_person() {
+    let Some(stack) = stack().await else {
+        return;
+    };
+    use reqwest::Method;
+    let admin = &stack.api;
+    let bob = person(admin, "bob", &["operator"]).await;
+    let (policy, _) = admin
+        .json(
+            admin
+                .mutate(Method::PUT, "/api/v1/approval-policies/prod", "policy")
+                .json(&json!({"site_tags": ["prod"], "description": "Production"})),
+            StatusCode::CREATED,
+        )
+        .await;
+    assert_eq!(policy["version"], 1);
+    bob.json(
+        bob.mutate(Method::PUT, "/api/v1/approval-policies/prod", "bob-policy")
+            .json(&json!({})),
+        StatusCode::FORBIDDEN,
+    )
+    .await;
+
+    admin
+        .json(
+            admin
+                .mutate(Method::PUT, "/api/v1/listeners/http", "listener")
+                .json(&json!({"id": "http", "address": "0.0.0.0:8080"})),
+            StatusCode::OK,
+        )
+        .await;
+    admin
+        .json(
+            admin
+                .mutate(Method::POST, "/api/v1/sites", "site")
+                .json(&json!({
+                    "name": "Shop",
+                    "action": {"type": "respond"},
+                    "domains": [{"host": "shop.example.com"}],
+                    "tags": ["prod"]
+                })),
+            StatusCode::CREATED,
+        )
+        .await;
+    let apply = |api: &Api, key: &str, body: Value| {
+        api.mutate(Method::POST, "/api/v1/config/apply", key)
+            .json(&body)
+    };
+    let (request, _) = admin
+        .json(apply(admin, "apply-1", json!({})), StatusCode::ACCEPTED)
+        .await;
+    assert_eq!(
+        (request["state"].clone(), request["requested_by"].clone()),
+        (json!("pending"), json!("operator"))
+    );
+    let id = request["id"].as_str().unwrap();
+    admin
+        .json(
+            admin.mutate(
+                Method::POST,
+                &format!("/api/v1/approvals/{id}/approve"),
+                "self",
+            ),
+            StatusCode::FORBIDDEN,
+        )
+        .await;
+    let (listed, _) = bob.json(bob.get("/api/v1/approvals"), StatusCode::OK).await;
+    assert_eq!(listed["items"][0]["id"], id);
+    let (approved, _) = bob
+        .json(
+            bob.mutate(
+                Method::POST,
+                &format!("/api/v1/approvals/{id}/approve"),
+                "approve",
+            ),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(approved["state"], "approved");
+    let (applied, _) = admin
+        .json(apply(admin, "apply-2", json!({})), StatusCode::OK)
+        .await;
+    assert!(applied["revision"].as_u64().is_some());
+
+    admin
+        .json(
+            admin
+                .mutate(Method::POST, "/api/v1/sites", "site-2")
+                .json(&json!({
+                    "name": "Checkout",
+                    "action": {"type": "respond"},
+                    "domains": [{"host": "checkout.example.com"}],
+                    "tags": ["prod"]
+                })),
+            StatusCode::CREATED,
+        )
+        .await;
+    let bypass =
+        json!({"bypass": {"reason": "checkout is down for everyone", "incident": "INC-7"}});
+    bob.json(
+        apply(&bob, "bypass-bob", bypass.clone()),
+        StatusCode::FORBIDDEN,
+    )
+    .await;
+    admin
+        .json(apply(admin, "bypass-admin", bypass), StatusCode::OK)
+        .await;
+    stack.stop().await;
 }

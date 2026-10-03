@@ -9,6 +9,7 @@
 mod access;
 mod acme;
 mod admission;
+mod approvals;
 mod audit;
 mod certificates;
 mod conditional;
@@ -30,9 +31,10 @@ mod state;
 mod tls_checks;
 
 pub use access::{AccessAudit, AccessSettings, Refusal};
+pub use approvals::Rejection;
 pub use config::ApiConfig;
 pub use configuration::{
-    ApplyRequest, ApplyResponse, CloneSiteRequest, DomainCheckRequest, DraftResponse,
+    ApplyBypass, ApplyRequest, ApplyResponse, CloneSiteRequest, DomainCheckRequest, DraftResponse,
     ImportResponse, RouteOrderRequest,
 };
 pub use contract::*;

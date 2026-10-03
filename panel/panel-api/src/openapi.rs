@@ -75,10 +75,16 @@ mod tests;
         crate::identity::rotate_token, crate::sign_in::list_identity_providers, crate::sign_in::get_identity_provider,
         crate::sign_in::put_identity_provider, crate::sign_in::delete_identity_provider, crate::sign_in::sign_in_options,
         crate::sign_in::start_sign_in, crate::sign_in::finish_sign_in,
-        crate::sign_in::get_sign_in_policy, crate::sign_in::put_sign_in_policy
+        crate::sign_in::get_sign_in_policy, crate::sign_in::put_sign_in_policy,
+        crate::approvals::list_approval_policies, crate::approvals::get_approval_policy,
+        crate::approvals::put_approval_policy, crate::approvals::delete_approval_policy,
+        crate::approvals::list_approval_requests, crate::approvals::get_approval_request,
+        crate::approvals::approve_request, crate::approvals::reject_request, crate::approvals::revoke_approval,
+        crate::approvals::withdraw_request
     ),
     tags(
         (name = "configuration", description = "Sites, domains, routes, upstreams, listeners and TLS profiles, edited as a draft and applied to the gateway"),
+        (name = "approvals", description = "Policies that ask other people to approve covered changes before they are applied, and the requests they open"),
         (name = "gateway", description = "The running gateway: data plane, workers, shutdown and upstream health"),
         (name = "audit", description = "Every change and every refused or failed attempt, in a tamper-evident hash chain"),
         (name = "certificates", description = "Server certificates whose private keys stay sealed with the panel and are delivered to the gateway, and the ACME accounts and automatic certificates that keep some of them issued and renewed"),

@@ -11,22 +11,23 @@ use crate::{
 };
 use axum::{
     body::Bytes,
-    extract::{Path, Query, State},
+    extract::{Extension, Path, Query, State},
     http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
 use chrono::{DateTime, SecondsFormat, Utc};
 use panel_application::{
-    ActivatedDeployment, ApplyOutcome, ConfigurationChange, ConfigurationOutput, ConfigurationPort,
-    ConfigurationRead, DraftInfo, GatewayUseCases,
+    ActivatedDeployment, ApplyOutcome, ApprovalBypass, ConfigurationChange, ConfigurationOutput,
+    ConfigurationPort, ConfigurationRead, DraftInfo, GatewayUseCases,
 };
 use panel_config_model::{
-    BatchRequest, Domain, DomainCheck, DomainView, Listener, ListenerView, NodeInput, RouteInput,
-    RouteView, SecurityPolicy, SecurityPolicyView, SiteBundle, SiteInput, SiteList, SiteQuery,
-    SiteSummary, SiteView, TlsProfile, TlsProfileInput, TlsProfileView, UpstreamInput,
-    UpstreamView, ValidationResult,
+    ApprovalRequest, BatchRequest, Domain, DomainCheck, DomainView, Listener, ListenerView,
+    NodeInput, RouteInput, RouteView, SecurityPolicy, SecurityPolicyView, SiteBundle, SiteInput,
+    SiteList, SiteQuery, SiteSummary, SiteView, TlsProfile, TlsProfileInput, TlsProfileView,
+    UpstreamInput, UpstreamView, ValidationResult,
 };
 use panel_errors::PanelError;
+use panel_identity::{Permission, Principal};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use utoipa::{IntoParams, ToSchema};
@@ -303,6 +304,20 @@ pub struct ApplyRequest {
     /// Recorded with the revision, for example why it was applied.
     #[serde(default)]
     pub note: Option<String>,
+    /// Applies without the approvals policies ask for; needs
+    /// `approval.bypass` and is recorded.
+    #[serde(default)]
+    pub bypass: Option<ApplyBypass>,
+}
+
+/// Why a change goes ahead without its approvals.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ApplyBypass {
+    /// At least 10 characters.
+    pub reason: String,
+    /// The incident it answers, such as a ticket reference.
+    pub incident: String,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -1094,12 +1109,18 @@ pub(crate) async fn validation<U: GatewayUseCases>(
     .await
 }
 
-/// Compiles the draft and activates it on the gateway.
+/// Compiles the draft and activates it on the gateway, unless approval
+/// policies cover the change and it still waits for approvals.
 #[utoipa::path(post, path = "/api/v1/config/apply", request_body = ApplyRequest,
-    params(MutationHeaders), responses((status = 200, body = ApplyResponse)), tag = "configuration")]
+    params(MutationHeaders), responses(
+        (status = 200, body = ApplyResponse),
+        (status = 202, body = ApprovalRequest,
+            description = "Policies ask for approvals first; nothing was applied")),
+    tag = "configuration")]
 pub(crate) async fn apply<U: GatewayUseCases>(
     State(state): State<ApiState<U>>,
     headers: HeaderMap,
+    principal: Option<Extension<Principal>>,
     body: Bytes,
 ) -> Result<Response, ApiError> {
     let context = command_context(&headers)?;
@@ -1116,6 +1137,15 @@ pub(crate) async fn apply<U: GatewayUseCases>(
     if let Some(note) = request.note.filter(|note| !note.trim().is_empty()) {
         apply = apply.with_note(note);
     }
+    if let Some(bypass) = request.bypass {
+        if principal.is_some_and(|Extension(principal)| !principal.can(Permission::ApprovalBypass))
+        {
+            return Err(ApiError::new(PanelError::permission_denied(
+                "applying without approvals needs the approval.bypass permission",
+            )));
+        }
+        apply = apply.bypassing(ApprovalBypass::new(bypass.reason, bypass.incident));
+    }
     match port(&state)?.apply(context, apply).await? {
         ApplyOutcome::Applied {
             draft,
@@ -1125,6 +1155,15 @@ pub(crate) async fn apply<U: GatewayUseCases>(
         } => {
             let mut response =
                 axum::Json(ApplyResponse::new(&draft, &deployment, revision)).into_response();
+            insert_draft(response.headers_mut(), &draft);
+            Ok(response)
+        }
+        ApplyOutcome::AwaitingApproval { draft, request, .. } => {
+            let mut response = (StatusCode::ACCEPTED, request).into_response();
+            response.headers_mut().insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/json"),
+            );
             insert_draft(response.headers_mut(), &draft);
             Ok(response)
         }
