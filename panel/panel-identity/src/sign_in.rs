@@ -355,6 +355,7 @@ impl ProviderSignIns {
                     roles: Vec::new(),
                     now,
                     first: false,
+                    service: false,
                 };
                 (id, Some(new), Vec::new(), Vec::new())
             }

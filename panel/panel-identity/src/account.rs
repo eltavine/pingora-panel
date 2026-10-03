@@ -97,6 +97,9 @@ pub struct Account {
     /// Keeps password sign-in when it is limited to break-glass accounts;
     /// every sign-in with it is recorded for review.
     pub break_glass: bool,
+    /// Belongs to a program: it never signs in, and account managers issue
+    /// its API tokens.
+    pub service: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub last_login_at: Option<DateTime<Utc>>,

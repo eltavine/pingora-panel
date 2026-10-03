@@ -51,6 +51,7 @@ pub struct NewAccount {
     pub now: DateTime<Utc>,
     /// Created only while no account exists, atomically.
     pub first: bool,
+    pub service: bool,
 }
 
 /// What an update changes; `None` leaves a field as it is.

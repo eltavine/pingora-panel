@@ -68,6 +68,8 @@ pub struct AccountRequest {
     /// Without one the account cannot log in until a password is set.
     pub password: Option<String>,
     pub roles: Vec<String>,
+    /// A service account, which never has a password.
+    pub service: bool,
 }
 
 /// A role to create or replace.
@@ -289,6 +291,7 @@ impl Identity {
                     roles: vec![role.id],
                     now: self.now(),
                     first: true,
+                    service: false,
                 },
                 &cause(scope, &actor),
             )
@@ -547,6 +550,11 @@ impl Identity {
         actor: &str,
     ) -> Result<()> {
         let stored = self.stored(account).await?;
+        if stored.account.service {
+            return Err(PanelError::precondition_failed(
+                "service accounts have no password; issue them API tokens",
+            ));
+        }
         self.check_password(
             new,
             &stored.account.username,
@@ -585,6 +593,11 @@ impl Identity {
     ) -> Result<Account> {
         let username = Username::new(&request.username)?;
         self.known_roles(&request.roles).await?;
+        if request.service && request.password.is_some() {
+            return Err(PanelError::invalid_argument(
+                "service accounts have no password; issue them API tokens",
+            ));
+        }
         let password_hash = match &request.password {
             Some(password) => {
                 self.check_password(password, &username, request.display_name.as_deref())?;
@@ -602,6 +615,7 @@ impl Identity {
                     roles: request.roles,
                     now: self.now(),
                     first: false,
+                    service: request.service,
                 },
                 &cause(scope, actor),
             )
@@ -623,6 +637,15 @@ impl Identity {
         let accounts = self.store.accounts().await?;
         if !accounts.iter().any(|account| account.id == id) {
             return Err(PanelError::not_found(format!("there is no account {id}")));
+        }
+        if change.break_glass == Some(true)
+            && accounts
+                .iter()
+                .any(|account| account.id == id && account.service)
+        {
+            return Err(PanelError::invalid_argument(
+                "service accounts never sign in, so they cannot be break-glass accounts",
+            ));
         }
         let roles = self.role_permissions(None).await?;
         let after: Vec<(bool, bool, Vec<String>)> = accounts
@@ -798,6 +821,59 @@ impl Identity {
                 "API tokens are created from a login session, not with another token",
             ));
         }
+        if self.stored(principal.account).await?.account.service {
+            return Err(PanelError::permission_denied(
+                "service accounts get API tokens from account managers",
+            ));
+        }
+        self.new_token(
+            principal.account,
+            &principal.permissions,
+            request,
+            scope,
+            principal.actor(),
+        )
+        .await
+    }
+
+    /// Issues an API token for a service account on an account manager's
+    /// behalf, with at most the service account's permissions.
+    pub async fn issue_token(
+        &self,
+        account: AccountId,
+        request: TokenRequest,
+        scope: &RequestScope,
+        actor: &str,
+    ) -> Result<(ApiToken, Secret)> {
+        let stored = self.stored(account).await?;
+        if !stored.account.service {
+            return Err(PanelError::precondition_failed(
+                "only service accounts are issued tokens; people create their own",
+            ));
+        }
+        if stored.account.disabled {
+            return Err(PanelError::precondition_failed("the account is disabled"));
+        }
+        let roles = self.role_permissions(None).await?;
+        let permissions: PermissionSet = stored
+            .account
+            .roles
+            .iter()
+            .filter_map(|role| roles.get(role))
+            .flat_map(PermissionSet::iter)
+            .collect();
+        self.new_token(account, &permissions, request, scope, actor)
+            .await
+    }
+
+    async fn new_token(
+        &self,
+        account: AccountId,
+        allowed: &PermissionSet,
+        request: TokenRequest,
+        scope: &RequestScope,
+        actor: &str,
+    ) -> Result<(ApiToken, Secret)> {
         let name = request.name.trim();
         if name.is_empty() || name.chars().count() > 64 {
             return Err(PanelError::invalid_argument(
@@ -812,13 +888,11 @@ impl Identity {
                 self.settings.max_token_lifetime.as_secs() / 86_400
             )));
         }
-        let permissions = request
-            .permissions
-            .unwrap_or_else(|| principal.permissions.clone());
-        if !principal.permissions.is_superset(&permissions) {
+        let permissions = request.permissions.unwrap_or_else(|| allowed.clone());
+        if !allowed.is_superset(&permissions) {
             let missing: Vec<_> = permissions
                 .iter()
-                .filter(|permission| !principal.can(*permission))
+                .filter(|permission| !allowed.contains(*permission))
                 .map(Permission::name)
                 .collect();
             return Err(PanelError::permission_denied(format!(
@@ -829,7 +903,7 @@ impl Identity {
         let now = self.now();
         let token = ApiToken {
             id: TokenId::generate(),
-            account: principal.account,
+            account,
             name: name.to_owned(),
             permissions,
             created_at: now,
@@ -844,7 +918,7 @@ impl Identity {
                     token: token.clone(),
                     secret: secret.hash(),
                 },
-                &cause(scope, principal.actor()),
+                &cause(scope, actor),
             )
             .await?;
         Ok((token, secret))

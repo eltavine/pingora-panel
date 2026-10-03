@@ -40,6 +40,8 @@ pub struct AccountView {
     /// Keeps password sign-in when it is limited to break-glass accounts;
     /// every sign-in with it is recorded as `identity.break_glass.used`.
     pub break_glass: bool,
+    /// Belongs to a program; it never signs in.
+    pub service: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub last_login_at: Option<DateTime<Utc>>,
@@ -56,6 +58,7 @@ impl From<Account> for AccountView {
             locked: account.locked,
             roles: account.roles,
             break_glass: account.break_glass,
+            service: account.service,
             created_at: account.created_at,
             updated_at: account.updated_at,
             last_login_at: account.last_login_at,
@@ -247,6 +250,10 @@ pub struct NewAccount {
     pub password: Option<String>,
     #[serde(default)]
     pub roles: Vec<String>,
+    /// A service account for a program: no password, and account managers
+    /// issue its API tokens.
+    #[serde(default)]
+    pub service: bool,
 }
 
 /// Changes to an account; absent fields stay as they are.
@@ -422,6 +429,7 @@ pub(crate) async fn setup<U>(
                 display_name: request.display_name,
                 password: Some(request.password),
                 roles: Vec::new(),
+                service: false,
             },
             &request_scope(&headers)?,
         )
@@ -693,6 +701,7 @@ pub(crate) async fn create_account<U>(
                 display_name: request.display_name.filter(|name| !name.trim().is_empty()),
                 password: request.password,
                 roles: request.roles,
+                service: request.service,
             },
             &request_scope(&headers)?,
             principal.actor(),
@@ -810,6 +819,50 @@ pub(crate) async fn end_account_session<U>(
         )
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Issues an API token for a service account; its secret is returned once.
+#[utoipa::path(post, path = "/api/v1/accounts/{id}/tokens", params(AccountPath),
+    request_body = NewToken, responses((status = 201, body = CreatedToken)), tag = "identity")]
+pub(crate) async fn issue_token<U>(
+    State(state): State<ApiState<U>>,
+    headers: HeaderMap,
+    Extension(principal): Extension<Principal>,
+    Path(path): Path<AccountPath>,
+    payload: Result<Json<NewToken>, JsonRejection>,
+) -> Result<Response, ApiError> {
+    let gate = gate(&state)?;
+    let request = body(payload)?;
+    let permissions = request
+        .permissions
+        .as_deref()
+        .map(PermissionSet::from_names)
+        .transpose()?;
+    let (token, secret) = gate
+        .identity
+        .issue_token(
+            AccountId::from_uuid(path.id),
+            TokenRequest {
+                name: request.name,
+                permissions,
+                lifetime: Duration::from_secs(u64::from(request.expires_in_days) * 86_400),
+            },
+            &request_scope(&headers)?,
+            principal.actor(),
+        )
+        .await?;
+    let mut response = (
+        StatusCode::CREATED,
+        Json(CreatedToken {
+            token: token.into(),
+            secret: secret.expose().to_owned(),
+        }),
+    )
+        .into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, "no-store".parse().expect("static"));
+    Ok(response)
 }
 
 /// An account's API tokens.

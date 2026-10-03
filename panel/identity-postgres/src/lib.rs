@@ -40,13 +40,18 @@ pub const MIGRATIONS: &[SchemaMigration] = &[
         "break-glass accounts and the password sign-in policy",
         include_str!("../migrations/10200_break_glass.sql"),
     ),
+    SchemaMigration::new(
+        10_300,
+        "service accounts",
+        include_str!("../migrations/10300_service_accounts.sql"),
+    ),
 ];
 
 /// Ended sessions are deleted this many days after they expire.
 const SESSION_RETENTION_DAYS: i64 = 30;
 
 const ACCOUNT: &str = "a.id, a.username, a.display_name, a.disabled, a.locked, a.break_glass, \
-     a.created_at, a.updated_at, a.last_login_at, a.password_changed_at, a.password_hash, \
+     a.service, a.created_at, a.updated_at, a.last_login_at, a.password_changed_at, a.password_hash, \
      a.failures, a.retry_after, \
      ARRAY(SELECT b.role_id FROM role_bindings b WHERE b.account_id = a.id ORDER BY b.role_id) \
      AS roles";
@@ -125,6 +130,7 @@ fn account(row: &PgRow) -> Result<Account> {
         locked: get(row, "locked")?,
         roles: get(row, "roles")?,
         break_glass: get(row, "break_glass")?,
+        service: get(row, "service")?,
         created_at: get(row, "created_at")?,
         updated_at: get(row, "updated_at")?,
         last_login_at: get(row, "last_login_at")?,
@@ -321,7 +327,8 @@ impl IdentityStore for PgIdentityStore {
         }
         sqlx::query(
             "INSERT INTO accounts (id, username, display_name, password_hash, \
-             password_changed_at, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $6)",
+             password_changed_at, created_at, updated_at, service) \
+             VALUES ($1, $2, $3, $4, $5, $6, $6, $7)",
         )
         .bind(new.id.as_uuid())
         .bind(new.username.as_str())
@@ -329,6 +336,7 @@ impl IdentityStore for PgIdentityStore {
         .bind(&new.password_hash)
         .bind(new.password_hash.as_ref().map(|_| new.now))
         .bind(new.now)
+        .bind(new.service)
         .execute(&mut *transaction)
         .await
         .map_err(|error| match storage(error) {

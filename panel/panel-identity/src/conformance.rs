@@ -49,6 +49,7 @@ where
     rotated_tokens_keep_their_grant_and_stop_the_old_secret(fresh().await).await;
     providers_link_accounts_and_keep_sign_ins_once(fresh().await).await;
     break_glass_accounts_keep_password_sign_in(fresh().await).await;
+    service_accounts_never_sign_in_and_get_tokens_from_managers(fresh().await).await;
 }
 
 const PASSWORD: &str = "glacier violin tapestry orbit";
@@ -990,6 +991,7 @@ async fn providers_link_accounts_and_keep_sign_ins_once(subject: impl StoreUnder
         roles: Vec::new(),
         now,
         first: false,
+        service: false,
     };
     let (first, secret) = sign_in(alice, Some(new(alice, "alice")), vec!["operator".into()]);
     let account = providers
@@ -1209,5 +1211,100 @@ async fn break_glass_accounts_keep_password_sign_in(subject: impl StoreUnderTest
             .await
             .len(),
         2
+    );
+}
+
+async fn service_accounts_never_sign_in_and_get_tokens_from_managers(subject: impl StoreUnderTest) {
+    let harness = Harness::new(subject, IdentitySettings::default());
+    let root = harness.admin().await;
+    let service = |password: Option<&str>| AccountRequest {
+        username: "ci".into(),
+        password: password.map(str::to_owned),
+        roles: vec!["operator".into()],
+        service: true,
+        ..AccountRequest::default()
+    };
+    let with_password = harness
+        .identity
+        .create_account(service(Some(PASSWORD)), &scope(), "root")
+        .await;
+    assert_eq!(
+        with_password.unwrap_err().code.as_str(),
+        ErrorCode::INVALID_ARGUMENT
+    );
+    let ci = harness
+        .identity
+        .create_account(service(None), &scope(), "root")
+        .await
+        .unwrap();
+    assert!(ci.service);
+    let store = harness.subject.store();
+    assert!(store.account(ci.id).await.unwrap().unwrap().account.service);
+    let reset = harness
+        .identity
+        .reset_password(ci.id, PASSWORD, &scope(), "root")
+        .await;
+    assert_eq!(
+        reset.unwrap_err().code.as_str(),
+        ErrorCode::PRECONDITION_FAILED
+    );
+    let break_glass = harness
+        .identity
+        .update_account(
+            ci.id,
+            AccountChange {
+                break_glass: Some(true),
+                ..AccountChange::default()
+            },
+            &scope(),
+            "root",
+        )
+        .await;
+    assert_eq!(
+        break_glass.unwrap_err().code.as_str(),
+        ErrorCode::INVALID_ARGUMENT
+    );
+
+    let request = |permissions: Option<PermissionSet>| TokenRequest {
+        name: "deploy".into(),
+        permissions,
+        lifetime: std::time::Duration::from_secs(86_400),
+    };
+    let (token, secret) = harness
+        .identity
+        .issue_token(ci.id, request(None), &scope(), "root")
+        .await
+        .unwrap();
+    assert_eq!(token.account, ci.id);
+    let principal = harness
+        .identity
+        .authenticate_token(secret.expose())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(principal.account, ci.id);
+    assert!(principal.can(Permission::ConfigApply));
+    assert!(!principal.can(Permission::IdentityManage));
+    let beyond = harness
+        .identity
+        .issue_token(
+            ci.id,
+            request(Some([Permission::IdentityManage].into_iter().collect())),
+            &scope(),
+            "root",
+        )
+        .await;
+    assert_eq!(
+        beyond.unwrap_err().code.as_str(),
+        ErrorCode::PERMISSION_DENIED
+    );
+    let person = harness
+        .identity
+        .issue_token(root.id, request(None), &scope(), "root")
+        .await;
+    assert_eq!(
+        person.unwrap_err().code.as_str(),
+        ErrorCode::PRECONDITION_FAILED,
+        "people create their own tokens"
     );
 }

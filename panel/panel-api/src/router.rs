@@ -326,7 +326,7 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         )
         .route(
             "/api/v1/accounts/{id}/tokens",
-            get(identity::account_tokens::<U>),
+            get(identity::account_tokens::<U>).post(identity::issue_token::<U>),
         )
         .route(
             "/api/v1/accounts/{id}/tokens/{token}",

@@ -82,6 +82,11 @@ pub(crate) static ROUTES: &[(&str, &str, Access)] = &[
         Requires(IdentityRead),
     ),
     (
+        "POST",
+        "/api/v1/accounts/{id}/tokens",
+        Requires(IdentityManage),
+    ),
+    (
         "DELETE",
         "/api/v1/accounts/{id}/tokens/{token}",
         Requires(IdentityManage),
