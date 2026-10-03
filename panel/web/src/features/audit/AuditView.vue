@@ -179,10 +179,11 @@ async function verify() {
       <AlertDescription>
         {{
           verification.intact
-            ? t('audit.intactDetail', {
-                checked: verification.checked,
-                head: verification.head_sequence,
-              })
+            ? t(
+                'audit.intactDetail',
+                { checked: verification.checked, head: verification.head_sequence },
+                verification.checked,
+              )
             : t('audit.brokenDetail', { sequence: verification.first_mismatch ?? '' })
         }}
       </AlertDescription>

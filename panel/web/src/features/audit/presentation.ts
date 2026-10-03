@@ -47,7 +47,7 @@ export function toneOf(type: string): StatusTone {
   return /\.(refused|failed|rejected|denied)$/.test(type) ? 'negative' : 'positive'
 }
 
-type Translate = (key: string, values?: Record<string, unknown>) => string
+type Translate = (key: string, values?: Record<string, unknown>, plural?: number) => string
 
 function text(value: unknown): string {
   return value === null || value === undefined ? '' : String(value)
@@ -82,10 +82,11 @@ export function summaryOf(event: AuditEvent, t: Translate): string {
       return `#${text(data.revision_id)} · ${text(data.content_hash).slice(0, 12)}`
     case 'gateway.reloaded':
     case 'gateway.workers.changed':
-      return t('audit.summary.generation', {
-        generation: text(data.generation),
-        workers: text(data.workers),
-      })
+      return t(
+        'audit.summary.generation',
+        { generation: text(data.generation), workers: text(data.workers) },
+        Number(data.workers),
+      )
     case 'gateway.endpoint.drained':
     case 'gateway.endpoint.restored':
       return text(data.endpoint)

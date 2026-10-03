@@ -183,7 +183,13 @@ function submit() {
             />
             <p class="text-muted-foreground text-xs">{{ t('upstreams.nodesHint') }}</p>
             <p v-if="invalidLines.length > 0" class="text-destructive text-xs" role="alert">
-              {{ t('upstreams.invalidNodeLines', { lines: invalidLines.join(', ') }) }}
+              {{
+                t(
+                  'upstreams.invalidNodeLines',
+                  { lines: invalidLines.join(', ') },
+                  invalidLines.length,
+                )
+              }}
             </p>
           </fieldset>
 
