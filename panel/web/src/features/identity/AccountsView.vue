@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { useMutation, useQuery } from '@tanstack/vue-query'
 import {
+  Bot,
   Ellipsis,
   KeyRound,
   LockKeyhole,
@@ -16,7 +17,11 @@ import {
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import type { AccountView } from '@/api/generated'
-import { listAccountsOptions, updateAccountMutation } from '@/api/generated/@tanstack/vue-query.gen'
+import {
+  listAccountsOptions,
+  listRolesOptions,
+  updateAccountMutation,
+} from '@/api/generated/@tanstack/vue-query.gen'
 import ApiFailureAlert from '@/components/ApiFailureAlert.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import PageHeader from '@/components/PageHeader.vue'
@@ -43,6 +48,7 @@ import { useSession } from '@/lib/session'
 import AccountAccessSheet from './AccountAccessSheet.vue'
 import AccountFormSheet from './AccountFormSheet.vue'
 import PasswordResetSheet from './PasswordResetSheet.vue'
+import TokenCreateSheet from './TokenCreateSheet.vue'
 import { accountState } from './presentation'
 
 const { t, d } = useI18n()
@@ -59,6 +65,19 @@ function openForm(account?: AccountView) {
 }
 
 const selected = ref<AccountView>()
+const roleCatalog = useQuery(listRolesOptions())
+const issueOpen = ref(false)
+function openIssue(account: AccountView) {
+  selected.value = account
+  issueOpen.value = true
+}
+/** The permissions an account's roles grant. */
+function permissionsOf(account: AccountView): string[] {
+  const granted = (roleCatalog.data.value ?? [])
+    .filter((role) => account.roles.includes(role.id))
+    .flatMap((role) => role.permissions)
+  return [...new Set(granted)].sort()
+}
 const resetOpen = ref(false)
 const accessOpen = ref(false)
 function openReset(account: AccountView) {
@@ -158,6 +177,10 @@ const disableOpen = computed({
                 <UserCheck v-else aria-hidden="true" />
                 {{ t(`accounts.${accountState(account)}`) }}
               </Badge>
+              <Badge v-if="account.service" variant="secondary" class="ml-1">
+                <Bot aria-hidden="true" />
+                {{ t('accounts.service') }}
+              </Badge>
               <Badge v-if="account.break_glass" variant="secondary" class="ml-1">
                 <Siren aria-hidden="true" />
                 {{ t('accounts.breakGlass') }}
@@ -187,7 +210,11 @@ const disableOpen = computed({
                       <Pencil aria-hidden="true" />
                       {{ t('common.edit') }}
                     </DropdownMenuItem>
-                    <DropdownMenuItem @select="openReset(account)">
+                    <DropdownMenuItem v-if="account.service" @select="openIssue(account)">
+                      <KeyRound aria-hidden="true" />
+                      {{ t('accounts.issueToken') }}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem v-else @select="openReset(account)">
                       <LockKeyhole aria-hidden="true" />
                       {{ t('accounts.resetPassword') }}
                     </DropdownMenuItem>
@@ -199,6 +226,7 @@ const disableOpen = computed({
                       {{ t('accounts.unlock') }}
                     </DropdownMenuItem>
                     <DropdownMenuItem
+                      v-if="!account.service"
                       @select="
                         change(
                           account,
@@ -246,6 +274,12 @@ const disableOpen = computed({
       v-model:open="resetOpen"
       :account="selected"
       @saved="accounts.refetch()"
+    />
+    <TokenCreateSheet
+      v-if="selected"
+      v-model:open="issueOpen"
+      :account="selected"
+      :permissions="permissionsOf(selected)"
     />
     <AccountAccessSheet
       v-if="selected"

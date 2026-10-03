@@ -27,6 +27,7 @@ import { notifyFailure } from '@/lib/configuration'
 import { useSession } from '@/lib/session'
 import IdentityProviderFormSheet from './IdentityProviderFormSheet.vue'
 import PasswordSignInCard from './PasswordSignInCard.vue'
+import WorkloadIdentitiesCard from './WorkloadIdentitiesCard.vue'
 
 const { t } = useI18n()
 const { can } = useSession()
@@ -176,6 +177,7 @@ function confirmRemove() {
     </div>
 
     <PasswordSignInCard v-if="providers.data.value?.length" />
+    <WorkloadIdentitiesCard />
 
     <IdentityProviderFormSheet
       v-model:open="formOpen"

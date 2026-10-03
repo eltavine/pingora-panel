@@ -258,6 +258,7 @@ test('administrators manage accounts and log out', async ({ page }) => {
     display_name: null,
     password: null,
     roles: ['viewer', 'administrator'],
+    service: false,
   })
 
   let ended = false
@@ -598,4 +599,127 @@ test('password sign-in is limited to break-glass accounts', async ({ page }) => 
   await page.getByRole('menuitem', { name: 'Remove break-glass' }).click()
   await expect(page.getByText('Account updated')).toBeVisible()
   expect(changes[1]!.postDataJSON()).toEqual({ break_glass: false })
+})
+
+test('service accounts are created without passwords and issued tokens', async ({ page }) => {
+  await setUp(page)
+  await signIn(page)
+  const changes: Request[] = []
+  const deployer = {
+    ...viewer,
+    id: '0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a61',
+    username: 'deployer',
+    display_name: null,
+    locked: false,
+    roles: ['viewer'],
+    service: true,
+    break_glass: false,
+  }
+  await page.route('**/api/v1/roles', (route) => route.fulfill({ json: roles }))
+  await page.route('**/api/v1/accounts', (route) => {
+    if (route.request().method() === 'POST') {
+      changes.push(route.request())
+      return route.fulfill({ status: 201, json: { ...deployer, username: 'builder' } })
+    }
+    return route.fulfill({ json: [deployer] })
+  })
+  await page.route(`**/api/v1/accounts/${deployer.id}/tokens`, (route) => {
+    changes.push(route.request())
+    return route.fulfill({
+      status: 201,
+      json: {
+        secret: 'ppat_issued-secret',
+        token: {
+          id: 't1',
+          name: 'nightly',
+          permissions: ['config.read'],
+          created_at: '2026-10-03T00:00:00Z',
+          expires_at: '2027-01-01T00:00:00Z',
+          last_used_at: null,
+        },
+      },
+    })
+  })
+
+  await page.goto('/accounts')
+  const row = page.getByRole('row', { name: /deployer/ })
+  await expect(row.getByText('Service')).toBeVisible()
+  await row.getByRole('button', { name: 'Actions' }).click()
+  await expect(page.getByRole('menuitem', { name: 'Reset password' })).toHaveCount(0)
+  await page.getByRole('menuitem', { name: 'Issue token' }).click()
+  const sheet = page.getByRole('dialog')
+  await expect(sheet.getByText('Issue a token for deployer')).toBeVisible()
+  await sheet.getByLabel('Name').fill('nightly')
+  await sheet.getByRole('button', { name: 'Create' }).click()
+  await expect(sheet.getByText('ppat_issued-secret')).toBeVisible()
+  expect(changes[0]!.postDataJSON()).toEqual({
+    name: 'nightly',
+    permissions: ['config.read'],
+    expires_in_days: 90,
+  })
+  await page.keyboard.press('Escape')
+
+  await page.getByRole('button', { name: 'New account' }).click()
+  await sheet.getByLabel('Username').fill('builder')
+  await sheet.getByRole('switch', { name: 'Service account' }).click()
+  await expect(sheet.getByLabel('Password', { exact: true })).toHaveCount(0)
+  await sheet.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByText('Created the account builder')).toBeVisible()
+  expect(changes[1]!.postDataJSON()).toMatchObject({
+    username: 'builder',
+    password: null,
+    service: true,
+  })
+})
+
+test('workload identities let programs act as service accounts', async ({ page }) => {
+  await setUp(page)
+  await signIn(page)
+  const saved: Request[] = []
+  await page.route('**/api/v1/identity-providers', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/v1/accounts', (route) =>
+    route.fulfill({
+      json: [
+        { ...viewer, id: 'svc-1', username: 'deployer', service: true },
+        { ...viewer, service: false },
+      ],
+    }),
+  )
+  await page.route('**/api/v1/workload-identities', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/v1/workload-identities/shop', (route) => {
+    saved.push(route.request())
+    return route.fulfill({
+      status: 201,
+      json: {
+        id: 'shop',
+        ...route.request().postDataJSON(),
+        created_at: '2026-10-03T00:00:00Z',
+        updated_at: '2026-10-03T00:00:00Z',
+      },
+    })
+  })
+
+  await page.goto('/identity-providers')
+  await expect(page.getByText('No workload identities yet.')).toBeVisible()
+  await page.getByRole('button', { name: 'Add workload identity' }).click()
+  const sheet = page.getByRole('dialog')
+  await sheet.getByLabel('Identifier').fill('shop')
+  await sheet.getByRole('combobox', { name: 'Service account' }).click()
+  await expect(page.getByRole('option', { name: 'watcher' })).toHaveCount(0)
+  await page.getByRole('option', { name: 'deployer' }).click()
+  await sheet.getByLabel('Subject').fill('repo:shop/site:*')
+  await sheet.getByRole('button', { name: 'Add claim' }).click()
+  await sheet.getByLabel('Claim', { exact: true }).fill('repository')
+  await sheet.getByLabel('Value', { exact: true }).fill('shop/site')
+  await sheet.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByText('Saved the workload identity shop')).toBeVisible()
+  expect(saved[0]!.postDataJSON()).toEqual({
+    account_id: 'svc-1',
+    issuer: 'https://token.actions.githubusercontent.com',
+    audience: 'pingora-panel',
+    subject: 'repo:shop/site:*',
+    claims: { repository: 'shop/site' },
+    session_minutes: 15,
+    enabled: true,
+  })
 })

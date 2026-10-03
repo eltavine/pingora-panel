@@ -11,6 +11,7 @@ import {
   updateAccountMutation,
 } from '@/api/generated/@tanstack/vue-query.gen'
 import FormField from '@/components/FormField.vue'
+import SwitchField from '@/components/SwitchField.vue'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -38,7 +39,13 @@ const create = useMutation(createAccountMutation())
 const update = useMutation(updateAccountMutation())
 const busy = computed(() => create.isPending.value || update.isPending.value)
 
-const form = reactive({ username: '', displayName: '', password: '', roles: [] as string[] })
+const form = reactive({
+  username: '',
+  displayName: '',
+  password: '',
+  roles: [] as string[],
+  service: false,
+})
 const passwordProblems = ref<string[]>([])
 watch(open, (isOpen) => {
   if (isOpen) {
@@ -48,6 +55,7 @@ watch(open, (isOpen) => {
       displayName: props.account?.display_name ?? '',
       password: '',
       roles: [...(props.account?.roles ?? ['viewer'])],
+      service: false,
     })
   }
 })
@@ -86,8 +94,9 @@ function submit() {
         body: {
           username: form.username,
           display_name: form.displayName.trim() || null,
-          password: form.password || null,
+          password: form.service ? null : form.password || null,
           roles: form.roles,
+          service: form.service,
         },
       },
       {
@@ -148,8 +157,15 @@ function submit() {
               </Label>
             </div>
           </fieldset>
-          <FormField
+          <SwitchField
             v-if="!account"
+            id="account-service"
+            v-model="form.service"
+            :label="t('accounts.serviceAccount')"
+            :hint="t('accounts.serviceAccountHint')"
+          />
+          <FormField
+            v-if="!account && !form.service"
             id="account-password"
             :label="t('accounts.password')"
             :hint="t('accounts.passwordHint')"

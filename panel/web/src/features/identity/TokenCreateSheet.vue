@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useMutation } from '@tanstack/vue-query'
 import { KeyRound, TriangleAlert } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
-import type { CreatedToken } from '@/api/generated'
-import { createTokenMutation } from '@/api/generated/@tanstack/vue-query.gen'
+import type { AccountView, CreatedToken } from '@/api/generated'
+import { createTokenMutation, issueTokenMutation } from '@/api/generated/@tanstack/vue-query.gen'
 import CopyValue from '@/components/CopyValue.vue'
 import FormField from '@/components/FormField.vue'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -32,20 +32,30 @@ import { notifyFailure } from '@/lib/configuration'
 import { permissionKey, TOKEN_LIFETIMES } from './presentation'
 
 const open = defineModel<boolean>('open', { required: true })
-const props = defineProps<{ permissions: readonly string[] }>()
+const props = defineProps<{
+  permissions: readonly string[]
+  /** A service account to issue the token for, instead of the caller. */
+  account?: AccountView
+}>()
 const emit = defineEmits<{ created: [] }>()
 
 const { t, te } = useI18n()
-const create = useMutation(createTokenMutation())
+const own = useMutation(createTokenMutation())
+const issue = useMutation(issueTokenMutation())
+const busy = computed(() => own.isPending.value || issue.isPending.value)
 const form = reactive({ name: '', days: '90', permissions: [] as string[] })
 const created = ref<CreatedToken>()
 
-watch(open, (isOpen) => {
-  if (isOpen) {
-    Object.assign(form, { name: '', days: '90', permissions: [...props.permissions] })
-    created.value = undefined
-  }
-})
+watch(
+  open,
+  (isOpen) => {
+    if (isOpen) {
+      Object.assign(form, { name: '', days: '90', permissions: [...props.permissions] })
+      created.value = undefined
+    }
+  },
+  { immediate: true },
+)
 
 function toggle(permission: string, checked: boolean | 'indeterminate') {
   form.permissions = checked
@@ -54,22 +64,23 @@ function toggle(permission: string, checked: boolean | 'indeterminate') {
 }
 
 function submit() {
-  create.mutate(
-    {
-      body: {
-        name: form.name.trim(),
-        permissions: form.permissions,
-        expires_in_days: Number(form.days),
-      },
+  const body = {
+    name: form.name.trim(),
+    permissions: form.permissions,
+    expires_in_days: Number(form.days),
+  }
+  const options = {
+    onSuccess: (token: CreatedToken) => {
+      created.value = token
+      emit('created')
     },
-    {
-      onSuccess: (token) => {
-        created.value = token
-        emit('created')
-      },
-      onError: (error) => notifyFailure(error, t('common.changeFailed')),
-    },
-  )
+    onError: (error: unknown) => notifyFailure(error, t('common.changeFailed')),
+  }
+  if (props.account) {
+    issue.mutate({ path: { id: props.account.id }, body }, options)
+  } else {
+    own.mutate({ body }, options)
+  }
 }
 </script>
 
@@ -79,7 +90,11 @@ function submit() {
       <SheetHeader>
         <SheetTitle class="flex items-center gap-2">
           <KeyRound class="size-5" aria-hidden="true" />
-          {{ t('account.newToken') }}
+          {{
+            account
+              ? t('accounts.issueTokenFor', { name: account.username })
+              : t('account.newToken')
+          }}
         </SheetTitle>
         <SheetDescription>{{ t('account.tokensDetail') }}</SheetDescription>
       </SheetHeader>
@@ -128,11 +143,8 @@ function submit() {
           </div>
         </fieldset>
         <SheetFooter class="px-0">
-          <Button
-            type="submit"
-            :disabled="create.isPending.value || !form.name.trim() || !form.permissions.length"
-          >
-            <Spinner v-if="create.isPending.value" data-icon="inline-start" />
+          <Button type="submit" :disabled="busy || !form.name.trim() || !form.permissions.length">
+            <Spinner v-if="busy" data-icon="inline-start" />
             <KeyRound v-else data-icon="inline-start" aria-hidden="true" />
             {{ t('common.create') }}
           </Button>
