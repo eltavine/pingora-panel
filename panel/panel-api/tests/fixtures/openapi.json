@@ -43369,10 +43369,11 @@
       "Context": {
         "type": "string",
         "description": "The block a directive appears in.",
-        "enum": [
+        "x-extensible-enum": [
           "main",
           "http",
           "tls_profile",
+          "security_policy",
           "listener",
           "upstream",
           "server",

@@ -11,8 +11,8 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use panel_config_model::{
-    validate, Action, ConfigModel, Domain, Listener, MatchKind, Route, RouteMatch, Site,
-    TlsProfile, Upstream, UpstreamNode,
+    validate, Action, ConfigModel, Domain, Listener, MatchKind, Route, RouteMatch, SecurityPolicy,
+    Site, TlsProfile, Upstream, UpstreamNode,
 };
 use panel_domain::{CertificateId, NormalizedHost};
 use panel_dsl::{Argument, Body, Directive, Document, LineIndex, Span};
@@ -28,6 +28,10 @@ use std::{
     rc::Rc,
 };
 use uuid::Uuid;
+
+mod security;
+
+pub(crate) use security::{print_rate, DEFAULT_REALM};
 
 /// How references in a value are resolved.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -178,6 +182,7 @@ struct Lowerer<'a> {
     includes: Vec<String>,
     scopes: Vec<Scope>,
     profiles: Vec<(TlsProfile, Origin)>,
+    policies: Vec<(SecurityPolicy, Origin)>,
     listeners: Vec<ListenerDraft>,
     upstreams: Vec<(Upstream, Origin)>,
     servers: Vec<ServerDraft>,
@@ -204,6 +209,7 @@ impl<'a> Lowerer<'a> {
                 constants: BTreeMap::new(),
             }],
             profiles: Vec::new(),
+            policies: Vec::new(),
             listeners: Vec::new(),
             upstreams: Vec::new(),
             servers: Vec::new(),
@@ -715,6 +721,7 @@ impl<'a> Lowerer<'a> {
                 &mut seen,
                 &mut |lowerer, file, directive, spec, depth| match spec.name {
                     "tls_profile" => lowerer.tls_profile(file, directive, depth),
+                    "security_policy" => lowerer.security_policy(file, directive, depth),
                     "listener" => lowerer.listener(file, directive, depth),
                     "upstream" => lowerer.upstream(file, directive, depth),
                     "server" => lowerer.server(file, directive, depth),
@@ -1031,8 +1038,8 @@ impl<'a> Lowerer<'a> {
             reuse_port: false,
             ipv6_only: None,
             default_site_id: None,
-            real_ip_header: Default::default(),
-            trusted_proxies: Default::default(),
+            trusted_proxies: Vec::new(),
+            real_ip_header: panel_ir::RealIpHeader::default(),
         };
         let mut default_server = None;
         let Some(block) = directive.block() else {
@@ -1092,6 +1099,15 @@ impl<'a> Lowerer<'a> {
                         "ipv6_only" => listener.ipv6_only = lowerer.bool_arg(file, arg),
                         "default_server" => {
                             default_server = Some((Self::literal(arg), file.to_owned(), arg.span))
+                        }
+                        "trusted_proxies" => {
+                            let networks = lowerer.networks(file, &directive.args);
+                            listener.trusted_proxies.extend(networks);
+                        }
+                        "real_ip_header" => {
+                            if let Some(header) = lowerer.real_ip_header(file, arg) {
+                                listener.real_ip_header = header;
+                            }
                         }
                         _ => unreachable!(),
                     }
@@ -1582,7 +1598,7 @@ impl<'a> Lowerer<'a> {
                 deleted_at: None,
                 created_at: now,
                 updated_at: now,
-                security_policy_id: Default::default(),
+                security_policy_id: None,
             },
             action: None,
             routes: Vec::new(),
@@ -1751,6 +1767,7 @@ impl<'a> Lowerer<'a> {
                 .listener_ids
                 .extend(directive.args.iter().map(Self::literal)),
             "tls_profile" => draft.site.tls_profile_id = arg.map(Self::literal),
+            "security_policy" => draft.site.security_policy_id = arg.map(Self::literal),
             "https_redirect" => {
                 draft.site.https_redirect = arg
                     .and_then(|arg| self.bool_arg(file, arg))
@@ -1827,7 +1844,7 @@ impl<'a> Lowerer<'a> {
                     host: None,
                 },
                 action: placeholder_action(),
-                security_policy_id: Default::default(),
+                security_policy_id: None,
             },
             priority_set: false,
             action: None,
@@ -1946,6 +1963,9 @@ impl<'a> Lowerer<'a> {
                                 draft.route.enabled = arg
                                     .and_then(|arg| lowerer.bool_arg(file, arg))
                                     .unwrap_or(true)
+                            }
+                            "security_policy" => {
+                                draft.route.security_policy_id = arg.map(Self::literal)
                             }
                             action => {
                                 let Some(found) = lowerer.action(file, directive, action) else {
@@ -2179,6 +2199,10 @@ impl<'a> Lowerer<'a> {
                 .into_iter()
                 .map(|(profile, _)| profile)
                 .collect(),
+            security_policies: std::mem::take(&mut self.policies)
+                .into_iter()
+                .map(|(policy, _)| policy)
+                .collect(),
             upstreams: std::mem::take(&mut self.upstreams)
                 .into_iter()
                 .map(|(upstream, _)| upstream)
@@ -2243,6 +2267,13 @@ impl<'a> Lowerer<'a> {
                 Some(origin) => self.report(diagnostic, &origin.file, origin.span),
                 None => self.diagnostics.push(diagnostic),
             }
+        });
+        crate::checks::exposure(&model, &mut |resource, diagnostic| match self
+            .origin_of(&resource)
+            .cloned()
+        {
+            Some(origin) => self.report(diagnostic, &origin.file, origin.span),
+            None => self.diagnostics.push(diagnostic),
         });
         for (file, span, diagnostic) in
             crate::inheritance::check(&model, &self.written, &self.origins)

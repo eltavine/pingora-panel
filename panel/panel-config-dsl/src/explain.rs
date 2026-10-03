@@ -295,6 +295,14 @@ impl<'a> Explainer<'a> {
                     self.tls_profile(profile),
                 )
             }
+            ["security-policies", id] => {
+                let policy = model.security_policies.iter().find(|p| p.id == *id)?;
+                (
+                    Context::SecurityPolicy,
+                    Some(policy.id.clone()),
+                    self.security_policy(&policy.id),
+                )
+            }
             _ => return None,
         })
     }
@@ -308,6 +316,7 @@ impl<'a> Explainer<'a> {
             ("listen", all.as_str()),
             ("https_redirect", "off"),
             ("hsts", "off"),
+            ("security_policy", "none"),
             ("www_redirect", "off"),
         ] {
             self.or_default(&mut settings, &resource, Context::Server, directive, value);
@@ -357,6 +366,13 @@ impl<'a> Explainer<'a> {
                 None => Setting::new(directive, value, SettingSource::Default)
                     .rule(directive, Context::Server),
             });
+        }
+        if let Some(written) = self.first(&server, "security_policy") {
+            settings.push(
+                self.here(written, Context::Server)
+                    .from(from.clone())
+                    .inherited(),
+            );
         }
         self.certificates(&mut settings, site, Some(route));
         self.constants(&mut settings, &resource);
@@ -473,6 +489,15 @@ impl<'a> Explainer<'a> {
             "reuse_port",
             "off",
         );
+        if !listener.trusted_proxies.is_empty() {
+            self.or_default(
+                &mut settings,
+                &resource,
+                Context::Listener,
+                "real_ip_header",
+                "x-forwarded-for",
+            );
+        }
         self.constants(&mut settings, &resource);
         settings
     }
@@ -518,6 +543,20 @@ impl<'a> Explainer<'a> {
             };
             settings.push(setting.scoped(target).rule("tls", Context::Upstream));
         }
+        self.constants(&mut settings, &resource);
+        settings
+    }
+
+    fn security_policy(&self, id: &str) -> Vec<Setting> {
+        let resource = format!("security-policies/{id}");
+        let mut settings = self.own(&resource, Context::SecurityPolicy, &[]);
+        self.or_default(
+            &mut settings,
+            &resource,
+            Context::SecurityPolicy,
+            "limited_response",
+            "429",
+        );
         self.constants(&mut settings, &resource);
         settings
     }

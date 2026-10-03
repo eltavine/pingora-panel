@@ -1,12 +1,13 @@
-//! Routes that are valid but can never match: shadowed by a route the
-//! gateway evaluates first, or restricted to a host the server does not
-//! answer for.
+//! Settings that are valid but do not do what they seem to: routes that can
+//! never match, being shadowed by a route the gateway evaluates first or
+//! restricted to a host the server does not answer for, and settings that
+//! expose clients.
 
 use crate::codes;
 use globset::GlobBuilder;
 use panel_config_model::{ConfigModel, MatchKind, Route};
 use panel_errors::Diagnostic;
-use std::cmp::Reverse;
+use std::{cmp::Reverse, collections::BTreeSet};
 use uuid::Uuid;
 
 /// The gateway's evaluation order: priority, then the more specific path
@@ -79,6 +80,71 @@ pub(crate) fn label(route: &Route) -> String {
         || format!("{:?}", route.matcher.path),
         |name| format!("{name:?}"),
     )
+}
+
+/// Reports, by resource, passwords asked for over plain HTTP and listeners
+/// that take every peer for a proxy.
+pub(crate) fn exposure(model: &ConfigModel, report: &mut dyn FnMut(String, Diagnostic)) {
+    for listener in &model.listeners {
+        if let Some(network) = listener
+            .trusted_proxies
+            .iter()
+            .find(|network| network.ends_with("/0"))
+        {
+            let diagnostic = Diagnostic::warning(
+                codes::EXPOSURE,
+                format!(
+                    "listener {} trusts {network} as proxies, so any client can name the address the gateway sees",
+                    listener.id
+                ),
+            )
+            .with_help("list only the networks of your proxies and load balancers");
+            report(format!("listeners/{}", listener.id), diagnostic);
+        }
+    }
+    let asking: BTreeSet<&str> = model
+        .security_policies
+        .iter()
+        .filter(|policy| policy.basic_auth.is_some())
+        .map(|policy| policy.id.as_str())
+        .collect();
+    let asks = |policy: &Option<String>| {
+        policy
+            .as_deref()
+            .is_some_and(|policy| asking.contains(policy))
+    };
+    for site in model
+        .sites
+        .iter()
+        .filter(|site| !site.is_deleted() && site.enabled && !site.https_redirect)
+    {
+        let Some(listener) = model.listeners.iter().find(|listener| {
+            listener.tls_profile_id.is_none()
+                && (site.listener_ids.is_empty() || site.listener_ids.contains(&listener.id))
+        }) else {
+            continue;
+        };
+        let resource = if asks(&site.security_policy_id) {
+            format!("sites/{}", site.id)
+        } else if let Some(route) = site
+            .routes
+            .iter()
+            .find(|route| route.enabled && asks(&route.security_policy_id))
+        {
+            format!("sites/{}/routes/{}", site.id, route.id)
+        } else {
+            continue;
+        };
+        let diagnostic = Diagnostic::warning(
+            codes::EXPOSURE,
+            format!(
+                "server {:?} asks for passwords on listener {}, which serves plain HTTP, so they cross the network readable",
+                site.name, listener.id
+            ),
+        )
+        .with_help("turn on https_redirect, or serve the server only on HTTPS listeners with listen");
+        report(resource, diagnostic);
+    }
 }
 
 /// Reports, by site and route, every enabled route that cannot match.

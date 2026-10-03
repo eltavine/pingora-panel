@@ -182,6 +182,57 @@ fn renaming_an_upstream_reprints_what_refers_to_it() {
 }
 
 #[test]
+fn security_policies_join_and_leave_the_text() {
+    let (sources, lowered) = stored();
+    let mut next = lowered.model.clone();
+    next.put_security_policy(panel_config_model::SecurityPolicy {
+        id: "office".into(),
+        allowed_cidrs: vec!["10.0.0.0/8".into()],
+        ..Default::default()
+    });
+    let shop = next
+        .sites
+        .iter_mut()
+        .find(|site| site.name == "shop")
+        .unwrap();
+    shop.security_policy_id = Some("office".into());
+    let edited = reconcile(&sources, &lowered, &next);
+    let text = edited.get("main.conf").unwrap();
+    assert!(
+        text.contains("    security_policy office {\n        allow 10.0.0.0/8;\n    }\n"),
+        "{text}"
+    );
+    assert!(text.contains("        security_policy office;\n"), "{text}");
+    assert!(text.contains("   # keep me\n"), "{text}");
+    let again = read(&edited);
+    assert!(again.is_valid(), "{:#?}\n{text}", again.diagnostics);
+    assert_eq!(again.model.security_policies, next.security_policies);
+    let kinds: Vec<_> = plan(&lowered.model, &again.model)
+        .iter()
+        .map(|change| {
+            (
+                change.resource.split('/').next().unwrap().to_owned(),
+                change.change,
+            )
+        })
+        .collect();
+    assert!(
+        kinds.contains(&("security-policies".to_owned(), Change::Added)),
+        "{kinds:?}"
+    );
+
+    let mut back = again.model.clone();
+    back.sites
+        .iter_mut()
+        .for_each(|site| site.security_policy_id = None);
+    back.delete_security_policy("office").unwrap();
+    let removed = reconcile(&edited, &again, &back);
+    let text = removed.get("main.conf").unwrap();
+    assert!(!text.contains("security_policy"), "{text}");
+    assert!(read(&removed).is_valid());
+}
+
+#[test]
 fn an_empty_configuration_gains_an_http_block() {
     let empty = Sources::single("");
     let lowered = read(&empty);

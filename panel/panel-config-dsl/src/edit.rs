@@ -19,6 +19,12 @@ pub(crate) fn blocks(model: &ConfigModel) -> Vec<(String, Directive)> {
             print::tls_profile(profile),
         )
     }));
+    blocks.extend(model.security_policies.iter().map(|policy| {
+        (
+            format!("security-policies/{}", policy.id),
+            print::security_policy(policy),
+        )
+    }));
     blocks.extend(model.listeners.iter().map(|listener| {
         (
             format!("listeners/{}", listener.id),

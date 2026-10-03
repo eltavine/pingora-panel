@@ -370,6 +370,175 @@ fn tls_settings_and_hsts_read_and_print() {
 }
 
 #[test]
+fn security_policies_read_print_and_warn() {
+    let text = r#"language_version 1;
+http {
+    security_policy staff {
+        allow 10.0.0.0/8 2001:db8::/32;
+        deny 10.9.0.0/16;
+        methods get POST;
+        deny_paths /.git /admin/internal;
+        deny_user_agents "^curl/" sqlmap;
+        referers none *.shop.example shop.example;
+        basic_auth staff.htpasswd "realm=Staff area";
+        max_header_size 16k;
+        max_body_size 10m;
+        body_timeout 30s;
+        rate_limit 10r/s burst=20;
+        rate_limit 300r/m key=$http_x_api_key;
+        rate_limit 5r/10s key=$route;
+        max_concurrent 8;
+        limited_response 503 "body=Slow down" type=text/plain;
+    }
+    security_policy login {
+        rate_limit 5r/m key=$client_ip;
+    }
+    listener http {
+        address 0.0.0.0:80;
+        trusted_proxies 192.0.2.0/24 198.51.100.7;
+        real_ip_header x-real-ip;
+    }
+    server shop {
+        server_name shop.example;
+        security_policy staff;
+        respond 200 "body=ok";
+        route {
+            match exact /login;
+            security_policy login;
+            respond 200 "body=login";
+        }
+    }
+}
+"#;
+    let lowered = read(text);
+    assert!(
+        lowered.errors().next().is_none(),
+        "{:#?}",
+        lowered.diagnostics
+    );
+    let policy = &lowered.model.security_policies[0];
+    assert_eq!(policy.allowed_methods, ["GET", "POST"]);
+    assert_eq!(policy.denied_user_agents, ["^curl/", "sqlmap"]);
+    let referer = policy.referer.as_ref().unwrap();
+    assert!(referer.allow_empty);
+    assert_eq!(referer.allowed_hosts, ["*.shop.example", "shop.example"]);
+    let auth = policy.basic_auth.as_ref().unwrap();
+    assert_eq!(
+        (auth.realm.as_str(), auth.users_secret_id.as_str()),
+        ("Staff area", "staff.htpasswd")
+    );
+    assert_eq!(policy.max_body_bytes, Some(10 << 20));
+    assert_eq!(policy.body_timeout_seconds, Some(30));
+    assert_eq!(policy.rate_limits.len(), 3);
+    assert_eq!(
+        policy.rate_limits[1].key,
+        panel_ir::RateLimitKey::Header {
+            name: "x-api-key".into()
+        }
+    );
+    assert_eq!(
+        (
+            policy.rate_limits[2].requests,
+            policy.rate_limits[2].per_seconds
+        ),
+        (5, 10)
+    );
+    assert_eq!(policy.limited_response.as_ref().unwrap().status, 503);
+    let listener = &lowered.model.listeners[0];
+    assert_eq!(listener.trusted_proxies.len(), 2);
+    assert_eq!(listener.real_ip_header, panel_ir::RealIpHeader::XRealIp);
+    let site = &lowered.model.sites[0];
+    assert_eq!(site.security_policy_id.as_deref(), Some("staff"));
+    assert_eq!(site.routes[0].security_policy_id.as_deref(), Some("login"));
+    assert!(
+        lowered.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code.as_str() == codes::EXPOSURE
+                && diagnostic
+                    .message
+                    .contains("asks for passwords on listener http")
+        }),
+        "{:#?}",
+        lowered.diagnostics
+    );
+
+    let printed = print(&lowered.model);
+    for line in [
+        "        methods GET POST;\n",
+        "        referers none *.shop.example shop.example;\n",
+        "        basic_auth staff.htpasswd \"realm=Staff area\";\n",
+        "        rate_limit 10r/s burst=20;\n",
+        "        rate_limit 300r/m key=$http_x_api_key;\n",
+        "        rate_limit 5r/10s key=$route;\n",
+        "        rate_limit 5r/m;\n",
+        "        trusted_proxies 192.0.2.0/24 198.51.100.7;\n",
+        "        real_ip_header x-real-ip;\n",
+        "        security_policy staff;\n",
+        "            security_policy login;\n",
+    ] {
+        assert!(printed.contains(line), "{line}{printed}");
+    }
+    assert!(same_configuration(&lowered.model, &read(&printed).model));
+
+    let secure = read(&text.replace(
+        "server_name shop.example;",
+        "server_name shop.example;\n        https_redirect on;",
+    ));
+    assert!(!secure
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code.as_str() == codes::EXPOSURE));
+    let everyone = read(&text.replace("198.51.100.7", "0.0.0.0/0"));
+    assert!(everyone
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.message.contains("trusts 0.0.0.0/0 as proxies")));
+
+    for (from, to, message) in [
+        ("10.9.0.0/16", "10.9.0.0/33", "is not an IP network"),
+        ("methods get", "methods \"GE T\"", "is not an HTTP method"),
+        (
+            "deny_paths /.git",
+            "deny_paths .git",
+            "does not start with /",
+        ),
+        ("10r/s", "10/s", "is not a rate"),
+        ("key=$route", "key=$uri", "is not a rate limit key"),
+        (
+            "body_timeout 30s",
+            "body_timeout 1500ms",
+            "whole number of seconds",
+        ),
+        ("max_body_size 10m", "max_body_size 0", "is not a size"),
+        ("referers none", "referers none bad*host", "is not a host"),
+        ("\"^curl/\"", "\"(\"", "user agent pattern"),
+        (
+            "security_policy login;",
+            "security_policy missing;",
+            "does not exist",
+        ),
+        (
+            "real_ip_header x-real-ip",
+            "real_ip_header via",
+            "is not x-forwarded-for",
+        ),
+        (
+            "limited_response 503",
+            "limited_response 200",
+            "status must be 400 to 599",
+        ),
+    ] {
+        let lowered = read(&text.replace(from, to));
+        assert!(
+            lowered
+                .errors()
+                .any(|diagnostic| diagnostic.message.contains(message)),
+            "{message}: {:#?}",
+            lowered.diagnostics
+        );
+    }
+}
+
+#[test]
 fn literal_dollars_survive_a_round_trip() {
     let text = "language_version 1;\nhttp {\n    upstream app {\n        server 10.0.0.1:80;\n    }\n    server s {\n        server_name s.example;\n        note \"uses $HOME\";\n        respond 200 \"body=cost $$5 or $$amount\";\n    }\n}\n";
     let lowered = read(text);

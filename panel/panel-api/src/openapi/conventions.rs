@@ -8,7 +8,7 @@ use utoipa::{
         header::Header,
         path::{ParameterBuilder, ParameterIn},
         response::ResponseBuilder,
-        schema::{ObjectBuilder, Type},
+        schema::{ObjectBuilder, Schema, Type},
         Content, Ref, RefOr, Required,
     },
     Modify,
@@ -16,8 +16,24 @@ use utoipa::{
 
 pub(super) struct HttpConventions;
 
+/// Response enums whose values grow with the product, such as the blocks of
+/// the configuration language; clients must accept values they do not know.
+const EXTENSIBLE_ENUMS: &[&str] = &["Context"];
+
 impl Modify for HttpConventions {
     fn modify(&self, document: &mut openapi::OpenApi) {
+        if let Some(components) = document.components.as_mut() {
+            for name in EXTENSIBLE_ENUMS {
+                if let Some(RefOr::T(Schema::Object(object))) = components.schemas.get_mut(*name) {
+                    if let Some(values) = object.enum_values.take() {
+                        object
+                            .extensions
+                            .get_or_insert_default()
+                            .insert("x-extensible-enum".into(), values.into());
+                    }
+                }
+            }
+        }
         for (path, item) in &mut document.paths.paths {
             item.parameters.get_or_insert_default().push(ParameterBuilder::new()
                 .name(REQUEST_ID_HEADER).parameter_in(ParameterIn::Header)

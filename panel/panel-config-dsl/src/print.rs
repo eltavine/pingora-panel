@@ -2,15 +2,19 @@
 //! service stores and formats, with defaults left out.
 
 use crate::{
-    values::{print_bool, print_duration_ms},
+    lower::{print_rate, DEFAULT_REALM},
+    values::{print_bool, print_duration_ms, print_size},
     variables::{escape, print_hash_key},
     LANGUAGE_VERSION,
 };
 use panel_config_model::{
-    Action, ConfigModel, Listener, Route, Site, TlsProfile, Upstream, UpstreamNode,
+    Action, ConfigModel, Listener, Route, SecurityPolicy, Site, TlsProfile, Upstream, UpstreamNode,
 };
 use panel_dsl::{Directive, Document, Trivia};
-use panel_ir::{HealthCheckProtocol, ListenerProtocols, LoadBalancingPolicy, WwwRedirect};
+use panel_ir::{
+    HealthCheckProtocol, ListenerProtocols, LoadBalancingPolicy, RateLimitKey, RealIpHeader,
+    WwwRedirect,
+};
 
 /// The whole model as `main.conf`.
 pub fn print(model: &ConfigModel) -> String {
@@ -20,6 +24,7 @@ pub fn print(model: &ConfigModel) -> String {
 pub fn document(model: &ConfigModel) -> Document {
     let mut http = Vec::new();
     http.extend(model.tls_profiles.iter().map(tls_profile));
+    http.extend(model.security_policies.iter().map(security_policy));
     http.extend(
         model
             .listeners
@@ -89,6 +94,85 @@ pub fn tls_profile(profile: &TlsProfile) -> Directive {
     Directive::with_block("tls_profile", [profile.id.clone()], body)
 }
 
+pub fn security_policy(policy: &SecurityPolicy) -> Directive {
+    let mut body = Vec::new();
+    let mut list = |name: &str, values: Vec<String>| {
+        if !values.is_empty() {
+            body.push(Directive::simple(name, values));
+        }
+    };
+    list("allow", policy.allowed_cidrs.clone());
+    list("deny", policy.denied_cidrs.clone());
+    list("methods", policy.allowed_methods.clone());
+    list(
+        "deny_paths",
+        policy
+            .denied_path_prefixes
+            .iter()
+            .map(|path| expanded(path))
+            .collect(),
+    );
+    list("deny_user_agents", policy.denied_user_agents.clone());
+    if let Some(rule) = &policy.referer {
+        let mut hosts: Vec<String> = rule
+            .allow_empty
+            .then(|| "none".to_owned())
+            .into_iter()
+            .collect();
+        hosts.extend(rule.allowed_hosts.iter().map(|host| expanded(host)));
+        list("referers", hosts);
+    }
+    if let Some(auth) = &policy.basic_auth {
+        let mut args = vec![expanded(&auth.users_secret_id)];
+        if auth.realm != DEFAULT_REALM {
+            args.push(format!("realm={}", expanded(&auth.realm)));
+        }
+        body.push(Directive::simple("basic_auth", args));
+    }
+    if let Some(bytes) = policy.max_header_bytes {
+        body.push(Directive::simple("max_header_size", [print_size(bytes)]));
+    }
+    if let Some(bytes) = policy.max_body_bytes {
+        body.push(Directive::simple("max_body_size", [print_size(bytes)]));
+    }
+    if let Some(seconds) = policy.body_timeout_seconds {
+        body.push(Directive::simple(
+            "body_timeout",
+            [print_duration_ms(seconds.saturating_mul(1_000))],
+        ));
+    }
+    for limit in &policy.rate_limits {
+        let mut args = vec![print_rate(limit.requests, limit.per_seconds)];
+        if limit.burst > 0 {
+            args.push(format!("burst={}", limit.burst));
+        }
+        match &limit.key {
+            RateLimitKey::ClientAddress => {}
+            RateLimitKey::Host => args.push("key=$host".into()),
+            RateLimitKey::Route => args.push("key=$route".into()),
+            RateLimitKey::Header { name } => {
+                args.push(format!("key={}", print_hash_key(&format!("header:{name}"))));
+            }
+            _ => {}
+        }
+        body.push(Directive::simple("rate_limit", args));
+    }
+    if let Some(max) = policy.max_concurrent_requests {
+        body.push(Directive::simple("max_concurrent", [max.to_string()]));
+    }
+    if let Some(response) = &policy.limited_response {
+        let mut args = vec![response.status.to_string()];
+        if !response.body.is_empty() {
+            args.push(format!("body={}", expanded(&response.body)));
+        }
+        if let Some(content_type) = &response.content_type {
+            args.push(format!("type={}", expanded(content_type)));
+        }
+        body.push(Directive::simple("limited_response", args));
+    }
+    Directive::with_block("security_policy", [policy.id.clone()], body)
+}
+
 pub fn listener(listener: &Listener, model: &ConfigModel) -> Directive {
     let mut body = vec![Directive::simple("address", [expanded(&listener.address)])];
     if listener.protocols != ListenerProtocols::default() {
@@ -113,6 +197,18 @@ pub fn listener(listener: &Listener, model: &ConfigModel) -> Directive {
     }
     if let Some(ipv6_only) = listener.ipv6_only {
         body.push(Directive::simple("ipv6_only", [print_bool(ipv6_only)]));
+    }
+    if !listener.trusted_proxies.is_empty() {
+        body.push(Directive::simple(
+            "trusted_proxies",
+            listener.trusted_proxies.iter().cloned(),
+        ));
+    }
+    match listener.real_ip_header {
+        RealIpHeader::XForwardedFor => {}
+        RealIpHeader::XRealIp => body.push(Directive::simple("real_ip_header", ["x-real-ip"])),
+        RealIpHeader::Forwarded => body.push(Directive::simple("real_ip_header", ["forwarded"])),
+        _ => {}
     }
     if let Some(site) = listener
         .default_site_id
@@ -332,6 +428,9 @@ fn route(route: &Route, model: &ConfigModel) -> Directive {
     if !route.enabled {
         body.push(Directive::simple("enabled", ["off"]));
     }
+    if let Some(policy) = &route.security_policy_id {
+        body.push(Directive::simple("security_policy", [policy.clone()]));
+    }
     body.push(action(&route.action, model));
     Directive::with_block("route", route.name.clone(), body)
 }
@@ -404,6 +503,9 @@ pub fn server(site: &Site, model: &ConfigModel) -> Directive {
             args.push("preload".into());
         }
         body.push(Directive::simple("hsts", args));
+    }
+    if let Some(policy) = &site.security_policy_id {
+        body.push(Directive::simple("security_policy", [policy.clone()]));
     }
     match site.www_redirect {
         WwwRedirect::None => {}
