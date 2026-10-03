@@ -22453,6 +22453,7 @@
             "items": {
               "type": "string"
             },
+            "description": "ALPN protocol IDs a listener using this profile offers, narrowing the\nlistener's enabled protocols; empty offers all of them. A profile chosen\nby SNI for a domain does not change its listener's offer.",
             "uniqueItems": true
           },
           "certificate_secret_id": {

@@ -223,6 +223,9 @@ message TlsProfile {
   string certificate_ref = 2;
   string private_key_secret_id = 3;
   string min_protocol = 4;
+  // ALPN protocol IDs a listener using this profile offers, narrowing the
+  // listener's enabled protocols; empty offers all of them. A profile chosen
+  // by SNI for a domain does not change its listener's offer.
   repeated string alpn = 5;
 }
 

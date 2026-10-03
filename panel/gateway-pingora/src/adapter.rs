@@ -265,7 +265,7 @@ impl PingoraGatewayAdapter {
         let listeners = snapshot
             .listeners
             .iter()
-            .map(ListenerPlan::from_ir)
+            .map(|listener| ListenerPlan::from_ir(listener, &snapshot.tls_profiles))
             .collect::<Result<Vec<_>>>()?;
         self.check_bindable(&listeners)?;
         let secrets = Arc::clone(&self.options.secrets);

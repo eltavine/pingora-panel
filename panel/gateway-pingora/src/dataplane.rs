@@ -398,7 +398,7 @@ impl Generation {
                     Arc::clone(&active),
                     plan.id.clone(),
                 )));
-                settings.set_alpn(match (plan.http1, plan.http2) {
+                settings.set_alpn(match (plan.alpn_http1, plan.alpn_http2) {
                     (true, true) => ALPN::H2H1,
                     (false, _) => ALPN::H2,
                     (true, false) => ALPN::H1,

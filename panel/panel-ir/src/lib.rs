@@ -655,6 +655,9 @@ pub struct TlsProfile {
     pub certificate_secret_id: String,
     pub private_key_secret_id: String,
     pub min_protocol: String,
+    /// ALPN protocol IDs a listener using this profile offers, narrowing the
+    /// listener's enabled protocols; empty offers all of them. A profile chosen
+    /// by SNI for a domain does not change its listener's offer.
     pub alpn: BTreeSet<String>,
 }
 

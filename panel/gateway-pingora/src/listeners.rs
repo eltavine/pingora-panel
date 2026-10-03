@@ -1,7 +1,7 @@
 //! Listening sockets and the fixed listener set of a data plane generation.
 
 use panel_errors::{PanelError, Result};
-use panel_ir::ListenerRef;
+use panel_ir::{ListenerRef, TlsProfile};
 use socket2::{Domain, Protocol, Socket, Type};
 use std::{
     io,
@@ -25,10 +25,14 @@ pub(crate) struct ListenerPlan {
     pub tls: bool,
     pub http1: bool,
     pub http2: bool,
+    /// Protocols offered through ALPN: the enabled ones that the listener's
+    /// own TLS profile allows.
+    pub alpn_http1: bool,
+    pub alpn_http2: bool,
 }
 
 impl ListenerPlan {
-    pub(crate) fn from_ir(listener: &ListenerRef) -> Result<Self> {
+    pub(crate) fn from_ir(listener: &ListenerRef, profiles: &[TlsProfile]) -> Result<Self> {
         let address = listener.address.parse().map_err(|_| {
             PanelError::validation_failed(format!(
                 "listener {} address {:?} is not an IP socket address",
@@ -45,8 +49,18 @@ impl ListenerPlan {
             tls: listener.tls_profile_id.is_some(),
             http1: listener.protocols.http1,
             http2: listener.protocols.http2,
+            alpn_http1: listener.protocols.http1 && offers(listener, profiles, "http/1.1"),
+            alpn_http2: listener.protocols.http2 && offers(listener, profiles, "h2"),
         })
     }
+}
+
+fn offers(listener: &ListenerRef, profiles: &[TlsProfile], protocol: &str) -> bool {
+    listener
+        .tls_profile_id
+        .as_ref()
+        .and_then(|id| profiles.iter().find(|profile| &profile.id == id))
+        .is_none_or(|profile| profile.alpn.is_empty() || profile.alpn.contains(protocol))
 }
 
 pub(crate) fn bind(key: &SocketKey) -> io::Result<TcpListener> {
@@ -82,11 +96,32 @@ mod tests {
         listener.reuse_port = true;
         listener.ipv6_only = Some(true);
         listener.protocols.http1 = false;
-        let plan = ListenerPlan::from_ir(&listener).unwrap();
+        let plan = ListenerPlan::from_ir(&listener, &[]).unwrap();
         assert!(plan.tls && !plan.http1 && plan.http2);
+        assert!(!plan.alpn_http1 && plan.alpn_http2);
         assert!(plan.socket.reuse_port);
         assert_eq!(plan.socket.ipv6_only, Some(true));
-        assert!(ListenerPlan::from_ir(&ListenerRef::new("bad", "localhost:80")).is_err());
+        assert!(ListenerPlan::from_ir(&ListenerRef::new("bad", "localhost:80"), &[]).is_err());
+    }
+
+    #[test]
+    fn the_listener_profile_narrows_the_alpn_offer() {
+        let mut listener = ListenerRef::new("https", "127.0.0.1:443");
+        listener.tls_profile_id = Some("tls".into());
+        listener.protocols.http2 = true;
+        let mut profile = TlsProfile {
+            id: "tls".into(),
+            certificate_secret_id: "cert.pem".into(),
+            private_key_secret_id: "key.pem".into(),
+            min_protocol: "TLSv1.2".into(),
+            alpn: ["http/1.1".to_owned()].into(),
+        };
+        let plan = ListenerPlan::from_ir(&listener, std::slice::from_ref(&profile)).unwrap();
+        assert!(plan.http2 && plan.alpn_http1 && !plan.alpn_http2);
+
+        profile.alpn.clear();
+        let plan = ListenerPlan::from_ir(&listener, &[profile]).unwrap();
+        assert!(plan.alpn_http1 && plan.alpn_http2);
     }
 
     #[test]

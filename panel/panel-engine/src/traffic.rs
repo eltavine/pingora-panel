@@ -7,7 +7,7 @@ use panel_ir::{
     RouteMatcher, RuntimeSnapshot, UpstreamPoolSpec,
 };
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     net::{IpAddr, SocketAddr},
 };
 
@@ -20,10 +20,10 @@ pub(crate) fn validate_traffic(snapshot: &RuntimeSnapshot, diagnostics: &mut Vec
             .push(Diagnostic::error(ErrorCode::VALIDATION_FAILED, message).with_resource(resource));
     };
     let site_ids: BTreeSet<_> = snapshot.sites.iter().map(|site| &site.id).collect();
-    let tls_profiles: BTreeSet<_> = snapshot
+    let tls_profiles: BTreeMap<_, _> = snapshot
         .tls_profiles
         .iter()
-        .map(|profile| profile.id.as_str())
+        .map(|profile| (profile.id.as_str(), profile))
         .collect();
     let static_policies: BTreeSet<_> = snapshot
         .static_content
@@ -73,18 +73,33 @@ pub(crate) fn validate_traffic(snapshot: &RuntimeSnapshot, diagnostics: &mut Vec
                 format!("listener {} must accept HTTP/1.1 or HTTP/2", listener.id),
             );
         }
-        if let Some(profile) = listener
-            .tls_profile_id
-            .as_deref()
-            .filter(|profile| !tls_profiles.contains(profile))
-        {
-            report(
-                &listener.id,
-                format!(
-                    "listener {} references unknown TLS profile {profile}",
-                    listener.id
+        if let Some(id) = listener.tls_profile_id.as_deref() {
+            match tls_profiles.get(id) {
+                None => report(
+                    &listener.id,
+                    format!(
+                        "listener {} references unknown TLS profile {id}",
+                        listener.id
+                    ),
                 ),
-            );
+                Some(profile) => {
+                    let offers =
+                        |protocol: &str| profile.alpn.is_empty() || profile.alpn.contains(protocol);
+                    let enabled = listener.protocols.http1 || listener.protocols.http2;
+                    if enabled
+                        && !(listener.protocols.http1 && offers("http/1.1")
+                            || listener.protocols.http2 && offers("h2"))
+                    {
+                        report(
+                            &listener.id,
+                            format!(
+                                "TLS profile {id} offers none of listener {}'s protocols",
+                                listener.id
+                            ),
+                        );
+                    }
+                }
+            }
         }
         if let Some(site) = listener
             .default_site_id
@@ -164,7 +179,7 @@ pub(crate) fn validate_traffic(snapshot: &RuntimeSnapshot, diagnostics: &mut Vec
             if let Some(profile) = domain
                 .tls_profile_id
                 .as_deref()
-                .filter(|profile| !tls_profiles.contains(profile))
+                .filter(|profile| !tls_profiles.contains_key(profile))
             {
                 report(
                     resource,
@@ -545,6 +560,17 @@ mod tests {
         https.tls_profile_id = Some("tls".into());
         snapshot.listeners.push(https);
         snapshot.sites[0].domains[0].primary = true;
+        assert!(messages(&mut snapshot).is_empty());
+
+        snapshot.tls_profiles[0].alpn = ["h2".to_owned()].into();
+        snapshot.listeners[1].protocols.http2 = false;
+        let found = messages(&mut snapshot);
+        assert!(
+            found.iter().any(|message| message
+                .contains("TLS profile tls offers none of listener https's protocols")),
+            "{found:?}"
+        );
+        snapshot.listeners[1].protocols.http2 = true;
         assert!(messages(&mut snapshot).is_empty());
     }
 
