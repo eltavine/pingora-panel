@@ -13,6 +13,10 @@ pub(crate) const ERROR_STATUSES: &[(&str, StatusCode)] = &[
         StatusCode::PRECONDITION_FAILED,
     ),
     (
+        ErrorCode::PRECONDITION_REQUIRED,
+        StatusCode::PRECONDITION_REQUIRED,
+    ),
+    (
         ErrorCode::UNSUPPORTED_CAPABILITY,
         StatusCode::UNPROCESSABLE_ENTITY,
     ),

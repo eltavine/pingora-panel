@@ -16,6 +16,8 @@ impl ErrorCode {
     pub const CONFLICT: &'static str = "CONFLICT";
     pub const NOT_FOUND: &'static str = "NOT_FOUND";
     pub const PRECONDITION_FAILED: &'static str = "PRECONDITION_FAILED";
+    /// A conditional request was required but sent without its precondition.
+    pub const PRECONDITION_REQUIRED: &'static str = "PRECONDITION_REQUIRED";
     pub const UNSUPPORTED_CAPABILITY: &'static str = "UNSUPPORTED_CAPABILITY";
     pub const PREPARE_FAILED: &'static str = "PREPARE_FAILED";
     pub const ACTIVATE_FAILED: &'static str = "ACTIVATE_FAILED";
@@ -241,6 +243,10 @@ impl PanelError {
 
     pub fn precondition_failed(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::PRECONDITION_FAILED, message)
+    }
+
+    pub fn precondition_required(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::PRECONDITION_REQUIRED, message)
     }
 
     pub fn unsupported_capability(message: impl Into<String>) -> Self {
