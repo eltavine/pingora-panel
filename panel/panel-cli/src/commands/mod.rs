@@ -14,6 +14,7 @@ pub mod routes;
 pub mod security;
 pub mod sites;
 pub mod upstreams;
+pub mod workload;
 
 use crate::client::{CliError, Result};
 use serde_json::{json, Map, Value};

@@ -257,6 +257,25 @@ async fn api(
              "disabled": false, "locked": false}
         ]))
         .into_response(),
+        ("POST", "/api/v1/accounts") => (
+            StatusCode::CREATED,
+            Json(json!({"id": "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a99",
+                        "username": body["username"], "service": body["service"]})),
+        )
+            .into_response(),
+        ("POST", "/api/v1/accounts/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/tokens") => (
+            StatusCode::CREATED,
+            Json(json!({"secret": "ppat_issued",
+                        "token": {"name": body["name"], "expires_at": "2026-10-10T00:00:00Z"}})),
+        )
+            .into_response(),
+        ("PUT", "/api/v1/workload-identities/shop") => Json(body.clone()).into_response(),
+        ("POST", "/api/v1/auth/workload") => (
+            StatusCode::CREATED,
+            Json(json!({"secret": "session-secret", "expires_at": "2026-10-03T09:15:00Z",
+                        "account": "deployer"})),
+        )
+            .into_response(),
         ("PATCH", "/api/v1/accounts/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b") => {
             Json(json!({"username": "ops", "disabled": body["disabled"]})).into_response()
         }
@@ -1602,4 +1621,102 @@ fn covered_changes_wait_for_approval_from_the_command_line() {
         "9to5",
     ]);
     assert_eq!(bad.status.code(), Some(2));
+}
+
+#[test]
+fn programs_get_service_accounts_and_workload_identities() {
+    let stub = Stub::start();
+    let created = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "account",
+        "create",
+        "deployer",
+        "--service",
+        "--role",
+        "operator",
+    ]);
+    assert!(created.status.success(), "{}", stderr(&created));
+    let body = &stub.requests("POST", "/api/v1/accounts")[0].body;
+    assert_eq!(
+        (body["service"].clone(), body["password"].clone()),
+        (json!(true), Value::Null)
+    );
+    let both = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "account",
+        "create",
+        "x",
+        "--service",
+        "--with-password",
+    ]);
+    assert_eq!(both.status.code(), Some(2));
+
+    let issued = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "account",
+        "issue-token",
+        "ops",
+        "--name",
+        "nightly",
+        "--days",
+        "7",
+    ]);
+    assert!(issued.status.success(), "{}", stderr(&issued));
+    assert!(String::from_utf8_lossy(&issued.stdout).contains("ppat_issued"));
+    assert_eq!(
+        stub.requests(
+            "POST",
+            "/api/v1/accounts/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/tokens"
+        )[0]
+        .body,
+        json!({"name": "nightly", "permissions": null, "expires_in_days": 7})
+    );
+
+    let set = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "workload-identity",
+        "set",
+        "shop",
+        "--account",
+        "ops",
+        "--issuer",
+        "https://token.actions.githubusercontent.com",
+        "--audience",
+        "pingora-panel",
+        "--subject",
+        "repo:shop/site:*",
+        "--claim",
+        "repository=shop/site",
+    ]);
+    assert!(set.status.success(), "{}", stderr(&set));
+    let body = &stub.requests("PUT", "/api/v1/workload-identities/shop")[0].body;
+    assert_eq!(body["account_id"], "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b");
+    assert_eq!(body["claims"], json!({"repository": "shop/site"}));
+    assert_eq!(
+        (body["session_minutes"].clone(), body["enabled"].clone()),
+        (json!(15), json!(true))
+    );
+
+    let token = std::env::temp_dir().join(format!("ppanel-workload-{}", std::process::id()));
+    std::fs::write(&token, "header.payload.signature\n").unwrap();
+    let exchanged = stub.ppanel(&[
+        "workload-identity",
+        "exchange",
+        "--token-file",
+        token.to_str().unwrap(),
+    ]);
+    std::fs::remove_file(&token).unwrap();
+    assert!(exchanged.status.success(), "{}", stderr(&exchanged));
+    assert_eq!(
+        String::from_utf8_lossy(&exchanged.stdout).trim(),
+        "session-secret"
+    );
+    assert_eq!(
+        stub.requests("POST", "/api/v1/auth/workload")[0].body,
+        json!({"token": "header.payload.signature"})
+    );
 }

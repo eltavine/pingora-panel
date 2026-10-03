@@ -77,10 +77,25 @@ pub(crate) enum AccountCommand {
         roles: Vec<String>,
         /// Set a password now; otherwise the account cannot log in until
         /// one is set.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "service")]
         with_password: bool,
+        /// A service account for a program: it never signs in, and account
+        /// managers issue its tokens with `ppanel account issue-token`.
+        #[arg(long)]
+        service: bool,
         #[command(flatten)]
         input: SecretInput,
+    },
+    /// Issues an API token for a service account; it is shown once.
+    IssueToken {
+        account: String,
+        #[arg(long)]
+        name: String,
+        /// A permission it grants; the service account's own without any.
+        #[arg(long = "permission")]
+        permissions: Vec<String>,
+        #[arg(long, default_value_t = 30)]
+        days: u32,
     },
     /// Changes an account's name, roles or state.
     Update {
@@ -217,11 +232,14 @@ fn state(account: &Value) -> String {
         (false, true) => "locked",
         _ => "active",
     };
-    if account["break_glass"] == true {
-        format!("{state}, break-glass")
-    } else {
-        state.into()
+    let mut state = state.to_owned();
+    if account["service"] == true {
+        state.push_str(", service");
     }
+    if account["break_glass"] == true {
+        state.push_str(", break-glass");
+    }
+    state
 }
 
 /// Creates the first account with the deployment's bootstrap token.
@@ -433,7 +451,7 @@ pub(crate) async fn token(api: &Api, output: &Output, command: TokenCommand) -> 
 }
 
 /// The ID of an account named by username or ID.
-async fn account_id(api: &Api, account: &str) -> Result<String> {
+pub(crate) async fn account_id(api: &Api, account: &str) -> Result<String> {
     if uuid::Uuid::parse_str(account).is_ok() {
         return Ok(account.to_owned());
     }
@@ -463,6 +481,7 @@ pub(crate) async fn account(api: &Api, output: &Output, command: AccountCommand)
             display_name,
             roles,
             with_password,
+            service,
             input,
         } => {
             let password = if with_password {
@@ -479,12 +498,42 @@ pub(crate) async fn account(api: &Api, output: &Output, command: AccountCommand)
                         "display_name": display_name,
                         "password": password,
                         "roles": roles,
+                        "service": service,
                     })),
                     None,
                 )
                 .await?
                 .body;
             output.done(&format!("Created {}", text(&created["username"])), &created);
+        }
+        AccountCommand::IssueToken {
+            account,
+            name,
+            permissions,
+            days,
+        } => {
+            let id = account_id(api, &account).await?;
+            let issued = api
+                .change(
+                    Method::POST,
+                    &format!("/api/v1/accounts/{id}/tokens"),
+                    Some(&json!({
+                        "name": name,
+                        "permissions": (!permissions.is_empty()).then_some(permissions),
+                        "expires_in_days": days,
+                    })),
+                    None,
+                )
+                .await?
+                .body;
+            output.done(
+                &format!(
+                    "{}\nThis is the only time the token is shown; it expires {}.",
+                    text(&issued["secret"]),
+                    text(&issued["token"]["expires_at"])
+                ),
+                &issued,
+            );
         }
         AccountCommand::Update {
             account,

@@ -96,6 +96,10 @@ enum Command {
     /// Who may sign in with a password.
     #[command(subcommand, name = "sign-in-policy")]
     SignInPolicy(commands::providers::SignInPolicyCommand),
+    /// Programs that act as service accounts with their own short-lived
+    /// tokens.
+    #[command(subcommand, name = "workload-identity")]
+    WorkloadIdentity(commands::workload::WorkloadCommand),
     /// Websites and their state.
     #[command(subcommand)]
     Site(commands::sites::SiteCommand),
@@ -203,6 +207,9 @@ async fn main() -> ExitCode {
             }
             Command::SignInPolicy(command) => {
                 commands::providers::sign_in_policy(&api, &output, command).await
+            }
+            Command::WorkloadIdentity(command) => {
+                commands::workload::workload(&api, &output, command).await
             }
             Command::Site(command) => commands::sites::run(&api, &output, command).await,
             Command::Domain(command) => commands::domains::run(&api, &output, command).await,
