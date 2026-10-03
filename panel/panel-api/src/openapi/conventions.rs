@@ -59,7 +59,7 @@ impl Modify for HttpConventions {
             .into_iter()
             .flatten()
             {
-                if path.starts_with("/api/v1/gateway/") || path.starts_with("/api/v1/platform/") {
+                if path.starts_with("/api/v1/") && path != "/api/v1/openapi.json" {
                     // All application ports can return the stable shared error
                     // envelope. JSON extraction additionally returns 413/415/422.
                     for status in ERROR_STATUSES

@@ -34,11 +34,19 @@ fn mutation_headers_describe_the_actual_request_requirements() {
 #[test]
 fn error_responses_and_receipt_polling_match_the_wire_contract() {
     let doc = document();
-    for (path, item) in doc["paths"].as_object().unwrap() {
-        if !path.starts_with("/api/v1/gateway/") {
-            continue;
-        }
-        let operation = item.get("post").or_else(|| item.get("get")).unwrap();
+    let operations: Vec<&Value> = doc["paths"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .filter(|(path, _)| *path != "/api/v1/openapi.json")
+        .flat_map(|(_, item)| {
+            ["get", "post", "put", "delete"]
+                .into_iter()
+                .filter_map(|method| item.get(method))
+        })
+        .collect();
+    assert!(operations.len() > 40);
+    for operation in operations {
         for status in [
             "400", "401", "403", "404", "408", "409", "412", "413", "415", "422", "429", "500",
         ] {
