@@ -3,10 +3,11 @@
 #   panel/deploy/generate-secrets.sh
 #   docker compose -f panel/deploy/compose.yaml up -d
 #
-# Every process uses the host network and binds loopback addresses, so
-# nothing is reachable from other hosts until the API authenticates callers;
-# the console is at http://127.0.0.1:8080. Internal gRPC additionally runs
-# over mutual TLS with credentials the pki service rotates.
+# Every process uses the host network. Control services bind loopback
+# addresses, so nothing but the gateway's configured listeners is reachable
+# from other hosts until the API authenticates callers; the console is at
+# http://127.0.0.1:8080. Internal gRPC additionally runs over mutual TLS with
+# credentials the pki service rotates.
 
 name: pingora-panel
 
@@ -120,13 +121,20 @@ services:
   gatewayd:
     <<: *panel
     command: ["/usr/local/bin/gatewayd"]
+    # Binding ports below 1024 on the host network needs this one capability.
+    user: "0:0"
+    cap_add: [NET_BIND_SERVICE]
     environment:
       PINGORA_PANEL_GATEWAY_ADDR: 127.0.0.1:50051
       PINGORA_PANEL_STATE_DIR: /var/lib/pingora-panel/gateway
       PINGORA_PANEL_TLS_DIR: /var/lib/pingora-panel/credentials/gatewayd
       PINGORA_PANEL_TRUST_DOMAIN: pingora-panel.internal
+      PINGORA_PANEL_SECRET_DIR: /var/lib/pingora-panel/gateway-secrets
+      PINGORA_PANEL_STATIC_ROOT: /srv/pingora-panel/sites
     volumes:
       - gateway-state:/var/lib/pingora-panel/gateway
+      - gateway-secrets:/var/lib/pingora-panel/gateway-secrets:ro
+      - sites:/srv/pingora-panel/sites:ro
       - credentials-gatewayd:/var/lib/pingora-panel/credentials/gatewayd:ro
     depends_on:
       pki-init:
@@ -224,6 +232,8 @@ volumes:
   postgres-data:
   nats-data:
   gateway-state:
+  gateway-secrets:
+  sites:
   pki-authority:
   credentials-panel-api:
   credentials-config-service:
