@@ -94,6 +94,12 @@ pub(crate) enum AccountCommand {
         disable: bool,
         #[arg(long)]
         enable: bool,
+        /// Keep its password sign-in when that is limited to break-glass
+        /// accounts; every sign-in with it is recorded for review.
+        #[arg(long, conflicts_with = "no_break_glass")]
+        break_glass: bool,
+        #[arg(long)]
+        no_break_glass: bool,
         /// Clears failed logins and re-enables a locked password.
         #[arg(long)]
         unlock: bool,
@@ -206,10 +212,15 @@ const PERMISSIONS: &[Column] = &[
 ];
 
 fn state(account: &Value) -> String {
-    match (account["disabled"] == true, account["locked"] == true) {
-        (true, _) => "disabled".into(),
-        (false, true) => "locked".into(),
-        _ => "active".into(),
+    let state = match (account["disabled"] == true, account["locked"] == true) {
+        (true, _) => "disabled",
+        (false, true) => "locked",
+        _ => "active",
+    };
+    if account["break_glass"] == true {
+        format!("{state}, break-glass")
+    } else {
+        state.into()
     }
 }
 
@@ -481,6 +492,8 @@ pub(crate) async fn account(api: &Api, output: &Output, command: AccountCommand)
             roles,
             disable,
             enable,
+            break_glass,
+            no_break_glass,
             unlock,
         } => {
             let id = account_id(api, &account).await?;
@@ -493,6 +506,9 @@ pub(crate) async fn account(api: &Api, output: &Output, command: AccountCommand)
             }
             if disable || enable {
                 patch.insert("disabled".into(), json!(disable));
+            }
+            if break_glass || no_break_glass {
+                patch.insert("break_glass".into(), json!(break_glass));
             }
             if unlock {
                 patch.insert("unlock".into(), json!(true));

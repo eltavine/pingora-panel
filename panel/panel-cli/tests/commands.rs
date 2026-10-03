@@ -247,6 +247,10 @@ async fn api(
         ("PUT", "/api/v1/tls-profiles/edge") => Json(body.clone()).into_response(),
         ("PUT", "/api/v1/security-policies/office") => Json(body.clone()).into_response(),
         ("PUT", "/api/v1/identity-providers/corp") => Json(body.clone()).into_response(),
+        ("PUT", "/api/v1/sign-in-policy") => Json(body.clone()).into_response(),
+        ("GET", "/api/v1/sign-in-policy") => {
+            Json(json!({"password_sign_in": "break_glass_only"})).into_response()
+        }
         ("GET", "/api/v1/identity-providers") => Json(json!([
             {"id": "corp", "display_name": "Corporate", "issuer": "https://id.example",
              "client_id": "panel", "has_client_secret": true, "scopes": ["profile"],
@@ -1420,4 +1424,50 @@ fn identity_providers_take_their_secret_from_a_file() {
         "ops",
     ]);
     assert_eq!(invalid.status.code(), Some(2));
+}
+
+#[test]
+fn password_sign_in_can_be_limited_to_break_glass_accounts() {
+    let stub = Stub::start();
+    let marked = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "account",
+        "update",
+        "ops",
+        "--break-glass",
+    ]);
+    assert!(marked.status.success(), "{}", stderr(&marked));
+    let patches = stub.requests(
+        "PATCH",
+        "/api/v1/accounts/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b",
+    );
+    assert_eq!(patches[0].body, json!({"break_glass": true}));
+
+    let limited = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "sign-in-policy",
+        "set",
+        "--password",
+        "break-glass-only",
+    ]);
+    assert!(limited.status.success(), "{}", stderr(&limited));
+    assert_eq!(
+        stub.requests("PUT", "/api/v1/sign-in-policy")[0].body,
+        json!({"password_sign_in": "break_glass_only"})
+    );
+    let shown = stub.ppanel(&["--token", "ppat_admin", "sign-in-policy", "show"]);
+    assert!(shown.status.success(), "{}", stderr(&shown));
+    assert!(String::from_utf8_lossy(&shown.stdout).contains("break-glass-only"));
+    let both = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "account",
+        "update",
+        "ops",
+        "--break-glass",
+        "--no-break-glass",
+    ]);
+    assert_eq!(both.status.code(), Some(2));
 }

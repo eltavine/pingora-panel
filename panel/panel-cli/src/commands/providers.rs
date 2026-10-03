@@ -4,7 +4,7 @@ use crate::{
     client::{Api, CliError, Result},
     output::{text, Column, Output},
 };
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 use reqwest::Method;
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
@@ -222,6 +222,61 @@ pub(crate) async fn identity_provider(
             )
             .await?;
             output.done(&format!("Deleted the identity provider {id}"), &Value::Null);
+        }
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub(crate) enum PasswordSignIn {
+    /// Every account that has a password.
+    Everyone,
+    /// Break-glass accounts only; everyone else uses an identity provider.
+    BreakGlassOnly,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum SignInPolicyCommand {
+    /// Who may sign in with a password.
+    Show,
+    /// Limits password sign-in to break-glass accounts, which needs an
+    /// enabled identity provider and an enabled break-glass account that can
+    /// manage accounts, or opens it to everyone again.
+    Set {
+        #[arg(long, value_enum)]
+        password: PasswordSignIn,
+    },
+}
+
+const POLICY: &[Column] = &[("Password sign-in", |policy| {
+    text(&policy["password_sign_in"]).replace('_', "-")
+})];
+
+pub(crate) async fn sign_in_policy(
+    api: &Api,
+    output: &Output,
+    command: SignInPolicyCommand,
+) -> Result<()> {
+    match command {
+        SignInPolicyCommand::Show => {
+            let policy = api.get("/api/v1/sign-in-policy", &[]).await?.body;
+            output.item(&policy, POLICY);
+        }
+        SignInPolicyCommand::Set { password } => {
+            let password = match password {
+                PasswordSignIn::Everyone => "everyone",
+                PasswordSignIn::BreakGlassOnly => "break_glass_only",
+            };
+            let policy = api
+                .change(
+                    Method::PUT,
+                    "/api/v1/sign-in-policy",
+                    Some(&json!({ "password_sign_in": password })),
+                    None,
+                )
+                .await?
+                .body;
+            output.done("Sign-in policy saved", &policy);
         }
     }
     Ok(())

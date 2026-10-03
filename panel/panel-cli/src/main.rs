@@ -93,6 +93,9 @@ enum Command {
     /// Identity providers people sign in with.
     #[command(subcommand, name = "identity-provider")]
     IdentityProvider(commands::providers::IdentityProviderCommand),
+    /// Who may sign in with a password.
+    #[command(subcommand, name = "sign-in-policy")]
+    SignInPolicy(commands::providers::SignInPolicyCommand),
     /// Websites and their state.
     #[command(subcommand)]
     Site(commands::sites::SiteCommand),
@@ -191,6 +194,9 @@ async fn main() -> ExitCode {
             Command::Role(command) => commands::identity::role(&api, &output, command).await,
             Command::IdentityProvider(command) => {
                 commands::providers::identity_provider(&api, &output, command).await
+            }
+            Command::SignInPolicy(command) => {
+                commands::providers::sign_in_policy(&api, &output, command).await
             }
             Command::Site(command) => commands::sites::run(&api, &output, command).await,
             Command::Domain(command) => commands::domains::run(&api, &output, command).await,
