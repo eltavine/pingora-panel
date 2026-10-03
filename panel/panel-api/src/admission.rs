@@ -20,6 +20,7 @@ fn needs_only_identity(path: &str) -> bool {
         "/api/v1/session",
         "/api/v1/account",
         "/api/v1/accounts",
+        "/api/v1/roles",
     ]
     .iter()
     .any(|prefix| {
