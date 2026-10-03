@@ -54,6 +54,17 @@ pub(crate) enum ConfigCommand {
     },
     /// The directives of the configuration language.
     Schema,
+    /// The syntax tree of a file: its directives as the language reads them.
+    Ast {
+        /// A file read as `main.conf`, or a directory of `.conf` files; the
+        /// draft by default.
+        path: Option<PathBuf>,
+        /// The file to show.
+        #[arg(long, default_value = ENTRY)]
+        file: String,
+    },
+    /// The runtime snapshot the saved draft compiles to, as JSON.
+    Ir,
     /// What applying the draft would change on the gateway.
     Plan,
     /// Compiles the draft and activates it on the gateway.
@@ -207,6 +218,35 @@ pub(crate) fn print_changes(output: &Output, changes: &Value) {
     }
 }
 
+/// Directives as an indented outline with their places.
+fn print_tree(nodes: &Value, depth: usize) {
+    let indent = "    ".repeat(depth);
+    for node in nodes.as_array().into_iter().flatten() {
+        for comment in node["comments"].as_array().into_iter().flatten() {
+            println!("{indent}# {}", text(comment));
+        }
+        let mut line = text(&node["name"]);
+        for arg in node["args"].as_array().into_iter().flatten() {
+            line.push(' ');
+            line.push_str(&text(arg));
+        }
+        println!("{indent}{line}  [{}]", text(&node["span"]));
+        if node.get("block").is_some() {
+            print_tree(&node["block"], depth + 1);
+        }
+    }
+}
+
+async fn draft_files(api: &Api, path: Option<PathBuf>) -> Result<Map<String, Value>> {
+    match path {
+        Some(path) => read_files(&path),
+        None => Ok(api.get("/api/v1/config/source", &[]).await?.body["files"]
+            .as_object()
+            .cloned()
+            .unwrap_or_default()),
+    }
+}
+
 async fn draft_version(api: &Api) -> Result<u64> {
     let draft = api.get("/api/v1/config/draft", &[]).await?.body;
     draft["version"]
@@ -325,13 +365,7 @@ pub async fn run(api: &Api, output: &Output, command: ConfigCommand) -> Result<(
             );
         }
         ConfigCommand::Check { path } => {
-            let files = match path {
-                Some(path) => read_files(&path)?,
-                None => api.get("/api/v1/config/source", &[]).await?.body["files"]
-                    .as_object()
-                    .cloned()
-                    .unwrap_or_default(),
-            };
+            let files = draft_files(api, path).await?;
             let result = api
                 .post_read("/api/v1/config/check", &json!({ "files": files }))
                 .await?
@@ -417,6 +451,31 @@ pub async fn run(api: &Api, output: &Output, command: ConfigCommand) -> Result<(
                     }),
                 ],
             );
+        }
+        ConfigCommand::Ast { path, file } => {
+            let files = draft_files(api, path).await?;
+            let tree = api
+                .post_read(
+                    "/api/v1/config/ast",
+                    &json!({ "files": files, "file": file }),
+                )
+                .await?
+                .body;
+            if output.format == Format::Json {
+                output.json(&tree);
+            } else if !output.quiet {
+                print_tree(&tree["directives"], 0);
+            }
+            print_diagnostics(&tree["diagnostics"]);
+        }
+        ConfigCommand::Ir => {
+            let snapshot = api.get("/api/v1/config/ir", &[]).await?.body;
+            if !output.quiet {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&snapshot).expect("JSON values serialize")
+                );
+            }
         }
         ConfigCommand::Plan => {
             let plan = api.get("/api/v1/config/plan", &[]).await?.body;

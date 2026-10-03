@@ -193,6 +193,15 @@ mod tests {
             vec!["ppanel", "config", "fmt", "conf", "--check"],
             vec!["ppanel", "config", "plan"],
             vec![
+                "ppanel",
+                "config",
+                "ast",
+                "conf",
+                "--file",
+                "sites/shop.conf",
+            ],
+            vec!["ppanel", "config", "ir"],
+            vec![
                 "ppanel", "config", "rollback", "--to", "4", "--reason", "errors",
             ],
             vec!["ppanel", "revision", "list", "--before", "9"],

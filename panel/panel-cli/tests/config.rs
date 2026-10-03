@@ -83,6 +83,19 @@ async fn api(
                 Json(json!({"valid": true, "diagnostics": []})).into_response()
             }
         }
+        ("POST", "/api/v1/config/ast") => Json(json!({
+            "file": body["file"],
+            "directives": [
+                {"name": "language_version", "args": ["1"], "span": "main.conf:1.1-19"},
+                {"name": "http", "args": [], "span": "main.conf:3.1-5.1", "comments": ["Edge"],
+                 "block": [{"name": "include", "args": ["sites/*.conf"], "span": "main.conf:4.5-25"}]}
+            ],
+            "diagnostics": []
+        }))
+        .into_response(),
+        ("GET", "/api/v1/config/ir") => {
+            Json(json!({"schema_version": "panel.ir.v1", "listeners": [], "sites": []})).into_response()
+        }
         ("POST", "/api/v1/config/format") => {
             Json(json!({"files": {"main.conf": "language_version 1;\n"}, "diagnostics": []}))
                 .into_response()
@@ -250,6 +263,24 @@ fn checks_and_formatting_report_positions_and_exit_codes() {
         std::fs::read_to_string(&file).unwrap(),
         "language_version 1;\n"
     );
+}
+
+#[test]
+fn syntax_trees_and_snapshots_are_printed() {
+    let stub = Stub::start();
+    let tree = stub.ppanel(&["config", "ast", "--file", "main.conf"]);
+    assert!(tree.status.success(), "{}", stderr(&tree));
+    assert_eq!(
+        stdout(&tree),
+        "language_version 1  [main.conf:1.1-19]\n# Edge\nhttp  [main.conf:3.1-5.1]\n    include sites/*.conf  [main.conf:4.5-25]\n"
+    );
+    assert_eq!(
+        stub.requests("POST", "/api/v1/config/ast")[0].body["files"]["main.conf"],
+        MAIN
+    );
+    let snapshot = stub.ppanel(&["config", "ir"]);
+    let snapshot: Value = serde_json::from_slice(&snapshot.stdout).unwrap();
+    assert_eq!(snapshot["schema_version"], "panel.ir.v1");
 }
 
 #[test]
