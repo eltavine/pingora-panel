@@ -191,6 +191,10 @@
         "panel-service"
       ]
     },
+    "panel-cli": {
+      "catalog": false,
+      "allowed_workspace_dependencies": []
+    },
     "panel-config-domain": {
       "catalog": true,
       "allowed_workspace_dependencies": []

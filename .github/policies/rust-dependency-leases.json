@@ -243,6 +243,16 @@
           "expires_on": "2027-03-01"
         },
         {
+          "crate": "tower-http",
+          "versions": [
+            "0.6.11",
+            "0.7.1"
+          ],
+          "owner": "pingora-panel-platform",
+          "reason": "Inherited transitive duplicate with no unified release line: 0.6.11 via reqwest in the ppanel command line; 0.7.1 via panel-api and panel-api-server.",
+          "expires_on": "2027-03-01"
+        },
+        {
           "crate": "windows-sys",
           "versions": [
             "0.59.0",
