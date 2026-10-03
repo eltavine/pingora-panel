@@ -383,11 +383,21 @@ refresh token, and sessions it refuses end; disabling or deleting a provider
 ends its sessions at once. Refused sign-ins are recorded as failed logins
 with the provider and the reason.
 
+Accounts can be marked as break-glass, and `/api/v1/sign-in-policy` can then
+limit password sign-in to them so that everyone else goes through a provider.
+The limit needs an enabled provider and an enabled break-glass account that
+can manage accounts, and while it holds that account cannot lose either.
+Every sign-in with a break-glass account is recorded as
+`identity.break_glass.used` alongside the login, and the console's Sign-in
+providers page lists the recent ones.
+
 ```sh
 ppanel identity-provider set corp --name "Corporate SSO" \
   --issuer https://id.example.com/realms/main --client-id panel \
   --client-secret-file corp-client-secret --group-role ops=operator --create-accounts
 ppanel identity-provider list
+ppanel account update admin --break-glass
+ppanel sign-in-policy set --password break-glass-only
 ```
 
 ## Certificates

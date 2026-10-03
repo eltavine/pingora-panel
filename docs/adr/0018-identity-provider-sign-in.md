@@ -61,11 +61,15 @@ Web Signature and Keys (RFC 7515, RFC 7517, RFC 7518).
   that simply ran out. Disabling or deleting a provider ends its sessions at
   once. Without refresh tokens, sessions end with their usual idle and
   absolute lifetimes.
-- **Break-glass access.** Once a provider exists, Administrators may
-  restrict password sign-in to accounts marked as break-glass. Those keep
-  their password whatever happens to the provider, and every sign-in with
-  one is recorded as a critical audit event so that it is noticed and
-  reviewed.
+- **Break-glass access.** Once a provider is enabled, Administrators may
+  limit password sign-in to accounts marked as break-glass, provided an
+  enabled one can manage accounts; while the limit holds, the last such
+  account cannot lose either. Break-glass accounts keep their password
+  whatever happens to the provider, and every sign-in with one is recorded
+  as its own audit event, `identity.break_glass.used`, in the same
+  transaction as the login, and shown on the console's sign-in providers
+  page so that it is noticed and reviewed. Other accounts are refused even
+  with the right password, which tells nobody without it anything.
 
 ## Consequences
 
