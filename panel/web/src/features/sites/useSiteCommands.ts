@@ -26,16 +26,7 @@ import {
   plainHeaders,
   useRefreshConfiguration,
 } from '@/lib/configuration'
-
-function download(name: string, value: unknown) {
-  const blob = new Blob([`${JSON.stringify(value, null, 2)}\n`], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = name
-  anchor.click()
-  setTimeout(() => URL.revokeObjectURL(url), 0)
-}
+import { downloadJson } from '@/lib/download'
 
 /** Site commands shared by the list and the detail page. */
 export function useSiteCommands() {
@@ -147,7 +138,7 @@ export function useSiteCommands() {
           throwOnError: true,
         })
         const stamp = new Date().toISOString().slice(0, 10)
-        download(`sites-${stamp}.json`, data)
+        downloadJson(`sites-${stamp}.json`, data)
         toast.success(t('sites.exported', { count: data.sites.length }))
       } catch (error) {
         notifyFailure(error, t('common.changeFailed'))
