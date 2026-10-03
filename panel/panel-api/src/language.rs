@@ -16,7 +16,7 @@ use axum::{
     Json,
 };
 use panel_application::{ApplyOutcome, ApplyRequest as Apply, GatewayUseCases};
-use panel_config_dsl::{plan::Changes, schema::DirectiveSpec};
+use panel_config_dsl::{plan::Changes, schema::DirectiveSpec, SyntaxTree};
 use panel_config_model::{Revision, RevisionDetail, RevisionList};
 use panel_errors::PanelError;
 use serde::{Deserialize, Serialize};
@@ -55,6 +55,14 @@ pub struct FormattedFiles {
     pub files: BTreeMap<String, String>,
     /// Syntax errors of the files left unchanged.
     pub diagnostics: Vec<DiagnosticDetails>,
+}
+
+/// Files and the one to read, `main.conf` by default.
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct SyntaxRequest {
+    pub files: BTreeMap<String, String>,
+    #[serde(default)]
+    pub file: Option<String>,
 }
 
 /// Every directive of the language, for editors.
@@ -184,6 +192,37 @@ pub(crate) async fn format<U: GatewayUseCases>(
         Some(&files),
     )
     .await
+}
+
+/// The syntax tree of a file: its directives as written, without saving.
+#[utoipa::path(post, path = "/api/v1/config/ast", request_body = SyntaxRequest, params(QueryHeaders),
+    responses((status = 200, body = SyntaxTree)), tag = "configuration")]
+pub(crate) async fn ast<U: GatewayUseCases>(
+    State(state): State<ApiState<U>>,
+    headers: HeaderMap,
+    payload: Result<Json<SyntaxRequest>, JsonRejection>,
+) -> Result<Response, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from_json)?;
+    read(
+        &state,
+        &headers,
+        "config.ast",
+        "config".into(),
+        Some(&request),
+    )
+    .await
+}
+
+/// The runtime snapshot (IR) the saved draft compiles to, as the gateway
+/// would receive it.
+#[utoipa::path(get, path = "/api/v1/config/ir", params(QueryHeaders),
+    responses((status = 200, description = "The runtime snapshot as JSON", body = Object)),
+    tag = "configuration")]
+pub(crate) async fn ir<U: GatewayUseCases>(
+    State(state): State<ApiState<U>>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    read(&state, &headers, "config.ir", "config".into(), None::<&()>).await
 }
 
 /// The language's directives, contexts and arguments, for editor completion.

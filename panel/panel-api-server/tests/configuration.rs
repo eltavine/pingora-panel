@@ -379,6 +379,17 @@ async fn sites_are_edited_validated_and_applied_through_the_api() {
         .json(api.get("/api/v1/config/schema"), StatusCode::OK)
         .await;
     assert!(schema["directives"].as_array().unwrap().len() > 40);
+    let (tree, _) = api
+        .json(
+            api.client
+                .post(format!("{}/api/v1/config/ast", api.base))
+                .json(&json!({"files": {"main.conf": "language_version 1;\n"}})),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(tree["directives"][0]["span"], "main.conf:1.1-19");
+    let (ir, _) = api.json(api.get("/api/v1/config/ir"), StatusCode::OK).await;
+    assert_eq!(ir["sites"].as_array().unwrap().len(), 1);
 
     let renamed = text.replace("shop.example.com", "store.example.com");
     let stale = api

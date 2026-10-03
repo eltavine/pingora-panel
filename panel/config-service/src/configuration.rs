@@ -9,7 +9,7 @@ use panel_application::{
     ActivatedDeployment, CommandContext, ConfigDocument, ContentHash, GatewayUseCases,
 };
 use panel_config_dsl::{
-    format_files, plan::changes, schema::DIRECTIVES, Sources, LANGUAGE_VERSION,
+    format_files, plan::changes, schema::DIRECTIVES, syntax_tree, Sources, ENTRY, LANGUAGE_VERSION,
 };
 use panel_config_model::{compile, ConfigModel, Revision, RevisionDetail, RevisionList};
 use panel_contracts::config::v1::{self as wire, configuration_server::Configuration};
@@ -49,6 +49,14 @@ enum Applied {
 #[serde(deny_unknown_fields)]
 struct FilesBody {
     files: BTreeMap<String, String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SyntaxBody {
+    files: BTreeMap<String, String>,
+    #[serde(default)]
+    file: Option<String>,
 }
 
 #[derive(Default, Deserialize)]
@@ -209,6 +217,27 @@ impl ConfigurationService {
                     &json!({ "files": formatted, "diagnostics": diagnostics }),
                     String::new(),
                 )
+            }
+            ("config.ast", "config") => {
+                let body: SyntaxBody = decode(parameters)?;
+                let file = body.file.unwrap_or_else(|| ENTRY.to_owned());
+                let tree = syntax_tree(&language::sources(body.files)?, &file)
+                    .ok_or_else(|| PanelError::not_found(format!("there is no file {file:?}")))?;
+                json_output(&tree, String::new())
+            }
+            ("config.ir", "config") => {
+                let lowered = language::read(&draft.sources, Some(&draft.model), Utc::now());
+                if !lowered.is_valid() {
+                    return Err(PanelError::validation_failed("the draft has errors")
+                        .with_diagnostics(lowered.diagnostics));
+                }
+                let snapshot = compile(&lowered.model, RevisionId::new(draft.version)).map_err(
+                    |diagnostics| {
+                        PanelError::validation_failed("the draft does not compile")
+                            .with_diagnostics(diagnostics)
+                    },
+                )?;
+                json_output(&snapshot, String::new())
             }
             ("config.schema", "config") => json_output(
                 &json!({ "language_version": LANGUAGE_VERSION, "directives": DIRECTIVES }),

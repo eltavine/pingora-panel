@@ -420,6 +420,43 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
         "{text}"
     );
 
+    let tree = client
+        .read(
+            scope(),
+            read(
+                "config.ast",
+                "config",
+                json!({"files": {"main.conf": SHOP}}),
+            ),
+        )
+        .await
+        .unwrap();
+    let tree = json(&tree.content);
+    assert_eq!(tree["directives"][1]["name"], "http");
+    assert_eq!(
+        tree["directives"][1]["block"][1]["comments"][0],
+        "The storefront's servers"
+    );
+    let missing = client
+        .read(
+            scope(),
+            read(
+                "config.ast",
+                "config",
+                json!({"files": {"main.conf": SHOP}, "file": "sites/none.conf"}),
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(missing.code.as_str(), ErrorCode::NOT_FOUND);
+    let ir = client
+        .read(scope(), read("config.ir", "config", json!({})))
+        .await
+        .unwrap();
+    let ir = json(&ir.content);
+    assert_eq!(ir["listeners"][0]["address"], "127.0.0.1:18080");
+    assert_eq!(ir["sites"].as_array().unwrap().len(), 1);
+
     let upstreams = client
         .read(scope(), read("upstreams.list", "upstreams", json!({})))
         .await
