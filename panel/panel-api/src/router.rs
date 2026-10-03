@@ -127,6 +127,16 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
                 .put(config::put_tls_profile::<U>)
                 .delete(config::delete_tls_profile::<U>),
         )
+        .route(
+            "/api/v1/security-policies",
+            get(config::list_security_policies::<U>),
+        )
+        .route(
+            "/api/v1/security-policies/{id}",
+            get(config::get_security_policy::<U>)
+                .put(config::put_security_policy::<U>)
+                .delete(config::delete_security_policy::<U>),
+        )
         .route("/api/v1/config/draft", get(config::draft::<U>))
         .route("/api/v1/config/validation", get(config::validation::<U>))
         .route("/api/v1/config/apply", post(config::apply::<U>))

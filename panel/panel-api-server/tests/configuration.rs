@@ -34,6 +34,7 @@ async fn gateway() -> SocketAddr {
             "activation.cas",
             "listener.http",
             "listener.http2",
+            "request.security",
             "route.path-prefix",
             "upstream.http",
         ]
@@ -634,6 +635,68 @@ async fn sites_are_edited_validated_and_applied_through_the_api() {
         .unwrap()
         .iter()
         .all(|item| item["actor_id"] == "operator"));
+
+    // Security policies are named resources that sites use and the gateway
+    // receives with the snapshot.
+    let (policy, headers) = api
+        .json(
+            api.mutate(Method::PUT, "/api/v1/security-policies/office", "policy")
+                .json(&json!({
+                    "id": "office",
+                    "allowed_cidrs": ["10.0.0.0/8"],
+                    "rate_limits": [{"key": {"kind": "client_address"}, "requests": 10, "per_seconds": 1, "burst": 5}]
+                })),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(policy["rate_limits"][0]["burst"], 5);
+    let policy_etag = headers["etag"].to_str().unwrap().to_owned();
+    let (guarded, _) = api
+        .json(
+            api.mutate(Method::POST, "/api/v1/sites", "guarded-site")
+                .json(&json!({
+                    "name": "Intranet",
+                    "action": {"type": "respond", "status": 204},
+                    "domains": [{"host": "intranet.example.com", "primary": true}],
+                    "security_policy_id": "office"
+                })),
+            StatusCode::CREATED,
+        )
+        .await;
+    assert_eq!(guarded["security_policy_id"], "office");
+    let (policies, _) = api
+        .json(api.get("/api/v1/security-policies"), StatusCode::OK)
+        .await;
+    assert_eq!(policies[0]["used_by"][0], guarded["id"]);
+    let in_use = api
+        .mutate(
+            Method::DELETE,
+            "/api/v1/security-policies/office",
+            "policy-delete",
+        )
+        .header("if-match", &policy_etag)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(in_use.status(), StatusCode::CONFLICT);
+    let (source, _) = api
+        .json(api.get("/api/v1/config/source"), StatusCode::OK)
+        .await;
+    assert!(
+        source.to_string().contains("security_policy office {"),
+        "{source}"
+    );
+    let (draft, _) = api
+        .json(api.get("/api/v1/config/draft"), StatusCode::OK)
+        .await;
+    let (applied, _) = api
+        .json(
+            api.mutate(Method::POST, "/api/v1/config/apply", "apply-policy")
+                .json(&json!({"expected_version": draft["version"]})),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(applied["draft"]["pending"], false);
 
     server.stop().await;
     audit.stop().await;

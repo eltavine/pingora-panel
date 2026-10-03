@@ -186,6 +186,22 @@ pub(crate) static ROUTES: &[(&str, &str, Access)] = &[
     ("GET", "/api/v1/tls-profiles/{id}", Requires(ConfigRead)),
     ("PUT", "/api/v1/tls-profiles/{id}", Requires(ConfigWrite)),
     ("DELETE", "/api/v1/tls-profiles/{id}", Requires(ConfigWrite)),
+    ("GET", "/api/v1/security-policies", Requires(ConfigRead)),
+    (
+        "GET",
+        "/api/v1/security-policies/{id}",
+        Requires(ConfigRead),
+    ),
+    (
+        "PUT",
+        "/api/v1/security-policies/{id}",
+        Requires(ConfigWrite),
+    ),
+    (
+        "DELETE",
+        "/api/v1/security-policies/{id}",
+        Requires(ConfigWrite),
+    ),
     ("GET", "/api/v1/config/draft", Requires(ConfigRead)),
     ("GET", "/api/v1/config/validation", Requires(ConfigRead)),
     ("POST", "/api/v1/config/apply", Requires(ConfigApply)),

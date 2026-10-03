@@ -5,14 +5,17 @@ use chrono::{DateTime, Utc};
 use panel_config_model::{
     abnormal_sites, checked, entity_tag, query_sites, summarize, validate, BatchAction,
     BatchRequest, ConfigModel, Domain, DomainCheck, DomainView, Listener, ListenerView, NodeInput,
-    Route, RouteInput, RouteView, SiteBundle, SiteInput, SiteList, SiteQuery, SiteView, TlsProfile,
-    TlsProfileInput, TlsProfileView, UpstreamInput, UpstreamView, ValidationResult,
+    Route, RouteInput, RouteView, SecurityPolicy, SecurityPolicyView, SiteBundle, SiteInput,
+    SiteList, SiteQuery, SiteView, TlsProfile, TlsProfileInput, TlsProfileView, UpstreamInput,
+    UpstreamView, ValidationResult,
 };
 use panel_domain::NormalizedHost;
 use panel_errors::{Diagnostic, PanelError, Result};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::BTreeSet;
 use uuid::Uuid;
+
+const POLICY: &str = "security policy";
 
 /// A JSON result and, for single resources, its entity tag.
 #[derive(Debug)]
@@ -53,6 +56,8 @@ enum Path<'a> {
     Listener(&'a str),
     TlsProfiles,
     TlsProfile(&'a str),
+    SecurityPolicies,
+    SecurityPolicy(&'a str),
     Domains,
 }
 
@@ -85,6 +90,8 @@ fn parse(resource: &str) -> Result<Path<'_>> {
         ["listeners", listener] => Path::Listener(listener),
         ["tls-profiles"] => Path::TlsProfiles,
         ["tls-profiles", profile] => Path::TlsProfile(profile),
+        ["security-policies"] => Path::SecurityPolicies,
+        ["security-policies", policy] => Path::SecurityPolicy(policy),
         ["domains"] => Path::Domains,
         _ => return Err(PanelError::not_found(format!("no resource {resource:?}"))),
     })
@@ -289,6 +296,18 @@ pub fn read(
         ("tls_profiles.get", Path::TlsProfile(id)) => {
             let profile = named(&model.tls_profiles, id, |item| &item.id, "TLS profile")?;
             Ok(Output::tagged(profile, entity_tag(profile)))
+        }
+        ("security_policies.list", Path::SecurityPolicies) => {
+            let views: Vec<SecurityPolicyView> = model
+                .security_policies
+                .iter()
+                .map(|policy| SecurityPolicyView::new(model, policy))
+                .collect();
+            Ok(Output::json(&views))
+        }
+        ("security_policies.get", Path::SecurityPolicy(id)) => {
+            let policy = named(&model.security_policies, id, |item| &item.id, POLICY)?;
+            Ok(Output::tagged(policy, entity_tag(policy)))
         }
         ("config.validate", Path::Root) => {
             let parameters: ValidateParameters = if parameters.is_empty() {
@@ -548,6 +567,34 @@ pub fn change(
             let etag = entity_tag(&profile);
             Ok((next, Output::tagged(&profile, etag)))
         }
+        ("security_policies.put", Path::SecurityPolicy(id)) => {
+            let policy = decode::<SecurityPolicy>(content)?;
+            if policy.id != id {
+                return Err(PanelError::invalid_argument(
+                    "the body id must match the path",
+                ));
+            }
+            if let Ok(existing) = named(&model.security_policies, id, |item| &item.id, POLICY) {
+                precondition(if_match, &entity_tag(existing))?;
+            }
+            let (next, _) = checked(model, |model| Ok(model.put_security_policy(policy)))?;
+            let policy = named(&next.security_policies, id, |item| &item.id, POLICY)?.clone();
+            let etag = entity_tag(&policy);
+            Ok((next, Output::tagged(&policy, etag)))
+        }
+        ("security_policies.delete", Path::SecurityPolicy(id)) => {
+            precondition(
+                if_match,
+                &entity_tag(named(
+                    &model.security_policies,
+                    id,
+                    |item| &item.id,
+                    POLICY,
+                )?),
+            )?;
+            let (next, ()) = checked(model, |model| model.delete_security_policy(id))?;
+            Ok((next, Output::json(&serde_json::json!({}))))
+        }
         ("tls_profiles.delete", Path::TlsProfile(id)) => {
             precondition(
                 if_match,
@@ -600,6 +647,111 @@ mod tests {
                 .content,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn security_policies_are_named_resources_that_sites_use() {
+        let model = ConfigModel::default();
+        let (model, policy) = apply(
+            &model,
+            "security_policies.put",
+            "security-policies/office",
+            json!({"id": "office", "allowed_cidrs": ["10.0.0.0/8"], "allowed_methods": ["GET"]}),
+        );
+        assert_eq!(policy["allowed_methods"][0], "GET");
+        let (model, site) = apply(
+            &model,
+            "sites.create",
+            "sites",
+            json!({
+                "name": "intranet",
+                "action": {"type": "respond", "status": 200},
+                "domains": [{"host": "intranet.example"}],
+                "security_policy_id": "office",
+                "routes": [{"priority": 1, "match": {"kind": "prefix", "path": "/hr"},
+                    "action": {"type": "respond", "status": 204}, "security_policy_id": "office"}]
+            }),
+        );
+        let site_id = site["id"].as_str().unwrap().to_owned();
+        let list = get(
+            &model,
+            "security_policies.list",
+            "security-policies",
+            Value::Null,
+        );
+        assert_eq!(list[0]["used_by"][0], site_id);
+        assert!(list[0]["etag"].is_string());
+
+        let current = read(
+            &model,
+            "security_policies.get",
+            "security-policies/office",
+            &[],
+        )
+        .unwrap();
+        let replaced = change(
+            &model,
+            "security_policies.put",
+            "security-policies/office",
+            "\"stale\"",
+            br#"{"id": "office"}"#,
+            Utc::now(),
+        );
+        assert_eq!(
+            replaced.unwrap_err().code.as_str(),
+            panel_errors::ErrorCode::PRECONDITION_FAILED
+        );
+        let refused = change(
+            &model,
+            "security_policies.delete",
+            "security-policies/office",
+            &current.etag,
+            &[],
+            Utc::now(),
+        );
+        assert_eq!(
+            refused.unwrap_err().code.as_str(),
+            panel_errors::ErrorCode::CONFLICT
+        );
+        let invalid = change(
+            &model,
+            "security_policies.put",
+            "security-policies/office",
+            &current.etag,
+            br#"{"id": "office", "rate_limits": [{"key": {"kind": "client_address"}, "requests": 0, "per_seconds": 1}]}"#,
+            Utc::now(),
+        );
+        assert_eq!(
+            invalid.unwrap_err().code.as_str(),
+            panel_errors::ErrorCode::VALIDATION_FAILED
+        );
+        let mismatched = change(
+            &model,
+            "security_policies.put",
+            "security-policies/office",
+            "",
+            br#"{"id": "other"}"#,
+            Utc::now(),
+        );
+        assert!(mismatched.is_err());
+        let missing = apply(
+            &model,
+            "security_policies.put",
+            "security-policies/open",
+            json!({"id": "open"}),
+        );
+        assert_eq!(
+            get(
+                &missing.0,
+                "security_policies.list",
+                "security-policies",
+                Value::Null
+            )
+            .as_array()
+            .unwrap()
+            .len(),
+            2
+        );
     }
 
     #[test]

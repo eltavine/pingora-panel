@@ -22,8 +22,9 @@ use panel_application::{
 };
 use panel_config_model::{
     BatchRequest, Domain, DomainCheck, DomainView, Listener, ListenerView, NodeInput, RouteInput,
-    RouteView, SiteBundle, SiteInput, SiteList, SiteQuery, SiteSummary, SiteView, TlsProfile,
-    TlsProfileInput, TlsProfileView, UpstreamInput, UpstreamView, ValidationResult,
+    RouteView, SecurityPolicy, SecurityPolicyView, SiteBundle, SiteInput, SiteList, SiteQuery,
+    SiteSummary, SiteView, TlsProfile, TlsProfileInput, TlsProfileView, UpstreamInput,
+    UpstreamView, ValidationResult,
 };
 use panel_errors::PanelError;
 use serde::{Deserialize, Serialize};
@@ -364,6 +365,14 @@ read_route!(
     "tls-profiles",
     Vec<TlsProfileView>,
     "Lists TLS profiles."
+);
+read_route!(
+    list_security_policies,
+    "/api/v1/security-policies",
+    "security_policies.list",
+    "security-policies",
+    Vec<SecurityPolicyView>,
+    "Lists security policies with the sites that use them."
 );
 read_route!(
     site_summary,
@@ -1031,6 +1040,16 @@ named_resource!(
     "tls_profiles",
     TlsProfile,
     TlsProfileInput
+);
+named_resource!(
+    get_security_policy,
+    put_security_policy,
+    delete_security_policy,
+    "/api/v1/security-policies/{id}",
+    "security-policies",
+    "security_policies",
+    SecurityPolicy,
+    SecurityPolicy
 );
 
 /// The draft's version and whether the gateway runs it.
