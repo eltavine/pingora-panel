@@ -21,12 +21,15 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { notifyFailure, plainHeaders, useRefreshConfiguration } from '@/lib/configuration'
 
 const { t } = useI18n()
 const refresh = useRefreshConfiguration()
 const draft = useQuery({ ...draftOptions(), refetchInterval: 15_000 })
 const confirming = ref(false)
+const note = ref('')
 const validation = useQuery(computed(() => ({ ...validationOptions(), enabled: confirming.value })))
 const apply = useMutation(applyMutation())
 const pending = computed(() => draft.data.value?.pending ?? false)
@@ -37,11 +40,15 @@ const diagnostics = computed(
 function confirm() {
   const version = draft.data.value?.version
   apply.mutate(
-    { body: { expected_version: version }, headers: plainHeaders() },
+    {
+      body: { expected_version: version, note: note.value.trim() || undefined },
+      headers: plainHeaders(),
+    },
     {
       onSuccess: (result) => {
-        toast.success(t('draft.applied', { version: result.draft.version }))
+        toast.success(t('draft.appliedRevision', { revision: result.revision }))
         confirming.value = false
+        note.value = ''
         void refresh()
       },
       onError: (error) => notifyFailure(error, t('draft.applyFailed')),
@@ -95,6 +102,16 @@ function confirm() {
               </li>
             </ul>
           </template>
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <Label for="apply-note">{{ t('draft.note') }}</Label>
+          <Textarea
+            id="apply-note"
+            v-model="note"
+            rows="2"
+            maxlength="1000"
+            :placeholder="t('draft.notePlaceholder')"
+          />
         </div>
         <AlertDialogFooter>
           <AlertDialogCancel>{{ t('common.cancel') }}</AlertDialogCancel>

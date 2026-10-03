@@ -159,6 +159,7 @@ test('a pending draft is validated before it is applied', async ({ page }) => {
     return route.fulfill({
       json: {
         draft: { version: 4, pending: false, applied_version: 4 },
+        revision: 3,
         revision_id: 9,
         content_hash: 'c'.repeat(64),
       },
@@ -170,7 +171,7 @@ test('a pending draft is validated before it is applied', async ({ page }) => {
   const dialog = page.getByRole('alertdialog')
   await expect(dialog).toContainText('The draft is valid')
   await dialog.getByRole('button', { name: 'Apply' }).click()
-  await expect(page.getByText('Applied v4')).toBeVisible()
+  await expect(page.getByText('Applied as revision #3')).toBeVisible()
   expect(applied[0]!.postDataJSON()).toEqual({ expected_version: 4 })
 })
 

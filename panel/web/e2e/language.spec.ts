@@ -57,6 +57,23 @@ const changes = {
   ],
 }
 
+function revision(id: number, outcome: string, note: string | null = null) {
+  return {
+    id,
+    draft_version: id,
+    language_version: 1,
+    content_hash: 'a'.repeat(64),
+    author: 'web-console',
+    note,
+    created_at: '2026-10-01T10:00:00Z',
+    outcome,
+    outcome_at: '2026-10-01T10:00:02Z',
+    diagnostics: [],
+    snapshot_hash: 'b'.repeat(64),
+    gateway_revision: id + 4,
+  }
+}
+
 async function useEnglish(page: Page) {
   await page.addInitScript(() => window.localStorage.setItem('pingora-panel.locale', 'en'))
 }
@@ -211,4 +228,96 @@ test('configuration files are checked as they are edited, saved and applied', as
   await sheet.getByRole('button', { name: 'Apply v5' }).click()
   await expect(page.getByText('Applied as revision #8')).toBeVisible()
   expect(applied[0]!.postDataJSON()).toEqual({ expected_version: 5, note: 'Rename the shop' })
+})
+
+test('revisions are compared, annotated and rolled back', async ({ page }) => {
+  await mockDraft(page)
+  await page.route(/\/api\/v1\/revisions(\?.*)?$/, (route) =>
+    route.fulfill({
+      json: { items: [revision(8, 'active', 'Rename the shop'), revision(7, 'superseded')] },
+    }),
+  )
+  const comparisons: string[] = []
+  await page.route(/\/api\/v1\/revisions\/7\/diff/, (route) => {
+    comparisons.push(new URL(route.request().url()).searchParams.get('against') ?? '')
+    return route.fulfill({ json: changes })
+  })
+  await page.route('**/api/v1/revisions/7', (route) =>
+    route.fulfill({
+      json: {
+        revision: revision(7, 'superseded'),
+        files: { 'main.conf': MAIN, 'sites/shop.conf': SHOP },
+      },
+    }),
+  )
+  await page.route('**/api/v1/revisions/9', (route) =>
+    route.fulfill({
+      json: { revision: revision(9, 'active', 'Bad deploy'), files: { 'main.conf': MAIN } },
+    }),
+  )
+  await page.route(/\/api\/v1\/revisions\/9\/diff/, (route) =>
+    route.fulfill({ json: { resources: [], files: [] } }),
+  )
+  await page.route('**/api/v1/revisions/7/note', (route) =>
+    route.fulfill({ json: revision(7, 'superseded', route.request().postDataJSON().note) }),
+  )
+  const restored: Request[] = []
+  await page.route('**/api/v1/revisions/7/restore', (route) => {
+    restored.push(route.request())
+    return route.fulfill({
+      json: {
+        language_version: 1,
+        version: 6,
+        etag: '"draft-6"',
+        files: { 'main.conf': MAIN },
+        diagnostics: [],
+      },
+    })
+  })
+  const applied: Request[] = []
+  await page.route('**/api/v1/config/apply', (route) => {
+    applied.push(route.request())
+    return route.fulfill({
+      json: {
+        draft: { version: 6, pending: false, applied_version: 6 },
+        revision: 9,
+        revision_id: 13,
+        content_hash: 'c'.repeat(64),
+      },
+    })
+  })
+
+  await page.goto('/revisions')
+  await expect(page.getByRole('heading', { name: 'Revisions' })).toBeVisible()
+  await expect(page.getByRole('status').filter({ hasText: 'Active' })).toBeVisible()
+  await expectNoHorizontalOverflow(page)
+  await page.getByRole('link', { name: '#7' }).click()
+
+  await expect(page.getByRole('heading', { name: 'Revision #7' })).toBeVisible()
+  await expect(
+    page.getByText('+    server_name store.example;').filter({ visible: true }).first(),
+  ).toBeVisible()
+  await page.getByRole('combobox', { name: 'Compare with' }).click()
+  await page.getByRole('option', { name: 'Active revision' }).click()
+  await expect.poll(() => comparisons).toContain('active')
+
+  await page.getByRole('button', { name: 'Edit note' }).click()
+  await page.getByRole('textbox', { name: 'Note' }).fill('Before the rename')
+  await page.getByRole('button', { name: 'Save' }).click()
+  await expect(page.getByText('Note saved')).toBeVisible()
+  await expect(page.getByText('Before the rename')).toBeVisible()
+
+  await page.getByRole('tab', { name: 'Files' }).click()
+  await expect(page.getByRole('textbox', { name: 'Contents of main.conf' })).toContainText(
+    'language_version 1;',
+  )
+
+  await page.getByRole('button', { name: 'Roll back' }).click()
+  const dialog = page.getByRole('alertdialog')
+  await dialog.getByLabel('Reason').fill('Bad deploy')
+  await dialog.getByRole('button', { name: 'Roll back' }).click()
+  await expect(page.getByText('Rolled back; revision #9 is active')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Revision #9' })).toBeVisible()
+  expect(restored).toHaveLength(1)
+  expect(applied[0]!.postDataJSON()).toEqual({ expected_version: 6, note: 'Bad deploy' })
 })
