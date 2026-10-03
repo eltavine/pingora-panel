@@ -15,6 +15,7 @@ mod acme;
 mod certificate_api;
 mod certificates;
 mod delivery;
+mod dns;
 mod jobs;
 
 pub use acme::{
@@ -25,6 +26,10 @@ pub use acme::{
 pub use certificate_api::CertificateService;
 pub use certificates::{Cause, CertificateInventory};
 pub use delivery::{Delivery, SecretDirectory};
+pub use dns::{
+    DnsProviderChange, DnsProviderFactory, DnsProviderRecord, DnsProviders, NewDnsProvider,
+    Rfc2136Config, StandardDnsProviders,
+};
 pub use jobs::PgJobStore;
 
 use chrono::Utc;
@@ -69,6 +74,11 @@ pub const MIGRATIONS: &[SchemaMigration] = &[
         10_200,
         "ACME accounts, automatic certificates and expiry reminders",
         include_str!("../migrations/10200_acme.sql"),
+    ),
+    SchemaMigration::new(
+        10_300,
+        "DNS providers for DNS-01",
+        include_str!("../migrations/10300_dns_providers.sql"),
     ),
 ];
 
@@ -122,11 +132,18 @@ pub fn process(
     let events = EventLog::new(process.database(), service);
     let inventory =
         CertificateInventory::new(process.database(), events.clone(), vault.clone(), directory);
+    let dns = DnsProviders::new(
+        process.database(),
+        events.clone(),
+        vault.clone(),
+        Arc::new(StandardDnsProviders),
+    );
     let acme = AcmeAutomation::new(
         process.database(),
         events,
         vault,
         inventory.clone(),
+        dns.clone(),
         Arc::clone(&store) as Arc<dyn JobStore>,
         AcmeClient::default(),
         secret_directory.as_deref(),
@@ -141,7 +158,7 @@ pub fn process(
             [ServiceName::new("panel-api")?],
         )
         .with_grpc_service(certificates_server::CertificatesServer::new(
-            CertificateService::new(inventory.clone(), acme),
+            CertificateService::new(inventory.clone(), acme, dns),
         ))
         .on_start(move |running| {
             running.spawn(maintain(

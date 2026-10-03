@@ -4,6 +4,7 @@
 use crate::{
     acme::{AccountId, AcmeAutomation, NewAutomaticCertificate},
     certificates::{Cause, CertificateInventory},
+    dns::{DnsProviderChange, DnsProviders, NewDnsProvider},
 };
 use panel_certificates::CertificateId;
 use panel_contracts::{
@@ -21,15 +22,21 @@ use zeroize::Zeroizing;
 const COLLECTION: &str = "certificates";
 const ACCOUNTS: &str = "acme-accounts";
 const AUTOMATIC: &str = "acme-certificates";
+const DNS_PROVIDERS: &str = "dns-providers";
 
 pub struct CertificateService {
     inventory: CertificateInventory,
     acme: AcmeAutomation,
+    dns: DnsProviders,
 }
 
 impl CertificateService {
-    pub fn new(inventory: CertificateInventory, acme: AcmeAutomation) -> Self {
-        Self { inventory, acme }
+    pub fn new(inventory: CertificateInventory, acme: AcmeAutomation, dns: DnsProviders) -> Self {
+        Self {
+            inventory,
+            acme,
+            dns,
+        }
     }
 }
 
@@ -65,6 +72,8 @@ enum Target {
     Account(AccountId),
     Automatic,
     AutomaticCertificate(CertificateId),
+    DnsProviders,
+    DnsProvider(String),
 }
 
 fn certificate_id(id: &str) -> Result<CertificateId> {
@@ -76,9 +85,11 @@ fn target(resource: &str) -> Result<Target> {
         None if resource == COLLECTION => Ok(Target::Collection),
         None if resource == ACCOUNTS => Ok(Target::Accounts),
         None if resource == AUTOMATIC => Ok(Target::Automatic),
+        None if resource == DNS_PROVIDERS => Ok(Target::DnsProviders),
         Some((COLLECTION, id)) => certificate_id(id).map(Target::Certificate),
         Some((ACCOUNTS, id)) => AccountId::new(id).map(Target::Account),
         Some((AUTOMATIC, id)) => certificate_id(id).map(Target::AutomaticCertificate),
+        Some((DNS_PROVIDERS, id)) => Ok(Target::DnsProvider(id.to_owned())),
         _ => Err(PanelError::invalid_argument(format!(
             "unknown resource {resource:?}"
         ))),
@@ -152,6 +163,13 @@ impl Certificates for CertificateService {
                 ("acme.certificates.get", Target::AutomaticCertificate(id)) => {
                     let automatic = self.acme.certificate(&id).await?;
                     Ok((encode(&automatic), automatic.etag()))
+                }
+                ("acme.dns_providers.list", Target::DnsProviders) => {
+                    Ok((encode(&self.dns.list().await?), String::new()))
+                }
+                ("acme.dns_providers.get", Target::DnsProvider(id)) => {
+                    let provider = self.dns.get(&id).await?;
+                    Ok((encode(&provider), provider.etag()))
                 }
                 (operation, _) => Err(unknown(operation)),
             }
@@ -247,6 +265,25 @@ impl Certificates for CertificateService {
                 ("acme.certificates.delete", Target::AutomaticCertificate(id)) => {
                     self.acme
                         .delete_certificate(cause, id, expected(&request.if_match)?)
+                        .await?;
+                    Ok((Vec::new(), String::new()))
+                }
+                ("acme.dns_providers.create", Target::DnsProviders) => {
+                    let body: NewDnsProvider = decode(&content)?;
+                    let provider = self.dns.create(cause, body).await?;
+                    Ok((encode(&provider), provider.etag()))
+                }
+                ("acme.dns_providers.update", Target::DnsProvider(id)) => {
+                    let body: DnsProviderChange = decode(&content)?;
+                    let provider = self
+                        .dns
+                        .update(cause, &id, expected(&request.if_match)?, body)
+                        .await?;
+                    Ok((encode(&provider), provider.etag()))
+                }
+                ("acme.dns_providers.delete", Target::DnsProvider(id)) => {
+                    self.dns
+                        .delete(cause, &id, expected(&request.if_match)?)
                         .await?;
                     Ok((Vec::new(), String::new()))
                 }

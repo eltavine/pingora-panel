@@ -1,7 +1,8 @@
 #![forbid(unsafe_code)]
 
 use automation_service::{
-    AcmeAutomation, Cause, CertificateInventory, CertificateService, SecretDirectory, MIGRATIONS,
+    AcmeAutomation, Cause, CertificateInventory, CertificateService, DnsProviders, SecretDirectory,
+    StandardDnsProviders, MIGRATIONS,
 };
 use chrono::Utc;
 use panel_acme::AcmeClient;
@@ -64,11 +65,13 @@ fn automation(
     vault: Arc<dyn SecretVault>,
     inventory: CertificateInventory,
 ) -> AcmeAutomation {
+    let events = EventLog::new(service, ServiceName::new("automation-service").unwrap());
     AcmeAutomation::new(
         service,
-        EventLog::new(service, ServiceName::new("automation-service").unwrap()),
-        Some(vault),
+        events.clone(),
+        Some(Arc::clone(&vault)),
         inventory,
+        DnsProviders::new(service, events, Some(vault), Arc::new(StandardDnsProviders)),
         Arc::new(MemoryJobStore::new()),
         AcmeClient::default(),
         None,
@@ -367,8 +370,14 @@ async fn operations_map_to_the_inventory_over_grpc() {
     };
     let vault = vault(&[&EnvelopeVault::generate_key().unwrap()]);
     let inventory = inventory(&database, Some(Arc::clone(&vault)), None);
-    let acme = automation(&database, vault, inventory.clone());
-    let service = CertificateService::new(inventory, acme);
+    let acme = automation(&database, Arc::clone(&vault), inventory.clone());
+    let dns = DnsProviders::new(
+        &database,
+        EventLog::new(&database, ServiceName::new("automation-service").unwrap()),
+        Some(vault),
+        Arc::new(StandardDnsProviders),
+    );
+    let service = CertificateService::new(inventory, acme, dns);
     let first = material("example.com");
 
     let uploaded = change(

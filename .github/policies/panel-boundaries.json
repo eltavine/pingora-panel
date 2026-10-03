@@ -28,6 +28,7 @@
     "automation-service": {
       "catalog": true,
       "allowed_workspace_dependencies": [
+        "dns-rfc2136",
         "panel-acme",
         "panel-certificates",
         "panel-context",

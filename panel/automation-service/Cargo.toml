@@ -10,6 +10,7 @@ publish.workspace = true
 [dependencies]
 async-trait.workspace = true
 chrono.workspace = true
+dns-rfc2136.workspace = true
 panel-acme.workspace = true
 panel-certificates.workspace = true
 panel-contracts.workspace = true

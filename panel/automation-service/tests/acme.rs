@@ -5,11 +5,15 @@
 //! failures and their events.
 
 use automation_service::{
-    handlers, AccountId, AcmeAutomation, Cause, CertificateInventory, IssuanceState, NewAccount,
-    NewAutomaticCertificate, PgJobStore, SecretDirectory, MIGRATIONS,
+    handlers, AccountId, AcmeAutomation, Cause, CertificateInventory, DnsProviderChange,
+    DnsProviderFactory, DnsProviders, IssuanceState, NewAccount, NewAutomaticCertificate,
+    NewDnsProvider, PgJobStore, Rfc2136Config, SecretDirectory, StandardDnsProviders, MIGRATIONS,
 };
 use chrono::Utc;
-use panel_acme::{testing::Pebble, AcmeClient, ChallengeKind};
+use panel_acme::{
+    testing::{Pebble, TestDns},
+    AcmeClient, ChallengeKind, DnsProvider,
+};
 use panel_certificates::{CertificateId, CertificateSource, ACME_CHALLENGE_DIRECTORY};
 use panel_errors::ErrorCode;
 use panel_events::{Principal, RequestId, RequestScope};
@@ -17,11 +21,13 @@ use panel_jobs::{JobStore, Worker, WorkerOptions};
 use panel_platform::ServiceName;
 use panel_postgres::{testing::TestDatabase, EventLog, ServiceDatabase};
 use panel_secrets::{EnvelopeVault, SecretVault};
+use serde_json::Value;
 use std::{
     sync::{Arc, LazyLock},
     time::Duration,
 };
 use tokio_util::sync::CancellationToken;
+use zeroize::Zeroizing;
 
 static ALICE: LazyLock<Principal> = LazyLock::new(|| EventLog::user("alice"));
 
@@ -67,7 +73,95 @@ fn automatic(certificate: &str, names: &[&str]) -> NewAutomaticCertificate {
         account: AccountId::new("pebble").unwrap(),
         names: names.iter().map(|name| (*name).to_owned()).collect(),
         challenge: ChallengeKind::Http01,
+        dns_provider: None,
     }
+}
+
+/// Checks settings as the standard providers do, then publishes through
+/// Pebble's DNS test server, which the RFC 2136 settings cannot reach.
+struct PebbleDns(TestDns);
+
+impl DnsProviderFactory for PebbleDns {
+    fn build(
+        &self,
+        kind: &str,
+        settings: &Value,
+        secret: &str,
+    ) -> panel_errors::Result<Arc<dyn DnsProvider>> {
+        StandardDnsProviders.build(kind, settings, secret)?;
+        Ok(Arc::new(self.0.clone()))
+    }
+}
+
+fn rfc2136(zone: &str) -> Rfc2136Config {
+    Rfc2136Config {
+        server: "127.0.0.1:53".into(),
+        zones: vec![zone.into()],
+        key_name: "acme-update".into(),
+        algorithm: "hmac-sha256".into(),
+        ttl: None,
+    }
+}
+
+struct Fixture {
+    acme: AcmeAutomation,
+    dns: DnsProviders,
+    inventory: CertificateInventory,
+    jobs: Arc<PgJobStore>,
+}
+
+fn fixture(service: &ServiceDatabase, pebble: &Pebble, secrets: &std::path::Path) -> Fixture {
+    let vault: Arc<dyn SecretVault> =
+        Arc::new(EnvelopeVault::from_keys(&EnvelopeVault::generate_key().unwrap()).unwrap());
+    let events = EventLog::new(service, ServiceName::new("automation-service").unwrap());
+    let inventory = CertificateInventory::new(
+        service,
+        events.clone(),
+        Some(Arc::clone(&vault)),
+        Some(SecretDirectory::new(secrets)),
+    );
+    let jobs = Arc::new(PgJobStore::new(
+        service,
+        ServiceName::new("automation-service").unwrap(),
+    ));
+    let dns = DnsProviders::new(
+        service,
+        events.clone(),
+        Some(Arc::clone(&vault)),
+        Arc::new(PebbleDns(pebble.dns())),
+    );
+    let acme = AcmeAutomation::new(
+        service,
+        events,
+        Some(vault),
+        inventory.clone(),
+        dns.clone(),
+        Arc::clone(&jobs) as Arc<dyn JobStore>,
+        AcmeClient::new(Duration::from_secs(60)),
+        Some(secrets),
+    );
+    Fixture {
+        acme,
+        dns,
+        inventory,
+        jobs,
+    }
+}
+
+async fn register(acme: &AcmeAutomation, pebble: &Pebble, scope: &RequestScope) {
+    acme.create_account(
+        cause(scope),
+        NewAccount {
+            id: AccountId::new("pebble").unwrap(),
+            directory: pebble.directory.url.clone(),
+            ca_bundle: pebble.directory.ca_bundle.clone(),
+            contact: vec!["ops@shop.test".into()],
+            terms_of_service_agreed: true,
+            external_account: None,
+        },
+    )
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
@@ -79,28 +173,12 @@ async fn automatic_certificates_are_issued_renewed_and_their_failures_kept() {
         return;
     };
     let secrets = tempfile::tempdir().unwrap();
-    let vault: Arc<dyn SecretVault> =
-        Arc::new(EnvelopeVault::from_keys(&EnvelopeVault::generate_key().unwrap()).unwrap());
-    let events_log = EventLog::new(&service, ServiceName::new("automation-service").unwrap());
-    let inventory = CertificateInventory::new(
-        &service,
-        events_log.clone(),
-        Some(Arc::clone(&vault)),
-        Some(SecretDirectory::new(secrets.path())),
-    );
-    let jobs = Arc::new(PgJobStore::new(
-        &service,
-        ServiceName::new("automation-service").unwrap(),
-    ));
-    let acme = AcmeAutomation::new(
-        &service,
-        events_log,
-        Some(vault),
-        inventory.clone(),
-        Arc::clone(&jobs) as Arc<dyn JobStore>,
-        AcmeClient::new(Duration::from_secs(60)),
-        Some(secrets.path()),
-    );
+    let Fixture {
+        acme,
+        inventory,
+        jobs,
+        ..
+    } = fixture(&service, &pebble, secrets.path());
     let gateway = pebble
         .serve_http01(&secrets.path().join(ACME_CHALLENGE_DIRECTORY))
         .await;
@@ -248,4 +326,108 @@ async fn automatic_certificates_are_issued_renewed_and_their_failures_kept() {
             "{expected} in {types:?}"
         );
     }
+}
+
+#[tokio::test]
+async fn wildcard_certificates_are_issued_through_a_dns_provider() {
+    let Some(pebble) = Pebble::from_env() else {
+        return;
+    };
+    let Some((_database, service)) = database().await else {
+        return;
+    };
+    let secrets = tempfile::tempdir().unwrap();
+    let Fixture {
+        acme,
+        dns,
+        inventory,
+        ..
+    } = fixture(&service, &pebble, secrets.path());
+    let scope = RequestScope::new(RequestId::new("request-2").unwrap());
+    register(&acme, &pebble, &scope).await;
+
+    let broken = dns
+        .create(
+            cause(&scope),
+            NewDnsProvider {
+                id: "zone".into(),
+                kind: "rfc2136".into(),
+                rfc2136: rfc2136("wild.test"),
+                secret: Zeroizing::new("not base64!".into()),
+                propagation_seconds: 0,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(broken.code.as_str(), ErrorCode::INVALID_ARGUMENT);
+    let provider = dns
+        .create(
+            cause(&scope),
+            NewDnsProvider {
+                id: "zone".into(),
+                kind: "rfc2136".into(),
+                rfc2136: rfc2136("wild.test"),
+                secret: Zeroizing::new("c2VjcmV0".into()),
+                propagation_seconds: 0,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(provider.version, 1);
+
+    let mut wildcard = automatic("wild.test", &["wild.test", "*.wild.test"]);
+    wildcard.challenge = ChallengeKind::Dns01;
+    let missing = acme
+        .create_certificate(cause(&scope), automatic("x.test", &["x.test"]))
+        .await;
+    assert!(missing.is_ok(), "HTTP-01 needs no provider");
+    let mut without = automatic("y.test", &["y.test"]);
+    without.challenge = ChallengeKind::Dns01;
+    assert_eq!(
+        acme.create_certificate(cause(&scope), without)
+            .await
+            .unwrap_err()
+            .code
+            .as_str(),
+        ErrorCode::VALIDATION_FAILED
+    );
+    wildcard.dns_provider = Some("zone".into());
+    let created = acme
+        .create_certificate(cause(&scope), wildcard)
+        .await
+        .unwrap();
+    assert_eq!(created.dns_provider.as_deref(), Some("zone"));
+
+    acme.issue(&scope, &id("wild.test")).await.unwrap();
+    let issued = acme.certificate(&id("wild.test")).await.unwrap();
+    assert_eq!(issued.state, IssuanceState::Issued, "{issued:?}");
+    assert_eq!(
+        inventory.get(&id("wild.test")).await.unwrap().details.names,
+        ["wild.test", "*.wild.test"]
+    );
+
+    let updated = dns
+        .update(
+            cause(&scope),
+            "zone",
+            Some(1),
+            DnsProviderChange {
+                rfc2136: Rfc2136Config {
+                    server: "127.0.0.1:5353".into(),
+                    ..rfc2136("wild.test")
+                },
+                secret: None,
+                propagation_seconds: 5,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!((updated.version, updated.propagation_seconds), (2, 5));
+    let in_use = dns.delete(cause(&scope), "zone", None).await.unwrap_err();
+    assert_eq!(in_use.code.as_str(), ErrorCode::CONFLICT);
+    acme.delete_certificate(cause(&scope), id("wild.test"), None)
+        .await
+        .unwrap();
+    dns.delete(cause(&scope), "zone", Some(2)).await.unwrap();
+    assert!(dns.list().await.unwrap().is_empty());
 }

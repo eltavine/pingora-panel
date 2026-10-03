@@ -1,7 +1,10 @@
 //! Certificates obtained and renewed through ACME: accounts with CAs,
 //! automatic certificates, and the jobs that issue and renew them.
 
-use crate::certificates::{Cause, CertificateInventory};
+use crate::{
+    certificates::{Cause, CertificateInventory},
+    dns::DnsProviders,
+};
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use panel_acme::{
@@ -50,6 +53,23 @@ static SYSTEM: LazyLock<Principal> = LazyLock::new(|| {
     Principal::system(Actor::new("automation-service").expect("the service name is an actor"))
 });
 
+/// Checks an identifier of 1 to 64 lowercase letters, digits and hyphens.
+pub(crate) fn slug(value: &str, what: &str) -> Result<String> {
+    let valid = (1..=64).contains(&value.len())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        && !value.starts_with('-')
+        && !value.ends_with('-');
+    if valid {
+        Ok(value.to_owned())
+    } else {
+        Err(PanelError::invalid_argument(format!(
+            "{value:?} is not {what}: use 1 to 64 lowercase letters, digits and hyphens"
+        )))
+    }
+}
+
 /// Names an ACME account: 1 to 64 lowercase letters, digits and hyphens.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
@@ -57,20 +77,7 @@ pub struct AccountId(String);
 
 impl AccountId {
     pub fn new(value: impl Into<String>) -> Result<Self> {
-        let value = value.into();
-        let valid = (1..=64).contains(&value.len())
-            && value
-                .bytes()
-                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-            && !value.starts_with('-')
-            && !value.ends_with('-');
-        if valid {
-            Ok(Self(value))
-        } else {
-            Err(PanelError::invalid_argument(format!(
-                "{value:?} is not an account ID: use 1 to 64 lowercase letters, digits and hyphens"
-            )))
-        }
+        slug(&value.into(), "an account ID").map(Self)
     }
 
     pub fn as_str(&self) -> &str {
@@ -174,6 +181,8 @@ pub struct AutomaticCertificate {
     pub account: AccountId,
     pub names: Vec<String>,
     pub challenge: ChallengeKind,
+    /// The provider that publishes DNS-01 records.
+    pub dns_provider: Option<String>,
     pub state: IssuanceState,
     /// When it is issued next.
     pub renew_after: DateTime<Utc>,
@@ -205,6 +214,9 @@ pub struct NewAutomaticCertificate {
     pub names: Vec<String>,
     #[serde(default = "http01")]
     pub challenge: ChallengeKind,
+    /// Required for DNS-01.
+    #[serde(default)]
+    pub dns_provider: Option<String>,
 }
 
 /// The columns read into an [`AcmeAccount`], as a literal so queries stay
@@ -220,7 +232,7 @@ macro_rules! account_columns {
 /// `acme_certificates a` joined with the inventory as `c`.
 macro_rules! automatic_columns {
     () => {
-        "a.certificate_id, a.account_id, a.names, a.challenge, a.renew_after, \
+        "a.certificate_id, a.account_id, a.names, a.challenge, a.dns_provider_id, a.renew_after, \
          a.window_explanation_url, a.failures, a.last_error_code, a.last_error_message, \
          a.last_attempt_at, a.version, a.created_at, a.updated_at, \
          (c.source = 'acme') AS issued"
@@ -293,6 +305,7 @@ fn automatic(row: &PgRow) -> Result<AutomaticCertificate> {
             &row.try_get::<String, _>("challenge")
                 .map_err(storage_error)?,
         )?,
+        dns_provider: row.try_get("dns_provider_id").map_err(storage_error)?,
         state: if failures > 0 {
             IssuanceState::Failing
         } else if issued == Some(true) {
@@ -395,17 +408,20 @@ pub struct AcmeAutomation {
     events: EventLog,
     vault: Option<Arc<dyn SecretVault>>,
     inventory: CertificateInventory,
+    dns: DnsProviders,
     jobs: Arc<dyn JobStore>,
     client: AcmeClient,
     challenges: Option<PathBuf>,
 }
 
 impl AcmeAutomation {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         database: &ServiceDatabase,
         events: EventLog,
         vault: Option<Arc<dyn SecretVault>>,
         inventory: CertificateInventory,
+        dns: DnsProviders,
         jobs: Arc<dyn JobStore>,
         client: AcmeClient,
         secret_directory: Option<&Path>,
@@ -415,6 +431,7 @@ impl AcmeAutomation {
             events,
             vault,
             inventory,
+            dns,
             jobs,
             client,
             challenges: secret_directory.map(|directory| directory.join(ACME_CHALLENGE_DIRECTORY)),
@@ -673,23 +690,35 @@ impl AcmeAutomation {
                     "wildcard names can only be validated with DNS-01",
                 ));
             }
-            if body.challenge == ChallengeKind::Dns01 {
-                return Err(PanelError::validation_failed(
-                    "DNS-01 needs a DNS provider, and none is configured",
-                ));
+            match (body.challenge, body.dns_provider.as_deref()) {
+                (ChallengeKind::Dns01, Some(provider)) => {
+                    self.dns.get(provider).await?;
+                }
+                (ChallengeKind::Dns01, None) => {
+                    return Err(PanelError::validation_failed(
+                        "DNS-01 needs a DNS provider to publish its records",
+                    ))
+                }
+                (_, Some(_)) => {
+                    return Err(PanelError::validation_failed(
+                        "only DNS-01 certificates name a DNS provider",
+                    ))
+                }
+                _ => {}
             }
             self.account(&body.account).await?;
             let now = Utc::now();
             let mut transaction = self.pool.begin().await.map_err(storage_error)?;
             let inserted = sqlx::query(
                 "INSERT INTO acme_certificates (certificate_id, account_id, names, challenge, \
-                 renew_after, version, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, 1, $5, $5) \
-                 ON CONFLICT (certificate_id) DO NOTHING",
+                 dns_provider_id, renew_after, version, created_at, updated_at) \
+                 VALUES ($1, $2, $3, $4, $5, $6, 1, $6, $6) ON CONFLICT (certificate_id) DO NOTHING",
             )
             .bind(id.as_str())
             .bind(body.account.as_str())
             .bind(&names)
             .bind(body.challenge.as_str())
+            .bind(&body.dns_provider)
             .bind(now)
             .execute(&mut *transaction)
             .await
@@ -710,6 +739,7 @@ impl AcmeAutomation {
                     "account": body.account,
                     "names": names,
                     "challenge": body.challenge,
+                    "dns_provider": body.dns_provider,
                 }),
             )
             .await?;
@@ -846,7 +876,7 @@ impl AcmeAutomation {
         let Some(row) = sqlx::query(
             "UPDATE acme_certificates SET issuing_until = $2 WHERE certificate_id = $1 \
              AND renew_after <= $3 AND (issuing_until IS NULL OR issuing_until < $3) \
-             RETURNING account_id, names, challenge, failures",
+             RETURNING account_id, names, challenge, dns_provider_id, failures",
         )
         .bind(id.as_str())
         .bind(now + ISSUING_LEASE)
@@ -867,12 +897,16 @@ impl AcmeAutomation {
             &row.try_get::<String, _>("challenge")
                 .map_err(storage_error)?,
         )?;
+        let provider: Option<String> = row.try_get("dns_provider_id").map_err(storage_error)?;
         let failures: i32 = row.try_get("failures").map_err(storage_error)?;
         let cause = Cause {
             scope,
             principal: &SYSTEM,
         };
-        match self.order(cause, id, &account, &names, challenge).await {
+        match self
+            .order(cause, id, &account, &names, challenge, provider.as_deref())
+            .await
+        {
             Ok(renew_after) => {
                 sqlx::query(
                     "UPDATE acme_certificates SET renew_after = $2, window_checked_after = $3, \
@@ -936,6 +970,7 @@ impl AcmeAutomation {
         account: &AccountId,
         names: &[String],
         challenge: ChallengeKind,
+        provider: Option<&str>,
     ) -> Result<DateTime<Utc>> {
         let (directory, credentials) = self.credentials(account).await?;
         let solver: Box<dyn ChallengeSolver> = match challenge {
@@ -946,11 +981,15 @@ impl AcmeAutomation {
                     )
                 })?))
             }
-            _ => {
-                return Err(PanelError::validation_failed(
-                    "DNS-01 needs a DNS provider, and none is configured",
-                ))
-            }
+            _ => Box::new(
+                self.dns
+                    .solver(provider.ok_or_else(|| {
+                        PanelError::validation_failed(
+                            "DNS-01 needs a DNS provider to publish its records",
+                        )
+                    })?)
+                    .await?,
+            ),
         };
         let replaces = match self.inventory.chain(id).await? {
             Some((CertificateSource::Acme, chain)) => renewal_identifier(&chain).ok().flatten(),
