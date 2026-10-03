@@ -15,8 +15,8 @@ mod persistence;
 mod runtime;
 
 pub use configuration::{
-    ApplyOutcome, ConfigurationChange, ConfigurationOutput, ConfigurationPort, ConfigurationRead,
-    DraftInfo,
+    ApplyOutcome, ApplyRequest, ConfigurationChange, ConfigurationOutput, ConfigurationPort,
+    ConfigurationRead, DraftInfo,
 };
 pub use context::{
     Actor, CommandContext, IdempotencyKey, RequestDeadline, RequestId, RequestScope, TraceContext,

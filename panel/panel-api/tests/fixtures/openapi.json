@@ -20870,6 +20870,13 @@
             "format": "int64",
             "description": "Refuses to apply if the draft changed since this version.",
             "minimum": 0
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Recorded with the revision, for example why it was applied."
           }
         }
       },
@@ -20877,6 +20884,7 @@
         "type": "object",
         "required": [
           "draft",
+          "revision",
           "revision_id",
           "content_hash"
         ],
@@ -20892,6 +20900,12 @@
               "string",
               "null"
             ]
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The configuration revision recorded for what now runs.",
+            "minimum": 0
           },
           "revision_id": {
             "type": "integer",

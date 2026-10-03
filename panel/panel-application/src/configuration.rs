@@ -46,18 +46,84 @@ pub struct ConfigurationOutput {
     pub draft: DraftInfo,
 }
 
+/// What to apply and how.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct ApplyRequest {
+    /// Refuses a draft that changed since this version; zero applies
+    /// whatever is current.
+    pub expected_version: u64,
+    /// Recorded with the revision.
+    pub note: Option<String>,
+    /// Validates and prepares on the gateway without activating.
+    pub dry_run: bool,
+}
+
+impl ApplyRequest {
+    pub fn new(expected_version: u64) -> Self {
+        Self {
+            expected_version,
+            ..Self::default()
+        }
+    }
+
+    pub fn with_note(mut self, note: impl Into<String>) -> Self {
+        self.note = Some(note.into());
+        self
+    }
+
+    pub fn dry_run(mut self) -> Self {
+        self.dry_run = true;
+        self
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ApplyOutcome {
+    /// The gateway runs the configuration recorded as `revision`.
+    #[non_exhaustive]
     Applied {
         draft: DraftInfo,
         deployment: ActivatedDeployment,
+        revision: u64,
     },
-    /// The draft failed validation and never reached the gateway.
+    /// The draft failed validation and never reached the gateway; the
+    /// attempt is recorded as `revision` when it got that far.
+    #[non_exhaustive]
     Rejected {
         draft: DraftInfo,
         report: ValidationReport,
+        revision: Option<u64>,
     },
+    /// A dry run passed every check, the gateway's preparation included.
+    #[non_exhaustive]
+    Checked {
+        draft: DraftInfo,
+        report: ValidationReport,
+    },
+}
+
+impl ApplyOutcome {
+    pub fn applied(draft: DraftInfo, deployment: ActivatedDeployment, revision: u64) -> Self {
+        Self::Applied {
+            draft,
+            deployment,
+            revision,
+        }
+    }
+
+    pub fn rejected(draft: DraftInfo, report: ValidationReport, revision: Option<u64>) -> Self {
+        Self::Rejected {
+            draft,
+            report,
+            revision,
+        }
+    }
+
+    pub fn checked(draft: DraftInfo, report: ValidationReport) -> Self {
+        Self::Checked { draft, report }
+    }
 }
 
 /// The configuration API: reads and changes of the draft and applying it.
@@ -75,7 +141,5 @@ pub trait ConfigurationPort: Send + Sync {
         change: ConfigurationChange,
     ) -> Result<ConfigurationOutput>;
 
-    /// `expected_version` refuses to apply a draft that changed meanwhile;
-    /// zero applies whatever is current.
-    async fn apply(&self, context: CommandContext, expected_version: u64) -> Result<ApplyOutcome>;
+    async fn apply(&self, context: CommandContext, request: ApplyRequest) -> Result<ApplyOutcome>;
 }

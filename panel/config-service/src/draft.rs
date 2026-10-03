@@ -1,5 +1,7 @@
+use crate::language;
 use chrono::{DateTime, Utc};
 use panel_application::{ContentHash, IdempotencyKey, RequestScope};
+use panel_config_dsl::Sources;
 use panel_config_model::{ConfigModel, MODEL_VERSION};
 use panel_errors::{PanelError, Result};
 use panel_events::{
@@ -15,6 +17,8 @@ use sqlx::{PgConnection, PgPool};
 pub struct DraftState {
     pub version: u64,
     pub model: ConfigModel,
+    /// The draft in the configuration language.
+    pub sources: Sources,
     pub updated_at: DateTime<Utc>,
     pub applied_version: Option<u64>,
     pub applied_at: Option<DateTime<Utc>>,
@@ -25,6 +29,14 @@ pub struct DraftState {
 pub struct ChangeOutput {
     pub content: Vec<u8>,
     pub etag: String,
+}
+
+/// A change's new draft. Files left out follow the model: only the blocks of
+/// what changed are rewritten.
+pub struct DraftChange {
+    pub model: ConfigModel,
+    pub sources: Option<Sources>,
+    pub output: ChangeOutput,
 }
 
 /// Identifies one change for idempotency and events.
@@ -49,6 +61,7 @@ type DraftRow = (
     i64,
     String,
     String,
+    Option<String>,
     DateTime<Utc>,
     Option<i64>,
     Option<DateTime<Utc>>,
@@ -81,7 +94,7 @@ impl PgDrafts {
     pub async fn change(
         &self,
         request: ChangeRequest<'_>,
-        change: impl FnOnce(&DraftState) -> Result<(ConfigModel, ChangeOutput)>,
+        change: impl FnOnce(&DraftState) -> Result<DraftChange>,
     ) -> Result<(DraftState, ChangeOutput)> {
         let mut transaction = self.pool.begin().await.map_err(storage_error)?;
         let current = read(&mut transaction, true).await?;
@@ -100,17 +113,27 @@ impl PgDrafts {
             }
             return Ok((current, ChangeOutput { content, etag }));
         }
-        let (model, output) = change(&current)?;
+        let DraftChange {
+            model,
+            sources,
+            output,
+        } = change(&current)?;
+        let sources =
+            sources.unwrap_or_else(|| language::follow(&current.sources, &current.model, &model));
         let next = current.version + 1;
         let document = serde_json::to_string(&model)
             .map_err(|error| PanelError::internal(format!("draft cannot be encoded: {error}")))?;
+        let files = serde_json::to_string(&sources).map_err(|error| {
+            PanelError::internal(format!("draft files cannot be encoded: {error}"))
+        })?;
         let (updated_at,): (DateTime<Utc>,) = sqlx::query_as(
             "UPDATE draft_configuration SET version = $1, format = $2, document = $3::jsonb, \
-             updated_at = now() RETURNING updated_at",
+             sources = $4::jsonb, updated_at = now() RETURNING updated_at",
         )
         .bind(stored(next)?)
         .bind(MODEL_VERSION)
         .bind(document)
+        .bind(files)
         .fetch_one(&mut *transaction)
         .await
         .map_err(storage_error)?;
@@ -145,6 +168,7 @@ impl PgDrafts {
             DraftState {
                 version: next,
                 model,
+                sources,
                 updated_at,
                 ..current
             },
@@ -152,10 +176,11 @@ impl PgDrafts {
         ))
     }
 
-    /// Records that `version` now runs on the gateway.
+    /// Records that `version`, as `revision`, now runs on the gateway.
     pub async fn mark_applied(
         &self,
         version: u64,
+        revision: u64,
         scope: &RequestScope,
         actor: &str,
     ) -> Result<DraftState> {
@@ -173,7 +198,7 @@ impl PgDrafts {
             "config.draft.applied",
             scope,
             actor,
-            json!({ "version": version }),
+            json!({ "version": version, "revision": revision }),
         )?;
         PgOutbox::append(&mut transaction, &event).await?;
         let state = read(&mut transaction, false).await?;
@@ -219,13 +244,13 @@ async fn read(connection: &mut PgConnection, lock: bool) -> Result<DraftState> {
     .await
     .map_err(storage_error)?;
     let query = if lock {
-        "SELECT version, format, document::text, updated_at, applied_version, applied_at \
-         FROM draft_configuration FOR UPDATE"
+        "SELECT version, format, document::text, sources::text, updated_at, applied_version, \
+         applied_at FROM draft_configuration FOR UPDATE"
     } else {
-        "SELECT version, format, document::text, updated_at, applied_version, applied_at \
-         FROM draft_configuration"
+        "SELECT version, format, document::text, sources::text, updated_at, applied_version, \
+         applied_at FROM draft_configuration"
     };
-    let (draft_version, format, document, updated_at, applied_version, applied_at): DraftRow =
+    let (draft_version, format, document, files, updated_at, applied_version, applied_at): DraftRow =
         sqlx::query_as(query)
             .fetch_one(&mut *connection)
             .await
@@ -235,11 +260,24 @@ async fn read(connection: &mut PgConnection, lock: bool) -> Result<DraftState> {
             "the draft is stored as {format}, which this service cannot read"
         )));
     }
-    let model = serde_json::from_str(&document)
+    let model: ConfigModel = serde_json::from_str(&document)
         .map_err(|error| PanelError::corrupt_state(format!("stored draft is invalid: {error}")))?;
+    let sources = match files {
+        Some(files) => serde_json::from_str::<std::collections::BTreeMap<String, String>>(&files)
+            .map_err(|error| {
+                PanelError::corrupt_state(format!("stored draft files are invalid: {error}"))
+            })
+            .and_then(|files| {
+                Sources::new(files).map_err(|path| {
+                    PanelError::corrupt_state(format!("stored draft file {path:?} is invalid"))
+                })
+            })?,
+        None => language::printed(&model),
+    };
     Ok(DraftState {
         version: version(draft_version)?,
         model,
+        sources,
         updated_at,
         applied_version: applied_version.map(version).transpose()?,
         applied_at,

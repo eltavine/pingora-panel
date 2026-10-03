@@ -300,20 +300,26 @@ pub struct ApplyRequest {
     /// Refuses to apply if the draft changed since this version.
     #[serde(default)]
     pub expected_version: Option<u64>,
+    /// Recorded with the revision, for example why it was applied.
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct ApplyResponse {
     pub draft: DraftResponse,
+    /// The configuration revision recorded for what now runs.
+    pub revision: u64,
     pub revision_id: u64,
     pub content_hash: String,
     pub previous_active_hash: Option<String>,
 }
 
 impl ApplyResponse {
-    fn new(draft: &DraftInfo, deployment: &ActivatedDeployment) -> Self {
+    fn new(draft: &DraftInfo, deployment: &ActivatedDeployment, revision: u64) -> Self {
         Self {
             draft: draft.into(),
+            revision,
             revision_id: deployment.revision_id().get(),
             content_hash: deployment.content_hash().as_str().into(),
             previous_active_hash: deployment
@@ -1086,12 +1092,19 @@ pub(crate) async fn apply<U: GatewayUseCases>(
             )))
         })?
     };
-    match port(&state)?
-        .apply(context, request.expected_version.unwrap_or(0))
-        .await?
-    {
-        ApplyOutcome::Applied { draft, deployment } => {
-            let mut response = axum::Json(ApplyResponse::new(&draft, &deployment)).into_response();
+    let mut apply = panel_application::ApplyRequest::new(request.expected_version.unwrap_or(0));
+    if let Some(note) = request.note.filter(|note| !note.trim().is_empty()) {
+        apply = apply.with_note(note);
+    }
+    match port(&state)?.apply(context, apply).await? {
+        ApplyOutcome::Applied {
+            draft,
+            deployment,
+            revision,
+            ..
+        } => {
+            let mut response =
+                axum::Json(ApplyResponse::new(&draft, &deployment, revision)).into_response();
             insert_draft(response.headers_mut(), &draft);
             Ok(response)
         }

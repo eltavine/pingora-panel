@@ -69,12 +69,19 @@ message ApplyRequest {
   .pingora.panel.common.v1.RequestContext context = 1;
   // Refuses to apply if the draft has changed since this version; zero skips the check.
   uint64 expected_version = 2;
+  // Recorded with the revision.
+  string note = 3;
+  // Validates and prepares on the gateway without activating.
+  bool dry_run = 4;
 }
 
 message ApplyResponse {
   Draft draft = 1;
   ActivatedDeployment deployment = 2;
-  // Present when the draft was refused before reaching the gateway.
+  // Present when the draft was refused before reaching the gateway, and for
+  // a dry run that passed.
   ValidationReport report = 3;
   .pingora.panel.common.v1.Error error = 4;
+  // The revision the attempt was recorded as; zero for a dry run.
+  uint64 revision = 5;
 }

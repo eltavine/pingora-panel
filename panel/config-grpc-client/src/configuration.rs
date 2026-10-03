@@ -2,8 +2,8 @@ use crate::{ConfigPublicationClient, MAX_MESSAGE_BYTES};
 use async_trait::async_trait;
 use config_proto_codec as codec;
 use panel_application::{
-    ApplyOutcome, CommandContext, ConfigurationChange, ConfigurationOutput, ConfigurationPort,
-    ConfigurationRead, DraftInfo, RequestScope,
+    ApplyOutcome, ApplyRequest, CommandContext, ConfigurationChange, ConfigurationOutput,
+    ConfigurationPort, ConfigurationRead, DraftInfo, RequestScope,
 };
 use panel_contracts::config::v1::{self as wire, configuration_client::ConfigurationClient};
 use panel_errors::{PanelError, Result};
@@ -94,28 +94,39 @@ impl ConfigurationPort for ConfigPublicationClient {
         output(response.content, response.etag, response.draft)
     }
 
-    async fn apply(&self, context: CommandContext, expected_version: u64) -> Result<ApplyOutcome> {
-        let request = wire::ApplyRequest {
+    async fn apply(&self, context: CommandContext, request: ApplyRequest) -> Result<ApplyOutcome> {
+        let wire_request = wire::ApplyRequest {
             context: Some(codec::encode_command(&context)),
-            expected_version,
+            expected_version: request.expected_version,
+            note: request.note.unwrap_or_default(),
+            dry_run: request.dry_run,
         };
         let response = self
             .configuration()
-            .apply(self.request(request, context.trace_context()))
+            .apply(self.request(wire_request, context.trace_context()))
             .await
             .map_err(status_error)?
             .into_inner();
         codec::decode_error(response.error)?;
         let draft = draft(response.draft)?;
-        Ok(match response.deployment {
-            Some(deployment) => ApplyOutcome::Applied {
-                draft,
-                deployment: codec::decode_activated(Some(deployment))?,
-            },
-            None => ApplyOutcome::Rejected {
-                draft,
-                report: codec::decode_report(response.report)?,
-            },
+        let revision = (response.revision != 0).then_some(response.revision);
+        Ok(match (response.deployment, revision) {
+            (Some(deployment), Some(revision)) => {
+                ApplyOutcome::applied(draft, codec::decode_activated(Some(deployment))?, revision)
+            }
+            (Some(_), None) => {
+                return Err(PanelError::internal(
+                    "the configuration service applied a draft without recording a revision",
+                ))
+            }
+            (None, _) => {
+                let report = codec::decode_report(response.report)?;
+                if report.valid {
+                    ApplyOutcome::checked(draft, report)
+                } else {
+                    ApplyOutcome::rejected(draft, report, revision)
+                }
+            }
         })
     }
 }

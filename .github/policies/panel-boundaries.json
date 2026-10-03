@@ -44,6 +44,7 @@
         "gateway-grpc-client",
         "gateway-proto-codec",
         "panel-application",
+        "panel-config-dsl",
         "panel-config-json",
         "panel-config-model",
         "panel-contracts",

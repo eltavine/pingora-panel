@@ -294,6 +294,7 @@ async fn sites_are_edited_validated_and_applied_through_the_api() {
         )
         .await;
     assert_eq!(applied["revision_id"], 7);
+    assert_eq!(applied["revision"], 1);
     assert_eq!(applied["draft"]["pending"], false);
     assert_eq!(headers["x-config-applied-version"], "7");
     let conflict = api

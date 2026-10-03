@@ -5,11 +5,11 @@
 use config_grpc_client::{ConfigClientConfig, ConfigPublicationClient};
 use gateway_grpc::GatewayGrpcService;
 use panel_application::{
-    ApplyOutcome, CommandContext, ConfigurationChange, ConfigurationPort, ConfigurationRead,
-    IdempotencyKey, RequestDeadline, RequestId, RequestScope,
+    ApplyOutcome, ApplyRequest, CommandContext, ConfigurationChange, ConfigurationPort,
+    ConfigurationRead, IdempotencyKey, RequestDeadline, RequestId, RequestScope,
 };
 use panel_control_runtime::{
-    ProcessSettings, DATABASE_PASSWORD_ENV, DATABASE_URL_ENV, NATS_URL_ENV,
+    ProcessSettings, RunningProcess, DATABASE_PASSWORD_ENV, DATABASE_URL_ENV, NATS_URL_ENV,
 };
 use panel_engine::{EngineCapability, FakeGatewayEngine};
 use panel_errors::ErrorCode;
@@ -92,12 +92,19 @@ fn json(content: &[u8]) -> Value {
     serde_json::from_slice(content).unwrap()
 }
 
-#[tokio::test]
-async fn draft_changes_are_idempotent_conditional_and_applied() {
+/// A running config-service with its database, broker and gateway.
+struct Harness {
+    client: ConfigPublicationClient,
+    _process: RunningProcess,
+    _broker: TestBroker,
+    _database: TestDatabase,
+}
+
+async fn start() -> Option<Harness> {
     let (Some(mut database), Some(broker)) =
         (TestDatabase::create().await, TestBroker::create().await)
     else {
-        return;
+        return None;
     };
     let secrets = database.bootstrap(&[("config", "config")]).await;
     let gateway = gateway().await;
@@ -140,7 +147,22 @@ async fn draft_changes_are_idempotent_conditional_and_applied() {
         ConfigClientConfig::default(),
     )
     .unwrap();
-    let scope = || RequestScope::new(RequestId::new("read").unwrap());
+    Some(Harness {
+        client,
+        _process: process,
+        _broker: broker,
+        _database: database,
+    })
+}
+
+fn scope() -> RequestScope {
+    RequestScope::new(RequestId::new("read").unwrap())
+}
+
+#[tokio::test]
+async fn draft_changes_are_idempotent_conditional_and_applied() {
+    let Some(harness) = start().await else { return };
+    let client = &harness.client;
 
     let summary = client
         .read(
@@ -157,7 +179,7 @@ async fn draft_changes_are_idempotent_conditional_and_applied() {
     assert_eq!(summary.draft.version, 0);
     assert_eq!(
         client
-            .apply(command("apply-empty"), 0)
+            .apply(command("apply-empty"), ApplyRequest::new(0))
             .await
             .unwrap_err()
             .code
@@ -240,17 +262,27 @@ async fn draft_changes_are_idempotent_conditional_and_applied() {
     assert_eq!(duplicate.code.as_str(), ErrorCode::VALIDATION_FAILED);
     assert!(duplicate.diagnostics[0].message.contains("already bound"));
 
-    match client.apply(command("apply-1"), 3).await.unwrap() {
-        ApplyOutcome::Applied { draft, deployment } => {
+    match client
+        .apply(command("apply-1"), ApplyRequest::new(3))
+        .await
+        .unwrap()
+    {
+        ApplyOutcome::Applied {
+            draft,
+            deployment,
+            revision,
+            ..
+        } => {
             assert_eq!(draft.applied_version, Some(3));
             assert!(!draft.pending());
             assert_eq!(deployment.revision_id().get(), 3);
+            assert_eq!(revision, 1);
         }
         other => panic!("expected an applied draft, got {other:?}"),
     }
     assert_eq!(
         client
-            .apply(command("apply-2"), 2)
+            .apply(command("apply-2"), ApplyRequest::new(2))
             .await
             .unwrap_err()
             .code
@@ -270,4 +302,296 @@ async fn draft_changes_are_idempotent_conditional_and_applied() {
         .unwrap();
     assert_eq!(json(&listed.content)["items"][0]["status"], "running");
     assert_eq!(listed.draft.applied_version, Some(3));
+}
+
+fn read(operation: &str, resource: &str, parameters: Value) -> ConfigurationRead {
+    ConfigurationRead {
+        operation: operation.into(),
+        resource: resource.into(),
+        parameters: serde_json::to_vec(&parameters).unwrap(),
+    }
+}
+
+const SHOP: &str = "\
+language_version 1;
+
+http {
+    listener http {
+        address 127.0.0.1:18080;
+    }
+
+    # The storefront's servers
+    upstream app {
+        server 10.0.0.11:8080;
+    }
+
+    server shop {
+        server_name shop.example;
+        proxy app;
+    }
+}
+";
+
+#[tokio::test]
+async fn the_draft_is_text_and_every_apply_is_a_revision() {
+    let Some(harness) = start().await else { return };
+    let client = &harness.client;
+
+    let source = client
+        .read(scope(), read("config.source", "config/source", json!({})))
+        .await
+        .unwrap();
+    assert_eq!(
+        json(&source.content)["files"]["main.conf"],
+        "language_version 1;\n\nhttp {\n}\n"
+    );
+    assert_eq!(source.etag.as_deref(), Some("\"draft-0\""));
+
+    let invalid = client
+        .read(scope(), read("config.check", "config", json!({"files": {"main.conf": "language_version 1;\nhttp {\n    server s { proxy nowhere; }\n}\n"}})))
+        .await
+        .unwrap();
+    let invalid = json(&invalid.content);
+    assert_eq!(invalid["valid"], false);
+    assert!(
+        invalid["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["message"] == "no upstream is named \"nowhere\""
+                && item["source_span"] == "main.conf:3.22-28"),
+        "{invalid}"
+    );
+
+    let formatted = client
+        .read(
+            scope(),
+            read(
+                "config.format",
+                "config",
+                json!({"files": {"main.conf": "language_version  1 ;"}}),
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        json(&formatted.content)["files"]["main.conf"],
+        "language_version 1;\n"
+    );
+    let schema = client
+        .read(scope(), read("config.schema", "config", json!({})))
+        .await
+        .unwrap();
+    assert!(
+        json(&schema.content)["directives"]
+            .as_array()
+            .unwrap()
+            .len()
+            > 40
+    );
+
+    let mut stale = change(
+        "config.source.replace",
+        "config/source",
+        json!({"files": {"main.conf": SHOP}}),
+    );
+    stale.if_match = Some("\"draft-7\"".into());
+    let error = client
+        .change(command("text-stale"), stale)
+        .await
+        .unwrap_err();
+    assert_eq!(error.code.as_str(), ErrorCode::PRECONDITION_FAILED);
+    let mut saved = change(
+        "config.source.replace",
+        "config/source",
+        json!({"files": {"main.conf": SHOP}}),
+    );
+    saved.if_match = Some("\"draft-0\"".into());
+    let saved = client.change(command("text"), saved).await.unwrap();
+    assert_eq!(saved.etag.as_deref(), Some("\"draft-1\""));
+    let text = json(&saved.content)["files"]["main.conf"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(
+        text.contains("    # The storefront's servers\n    upstream app {\n        id "),
+        "{text}"
+    );
+
+    let upstreams = client
+        .read(scope(), read("upstreams.list", "upstreams", json!({})))
+        .await
+        .unwrap();
+    let upstream = json(&upstreams.content)[0].clone();
+    let mut edited = upstream.clone();
+    edited["note"] = json!("primary pool");
+    for field in ["id", "etag", "used_by", "created_at", "updated_at"] {
+        edited.as_object_mut().unwrap().remove(field);
+    }
+    let mut replace = change(
+        "upstreams.replace",
+        &format!("upstreams/{}", upstream["id"].as_str().unwrap()),
+        edited,
+    );
+    replace.if_match = Some(upstream["etag"].as_str().unwrap().to_owned());
+    client.change(command("note"), replace).await.unwrap();
+    let source = client
+        .read(scope(), read("config.source", "config/source", json!({})))
+        .await
+        .unwrap();
+    let text = json(&source.content)["files"]["main.conf"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(
+        text.contains("    # The storefront's servers\n")
+            && text.contains("note \"primary pool\";"),
+        "{text}"
+    );
+
+    let plan = client
+        .read(scope(), read("config.plan", "config", json!({})))
+        .await
+        .unwrap();
+    let resources = json(&plan.content)["resources"].as_array().unwrap().len();
+    assert_eq!(resources, 3);
+
+    match client
+        .apply(command("dry"), ApplyRequest::new(2).dry_run())
+        .await
+        .unwrap()
+    {
+        ApplyOutcome::Checked { draft, .. } => assert_eq!(draft.applied_version, None),
+        other => panic!("expected a passed dry run, got {other:?}"),
+    }
+    let first = match client
+        .apply(command("first"), ApplyRequest::new(2).with_note("launch"))
+        .await
+        .unwrap()
+    {
+        ApplyOutcome::Applied { revision, .. } => revision,
+        other => panic!("expected an applied draft, got {other:?}"),
+    };
+
+    let mut replaced = change(
+        "config.source.replace",
+        "config/source",
+        json!({"files": {"main.conf": text.replace("shop.example", "store.example")}}),
+    );
+    replaced.if_match = Some("\"draft-2\"".into());
+    client.change(command("rename"), replaced).await.unwrap();
+    let second = match client
+        .apply(command("second"), ApplyRequest::new(3))
+        .await
+        .unwrap()
+    {
+        ApplyOutcome::Applied { revision, .. } => revision,
+        other => panic!("expected an applied draft, got {other:?}"),
+    };
+    assert_eq!(second, first + 1);
+
+    let listed = client
+        .read(scope(), read("revisions.list", "revisions", json!({})))
+        .await
+        .unwrap();
+    let items = json(&listed.content)["items"].clone();
+    assert_eq!(items[0]["id"], second);
+    assert_eq!(items[0]["outcome"], "active");
+    assert_eq!(items[1]["outcome"], "superseded");
+    assert_eq!(items[1]["note"], "launch");
+    assert_eq!(items[1]["author"], "operator");
+
+    let diff = client
+        .read(
+            scope(),
+            read("revisions.diff", &format!("revisions/{second}"), json!({})),
+        )
+        .await
+        .unwrap();
+    let diff = json(&diff.content);
+    assert_eq!(diff["resources"].as_array().unwrap().len(), 1);
+    assert!(diff["files"][0]["diff"]
+        .as_str()
+        .unwrap()
+        .contains("+        server_name store.example;"));
+
+    client
+        .change(
+            command("restore"),
+            change(
+                "revisions.restore",
+                &format!("revisions/{first}"),
+                Value::Null,
+            ),
+        )
+        .await
+        .unwrap();
+    let restored = client
+        .read(scope(), read("config.source", "config/source", json!({})))
+        .await
+        .unwrap();
+    let detail = client
+        .read(
+            scope(),
+            read("revisions.get", &format!("revisions/{first}"), json!({})),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        json(&restored.content)["files"],
+        json(&detail.content)["files"]
+    );
+    let plan = client
+        .read(scope(), read("config.plan", "config", json!({})))
+        .await
+        .unwrap();
+    assert_eq!(
+        json(&plan.content)["resources"].as_array().unwrap().len(),
+        1
+    );
+
+    let noted = client
+        .change(
+            command("note-1"),
+            change(
+                "revisions.note",
+                &format!("revisions/{first}"),
+                json!({"note": "first launch"}),
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(json(&noted.content)["note"], "first launch");
+
+    let reserved = text.replace(
+        "address 127.0.0.1:18080;",
+        "address 127.0.0.1:18080;\n        protocols http1 http3;",
+    );
+    let mut saved = change(
+        "config.source.replace",
+        "config/source",
+        json!({"files": {"main.conf": reserved}}),
+    );
+    saved.if_match = Some("*".into());
+    client.change(command("http3"), saved).await.unwrap();
+    let error = client
+        .apply(command("refused"), ApplyRequest::new(0))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code.as_str(), ErrorCode::UNSUPPORTED_CAPABILITY);
+    let listed = client
+        .read(
+            scope(),
+            read("revisions.list", "revisions", json!({"limit": 1})),
+        )
+        .await
+        .unwrap();
+    let latest = json(&listed.content);
+    assert_eq!(latest["items"][0]["outcome"], "failed");
+    assert_eq!(latest["next_before"], latest["items"][0]["id"]);
+    let active = client
+        .read(scope(), read("revisions.list", "revisions", json!({})))
+        .await
+        .unwrap();
+    assert_eq!(json(&active.content)["items"][1]["outcome"], "active");
 }

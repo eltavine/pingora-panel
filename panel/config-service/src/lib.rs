@@ -13,11 +13,13 @@
 mod configuration;
 mod deployments;
 mod draft;
+mod language;
 mod operations;
 mod publication;
 mod receipts;
 mod reconcile;
 mod recording;
+mod revisions;
 
 pub use configuration::ConfigurationService;
 pub use deployments::{PendingActivation, PgDeployments, PreparedRecord};
@@ -71,6 +73,11 @@ pub const MIGRATIONS: &[SchemaMigration] = &[
         "draft configuration",
         include_str!("../migrations/10002_draft_configuration.sql"),
     ),
+    SchemaMigration::new(
+        10_003,
+        "configuration revisions",
+        include_str!("../migrations/10003_configuration_revisions.sql"),
+    ),
 ];
 
 pub fn default_addresses() -> DefaultAddresses {
@@ -123,6 +130,7 @@ pub fn process(
         reconciliation.clone(),
     ));
     let drafts = PgDrafts::new(process.database(), ServiceName::new(SERVICE)?);
+    let revisions = revisions::PgRevisions::new(process.database());
     Ok(process
         .with_migrations(MIGRATIONS)
         .with_protocol(protocol_range(CONFIG_V1))
@@ -146,9 +154,13 @@ pub fn process(
             Ok(())
         })
         .with_grpc_service(
-            ConfigurationServer::new(ConfigurationService::new(drafts, Arc::clone(&use_cases)))
-                .max_decoding_message_size(MAX_MESSAGE_BYTES)
-                .max_encoding_message_size(MAX_MESSAGE_BYTES),
+            ConfigurationServer::new(ConfigurationService::new(
+                drafts,
+                revisions,
+                Arc::clone(&use_cases),
+            ))
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES),
         )
         .with_grpc_service(
             PublicationServer::from_arc(Arc::new(PublicationService::new(use_cases)))
