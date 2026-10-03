@@ -230,7 +230,11 @@ every directive for editors, `GET /api/v1/config/plan` lists the resources
 and file lines the draft changes relative to the active revision,
 `GET /api/v1/config/ir` returns the runtime snapshot it compiles to, and
 `POST /api/v1/config/dry-run` prepares that snapshot on the gateway without
-activating it. `POST /api/v1/config/import/nginx` converts the documented
+activating it. Redirect targets and response bodies are templates the
+gateway fills in per request: `$host`, `$uri`, `$method`, `$scheme`,
+`$client_ip`, `$request_id`, `$upstream_addr`, `$http_<name>` and
+`$cookie_<name>`, with `$$` for a literal dollar; gateways that cannot
+evaluate them refuse the snapshot. `POST /api/v1/config/import/nginx` converts the documented
 NGINX subset — `server`, `listen`, `server_name`, `location`, `proxy_pass`,
 `root`, `index`, `try_files`, `return` and `upstream` — and reports every
 directive it did not carry over at its position. Every apply records a revision with its files, author, note
