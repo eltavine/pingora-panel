@@ -1,6 +1,5 @@
 use crate::{
     draft::{ChangeOutput, ChangeRequest, DraftChange, DraftState, PgDrafts, DRAFT},
-    events::EventLog,
     language, operations,
     revisions::{NewRevision, PgRevisions},
 };
@@ -18,6 +17,7 @@ use panel_domain::RevisionId;
 use panel_engine::{validate_engine_ir, EngineCapability};
 use panel_errors::{Diagnostic, DiagnosticSeverity, PanelError, Result, ValidationReport};
 use panel_ir::{RuntimeSnapshot, IR_SCHEMA_VERSION};
+use panel_postgres::EventLog;
 use panel_service::trace_context;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -182,7 +182,7 @@ impl ConfigurationService {
             ),
         };
         self.events
-            .record(event_type, DRAFT, &context.scope(), context.actor(), data)
+            .record(event_type, DRAFT, &context.scope(), context.actor(), &data)
             .await;
     }
 
@@ -589,7 +589,7 @@ impl Configuration for ConfigurationService {
                         ("revision", &id.to_string()),
                         &context.scope(),
                         context.actor(),
-                        json!({ "revision": id, "note": note }),
+                        &json!({ "revision": id, "note": note }),
                     )
                     .await;
                 let draft = self.drafts.load().await?;
@@ -670,7 +670,7 @@ impl Configuration for ConfigurationService {
                     DRAFT,
                     &context.scope(),
                     context.actor(),
-                    json!({
+                    &json!({
                         "operation": request.operation,
                         "resource": request.resource,
                         "code": error.code.as_str(),

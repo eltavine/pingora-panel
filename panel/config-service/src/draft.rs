@@ -1,10 +1,10 @@
-use crate::{events::EventLog, language};
+use crate::language;
 use chrono::{DateTime, Utc};
 use panel_application::{ContentHash, IdempotencyKey, RequestScope};
 use panel_config_dsl::Sources;
 use panel_config_model::{ConfigModel, MODEL_VERSION};
 use panel_errors::{PanelError, Result};
-use panel_postgres::{storage_error, PgOutbox, ServiceDatabase};
+use panel_postgres::{storage_error, EventLog, PgOutbox, ServiceDatabase};
 use serde_json::json;
 use sqlx::{PgConnection, PgPool};
 

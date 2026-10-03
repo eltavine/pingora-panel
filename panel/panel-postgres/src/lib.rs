@@ -12,6 +12,7 @@
 mod bootstrap;
 mod database;
 mod error;
+mod event_log;
 mod health;
 mod identifier;
 mod inbox;
@@ -21,6 +22,7 @@ mod scram;
 pub use bootstrap::{DatabaseBootstrap, ServiceRole};
 pub use database::{SchemaMigration, ServiceDatabase, ServiceDatabaseConfig};
 pub use error::storage_error;
+pub use event_log::EventLog;
 pub use health::PgHealthCheck;
 pub use identifier::SqlIdentifier;
 pub use inbox::PgProcessedEventStore;

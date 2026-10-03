@@ -13,7 +13,6 @@
 mod configuration;
 mod deployments;
 mod draft;
-mod events;
 mod language;
 mod operations;
 mod publication;
@@ -25,7 +24,6 @@ mod revisions;
 pub use configuration::ConfigurationService;
 pub use deployments::{PendingActivation, PgDeployments, PreparedRecord};
 pub use draft::{DraftState, PgDrafts};
-pub use events::EventLog;
 pub use publication::PublicationService;
 pub use receipts::PgActivationReceipts;
 pub use reconcile::{Reconciler, Reconciliation, ReconciliationCheck, ReconciliationWatch};
@@ -45,7 +43,7 @@ use panel_errors::Result;
 use panel_health::Impact;
 use panel_platform::{Capability, ServiceName};
 use panel_platform_codec::protocol_range;
-use panel_postgres::{SchemaMigration, SqlIdentifier};
+use panel_postgres::{EventLog, SchemaMigration, SqlIdentifier};
 use panel_service::Environment;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
@@ -120,7 +118,7 @@ pub fn process(
         )?),
     ));
     let receipts = Arc::new(PgActivationReceipts::new(process.database()));
-    let events = events::EventLog::new(process.database(), ServiceName::new(SERVICE)?);
+    let events = EventLog::new(process.database(), ServiceName::new(SERVICE)?);
     let deployments = PgDeployments::new(process.database());
     let (reconciler, reconciliation) = Reconciler::new(
         Arc::clone(&gateway),

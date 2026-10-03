@@ -1,6 +1,5 @@
 use crate::{
     deployments::PgDeployments,
-    events::EventLog,
     reconcile::{Reconciliation, ReconciliationWatch},
 };
 use async_trait::async_trait;
@@ -9,6 +8,7 @@ use panel_application::{
     GatewayUseCases, IdempotencyKey, IdempotencyLookup, PreparedDeployment, RequestScope,
 };
 use panel_errors::{PanelError, Result, ValidationReport};
+use panel_postgres::EventLog;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -63,7 +63,7 @@ impl RecordingUseCases {
                 SNAPSHOT,
                 &context.scope(),
                 context.actor(),
-                data,
+                &data,
             )
             .await;
     }

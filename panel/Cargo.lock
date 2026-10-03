@@ -2631,11 +2631,13 @@ dependencies = [
  "panel-health",
  "panel-outbox",
  "pbkdf2",
+ "serde",
  "serde_json",
  "sha2 0.11.0",
  "sqlx",
  "stringprep",
  "tokio",
+ "tracing",
  "uuid",
 ]
 

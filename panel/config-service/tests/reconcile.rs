@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use config_service::{
-    EventLog, PgActivationReceipts, PgDeployments, Reconciler, Reconciliation, ReconciliationCheck,
+    PgActivationReceipts, PgDeployments, Reconciler, Reconciliation, ReconciliationCheck,
     RecordingUseCases, MIGRATIONS,
 };
 use gateway_grpc::GatewayGrpcService;
@@ -18,7 +18,7 @@ use panel_errors::ErrorCode;
 use panel_events::ServiceName;
 use panel_health::{HealthCheck, HealthStatus};
 use panel_ir::{RuntimeSnapshot, IR_SCHEMA_VERSION};
-use panel_postgres::{testing::TestDatabase, ServiceDatabase};
+use panel_postgres::{testing::TestDatabase, EventLog, ServiceDatabase};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::TcpListenerStream;
