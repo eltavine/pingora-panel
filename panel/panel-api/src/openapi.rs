@@ -54,7 +54,10 @@ mod tests;
         crate::identity::get_account, crate::identity::update_account,
         crate::identity::reset_password, crate::identity::account_sessions,
         crate::identity::end_account_session, crate::identity::account_tokens,
-        crate::identity::revoke_account_token, crate::identity::list_roles
+        crate::identity::revoke_account_token, crate::identity::list_roles,
+        crate::identity::create_role, crate::identity::replace_role, crate::identity::delete_role,
+        crate::identity::end_other_sessions, crate::identity::end_account_sessions,
+        crate::identity::rotate_token
     ),
     tags(
         (name = "configuration", description = "Sites, domains, routes, upstreams, listeners and TLS profiles, edited as a draft and applied to the gateway"),

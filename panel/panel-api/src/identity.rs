@@ -18,7 +18,8 @@ use chrono::{DateTime, Utc};
 use panel_errors::PanelError;
 use panel_identity::{
     Account, AccountChange, AccountId, AccountRequest, ApiToken, Credential, Permission,
-    PermissionSet, Principal, Role, Session, SessionId, TokenId, TokenRequest, Transport,
+    PermissionSet, Principal, Role, RoleRequest, Session, SessionId, TokenId, TokenRequest,
+    Transport,
 };
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
@@ -274,6 +275,39 @@ pub struct NewToken {
 pub struct CreatedToken {
     pub token: TokenView,
     pub secret: String,
+}
+
+/// A role of the caller's choosing.
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct NewRole {
+    /// 1 to 64 lowercase letters, digits, `.`, `_` or `-`.
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    pub permissions: Vec<String>,
+}
+
+/// What a role that is not built in becomes.
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct RoleChange {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    pub permissions: Vec<String>,
+}
+
+/// How many sessions ended.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct EndedSessions {
+    pub ended: u64,
+}
+
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Path)]
+pub(crate) struct RolePath {
+    /// Role identifier.
+    id: String,
 }
 
 #[derive(Deserialize, IntoParams)]
@@ -812,4 +846,152 @@ pub(crate) async fn list_roles<U>(
     let gate = gate(&state)?;
     let roles = gate.identity.roles().await?;
     Ok(Json(roles.into_iter().map(RoleView::from).collect()))
+}
+
+/// Creates a role.
+#[utoipa::path(post, path = "/api/v1/roles", request_body = NewRole,
+    responses((status = 201, body = RoleView)), tag = "identity")]
+pub(crate) async fn create_role<U>(
+    State(state): State<ApiState<U>>,
+    headers: HeaderMap,
+    Extension(principal): Extension<Principal>,
+    payload: Result<Json<NewRole>, JsonRejection>,
+) -> Result<Response, ApiError> {
+    let gate = gate(&state)?;
+    let request = body(payload)?;
+    let role = gate
+        .identity
+        .create_role(
+            RoleRequest {
+                id: request.id,
+                name: request.name,
+                description: request.description,
+                permissions: PermissionSet::from_names(&request.permissions)?,
+            },
+            &request_scope(&headers)?,
+            principal.actor(),
+        )
+        .await?;
+    Ok((StatusCode::CREATED, Json(RoleView::from(role))).into_response())
+}
+
+/// Replaces a role that is not built in.
+#[utoipa::path(put, path = "/api/v1/roles/{id}", params(RolePath), request_body = RoleChange,
+    responses((status = 200, body = RoleView)), tag = "identity")]
+pub(crate) async fn replace_role<U>(
+    State(state): State<ApiState<U>>,
+    headers: HeaderMap,
+    Extension(principal): Extension<Principal>,
+    Path(path): Path<RolePath>,
+    payload: Result<Json<RoleChange>, JsonRejection>,
+) -> Result<Json<RoleView>, ApiError> {
+    let gate = gate(&state)?;
+    let request = body(payload)?;
+    let role = gate
+        .identity
+        .update_role(
+            RoleRequest {
+                id: path.id,
+                name: request.name,
+                description: request.description,
+                permissions: PermissionSet::from_names(&request.permissions)?,
+            },
+            &request_scope(&headers)?,
+            principal.actor(),
+        )
+        .await?;
+    Ok(Json(role.into()))
+}
+
+/// Deletes a role that is not built in and that no account holds.
+#[utoipa::path(delete, path = "/api/v1/roles/{id}", params(RolePath),
+    responses((status = 204)), tag = "identity")]
+pub(crate) async fn delete_role<U>(
+    State(state): State<ApiState<U>>,
+    headers: HeaderMap,
+    Extension(principal): Extension<Principal>,
+    Path(path): Path<RolePath>,
+) -> Result<StatusCode, ApiError> {
+    let gate = gate(&state)?;
+    gate.identity
+        .delete_role(&path.id, &request_scope(&headers)?, principal.actor())
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Ends every session of the caller but the one making the request.
+#[utoipa::path(delete, path = "/api/v1/account/sessions",
+    responses((status = 200, body = EndedSessions)), tag = "identity")]
+pub(crate) async fn end_other_sessions<U>(
+    State(state): State<ApiState<U>>,
+    headers: HeaderMap,
+    Extension(principal): Extension<Principal>,
+) -> Result<Json<EndedSessions>, ApiError> {
+    let gate = gate(&state)?;
+    let ended = gate
+        .identity
+        .end_sessions(
+            principal.account,
+            principal.session(),
+            &request_scope(&headers)?,
+            principal.actor(),
+        )
+        .await?;
+    Ok(Json(EndedSessions { ended }))
+}
+
+/// Ends every session of an account.
+#[utoipa::path(delete, path = "/api/v1/accounts/{id}/sessions", params(AccountPath),
+    responses((status = 200, body = EndedSessions)), tag = "identity")]
+pub(crate) async fn end_account_sessions<U>(
+    State(state): State<ApiState<U>>,
+    headers: HeaderMap,
+    Extension(principal): Extension<Principal>,
+    Path(path): Path<AccountPath>,
+) -> Result<Json<EndedSessions>, ApiError> {
+    let gate = gate(&state)?;
+    let ended = gate
+        .identity
+        .end_sessions(
+            AccountId::from_uuid(path.id),
+            None,
+            &request_scope(&headers)?,
+            principal.actor(),
+        )
+        .await?;
+    Ok(Json(EndedSessions { ended }))
+}
+
+/// Replaces one of the caller's API tokens by one with a new secret, the
+/// same name and permissions and a fresh lifetime of the same length; the
+/// old secret stops working at once.
+#[utoipa::path(post, path = "/api/v1/account/tokens/{id}/rotate", params(OwnItemPath),
+    responses((status = 201, body = CreatedToken)), tag = "identity")]
+pub(crate) async fn rotate_token<U>(
+    State(state): State<ApiState<U>>,
+    headers: HeaderMap,
+    Extension(principal): Extension<Principal>,
+    Path(path): Path<OwnItemPath>,
+) -> Result<Response, ApiError> {
+    let gate = gate(&state)?;
+    let (token, secret) = gate
+        .identity
+        .rotate_token(
+            &principal,
+            TokenId::from_uuid(path.id),
+            &request_scope(&headers)?,
+        )
+        .await?;
+    let mut response = (
+        StatusCode::CREATED,
+        Json(CreatedToken {
+            token: token.into(),
+            secret: secret.expose().to_owned(),
+        }),
+    )
+        .into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, "no-store".parse().expect("static"));
+    Ok(response)
 }

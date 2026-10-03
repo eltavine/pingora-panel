@@ -37,9 +37,10 @@ pub use gateway_runtime::{
     UpstreamHealthReportResponse, UpstreamHealthResponse, WorkerCountRequest,
 };
 pub use identity::{
-    AccountPatch, AccountView, CreatedToken, CredentialKind, CurrentSession, LoginRequest,
-    LoginResponse, NewAccount, NewToken, PasswordChange, PasswordReset, PermissionView, RoleView,
-    SessionTransport, SessionView, SetupRequest, SetupStatus, TokenView,
+    AccountPatch, AccountView, CreatedToken, CredentialKind, CurrentSession, EndedSessions,
+    LoginRequest, LoginResponse, NewAccount, NewRole, NewToken, PasswordChange, PasswordReset,
+    PermissionView, RoleChange, RoleView, SessionTransport, SessionView, SetupRequest, SetupStatus,
+    TokenView,
 };
 pub use openapi::ApiDoc;
 pub use router::{router, router_with_config};

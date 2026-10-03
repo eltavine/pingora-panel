@@ -505,3 +505,131 @@ async fn refusals_of_authenticated_callers_are_recorded() {
         ("root", "csrf")
     );
 }
+
+#[tokio::test]
+async fn roles_sessions_and_tokens_are_managed_through_the_api() {
+    let app = app();
+    set_up(&app).await;
+    let root = bearer(&app, "root").await;
+    let created = call(
+        &app,
+        "POST",
+        "/api/v1/roles",
+        Some(&root),
+        Some(json!({"id": "deployer", "name": "Deployer", "permissions": ["config.read"]})),
+    )
+    .await;
+    assert_eq!(created.status, StatusCode::CREATED, "{}", created.body);
+    assert_eq!(created.body["built_in"], false);
+    let replaced = call(
+        &app,
+        "PUT",
+        "/api/v1/roles/deployer",
+        Some(&root),
+        Some(json!({"name": "Deployer", "permissions": ["config.read", "config.apply"]})),
+    )
+    .await;
+    assert_eq!(
+        replaced.body["permissions"],
+        json!(["config.read", "config.apply"])
+    );
+    let built_in = call(
+        &app,
+        "PUT",
+        "/api/v1/roles/administrator",
+        Some(&root),
+        Some(json!({"name": "Mine", "permissions": ["config.read"]})),
+    )
+    .await;
+    assert_eq!(built_in.status, StatusCode::FORBIDDEN);
+    let unknown = call(
+        &app,
+        "POST",
+        "/api/v1/roles",
+        Some(&root),
+        Some(json!({"id": "x", "name": "X", "permissions": ["root.everything"]})),
+    )
+    .await;
+    assert_eq!(unknown.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        call(&app, "DELETE", "/api/v1/roles/deployer", Some(&root), None)
+            .await
+            .status,
+        StatusCode::NO_CONTENT
+    );
+
+    let other = bearer(&app, "root").await;
+    let ended = call(
+        &app,
+        "DELETE",
+        "/api/v1/account/sessions",
+        Some(&root),
+        None,
+    )
+    .await;
+    assert!(ended.body["ended"].as_u64().unwrap() >= 1, "{}", ended.body);
+    assert_eq!(
+        call(&app, "GET", "/api/v1/session", Some(&other), None)
+            .await
+            .status,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        call(&app, "GET", "/api/v1/session", Some(&root), None)
+            .await
+            .status,
+        StatusCode::OK
+    );
+
+    let granted = call(
+        &app,
+        "POST",
+        "/api/v1/account/tokens",
+        Some(&root),
+        Some(json!({"name": "ci", "permissions": ["gateway.read"], "expires_in_days": 30})),
+    )
+    .await;
+    let old = granted.body["secret"].as_str().unwrap().to_owned();
+    let id = granted.body["token"]["id"].as_str().unwrap().to_owned();
+    let rotated = call(
+        &app,
+        "POST",
+        &format!("/api/v1/account/tokens/{id}/rotate"),
+        Some(&root),
+        None,
+    )
+    .await;
+    assert_eq!(rotated.status, StatusCode::CREATED, "{}", rotated.body);
+    assert_eq!(rotated.body["token"]["name"], "ci");
+    let new = rotated.body["secret"].as_str().unwrap().to_owned();
+    assert_eq!(
+        call(&app, "GET", "/api/v1/gateway/status", Some(&old), None)
+            .await
+            .status,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        call(&app, "GET", "/api/v1/gateway/status", Some(&new), None)
+            .await
+            .status,
+        StatusCode::OK
+    );
+
+    let current = call(&app, "GET", "/api/v1/session", Some(&root), None).await;
+    let account = current.body["account"]["id"].as_str().unwrap().to_owned();
+    let everything = call(
+        &app,
+        "DELETE",
+        &format!("/api/v1/accounts/{account}/sessions"),
+        Some(&root),
+        None,
+    )
+    .await;
+    assert_eq!(everything.body["ended"], 1);
+    assert_eq!(
+        call(&app, "GET", "/api/v1/session", Some(&root), None)
+            .await
+            .status,
+        StatusCode::UNAUTHORIZED
+    );
+}

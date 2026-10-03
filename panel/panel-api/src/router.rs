@@ -185,7 +185,10 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
             "/api/v1/account/password",
             put(identity::change_password::<U>),
         )
-        .route("/api/v1/account/sessions", get(identity::own_sessions::<U>))
+        .route(
+            "/api/v1/account/sessions",
+            get(identity::own_sessions::<U>).delete(identity::end_other_sessions::<U>),
+        )
         .route(
             "/api/v1/account/sessions/{id}",
             delete(identity::end_own_session::<U>),
@@ -197,6 +200,10 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         .route(
             "/api/v1/account/tokens/{id}",
             delete(identity::revoke_own_token::<U>),
+        )
+        .route(
+            "/api/v1/account/tokens/{id}/rotate",
+            post(identity::rotate_token::<U>),
         )
         .route(
             "/api/v1/accounts",
@@ -212,7 +219,7 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         )
         .route(
             "/api/v1/accounts/{id}/sessions",
-            get(identity::account_sessions::<U>),
+            get(identity::account_sessions::<U>).delete(identity::end_account_sessions::<U>),
         )
         .route(
             "/api/v1/accounts/{id}/sessions/{session}",
@@ -226,7 +233,14 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
             "/api/v1/accounts/{id}/tokens/{token}",
             delete(identity::revoke_account_token::<U>),
         )
-        .route("/api/v1/roles", get(identity::list_roles::<U>))
+        .route(
+            "/api/v1/roles",
+            get(identity::list_roles::<U>).post(identity::create_role::<U>),
+        )
+        .route(
+            "/api/v1/roles/{id}",
+            put(identity::replace_role::<U>).delete(identity::delete_role::<U>),
+        )
         .route_layer(from_fn_with_state(state.clone(), access::guard::<U>))
         .layer(DefaultBodyLimit::max(config.max_body_bytes()))
         .with_state(state);
