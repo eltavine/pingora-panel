@@ -808,7 +808,10 @@ schema. The administrator, never a service role, must own the database.
 
 `ServiceDatabase::migrate` applies platform migrations (versions below 10000) and the
 service's own migrations (10000 and above) in one ordered history stored in the
-service schema, so services migrate independently.
+service schema, so services migrate independently. A published migration is never
+edited, renamed or removed, and a new one sorts after every published version in its
+directory: CI compares them with the baseline commit, because a database that applied
+the old file would otherwise refuse to start or apply changes out of order.
 
 Producers call `PgOutbox::append` inside the transaction that changes their state, so an
 event exists exactly when that change commits. Each row stores the CloudEvents Protobuf
