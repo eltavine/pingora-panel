@@ -16,9 +16,20 @@ use utoipa::{
 
 pub(super) struct HttpConventions;
 
-/// Response enums whose values grow with the product, such as the blocks of
-/// the configuration language; clients must accept values they do not know.
-const EXTENSIBLE_ENUMS: &[&str] = &["Context", "PasswordSignInMode"];
+/// Response enums whose values grow with the product or with the standards
+/// behind them, such as the blocks of the configuration language or ACME
+/// challenge types; clients must accept values they do not know.
+const EXTENSIBLE_ENUMS: &[&str] = &[
+    "AcmeChallenge",
+    "CertificateSource",
+    "Context",
+    "CredentialKind",
+    "DnsProviderKind",
+    "HealthCheckProtocol",
+    "KeyAlgorithm",
+    "PasswordSignInMode",
+    "TsigAlgorithm",
+];
 
 impl Modify for HttpConventions {
     fn modify(&self, document: &mut openapi::OpenApi) {

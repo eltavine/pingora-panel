@@ -47,7 +47,7 @@ const fields = computed(() => {
     { label: t('certificates.notAfter'), value: d(new Date(certificate.not_after), 'datetime') },
     {
       label: t('certificates.keyAlgorithm'),
-      value: `${KEY_ALGORITHMS[certificate.key_algorithm]} · ${t('certificates.keyBits', { bits: certificate.key_bits })}`,
+      value: `${KEY_ALGORITHMS[certificate.key_algorithm] ?? certificate.key_algorithm} · ${t('certificates.keyBits', { bits: certificate.key_bits })}`,
     },
     { label: t('certificates.chainLength'), value: String(certificate.chain_length) },
     { label: t('certificates.version'), value: String(certificate.version) },

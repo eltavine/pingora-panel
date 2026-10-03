@@ -32,6 +32,19 @@ guard understands Protobuf rather than OpenAPI. Running a third-party CLI as a
 CI-only tool keeps it out of Rust application modules and avoids exposing its
 types through stable ports.
 
+## Enumerations that grow
+
+Adding a value to an enum that responses carry breaks clients that match
+on every value. Enums whose values grow with the product or with the
+standards behind them (DNS provider kinds, ACME challenge types, key and TSIG
+algorithms, health check protocols, certificate sources, credential kinds,
+the blocks of the configuration language) are therefore published as
+`x-extensible-enum` (Zalando RESTful API guideline 112): clients must accept
+values they do not know, and the server still validates requests against the
+values it knows. Closed sets such as risks, states and outcomes stay `enum`.
+Moving an enum to `x-extensible-enum` reads as removed request values to
+`oasdiff`, so it happens before the enum reaches a published contract.
+
 ## Upgrade and limits
 
 Pinning the release and digest makes upgrades reviewable and guards against

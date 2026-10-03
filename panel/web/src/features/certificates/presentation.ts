@@ -16,7 +16,8 @@ export const STATUS_TONES: Record<CertificateStatus, StatusTone> = {
   not_yet_valid: 'pending',
 }
 
-export const KEY_ALGORITHMS: Record<KeyAlgorithm, string> = {
+/** Names of the key algorithms the panel knows; others show as they are. */
+export const KEY_ALGORITHMS: Partial<Record<KeyAlgorithm, string>> = {
   rsa: 'RSA',
   ecdsa_p256: 'ECDSA P-256',
   ecdsa_p384: 'ECDSA P-384',
