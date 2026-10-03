@@ -5,22 +5,59 @@
 
 use crate::{error::ApiError, request_context::request_scope, ApiState};
 use async_trait::async_trait;
+use axum::extract::ConnectInfo;
 use axum::{
     extract::{MatchedPath, Request, State},
     http::{header, HeaderMap, HeaderValue, Method},
     middleware::Next,
     response::{IntoResponse, Response},
 };
+use chrono::Utc;
 use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
 use panel_application::RequestScope;
+use panel_application::{SiteAccess, SiteScope};
 use panel_errors::PanelError;
-use panel_identity::{Client, Identity, Permission, Principal, Transport, TOKEN_PREFIX};
+use panel_identity::{
+    Access as HeldAccess, Client, GrantScope, Identity, Permission, Principal, Transport, SCOPABLE,
+    TOKEN_PREFIX,
+};
 use serde::Serialize;
 use std::{net::SocketAddr, num::NonZeroU32, sync::Arc, time::Duration};
 
 pub(crate) const SESSION_COOKIE: &str = "__Host-ppanel_session";
 pub(crate) const CSRF_HEADER: &str = "x-csrf-token";
 pub(crate) const ACTOR_HEADER: &str = "x-actor";
+/// The sites a request is limited to (ADR 0021); set only by the guard.
+pub(crate) const SITE_SCOPE_HEADER: &str = "x-panel-site-scope";
+
+/// The site scope of configuration permissions held only for some sites.
+fn site_scope(access: &HeldAccess) -> SiteScope {
+    let limited = SCOPABLE
+        .iter()
+        .filter_map(|permission| {
+            let mut held = SiteAccess {
+                permission: permission.name().into(),
+                ..SiteAccess::default()
+            };
+            for scope in access.scopes(*permission) {
+                match scope {
+                    GrantScope::SiteGroup { group } => held.groups.push(group.clone()),
+                    GrantScope::Site { site } => held.sites.push(site.to_string()),
+                    _ => {}
+                }
+            }
+            (!held.groups.is_empty() || !held.sites.is_empty()).then_some(held)
+        })
+        .collect();
+    SiteScope {
+        unrestricted: SCOPABLE
+            .iter()
+            .filter(|permission| access.unrestricted.contains(**permission))
+            .map(|permission| permission.name().to_owned())
+            .collect(),
+        limited,
+    }
+}
 
 /// What a route requires of its caller.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -84,6 +121,21 @@ pub(crate) static ROUTES: &[(&str, &str, Access)] = &[
     (
         "POST",
         "/api/v1/accounts/{id}/tokens",
+        Requires(IdentityManage),
+    ),
+    (
+        "GET",
+        "/api/v1/accounts/{id}/grants",
+        Requires(IdentityRead),
+    ),
+    (
+        "POST",
+        "/api/v1/accounts/{id}/grants",
+        Requires(IdentityManage),
+    ),
+    (
+        "DELETE",
+        "/api/v1/accounts/{id}/grants/{grant}",
         Requires(IdentityManage),
     ),
     (
@@ -608,6 +660,7 @@ pub(crate) async fn guard<U: Send + Sync + 'static>(
         return next.run(request).await;
     };
     request.headers_mut().remove(ACTOR_HEADER);
+    request.headers_mut().remove(SITE_SCOPE_HEADER);
     let route = request
         .extensions()
         .get::<MatchedPath>()
@@ -673,15 +726,36 @@ pub(crate) async fn guard<U: Send + Sync + 'static>(
             return refused("csrf", None, error).await;
         }
     }
+    let peer = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ConnectInfo(address)| *address);
+    let held = principal.access(
+        Utc::now(),
+        client(request.headers(), peer)
+            .address
+            .and_then(|address| address.parse().ok()),
+    );
     if let Requires(permission) = access {
-        if !principal.can(permission) {
-            let error = ApiError::new(PanelError::permission_denied(format!(
-                "this needs the {} permission",
-                permission.name()
-            )));
-            return refused("permission", Some(permission), error).await;
+        if !held.unrestricted.contains(permission) {
+            if !held.holds(permission) {
+                let error = ApiError::new(PanelError::permission_denied(format!(
+                    "this needs the {} permission",
+                    permission.name()
+                )));
+                return refused("permission", Some(permission), error).await;
+            }
+            // Held only for some sites: the configuration service keeps the
+            // request within them.
+            if let Ok(value) = serde_json::to_string(&site_scope(&held))
+                .map_err(|_| ())
+                .and_then(|scope| HeaderValue::from_str(&scope).map_err(|_| ()))
+            {
+                request.headers_mut().insert(SITE_SCOPE_HEADER, value);
+            }
         }
     }
+    request.extensions_mut().insert(held);
     if let Ok(actor) = HeaderValue::from_str(principal.actor()) {
         request.headers_mut().insert(ACTOR_HEADER, actor);
     }

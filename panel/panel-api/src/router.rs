@@ -1,8 +1,8 @@
 use crate::{
     access, acme,
     admission::{admit, Admission},
-    approvals, audit, certificates, configuration as config, gateway_runtime as runtime, identity,
-    language, middleware, routes, sign_in, tls_checks, workload, ApiConfig, ApiState,
+    approvals, audit, certificates, configuration as config, gateway_runtime as runtime, grants,
+    identity, language, middleware, routes, sign_in, tls_checks, workload, ApiConfig, ApiState,
 };
 use axum::{
     extract::DefaultBodyLimit,
@@ -327,6 +327,14 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         .route(
             "/api/v1/accounts/{id}/tokens",
             get(identity::account_tokens::<U>).post(identity::issue_token::<U>),
+        )
+        .route(
+            "/api/v1/accounts/{id}/grants",
+            get(grants::list_grants::<U>).post(grants::create_grant::<U>),
+        )
+        .route(
+            "/api/v1/accounts/{id}/grants/{grant}",
+            delete(grants::delete_grant::<U>),
         )
         .route(
             "/api/v1/accounts/{id}/tokens/{token}",

@@ -1,5 +1,7 @@
+use crate::access::SITE_SCOPE_HEADER;
 use crate::error::ApiError;
 use axum::http::HeaderMap;
+use panel_application::SiteScope;
 use panel_application::{
     CommandContext, IdempotencyKey, RequestDeadline, RequestId, RequestScope, TraceContext,
 };
@@ -51,11 +53,21 @@ pub(crate) fn trace_context(headers: &HeaderMap) -> Option<TraceContext> {
 pub(crate) fn request_scope(headers: &HeaderMap) -> Result<RequestScope, ApiError> {
     let request_id = RequestId::new(required_header(headers, REQUEST_ID_HEADER)?)?;
     let metadata = QueryHeaders::parse(headers)?;
-    let scope = RequestScope::new(request_id).with_trace_context(trace_context(headers));
+    let scope = RequestScope::new(request_id)
+        .with_trace_context(trace_context(headers))
+        .with_site_scope(site_scope(headers));
     Ok(match metadata.correlation_id {
         Some(correlation_id) => scope.with_correlation_id(RequestId::new(correlation_id)?),
         None => scope,
     })
+}
+
+/// The site scope the guard attached; only the guard sets the header.
+fn site_scope(headers: &HeaderMap) -> Option<SiteScope> {
+    headers
+        .get(SITE_SCOPE_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| serde_json::from_str(value).ok())
 }
 
 /// Metadata accepted by mutating endpoints. The same type defines the
@@ -106,6 +118,7 @@ pub(crate) fn command_context(headers: &HeaderMap) -> Result<CommandContext, Api
         deadline,
         idempotency_key,
     )
+    .map(|context| context.with_site_scope(site_scope(headers)))
     .map(|context| context.with_trace_context(trace_context(headers)))
     .map_err(Into::into)
 }

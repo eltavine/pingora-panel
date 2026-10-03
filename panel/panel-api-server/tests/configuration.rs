@@ -884,3 +884,158 @@ async fn covered_changes_wait_for_another_person() {
         .await;
     stack.stop().await;
 }
+
+#[tokio::test]
+async fn grants_limit_people_to_a_site_group_and_their_conditions() {
+    let Some(stack) = stack().await else {
+        return;
+    };
+    use reqwest::Method;
+    let admin = &stack.api;
+    admin
+        .json(
+            admin
+                .mutate(Method::PUT, "/api/v1/listeners/http", "listener")
+                .json(&json!({"id": "http", "address": "0.0.0.0:8080"})),
+            StatusCode::OK,
+        )
+        .await;
+    let mut ids = HashMap::new();
+    for (name, group) in [("shop", "shop"), ("intranet", "corp")] {
+        let (site, _) = admin
+            .json(
+                admin
+                    .mutate(Method::POST, "/api/v1/sites", name)
+                    .json(&json!({
+                        "name": name,
+                        "group": group,
+                        "action": {"type": "respond"},
+                        "domains": [{"host": format!("{name}.example.com")}]
+                    })),
+                StatusCode::CREATED,
+            )
+            .await;
+        ids.insert(name, site["id"].as_str().unwrap().to_owned());
+    }
+    admin
+        .json(
+            admin
+                .mutate(Method::POST, "/api/v1/config/apply", "apply-1")
+                .json(&json!({})),
+            StatusCode::OK,
+        )
+        .await;
+
+    let keeper = person(admin, "keeper", &[]).await;
+    let (accounts, _) = admin
+        .json(admin.get("/api/v1/accounts"), StatusCode::OK)
+        .await;
+    let keeper_id = accounts
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|account| account["username"] == "keeper")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (grant, _) = admin
+        .json(
+            admin
+                .mutate(
+                    Method::POST,
+                    &format!("/api/v1/accounts/{keeper_id}/grants"),
+                    "grant",
+                )
+                .json(
+                    &json!({"role": "operator", "scope": {"kind": "site_group", "group": "shop"}}),
+                ),
+            StatusCode::CREATED,
+        )
+        .await;
+    assert_eq!(grant["scope"]["group"], "shop");
+
+    let (current, _) = keeper
+        .json(keeper.get("/api/v1/session"), StatusCode::OK)
+        .await;
+    assert!(current["limited"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("config.write")));
+    let (sites, _) = keeper
+        .json(keeper.get("/api/v1/sites"), StatusCode::OK)
+        .await;
+    let names: Vec<&str> = sites["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|site| site["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["shop"]);
+    keeper
+        .json(
+            keeper.mutate(
+                Method::POST,
+                &format!("/api/v1/sites/{}/disable", ids["intranet"]),
+                "theirs",
+            ),
+            StatusCode::FORBIDDEN,
+        )
+        .await;
+    keeper
+        .json(
+            keeper
+                .mutate(Method::PUT, "/api/v1/listeners/https", "shared")
+                .json(&json!({"id": "https", "address": "0.0.0.0:8443"})),
+            StatusCode::FORBIDDEN,
+        )
+        .await;
+    keeper
+        .json(
+            keeper.mutate(
+                Method::POST,
+                &format!("/api/v1/sites/{}/disable", ids["shop"]),
+                "mine",
+            ),
+            StatusCode::OK,
+        )
+        .await;
+    keeper
+        .json(
+            keeper
+                .mutate(Method::POST, "/api/v1/config/apply", "apply-2")
+                .json(&json!({})),
+            StatusCode::OK,
+        )
+        .await;
+
+    let remote = person(admin, "remote", &[]).await;
+    let remote_id = admin
+        .json(admin.get("/api/v1/accounts"), StatusCode::OK)
+        .await
+        .0
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|account| account["username"] == "remote")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    admin
+        .json(
+            admin
+                .mutate(
+                    Method::POST,
+                    &format!("/api/v1/accounts/{remote_id}/grants"),
+                    "office-only",
+                )
+                .json(&json!({"role": "viewer", "conditions": {"networks": ["203.0.113.0/24"]}})),
+            StatusCode::CREATED,
+        )
+        .await;
+    remote
+        .json(remote.get("/api/v1/sites"), StatusCode::FORBIDDEN)
+        .await;
+    stack.stop().await;
+}

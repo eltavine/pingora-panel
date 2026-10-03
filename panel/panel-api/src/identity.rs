@@ -17,9 +17,9 @@ use axum::{
 use chrono::{DateTime, Utc};
 use panel_errors::PanelError;
 use panel_identity::{
-    Account, AccountChange, AccountId, AccountRequest, ApiToken, Credential, Permission,
-    PermissionSet, Principal, Role, RoleRequest, Session, SessionId, TokenId, TokenRequest,
-    Transport,
+    Access as HeldAccess, Account, AccountChange, AccountId, AccountRequest, ApiToken, Credential,
+    Permission, PermissionSet, Principal, Role, RoleRequest, Session, SessionId, TokenId,
+    TokenRequest, Transport,
 };
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
@@ -188,6 +188,8 @@ pub enum CredentialKind {
 pub struct CurrentSession {
     pub account: AccountView,
     pub permissions: Vec<String>,
+    /// Of `permissions`, those held only for some sites.
+    pub limited: Vec<String>,
     pub credential: CredentialKind,
     /// The login session, unless an API token authenticated the request.
     pub session: Option<SessionView>,
@@ -371,7 +373,11 @@ fn body<T>(payload: Result<Json<T>, JsonRejection>) -> Result<T, ApiError> {
         .map_err(ApiError::from_json)
 }
 
-async fn current(gate: &Gate, principal: &Principal) -> Result<CurrentSession, ApiError> {
+async fn current(
+    gate: &Gate,
+    principal: &Principal,
+    held: Option<&HeldAccess>,
+) -> Result<CurrentSession, ApiError> {
     let account = gate.identity.account(principal.account).await?;
     let session = match principal.session() {
         Some(id) => gate
@@ -385,7 +391,32 @@ async fn current(gate: &Gate, principal: &Principal) -> Result<CurrentSession, A
     };
     Ok(CurrentSession {
         account: account.into(),
-        permissions: names(&principal.permissions),
+        permissions: match held {
+            Some(held) => {
+                let mut all: Vec<String> = names(&held.unrestricted);
+                all.extend(
+                    held.scoped
+                        .iter()
+                        .map(|(permission, _)| permission.name().to_owned()),
+                );
+                all.sort();
+                all.dedup();
+                all
+            }
+            None => names(&principal.permissions),
+        },
+        limited: held
+            .map(|held| {
+                let mut limited: Vec<String> = held
+                    .scoped
+                    .iter()
+                    .map(|(permission, _)| permission.name().to_owned())
+                    .collect();
+                limited.sort();
+                limited.dedup();
+                limited
+            })
+            .unwrap_or_default(),
         credential: match principal.credential {
             Credential::SessionCookie { .. } => CredentialKind::Cookie,
             Credential::SessionBearer { .. } => CredentialKind::Bearer,
@@ -470,7 +501,7 @@ pub(crate) async fn login<U>(
         .authenticate_session(login.secret.expose(), transport)
         .await?
         .ok_or_else(|| PanelError::internal("the new session is not live"))?;
-    let current = current(&gate, &principal).await?;
+    let current = current(&gate, &principal, None).await?;
     let lifetime = gate.identity.settings().sessions.absolute;
     let mut response = (
         StatusCode::CREATED,
@@ -497,9 +528,11 @@ pub(crate) async fn login<U>(
 pub(crate) async fn session<U>(
     State(state): State<ApiState<U>>,
     Extension(principal): Extension<Principal>,
+    held: Option<Extension<HeldAccess>>,
 ) -> Result<Response, ApiError> {
     let gate = gate(&state)?;
-    let mut response = Json(current(&gate, &principal).await?).into_response();
+    let held = held.map(|Extension(held)| held);
+    let mut response = Json(current(&gate, &principal, held.as_ref()).await?).into_response();
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, "no-store".parse().expect("static"));
