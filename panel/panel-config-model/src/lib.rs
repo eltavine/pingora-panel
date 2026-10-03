@@ -28,7 +28,7 @@ pub use query::{
 };
 pub use revisions::{Revision, RevisionDetail, RevisionList, RevisionOutcome};
 pub use security::{SecurityPolicy, MAX_BODY_TIMEOUT_SECONDS, MAX_RATE_PERIOD_SECONDS};
-pub use validate::validate;
+pub use validate::{validate, MAX_HEAD_TIMEOUT_SECONDS};
 pub use views::{
     BatchAction, BatchRequest, DomainCheck, DomainOwner, DomainView, ListenerView, RouteView,
     SecurityPolicyView, SiteList, SiteView, TlsProfileView, UpstreamView, ValidationResult,

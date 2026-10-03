@@ -1040,6 +1040,7 @@ impl<'a> Lowerer<'a> {
             default_site_id: None,
             trusted_proxies: Vec::new(),
             real_ip_header: panel_ir::RealIpHeader::default(),
+            request_head_timeout_seconds: None,
         };
         let mut default_server = None;
         let Some(block) = directive.block() else {
@@ -1108,6 +1109,10 @@ impl<'a> Lowerer<'a> {
                             if let Some(header) = lowerer.real_ip_header(file, arg) {
                                 listener.real_ip_header = header;
                             }
+                        }
+                        "request_head_timeout" => {
+                            listener.request_head_timeout_seconds =
+                                lowerer.whole_seconds(file, arg);
                         }
                         _ => unreachable!(),
                     }

@@ -397,6 +397,7 @@ http {
         address 0.0.0.0:80;
         trusted_proxies 192.0.2.0/24 198.51.100.7;
         real_ip_header x-real-ip;
+        request_head_timeout 15s;
     }
     server shop {
         server_name shop.example;
@@ -447,6 +448,7 @@ http {
     let listener = &lowered.model.listeners[0];
     assert_eq!(listener.trusted_proxies.len(), 2);
     assert_eq!(listener.real_ip_header, panel_ir::RealIpHeader::XRealIp);
+    assert_eq!(listener.request_head_timeout_seconds, Some(15));
     let site = &lowered.model.sites[0];
     assert_eq!(site.security_policy_id.as_deref(), Some("staff"));
     assert_eq!(site.routes[0].security_policy_id.as_deref(), Some("login"));
@@ -472,6 +474,7 @@ http {
         "        rate_limit 5r/m;\n",
         "        trusted_proxies 192.0.2.0/24 198.51.100.7;\n",
         "        real_ip_header x-real-ip;\n",
+        "        request_head_timeout 15s;\n",
         "        security_policy staff;\n",
         "            security_policy login;\n",
     ] {
@@ -507,6 +510,11 @@ http {
             "body_timeout 30s",
             "body_timeout 1500ms",
             "whole number of seconds",
+        ),
+        (
+            "request_head_timeout 15s",
+            "request_head_timeout 10m",
+            "request head timeout must be 1 to 300 seconds",
         ),
         ("max_body_size 10m", "max_body_size 0", "is not a size"),
         ("referers none", "referers none bad*host", "is not a host"),

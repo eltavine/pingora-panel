@@ -489,6 +489,13 @@ impl<'a> Explainer<'a> {
             "reuse_port",
             "off",
         );
+        self.or_default(
+            &mut settings,
+            &resource,
+            Context::Listener,
+            "request_head_timeout",
+            "30s",
+        );
         if !listener.trusted_proxies.is_empty() {
             self.or_default(
                 &mut settings,

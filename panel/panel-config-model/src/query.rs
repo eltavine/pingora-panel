@@ -432,6 +432,7 @@ mod tests {
                 default_site_id: None,
                 real_ip_header: Default::default(),
                 trusted_proxies: Default::default(),
+                request_head_timeout_seconds: Default::default(),
             }],
             upstreams: vec![upstream],
             tls_profiles: vec![crate::TlsProfile {

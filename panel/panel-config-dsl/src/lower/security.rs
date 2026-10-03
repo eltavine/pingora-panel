@@ -167,24 +167,7 @@ impl Lowerer<'_> {
             }
             "max_header_size" => policy.max_header_bytes = self.size(file, arg),
             "max_body_size" => policy.max_body_bytes = self.size(file, arg),
-            "body_timeout" => {
-                let Some(value) = self.value(file, arg) else {
-                    return;
-                };
-                let Some(ms) = self.duration(file, arg, &value) else {
-                    return;
-                };
-                if ms == 0 || ms % 1000 != 0 {
-                    self.error(
-                        file,
-                        arg.span,
-                        codes::TYPE,
-                        format!("{value:?} is not a whole number of seconds"),
-                    );
-                } else {
-                    policy.body_timeout_seconds = Some(ms / 1000);
-                }
-            }
+            "body_timeout" => policy.body_timeout_seconds = self.whole_seconds(file, arg),
             "rate_limit" => {
                 if let Some(limit) = self.rate_limit(file, directive) {
                     policy.rate_limits.push(limit);
@@ -270,6 +253,22 @@ impl Lowerer<'_> {
                 None
             }
         }
+    }
+
+    /// A positive duration in whole seconds, such as `30s` or `2m`.
+    pub(super) fn whole_seconds(&mut self, file: &str, arg: &Argument) -> Option<u64> {
+        let value = self.value(file, arg)?;
+        let ms = self.duration(file, arg, &value)?;
+        if ms == 0 || ms % 1000 != 0 {
+            self.error(
+                file,
+                arg.span,
+                codes::TYPE,
+                format!("{value:?} is not a whole number of seconds"),
+            );
+            return None;
+        }
+        Some(ms / 1000)
     }
 
     fn text(&mut self, file: &str, arg: &Argument, value: &str) -> Option<String> {

@@ -18,6 +18,8 @@ const MAX_NAME_BYTES: usize = 128;
 const MAX_LABEL_BYTES: usize = 64;
 const MAX_NOTE_BYTES: usize = 2048;
 pub(crate) const REDIRECT_STATUSES: [u16; 5] = [301, 302, 303, 307, 308];
+/// The longest request head timeout a listener may set.
+pub const MAX_HEAD_TIMEOUT_SECONDS: u64 = 300;
 
 struct Report(Vec<Diagnostic>);
 
@@ -328,6 +330,15 @@ fn validate_listeners<'a>(
             .filter(|site| !live_sites.contains(site))
         {
             report.error(&resource, format!("default site {site} does not exist"));
+        }
+        if listener
+            .request_head_timeout_seconds
+            .is_some_and(|seconds| !(1..=MAX_HEAD_TIMEOUT_SECONDS).contains(&seconds))
+        {
+            report.error(
+                &resource,
+                format!("the request head timeout must be 1 to {MAX_HEAD_TIMEOUT_SECONDS} seconds"),
+            );
         }
         for proxy in listener
             .trusted_proxies
@@ -858,6 +869,7 @@ mod tests {
             default_site_id: Some(Uuid::now_v7()),
             real_ip_header: Default::default(),
             trusted_proxies: Default::default(),
+            request_head_timeout_seconds: Default::default(),
         });
         let found = messages(&model);
         for expected in [

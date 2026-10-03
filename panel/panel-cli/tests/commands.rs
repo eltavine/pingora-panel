@@ -246,6 +246,7 @@ async fn api(
         }
         ("PUT", "/api/v1/tls-profiles/edge") => Json(body.clone()).into_response(),
         ("PUT", "/api/v1/security-policies/office") => Json(body.clone()).into_response(),
+        ("PUT", "/api/v1/listeners/edge") => Json(body.clone()).into_response(),
         ("GET", "/api/v1/security-policies") => Json(json!([
             {"id": "office", "allowed_cidrs": ["10.0.0.0/8"], "basic_auth": {"realm": "Staff", "users_secret_id": "staff.htpasswd"},
              "rate_limits": [{"key": {"kind": "client_address"}, "requests": 10, "per_seconds": 1}],
@@ -1241,6 +1242,33 @@ fn security_policies_are_set_from_flags() {
         "10 per second",
     ]);
     assert_eq!(invalid.status.code(), Some(2));
+}
+
+#[test]
+fn listeners_name_trusted_proxies_and_head_deadlines() {
+    let stub = Stub::start();
+    let saved = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "listener",
+        "set",
+        "edge",
+        "--address",
+        "0.0.0.0:80",
+        "--trusted-proxy",
+        "10.0.0.0/8",
+        "--trusted-proxy",
+        "192.0.2.7",
+        "--real-ip-header",
+        "X-Real-IP",
+        "--request-head-timeout",
+        "15",
+    ]);
+    assert!(saved.status.success(), "{}", stderr(&saved));
+    let body = &stub.requests("PUT", "/api/v1/listeners/edge")[0].body;
+    assert_eq!(body["trusted_proxies"], json!(["10.0.0.0/8", "192.0.2.7"]));
+    assert_eq!(body["real_ip_header"], "x-real-ip");
+    assert_eq!(body["request_head_timeout_seconds"], 15);
 }
 
 #[test]

@@ -204,6 +204,12 @@ pub fn listener(listener: &Listener, model: &ConfigModel) -> Directive {
             listener.trusted_proxies.iter().cloned(),
         ));
     }
+    if let Some(seconds) = listener.request_head_timeout_seconds {
+        body.push(Directive::simple(
+            "request_head_timeout",
+            [print_duration_ms(seconds.saturating_mul(1_000))],
+        ));
+    }
     match listener.real_ip_header {
         RealIpHeader::XForwardedFor => {}
         RealIpHeader::XRealIp => body.push(Directive::simple("real_ip_header", ["x-real-ip"])),

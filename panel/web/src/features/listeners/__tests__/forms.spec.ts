@@ -22,12 +22,15 @@ describe('listener forms', () => {
       default_site_id: null,
       trusted_proxies: [],
       real_ip_header: 'x-forwarded-for',
+      request_head_timeout_seconds: null,
     })
     form.trustedProxies = '10.0.0.0/8\n 192.0.2.7, '
     form.realIpHeader = 'forwarded'
+    form.requestHeadTimeout = 15
     expect(listenerBody(form)).toMatchObject({
       trusted_proxies: ['10.0.0.0/8', '192.0.2.7'],
       real_ip_header: 'forwarded',
+      request_head_timeout_seconds: 15,
     })
   })
 

@@ -12,7 +12,9 @@ use panel_ir::{
     RouteMatcher, RouteSpec, RuntimeSnapshot, SiteSpec, StaticContentPolicy, UpstreamEndpoint,
     UpstreamPoolSpec, WwwRedirect,
 };
-use panel_ir::{REQUEST_SECURITY_CAPABILITY, TRUSTED_PROXIES_CAPABILITY};
+use panel_ir::{
+    REQUEST_HEAD_TIMEOUT_CAPABILITY, REQUEST_SECURITY_CAPABILITY, TRUSTED_PROXIES_CAPABILITY,
+};
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
@@ -133,6 +135,12 @@ impl Compiler {
         compiled.real_ip_header = listener.real_ip_header;
         if !listener.trusted_proxies.is_empty() {
             self.capabilities.insert(TRUSTED_PROXIES_CAPABILITY);
+        }
+        compiled.request_head_timeout_ms = listener
+            .request_head_timeout_seconds
+            .map(|seconds| seconds.saturating_mul(1000));
+        if compiled.request_head_timeout_ms.is_some() {
+            self.capabilities.insert(REQUEST_HEAD_TIMEOUT_CAPABILITY);
         }
         compiled.default_site_id = listener
             .default_site_id
@@ -470,6 +478,7 @@ mod tests {
                 default_site_id: Some(site_id),
                 real_ip_header: Default::default(),
                 trusted_proxies: Default::default(),
+                request_head_timeout_seconds: Default::default(),
             }],
             tls_profiles: Vec::new(),
             upstreams: vec![upstream],
@@ -582,6 +591,7 @@ mod tests {
         model.sites[0].security_policy_id = Some("staff".into());
         model.sites[0].routes[0].security_policy_id = Some("staff".into());
         model.listeners[0].trusted_proxies = vec!["10.0.0.0/8".into()];
+        model.listeners[0].request_head_timeout_seconds = Some(15);
 
         let snapshot = compile(&model, RevisionId::new(10)).unwrap();
         let required: Vec<_> = snapshot
@@ -610,11 +620,17 @@ mod tests {
             Some("staff")
         );
         assert!(snapshot.listeners[0].trusted_proxies.contains("10.0.0.0/8"));
+        assert_eq!(snapshot.listeners[0].request_head_timeout_ms, Some(15_000));
+        assert!(
+            required.contains(&REQUEST_HEAD_TIMEOUT_CAPABILITY),
+            "{required:?}"
+        );
         assert!(model.clone().delete_security_policy("staff").is_err());
         assert!(model.clone().delete_security_policy("unused").is_ok());
 
         model.sites[0].routes[0].security_policy_id = Some("missing".into());
         model.listeners[0].trusted_proxies = vec!["proxy".into()];
+        model.listeners[0].request_head_timeout_seconds = Some(0);
         let messages: Vec<String> = crate::validate(&model)
             .into_iter()
             .map(|diagnostic| diagnostic.message)
@@ -631,8 +647,15 @@ mod tests {
                 .any(|message| message.contains("trusted proxy")),
             "{messages:?}"
         );
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("request head timeout")),
+            "{messages:?}"
+        );
         model.sites[0].routes[0].security_policy_id = None;
         model.listeners[0].trusted_proxies.clear();
+        model.listeners[0].request_head_timeout_seconds = None;
         model.delete_site(site, Utc::now()).unwrap();
         let snapshot = compile(&model, RevisionId::new(11)).unwrap();
         assert!(snapshot.security_policies.is_empty());

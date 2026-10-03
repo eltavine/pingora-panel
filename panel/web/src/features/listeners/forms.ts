@@ -1,4 +1,5 @@
 import type { ListenerView, RealIpHeader, TlsProfileView } from '@/api/generated'
+import { optionalNumber } from '@/features/sites/forms'
 
 export const TLS_VERSIONS = ['TLSv1.2', 'TLSv1.3'] as const
 /** The maximum version when none is named. */
@@ -35,6 +36,8 @@ export interface ListenerForm {
   /** Networks, one per line. */
   trustedProxies: string
   realIpHeader: RealIpHeader
+  /** Seconds; empty leaves the gateway's default. */
+  requestHeadTimeout: number | string
 }
 
 /** Where a profile's certificate comes from. */
@@ -68,6 +71,7 @@ export function listenerForm(listener?: ListenerView): ListenerForm {
     defaultSiteId: listener?.default_site_id ?? '',
     trustedProxies: (listener?.trusted_proxies ?? []).join('\n'),
     realIpHeader: listener?.real_ip_header ?? 'x-forwarded-for',
+    requestHeadTimeout: listener?.request_head_timeout_seconds ?? '',
   }
 }
 
@@ -85,6 +89,7 @@ export function listenerBody(form: ListenerForm) {
       .map((network) => network.trim())
       .filter((network) => network.length > 0),
     real_ip_header: form.realIpHeader,
+    request_head_timeout_seconds: optionalNumber(form.requestHeadTimeout),
   }
 }
 

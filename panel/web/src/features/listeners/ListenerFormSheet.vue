@@ -205,6 +205,21 @@ function submit() {
               </SelectContent>
             </Select>
           </FormField>
+          <FormField
+            id="listener-head-timeout"
+            :label="t('listeners.requestHeadTimeout')"
+            :hint="t('listeners.requestHeadTimeoutHint')"
+          >
+            <Input
+              id="listener-head-timeout"
+              v-model="form.requestHeadTimeout"
+              type="number"
+              min="1"
+              max="300"
+              placeholder="30"
+              class="w-32"
+            />
+          </FormField>
           <SwitchField
             id="listener-reuse"
             v-model="form.reusePort"

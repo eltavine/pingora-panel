@@ -45796,6 +45796,15 @@
             "$ref": "#/components/schemas/RealIpHeader",
             "description": "The header trusted proxies name the client in."
           },
+          "request_head_timeout_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The longest a client may take to send a request head, in seconds;\nthe gateway allows 30 when unset.",
+            "minimum": 0
+          },
           "reuse_port": {
             "type": "boolean"
           },

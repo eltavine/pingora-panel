@@ -378,6 +378,9 @@ const zhCN = {
       '每行一个网络，如 10.0.0.0/8。只采信这些代理转发时声明的客户端地址；其他来源的 X-Forwarded-For、X-Real-IP 与 Forwarded 会被丢弃。',
     realIpHeader: '客户端地址请求头',
     trustedProxiesCount: '{count} 个受信代理',
+    requestHeadTimeout: '请求头超时（秒）',
+    requestHeadTimeoutHint:
+      '客户端发送请求头的最长时间，留空为 30 秒；从连接建立或上一个请求结束时起算。首个请求超时返回 408，以防 Slowloris 慢速攻击。',
     saved: '已保存监听 {id}',
     deleted: '已删除监听',
     confirmDeleteTitle: '删除监听 {id}？',
@@ -1602,6 +1605,9 @@ const en: DeepString<Messages> = {
       'One network per line, such as 10.0.0.0/8. Only these proxies may name the client they forward; X-Forwarded-For, X-Real-IP and Forwarded from anyone else are dropped.',
     realIpHeader: 'Client address header',
     trustedProxiesCount: '{count} trusted proxy | {count} trusted proxies',
+    requestHeadTimeout: 'Request head timeout (s)',
+    requestHeadTimeoutHint:
+      'How long a client may take to send a request head, 30 when empty, counted from the start of the connection or the end of the previous request. A late first head gets 408, which stops Slowloris attacks.',
     saved: 'Saved listener {id}',
     deleted: 'Listener deleted',
     confirmDeleteTitle: 'Delete listener {id}?',

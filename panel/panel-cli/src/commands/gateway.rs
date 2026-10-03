@@ -45,6 +45,10 @@ pub(crate) enum ListenerCommand {
         /// x-real-ip or forwarded.
         #[arg(long, requires = "trusted_proxies")]
         real_ip_header: Option<String>,
+        /// The longest a client may take to send a request head; 30 when
+        /// not given.
+        #[arg(long, value_name = "SECONDS")]
+        request_head_timeout: Option<u64>,
     },
     /// Removes a listener no site uses.
     Delete { id: String },
@@ -218,6 +222,7 @@ pub async fn listener(api: &Api, output: &Output, command: ListenerCommand) -> R
             default_site,
             trusted_proxies,
             real_ip_header,
+            request_head_timeout,
         } => {
             let path = format!("/api/v1/listeners/{id}");
             let etag = existing(api, &path).await?;
@@ -230,6 +235,7 @@ pub async fn listener(api: &Api, output: &Output, command: ListenerCommand) -> R
                 "ipv6_only": ipv6_only,
                 "default_site_id": default_site,
                 "trusted_proxies": trusted_proxies,
+                "request_head_timeout_seconds": request_head_timeout,
             });
             if let Some(header) = real_ip_header {
                 body["real_ip_header"] = json!(header.to_ascii_lowercase());

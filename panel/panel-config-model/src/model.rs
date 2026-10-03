@@ -184,6 +184,10 @@ pub struct Listener {
     /// The header trusted proxies name the client in.
     #[serde(default, skip_serializing_if = "is_default")]
     pub real_ip_header: RealIpHeader,
+    /// The longest a client may take to send a request head, in seconds;
+    /// the gateway allows 30 when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_head_timeout_seconds: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -474,6 +478,7 @@ mod tests {
             default_site_id: None,
             real_ip_header: Default::default(),
             trusted_proxies: Default::default(),
+            request_head_timeout_seconds: Default::default(),
         });
         assert_eq!(entity_tag(&model), entity_tag(&ConfigModel::default()));
         assert_ne!(entity_tag(&model), entity_tag(&changed));

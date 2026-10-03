@@ -992,6 +992,7 @@ mod tests {
             default_site_id: Some(id),
             real_ip_header: Default::default(),
             trusted_proxies: Default::default(),
+            request_head_timeout_seconds: Default::default(),
         });
         model.delete_site(id, now).unwrap();
         assert!(model.site(id).unwrap().is_deleted());
