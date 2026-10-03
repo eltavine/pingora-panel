@@ -7,11 +7,16 @@
 //! boundary. Internal modules are private so their organization can evolve
 //! without changing the public application contract.
 
+mod configuration;
 mod context;
 mod gateway;
 mod idempotency;
 mod persistence;
 
+pub use configuration::{
+    ApplyOutcome, ConfigurationChange, ConfigurationOutput, ConfigurationPort, ConfigurationRead,
+    DraftInfo,
+};
 pub use context::{
     Actor, CommandContext, IdempotencyKey, RequestDeadline, RequestId, RequestScope, TraceContext,
 };

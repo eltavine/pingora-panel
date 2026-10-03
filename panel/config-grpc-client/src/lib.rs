@@ -1,7 +1,9 @@
 #![forbid(unsafe_code)]
 
-//! `GatewayUseCases` over `config-service`'s publication API, so the public
-//! API composes publication without owning it.
+//! `GatewayUseCases` and `ConfigurationPort` over `config-service`, so the
+//! public API composes publication and configuration without owning them.
+
+mod configuration;
 
 use async_trait::async_trait;
 use config_proto_codec as codec;
@@ -18,7 +20,7 @@ use std::{net::IpAddr, time::Duration};
 use tonic::transport::{Channel, Endpoint};
 use uuid::Uuid;
 
-const MAX_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
+pub(crate) const MAX_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
 const CLIENT: &str = "config-grpc-client";
 
 /// Connection policy for the publication client.
@@ -90,7 +92,7 @@ impl ConfigPublicationClient {
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
     }
 
-    fn request<T>(&self, message: T, trace: Option<&TraceContext>) -> tonic::Request<T> {
+    pub(crate) fn request<T>(&self, message: T, trace: Option<&TraceContext>) -> tonic::Request<T> {
         let mut request = tonic::Request::new(message);
         request.set_timeout(self.config.request_timeout);
         propagate_trace(request.metadata_mut(), trace);

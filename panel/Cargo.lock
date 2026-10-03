@@ -619,6 +619,7 @@ dependencies = [
  "panel-contracts",
  "panel-errors",
  "panel-service",
+ "prost-types",
  "tokio",
  "tonic",
  "uuid",

@@ -15,6 +15,7 @@ panel-application.workspace = true
 panel-contracts.workspace = true
 panel-errors.workspace = true
 panel-service.workspace = true
+prost-types.workspace = true
 tonic.workspace = true
 uuid.workspace = true
 
