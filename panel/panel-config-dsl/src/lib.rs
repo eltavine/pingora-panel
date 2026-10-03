@@ -49,4 +49,6 @@ pub mod codes {
     pub const SHADOWED_ROUTE: &str = "DSL_SHADOWED_ROUTE";
     /// A route can never match; a warning.
     pub const UNREACHABLE_ROUTE: &str = "DSL_UNREACHABLE_ROUTE";
+    /// Quotes inside an argument are part of its value; a warning.
+    pub const QUOTES: &str = "DSL_QUOTES";
 }

@@ -132,6 +132,31 @@ pub fn parse_socket_address(value: &str) -> Option<SocketAddr> {
     value.parse().ok()
 }
 
+fn parameter_key(key: &str) -> bool {
+    !key.is_empty()
+        && key
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte == b'_')
+}
+
+/// For a bare `key="value"`, whose quotes are part of the value as in NGINX,
+/// the parameter that was probably meant: `key=value`.
+pub fn quoted_parameter(arg: &Argument) -> Option<String> {
+    if arg.quote.is_some() {
+        return None;
+    }
+    let (key, value) = arg.value.split_once('=')?;
+    let inner = value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .or_else(|| {
+            value
+                .strip_prefix('\'')
+                .and_then(|value| value.strip_suffix('\''))
+        })?;
+    (parameter_key(key) && value.len() >= 2).then(|| format!("{key}={inner}"))
+}
+
 /// Arguments split into positional ones and `key=value` parameters. A key is
 /// lowercase letters and underscores, so values such as URLs stay positional.
 #[derive(Debug, Default)]
@@ -147,12 +172,7 @@ impl<'a> Params<'a> {
         let mut params = Self::default();
         for arg in args {
             match arg.value.split_once('=') {
-                Some((key, value))
-                    if !key.is_empty()
-                        && key
-                            .bytes()
-                            .all(|byte| byte.is_ascii_lowercase() || byte == b'_') =>
-                {
+                Some((key, value)) if parameter_key(key) => {
                     if params.named.insert(key, (value, arg)).is_some() {
                         params.repeated.push(arg);
                     }
@@ -233,5 +253,21 @@ mod tests {
         assert_eq!(params.positional.len(), 3);
         assert_eq!(params.named["weight"].0, "3");
         assert_eq!(params.repeated.len(), 1);
+    }
+
+    #[test]
+    fn quotes_inside_a_parameter_are_flagged() {
+        let parameter = |value: &str| quoted_parameter(&Argument::new(value));
+        assert_eq!(parameter("body=\"ok\"").as_deref(), Some("body=ok"));
+        assert_eq!(parameter("body='a b'").as_deref(), Some("body=a b"));
+        for fine in [
+            "body=ok",
+            "body=\"",
+            "body=\"a'",
+            "https://a/?x=\"1\"",
+            "=\"x\"",
+        ] {
+            assert_eq!(parameter(fine), None, "{fine}");
+        }
     }
 }

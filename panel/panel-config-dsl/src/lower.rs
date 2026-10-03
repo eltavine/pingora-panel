@@ -303,6 +303,16 @@ impl<'a> Lowerer<'a> {
                 ));
                 self.report(diagnostic, file, directive.name.span);
             }
+            for arg in &directive.args {
+                if let Some(intended) = values::quoted_parameter(arg) {
+                    let diagnostic = Diagnostic::warning(
+                        codes::QUOTES,
+                        format!("the quotes in {:?} are part of the value", arg.value),
+                    )
+                    .with_help(format!("write it as {}", panel_dsl::quote(&intended)));
+                    self.report(diagnostic, file, arg.span);
+                }
+            }
             if !spec.repeatable && !seen.insert(spec.name) {
                 self.error(
                     file,

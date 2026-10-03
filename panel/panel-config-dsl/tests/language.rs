@@ -407,6 +407,36 @@ http {
 }
 
 #[test]
+fn quotes_inside_a_parameter_are_part_of_the_value() {
+    let text = "\
+language_version 1;
+http {
+    server s {
+        server_name s.example;
+        respond 200 body=\"ok\";
+    }
+    server t {
+        server_name t.example;
+        respond 503 \"body=be right back\";
+    }
+}
+";
+    let lowered = read(text);
+    assert!(lowered.is_valid(), "{:#?}", lowered.diagnostics);
+    let warnings: Vec<_> = lowered
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code.as_str() == codes::QUOTES)
+        .collect();
+    assert_eq!(warnings.len(), 1, "{warnings:#?}");
+    assert_eq!(
+        warnings[0].source_span.as_deref(),
+        Some("main.conf:5.21-29")
+    );
+    assert_eq!(warnings[0].help.as_deref(), Some("write it as body=ok"));
+}
+
+#[test]
 fn variables_includes_and_versions() {
     let mut files = BTreeMap::new();
     files.insert(
