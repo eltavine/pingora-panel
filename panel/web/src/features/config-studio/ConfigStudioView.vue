@@ -8,6 +8,7 @@ import {
   Check,
   CircleCheck,
   FileCode2,
+  FileInput,
   FileJson2,
   FilePlus2,
   ListTree,
@@ -45,6 +46,7 @@ import { changeHeaders, notifyFailure, useRefreshConfiguration } from '@/lib/con
 import { downloadJson } from '@/lib/download'
 import { baseContext, directiveCompletion } from './completion'
 import { editorDiagnostics } from './lint'
+import NginxImportSheet from './NginxImportSheet.vue'
 import OutlineTree from './OutlineTree.vue'
 import ReviewSheet from './ReviewSheet.vue'
 import { ENTRY, isFilePath, useConfigFiles } from './useConfigFiles'
@@ -55,6 +57,7 @@ const config = useConfigFiles()
 const schema = useQuery({ ...schemaOptions(), staleTime: Infinity })
 const editor = useTemplateRef<InstanceType<typeof CodeEditor>>('editor')
 const reviewing = ref(false)
+const importing = ref(false)
 const naming = ref(false)
 const panel = ref<'problems' | 'outline'>('problems')
 const outline = ref<SyntaxTree>()
@@ -131,6 +134,13 @@ function addFile() {
   config.add(path)
   newPath.value = ''
   naming.value = false
+}
+
+/** Loads converted files into the editor, to review before saving. */
+function useImported(files: Record<string, string>) {
+  config.files.value = { ...files }
+  config.active.value = ENTRY
+  toast.success(t('studio.imported'))
 }
 
 async function readOutline() {
@@ -226,6 +236,10 @@ useEventListener(window, 'beforeunload', (event: BeforeUnloadEvent) => {
           <Spinner v-if="config.format.isPending.value" data-icon="inline-start" />
           <WandSparkles v-else data-icon="inline-start" aria-hidden="true" />
           {{ t('studio.format') }}
+        </Button>
+        <Button variant="outline" size="sm" @click="importing = true">
+          <FileInput data-icon="inline-start" aria-hidden="true" />
+          {{ t('studio.importNginx') }}
         </Button>
         <Button variant="outline" size="sm" :disabled="exporting" @click="exportSnapshot">
           <Spinner v-if="exporting" data-icon="inline-start" />
@@ -421,6 +435,7 @@ useEventListener(window, 'beforeunload', (event: BeforeUnloadEvent) => {
       </div>
     </div>
 
+    <NginxImportSheet v-model:open="importing" @use="useImported" />
     <ReviewSheet
       v-model:open="reviewing"
       :version="config.version.value"

@@ -348,3 +348,62 @@ test('revisions are compared, annotated and rolled back', async ({ page }) => {
   expect(restored).toHaveLength(1)
   expect(applied[0]!.postDataJSON()).toEqual({ expected_version: 6, note: 'Bad deploy' })
 })
+
+test('NGINX configuration is converted and loaded into the editor', async ({ page }) => {
+  await mockDraft(page)
+  await page.route('**/api/v1/config/source', (route) =>
+    route.fulfill({
+      json: {
+        language_version: 1,
+        version: 4,
+        etag: '"draft-4"',
+        files: { 'main.conf': MAIN },
+        diagnostics: [],
+      },
+    }),
+  )
+  await page.route('**/api/v1/config/check', (route) =>
+    route.fulfill({ json: { valid: true, diagnostics: [] } }),
+  )
+  const converted =
+    'language_version 1;\n\nhttp {\n    server imported {\n        respond 204;\n    }\n}\n'
+  const requests: Request[] = []
+  await page.route('**/api/v1/config/import/nginx', (route) => {
+    requests.push(route.request())
+    return route.fulfill({
+      json: {
+        files: { 'main.conf': converted },
+        report: [
+          {
+            code: 'NGINX_UNSUPPORTED',
+            severity: 'WARNING',
+            message: "'gzip' is not supported",
+            source_span: 'nginx.conf:2.5-12',
+          },
+        ],
+        valid: true,
+        diagnostics: [],
+      },
+    })
+  })
+
+  await page.goto('/config')
+  await page.getByRole('button', { name: 'Import NGINX' }).click()
+  const sheet = page.getByRole('dialog')
+  await sheet.getByLabel('NGINX configuration').fill('http {\n    gzip on;\n}\n')
+  await sheet.getByRole('button', { name: 'Convert' }).click()
+  await expect(sheet.getByText("'gzip' is not supported")).toBeVisible()
+  await expect(sheet.getByText('Not fully carried over (1)')).toBeVisible()
+  expect(requests[0]!.postDataJSON()).toEqual({
+    files: { 'nginx.conf': 'http {\n    gzip on;\n}\n' },
+    entry: 'nginx.conf',
+  })
+  await sheet.getByRole('button', { name: 'Load into the editor' }).click()
+  await expect(page.getByText('The converted configuration is in the editor')).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Contents of main.conf' })).toContainText(
+    'server imported',
+  )
+  await expect(
+    page.getByRole('list', { name: 'Files' }).getByRole('img', { name: 'Unsaved' }),
+  ).toBeVisible()
+})
