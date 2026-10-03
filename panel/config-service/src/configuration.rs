@@ -1,4 +1,5 @@
 use crate::{
+    approvals::{assess, Bypass, Gate, Opening, PgApprovals},
     draft::{ChangeOutput, ChangeRequest, DraftChange, DraftState, PgDrafts, DRAFT},
     language, operations,
     revisions::{NewRevision, PgRevisions},
@@ -12,7 +13,10 @@ use panel_config_dsl::{
     explain, format_files, import_nginx, plan::changes, schema::DIRECTIVES, syntax_tree, Sources,
     ENTRY, LANGUAGE_VERSION,
 };
-use panel_config_model::{compile, ConfigModel, Revision, RevisionDetail, RevisionList};
+use panel_config_model::{
+    compile, ApprovalPolicy, ApprovalPolicyInput, ApprovalRequest, ApprovalRequestList,
+    ConfigModel, Revision, RevisionDetail, RevisionList,
+};
 use panel_contracts::config::v1::{self as wire, configuration_server::Configuration};
 use panel_domain::RevisionId;
 use panel_engine::{validate_engine_ir, EngineCapability};
@@ -24,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{collections::BTreeMap, sync::Arc};
 use tonic::{Request, Response, Status};
+use uuid::Uuid;
 
 const DEFAULT_REVISION_PAGE: u32 = 50;
 const MAX_REVISION_PAGE: u32 = 500;
@@ -37,6 +42,7 @@ const MAX_REVISION_PAGE: u32 = 500;
 pub struct ConfigurationService {
     drafts: PgDrafts,
     revisions: PgRevisions,
+    approvals: PgApprovals,
     publication: Arc<dyn GatewayUseCases>,
     events: EventLog,
 }
@@ -46,6 +52,38 @@ enum Applied {
     Activated(ActivatedDeployment, u64),
     Rejected(ValidationReport, Option<u64>),
     Checked(ValidationReport),
+    /// Policies ask for approvals first; nothing was published.
+    AwaitingApproval(Box<ApprovalRequest>),
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ApprovalPage {
+    before: Option<DateTime<Utc>>,
+    limit: Option<u32>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReasonBody {
+    reason: Option<String>,
+}
+
+const DEFAULT_APPROVAL_PAGE: u32 = 50;
+const MAX_APPROVAL_PAGE: u32 = 200;
+
+fn approval_id(resource: &str) -> Result<Uuid> {
+    resource
+        .strip_prefix("approvals/")
+        .and_then(|id| Uuid::parse_str(id).ok())
+        .ok_or_else(|| PanelError::not_found(format!("no resource {resource:?}")))
+}
+
+fn policy_id(resource: &str) -> Result<&str> {
+    resource
+        .strip_prefix("approval-policies/")
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| PanelError::not_found(format!("no resource {resource:?}")))
 }
 
 #[derive(Deserialize)]
@@ -148,15 +186,181 @@ impl ConfigurationService {
     pub fn new(
         drafts: PgDrafts,
         revisions: PgRevisions,
+        approvals: PgApprovals,
         publication: Arc<dyn GatewayUseCases>,
         events: EventLog,
     ) -> Self {
         Self {
             drafts,
             revisions,
+            approvals,
             publication,
             events,
         }
+    }
+
+    /// Reads of approval policies and requests; `None` for every other
+    /// operation. Requests report their state as of now.
+    async fn read_approvals(
+        &self,
+        draft: &DraftState,
+        operation: &str,
+        resource: &str,
+        parameters: &[u8],
+    ) -> Result<Option<operations::Output>> {
+        let now = Utc::now();
+        let draft_hash = language::content_hash(&draft.sources);
+        let output = match (operation, resource) {
+            ("approval_policies.list", "approval-policies") => {
+                json_output(&self.approvals.policies().await?, String::new())
+            }
+            ("approval_policies.get", resource) if resource.starts_with("approval-policies/") => {
+                json_output(
+                    &self.approvals.policy(policy_id(resource)?).await?,
+                    String::new(),
+                )
+            }
+            ("approvals.list", "approvals") => {
+                let page: ApprovalPage = decode(parameters)?;
+                let limit = page
+                    .limit
+                    .unwrap_or(DEFAULT_APPROVAL_PAGE)
+                    .clamp(1, MAX_APPROVAL_PAGE);
+                let mut items = self.approvals.requests(page.before, limit).await?;
+                for item in &mut items {
+                    item.state = item.state_at(now, draft_hash.as_str());
+                }
+                let next_before = (items.len() == limit as usize)
+                    .then(|| items.last().map(|last| last.requested_at))
+                    .flatten();
+                json_output(&ApprovalRequestList { items, next_before }, String::new())
+            }
+            ("approvals.get", resource) if resource.starts_with("approvals/") => {
+                let mut item = self.approvals.request(approval_id(resource)?).await?;
+                item.state = item.state_at(now, draft_hash.as_str());
+                json_output(&item, String::new())
+            }
+            _ => return Ok(None),
+        };
+        Ok(Some(output))
+    }
+
+    /// Changes to approval policies and decisions on requests; `None` for
+    /// every other operation.
+    async fn change_approvals(
+        &self,
+        context: &CommandContext,
+        request: &wire::ChangeRequest,
+    ) -> Result<Option<ChangeOutput>> {
+        let scope = context.scope();
+        let actor = context.actor();
+        let resource = request.resource.as_str();
+        let value = match request.operation.as_str() {
+            "approval_policies.put" => {
+                let input: ApprovalPolicyInput = decode(&request.content)?;
+                let (policy, created) = self
+                    .approvals
+                    .put_policy(policy_id(resource)?, input, &scope, actor)
+                    .await?;
+                json!({ "policy": policy, "created": created })
+            }
+            "approval_policies.delete" => {
+                self.approvals
+                    .delete_policy(policy_id(resource)?, &scope, actor)
+                    .await?;
+                json!({})
+            }
+            operation @ ("approvals.approve" | "approvals.reject" | "approvals.withdraw"
+            | "approvals.revoke") => {
+                let id = approval_id(resource)?;
+                let now = Utc::now();
+                let draft = self.drafts.load().await?;
+                let draft_hash = language::content_hash(&draft.sources);
+                let mut decided = match operation {
+                    "approvals.approve" => {
+                        self.approvals
+                            .approve(id, actor, draft_hash.as_str(), now, &scope)
+                            .await?
+                    }
+                    "approvals.reject" => {
+                        let body: ReasonBody = decode(&request.content)?;
+                        let reason = body
+                            .reason
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|reason| !reason.is_empty());
+                        self.approvals
+                            .reject(id, actor, reason, draft_hash.as_str(), now, &scope)
+                            .await?
+                    }
+                    "approvals.withdraw" => self.approvals.withdraw(id, actor, now, &scope).await?,
+                    _ => self.approvals.revoke(id, actor, now, &scope).await?,
+                };
+                decided.state = decided.state_at(now, draft_hash.as_str());
+                serde_json::to_value(&decided).expect("API values serialize")
+            }
+            _ => return Ok(None),
+        };
+        Ok(Some(ChangeOutput {
+            content: serde_json::to_vec(&value).expect("API values serialize"),
+            etag: String::new(),
+        }))
+    }
+
+    /// Whether policies let the draft through: no policy covers it, enough
+    /// people approved it, or an Administrator bypassed them. Otherwise the
+    /// request it waits on.
+    async fn approval_gate(
+        &self,
+        context: &CommandContext,
+        request: &wire::ApplyRequest,
+        draft: &DraftState,
+        content_hash: &str,
+        note: Option<&str>,
+    ) -> Result<std::result::Result<Option<Uuid>, Box<ApprovalRequest>>> {
+        let policies = self.approvals.policies().await?;
+        if !policies.iter().any(|policy| policy.policy.enabled) {
+            return Ok(Ok(None));
+        }
+        let (active, _) = self.active().await?;
+        let assessment = assess(&active, &draft.model);
+        let now = Utc::now();
+        let covering: Vec<&ApprovalPolicy> = policies
+            .iter()
+            .filter(|policy| policy.covers(&assessment, now))
+            .collect();
+        if covering.is_empty() {
+            return Ok(Ok(None));
+        }
+        let scope = context.scope();
+        if !request.bypass_reason.is_empty() || !request.bypass_incident.is_empty() {
+            let bypass = Bypass {
+                reason: request.bypass_reason.clone(),
+                incident: request.bypass_incident.clone(),
+            };
+            self.approvals
+                .bypassed(&bypass, content_hash, &covering, &scope, context.actor())
+                .await?;
+            return Ok(Ok(None));
+        }
+        let opening = Opening {
+            draft_version: draft.version,
+            content_hash,
+            note,
+            assessment,
+            covering,
+        };
+        Ok(
+            match self
+                .approvals
+                .gate(opening, now, &scope, context.actor())
+                .await?
+            {
+                Gate::Clear => Ok(None),
+                Gate::Approved(id) => Ok(Some(id)),
+                Gate::Awaiting(waiting) => Err(waiting),
+            },
+        )
     }
 
     /// Records how an apply ended unless it activated, which the draft
@@ -175,7 +379,7 @@ impl ConfigurationService {
                 .collect::<Vec<_>>()
         };
         let (event_type, data) = match result {
-            Ok((_, Applied::Activated(..))) => return,
+            Ok((_, Applied::Activated(..) | Applied::AwaitingApproval(_))) => return,
             Ok((draft, Applied::Checked(_))) => (
                 "config.apply.checked",
                 json!({ "version": draft.version, "valid": true }),
@@ -484,6 +688,13 @@ impl ConfigurationService {
             return Ok((draft, outcome));
         }
 
+        let approved = match self
+            .approval_gate(&context, &request, &draft, content_hash.as_str(), note)
+            .await?
+        {
+            Ok(approved) => approved,
+            Err(waiting) => return Ok((draft, Applied::AwaitingApproval(waiting))),
+        };
         let snapshot_hash = snapshot.content_hash.clone();
         let id = self
             .revisions
@@ -529,6 +740,11 @@ impl ConfigurationService {
                 activated.revision_id().get(),
             )
             .await?;
+        if let Some(request) = approved {
+            self.approvals
+                .applied(request, id, context.actor(), &context.scope())
+                .await?;
+        }
         let draft = self
             .drafts
             .mark_applied(draft.version, id, note, &context.scope(), context.actor())
@@ -579,6 +795,17 @@ impl Configuration for ConfigurationService {
         let result: Result<_> = async {
             codec::decode_scope(request.context, trace)?;
             let draft = self.drafts.load().await?;
+            if let Some(output) = self
+                .read_approvals(
+                    &draft,
+                    &request.operation,
+                    &request.resource,
+                    &request.parameters,
+                )
+                .await?
+            {
+                return Ok((draft, output));
+            }
             let output = match self
                 .read_language(
                     &draft,
@@ -630,6 +857,10 @@ impl Configuration for ConfigurationService {
             }
         };
         let result: Result<_> = async {
+            if let Some(output) = self.change_approvals(&context, &request).await? {
+                let draft = self.drafts.load().await?;
+                return Ok((draft, output));
+            }
             if request.operation == "revisions.note" {
                 let body: NoteBody = decode(&request.content)?;
                 let note = body.note.as_deref().map(str::trim).filter(|note| !note.is_empty());
@@ -766,23 +997,24 @@ impl Configuration for ConfigurationService {
             Ok((draft, Applied::Activated(deployment, revision))) => wire::ApplyResponse {
                 draft: Some(encode_draft(&draft)),
                 deployment: Some(codec::encode_activated(&deployment)),
-                report: None,
-                error: None,
                 revision,
+                ..wire::ApplyResponse::default()
             },
             Ok((draft, Applied::Rejected(report, revision))) => wire::ApplyResponse {
                 draft: Some(encode_draft(&draft)),
-                deployment: None,
                 report: Some(codec::encode_report(&report)),
-                error: None,
                 revision: revision.unwrap_or_default(),
+                ..wire::ApplyResponse::default()
             },
             Ok((draft, Applied::Checked(report))) => wire::ApplyResponse {
                 draft: Some(encode_draft(&draft)),
-                deployment: None,
                 report: Some(codec::encode_report(&report)),
-                error: None,
-                revision: 0,
+                ..wire::ApplyResponse::default()
+            },
+            Ok((draft, Applied::AwaitingApproval(waiting))) => wire::ApplyResponse {
+                draft: Some(encode_draft(&draft)),
+                approval: serde_json::to_vec(&waiting).expect("API values serialize"),
+                ..wire::ApplyResponse::default()
             },
             Err(error) => wire::ApplyResponse {
                 error: Some((&error).into()),

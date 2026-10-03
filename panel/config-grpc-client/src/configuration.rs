@@ -95,11 +95,14 @@ impl ConfigurationPort for ConfigPublicationClient {
     }
 
     async fn apply(&self, context: CommandContext, request: ApplyRequest) -> Result<ApplyOutcome> {
+        let bypass = request.bypass.unwrap_or_default();
         let wire_request = wire::ApplyRequest {
             context: Some(codec::encode_command(&context)),
             expected_version: request.expected_version,
             note: request.note.unwrap_or_default(),
             dry_run: request.dry_run,
+            bypass_reason: bypass.reason,
+            bypass_incident: bypass.incident,
         };
         let response = self
             .configuration()
@@ -109,6 +112,9 @@ impl ConfigurationPort for ConfigPublicationClient {
             .into_inner();
         codec::decode_error(response.error)?;
         let draft = draft(response.draft)?;
+        if !response.approval.is_empty() {
+            return Ok(ApplyOutcome::awaiting_approval(draft, response.approval));
+        }
         let revision = (response.revision != 0).then_some(response.revision);
         Ok(match (response.deployment, revision) {
             (Some(deployment), Some(revision)) => {

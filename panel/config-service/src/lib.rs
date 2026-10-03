@@ -10,6 +10,7 @@
 //! restores the desired configuration to a gateway that lost it, and
 //! suspends publication while the gateway runs an unknown configuration.
 
+mod approvals;
 mod configuration;
 mod deployments;
 mod draft;
@@ -78,6 +79,11 @@ pub const MIGRATIONS: &[SchemaMigration] = &[
         "configuration revisions",
         include_str!("../migrations/10003_configuration_revisions.sql"),
     ),
+    SchemaMigration::new(
+        10_004,
+        "approval policies, requests and approvals",
+        include_str!("../migrations/10004_approvals.sql"),
+    ),
 ];
 
 pub fn default_addresses() -> DefaultAddresses {
@@ -133,6 +139,7 @@ pub fn process(
     ));
     let drafts = PgDrafts::new(process.database(), events.clone());
     let revisions = revisions::PgRevisions::new(process.database());
+    let approvals = approvals::PgApprovals::new(process.database(), events.clone());
     Ok(process
         .with_migrations(MIGRATIONS)
         .with_protocol(protocol_range(CONFIG_V1))
@@ -159,6 +166,7 @@ pub fn process(
             ConfigurationServer::new(ConfigurationService::new(
                 drafts,
                 revisions,
+                approvals,
                 Arc::clone(&use_cases),
                 events,
             ))

@@ -291,7 +291,8 @@ pub enum ApprovalState {
     Withdrawn,
     /// Nobody decided in time, or the approvals ran out.
     Expired,
-    /// The draft no longer has the content the request is about.
+    /// The draft's content, or the policies covering it, changed since it
+    /// was asked.
     Outdated,
     /// The approved content was applied.
     Applied,

@@ -57,6 +57,26 @@ pub struct ApplyRequest {
     pub note: Option<String>,
     /// Validates and prepares on the gateway without activating.
     pub dry_run: bool,
+    /// Applies without the approvals policies ask for.
+    pub bypass: Option<ApprovalBypass>,
+}
+
+/// Why an approval was bypassed; only for actors allowed to.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct ApprovalBypass {
+    pub reason: String,
+    /// The incident it answers, such as a ticket reference.
+    pub incident: String,
+}
+
+impl ApprovalBypass {
+    pub fn new(reason: impl Into<String>, incident: impl Into<String>) -> Self {
+        Self {
+            reason: reason.into(),
+            incident: incident.into(),
+        }
+    }
 }
 
 impl ApplyRequest {
@@ -74,6 +94,11 @@ impl ApplyRequest {
 
     pub fn dry_run(mut self) -> Self {
         self.dry_run = true;
+        self
+    }
+
+    pub fn bypassing(mut self, bypass: ApprovalBypass) -> Self {
+        self.bypass = Some(bypass);
         self
     }
 }
@@ -102,6 +127,10 @@ pub enum ApplyOutcome {
         draft: DraftInfo,
         report: ValidationReport,
     },
+    /// Policies ask for approvals first; nothing was published. `request`
+    /// is the approval request as JSON.
+    #[non_exhaustive]
+    AwaitingApproval { draft: DraftInfo, request: Vec<u8> },
 }
 
 impl ApplyOutcome {
@@ -123,6 +152,10 @@ impl ApplyOutcome {
 
     pub fn checked(draft: DraftInfo, report: ValidationReport) -> Self {
         Self::Checked { draft, report }
+    }
+
+    pub fn awaiting_approval(draft: DraftInfo, request: Vec<u8>) -> Self {
+        Self::AwaitingApproval { draft, request }
     }
 }
 

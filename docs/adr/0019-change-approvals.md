@@ -45,9 +45,9 @@ revision history depend on them.
 - **Emergency bypass.** People with `approval.bypass`, which only
   Administrators hold, may apply without the approvals by giving a reason
   and an incident reference. The bypass is recorded as its own audit event,
-  `config.approval.bypassed`, in the same transaction as the revision it
-  lets through, and the console shows recent bypasses on the approvals
-  page.
+  `config.approval.bypassed`, before anything is published, and nothing is
+  applied if it cannot be recorded; open requests for the same content
+  close with it. The console shows recent bypasses on the approvals page.
 - **Events.** Policy changes and every step of a request are published like
   other configuration events, so the audit trail shows who asked, who
   approved or rejected, and what was finally applied.

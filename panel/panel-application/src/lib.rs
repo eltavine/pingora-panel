@@ -21,8 +21,8 @@ mod tls_probe;
 pub use audit::{AuditFilter, AuditPage, AuditPort, AuditRecord, AuditVerification};
 pub use certificates::{CertificateChange, CertificateOutput, CertificatePort, CertificateRead};
 pub use configuration::{
-    ApplyOutcome, ApplyRequest, ConfigurationChange, ConfigurationOutput, ConfigurationPort,
-    ConfigurationRead, DraftInfo,
+    ApplyOutcome, ApplyRequest, ApprovalBypass, ConfigurationChange, ConfigurationOutput,
+    ConfigurationPort, ConfigurationRead, DraftInfo,
 };
 pub use context::{
     Actor, CommandContext, IdempotencyKey, RequestDeadline, RequestId, RequestScope, TraceContext,

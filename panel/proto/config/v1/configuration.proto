@@ -73,6 +73,11 @@ message ApplyRequest {
   string note = 3;
   // Validates and prepares on the gateway without activating.
   bool dry_run = 4;
+  // Applies without the approvals policies ask for, recording why; callers
+  // allow it only to actors who may bypass approvals.
+  string bypass_reason = 5;
+  // The incident the bypass answers, such as a ticket reference.
+  string bypass_incident = 6;
 }
 
 message ApplyResponse {
@@ -84,4 +89,7 @@ message ApplyResponse {
   .pingora.panel.common.v1.Error error = 4;
   // The revision the attempt was recorded as; zero for a dry run.
   uint64 revision = 5;
+  // The approval request as JSON when policies ask for approvals first;
+  // nothing was published.
+  bytes approval = 6;
 }
