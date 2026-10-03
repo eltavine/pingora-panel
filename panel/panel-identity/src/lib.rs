@@ -7,6 +7,8 @@
 //! tests.
 
 mod account;
+#[cfg(feature = "test-support")]
+pub mod conformance;
 pub mod memory;
 mod password;
 mod permission;
