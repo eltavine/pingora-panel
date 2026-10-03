@@ -8,6 +8,8 @@ export const ALL_PERMISSIONS = [
   'config.read',
   'config.write',
   'config.apply',
+  'certificate.read',
+  'certificate.manage',
   'audit.read',
   'platform.read',
   'identity.read',

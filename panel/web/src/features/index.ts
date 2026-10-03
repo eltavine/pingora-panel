@@ -1,4 +1,5 @@
 import { auditFeature } from './audit'
+import { certificatesFeature } from './certificates'
 import { configStudioFeature } from './config-studio'
 import { gatewayFeature } from './gateway'
 import { identityFeature } from './identity'
@@ -20,6 +21,7 @@ export const features: readonly FeatureModule[] = [
   sitesFeature,
   upstreamsFeature,
   listenersFeature,
+  certificatesFeature,
   configStudioFeature,
   identityFeature,
 ]
