@@ -28,7 +28,7 @@ trap 'rm -rf -- "$test_root"' EXIT
 test_repo="$test_root/repository"
 mkdir -p \
   "$test_repo/.github/scripts" \
-  "$test_repo/panel/panel-contracts/src" \
+  "$test_repo/panel/generated-contracts/src" \
   "$test_repo/panel/stable-api/src"
 cp "$script_dir/check-panel-rust-api-breaking.sh" "$test_repo/.github/scripts/"
 cp "$script_dir/list-workspace-package-names.py" "$test_repo/.github/scripts/"
@@ -36,18 +36,21 @@ cp "$script_dir/list-workspace-package-names.py" "$test_repo/.github/scripts/"
 cat >"$test_repo/panel/Cargo.toml" <<'EOF'
 [workspace]
 resolver = "2"
-members = ["panel-contracts", "stable-api"]
+members = ["generated-contracts", "stable-api"]
 EOF
 
-cat >"$test_repo/panel/panel-contracts/Cargo.toml" <<'EOF'
+cat >"$test_repo/panel/generated-contracts/Cargo.toml" <<'EOF'
 [package]
-name = "panel-contracts"
+name = "generated-contracts"
 version = "0.1.0"
 edition = "2021"
 publish = false
+
+[package.metadata.pingora-panel]
+generated-from = "protobuf"
 EOF
 
-cat >"$test_repo/panel/panel-contracts/src/lib.rs" <<'EOF'
+cat >"$test_repo/panel/generated-contracts/src/lib.rs" <<'EOF'
 // Generated transport bindings are compatibility-checked by Buf, not Rust SemVer.
 pub struct GeneratedContract {
     pub value: String,
@@ -125,18 +128,28 @@ cat >"$test_repo/panel/new-api/src/lib.rs" <<'EOF'
 pub struct NewlyIntroducedValue;
 EOF
 sed -i.bak \
-  's/members = \["panel-contracts", "stable-api"\]/members = ["panel-contracts", "stable-api", "new-api"]/' \
+  's/members = \["generated-contracts", "stable-api"\]/members = ["generated-contracts", "stable-api", "new-api"]/' \
   "$test_repo/panel/Cargo.toml"
 rm -f -- "$test_repo/panel/Cargo.toml.bak"
 cargo generate-lockfile --manifest-path "$test_repo/panel/Cargo.toml" --quiet
 bash "$test_repo/.github/scripts/check-panel-rust-api-breaking.sh" "$baseline_ref" >/dev/null
 
-cat >"$test_repo/panel/panel-contracts/src/lib.rs" <<'EOF'
+cat >"$test_repo/panel/generated-contracts/src/lib.rs" <<'EOF'
 // Simulate a source-breaking generated change. Buf, not this Rust API guard,
 // owns compatibility for the generated transport crate.
-pub struct GeneratedContract;
+pub struct RenamedContract {
+    pub value: String,
+}
 EOF
 bash "$test_repo/.github/scripts/check-panel-rust-api-breaking.sh" "$baseline_ref" >/dev/null
+
+# The package's own declaration, not its name, delegates its compatibility.
+sed -i.bak '/^\[package.metadata.pingora-panel\]$/,$d' \
+  "$test_repo/panel/generated-contracts/Cargo.toml"
+rm -f -- "$test_repo/panel/generated-contracts/Cargo.toml.bak"
+assert_breaking_rejected "undeclared generated package change"
+git -C "$test_repo" show "$baseline_ref:panel/generated-contracts/Cargo.toml" \
+  >"$test_repo/panel/generated-contracts/Cargo.toml"
 
 sed -i.bak '/#\[cfg(feature = "extended")\]/,/^}/d' \
   "$test_repo/panel/stable-api/src/lib.rs"
@@ -159,7 +172,7 @@ cargo generate-lockfile --manifest-path "$test_repo/panel/Cargo.toml" --quiet
 bash "$test_repo/.github/scripts/check-panel-rust-api-breaking.sh" "$baseline_ref" >/dev/null
 
 sed -i.bak \
-  's/members = \["panel-contracts", "stable-api", "new-api"\]/members = ["panel-contracts", "new-api"]/' \
+  's/members = \["generated-contracts", "stable-api", "new-api"\]/members = ["generated-contracts", "new-api"]/' \
   "$test_repo/panel/Cargo.toml"
 rm -f -- "$test_repo/panel/Cargo.toml.bak"
 cargo generate-lockfile --manifest-path "$test_repo/panel/Cargo.toml" --quiet

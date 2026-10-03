@@ -19,6 +19,10 @@ tonic-prost.workspace = true
 protoc-bin-vendored = "=3.2.0"
 tonic-prost-build.workspace = true
 
+[package.metadata.pingora-panel]
+# Buf, not the Rust API check, guards what is generated from Protobuf.
+generated-from = "protobuf"
+
 [package.metadata.cargo-machete]
 # Generated code included by tonic::include_proto! references the runtime codec
 # and the well-known protobuf types.

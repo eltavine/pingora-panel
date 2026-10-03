@@ -35,7 +35,7 @@ if [[ "$actual_tool_version" != "cargo-semver-checks $expected_tool_version" ]];
   exit 2
 fi
 
-for command in cargo comm git python3 tar; do
+for command in cargo comm git grep python3 tar; do
   if ! command -v "$command" >/dev/null 2>&1; then
     printf 'required Rust API compatibility command is unavailable: %s\n' "$command" >&2
     exit 2
@@ -55,8 +55,10 @@ git -C "$repo_root" archive "$baseline_ref" | tar -x -C "$baseline_source"
 
 current_packages="$semver_operation_root/current-packages"
 baseline_packages="$semver_operation_root/baseline-packages"
+generated_packages="$semver_operation_root/generated-packages"
 python3 "$package_lister" "$repo_root/panel/Cargo.toml" >"$current_packages"
 python3 "$package_lister" "$baseline_source/panel/Cargo.toml" >"$baseline_packages"
+python3 "$package_lister" --generated "$repo_root/panel/Cargo.toml" >"$generated_packages"
 
 removed_packages="$(LC_ALL=C comm -23 "$baseline_packages" "$current_packages")"
 if [[ -n "$removed_packages" ]]; then
@@ -65,24 +67,28 @@ if [[ -n "$removed_packages" ]]; then
   exit 1
 fi
 
+# Additive Proto evolution necessarily adds fields to generated Rust structs.
+# Buf owns that wire contract; this guard owns every hand-written public API.
+is_generated() {
+  grep -Fqx -- "$1" "$generated_packages"
+}
+
 declare -a packages_to_check=()
 while IFS= read -r package; do
   [[ -n "$package" ]] || continue
-  if [[ "$package" != panel-contracts ]]; then
+  if ! is_generated "$package"; then
     packages_to_check+=("$package")
   fi
 done < <(LC_ALL=C comm -12 "$baseline_packages" "$current_packages")
 
 while IFS= read -r package; do
   [[ -n "$package" ]] || continue
-  if [[ "$package" == panel-contracts ]]; then
+  if is_generated "$package"; then
     continue
   fi
   printf 'New Rust API package has no baseline and is treated as additive: %s\n' "$package"
 done < <(LC_ALL=C comm -13 "$baseline_packages" "$current_packages")
 
-# Additive Proto evolution necessarily adds fields to generated Rust structs.
-# Buf owns that wire contract; this guard owns every hand-written public API.
 for package in "${packages_to_check[@]}"; do
   # cargo-semver-checks deliberately skips `publish = false` crates selected
   # through --workspace. Every Panel package is private, so select each one
