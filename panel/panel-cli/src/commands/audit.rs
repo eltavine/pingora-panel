@@ -10,7 +10,7 @@ use clap::Subcommand;
 pub(crate) enum AuditCommand {
     /// Audit events, newest first.
     List {
-        /// Who acted; `--actor` names who makes changes.
+        /// Who acted: an account's username.
         #[arg(long)]
         actor_id: Option<String>,
         /// An event type, or a prefix ending in `.` such as `config.`.

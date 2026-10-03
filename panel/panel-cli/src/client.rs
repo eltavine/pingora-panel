@@ -82,6 +82,12 @@ impl fmt::Display for CliError {
                 if let Some(request) = problem["request_id"].as_str() {
                     write!(formatter, "\n  request {request}")?;
                 }
+                if *status == StatusCode::UNAUTHORIZED {
+                    write!(
+                        formatter,
+                        "\n  log in with `ppanel login`, or pass an API token with --token"
+                    )?;
+                }
                 Ok(())
             }
         }
@@ -98,7 +104,8 @@ pub struct Reply {
 pub struct Api {
     http: reqwest::Client,
     base: String,
-    actor: String,
+    /// An API token or a session secret, sent as a bearer credential.
+    credential: Option<String>,
     timeout: Duration,
     idempotency_key: Option<String>,
 }
@@ -106,7 +113,7 @@ pub struct Api {
 impl Api {
     pub fn new(
         base: &str,
-        actor: String,
+        credential: Option<String>,
         timeout: Duration,
         idempotency_key: Option<String>,
     ) -> Result<Self> {
@@ -118,10 +125,15 @@ impl Api {
         Ok(Self {
             http,
             base: base.trim_end_matches('/').to_owned(),
-            actor,
+            credential,
             timeout,
             idempotency_key,
         })
+    }
+
+    /// The API's base URL, which keys stored sessions.
+    pub fn base(&self) -> &str {
+        &self.base
     }
 
     pub async fn get(&self, path: &str, query: &[(&str, String)]) -> Result<Reply> {
@@ -154,7 +166,6 @@ impl Api {
             .http
             .request(method, format!("{}{path}", self.base))
             .header("x-request-id", Uuid::now_v7().to_string())
-            .header("x-actor", &self.actor)
             .header(
                 "x-deadline",
                 deadline.to_rfc3339_opts(SecondsFormat::Secs, true),
@@ -170,6 +181,10 @@ impl Api {
     }
 
     async fn execute(&self, request: reqwest::RequestBuilder) -> Result<Reply> {
+        let request = match &self.credential {
+            Some(credential) => request.bearer_auth(credential),
+            None => request,
+        };
         let response = request
             .send()
             .await

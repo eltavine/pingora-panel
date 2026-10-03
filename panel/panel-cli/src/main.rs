@@ -6,10 +6,13 @@
 
 mod client;
 mod commands;
+mod credentials;
 mod output;
 
 use clap::{CommandFactory, Parser, Subcommand};
 use client::{Api, CliError};
+use commands::identity::SecretInput;
+use credentials::Credentials;
 use output::{Format, Output};
 use std::{process::ExitCode, time::Duration};
 
@@ -28,9 +31,9 @@ struct Cli {
         default_value = "http://127.0.0.1:8080"
     )]
     api: String,
-    /// Who makes changes, as recorded with each change.
-    #[arg(long, global = true, env = "PPANEL_ACTOR")]
-    actor: Option<String>,
+    /// An API token, used instead of the session `ppanel login` keeps.
+    #[arg(long, global = true, env = "PPANEL_TOKEN", hide_env_values = true)]
+    token: Option<String>,
     /// Seconds to wait for each request.
     #[arg(long, global = true, default_value_t = 30)]
     timeout: u64,
@@ -48,6 +51,41 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Creates the first account with the deployment's bootstrap token.
+    Setup {
+        #[arg(long)]
+        username: String,
+        /// The file holding the bootstrap token.
+        #[arg(long)]
+        bootstrap_token_file: String,
+        #[command(flatten)]
+        input: SecretInput,
+    },
+    /// Logs in and keeps the session for later commands.
+    Login {
+        #[arg(long)]
+        username: String,
+        #[command(flatten)]
+        input: SecretInput,
+    },
+    /// Ends the kept session.
+    Logout,
+    /// The account in use, its roles and permissions.
+    Whoami,
+    /// Changes your password; your other sessions end.
+    Password {
+        #[command(flatten)]
+        input: SecretInput,
+    },
+    /// Your API tokens, for scripts.
+    #[command(subcommand)]
+    Token(commands::identity::TokenCommand),
+    /// Accounts, their roles, sessions and tokens.
+    #[command(subcommand)]
+    Account(commands::identity::AccountCommand),
+    /// Roles and the permissions they grant.
+    #[command(subcommand)]
+    Role(commands::identity::RoleCommand),
     /// Websites and their state.
     #[command(subcommand)]
     Site(commands::sites::SiteCommand),
@@ -92,14 +130,19 @@ async fn main() -> ExitCode {
         clap_complete::generate(shell, &mut Cli::command(), "ppanel", &mut std::io::stdout());
         return ExitCode::SUCCESS;
     }
-    let actor = cli
-        .actor
-        .or_else(|| std::env::var("USER").ok())
-        .unwrap_or_else(|| "ppanel".into());
+    let credentials = Credentials::locate();
+    let signing_in = matches!(cli.command, Command::Login { .. } | Command::Setup { .. });
+    let credential = cli.token.or_else(|| {
+        credentials
+            .as_ref()
+            .filter(|_| !signing_in)
+            .and_then(|credentials| credentials.load(cli.api.trim_end_matches('/')))
+            .map(|stored| stored.secret)
+    });
     let result = async {
         let api = Api::new(
             &cli.api,
-            actor,
+            credential,
             Duration::from_secs(cli.timeout.max(1)),
             cli.idempotency_key,
         )?;
@@ -108,6 +151,28 @@ async fn main() -> ExitCode {
             quiet: cli.quiet,
         };
         match cli.command {
+            Command::Setup {
+                username,
+                bootstrap_token_file,
+                input,
+            } => {
+                commands::identity::setup(&api, &output, username, bootstrap_token_file, &input)
+                    .await
+            }
+            Command::Login { username, input } => {
+                commands::identity::login(&api, &output, credentials.as_ref(), username, &input)
+                    .await
+            }
+            Command::Logout => {
+                commands::identity::logout(&api, &output, credentials.as_ref()).await
+            }
+            Command::Whoami => commands::identity::whoami(&api, &output).await,
+            Command::Password { input } => {
+                commands::identity::password(&api, &output, &input).await
+            }
+            Command::Token(command) => commands::identity::token(&api, &output, command).await,
+            Command::Account(command) => commands::identity::account(&api, &output, command).await,
+            Command::Role(command) => commands::identity::role(&api, &output, command).await,
             Command::Site(command) => commands::sites::run(&api, &output, command).await,
             Command::Domain(command) => commands::domains::run(&api, &output, command).await,
             Command::Route(command) => commands::routes::run(&api, &output, command).await,
@@ -205,6 +270,52 @@ mod tests {
                 "sites/shop.conf",
             ],
             vec!["ppanel", "config", "ir"],
+            vec![
+                "ppanel",
+                "setup",
+                "--username",
+                "root",
+                "--bootstrap-token-file",
+                "secrets/bootstrap-token",
+                "--password-stdin",
+            ],
+            vec!["ppanel", "login", "--username", "root"],
+            vec!["ppanel", "--token", "ppat_x", "whoami"],
+            vec!["ppanel", "logout"],
+            vec!["ppanel", "password", "--password-stdin"],
+            vec![
+                "ppanel",
+                "token",
+                "create",
+                "ci",
+                "--permission",
+                "config.read",
+            ],
+            vec![
+                "ppanel",
+                "token",
+                "revoke",
+                "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b",
+            ],
+            vec![
+                "ppanel",
+                "account",
+                "create",
+                "ops",
+                "--role",
+                "operator",
+                "--with-password",
+            ],
+            vec![
+                "ppanel",
+                "account",
+                "update",
+                "ops",
+                "--unlock",
+                "--disable",
+            ],
+            vec!["ppanel", "account", "end-session", "ops", "0190a1b2"],
+            vec!["ppanel", "role", "permissions"],
             vec![
                 "ppanel",
                 "config",

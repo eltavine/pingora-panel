@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
-//! `ppanel config`, `ppanel revision` and `ppanel audit` against a stand-in
-//! API that records what the command line sends.
+//! `ppanel` against a stand-in API that records what the command line
+//! sends.
 
 use axum::{
     extract::State,
@@ -12,7 +12,8 @@ use axum::{
 };
 use serde_json::{json, Value};
 use std::{
-    process::Output,
+    io::Write,
+    process::{Output, Stdio},
     sync::{Arc, Mutex},
 };
 
@@ -22,6 +23,7 @@ struct Request {
     path: String,
     query: String,
     if_match: Option<String>,
+    authorization: Option<String>,
     body: Value,
 }
 
@@ -48,6 +50,9 @@ async fn api(
         query: uri.query().unwrap_or_default().to_owned(),
         if_match: headers
             .get("if-match")
+            .map(|value| value.to_str().unwrap().to_owned()),
+        authorization: headers
+            .get("authorization")
             .map(|value| value.to_str().unwrap().to_owned()),
         body: body.clone(),
     });
@@ -183,6 +188,49 @@ async fn api(
             noted["note"] = body["note"].clone();
             Json(noted).into_response()
         }
+        ("POST", "/api/v1/session") => (
+            StatusCode::CREATED,
+            Json(json!({
+                "account": {"username": body["username"], "roles": ["operator"]},
+                "permissions": ["config.read"], "credential": "bearer",
+                "session": {"expires_at": "2026-10-04T08:00:00Z"},
+                "secret": "session-secret"
+            })),
+        )
+            .into_response(),
+        ("GET", "/api/v1/session") => {
+            if headers.contains_key("authorization") {
+                Json(json!({
+                    "account": {"username": "ops", "roles": ["operator"]},
+                    "permissions": ["config.read", "config.write"], "credential": "bearer",
+                    "session": {"expires_at": "2026-10-04T08:00:00Z"}
+                }))
+                .into_response()
+            } else {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({"status": 401, "detail": "log in or present an API token"})),
+                )
+                    .into_response()
+            }
+        }
+        ("DELETE", "/api/v1/session") => StatusCode::NO_CONTENT.into_response(),
+        ("POST", "/api/v1/account/tokens") => (
+            StatusCode::CREATED,
+            Json(json!({
+                "token": {"name": body["name"], "expires_at": "2026-11-02T08:00:00Z"},
+                "secret": "ppat_new"
+            })),
+        )
+            .into_response(),
+        ("GET", "/api/v1/accounts") => Json(json!([
+            {"id": "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b", "username": "ops", "roles": ["operator"],
+             "disabled": false, "locked": false}
+        ]))
+        .into_response(),
+        ("PATCH", "/api/v1/accounts/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b") => {
+            Json(json!({"username": "ops", "disabled": body["disabled"]})).into_response()
+        }
         _ => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -190,6 +238,8 @@ async fn api(
 struct Stub {
     base: String,
     log: Log,
+    /// Where the command line keeps sessions, apart from the user's own.
+    config: tempfile::TempDir,
 }
 
 impl Stub {
@@ -214,15 +264,39 @@ impl Stub {
         Self {
             base: format!("http://{address}"),
             log,
+            config: tempfile::tempdir().unwrap(),
         }
     }
 
-    fn ppanel(&self, arguments: &[&str]) -> Output {
-        std::process::Command::new(env!("CARGO_BIN_EXE_ppanel"))
-            .args(["--api", &self.base, "--actor", "ops"])
+    fn command(&self, arguments: &[&str]) -> std::process::Command {
+        let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_ppanel"));
+        command
+            .args(["--api", &self.base])
             .args(arguments)
-            .output()
+            .env("PPANEL_CONFIG_DIR", self.config.path())
+            .env_remove("PPANEL_TOKEN");
+        command
+    }
+
+    fn ppanel(&self, arguments: &[&str]) -> Output {
+        self.command(arguments).output().unwrap()
+    }
+
+    fn ppanel_with_input(&self, arguments: &[&str], input: &str) -> Output {
+        let mut child = self
+            .command(arguments)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
             .unwrap()
+            .write_all(input.as_bytes())
+            .unwrap();
+        child.wait_with_output().unwrap()
     }
 
     fn requests(&self, method: &str, path: &str) -> Vec<Request> {
@@ -526,4 +600,77 @@ fn applying_rolling_back_and_revisions() {
     assert_eq!(stdout(&noted).trim(), "Noted revision 3");
     let missing = stub.ppanel(&["revision", "show", "8"]);
     assert_eq!(missing.status.code(), Some(3));
+}
+
+#[test]
+fn logging_in_keeps_a_session_for_later_commands() {
+    let stub = Stub::start();
+    let refused = stub.ppanel(&["whoami"]);
+    assert_eq!(refused.status.code(), Some(7), "{}", stderr(&refused));
+    assert!(stderr(&refused).contains("ppanel login"));
+
+    let login = stub.ppanel_with_input(
+        &["login", "--username", "ops", "--password-stdin"],
+        "a long enough passphrase\n",
+    );
+    assert!(login.status.success(), "{}", stderr(&login));
+    assert!(stdout(&login).starts_with("Logged in as ops until 2026-10-04T08:00:00Z"));
+    let sent = &stub.requests("POST", "/api/v1/session")[0];
+    assert_eq!(
+        sent.body,
+        json!({"username": "ops", "password": "a long enough passphrase", "transport": "bearer"})
+    );
+    assert_eq!(sent.authorization, None);
+    let kept = std::fs::read_to_string(stub.config.path().join("credentials.json")).unwrap();
+    assert!(kept.contains("session-secret"));
+
+    let whoami = stub.ppanel(&["whoami"]);
+    assert!(whoami.status.success(), "{}", stderr(&whoami));
+    assert!(stdout(&whoami).contains("config.read,config.write"));
+    assert_eq!(
+        stub.requests("GET", "/api/v1/session")[1]
+            .authorization
+            .as_deref(),
+        Some("Bearer session-secret")
+    );
+    stub.ppanel(&["--token", "ppat_given", "whoami"]);
+    assert_eq!(
+        stub.requests("GET", "/api/v1/session")[2]
+            .authorization
+            .as_deref(),
+        Some("Bearer ppat_given")
+    );
+
+    let token = stub.ppanel(&[
+        "token",
+        "create",
+        "ci",
+        "--permission",
+        "config.read",
+        "--days",
+        "30",
+    ]);
+    assert!(token.status.success(), "{}", stderr(&token));
+    assert!(stdout(&token).starts_with("ppat_new\n"));
+    assert_eq!(
+        stub.requests("POST", "/api/v1/account/tokens")[0].body,
+        json!({"name": "ci", "permissions": ["config.read"], "expires_in_days": 30})
+    );
+
+    let disabled = stub.ppanel(&["account", "update", "OPS", "--disable"]);
+    assert!(disabled.status.success(), "{}", stderr(&disabled));
+    assert_eq!(
+        stub.requests(
+            "PATCH",
+            "/api/v1/accounts/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"
+        )[0]
+        .body,
+        json!({"disabled": true})
+    );
+
+    let logout = stub.ppanel(&["logout"]);
+    assert!(logout.status.success(), "{}", stderr(&logout));
+    assert_eq!(stub.requests("DELETE", "/api/v1/session").len(), 1);
+    let again = stub.ppanel(&["whoami"]);
+    assert_eq!(again.status.code(), Some(7));
 }
