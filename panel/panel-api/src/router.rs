@@ -1,5 +1,5 @@
 use crate::{
-    access,
+    access, acme,
     admission::{admit, Admission},
     audit, certificates, configuration as config, gateway_runtime as runtime, identity, language,
     middleware, routes, tls_checks, ApiConfig, ApiState,
@@ -186,6 +186,28 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         .route(
             "/api/v1/certificate-inspections",
             post(certificates::inspect_certificate),
+        )
+        .route(
+            "/api/v1/acme-accounts",
+            get(acme::list_acme_accounts::<U>).post(acme::create_acme_account::<U>),
+        )
+        .route(
+            "/api/v1/acme-accounts/{id}",
+            get(acme::get_acme_account::<U>).delete(acme::delete_acme_account::<U>),
+        )
+        .route(
+            "/api/v1/acme-certificates",
+            get(acme::list_automatic_certificates::<U>)
+                .post(acme::create_automatic_certificate::<U>),
+        )
+        .route(
+            "/api/v1/acme-certificates/{id}",
+            get(acme::get_automatic_certificate::<U>)
+                .delete(acme::delete_automatic_certificate::<U>),
+        )
+        .route(
+            "/api/v1/acme-certificates/{id}/renewals",
+            post(acme::renew_automatic_certificate::<U>),
         )
         .route("/api/v1/tls-checks", post(tls_checks::check_tls::<U>))
         .route("/api/v1/openapi.json", get(routes::openapi))

@@ -32,7 +32,7 @@ fn port<U>(state: &ApiState<U>) -> Result<Arc<dyn CertificatePort>, ApiError> {
     })
 }
 
-fn body<T>(payload: Result<Json<T>, JsonRejection>) -> Result<T, ApiError> {
+pub(crate) fn body<T>(payload: Result<Json<T>, JsonRejection>) -> Result<T, ApiError> {
     payload
         .map(|Json(value)| value)
         .map_err(ApiError::from_json)
@@ -144,7 +144,7 @@ pub(crate) struct CoverageQuery {
     hosts: String,
 }
 
-async fn read<U>(
+pub(crate) async fn read<U>(
     state: &ApiState<U>,
     headers: &HeaderMap,
     operation: &str,
@@ -162,7 +162,7 @@ async fn read<U>(
         .await?)
 }
 
-async fn change<U>(
+pub(crate) async fn change<U>(
     state: &ApiState<U>,
     headers: &HeaderMap,
     operation: &str,
@@ -197,7 +197,7 @@ fn if_match(headers: &HeaderMap) -> Result<String, ApiError> {
     })
 }
 
-fn decoded<T: DeserializeOwned>(output: &CertificateOutput) -> Result<T, ApiError> {
+pub(crate) fn decoded<T: DeserializeOwned>(output: &CertificateOutput) -> Result<T, ApiError> {
     serde_json::from_slice(&output.content).map_err(|_| {
         ApiError::new(PanelError::internal(
             "the certificate inventory answered with an unreadable document",

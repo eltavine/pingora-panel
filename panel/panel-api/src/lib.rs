@@ -7,6 +7,7 @@
 //! transports are injected through application-owned ports.
 
 mod access;
+mod acme;
 mod admission;
 mod audit;
 mod certificates;

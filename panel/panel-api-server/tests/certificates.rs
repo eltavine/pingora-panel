@@ -8,6 +8,7 @@ mod support;
 
 use chrono::Utc;
 use gateway_grpc::GatewayGrpcService;
+use panel_acme::testing::Pebble;
 use panel_certificates::self_signed;
 use panel_control_runtime::{
     ProcessSettings, RunningProcess, DATABASE_PASSWORD_ENV, DATABASE_URL_ENV, NATS_URL_ENV,
@@ -465,6 +466,77 @@ async fn certificates_are_kept_delivered_and_audited() {
         ]
     );
     assert!(audited.iter().all(|(_, actor)| actor == "operator"));
+
+    if let Some(pebble) = Pebble::from_env() {
+        let (account, etag) = api
+            .send(
+                api.mutate(Method::POST, "/api/v1/acme-accounts", "acme-account-1")
+                    .json(&json!({
+                        "id": "pebble",
+                        "directory": pebble.directory.url,
+                        "ca_bundle": pebble.directory.ca_bundle,
+                        "contact": ["ops@shop.example"],
+                        "terms_of_service_agreed": true,
+                    })),
+                StatusCode::CREATED,
+            )
+            .await;
+        assert_eq!(
+            (account["id"].as_str(), etag.as_str()),
+            (Some("pebble"), "\"1\"")
+        );
+        assert!(account["url"].as_str().unwrap().starts_with("https://"));
+        let (automatic, _) = api
+            .send(
+                api.mutate(
+                    Method::POST,
+                    "/api/v1/acme-certificates",
+                    "acme-certificate-1",
+                )
+                .json(&json!({
+                    "id": "acme.shop.example",
+                    "account": "pebble",
+                    "names": ["acme.shop.example"],
+                })),
+                StatusCode::CREATED,
+            )
+            .await;
+        assert_eq!(automatic["challenge"], "http-01");
+        let (listed, _) = api
+            .send(api.get("/api/v1/acme-certificates"), StatusCode::OK)
+            .await;
+        assert_eq!(listed[0]["id"], "acme.shop.example");
+        let (renewal, _) = api
+            .send(
+                api.mutate(
+                    Method::POST,
+                    "/api/v1/acme-certificates/acme.shop.example/renewals",
+                    "acme-renewal-1",
+                ),
+                StatusCode::ACCEPTED,
+            )
+            .await;
+        api.send(
+            api.mutate(
+                Method::DELETE,
+                "/api/v1/acme-certificates/acme.shop.example",
+                "acme-delete-1",
+            )
+            .header("if-match", renewal["etag"].as_str().unwrap()),
+            StatusCode::NO_CONTENT,
+        )
+        .await;
+        api.send(
+            api.mutate(
+                Method::DELETE,
+                "/api/v1/acme-accounts/pebble",
+                "acme-delete-2",
+            )
+            .header("if-match", "\"1\""),
+            StatusCode::NO_CONTENT,
+        )
+        .await;
+    }
 
     server.stop().await;
     automation.stop().await;

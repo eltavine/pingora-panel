@@ -2473,6 +2473,7 @@ dependencies = [
  "gateway-grpc",
  "gateway-grpc-client",
  "identity-postgres",
+ "panel-acme",
  "panel-api",
  "panel-application",
  "panel-certificates",

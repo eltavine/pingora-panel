@@ -16,6 +16,7 @@ use std::sync::Arc;
 use tower::ServiceExt;
 
 mod access;
+mod acme;
 mod admission;
 mod certificates;
 mod conditional;

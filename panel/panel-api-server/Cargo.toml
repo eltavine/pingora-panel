@@ -39,6 +39,7 @@ tls-probe-rustls.workspace = true
 
 [dev-dependencies]
 audit-service.workspace = true
+panel-acme = { workspace = true, features = ["test-support"] }
 automation-service.workspace = true
 tempfile.workspace = true
 chrono.workspace = true
