@@ -23,20 +23,12 @@ const BACKDATE: Duration = Duration::minutes(5);
 /// Generates an ECDSA P-256 certificate signed by its own key for `names`,
 /// which are DNS names, wildcards or IP addresses, valid for `days`.
 pub fn self_signed(names: &[String], days: u32, now: DateTime<Utc>) -> Result<Accepted> {
-    if names.is_empty() || names.len() > MAX_NAMES {
-        return Err(PanelError::validation_failed(format!(
-            "a certificate needs 1 to {MAX_NAMES} names"
-        )));
-    }
+    let names = subject_names(names)?;
     if days == 0 || days > MAX_SELF_SIGNED_DAYS {
         return Err(PanelError::validation_failed(format!(
             "a generated certificate is valid for 1 to {MAX_SELF_SIGNED_DAYS} days"
         )));
     }
-    let names = names
-        .iter()
-        .map(|name| subject_name(name.trim()))
-        .collect::<Result<Vec<_>>>()?;
     let mut params = CertificateParams::default();
     let mut subject = DistinguishedName::new();
     subject.push(DnType::CommonName, names[0].0.clone());
@@ -55,6 +47,17 @@ pub fn self_signed(names: &[String], days: u32, now: DateTime<Utc>) -> Result<Ac
         .map_err(|error| PanelError::internal(format!("certificate generation failed: {error}")))?;
     let key = Zeroizing::new(pem::encode("PRIVATE KEY", &key.serialize_der()));
     accept(&pem::encode(CERTIFICATE, certificate.der()), &key, now)
+}
+
+/// Checks the names a certificate is requested for and gives each with its
+/// subject alternative name.
+pub(crate) fn subject_names(names: &[String]) -> Result<Vec<(String, SanType)>> {
+    if names.is_empty() || names.len() > MAX_NAMES {
+        return Err(PanelError::validation_failed(format!(
+            "a certificate needs 1 to {MAX_NAMES} names"
+        )));
+    }
+    names.iter().map(|name| subject_name(name.trim())).collect()
 }
 
 fn subject_name(name: &str) -> Result<(String, SanType)> {

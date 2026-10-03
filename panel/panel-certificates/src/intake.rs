@@ -95,7 +95,7 @@ pub fn describe_der(chain: &[Vec<u8>]) -> Result<CertificateDetails> {
     inspect(&certificates)
 }
 
-fn parse_chain(text: &str) -> Result<Vec<CertificateDer<'static>>> {
+pub(crate) fn parse_chain(text: &str) -> Result<Vec<CertificateDer<'static>>> {
     if text.len() > MAX_CHAIN_BYTES {
         return Err(PanelError::validation_failed(format!(
             "the certificate chain is larger than {MAX_CHAIN_BYTES} bytes"
