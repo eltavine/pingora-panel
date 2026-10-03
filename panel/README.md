@@ -518,6 +518,7 @@ http {
         tls_profile edge;
         trusted_proxies 192.0.2.0/24;              # the load balancer
         real_ip_header x-forwarded-for;
+        request_head_timeout 20s;                  # 30s when not written
     }
 
     server shop {
@@ -547,6 +548,14 @@ forwarded. With them, the gateway reads the header `real_ip_header` names
 from the right, skipping trusted networks; the first address outside them is
 the client that rules and limits see, and upstreams receive it as
 `X-Real-IP`.
+
+Every listener also gives clients a deadline for each request head, 30
+seconds unless `request_head_timeout` says otherwise: counted from the
+connection's start for its first request and from the end of the previous
+request for later ones. A client that sends its request a byte at a time
+(Slowloris) gets 408 for a late first head, and a late later head, or a
+kept-alive connection left idle that long, is closed. HTTP/2 connections are
+watched until their preface.
 
 Password files are htpasswd files in the gateway's secret directory, made
 with `htpasswd -B` or an Argon2 tool; a file holding weaker hashes is refused

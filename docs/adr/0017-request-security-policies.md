@@ -57,6 +57,17 @@ password files.
   walking from the TCP peer; rules, limits and forwarding headers use it.
   Forwarding headers from peers that are not trusted are dropped before the
   gateway adds its own, so upstreams cannot be told a forged address.
+- **Slow clients.** Every listener gives each request head a deadline, 30
+  seconds unless the listener sets its own: from the connection's start for
+  its first request and from the end of the previous request for later
+  ones, so trickling a head byte by byte (Slowloris) cannot hold a
+  connection and idle kept-alive connections are closed. Pingora bounds
+  each read but not a whole head; the gateway wraps each accepted
+  connection to watch the head instead of changing Pingora. A late first
+  head gets 408; a late later head closes the connection, since its bytes
+  may be the rest of a body the previous request left unread. Gateways
+  advertise `listener.request-head-timeout` for listeners that set their
+  own deadline.
 - **Checks.** Validation warns about dangerous settings: Basic
   authentication on listeners without TLS, every address trusted as a proxy
   and upstreams that do not verify their TLS nodes. The gateway refuses
