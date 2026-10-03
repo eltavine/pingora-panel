@@ -42,6 +42,15 @@ information says so, and back off after failures.
   DNS-01, which publishes `_acme-challenge` TXT records through a
   `DnsProvider` and waits for them to propagate. Whatever was presented is
   removed after the order, whether it succeeded or not.
+- **DNS providers.** DNS providers are kept by the automation service with
+  their secrets sealed like keys, and a DNS-01 certificate names one. The
+  first kind sends RFC 2136 dynamic updates to the zone's primary over TCP,
+  signed with TSIG (RFC 8945, HMAC-SHA256 or HMAC-SHA512), and accepts only
+  answers whose signature verifies, so BIND, Knot DNS, PowerDNS and most
+  authoritative servers work without vendor APIs. It is implemented in the
+  panel rather than with a DNS library, whose dependencies would add a third
+  generation of the random number crates, and its signatures are tested
+  against BIND's.
 - **Jobs.** Issuance is a `certificate.issue` job, so it survives restarts
   and runs once across replicas, and a certificate is issued by one job at a
   time. Creating an automatic certificate or asking to renew it enqueues the

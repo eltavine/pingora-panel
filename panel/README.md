@@ -446,21 +446,31 @@ at a random moment inside its suggested window. A failed attempt keeps the
 CA's reason, is published as `tls.acme.certificate.failed` and is retried
 after an hour, doubling up to a day. The hourly renewal check also publishes
 `tls.certificate.expiring` when any certificate comes within 30, 14, 7, 3
-and 1 days of its end and once it has expired. Wildcard names need DNS-01,
-which is not offered yet.
+and 1 days of its end and once it has expired.
 
-`/api/v1/acme-accounts` and `/api/v1/acme-certificates`, with
-`/api/v1/acme-certificates/{id}/renewals` to renew at once, need
-`certificate.read` to read and `certificate.manage` to change, as does the
-console's Certificates page, which shows each automatic certificate's state
-and last failure.
+Wildcard names, and names no gateway answers for on port 80, use DNS-01: a
+DNS provider publishes `_acme-challenge` TXT records and the order waits its
+propagation time before the CA looks. A provider sends RFC 2136 dynamic
+updates to the zones' primary, signed with a TSIG key (HMAC-SHA256 or
+HMAC-SHA512) whose base64 secret is sealed like keys, so BIND, Knot DNS and
+PowerDNS work as they are. For BIND, a key and an `update-policy` such as
+`grant acme-update. zonesub TXT;` limit the key to TXT records.
+
+`/api/v1/acme-accounts`, `/api/v1/dns-providers` and
+`/api/v1/acme-certificates`, with `/api/v1/acme-certificates/{id}/renewals`
+to renew at once, need `certificate.read` to read and `certificate.manage`
+to change, as does the console's Certificates page, which shows each
+automatic certificate's state and last failure.
 
 ```sh
 ppanel acme account register letsencrypt --directory letsencrypt \
   --email ops@example.com --agree-tos
 ppanel acme certificate request example.com --account letsencrypt \
   --name example.com --name www.example.com
-ppanel acme certificate show example.com
+ppanel acme dns-provider add primary-ns --server ns1.example.com:53 \
+  --zone example.com --key-name acme-update --secret-file acme-update.key
+ppanel acme certificate request wildcard.example.com --account letsencrypt \
+  --name '*.example.com' --challenge dns-01 --dns-provider primary-ns
 ppanel tls-profile set edge --certificate-id example.com
 ```
 
@@ -581,6 +591,10 @@ cargo test --manifest-path panel/Cargo.toml --package panel-postgres --package p
   --package panel-acme --package automation-service --all-features
 panel/scripts/dev-services.sh down
 ```
+
+`PANEL_TEST_RFC2136_SERVER` additionally runs the RFC 2136 provider against a
+real primary for `example.com`, as described in
+`panel/dns-rfc2136/tests/primary.rs`.
 
 ## Compose installation
 
