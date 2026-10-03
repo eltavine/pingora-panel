@@ -13,6 +13,7 @@ pub mod memory;
 mod password;
 mod permission;
 mod principal;
+mod provider;
 mod secret;
 mod service;
 mod session;
@@ -23,6 +24,7 @@ pub use account::{Account, AccountId, Username};
 pub use password::{PasswordHasher, PasswordPolicy, PasswordProblem, Verification};
 pub use permission::{built_in_roles, Permission, PermissionSet, Role};
 pub use principal::{Credential, Principal};
+pub use provider::{OpenIdConnect, ProviderSettings, Refreshed, SignInRequest, SignedIn};
 pub use secret::{csrf_token, Secret, SecretHash, TOKEN_PREFIX};
 pub use service::{
     AccountRequest, Client, Identity, IdentitySettings, Login, RoleRequest, TokenRequest,

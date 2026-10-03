@@ -1921,11 +1921,25 @@ dependencies = [
 name = "identity-oidc"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "axum",
  "base64 0.22.1",
+ "bytes",
+ "http",
+ "http-body-util",
+ "hyper-rustls",
+ "hyper-util",
+ "identity-oidc",
  "panel-errors",
+ "panel-identity",
+ "percent-encoding",
+ "reqwest",
  "ring",
+ "rustls",
+ "rustls-platform-verifier",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
