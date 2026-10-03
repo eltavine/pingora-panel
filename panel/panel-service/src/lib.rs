@@ -15,7 +15,9 @@ mod process;
 mod trace;
 
 pub use grpc::{describe_peer, negotiate_with_peer, publish_grpc_health, ServiceInfoService};
-pub use grpc_client::{status_error, GrpcHealthCheck};
+pub use grpc_client::{
+    loopback_channel, request_context, response_error, status_error, GrpcHealthCheck,
+};
 pub use ops::{health_response, ops_router, LIVENESS_PATH, READINESS_PATH};
 pub use panel_environment::{require_loopback, Environment};
 pub use probe::probe_http;

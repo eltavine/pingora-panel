@@ -7,18 +7,14 @@ use async_trait::async_trait;
 use panel_application::{
     AuditFilter, AuditPage, AuditPort, AuditRecord, AuditVerification, RequestScope,
 };
-use panel_contracts::{
-    audit::v1::{self as wire, audit_query_client::AuditQueryClient},
-    common::v1 as common,
-    PROTOCOL_VERSION,
-};
+use panel_contracts::audit::v1::{self as wire, audit_query_client::AuditQueryClient};
 use panel_errors::{PanelError, Result};
-use panel_service::{propagate_trace, status_error, GrpcHealthCheck};
-use std::{
-    net::IpAddr,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+use panel_service::{
+    loopback_channel, propagate_trace, request_context, response_error, status_error,
+    GrpcHealthCheck,
 };
-use tonic::transport::{Channel, Endpoint};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tonic::transport::Channel;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -31,27 +27,8 @@ pub struct AuditClient {
 impl AuditClient {
     /// A client that connects on first use to a plaintext loopback endpoint.
     pub fn connect_lazy(endpoint: impl Into<String>) -> Result<Self> {
-        let endpoint = Endpoint::from_shared(endpoint.into()).map_err(|error| {
-            PanelError::invalid_argument(format!("invalid audit service endpoint: {error}"))
-        })?;
-        let uri = endpoint.uri();
-        let loopback = uri.scheme_str() == Some("http")
-            && uri
-                .host()
-                .map(|host| host.trim_start_matches('[').trim_end_matches(']'))
-                .and_then(|host| host.parse::<IpAddr>().ok())
-                .is_some_and(|ip| ip.is_loopback());
-        if !loopback {
-            return Err(PanelError::invalid_argument(
-                "the audit service endpoint must be a plaintext numeric loopback address \
-                 unless mutual TLS is enabled",
-            ));
-        }
         Ok(Self {
-            channel: endpoint
-                .connect_timeout(CONNECT_TIMEOUT)
-                .timeout(REQUEST_TIMEOUT)
-                .connect_lazy(),
+            channel: loopback_channel("audit service", endpoint, CONNECT_TIMEOUT, REQUEST_TIMEOUT)?,
         })
     }
 
@@ -78,15 +55,6 @@ impl AuditClient {
     }
 }
 
-fn context(scope: &RequestScope) -> common::RequestContext {
-    common::RequestContext {
-        request_id: scope.request_id().as_str().into(),
-        correlation_id: scope.correlation_id().as_str().into(),
-        schema_version: PROTOCOL_VERSION.into(),
-        ..common::RequestContext::default()
-    }
-}
-
 fn timestamp(time: SystemTime) -> prost_types::Timestamp {
     let since = time.duration_since(UNIX_EPOCH).unwrap_or_default();
     prost_types::Timestamp {
@@ -100,10 +68,6 @@ fn time(value: Option<prost_types::Timestamp>) -> Option<SystemTime> {
     let seconds = u64::try_from(value.seconds).ok()?;
     let nanos = u32::try_from(value.nanos).ok()?;
     UNIX_EPOCH.checked_add(Duration::new(seconds, nanos))
-}
-
-fn checked(error: Option<common::Error>) -> Result<()> {
-    error.map_or(Ok(()), |error| Err(error.into()))
 }
 
 fn record(value: wire::AuditRecord) -> AuditRecord {
@@ -132,7 +96,7 @@ fn record(value: wire::AuditRecord) -> AuditRecord {
 impl AuditPort for AuditClient {
     async fn list(&self, scope: RequestScope, filter: AuditFilter) -> Result<AuditPage> {
         let request = wire::ListRequest {
-            context: Some(context(&scope)),
+            context: Some(request_context(&scope)),
             before: filter.before,
             limit: filter.limit,
             actor_id: filter.actor_id,
@@ -147,7 +111,7 @@ impl AuditPort for AuditClient {
             .await
             .map_err(status_error)?
             .into_inner();
-        checked(response.error)?;
+        response_error(response.error)?;
         Ok(AuditPage {
             records: response.records.into_iter().map(record).collect(),
             next_before: response.next_before,
@@ -156,7 +120,7 @@ impl AuditPort for AuditClient {
 
     async fn get(&self, scope: RequestScope, sequence: u64) -> Result<AuditRecord> {
         let request = wire::GetRequest {
-            context: Some(context(&scope)),
+            context: Some(request_context(&scope)),
             sequence,
         };
         let response = AuditQueryClient::new(self.channel.clone())
@@ -164,7 +128,7 @@ impl AuditPort for AuditClient {
             .await
             .map_err(status_error)?
             .into_inner();
-        checked(response.error)?;
+        response_error(response.error)?;
         response
             .record
             .map(record)
@@ -178,7 +142,7 @@ impl AuditPort for AuditClient {
         to: Option<u64>,
     ) -> Result<AuditVerification> {
         let request = wire::VerifyRequest {
-            context: Some(context(&scope)),
+            context: Some(request_context(&scope)),
             from,
             to,
         };
@@ -187,7 +151,7 @@ impl AuditPort for AuditClient {
             .await
             .map_err(status_error)?
             .into_inner();
-        checked(response.error)?;
+        response_error(response.error)?;
         Ok(AuditVerification {
             intact: response.intact,
             checked: response.checked,

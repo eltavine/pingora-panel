@@ -13,10 +13,13 @@ use panel_contracts::{
     common::v1 as common,
     PROTOCOL_VERSION,
 };
-use panel_errors::{PanelError, Result};
-use panel_service::{propagate_trace, status_error, GrpcHealthCheck};
-use std::{net::IpAddr, time::Duration};
-use tonic::transport::{Channel, Endpoint};
+use panel_errors::Result;
+use panel_service::{
+    loopback_channel, propagate_trace, request_context, response_error, status_error,
+    GrpcHealthCheck,
+};
+use std::time::Duration;
+use tonic::transport::Channel;
 use zeroize::Zeroizing;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -30,27 +33,13 @@ pub struct AutomationClient {
 impl AutomationClient {
     /// A client that connects on first use to a plaintext loopback endpoint.
     pub fn connect_lazy(endpoint: impl Into<String>) -> Result<Self> {
-        let endpoint = Endpoint::from_shared(endpoint.into()).map_err(|error| {
-            PanelError::invalid_argument(format!("invalid automation service endpoint: {error}"))
-        })?;
-        let uri = endpoint.uri();
-        let loopback = uri.scheme_str() == Some("http")
-            && uri
-                .host()
-                .map(|host| host.trim_start_matches('[').trim_end_matches(']'))
-                .and_then(|host| host.parse::<IpAddr>().ok())
-                .is_some_and(|ip| ip.is_loopback());
-        if !loopback {
-            return Err(PanelError::invalid_argument(
-                "the automation service endpoint must be a plaintext numeric loopback address \
-                 unless mutual TLS is enabled",
-            ));
-        }
         Ok(Self {
-            channel: endpoint
-                .connect_timeout(CONNECT_TIMEOUT)
-                .timeout(REQUEST_TIMEOUT)
-                .connect_lazy(),
+            channel: loopback_channel(
+                "automation service",
+                endpoint,
+                CONNECT_TIMEOUT,
+                REQUEST_TIMEOUT,
+            )?,
         })
     }
 
@@ -77,10 +66,6 @@ impl AutomationClient {
     }
 }
 
-fn checked(error: Option<common::Error>) -> Result<()> {
-    error.map_or(Ok(()), |error| Err(error.into()))
-}
-
 fn etag(value: String) -> Option<String> {
     (!value.is_empty()).then_some(value)
 }
@@ -89,12 +74,7 @@ fn etag(value: String) -> Option<String> {
 impl CertificatePort for AutomationClient {
     async fn read(&self, scope: RequestScope, read: CertificateRead) -> Result<CertificateOutput> {
         let message = wire::ReadRequest {
-            context: Some(common::RequestContext {
-                request_id: scope.request_id().as_str().into(),
-                correlation_id: scope.correlation_id().as_str().into(),
-                schema_version: PROTOCOL_VERSION.into(),
-                ..common::RequestContext::default()
-            }),
+            context: Some(request_context(&scope)),
             operation: read.operation,
             resource: read.resource,
             parameters: read.parameters,
@@ -104,7 +84,7 @@ impl CertificatePort for AutomationClient {
             .await
             .map_err(status_error)?
             .into_inner();
-        checked(response.error)?;
+        response_error(response.error)?;
         Ok(CertificateOutput {
             content: response.content,
             etag: etag(response.etag),
@@ -138,7 +118,7 @@ impl CertificatePort for AutomationClient {
             .await
             .map_err(status_error)?
             .into_inner();
-        checked(response.error)?;
+        response_error(response.error)?;
         Ok(CertificateOutput {
             content: response.content,
             etag: etag(response.etag),
