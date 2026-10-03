@@ -122,7 +122,7 @@ Pingora Panel 是一个面向团队运维的单节点网站网关控制平台。
 
 ### 3.1 当前仓库事实
 
-当前仓库是 Pingora 0.9.0 的完整 Rust workspace，包含 `pingora-core`、`pingora-proxy`、`pingora-load-balancing`、TLS、缓存、指标等上游 crates，并包含针对 Rust 与 OpenResty 基线的 CI 调整。Pingora Panel 现处于 `In Progress / durable gateway foundation`：`panel/` 独立 workspace 已提供 Proto-first 契约、稳定错误模型、领域值对象、Engine-neutral IR、`GatewayEngine`/`SnapshotStore`/`DataPlaneAdapter`/`GatewayRuntimeInfoProvider` ports、内存 `FakeGatewayEngine`、独立 durable runtime、原子文件快照存储、Pingora 0.9.0 adapter、Tonic gRPC transport、标准 gRPC Health、`gatewayd` 组合根、v1/v2 磁盘格式 Golden Fixture、真实 TCP 与文件系统故障黑盒测试、有界 mutation admission、两阶段 readiness drain、plaintext loopback-only 管理绑定、恢复诊断、Proto compatibility guard 自测试、security lockfile resolver hermetic 自测试、依赖边界检查，模块化 Axum/Utoipa REST adapter、从 HTTP 经 gRPC 到事件贯通的 Request-ID/Correlation/W3C Trace Context 传播、CloudEvents 领域事件契约、服务独占 PostgreSQL schema 与迁移、事务性 Outbox、幂等 Inbox、NATS JetStream 投递与 DLQ，以及 shadcn-vue 管理控制台。`panel-api`、`config-service`、`automation-service`、`observability-service` 已作为独立进程运行：统一的控制面运行时负责延迟连接依赖、迁移、Outbox relay 选主、`application/health+json` 聚合 Readiness、gRPC Health、Degraded Mode、服务描述与 JetStream KV 服务注册，`panel-bootstrap` 幂等初始化角色、schema 与流；`automation-service` 提供带租约、取消、指数退避重试、进度事件、RFC 5545 持久化调度与维护窗口的作业引擎。`panel-api` 在公共 listener 上提供 REST 与控制台，发布请求经 `pingora.panel.config.v1` 交给 `config-service`，回执持久化在 `config` schema。服务间 gRPC 可启用基于内部 CA 的 mTLS（SPIFFE/DNS 工作负载身份、TLS 1.3、按调用方授权、证书自动轮换）。`panel/deploy` 提供单镜像与 Docker/Podman Compose 安装（host 网络 loopback 绑定、内部 mTLS、证书轮换、只读根文件系统）。`gatewayd` 以 Pingora 数据面服务生效配置的 listener、虚拟主机、路由、TLS（SNI 选证）、静态内容与上游池（加权轮询、随机、一致性哈希、主备、主动与被动健康检查、手动摘除），并支持平滑 reload、worker 调整与 graceful shutdown；`config-service` 以单一版本化草稿保存站点、域名、路由、上游、监听与证书配置，变更经校验、`If-Match` 条件与幂等回执后提交，应用时编译为 IR 并以比较交换激活；REST API、`ppanel` CLI 与 Web 控制台提供同一套操作。DSL 编译服务、审计写入与认证授权仍未实现。
+当前仓库是 Pingora 0.9.0 的完整 Rust workspace，包含 `pingora-core`、`pingora-proxy`、`pingora-load-balancing`、TLS、缓存、指标等上游 crates，并包含针对 Rust 与 OpenResty 基线的 CI 调整。Pingora Panel 现处于 `In Progress / durable gateway foundation`：`panel/` 独立 workspace 已提供 Proto-first 契约、稳定错误模型、领域值对象、Engine-neutral IR、`GatewayEngine`/`SnapshotStore`/`DataPlaneAdapter`/`GatewayRuntimeInfoProvider` ports、内存 `FakeGatewayEngine`、独立 durable runtime、原子文件快照存储、Pingora 0.9.0 adapter、Tonic gRPC transport、标准 gRPC Health、`gatewayd` 组合根、v1/v2 磁盘格式 Golden Fixture、真实 TCP 与文件系统故障黑盒测试、有界 mutation admission、两阶段 readiness drain、plaintext loopback-only 管理绑定、恢复诊断、Proto compatibility guard 自测试、security lockfile resolver hermetic 自测试、依赖边界检查，模块化 Axum/Utoipa REST adapter、从 HTTP 经 gRPC 到事件贯通的 Request-ID/Correlation/W3C Trace Context 传播、CloudEvents 领域事件契约、服务独占 PostgreSQL schema 与迁移、事务性 Outbox、幂等 Inbox、NATS JetStream 投递与 DLQ，以及 shadcn-vue 管理控制台。`panel-api`、`config-service`、`automation-service`、`observability-service` 已作为独立进程运行：统一的控制面运行时负责延迟连接依赖、迁移、Outbox relay 选主、`application/health+json` 聚合 Readiness、gRPC Health、Degraded Mode、服务描述与 JetStream KV 服务注册，`panel-bootstrap` 幂等初始化角色、schema 与流；`automation-service` 提供带租约、取消、指数退避重试、进度事件、RFC 5545 持久化调度与维护窗口的作业引擎。`panel-api` 在公共 listener 上提供 REST 与控制台，发布请求经 `pingora.panel.config.v1` 交给 `config-service`，回执持久化在 `config` schema。服务间 gRPC 可启用基于内部 CA 的 mTLS（SPIFFE/DNS 工作负载身份、TLS 1.3、按调用方授权、证书自动轮换）。`panel/deploy` 提供单镜像与 Docker/Podman Compose 安装（host 网络 loopback 绑定、内部 mTLS、证书轮换、只读根文件系统）。`gatewayd` 以 Pingora 数据面服务生效配置的 listener、虚拟主机、路由、TLS（SNI 选证）、静态内容与上游池（加权轮询、随机、一致性哈希、主备、主动与被动健康检查、手动摘除），并支持平滑 reload、worker 调整与 graceful shutdown；`config-service` 以单一版本化草稿保存站点、域名、路由、上游、监听与证书配置，变更经校验、`If-Match` 条件与幂等回执后提交，应用时编译为 IR 并以比较交换激活；REST API、`ppanel` CLI 与 Web 控制台提供同一套操作。配置语言以文件编辑草稿并记录可回滚的配置版本；`audit-service` 将各服务的事件记录为防篡改的哈希链审计日志。认证授权仍未实现。
 
 Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交：`665fd57`；该提交的 Pingora crates：`0.8.0`；许可证：Apache-2.0；此记录不代表当前提交的验收状态）：
 
@@ -134,6 +134,8 @@ Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交
 0.2 网关核心各项已在 REST API、`ppanel` CLI 与 Web 控制台实现，并由模块、集成、真实进程与浏览器端到端测试覆盖，因此标记为 `Implemented`。其验收中的操作审计与权限检查分别随 `AUDIT-*`（0.3）与 `IAM-*`（0.4）完成；在此之前这些功能不得标记为 `Verified`。
 
 0.3 配置语言与版本（`SITE-034`～`SITE-045` 及上列 `DSL-*`）已在 REST API、`ppanel` CLI 与 Web 控制台实现：草稿以 `main.conf` 为入口的语言文件编辑，支持检查、格式化、补全 Schema、语法树、计划与 Diff、IR 导出、试运行，以及记录作者、备注与结果、可比较和一键回滚的配置版本；同样在操作审计（`AUDIT-*`）与权限（`IAM-*`）验收完成前不得标记为 `Verified`。请求变量（`DSL-010`～`DSL-017`）已在语言中识别与校验、运行时模板尚未实现，Size 与 IP/CIDR 类型（`DSL-023`、`DSL-024`）已能解析、尚无指令使用，因此为 `In Progress`；继承检查（`DSL-034`）、Lua 脚本引用（`DSL-042`）与 Nginx 子集导入和迁移报告（`DSL-043`～`DSL-045`）仍为 `Planned`。
+
+0.3 审计（`AUDIT-001`、`AUDIT-003`、`AUDIT-004`）已由 `audit-service` 实现：各服务通过事务性 Outbox 发布每次变更及被拒绝或失败的尝试，审计服务按来源与事件 ID 幂等写入带检查点、只追加的 SHA-256 哈希链，并在 REST API、`ppanel audit` 与控制台审计日志中提供筛选、详情与完整性校验。证书操作审计（`AUDIT-005`）已覆盖 TLS Profile 变更，证书签发与续期随 `TLS-*` 补齐，因此为 `In Progress`；登录审计（`AUDIT-002`）随 `IAM-*` 的登录实现，Docker 操作审计（`AUDIT-006`）随 `CTR-*` 实现，仍为 `Planned`。
 
 ### 3.2 目标仓库边界
 
@@ -1116,11 +1118,11 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | SEC-031 | 391 | Path Traversal 防护 | 0.4 | A/C/G | Operator | policy-engine | 执行“Path Traversal 防护”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | SEC-032 | 392 | Symlink 策略 | 0.4 | A/C/G | Operator | policy-engine | 执行“Symlink 策略”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | SEC-033 | 393 | 配置危险项警告 | 0.4 | A/C/G | Operator | policy-engine | 执行“配置危险项警告”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| AUDIT-001 | 394 | 操作审计日志 | 0.3 | A/C/G | Auditor | audit writer | 执行“操作审计日志”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| AUDIT-001 | 394 | 操作审计日志 | 0.3 | A/C/G | Auditor | audit writer | 执行“操作审计日志”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | AUDIT-002 | 395 | 登录审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“登录审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| AUDIT-003 | 396 | 配置修改审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“配置修改审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| AUDIT-004 | 397 | 配置发布审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“配置发布审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| AUDIT-005 | 398 | 证书操作审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“证书操作审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| AUDIT-003 | 396 | 配置修改审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“配置修改审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| AUDIT-004 | 397 | 配置发布审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“配置发布审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| AUDIT-005 | 398 | 证书操作审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“证书操作审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
 | AUDIT-006 | 399 | Docker 操作审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“Docker 操作审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | OBS-001 | 400 | Access Log | 0.5 | A/C/G | Operator | observability-service | 执行“Access Log”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | OBS-002 | 401 | Error Log | 0.5 | A/C/G | Operator | observability-service | 执行“Error Log”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
@@ -1417,7 +1419,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | 新增团队/平台需求 | 105 |
 | 总 Feature ID | 685 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
-| 当前 `Implemented` | 197（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-009`、`DSL-018`～`DSL-022`、`DSL-025`～`DSL-033`、`DSL-035`～`DSL-041`、`DSL-046`～`DSL-050`） |
+| 当前 `Implemented` | 200（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-009`、`DSL-018`～`DSL-022`、`DSL-025`～`DSL-033`、`DSL-035`～`DSL-041`、`DSL-046`～`DSL-050`；审计：`AUDIT-001`、`AUDIT-003`、`AUDIT-004`） |
 | 1.0 要求 `Verified` | 685 |
 
 分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 47、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。

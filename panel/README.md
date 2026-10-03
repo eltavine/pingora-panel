@@ -252,6 +252,32 @@ The console edits the same files with highlighting, completion for the
 block being edited, problems checked as the text changes and an outline,
 and shows revisions with their differences, notes and rollback.
 
+## Audit trail
+
+Every change, and every refused or failed attempt, is recorded once by
+`audit-service` ([decision](../docs/adr/0013-audit-trail.md)). Services
+publish them as events through their outbox: `config-service` for draft
+changes, refusals, dry runs, applies, revision notes and snapshot
+publication, and `panel-api` for gateway reloads, worker changes,
+shutdowns, drains and restores. Each record keeps the actor, request,
+correlation, idempotency key and trace context of its event, and records
+form a SHA-256 hash chain that a trigger keeps append-only.
+
+`GET /api/v1/audit-events` lists records newest first, filtered by `actor`,
+`type` (an event type or a prefix such as `config.`), `subject`,
+`correlation_id`, `since` and `until`; `/api/v1/audit-events/{sequence}`
+returns one and `/api/v1/audit-events/verify` recomputes the chain.
+
+```sh
+ppanel audit list --type config. --since 2026-10-01T00:00:00Z
+ppanel audit list --correlation-id <request-id>
+ppanel audit show 42
+ppanel audit verify
+```
+
+The console's audit log filters the same records, follows one request's
+events and verifies the chain.
+
 ## Activation invariant
 
 All fallible work required to build and durably publish the activation occurs
