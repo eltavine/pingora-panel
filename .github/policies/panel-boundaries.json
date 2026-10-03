@@ -150,6 +150,16 @@
         "snapshot-store-fs"
       ]
     },
+    "identity-postgres": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-errors",
+        "panel-event-codec",
+        "panel-events",
+        "panel-identity",
+        "panel-postgres"
+      ]
+    },
     "observability-service": {
       "catalog": false,
       "allowed_workspace_dependencies": [

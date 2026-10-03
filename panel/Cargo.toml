@@ -15,6 +15,7 @@ members = [
     "panel-config-state-codec",
     "panel-application",
     "panel-identity",
+    "identity-postgres",
     "panel-outbox",
     "panel-pki",
     "panel-tls",
@@ -108,6 +109,7 @@ panel-config-dsl = { version = "=0.1.0", path = "panel-config-dsl" }
 panel-api = { version = "=0.1.0", path = "panel-api" }
 panel-application = { version = "=0.1.0", path = "panel-application" }
 panel-identity = { version = "=0.1.0", path = "panel-identity" }
+identity-postgres = { version = "=0.1.0", path = "identity-postgres" }
 panel-outbox = { version = "=0.1.0", path = "panel-outbox" }
 panel-persistence-memory = { version = "=0.1.0", path = "panel-persistence-memory" }
 panel-pki = { version = "=0.1.0", path = "panel-pki" }
