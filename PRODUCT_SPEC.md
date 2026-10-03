@@ -122,7 +122,7 @@ Pingora Panel 是一个面向团队运维的单节点网站网关控制平台。
 
 ### 3.1 当前仓库事实
 
-当前仓库是 Pingora 0.9.0 的完整 Rust workspace，包含 `pingora-core`、`pingora-proxy`、`pingora-load-balancing`、TLS、缓存、指标等上游 crates，并包含针对 Rust 与 OpenResty 基线的 CI 调整。Pingora Panel 现处于 `In Progress / durable gateway foundation`：`panel/` 独立 workspace 已提供 Proto-first 契约、稳定错误模型、领域值对象、Engine-neutral IR、`GatewayEngine`/`SnapshotStore`/`DataPlaneAdapter`/`GatewayRuntimeInfoProvider` ports、内存 `FakeGatewayEngine`、独立 durable runtime、原子文件快照存储、Pingora 0.9.0 adapter、Tonic gRPC transport、标准 gRPC Health、`gatewayd` 组合根、v1/v2 磁盘格式 Golden Fixture、真实 TCP 与文件系统故障黑盒测试、有界 mutation admission、两阶段 readiness drain、plaintext loopback-only 管理绑定、恢复诊断、Proto compatibility guard 自测试、security lockfile resolver hermetic 自测试、依赖边界检查，模块化 Axum/Utoipa REST adapter、从 HTTP 经 gRPC 到事件贯通的 Request-ID/Correlation/W3C Trace Context 传播、CloudEvents 领域事件契约、服务独占 PostgreSQL schema 与迁移、事务性 Outbox、幂等 Inbox、NATS JetStream 投递与 DLQ，以及 shadcn-vue 管理控制台。`panel-api`、`config-service`、`automation-service`、`observability-service` 已作为独立进程运行：统一的控制面运行时负责延迟连接依赖、迁移、Outbox relay 选主、`application/health+json` 聚合 Readiness、gRPC Health、Degraded Mode、服务描述与 JetStream KV 服务注册，`panel-bootstrap` 幂等初始化角色、schema 与流；`automation-service` 提供带租约、取消、指数退避重试、进度事件、RFC 5545 持久化调度与维护窗口的作业引擎。`panel-api` 在公共 listener 上提供 REST 与控制台，发布请求经 `pingora.panel.config.v1` 交给 `config-service`，回执持久化在 `config` schema。服务间 gRPC 可启用基于内部 CA 的 mTLS（SPIFFE/DNS 工作负载身份、TLS 1.3、按调用方授权、证书自动轮换）。`panel/deploy` 提供单镜像与 Docker/Podman Compose 安装（host 网络 loopback 绑定、内部 mTLS、证书轮换、只读根文件系统）。DSL 编译服务、CLI 和生产数据面 listener 仍未实现。
+当前仓库是 Pingora 0.9.0 的完整 Rust workspace，包含 `pingora-core`、`pingora-proxy`、`pingora-load-balancing`、TLS、缓存、指标等上游 crates，并包含针对 Rust 与 OpenResty 基线的 CI 调整。Pingora Panel 现处于 `In Progress / durable gateway foundation`：`panel/` 独立 workspace 已提供 Proto-first 契约、稳定错误模型、领域值对象、Engine-neutral IR、`GatewayEngine`/`SnapshotStore`/`DataPlaneAdapter`/`GatewayRuntimeInfoProvider` ports、内存 `FakeGatewayEngine`、独立 durable runtime、原子文件快照存储、Pingora 0.9.0 adapter、Tonic gRPC transport、标准 gRPC Health、`gatewayd` 组合根、v1/v2 磁盘格式 Golden Fixture、真实 TCP 与文件系统故障黑盒测试、有界 mutation admission、两阶段 readiness drain、plaintext loopback-only 管理绑定、恢复诊断、Proto compatibility guard 自测试、security lockfile resolver hermetic 自测试、依赖边界检查，模块化 Axum/Utoipa REST adapter、从 HTTP 经 gRPC 到事件贯通的 Request-ID/Correlation/W3C Trace Context 传播、CloudEvents 领域事件契约、服务独占 PostgreSQL schema 与迁移、事务性 Outbox、幂等 Inbox、NATS JetStream 投递与 DLQ，以及 shadcn-vue 管理控制台。`panel-api`、`config-service`、`automation-service`、`observability-service` 已作为独立进程运行：统一的控制面运行时负责延迟连接依赖、迁移、Outbox relay 选主、`application/health+json` 聚合 Readiness、gRPC Health、Degraded Mode、服务描述与 JetStream KV 服务注册，`panel-bootstrap` 幂等初始化角色、schema 与流；`automation-service` 提供带租约、取消、指数退避重试、进度事件、RFC 5545 持久化调度与维护窗口的作业引擎。`panel-api` 在公共 listener 上提供 REST 与控制台，发布请求经 `pingora.panel.config.v1` 交给 `config-service`，回执持久化在 `config` schema。服务间 gRPC 可启用基于内部 CA 的 mTLS（SPIFFE/DNS 工作负载身份、TLS 1.3、按调用方授权、证书自动轮换）。`panel/deploy` 提供单镜像与 Docker/Podman Compose 安装（host 网络 loopback 绑定、内部 mTLS、证书轮换、只读根文件系统）。`gatewayd` 以 Pingora 数据面服务生效配置的 listener、虚拟主机、路由、TLS（SNI 选证）、静态内容与上游池（加权轮询、随机、一致性哈希、主备、主动与被动健康检查、手动摘除），并支持平滑 reload、worker 调整与 graceful shutdown；`config-service` 以单一版本化草稿保存站点、域名、路由、上游、监听与证书配置，变更经校验、`If-Match` 条件与幂等回执后提交，应用时编译为 IR 并以比较交换激活；REST API、`ppanel` CLI 与 Web 控制台提供同一套操作。DSL 编译服务、审计写入与认证授权仍未实现。
 
 Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交：`665fd57`；该提交的 Pingora crates：`0.8.0`；许可证：Apache-2.0；此记录不代表当前提交的验收状态）：
 
@@ -131,7 +131,7 @@ Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交
 - `Planned`：PostgreSQL、NATS、控制服务、REST 进程 listener（adapter 与库级组合工厂已有）、`ppanel` CLI、Vue GUI、生产 listener 和 TLS/cache/Lua 执行能力。
 
 上述状态只覆盖 Initial Foundation，不把面板完整功能目录误写为已实现。
-进程级 shutdown 与运行信息测试是 `gatewayd` 基础设施验收证据；在生产 Pingora listener、权限检查和操作审计接入前，`GATE-002` 至 `GATE-006` 仍保持 `Planned`，不得用基础设施测试替代完整产品验收。
+0.2 网关核心各项已在 REST API、`ppanel` CLI 与 Web 控制台实现，并由模块、集成、真实进程与浏览器端到端测试覆盖，因此标记为 `Implemented`。其验收中的操作审计与权限检查分别随 `AUDIT-*`（0.3）与 `IAM-*`（0.4）完成；在此之前这些功能不得标记为 `Verified`。
 
 ### 3.2 目标仓库边界
 
@@ -721,39 +721,39 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 
 | Feature ID | Legacy | Requirement | Phase | Surface | Permission | Dependency | Acceptance | Status | Thesis |
 |---|---:|---|---:|---|---|---|---|---|---|
-| SITE-001 | 1 | 网站总览 | 0.2 | A/C/G | Viewer | config-service | 查询“网站总览”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| SITE-002 | 2 | 运行网站数统计 | 0.2 | A/C/G | Viewer | config-service | 查询“运行网站数统计”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| SITE-003 | 3 | 停止网站数统计 | 0.2 | A/C/G | Viewer | config-service | 查询“停止网站数统计”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| SITE-004 | 4 | 异常网站数统计 | 0.2 | A/C/G | Viewer | config-service | 查询“异常网站数统计”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| SITE-005 | 5 | HTTPS 网站数统计 | 0.2 | A/C/G | Viewer | config-service | 查询“HTTPS 网站数统计”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| SITE-006 | 6 | 反向代理网站数统计 | 0.2 | A/C/G | Viewer | config-service | 查询“反向代理网站数统计”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| SITE-007 | 7 | 静态网站数统计 | 0.2 | A/C/G | Viewer | config-service | 查询“静态网站数统计”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| SITE-008 | 8 | 新建反向代理网站 | 0.2 | A/C/G | Operator | config-service | 执行“新建反向代理网站”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SITE-009 | 9 | 新建静态网站 | 0.2 | A/C/G | Operator | config-service | 执行“新建静态网站”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SITE-010 | 10 | 新建纯重定向网站 | 0.2 | A/C/G | Operator | config-service | 执行“新建纯重定向网站”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SITE-011 | 11 | 新建维护页网站 | 0.2 | A/C/G | Operator | config-service | 执行“新建维护页网站”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SITE-012 | 12 | 克隆网站 | 0.2 | A/C/G | Operator | config-service | 执行“克隆网站”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SITE-013 | 13 | 导入网站配置 | 0.2 | A/C/G | Operator | config-service | 执行“导入网站配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SITE-014 | 14 | 导出网站配置 | 0.2 | A/C/G | Operator | config-service | 执行“导出网站配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SITE-015 | 15 | 网站启用 | 0.2 | A/C/G | Operator | config-service | 执行“网站启用”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SITE-016 | 16 | 网站停用 | 0.2 | A/C/G | Operator | config-service | 执行“网站停用”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SITE-017 | 17 | 网站删除 | 0.2 | A/C/G | Operator | config-service | 执行“网站删除”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SITE-018 | 18 | 网站软删除 | 0.2 | A/C/G | Operator | config-service | 执行“网站软删除”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SITE-019 | 19 | 网站恢复 | 0.2 | A/C/G | Operator | config-service | 执行“网站恢复”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SITE-020 | 20 | 网站分组 | 0.2 | A/C/G | Operator | config-service | 执行“网站分组”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SITE-021 | 21 | 网站标签 | 0.2 | A/C/G | Operator | config-service | 执行“网站标签”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SITE-022 | 22 | 网站备注 | 0.2 | A/C/G | Operator | config-service | 执行“网站备注”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SITE-023 | 23 | 网站收藏 | 0.2 | A/C/G | Operator | config-service | 执行“网站收藏”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SITE-024 | 24 | 网站关键词搜索 | 0.2 | A/C/G | Viewer | config-service | 查询“网站关键词搜索”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| SITE-025 | 25 | 按状态筛选 | 0.2 | A/C/G | Viewer | config-service | 查询“按状态筛选”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| SITE-026 | 26 | 按类型筛选 | 0.2 | A/C/G | Viewer | config-service | 查询“按类型筛选”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| SITE-027 | 27 | 按域名筛选 | 0.2 | A/C/G | Viewer | config-service | 查询“按域名筛选”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| SITE-028 | 28 | 按标签筛选 | 0.2 | A/C/G | Viewer | config-service | 查询“按标签筛选”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| SITE-029 | 29 | 网站排序 | 0.2 | A/C/G | Operator | config-service | 执行“网站排序”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SITE-030 | 30 | 批量启动 | 0.2 | A/C/G | Operator | config-service | 执行“批量启动”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SITE-031 | 31 | 批量停止 | 0.2 | A/C/G | Operator | config-service | 执行“批量停止”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SITE-032 | 32 | 批量删除 | 0.2 | A/C/G | Operator | config-service | 执行“批量删除”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SITE-033 | 33 | 批量验证配置 | 0.2 | A/C/G | Operator | config-service | 执行“批量验证配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| SITE-001 | 1 | 网站总览 | 0.2 | A/C/G | Viewer | config-service | 查询“网站总览”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| SITE-002 | 2 | 运行网站数统计 | 0.2 | A/C/G | Viewer | config-service | 查询“运行网站数统计”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| SITE-003 | 3 | 停止网站数统计 | 0.2 | A/C/G | Viewer | config-service | 查询“停止网站数统计”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| SITE-004 | 4 | 异常网站数统计 | 0.2 | A/C/G | Viewer | config-service | 查询“异常网站数统计”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| SITE-005 | 5 | HTTPS 网站数统计 | 0.2 | A/C/G | Viewer | config-service | 查询“HTTPS 网站数统计”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| SITE-006 | 6 | 反向代理网站数统计 | 0.2 | A/C/G | Viewer | config-service | 查询“反向代理网站数统计”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| SITE-007 | 7 | 静态网站数统计 | 0.2 | A/C/G | Viewer | config-service | 查询“静态网站数统计”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| SITE-008 | 8 | 新建反向代理网站 | 0.2 | A/C/G | Operator | config-service | 执行“新建反向代理网站”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SITE-009 | 9 | 新建静态网站 | 0.2 | A/C/G | Operator | config-service | 执行“新建静态网站”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SITE-010 | 10 | 新建纯重定向网站 | 0.2 | A/C/G | Operator | config-service | 执行“新建纯重定向网站”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SITE-011 | 11 | 新建维护页网站 | 0.2 | A/C/G | Operator | config-service | 执行“新建维护页网站”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SITE-012 | 12 | 克隆网站 | 0.2 | A/C/G | Operator | config-service | 执行“克隆网站”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SITE-013 | 13 | 导入网站配置 | 0.2 | A/C/G | Operator | config-service | 执行“导入网站配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SITE-014 | 14 | 导出网站配置 | 0.2 | A/C/G | Operator | config-service | 执行“导出网站配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SITE-015 | 15 | 网站启用 | 0.2 | A/C/G | Operator | config-service | 执行“网站启用”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SITE-016 | 16 | 网站停用 | 0.2 | A/C/G | Operator | config-service | 执行“网站停用”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SITE-017 | 17 | 网站删除 | 0.2 | A/C/G | Operator | config-service | 执行“网站删除”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SITE-018 | 18 | 网站软删除 | 0.2 | A/C/G | Operator | config-service | 执行“网站软删除”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SITE-019 | 19 | 网站恢复 | 0.2 | A/C/G | Operator | config-service | 执行“网站恢复”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SITE-020 | 20 | 网站分组 | 0.2 | A/C/G | Operator | config-service | 执行“网站分组”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SITE-021 | 21 | 网站标签 | 0.2 | A/C/G | Operator | config-service | 执行“网站标签”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SITE-022 | 22 | 网站备注 | 0.2 | A/C/G | Operator | config-service | 执行“网站备注”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SITE-023 | 23 | 网站收藏 | 0.2 | A/C/G | Operator | config-service | 执行“网站收藏”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SITE-024 | 24 | 网站关键词搜索 | 0.2 | A/C/G | Viewer | config-service | 查询“网站关键词搜索”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| SITE-025 | 25 | 按状态筛选 | 0.2 | A/C/G | Viewer | config-service | 查询“按状态筛选”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| SITE-026 | 26 | 按类型筛选 | 0.2 | A/C/G | Viewer | config-service | 查询“按类型筛选”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| SITE-027 | 27 | 按域名筛选 | 0.2 | A/C/G | Viewer | config-service | 查询“按域名筛选”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| SITE-028 | 28 | 按标签筛选 | 0.2 | A/C/G | Viewer | config-service | 查询“按标签筛选”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| SITE-029 | 29 | 网站排序 | 0.2 | A/C/G | Operator | config-service | 执行“网站排序”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SITE-030 | 30 | 批量启动 | 0.2 | A/C/G | Operator | config-service | 执行“批量启动”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SITE-031 | 31 | 批量停止 | 0.2 | A/C/G | Operator | config-service | 执行“批量停止”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SITE-032 | 32 | 批量删除 | 0.2 | A/C/G | Operator | config-service | 执行“批量删除”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SITE-033 | 33 | 批量验证配置 | 0.2 | A/C/G | Operator | config-service | 执行“批量验证配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | SITE-034 | 34 | 网站配置草稿 | 0.3 | A/C/G | Operator | config-service | 执行“网站配置草稿”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
 | SITE-035 | 35 | 草稿保存 | 0.3 | A/C/G | Operator | config-service | 执行“草稿保存”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
 | SITE-036 | 36 | 草稿预览 | 0.3 | A/C/G | Viewer | config-service | 查询“草稿预览”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | Yes |
@@ -766,50 +766,50 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | SITE-043 | 43 | 配置冲突检查 | 0.3 | A/C/G | Operator | config-service | 执行“配置冲突检查”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
 | SITE-044 | 44 | 配置 Dry-run | 0.3 | A/C/G | Operator | config-service | 执行“配置 Dry-run”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
 | SITE-045 | 45 | 配置原子发布 | 0.3 | A/C/G | Operator | config-service | 执行“配置原子发布”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| GATE-001 | 46 | Pingora graceful reload | 0.2 | I | Operator | gatewayd | 执行“Pingora graceful reload”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| GATE-002 | 47 | Pingora graceful shutdown | 0.2 | I | Operator | gatewayd | 执行“Pingora graceful shutdown”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| GATE-003 | 48 | Pingora 服务状态 | 0.2 | I | Viewer | gatewayd | 查询“Pingora 服务状态”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| GATE-004 | 49 | Pingora 运行时长 | 0.2 | I | Viewer | gatewayd | 查询“Pingora 运行时长”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| GATE-005 | 50 | Pingora 版本展示 | 0.2 | I | Viewer | gatewayd | 查询“Pingora 版本展示”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| GATE-006 | 51 | Worker 数展示 | 0.2 | I | Viewer | gatewayd | 查询“Worker 数展示”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| GATE-007 | 52 | Worker 配置修改 | 0.2 | I | Operator | gatewayd | 执行“Worker 配置修改”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-001 | 53 | 主域名管理 | 0.2 | A/C/G | Operator | config-service | 执行“主域名管理”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-002 | 54 | 多域名绑定 | 0.2 | A/C/G | Operator | config-service | 执行“多域名绑定”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-003 | 55 | 泛域名绑定 | 0.2 | A/C/G | Operator | config-service | 执行“泛域名绑定”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-004 | 56 | 域名别名 | 0.2 | A/C/G | Operator | config-service | 执行“域名别名”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-005 | 57 | 域名启停 | 0.2 | A/C/G | Operator | config-service | 执行“域名启停”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-006 | 58 | 域名批量导入 | 0.2 | A/C/G | Operator | config-service | 执行“域名批量导入”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-007 | 59 | 域名重复检测 | 0.2 | A/C/G | Operator | config-service | 执行“域名重复检测”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-008 | 60 | 域名语法检测 | 0.2 | A/C/G | Operator | config-service | 执行“域名语法检测”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-009 | 61 | IDN 域名转换 | 0.2 | A/C/G | Operator | config-service | 执行“IDN 域名转换”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-010 | 62 | HTTP 监听 | 0.2 | A/C/G | Operator | config-service | 执行“HTTP 监听”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-011 | 63 | HTTPS 监听 | 0.2 | A/C/G | Operator | config-service | 执行“HTTPS 监听”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-012 | 64 | IPv4 监听 | 0.2 | A/C/G | Operator | config-service | 执行“IPv4 监听”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-013 | 65 | IPv6 监听 | 0.2 | A/C/G | Operator | config-service | 执行“IPv6 监听”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-014 | 66 | 自定义监听地址 | 0.2 | A/C/G | Operator | config-service | 执行“自定义监听地址”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-015 | 67 | 自定义监听端口 | 0.2 | A/C/G | Operator | config-service | 执行“自定义监听端口”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-016 | 68 | 端口冲突检测 | 0.2 | A/C/G | Operator | config-service | 执行“端口冲突检测”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-017 | 69 | SO_REUSEPORT 配置 | 0.2 | A/C/G | Operator | config-service | 执行“SO_REUSEPORT 配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-018 | 70 | HTTP/1.1 开关 | 0.2 | A/C/G | Operator | config-service | 执行“HTTP/1.1 开关”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-019 | 71 | HTTP/2 开关 | 0.2 | A/C/G | Operator | config-service | 执行“HTTP/2 开关”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-020 | 72 | HTTP/3 预留配置 | 0.2 | A/C/G | Operator | config-service | 执行“HTTP/3 预留配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-021 | 73 | 默认虚拟主机 | 0.2 | A/C/G | Operator | config-service | 执行“默认虚拟主机”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-022 | 74 | 未匹配域名拒绝 | 0.2 | A/C/G | Operator | config-service | 执行“未匹配域名拒绝”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-023 | 75 | Host 大小写规范化 | 0.2 | A/C/G | Operator | config-service | 执行“Host 大小写规范化”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-024 | 76 | SNI 与 Host 一致性检查 | 0.2 | A/C/G | Viewer | config-service | 查询“SNI 与 Host 一致性检查”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| DOM-025 | 77 | 域名跳转 WWW | 0.2 | A/C/G | Operator | config-service | 执行“域名跳转 WWW”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-026 | 78 | 去 WWW 跳转 | 0.2 | A/C/G | Operator | config-service | 执行“去 WWW 跳转”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-027 | 79 | HTTP 自动跳 HTTPS | 0.2 | A/C/G | Operator | config-service | 执行“HTTP 自动跳 HTTPS”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| DOM-028 | 80 | HTTPS 可选关闭跳转 | 0.2 | A/C/G | Operator | config-service | 执行“HTTPS 可选关闭跳转”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| ROUTE-001 | 81 | URI 精确匹配 | 0.2 | A/C/G | Operator | config-service | 执行“URI 精确匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| ROUTE-002 | 82 | URI 前缀匹配 | 0.2 | A/C/G | Operator | config-service | 执行“URI 前缀匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| ROUTE-003 | 83 | URI 正则匹配 | 0.2 | A/C/G | Operator | config-service | 执行“URI 正则匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| ROUTE-004 | 84 | URI 通配符匹配 | 0.2 | A/C/G | Operator | config-service | 执行“URI 通配符匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| ROUTE-005 | 85 | 匹配优先级 | 0.2 | A/C/G | Operator | config-service | 执行“匹配优先级”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| ROUTE-006 | 86 | 命名路由 | 0.2 | A/C/G | Operator | config-service | 执行“命名路由”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| ROUTE-007 | 87 | 路由启停 | 0.2 | A/C/G | Operator | config-service | 执行“路由启停”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| ROUTE-008 | 88 | 路由排序 | 0.2 | A/C/G | Operator | config-service | 执行“路由排序”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| ROUTE-009 | 89 | 路由拖拽调整优先级 | 0.2 | A/C/G | Operator | config-service | 执行“路由拖拽调整优先级”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| GATE-001 | 46 | Pingora graceful reload | 0.2 | I | Operator | gatewayd | 执行“Pingora graceful reload”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| GATE-002 | 47 | Pingora graceful shutdown | 0.2 | I | Operator | gatewayd | 执行“Pingora graceful shutdown”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| GATE-003 | 48 | Pingora 服务状态 | 0.2 | I | Viewer | gatewayd | 查询“Pingora 服务状态”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| GATE-004 | 49 | Pingora 运行时长 | 0.2 | I | Viewer | gatewayd | 查询“Pingora 运行时长”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| GATE-005 | 50 | Pingora 版本展示 | 0.2 | I | Viewer | gatewayd | 查询“Pingora 版本展示”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| GATE-006 | 51 | Worker 数展示 | 0.2 | I | Viewer | gatewayd | 查询“Worker 数展示”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| GATE-007 | 52 | Worker 配置修改 | 0.2 | I | Operator | gatewayd | 执行“Worker 配置修改”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-001 | 53 | 主域名管理 | 0.2 | A/C/G | Operator | config-service | 执行“主域名管理”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-002 | 54 | 多域名绑定 | 0.2 | A/C/G | Operator | config-service | 执行“多域名绑定”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-003 | 55 | 泛域名绑定 | 0.2 | A/C/G | Operator | config-service | 执行“泛域名绑定”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-004 | 56 | 域名别名 | 0.2 | A/C/G | Operator | config-service | 执行“域名别名”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-005 | 57 | 域名启停 | 0.2 | A/C/G | Operator | config-service | 执行“域名启停”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-006 | 58 | 域名批量导入 | 0.2 | A/C/G | Operator | config-service | 执行“域名批量导入”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-007 | 59 | 域名重复检测 | 0.2 | A/C/G | Operator | config-service | 执行“域名重复检测”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-008 | 60 | 域名语法检测 | 0.2 | A/C/G | Operator | config-service | 执行“域名语法检测”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-009 | 61 | IDN 域名转换 | 0.2 | A/C/G | Operator | config-service | 执行“IDN 域名转换”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-010 | 62 | HTTP 监听 | 0.2 | A/C/G | Operator | config-service | 执行“HTTP 监听”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-011 | 63 | HTTPS 监听 | 0.2 | A/C/G | Operator | config-service | 执行“HTTPS 监听”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-012 | 64 | IPv4 监听 | 0.2 | A/C/G | Operator | config-service | 执行“IPv4 监听”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-013 | 65 | IPv6 监听 | 0.2 | A/C/G | Operator | config-service | 执行“IPv6 监听”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-014 | 66 | 自定义监听地址 | 0.2 | A/C/G | Operator | config-service | 执行“自定义监听地址”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-015 | 67 | 自定义监听端口 | 0.2 | A/C/G | Operator | config-service | 执行“自定义监听端口”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-016 | 68 | 端口冲突检测 | 0.2 | A/C/G | Operator | config-service | 执行“端口冲突检测”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-017 | 69 | SO_REUSEPORT 配置 | 0.2 | A/C/G | Operator | config-service | 执行“SO_REUSEPORT 配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-018 | 70 | HTTP/1.1 开关 | 0.2 | A/C/G | Operator | config-service | 执行“HTTP/1.1 开关”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-019 | 71 | HTTP/2 开关 | 0.2 | A/C/G | Operator | config-service | 执行“HTTP/2 开关”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-020 | 72 | HTTP/3 预留配置 | 0.2 | A/C/G | Operator | config-service | 执行“HTTP/3 预留配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-021 | 73 | 默认虚拟主机 | 0.2 | A/C/G | Operator | config-service | 执行“默认虚拟主机”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-022 | 74 | 未匹配域名拒绝 | 0.2 | A/C/G | Operator | config-service | 执行“未匹配域名拒绝”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-023 | 75 | Host 大小写规范化 | 0.2 | A/C/G | Operator | config-service | 执行“Host 大小写规范化”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-024 | 76 | SNI 与 Host 一致性检查 | 0.2 | A/C/G | Viewer | config-service | 查询“SNI 与 Host 一致性检查”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| DOM-025 | 77 | 域名跳转 WWW | 0.2 | A/C/G | Operator | config-service | 执行“域名跳转 WWW”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-026 | 78 | 去 WWW 跳转 | 0.2 | A/C/G | Operator | config-service | 执行“去 WWW 跳转”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-027 | 79 | HTTP 自动跳 HTTPS | 0.2 | A/C/G | Operator | config-service | 执行“HTTP 自动跳 HTTPS”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DOM-028 | 80 | HTTPS 可选关闭跳转 | 0.2 | A/C/G | Operator | config-service | 执行“HTTPS 可选关闭跳转”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| ROUTE-001 | 81 | URI 精确匹配 | 0.2 | A/C/G | Operator | config-service | 执行“URI 精确匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| ROUTE-002 | 82 | URI 前缀匹配 | 0.2 | A/C/G | Operator | config-service | 执行“URI 前缀匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| ROUTE-003 | 83 | URI 正则匹配 | 0.2 | A/C/G | Operator | config-service | 执行“URI 正则匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| ROUTE-004 | 84 | URI 通配符匹配 | 0.2 | A/C/G | Operator | config-service | 执行“URI 通配符匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| ROUTE-005 | 85 | 匹配优先级 | 0.2 | A/C/G | Operator | config-service | 执行“匹配优先级”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| ROUTE-006 | 86 | 命名路由 | 0.2 | A/C/G | Operator | config-service | 执行“命名路由”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| ROUTE-007 | 87 | 路由启停 | 0.2 | A/C/G | Operator | config-service | 执行“路由启停”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| ROUTE-008 | 88 | 路由排序 | 0.2 | A/C/G | Operator | config-service | 执行“路由排序”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| ROUTE-009 | 89 | 路由拖拽调整优先级 | 0.2 | A/C/G | Operator | config-service | 执行“路由拖拽调整优先级”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | ROUTE-010 | 90 | Method 匹配 | 0.6 | A/C/G | Operator | config-service | 执行“Method 匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | ROUTE-011 | 91 | Host 匹配 | 0.6 | A/C/G | Operator | config-service | 执行“Host 匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | ROUTE-012 | 92 | Header 匹配 | 0.6 | A/C/G | Operator | config-service | 执行“Header 匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
@@ -826,50 +826,50 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | ROUTE-023 | 103 | 路由命中测试器 | 0.6 | A/C/G | Viewer | config-service | 查询“路由命中测试器”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
 | ROUTE-024 | 104 | 模拟请求匹配 | 0.6 | A/C/G | Operator | config-service | 执行“模拟请求匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | ROUTE-025 | 105 | 显示最终命中的 Route | 0.6 | A/C/G | Viewer | config-service | 查询“显示最终命中的 Route”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| UP-001 | 106 | 反向代理目标设置 | 0.2 | A/C/G | Operator | gatewayd | 执行“反向代理目标设置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-002 | 107 | HTTP 上游 | 0.2 | A/C/G | Operator | gatewayd | 执行“HTTP 上游”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-003 | 108 | HTTPS 上游 | 0.2 | A/C/G | Operator | gatewayd | 执行“HTTPS 上游”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-004 | 109 | Unix Socket 上游预留 | 0.2 | A/C/G | Operator | gatewayd | 执行“Unix Socket 上游预留”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-005 | 110 | 上游 Host 修改 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游 Host 修改”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-006 | 111 | 上游 SNI 设置 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游 SNI 设置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-007 | 112 | 上游 TLS 校验 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游 TLS 校验”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-008 | 113 | 上游 CA 设置 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游 CA 设置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-009 | 114 | 上游连接超时 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游连接超时”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-010 | 115 | 上游读取超时 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游读取超时”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-011 | 116 | 上游写入超时 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游写入超时”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-012 | 117 | 上游空闲超时 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游空闲超时”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-013 | 118 | Keepalive 控制 | 0.2 | A/C/G | Operator | gatewayd | 执行“Keepalive 控制”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-014 | 119 | Connection Pool 配置 | 0.2 | A/C/G | Operator | gatewayd | 执行“Connection Pool 配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-015 | 120 | 上游最大连接数 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游最大连接数”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-016 | 121 | 上游节点创建 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游节点创建”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-017 | 122 | 上游节点删除 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游节点删除”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-018 | 123 | 上游节点启停 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游节点启停”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-019 | 124 | 上游节点权重 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游节点权重”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-020 | 125 | 上游节点备注 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游节点备注”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-021 | 126 | Upstream Group | 0.2 | A/C/G | Operator | gatewayd | 执行“Upstream Group”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-022 | 127 | Round-robin | 0.2 | A/C/G | Operator | gatewayd | 执行“Round-robin”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-023 | 128 | Weighted round-robin | 0.2 | A/C/G | Operator | gatewayd | 执行“Weighted round-robin”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-024 | 129 | Random | 0.2 | A/C/G | Operator | gatewayd | 执行“Random”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-025 | 130 | Consistent hash | 0.2 | A/C/G | Operator | gatewayd | 执行“Consistent hash”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-026 | 131 | 按 Client IP Hash | 0.2 | A/C/G | Operator | gatewayd | 执行“按 Client IP Hash”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-027 | 132 | 按 Header Hash | 0.2 | A/C/G | Operator | gatewayd | 执行“按 Header Hash”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-028 | 133 | 按 Cookie Hash | 0.2 | A/C/G | Operator | gatewayd | 执行“按 Cookie Hash”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-029 | 134 | 主备节点 | 0.2 | A/C/G | Operator | gatewayd | 执行“主备节点”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-030 | 135 | Failover | 0.2 | A/C/G | Operator | gatewayd | 执行“Failover”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-031 | 136 | 被动健康检查 | 0.2 | A/C/G | Viewer | gatewayd | 查询“被动健康检查”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| UP-032 | 137 | 主动 HTTP 健康检查 | 0.2 | A/C/G | Viewer | gatewayd | 查询“主动 HTTP 健康检查”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| UP-033 | 138 | 健康检查 Path | 0.2 | A/C/G | Viewer | gatewayd | 查询“健康检查 Path”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| UP-034 | 139 | 健康检查 Method | 0.2 | A/C/G | Viewer | gatewayd | 查询“健康检查 Method”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| UP-035 | 140 | 健康检查 Interval | 0.2 | A/C/G | Viewer | gatewayd | 查询“健康检查 Interval”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| UP-036 | 141 | 健康检查 Timeout | 0.2 | A/C/G | Viewer | gatewayd | 查询“健康检查 Timeout”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| UP-037 | 142 | 健康状态码判断 | 0.2 | A/C/G | Viewer | gatewayd | 查询“健康状态码判断”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| UP-038 | 143 | 连续成功阈值 | 0.2 | A/C/G | Operator | gatewayd | 执行“连续成功阈值”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-039 | 144 | 连续失败阈值 | 0.2 | A/C/G | Operator | gatewayd | 执行“连续失败阈值”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-040 | 145 | 上游实时健康状态 | 0.2 | A/C/G | Viewer | gatewayd | 查询“上游实时健康状态”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| UP-041 | 146 | 上游延迟显示 | 0.2 | A/C/G | Viewer | gatewayd | 查询“上游延迟显示”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| UP-042 | 147 | 上游失败次数 | 0.2 | A/C/G | Viewer | gatewayd | 查询“上游失败次数”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| UP-043 | 148 | 手动摘除节点 | 0.2 | A/C/G | Operator | gatewayd | 执行“手动摘除节点”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-044 | 149 | 手动恢复节点 | 0.2 | A/C/G | Operator | gatewayd | 执行“手动恢复节点”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| UP-001 | 106 | 反向代理目标设置 | 0.2 | A/C/G | Operator | gatewayd | 执行“反向代理目标设置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-002 | 107 | HTTP 上游 | 0.2 | A/C/G | Operator | gatewayd | 执行“HTTP 上游”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-003 | 108 | HTTPS 上游 | 0.2 | A/C/G | Operator | gatewayd | 执行“HTTPS 上游”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-004 | 109 | Unix Socket 上游预留 | 0.2 | A/C/G | Operator | gatewayd | 执行“Unix Socket 上游预留”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-005 | 110 | 上游 Host 修改 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游 Host 修改”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-006 | 111 | 上游 SNI 设置 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游 SNI 设置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-007 | 112 | 上游 TLS 校验 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游 TLS 校验”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-008 | 113 | 上游 CA 设置 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游 CA 设置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-009 | 114 | 上游连接超时 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游连接超时”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-010 | 115 | 上游读取超时 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游读取超时”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-011 | 116 | 上游写入超时 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游写入超时”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-012 | 117 | 上游空闲超时 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游空闲超时”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-013 | 118 | Keepalive 控制 | 0.2 | A/C/G | Operator | gatewayd | 执行“Keepalive 控制”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-014 | 119 | Connection Pool 配置 | 0.2 | A/C/G | Operator | gatewayd | 执行“Connection Pool 配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-015 | 120 | 上游最大连接数 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游最大连接数”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-016 | 121 | 上游节点创建 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游节点创建”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-017 | 122 | 上游节点删除 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游节点删除”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-018 | 123 | 上游节点启停 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游节点启停”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-019 | 124 | 上游节点权重 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游节点权重”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-020 | 125 | 上游节点备注 | 0.2 | A/C/G | Operator | gatewayd | 执行“上游节点备注”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-021 | 126 | Upstream Group | 0.2 | A/C/G | Operator | gatewayd | 执行“Upstream Group”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-022 | 127 | Round-robin | 0.2 | A/C/G | Operator | gatewayd | 执行“Round-robin”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-023 | 128 | Weighted round-robin | 0.2 | A/C/G | Operator | gatewayd | 执行“Weighted round-robin”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-024 | 129 | Random | 0.2 | A/C/G | Operator | gatewayd | 执行“Random”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-025 | 130 | Consistent hash | 0.2 | A/C/G | Operator | gatewayd | 执行“Consistent hash”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-026 | 131 | 按 Client IP Hash | 0.2 | A/C/G | Operator | gatewayd | 执行“按 Client IP Hash”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-027 | 132 | 按 Header Hash | 0.2 | A/C/G | Operator | gatewayd | 执行“按 Header Hash”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-028 | 133 | 按 Cookie Hash | 0.2 | A/C/G | Operator | gatewayd | 执行“按 Cookie Hash”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-029 | 134 | 主备节点 | 0.2 | A/C/G | Operator | gatewayd | 执行“主备节点”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-030 | 135 | Failover | 0.2 | A/C/G | Operator | gatewayd | 执行“Failover”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-031 | 136 | 被动健康检查 | 0.2 | A/C/G | Viewer | gatewayd | 查询“被动健康检查”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| UP-032 | 137 | 主动 HTTP 健康检查 | 0.2 | A/C/G | Viewer | gatewayd | 查询“主动 HTTP 健康检查”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| UP-033 | 138 | 健康检查 Path | 0.2 | A/C/G | Viewer | gatewayd | 查询“健康检查 Path”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| UP-034 | 139 | 健康检查 Method | 0.2 | A/C/G | Viewer | gatewayd | 查询“健康检查 Method”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| UP-035 | 140 | 健康检查 Interval | 0.2 | A/C/G | Viewer | gatewayd | 查询“健康检查 Interval”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| UP-036 | 141 | 健康检查 Timeout | 0.2 | A/C/G | Viewer | gatewayd | 查询“健康检查 Timeout”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| UP-037 | 142 | 健康状态码判断 | 0.2 | A/C/G | Viewer | gatewayd | 查询“健康状态码判断”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| UP-038 | 143 | 连续成功阈值 | 0.2 | A/C/G | Operator | gatewayd | 执行“连续成功阈值”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-039 | 144 | 连续失败阈值 | 0.2 | A/C/G | Operator | gatewayd | 执行“连续失败阈值”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-040 | 145 | 上游实时健康状态 | 0.2 | A/C/G | Viewer | gatewayd | 查询“上游实时健康状态”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| UP-041 | 146 | 上游延迟显示 | 0.2 | A/C/G | Viewer | gatewayd | 查询“上游延迟显示”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| UP-042 | 147 | 上游失败次数 | 0.2 | A/C/G | Viewer | gatewayd | 查询“上游失败次数”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| UP-043 | 148 | 手动摘除节点 | 0.2 | A/C/G | Operator | gatewayd | 执行“手动摘除节点”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-044 | 149 | 手动恢复节点 | 0.2 | A/C/G | Operator | gatewayd | 执行“手动恢复节点”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | UP-045 | 150 | 请求失败重试 | 0.6 | A/C/G | Operator | gatewayd | 执行“请求失败重试”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | UP-046 | 151 | 重试次数 | 0.6 | A/C/G | Viewer | gatewayd | 查询“重试次数”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
 | UP-047 | 152 | 指定错误类型重试 | 0.6 | A/C/G | Operator | gatewayd | 执行“指定错误类型重试”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
@@ -1415,7 +1415,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | 新增团队/平台需求 | 105 |
 | 总 Feature ID | 685 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
-| 当前 `Implemented` | 29（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`） |
+| 当前 `Implemented` | 150（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`） |
 | 1.0 要求 `Verified` | 685 |
 
 分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 47、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。
