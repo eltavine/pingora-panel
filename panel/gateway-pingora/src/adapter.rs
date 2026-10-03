@@ -1,17 +1,98 @@
-use crate::{routing::RouteIndex, ProxyRouteSelection, ADAPTER_VERSION, PINGORA_PACKAGE_VERSION};
+use crate::{
+    certificates::CertificateIndex,
+    listeners::{self, ListenerPlan, SocketKey},
+    routing::{RoutingTable, Targets},
+    secrets::{NoSecrets, SecretSource},
+    static_files::StaticContent,
+    upstream::{EndpointStates, PoolHealth, UpstreamPool},
+    ADAPTER_VERSION, PINGORA_PACKAGE_VERSION,
+};
 use arc_swap::ArcSwapOption;
 use async_trait::async_trait;
-use panel_domain::NormalizedHost;
 use panel_engine::{validate_engine_ir, DataPlaneAdapter, EngineCapabilities, EngineCapability};
 use panel_errors::{Diagnostic, ErrorCode, PanelError, Result, ValidationReport};
-use panel_ir::{LoadBalancingPolicy, RouteAction, RouteMatcher, RuntimeSnapshot};
-use pingora_core::upstreams::peer::HttpPeer;
-use pingora_http::RequestHeader;
-use pingora_load_balancing::Backend;
-use std::{collections::BTreeSet, net::SocketAddr, sync::Arc};
+use panel_ir::RuntimeSnapshot;
+use parking_lot::Mutex;
+use std::{
+    collections::{BTreeSet, HashMap, HashSet},
+    fmt,
+    path::PathBuf,
+    sync::Arc,
+};
+use tokio::sync::watch;
+
+pub(crate) type ActiveSnapshot = Arc<ArcSwapOption<PreparedPingoraSnapshot>>;
+
+/// Capabilities this adapter serves. HTTP/3 listeners and Unix socket
+/// upstreams are reserved in the IR and deliberately absent.
+const CAPABILITIES: &[&str] = &[
+    "action.redirect",
+    "action.respond",
+    "action.static",
+    "activation.cas",
+    "listener.http",
+    "listener.http2",
+    "listener.https",
+    "route.exact-path",
+    "route.glob",
+    "route.host",
+    "route.path-prefix",
+    "route.regex",
+    "site.redirect",
+    "upstream.backup",
+    "upstream.balancing",
+    "upstream.health-check",
+    "upstream.http",
+    "upstream.http2",
+    "upstream.https",
+    "upstream.passive-health",
+];
+
+/// Gateway resources the adapter reads while preparing snapshots.
+#[derive(Clone)]
+pub struct AdapterOptions {
+    secrets: Arc<dyn SecretSource>,
+    static_root: Option<PathBuf>,
+}
+
+impl Default for AdapterOptions {
+    fn default() -> Self {
+        Self {
+            secrets: Arc::new(NoSecrets),
+            static_root: None,
+        }
+    }
+}
+
+impl fmt::Debug for AdapterOptions {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AdapterOptions")
+            .field("static_root", &self.static_root)
+            .finish_non_exhaustive()
+    }
+}
+
+impl AdapterOptions {
+    /// Source of TLS certificates, keys and CA bundles named by snapshots.
+    pub fn with_secrets(mut self, secrets: Arc<dyn SecretSource>) -> Self {
+        self.secrets = secrets;
+        self
+    }
+
+    /// Directory that static content roots are relative to.
+    pub fn with_static_root(mut self, root: impl Into<PathBuf>) -> Self {
+        self.static_root = Some(root.into());
+        self
+    }
+}
 
 pub struct PingoraGatewayAdapter {
-    active: ArcSwapOption<PreparedPingoraSnapshot>,
+    active: ActiveSnapshot,
+    activations: watch::Sender<u64>,
+    options: AdapterOptions,
+    endpoints: Arc<EndpointStates>,
+    bound: Mutex<BTreeSet<SocketKey>>,
 }
 
 /// Opaque immutable artifact built entirely before activation.
@@ -20,8 +101,11 @@ pub struct PingoraGatewayAdapter {
 /// boundary even though the associated type is visible to the generic runtime.
 pub struct PreparedPingoraSnapshot {
     snapshot: RuntimeSnapshot,
-    routes: RouteIndex,
-    _peers: Vec<PrivatePeer>,
+    pub(crate) routing: RoutingTable,
+    pub(crate) pools: Vec<UpstreamPool>,
+    pub(crate) statics: Vec<StaticContent>,
+    pub(crate) certificates: CertificateIndex,
+    pub(crate) listeners: Vec<ListenerPlan>,
 }
 
 impl Default for PingoraGatewayAdapter {
@@ -32,8 +116,16 @@ impl Default for PingoraGatewayAdapter {
 
 impl PingoraGatewayAdapter {
     pub fn new() -> Self {
+        Self::with_options(AdapterOptions::default())
+    }
+
+    pub fn with_options(options: AdapterOptions) -> Self {
         Self {
-            active: ArcSwapOption::empty(),
+            active: Arc::new(ArcSwapOption::empty()),
+            activations: watch::channel(0).0,
+            options,
+            endpoints: Arc::default(),
+            bound: Mutex::default(),
         }
     }
 
@@ -51,41 +143,74 @@ impl PingoraGatewayAdapter {
             .map(|prepared| prepared.snapshot.clone())
     }
 
-    /// Selects from the immutable active routing table without exposing Pingora values.
-    /// `path` is the absolute URI path component, excluding query and fragment.
-    pub fn active_proxy_route(
-        &self,
-        host: &NormalizedHost,
-        path: &str,
-    ) -> Option<ProxyRouteSelection> {
-        self.active.load().as_ref()?.routes.select(host, path)
+    /// Live health of every upstream pool in the active snapshot.
+    pub fn upstream_health(&self) -> Vec<PoolHealth> {
+        self.active
+            .load_full()
+            .map(|prepared| prepared.pools.iter().map(UpstreamPool::health).collect())
+            .unwrap_or_default()
+    }
+
+    /// Takes an endpoint out of rotation, or returns it, until changed again.
+    pub fn set_endpoint_drained(&self, pool: &str, endpoint: &str, drained: bool) -> Result<()> {
+        let exists = self.active.load().as_ref().is_some_and(|prepared| {
+            prepared.pools.iter().any(|candidate| {
+                candidate.id.as_str() == pool
+                    && candidate
+                        .endpoints
+                        .iter()
+                        .any(|item| item.id.as_str() == endpoint)
+            })
+        });
+        if !exists {
+            return Err(PanelError::not_found(format!(
+                "the active configuration has no endpoint {endpoint} in upstream {pool}"
+            )));
+        }
+        self.endpoints.set_drained(pool, endpoint, drained);
+        Ok(())
+    }
+
+    /// Endpoints currently drained by an operator, as `(pool, endpoint)`.
+    pub fn drained_endpoints(&self) -> BTreeSet<(String, String)> {
+        self.endpoints.drained()
+    }
+
+    /// Restores drains recorded before a restart; unknown endpoints are kept
+    /// until the next activation shows whether they still exist.
+    pub fn restore_drained(&self, drained: impl IntoIterator<Item = (String, String)>) {
+        for (pool, endpoint) in drained {
+            self.endpoints.set_drained(&pool, &endpoint, true);
+        }
+    }
+
+    pub(crate) fn active(&self) -> ActiveSnapshot {
+        Arc::clone(&self.active)
+    }
+
+    pub(crate) fn active_prepared(&self) -> Option<Arc<PreparedPingoraSnapshot>> {
+        self.active.load_full()
+    }
+
+    pub(crate) fn subscribe(&self) -> watch::Receiver<u64> {
+        self.activations.subscribe()
+    }
+
+    pub(crate) fn set_bound_sockets(&self, sockets: BTreeSet<SocketKey>) {
+        *self.bound.lock() = sockets;
     }
 
     fn supported_capabilities() -> BTreeSet<EngineCapability> {
-        [
-            EngineCapability::new("route.host", "1"),
-            EngineCapability::new("route.path-prefix", "1"),
-            EngineCapability::new("upstream.http", "1"),
-            EngineCapability::new("upstream.https", "1"),
-            EngineCapability::new("activation.cas", "1"),
-        ]
-        .into_iter()
-        .collect()
+        CAPABILITIES
+            .iter()
+            .map(|name| EngineCapability::new(*name, "1"))
+            .collect()
     }
 
-    fn validate_supported_ir(snapshot: &RuntimeSnapshot) -> Result<ValidationReport> {
+    fn validate_supported_ir(snapshot: &RuntimeSnapshot) -> Result<()> {
         let mut unsupported = Vec::new();
-        if !snapshot.listeners.is_empty() {
-            unsupported.push("listeners");
-        }
-        if !snapshot.tls_profiles.is_empty() {
-            unsupported.push("tls_profiles");
-        }
         if !snapshot.header_policies.is_empty() {
             unsupported.push("header_policies");
-        }
-        if !snapshot.static_content.is_empty() {
-            unsupported.push("static_content");
         }
         if !snapshot.cache_policies.is_empty() {
             unsupported.push("cache_policies");
@@ -96,18 +221,14 @@ impl PingoraGatewayAdapter {
         if !snapshot.lua_policies.is_empty() {
             unsupported.push("lua_policies");
         }
+        if snapshot
+            .listeners
+            .iter()
+            .any(|listener| listener.protocols.http3)
+        {
+            unsupported.push("HTTP/3 listeners (reserved)");
+        }
         for route in &snapshot.routes {
-            if !matches!(
-                route.matcher,
-                RouteMatcher::Host { .. }
-                    | RouteMatcher::PathPrefix { .. }
-                    | RouteMatcher::HostPathPrefix { .. }
-            ) {
-                unsupported.push("route matcher");
-            }
-            if !matches!(route.action, RouteAction::Proxy { .. }) {
-                unsupported.push("route action");
-            }
             if route.retry_policy.is_some()
                 || route.header_policy_id.is_some()
                 || route.cache_policy_id.is_some()
@@ -118,100 +239,120 @@ impl PingoraGatewayAdapter {
             }
         }
         for pool in &snapshot.upstream_pools {
-            if !matches!(pool.load_balancing, LoadBalancingPolicy::RoundRobin) {
-                unsupported.push("load balancing policy");
-            }
             if pool.retry_policy.attempts != 0 {
                 unsupported.push("upstream retry policy");
             }
-            if pool.endpoints.is_empty() {
-                return Ok(ValidationReport::from_diagnostics(vec![Diagnostic::error(
-                    ErrorCode::VALIDATION_FAILED,
-                    format!("upstream pool {} has no endpoints", pool.id),
-                )]));
-            }
-            for endpoint in &pool.endpoints {
-                if endpoint.weight == 0 {
-                    return Ok(ValidationReport::from_diagnostics(vec![Diagnostic::error(
-                        ErrorCode::VALIDATION_FAILED,
-                        format!(
-                            "upstream endpoint {} must have a positive weight",
-                            endpoint.id
-                        ),
-                    )]));
-                }
-                let _peer = PrivatePeer::try_from(endpoint)?;
+            if pool
+                .endpoints
+                .iter()
+                .any(|endpoint| endpoint.unix_socket.is_some())
+            {
+                unsupported.push("Unix socket upstreams (reserved)");
             }
         }
-        if !unsupported.is_empty() {
-            unsupported.sort_unstable();
-            unsupported.dedup();
-            return Err(PanelError::unsupported_capability(format!(
-                "Pingora adapter does not support IR nodes: {}",
-                unsupported.join(", ")
-            )));
+        if unsupported.is_empty() {
+            return Ok(());
         }
-        Ok(ValidationReport::valid())
+        unsupported.sort_unstable();
+        unsupported.dedup();
+        Err(PanelError::unsupported_capability(format!(
+            "Pingora adapter does not support IR nodes: {}",
+            unsupported.join(", ")
+        )))
     }
 
-    fn compile(snapshot: RuntimeSnapshot) -> Result<PreparedPingoraSnapshot> {
-        let routes = RouteIndex::compile(&snapshot)?;
-        let peers = snapshot
+    async fn compile(&self, snapshot: RuntimeSnapshot) -> Result<PreparedPingoraSnapshot> {
+        let listeners = snapshot
+            .listeners
+            .iter()
+            .map(ListenerPlan::from_ir)
+            .collect::<Result<Vec<_>>>()?;
+        self.check_bindable(&listeners)?;
+        let secrets = Arc::clone(&self.options.secrets);
+        let static_root = self.options.static_root.clone();
+        let blocking = snapshot.clone();
+        let (certificates, statics) = tokio::task::spawn_blocking(move || {
+            let certificates = CertificateIndex::build(&blocking, secrets.as_ref())?;
+            let statics = blocking
+                .static_content
+                .iter()
+                .map(|policy| StaticContent::compile(policy, static_root.as_deref()))
+                .collect::<Result<Vec<_>>>()?;
+            Ok::<_, PanelError>((certificates, statics))
+        })
+        .await
+        .map_err(|error| {
+            PanelError::internal(format!("snapshot compilation stopped: {error}"))
+        })??;
+        let mut pools = Vec::with_capacity(snapshot.upstream_pools.len());
+        for pool in &snapshot.upstream_pools {
+            pools.push(
+                UpstreamPool::compile(pool, &self.endpoints, self.options.secrets.as_ref()).await?,
+            );
+        }
+        let pool_indexes: HashMap<&str, usize> = snapshot
             .upstream_pools
             .iter()
-            .flat_map(|pool| pool.endpoints.iter())
-            .map(PrivatePeer::try_from)
-            .collect::<Result<Vec<_>>>()?;
+            .enumerate()
+            .map(|(index, pool)| (pool.id.as_str(), index))
+            .collect();
+        let static_indexes: HashMap<&str, usize> = snapshot
+            .static_content
+            .iter()
+            .enumerate()
+            .map(|(index, policy)| (policy.id.as_str(), index))
+            .collect();
+        let routing = RoutingTable::compile(
+            &snapshot,
+            &Targets {
+                pools: &pool_indexes,
+                statics: &static_indexes,
+            },
+        )?;
         Ok(PreparedPingoraSnapshot {
             snapshot,
-            routes,
-            _peers: peers,
+            routing,
+            pools,
+            statics,
+            certificates,
+            listeners,
         })
     }
-}
 
-/// All direct interaction with Pingora values remains behind this private descriptor.
-struct PrivatePeer {
-    _peer: HttpPeer,
-    _backend: Backend,
-    _header_probe: RequestHeader,
-}
-
-impl TryFrom<&panel_ir::UpstreamEndpoint> for PrivatePeer {
-    type Error = PanelError;
-
-    fn try_from(endpoint: &panel_ir::UpstreamEndpoint) -> Result<Self> {
-        let socket_text = if endpoint.address.host().contains(':') {
-            format!("[{}]:{}", endpoint.address.host(), endpoint.address.port())
+    /// Detects port conflicts with other processes before activation. Ports
+    /// this gateway already holds are resolved when the listener set changes.
+    fn check_bindable(&self, listeners: &[ListenerPlan]) -> Result<()> {
+        let bound = self.bound.lock().clone();
+        let diagnostics: Vec<_> = listeners
+            .iter()
+            .filter(|plan| {
+                !bound.contains(&plan.socket)
+                    && !bound
+                        .iter()
+                        .any(|held| held.address.port() == plan.socket.address.port())
+            })
+            .filter_map(|plan| {
+                listeners::bind(&plan.socket).err().map(|error| {
+                    Diagnostic::error(
+                        ErrorCode::VALIDATION_FAILED,
+                        format!(
+                            "listener {} cannot use {}: {error}",
+                            plan.id, plan.socket.address
+                        ),
+                    )
+                    .with_resource(plan.id.clone())
+                })
+            })
+            .collect();
+        if diagnostics.is_empty() {
+            Ok(())
         } else {
-            format!("{}:{}", endpoint.address.host(), endpoint.address.port())
-        };
-        let socket: SocketAddr = socket_text.parse().map_err(|_| {
-            PanelError::invalid_argument(format!(
-                "upstream {} must use an IP literal during the initial adapter stage",
-                endpoint.id
-            ))
-        })?;
-        let sni = endpoint
-            .sni
-            .clone()
-            .unwrap_or_else(|| endpoint.address.host().to_string());
-        let peer = HttpPeer::new(socket, endpoint.address.tls(), sni);
-        let backend = Backend::new_with_weight(&socket.to_string(), endpoint.weight as usize)
-            .map_err(|error| {
-                PanelError::invalid_argument(format!(
-                    "invalid Pingora backend for {}: {error}",
-                    endpoint.id
-                ))
-            })?;
-        let header_probe = RequestHeader::build("GET", b"/", None).map_err(|error| {
-            PanelError::internal(format!("Pingora HTTP header mapping failed: {error}"))
-        })?;
-        Ok(Self {
-            _peer: peer,
-            _backend: backend,
-            _header_probe: header_probe,
-        })
+            Err(PanelError::new(
+                ErrorCode::VALIDATION_FAILED,
+                "listener ports are unavailable",
+            )
+            .with_diagnostics(diagnostics))
+        }
     }
 }
 
@@ -234,7 +375,8 @@ impl DataPlaneAdapter for PingoraGatewayAdapter {
         if !base.valid {
             return Ok(base);
         }
-        Self::validate_supported_ir(snapshot)
+        Self::validate_supported_ir(snapshot)?;
+        Ok(base)
     }
 
     async fn prepare(&self, snapshot: RuntimeSnapshot) -> Result<Self::Prepared> {
@@ -246,23 +388,31 @@ impl DataPlaneAdapter for PingoraGatewayAdapter {
             )
             .with_diagnostics(report.diagnostics));
         }
-        Self::compile(snapshot)
+        self.compile(snapshot).await
     }
 
     fn activate(&self, prepared: Arc<Self::Prepared>) {
+        let live: HashSet<(String, String)> = prepared
+            .pools
+            .iter()
+            .flat_map(|pool| {
+                pool.endpoints
+                    .iter()
+                    .map(|endpoint| (pool.id.as_str().to_owned(), endpoint.id.as_str().to_owned()))
+            })
+            .collect();
         self.active.store(Some(prepared));
+        self.endpoints.retain(&live);
+        self.activations.send_modify(|generation| *generation += 1);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use panel_domain::{
-        EndpointAddress, EndpointId, PathPrefix, RevisionId, RouteId, SiteId, UpstreamPoolId,
-    };
+    use panel_domain::{EndpointAddress, EndpointId, RevisionId, UpstreamPoolId};
     use panel_ir::{
-        CachePolicy, CapabilityRequirement, DomainSpec, RouteSpec, SiteSpec, UpstreamEndpoint,
-        UpstreamPoolSpec,
+        CachePolicy, CapabilityRequirement, ListenerRef, UpstreamEndpoint, UpstreamPoolSpec,
     };
 
     fn mapped_snapshot(tls: bool) -> RuntimeSnapshot {
@@ -292,56 +442,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn maps_http_and_https_peers_without_listener() {
+    async fn maps_http_and_https_peers() {
         let adapter = PingoraGatewayAdapter::new();
-        assert!(
-            adapter
-                .validate(&mapped_snapshot(false))
-                .await
-                .unwrap()
-                .valid
-        );
-        assert!(
-            adapter
-                .validate(&mapped_snapshot(true))
-                .await
-                .unwrap()
-                .valid
-        );
+        for tls in [false, true] {
+            let snapshot = mapped_snapshot(tls);
+            assert!(adapter.validate(&snapshot).await.unwrap().valid);
+            adapter.prepare(snapshot).await.unwrap();
+        }
     }
 
     #[tokio::test]
-    async fn active_routing_decision_comes_from_the_published_snapshot() {
-        let adapter = PingoraGatewayAdapter::new();
-        let mut snapshot = mapped_snapshot(false);
-        snapshot.sites.push(SiteSpec::new(
-            SiteId::new("site").unwrap(),
-            "site",
-            vec![DomainSpec::new(NormalizedHost::new("example.com").unwrap())],
-        ));
-        snapshot.routes.push(RouteSpec::new(
-            RouteId::new("api").unwrap(),
-            SiteId::new("site").unwrap(),
-            1,
-            RouteMatcher::PathPrefix {
-                path: PathPrefix::new("/api").unwrap(),
-            },
-            RouteAction::Proxy {
-                upstream_pool_id: UpstreamPoolId::new("primary").unwrap(),
-            },
-        ));
-        snapshot.refresh_content_hash();
-        let host = NormalizedHost::new("example.com").unwrap();
-        assert!(adapter.active_proxy_route(&host, "/api").is_none());
-        adapter.activate(Arc::new(adapter.prepare(snapshot).await.unwrap()));
-        let selected = adapter.active_proxy_route(&host, "/api/users").unwrap();
-        assert_eq!(selected.route_id().as_str(), "api");
-        assert_eq!(selected.upstream_pool_id().as_str(), "primary");
-        assert!(adapter.active_proxy_route(&host, "/apis").is_none());
-    }
-
-    #[tokio::test]
-    async fn unsupported_nodes_fail_explicitly() {
+    async fn unsupported_and_reserved_nodes_fail_explicitly() {
         let adapter = PingoraGatewayAdapter::new();
         let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
         snapshot.cache_policies.push(CachePolicy {
@@ -353,6 +464,42 @@ mod tests {
         snapshot.refresh_content_hash();
         let error = adapter.validate(&snapshot).await.unwrap_err();
         assert_eq!(error.code.as_str(), ErrorCode::UNSUPPORTED_CAPABILITY);
+
+        let mut snapshot = mapped_snapshot(false);
+        let mut listener = ListenerRef::new("quic", "127.0.0.1:8443");
+        listener.protocols.http3 = true;
+        snapshot.listeners.push(listener);
+        snapshot.upstream_pools[0].endpoints[0].unix_socket = Some("/run/app.sock".into());
+        snapshot.refresh_content_hash();
+        let error = adapter.validate(&snapshot).await.unwrap_err();
+        assert!(
+            error.message.contains("HTTP/3 listeners (reserved)"),
+            "{error}"
+        );
+        assert!(
+            error.message.contains("Unix socket upstreams (reserved)"),
+            "{error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn occupied_listener_ports_fail_preparation() {
+        let occupied = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+        snapshot.listeners.push(ListenerRef::new(
+            "http",
+            occupied.local_addr().unwrap().to_string(),
+        ));
+        snapshot.refresh_content_hash();
+        let error = PingoraGatewayAdapter::new()
+            .prepare(snapshot)
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.code.as_str(), ErrorCode::VALIDATION_FAILED);
+        assert!(error.diagnostics[0]
+            .message
+            .contains("listener http cannot use"));
     }
 
     /// Reserved feature gates must never widen the advertised capability set,
@@ -364,32 +511,32 @@ mod tests {
             .await
             .unwrap()
             .capabilities;
-
-        assert_eq!(
-            advertised,
-            [
-                EngineCapability::new("activation.cas", "1"),
-                EngineCapability::new("route.host", "1"),
-                EngineCapability::new("route.path-prefix", "1"),
-                EngineCapability::new("upstream.http", "1"),
-                EngineCapability::new("upstream.https", "1"),
-            ]
-            .into_iter()
-            .collect::<BTreeSet<_>>()
-        );
+        assert_eq!(advertised.len(), CAPABILITIES.len());
+        assert!(!advertised.contains(&EngineCapability::new("listener.http3", "1")));
+        assert!(!advertised.contains(&EngineCapability::new("upstream.unix", "1")));
+        assert!(advertised.contains(&EngineCapability::new("activation.cas", "1")));
     }
 
     #[tokio::test]
-    async fn version_and_capabilities_are_reported() {
+    async fn activation_publishes_and_drains_are_scoped_to_active_endpoints() {
         let adapter = PingoraGatewayAdapter::new();
-        let capabilities = adapter.capabilities().await.unwrap();
-        assert_eq!(capabilities.build_version, "0.9.0");
-        assert_eq!(adapter.pingora_package_version(), "0.9.0");
-        assert!(capabilities
-            .capabilities
-            .contains(&EngineCapability::new("activation.cas", "1")));
+        let activations = adapter.subscribe();
+        assert!(adapter
+            .set_endpoint_drained("primary", "local", true)
+            .is_err());
         let prepared = Arc::new(adapter.prepare(mapped_snapshot(false)).await.unwrap());
         adapter.activate(prepared);
+        assert!(activations.has_changed().unwrap());
         assert!(adapter.active_snapshot().is_some());
+        adapter
+            .set_endpoint_drained("primary", "local", true)
+            .unwrap();
+        assert_eq!(
+            adapter.drained_endpoints(),
+            BTreeSet::from([("primary".to_owned(), "local".to_owned())])
+        );
+        let health = adapter.upstream_health();
+        assert!(health[0].endpoints[0].drained);
+        assert_eq!(adapter.pingora_package_version(), "0.9.0");
     }
 }

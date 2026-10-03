@@ -10,16 +10,36 @@ publish.workspace = true
 [dependencies]
 arc-swap.workspace = true
 async-trait.workspace = true
+bytes.workspace = true
+globset.workspace = true
+http.workspace = true
+httpdate.workspace = true
+mime_guess.workspace = true
 panel-domain.workspace = true
 panel-engine.workspace = true
 panel-errors.workspace = true
 panel-ir.workspace = true
-pingora-core.workspace = true
+parking_lot.workspace = true
+pingora-core = { workspace = true, features = ["rustls"] }
 pingora-http.workspace = true
-pingora-load-balancing.workspace = true
+pingora-load-balancing = { workspace = true, features = ["rustls"] }
+pingora-proxy = { workspace = true, features = ["rustls"] }
+percent-encoding.workspace = true
+regex.workspace = true
+rustls.workspace = true
+rustls-pki-types.workspace = true
+socket2.workspace = true
+tokio.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
-tokio.workspace = true
+base64.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["http2"] }
+hyper-util = { workspace = true, features = ["http2"] }
+rcgen.workspace = true
+tempfile.workspace = true
+tokio-rustls.workspace = true
 
 [features]
 default = []

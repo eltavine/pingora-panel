@@ -67,13 +67,19 @@ gateway-grpc-client = { version = "=0.1.0", path = "gateway-grpc-client" }
 gateway-proto-codec = { version = "=0.1.0", path = "gateway-proto-codec" }
 gateway-pingora = { version = "=0.1.0", path = "gateway-pingora" }
 getrandom = "=0.4.3"
+globset = { version = "=0.4.20", default-features = false }
 hex = "=0.4.3"
+http = "=1.5.0"
+http-body-util = "=0.1.5"
+httpdate = "=1.0.3"
 hyper = { version = "=1.11.1", features = ["client", "http1"] }
 hyper-util = { version = "=0.1.20", features = ["tokio"] }
 hmac = "=0.13.0"
 idna = "=1.1.0"
 iri-string = "=0.7.14"
 mediatype = "=0.23.0"
+mime_guess = { version = "=2.0.5", default-features = false }
+parking_lot = "=0.12.5"
 pbkdf2 = { version = "=0.13.0", default-features = false, features = ["hmac"] }
 percent-encoding = "=2.3.2"
 prost = "=0.14.4"
@@ -107,10 +113,13 @@ panel-jobs = { version = "=0.1.0", path = "panel-jobs" }
 pingora-core = { version = "=0.9.0", path = "../pingora-core", default-features = false }
 pingora-http = { version = "=0.9.0", path = "../pingora-http", default-features = false }
 pingora-load-balancing = { version = "=0.9.0", path = "../pingora-load-balancing", default-features = false }
+pingora-proxy = { version = "=0.9.0", path = "../pingora-proxy", default-features = false }
+regex = { version = "=1.13.1", default-features = false, features = ["std", "perf", "unicode-perl"] }
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.145"
 sha2 = "=0.11.0"
 snapshot-store-fs = { version = "=0.2.0", path = "snapshot-store-fs" }
+socket2 = { version = "=0.6.5", features = ["all"] }
 sqlx = { version = "=0.9.0", default-features = false, features = ["chrono", "migrate", "postgres", "runtime-tokio", "tls-rustls-ring-webpki", "uuid"] }
 stringprep = "=0.1.5"
 thiserror = "=2.0.21"
