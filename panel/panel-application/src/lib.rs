@@ -16,6 +16,7 @@ mod idempotency;
 mod operations;
 mod persistence;
 mod runtime;
+mod tls_probe;
 
 pub use audit::{AuditFilter, AuditPage, AuditPort, AuditRecord, AuditVerification};
 pub use certificates::{CertificateChange, CertificateOutput, CertificatePort, CertificateRead};
@@ -41,3 +42,4 @@ pub use runtime::{
     DataPlaneListener, DataPlaneState, EndpointHealth, GatewayRuntimePort, UpstreamHealth,
     UpstreamHealthReport,
 };
+pub use tls_probe::{TlsProbe, TlsProbeReport, TlsProbeTarget};

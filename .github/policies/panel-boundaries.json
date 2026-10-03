@@ -490,6 +490,13 @@
         "panel-errors",
         "panel-service"
       ]
+    },
+    "tls-probe-rustls": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-application",
+        "panel-errors"
+      ]
     }
   },
   "rules": {

@@ -4531,6 +4531,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
+name = "tls-probe-rustls"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "panel-application",
+ "panel-errors",
+ "rcgen",
+ "rustls",
+ "rustls-pki-types",
+ "tokio",
+ "tokio-rustls",
+]
+
+[[package]]
 name = "tokio"
 version = "1.48.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

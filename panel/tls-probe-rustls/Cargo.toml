@@ -1,0 +1,20 @@
+[package]
+name = "tls-probe-rustls"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+panel-application.workspace = true
+panel-errors.workspace = true
+rustls = { workspace = true, features = ["tls12"] }
+rustls-pki-types.workspace = true
+tokio = { workspace = true, features = ["io-util", "net"] }
+tokio-rustls = { workspace = true, features = ["tls12"] }
+
+[dev-dependencies]
+rcgen.workspace = true

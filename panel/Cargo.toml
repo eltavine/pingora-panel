@@ -35,6 +35,7 @@ members = [
     "panel-engine",
     "panel-gateway-runtime",
     "snapshot-store-fs",
+    "tls-probe-rustls",
     "gateway-pingora",
     "gateway-proto-codec",
     "config-proto-codec",
@@ -148,6 +149,7 @@ sha2 = "=0.11.0"
 subtle = "=2.6.1"
 similar = "=3.2.0"
 snapshot-store-fs = { version = "=0.2.0", path = "snapshot-store-fs" }
+tls-probe-rustls = { version = "=0.1.0", path = "tls-probe-rustls" }
 socket2 = { version = "=0.6.5", features = ["all"] }
 sqlx = { version = "=0.9.0", default-features = false, features = ["chrono", "migrate", "postgres", "runtime-tokio", "tls-rustls-ring-webpki", "uuid"] }
 stringprep = "=0.1.5"
