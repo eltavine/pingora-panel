@@ -2,6 +2,7 @@
 
 use crate::{
     certificates::TlsVersion,
+    head_deadline::DEFAULT_HEAD_TIMEOUT,
     security::{ClientResolution, Networks},
 };
 use panel_errors::{PanelError, Result};
@@ -16,6 +17,7 @@ use std::{
     io,
     net::{SocketAddr, TcpListener},
     sync::Arc,
+    time::Duration,
 };
 
 const BACKLOG: i32 = 65_535;
@@ -45,6 +47,8 @@ pub(crate) struct ListenerPlan {
     pub handshake: Handshake,
     /// How the client's address is learned from trusted proxies.
     pub client: ClientResolution,
+    /// The longest a client may take to send a request head.
+    pub head_timeout: Duration,
 }
 
 /// What a TLS listener accepts in every handshake.
@@ -131,6 +135,16 @@ impl ListenerPlan {
                     ))
                 })?,
                 header: listener.real_ip_header,
+            },
+            head_timeout: match listener.request_head_timeout_ms {
+                Some(0) => {
+                    return Err(PanelError::validation_failed(format!(
+                        "listener {} gives clients no time to send a request head",
+                        listener.id
+                    )))
+                }
+                Some(ms) => Duration::from_millis(ms),
+                None => DEFAULT_HEAD_TIMEOUT,
             },
         })
     }

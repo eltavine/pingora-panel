@@ -9,15 +9,18 @@ use crate::{
     acme::ChallengeDirectory,
     adapter::{ActiveSnapshot, PingoraGatewayAdapter},
     certificates::{HandshakeRecorder, ListenerCertificates},
+    head_deadline::{Connections, HeadDeadline},
     listeners::{self, ListenerPlan, SocketKey},
     proxy::{ListenerContext, PanelProxy},
 };
 use panel_errors::{PanelError, Result};
 use pingora_core::{
-    apps::HttpServerOptions, listeners::tls::TlsSettings, server::configuration::ServerConf,
-    services::Service as _,
+    apps::HttpServerOptions,
+    listeners::tls::TlsSettings,
+    server::configuration::ServerConf,
+    services::{listening::Service, Service as _},
 };
-use pingora_proxy::ProxyServiceBuilder;
+use pingora_proxy::HttpProxy;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     future::Future,
@@ -376,6 +379,7 @@ impl Generation {
             let socket = sockets.get(&plan.socket).ok_or_else(|| {
                 PanelError::internal(format!("listener {} has no socket", plan.id))
             })?;
+            let connections = Arc::new(Connections::default());
             let proxy = PanelProxy::new(
                 ListenerContext {
                     id: plan.id.clone(),
@@ -383,16 +387,20 @@ impl Generation {
                     http1: plan.http1,
                     challenges: challenges.clone(),
                     client: plan.client.clone(),
+                    connections: Arc::clone(&connections),
                 },
                 Arc::clone(&active),
                 Arc::clone(&in_flight),
             );
             let mut server_options = HttpServerOptions::default();
             server_options.h2c = plan.http2 && !plan.tls;
-            let mut service = ProxyServiceBuilder::new(&conf, proxy)
-                .name(format!("listener {}", plan.id))
-                .server_options(server_options)
-                .build();
+            let mut proxy = HttpProxy::new(proxy, Arc::clone(&conf));
+            proxy.server_options = Some(server_options);
+            proxy.handle_init_modules();
+            let mut service = Service::new(
+                format!("listener {}", plan.id),
+                HeadDeadline::new(proxy, plan.head_timeout, connections),
+            );
             let address = plan.socket.address.to_string();
             if plan.tls {
                 let config = plan.server_config(Arc::new(ListenerCertificates::new(

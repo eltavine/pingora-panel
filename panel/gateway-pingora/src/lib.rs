@@ -10,6 +10,7 @@ mod adapter;
 mod certificates;
 mod dataplane;
 mod forwarding;
+mod head_deadline;
 mod hosts;
 mod hsts;
 mod listeners;

@@ -36,6 +36,7 @@ const CAPABILITIES: &[&str] = &[
     "listener.http",
     "listener.http2",
     "listener.https",
+    "listener.request-head-timeout",
     "listener.tls-settings",
     "listener.trusted-proxies",
     "request.security",

@@ -6,6 +6,7 @@ use crate::{
     adapter::{ActiveSnapshot, PreparedPingoraSnapshot},
     certificates::Handshake,
     forwarding::{self, Forwarding},
+    head_deadline::Connections,
     hosts::{self, HostError, RequestHost},
     hsts::{StrictTransport, StrictTransportBuilder},
     path, responses,
@@ -74,6 +75,8 @@ pub(crate) struct ListenerContext {
     pub http1: bool,
     pub challenges: Option<Arc<ChallengeDirectory>>,
     pub client: ClientResolution,
+    /// The listener's connections, told when a request on them is done.
+    pub connections: Arc<Connections>,
 }
 
 pub(crate) struct PanelProxy {
@@ -526,6 +529,14 @@ impl ProxyHttp for PanelProxy {
         error: Option<&Error>,
         ctx: &mut RequestContext,
     ) {
+        if !session.is_http2() {
+            if let Some(socket) = session
+                .digest()
+                .and_then(|digest| digest.socket_digest.as_ref())
+            {
+                self.listener.connections.request_done(socket);
+            }
+        }
         let status = session
             .response_written()
             .map_or(0, |response| response.status.as_u16());

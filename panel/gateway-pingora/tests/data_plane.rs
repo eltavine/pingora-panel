@@ -781,6 +781,102 @@ async fn security_policies_refuse_limit_and_authenticate() {
     gateway.stop().await;
 }
 
+/// Sends `head` a byte at a time every `pace` until the gateway answers, and
+/// returns what it answered first.
+async fn trickle(address: SocketAddr, head: &'static [u8], pace: Duration) -> Vec<u8> {
+    let (mut reader, mut writer) = TcpStream::connect(address).await.unwrap().into_split();
+    let writing = tokio::spawn(async move {
+        for byte in head {
+            if writer.write_all(&[*byte]).await.is_err() {
+                return;
+            }
+            tokio::time::sleep(pace).await;
+        }
+        std::future::pending::<()>().await;
+    });
+    let mut answer = vec![0; 256];
+    let read = tokio::time::timeout(Duration::from_secs(5), reader.read(&mut answer))
+        .await
+        .expect("the gateway answers in time")
+        .unwrap_or(0);
+    writing.abort();
+    answer.truncate(read);
+    answer
+}
+
+#[tokio::test]
+async fn request_heads_must_arrive_in_time() {
+    let upstream = echo_upstream().await;
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    let mut listener = ListenerRef::new("http", listen.to_string());
+    listener.request_head_timeout_ms = Some(400);
+    snapshot.listeners.push(listener);
+    snapshot.upstream_pools.push(pool("app", &[upstream]));
+    snapshot.sites.push(site(&["shop.test"]));
+    snapshot
+        .routes
+        .push(route("all", 1, prefix("/"), proxy("app")));
+    let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
+    wait_for(listen).await;
+
+    let started = std::time::Instant::now();
+    let stalled = trickle(
+        listen,
+        b"GET / HTTP/1.1\r\nhost: shop.test\r\n",
+        Duration::ZERO,
+    )
+    .await;
+    assert!(
+        stalled.starts_with(b"HTTP/1.1 408 "),
+        "{}",
+        String::from_utf8_lossy(&stalled)
+    );
+    assert!(started.elapsed() < Duration::from_secs(2));
+    let trickled = trickle(
+        listen,
+        b"GET / HTTP/1.1\r\nhost: shop.test\r\nx-padding: aaaaaaaaaaaaaaaa\r\n\r\n",
+        Duration::from_millis(40),
+    )
+    .await;
+    assert!(
+        trickled.starts_with(b"HTTP/1.1 408 "),
+        "bytes arriving one by one do not extend the deadline: {}",
+        String::from_utf8_lossy(&trickled)
+    );
+
+    let mut stream = TcpStream::connect(listen).await.unwrap();
+    let request = b"GET / HTTP/1.1\r\nhost: shop.test\r\n\r\n";
+    let mut answer = vec![0; 4096];
+    for _ in 0..2 {
+        stream.write_all(request).await.unwrap();
+        let read = stream.read(&mut answer).await.unwrap();
+        assert!(answer[..read].starts_with(b"HTTP/1.1 200 "));
+        tokio::time::sleep(Duration::from_millis(150)).await;
+    }
+    let idle = tokio::time::timeout(Duration::from_secs(5), stream.read(&mut answer))
+        .await
+        .expect("an idle connection is closed after the deadline");
+    assert!(matches!(idle, Ok(0) | Err(_)), "{idle:?}");
+
+    let mut stream = TcpStream::connect(listen).await.unwrap();
+    stream.write_all(request).await.unwrap();
+    let read = stream.read(&mut answer).await.unwrap();
+    assert!(answer[..read].starts_with(b"HTTP/1.1 200 "));
+    stream
+        .write_all(b"GET / HTTP/1.1\r\nhost: shop.test\r\n")
+        .await
+        .unwrap();
+    let late = tokio::time::timeout(Duration::from_secs(5), stream.read(&mut answer))
+        .await
+        .expect("a late head on a kept-alive connection closes it");
+    assert!(
+        matches!(late, Ok(0) | Err(_)),
+        "later heads are cut without an answer: {late:?}"
+    );
+    gateway.stop().await;
+}
+
 fn pem(label: &str, der: &[u8]) -> String {
     let encoded = base64::engine::general_purpose::STANDARD.encode(der);
     let lines: Vec<_> = encoded
