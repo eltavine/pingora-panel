@@ -128,6 +128,22 @@ jobs:
             | python3 -c "import json, sys; print(json.load(sys.stdin)['fingerprint'])")
           test "$served" = "$kept"
 
+      - name: Keep the gateway's metrics in Prometheus
+        run: |
+          curl --fail --silent --show-error http://127.0.0.1:9185/metrics \
+            | grep -q '^pingora_panel_gateway_config_revision '
+          requests=0
+          for _ in $(seq 1 45); do
+            requests=$(curl --fail --silent --show-error --get http://127.0.0.1:9090/api/v1/query \
+              --data-urlencode 'query=sum(http_server_request_duration_seconds_count{site!=""})' \
+              | python3 -c "import json, sys; r = json.load(sys.stdin)['data']['result']; print(int(float(r[0]['value'][1])) if r else 0)")
+            if [ "$requests" -gt 0 ]; then
+              break
+            fi
+            sleep 2
+          done
+          test "$requests" -gt 0
+
       - name: Audit the changes
         run: |
           ppanel() { docker compose exec -T -e PPANEL_TOKEN panel-api ppanel "$@"; }

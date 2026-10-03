@@ -80,6 +80,23 @@ services:
       timeout: 3s
       retries: 30
 
+  # Keeps the gateway's metrics; only observability-service queries it.
+  prometheus:
+    image: docker.io/prom/prometheus:v3.15.0-distroless@sha256:b2a413d5a03ea6a76782a508d1c7947440bba3b973931a25676e278431891b01
+    network_mode: host
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.listen-address=127.0.0.1:9090
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+
   # Creates the certificate authority and every service's credentials.
   pki-init:
     <<: *pki
@@ -134,6 +151,8 @@ services:
       PINGORA_PANEL_TRUST_DOMAIN: pingora-panel.internal
       PINGORA_PANEL_SECRET_DIR: /var/lib/pingora-panel/gateway-secrets
       PINGORA_PANEL_STATIC_ROOT: /srv/pingora-panel/sites
+      # Serves /metrics to Prometheus.
+      PINGORA_PANEL_OPS_ADDR: 127.0.0.1:9185
     volumes:
       - gateway-state:/var/lib/pingora-panel/gateway
       - gateway-secrets:/var/lib/pingora-panel/gateway-secrets:ro
@@ -272,6 +291,7 @@ secrets:
 volumes:
   postgres-data:
   nats-data:
+  prometheus-data:
   gateway-state:
   gateway-secrets:
   sites:
