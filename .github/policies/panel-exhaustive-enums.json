@@ -42,6 +42,18 @@
       "name": "LoadBalancingPolicy",
       "owner": "pingora-panel-platform",
       "reason": "gateway-grpc encodes every policy onto the wire, and gateway-pingora maps it onto a Pingora selector. A new policy must fail to compile in both rather than fall back to an unintended one."
+    },
+    {
+      "package": "panel-ir",
+      "name": "WwwRedirect",
+      "owner": "pingora-panel-platform",
+      "reason": "gateway-proto-codec maps every redirect mode onto the protobuf enum. A new mode must fail to compile there rather than be sent as no redirect."
+    },
+    {
+      "package": "panel-ir",
+      "name": "HealthCheckProtocol",
+      "owner": "pingora-panel-platform",
+      "reason": "gateway-proto-codec encodes every probe protocol onto the wire, and gateway-pingora builds a probe for each. A new protocol must fail to compile in both rather than probe the wrong way."
     }
   ]
 }
