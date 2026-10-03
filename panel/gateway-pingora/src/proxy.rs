@@ -13,11 +13,13 @@ use crate::{
     routing::{RouteTarget, SiteRoutes},
     security::{Admission, Candidate, ClientResolution, Refusal},
     static_files,
+    telemetry::{self, GatewayMetrics},
     template::Facts,
     upstream::{EndpointLease, UpstreamPool},
 };
 use async_trait::async_trait;
 use http::header;
+use panel_metrics::{method, protocol_version, ActiveRequest, ClientRequest, ServerRequest};
 use pingora_core::{
     modules::http::{compression::ResponseCompressionBuilder, HttpModules},
     upstreams::peer::HttpPeer,
@@ -77,6 +79,8 @@ pub(crate) struct ListenerContext {
     pub client: ClientResolution,
     /// The listener's connections, told when a request on them is done.
     pub connections: Arc<Connections>,
+    /// Where requests are measured, when the gateway is.
+    pub metrics: Option<GatewayMetrics>,
 }
 
 pub(crate) struct PanelProxy {
@@ -125,6 +129,9 @@ pub(crate) struct RequestContext {
     /// What security policies left the request to keep to.
     admission: Admission,
     body_seen: u64,
+    started: Instant,
+    /// Counts the request as active while it is measured.
+    active: Option<ActiveRequest>,
 }
 
 impl RequestContext {
@@ -160,6 +167,8 @@ impl ProxyHttp for PanelProxy {
             trusted_peer: false,
             admission: Admission::default(),
             body_seen: 0,
+            started: Instant::now(),
+            active: None,
         }
     }
 
@@ -168,6 +177,13 @@ impl ProxyHttp for PanelProxy {
         session: &mut Session,
         ctx: &mut RequestContext,
     ) -> pingora_core::Result<bool> {
+        if let Some(metrics) = &self.listener.metrics {
+            ctx.active = Some(
+                metrics
+                    .server
+                    .start(method(&session.req_header().method), self.scheme()),
+            );
+        }
         let Some(snapshot) = self.active.load_full() else {
             responses::plain(
                 session,
@@ -437,7 +453,7 @@ impl ProxyHttp for PanelProxy {
 
     async fn upstream_response_filter(
         &self,
-        _session: &mut Session,
+        session: &mut Session,
         upstream_response: &mut ResponseHeader,
         ctx: &mut RequestContext,
     ) -> pingora_core::Result<()> {
@@ -448,16 +464,32 @@ impl ProxyHttp for PanelProxy {
         if let (Some((pool, endpoint)), Some(sent_at)) = (ctx.upstream(), sent_at) {
             pool.record_latency(endpoint, sent_at.elapsed());
         }
+        let status = upstream_response.status.as_u16();
+        self.measure_upstream(
+            &session.req_header().method,
+            ctx,
+            sent_at,
+            Some(status),
+            None,
+        );
         Ok(())
     }
 
     fn fail_to_connect(
         &self,
-        _session: &mut Session,
+        session: &mut Session,
         _peer: &HttpPeer,
         ctx: &mut RequestContext,
         mut error: Box<Error>,
     ) -> Box<Error> {
+        let sent_at = ctx.sent_at.take();
+        self.measure_upstream(
+            &session.req_header().method,
+            ctx,
+            sent_at,
+            None,
+            Some(&error),
+        );
         if let Some((pool, endpoint)) = ctx.upstream() {
             pool.record_failure(endpoint);
             // Nothing reached the upstream, so trying another endpoint is safe.
@@ -477,6 +509,14 @@ impl ProxyHttp for PanelProxy {
         ctx: &mut RequestContext,
         client_reused: bool,
     ) -> Box<Error> {
+        let sent_at = ctx.sent_at.take();
+        self.measure_upstream(
+            &session.req_header().method,
+            ctx,
+            sent_at,
+            None,
+            Some(&error),
+        );
         if !ctx.failure_recorded && error.esource() == &pingora_core::ErrorSource::Upstream {
             if let Some((pool, endpoint)) = ctx.upstream() {
                 pool.record_failure(endpoint);
@@ -553,6 +593,7 @@ impl ProxyHttp for PanelProxy {
             }
         }
         ctx.lease = None;
+        self.measure(session, error, ctx, status);
         if tracing::enabled!(tracing::Level::DEBUG) {
             let site = ctx
                 .snapshot
@@ -574,6 +615,87 @@ impl ProxyHttp for PanelProxy {
 }
 
 impl PanelProxy {
+    fn scheme(&self) -> &'static str {
+        if self.listener.tls {
+            "https"
+        } else {
+            "http"
+        }
+    }
+
+    /// Records a request that is done, and stops counting it as active.
+    fn measure(
+        &self,
+        session: &Session,
+        error: Option<&Error>,
+        ctx: &mut RequestContext,
+        status: u16,
+    ) {
+        let active = ctx.active.take();
+        let Some(metrics) = &self.listener.metrics else {
+            return;
+        };
+        let request = session.req_header();
+        let status = (status > 0).then_some(status);
+        let labels = ctx.snapshot.as_ref().map(|snapshot| &snapshot.labels);
+        let site = labels
+            .zip(ctx.site)
+            .and_then(|(labels, site)| labels.site(site));
+        let route = labels
+            .zip(ctx.site.zip(ctx.route))
+            .and_then(|(labels, (site, route))| labels.route(site, route));
+        let measured = ServerRequest {
+            http_request_method: method(&request.method),
+            url_scheme: self.scheme(),
+            http_response_status_code: status,
+            network_protocol_version: protocol_version(request.version),
+            error_type: telemetry::server_error_type(error, status),
+            site,
+            route,
+        };
+        metrics.server.finish(
+            &measured,
+            ctx.started.elapsed(),
+            u64::try_from(session.body_bytes_read()).unwrap_or(u64::MAX),
+            u64::try_from(session.body_bytes_sent()).unwrap_or(u64::MAX),
+        );
+        drop(active);
+    }
+
+    /// Records an attempt sent upstream at `sent_at`, once it has a response
+    /// or failed.
+    fn measure_upstream(
+        &self,
+        request_method: &http::Method,
+        ctx: &RequestContext,
+        sent_at: Option<Instant>,
+        status: Option<u16>,
+        error: Option<&Error>,
+    ) {
+        let (Some(metrics), Some(sent_at)) = (&self.listener.metrics, sent_at) else {
+            return;
+        };
+        let Some(endpoint) = ctx
+            .snapshot
+            .as_ref()
+            .zip(ctx.pool.zip(ctx.endpoint))
+            .and_then(|(snapshot, (pool, endpoint))| snapshot.labels.endpoint(pool, endpoint))
+        else {
+            return;
+        };
+        metrics.client.finish(
+            &ClientRequest {
+                http_request_method: method(request_method),
+                server_address: endpoint.address,
+                server_port: endpoint.port,
+                http_response_status_code: status,
+                error_type: telemetry::client_error_type(error, status),
+                upstream: endpoint.upstream,
+            },
+            sent_at.elapsed(),
+        );
+    }
+
     /// The key authorization for an HTTP-01 challenge this request fetches.
     async fn challenge_answer(&self, session: &Session) -> Option<bytes::Bytes> {
         let challenges = self.listener.challenges.as_ref()?;

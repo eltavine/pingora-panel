@@ -19,6 +19,7 @@ use pingora_core::{
     },
     server::ShutdownWatch,
 };
+use prometheus_client::metrics::gauge::Gauge;
 use std::{
     collections::HashMap,
     fmt,
@@ -52,25 +53,42 @@ const SHARDS: usize = 32;
 #[derive(Default)]
 pub(crate) struct Connections {
     shards: [Mutex<HashMap<usize, Arc<AtomicBool>>>; SHARDS],
+    /// Counts the open connections, when the gateway is measured.
+    open: Option<Gauge>,
 }
 
 impl Connections {
+    pub(crate) fn counted(open: Option<Gauge>) -> Self {
+        Self {
+            open,
+            ..Self::default()
+        }
+    }
+
     fn shard(&self, key: usize) -> &Mutex<HashMap<usize, Arc<AtomicBool>>> {
         &self.shards[(key >> 4) % SHARDS]
     }
 
     fn watch(&self, key: usize, due: Arc<AtomicBool>) {
-        self.shard(key)
+        let replaced = self
+            .shard(key)
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(key, due);
+        if let (None, Some(open)) = (replaced, &self.open) {
+            open.inc();
+        }
     }
 
     fn forget(&self, key: usize) {
-        self.shard(key)
+        let removed = self
+            .shard(key)
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&key);
+        if let (Some(_), Some(open)) = (removed, &self.open) {
+            open.dec();
+        }
     }
 
     /// Starts the deadline for the next request head on the connection of

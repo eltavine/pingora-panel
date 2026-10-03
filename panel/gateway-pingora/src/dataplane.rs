@@ -12,6 +12,7 @@ use crate::{
     head_deadline::{Connections, HeadDeadline},
     listeners::{self, ListenerPlan, SocketKey},
     proxy::{ListenerContext, PanelProxy},
+    telemetry::GatewayMetrics,
 };
 use panel_errors::{PanelError, Result};
 use pingora_core::{
@@ -50,6 +51,7 @@ pub struct DataPlaneOptions {
     workers: NonZeroUsize,
     drain_timeout: Duration,
     upstream_pool_size: usize,
+    metrics: Option<GatewayMetrics>,
 }
 
 impl DataPlaneOptions {
@@ -58,7 +60,14 @@ impl DataPlaneOptions {
             workers,
             drain_timeout: DEFAULT_DRAIN_TIMEOUT,
             upstream_pool_size: DEFAULT_UPSTREAM_POOL_SIZE,
+            metrics: None,
         }
+    }
+
+    /// Records requests, connections and handshakes in `metrics`.
+    pub fn with_metrics(mut self, metrics: GatewayMetrics) -> Self {
+        self.metrics = Some(metrics);
+        self
     }
 
     /// How long a replaced generation may finish in-flight requests.
@@ -262,7 +271,7 @@ impl DataPlane {
                 &state.sockets,
                 self.adapter.active(),
                 self.adapter.challenges(),
-                self.options.upstream_pool_size,
+                &self.options,
             )?;
             state.generations = id;
             Some(generation)
@@ -358,7 +367,7 @@ impl Generation {
         sockets: &BTreeMap<SocketKey, TcpListener>,
         active: ActiveSnapshot,
         challenges: Option<Arc<ChallengeDirectory>>,
-        upstream_pool_size: usize,
+        options: &DataPlaneOptions,
     ) -> Result<Self> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(workers)
@@ -370,7 +379,7 @@ impl Generation {
             })?;
         let conf = Arc::new(ServerConf {
             threads: workers,
-            upstream_keepalive_pool_size: upstream_pool_size,
+            upstream_keepalive_pool_size: options.upstream_pool_size,
             ..ServerConf::default()
         });
         let (shutdown, watch) = watch::channel(false);
@@ -379,10 +388,16 @@ impl Generation {
             let socket = sockets.get(&plan.socket).ok_or_else(|| {
                 PanelError::internal(format!("listener {} has no socket", plan.id))
             })?;
-            let connections = Arc::new(Connections::default());
+            let label: Arc<str> = Arc::from(plan.id.as_str());
+            let metrics = options.metrics.clone();
+            let connections = Arc::new(Connections::counted(
+                metrics.as_ref().map(|metrics| metrics.connections(&label)),
+            ));
+            let handshakes = HandshakeRecorder(metrics.clone().map(|metrics| (metrics, label)));
             let proxy = PanelProxy::new(
                 ListenerContext {
                     id: plan.id.clone(),
+                    metrics,
                     tls: plan.tls,
                     http1: plan.http1,
                     challenges: challenges.clone(),
@@ -407,8 +422,7 @@ impl Generation {
                     Arc::clone(&active),
                     plan.id.clone(),
                 )))?;
-                let settings =
-                    TlsSettings::from_server_config(config, Some(Box::new(HandshakeRecorder)));
+                let settings = TlsSettings::from_server_config(config, Some(Box::new(handshakes)));
                 service.add_tls_with_settings(&address, None, settings);
             } else {
                 service.add_tcp(&address);

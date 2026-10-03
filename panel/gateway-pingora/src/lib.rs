@@ -22,6 +22,7 @@ mod routing;
 mod secrets;
 mod security;
 mod static_files;
+mod telemetry;
 mod template;
 mod upstream;
 
@@ -32,6 +33,7 @@ pub use file_checks::{
     EscapingLink, FileChecks, PrivateKeyCheck, StaticRootCheck, MAX_STATIC_ENTRIES,
 };
 pub use secrets::{DirectorySecrets, NoSecrets, SecretPermissions, SecretSource};
+pub use telemetry::GatewayMetrics;
 pub use upstream::{EndpointHealth, PoolHealth};
 
 pub const ADAPTER_VERSION: &str = env!("CARGO_PKG_VERSION");

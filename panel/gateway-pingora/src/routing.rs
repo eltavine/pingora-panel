@@ -250,6 +250,10 @@ impl RoutingTable {
         &self.sites[index]
     }
 
+    pub(crate) fn sites(&self) -> &[SiteRoutes] {
+        &self.sites
+    }
+
     pub(crate) fn default_site(&self, listener: &str) -> Option<usize> {
         self.default_sites.get(listener).copied()
     }
@@ -285,6 +289,10 @@ impl SiteRoutes {
                 .is_none_or(|constraint| host_matches(constraint, host))
                 && route.path.matches(path)
         })
+    }
+
+    pub(crate) fn routes(&self) -> &[CompiledRoute] {
+        &self.routes
     }
 
     pub(crate) fn route(&self, index: usize) -> &CompiledRoute {

@@ -25,12 +25,14 @@ panel-domain.workspace = true
 panel-engine.workspace = true
 panel-errors.workspace = true
 panel-ir.workspace = true
+panel-metrics.workspace = true
 parking_lot.workspace = true
 pingora-core = { workspace = true, features = ["rustls"] }
 pingora-http.workspace = true
 pingora-load-balancing = { workspace = true, features = ["rustls"] }
 pingora-proxy = { workspace = true, features = ["rustls"] }
 percent-encoding.workspace = true
+prometheus-client.workspace = true
 regex.workspace = true
 rustls = { workspace = true, features = ["tls12"] }
 rustls-pki-types.workspace = true

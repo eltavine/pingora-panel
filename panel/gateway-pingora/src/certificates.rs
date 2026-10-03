@@ -1,5 +1,6 @@
 //! Downstream server certificates chosen by SNI from the active snapshot.
 
+use crate::telemetry::GatewayMetrics;
 use crate::{adapter::ActiveSnapshot, secrets::SecretSource};
 use async_trait::async_trait;
 use panel_errors::{PanelError, Result};
@@ -229,7 +230,10 @@ pub(crate) struct Handshake {
     pub version: Option<TlsVersion>,
 }
 
-pub(crate) struct HandshakeRecorder;
+/// Keeps what a completed handshake negotiated for the requests on its
+/// connection, and counts the handshake for the listener when the gateway
+/// is measured.
+pub(crate) struct HandshakeRecorder(pub Option<(GatewayMetrics, Arc<str>)>);
 
 #[async_trait]
 impl TlsAccept for HandshakeRecorder {
@@ -237,9 +241,13 @@ impl TlsAccept for HandshakeRecorder {
         &self,
         tls: &TlsRef,
     ) -> Option<Arc<dyn Any + Send + Sync>> {
+        let version = tls.version().and_then(TlsVersion::parse);
+        if let Some((metrics, listener)) = &self.0 {
+            metrics.handshake(listener, version);
+        }
         Some(Arc::new(Handshake {
             server_name: tls.server_name().map(str::to_ascii_lowercase),
-            version: tls.version().and_then(TlsVersion::parse),
+            version,
         }))
     }
 }

@@ -5,7 +5,7 @@
 use base64::Engine;
 use gateway_pingora::{
     AdapterOptions, ChallengeDirectory, DataPlane, DataPlaneOptions, DirectorySecrets,
-    PingoraGatewayAdapter,
+    GatewayMetrics, PingoraGatewayAdapter,
 };
 use panel_domain::{
     EndpointAddress, EndpointId, NormalizedHost, PathPrefix, RevisionId, RouteId, SiteId,
@@ -18,6 +18,7 @@ use panel_ir::{
     SecurityPolicy, SiteSpec, StaticContentPolicy, StrictTransportSecurity, TlsProfile,
     UpstreamEndpoint, UpstreamPoolSpec, WwwRedirect,
 };
+use panel_metrics::Metrics;
 use std::{
     collections::{BTreeSet, HashMap},
     net::SocketAddr,
@@ -149,13 +150,22 @@ struct Gateway {
 
 impl Gateway {
     async fn start(options: AdapterOptions, snapshot: RuntimeSnapshot) -> Self {
+        Self::start_with(options, snapshot, None).await
+    }
+
+    async fn start_with(
+        options: AdapterOptions,
+        snapshot: RuntimeSnapshot,
+        metrics: Option<GatewayMetrics>,
+    ) -> Self {
         let adapter = Arc::new(PingoraGatewayAdapter::with_options(options));
         Self::activate(&adapter, snapshot).await;
-        let plane = DataPlane::new(
-            Arc::clone(&adapter),
-            DataPlaneOptions::new(NonZeroUsize::new(2).unwrap())
-                .with_drain_timeout(Duration::from_secs(2)),
-        );
+        let mut plane_options = DataPlaneOptions::new(NonZeroUsize::new(2).unwrap())
+            .with_drain_timeout(Duration::from_secs(2));
+        if let Some(metrics) = metrics {
+            plane_options = plane_options.with_metrics(metrics);
+        }
+        let plane = DataPlane::new(Arc::clone(&adapter), plane_options);
         let (stop, stopped) = oneshot::channel();
         let task = tokio::spawn(Arc::clone(&plane).run(async {
             let _ = stopped.await;
@@ -360,6 +370,97 @@ async fn proxies_redirects_responds_and_rejects_on_plain_http() {
 
     gateway.stop().await;
     assert!(TcpStream::connect(listen).await.is_err());
+}
+
+/// Waits for the metrics to contain `sample`, as requests are measured after
+/// their responses are sent.
+async fn measured(metrics: &Metrics, sample: &str) {
+    for _ in 0..200 {
+        if metrics.encode().contains(sample) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("no sample {sample} in\n{}", metrics.encode());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn requests_and_upstream_attempts_are_measured() {
+    let upstream = echo_upstream().await;
+    let unreachable = free_address();
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    snapshot.sites.push(site(&["example.com"]));
+    snapshot.upstream_pools.push(pool("app", &[upstream]));
+    snapshot.upstream_pools.push(pool("down", &[unreachable]));
+    snapshot.routes = vec![
+        route("app", 10, prefix("/"), proxy("app")),
+        route("down", 1, prefix("/down"), proxy("down")),
+    ];
+    let mut metrics = Metrics::new();
+    let gateway_metrics = GatewayMetrics::register(&mut metrics);
+    let gateway =
+        Gateway::start_with(AdapterOptions::default(), snapshot, Some(gateway_metrics)).await;
+    wait_for(listen).await;
+
+    assert_eq!(
+        get(listen, Some("example.com"), "/hello", "").await.status,
+        200
+    );
+    assert_eq!(
+        get(listen, Some("example.com"), "/down", "").await.status,
+        502
+    );
+
+    measured(
+        &metrics,
+        "http_server_request_duration_seconds_count{http_request_method=\"GET\",\
+         url_scheme=\"http\",http_response_status_code=\"200\",\
+         network_protocol_version=\"1.1\",error_type=\"\",site=\"site\",route=\"app\"} 1",
+    )
+    .await;
+    measured(
+        &metrics,
+        "http_server_request_duration_seconds_count{http_request_method=\"GET\",\
+         url_scheme=\"http\",http_response_status_code=\"502\",\
+         network_protocol_version=\"1.1\",error_type=\"connect_refused\",site=\"site\",\
+         route=\"down\"} 1",
+    )
+    .await;
+    measured(
+        &metrics,
+        &format!(
+            "http_client_request_duration_seconds_count{{http_request_method=\"GET\",\
+             server_address=\"127.0.0.1\",server_port=\"{}\",http_response_status_code=\"200\",\
+             error_type=\"\",upstream=\"app\"}} 1",
+            upstream.port()
+        ),
+    )
+    .await;
+    measured(
+        &metrics,
+        &format!(
+            "http_client_request_duration_seconds_count{{http_request_method=\"GET\",\
+             server_address=\"127.0.0.1\",server_port=\"{}\",http_response_status_code=\"\",\
+             error_type=\"connect_refused\",upstream=\"down\"}} 1",
+            unreachable.port()
+        ),
+    )
+    .await;
+    measured(
+        &metrics,
+        "http_server_active_requests{http_request_method=\"GET\",url_scheme=\"http\"} 0",
+    )
+    .await;
+    measured(
+        &metrics,
+        "pingora_panel_gateway_open_connections{listener=\"http\"} 0",
+    )
+    .await;
+    gateway.stop().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -930,9 +1031,12 @@ async fn tls_listener_selects_certificates_by_sni_and_rejects_misdirected_hosts(
     snapshot
         .routes
         .push(route("app", 1, prefix("/"), proxy("app")));
-    let gateway = Gateway::start(
+    let mut metrics = Metrics::new();
+    let gateway_metrics = GatewayMetrics::register(&mut metrics);
+    let gateway = Gateway::start_with(
         AdapterOptions::default().with_secrets(Arc::new(DirectorySecrets::new(secrets.path()))),
         snapshot,
+        Some(gateway_metrics),
     )
     .await;
     wait_for(listen).await;
@@ -986,6 +1090,12 @@ async fn tls_listener_selects_certificates_by_sni_and_rejects_misdirected_hosts(
     )
     .await;
     assert_eq!(response.status, 421);
+    measured(
+        &metrics,
+        "pingora_panel_gateway_tls_handshakes_total{listener=\"https\",\
+         tls_protocol_version=\"1.3\"} 3",
+    )
+    .await;
     gateway.stop().await;
 }
 

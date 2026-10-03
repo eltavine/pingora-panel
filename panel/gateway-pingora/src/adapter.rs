@@ -7,6 +7,7 @@ use crate::{
     secrets::{NoSecrets, SecretSource},
     security::{LimitState, SecurityGate},
     static_files::StaticContent,
+    telemetry::SnapshotLabels,
     upstream::{EndpointStates, PoolHealth, UpstreamPool},
     ADAPTER_VERSION, PINGORA_PACKAGE_VERSION,
 };
@@ -129,6 +130,7 @@ pub struct PreparedPingoraSnapshot {
     /// Replaced when the certificate files change, without a new snapshot.
     pub(crate) certificates: ArcSwap<CertificateIndex>,
     pub(crate) listeners: Vec<ListenerPlan>,
+    pub(crate) labels: SnapshotLabels,
 }
 
 impl Default for PingoraGatewayAdapter {
@@ -385,6 +387,7 @@ impl PingoraGatewayAdapter {
                 policies: &policy_indexes,
             },
         )?;
+        let labels = SnapshotLabels::new(&routing, &pools);
         Ok(PreparedPingoraSnapshot {
             snapshot,
             routing,
@@ -393,6 +396,7 @@ impl PingoraGatewayAdapter {
             policies,
             certificates: ArcSwap::from_pointee(certificates),
             listeners,
+            labels,
         })
     }
 

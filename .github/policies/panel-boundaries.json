@@ -124,7 +124,8 @@
         "panel-domain",
         "panel-engine",
         "panel-errors",
-        "panel-ir"
+        "panel-ir",
+        "panel-metrics"
       ]
     },
     "gateway-proto-codec": {
