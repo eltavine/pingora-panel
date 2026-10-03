@@ -170,9 +170,13 @@ services:
       PINGORA_PANEL_DATABASE_URL: postgres://panel_automation@127.0.0.1:5432/pingora_panel
       PINGORA_PANEL_DATABASE_PASSWORD_FILE: /run/secrets/automation-database-password
       PINGORA_PANEL_TLS_DIR: /var/lib/pingora-panel/credentials/automation-service
-    secrets: [automation-database-password]
+      # Seal certificate keys; losing them loses every stored key.
+      PINGORA_PANEL_MASTER_KEYS_FILE: /run/secrets/master-keys
+      PINGORA_PANEL_GATEWAY_SECRET_DIR: /var/lib/pingora-panel/gateway-secrets
+    secrets: [automation-database-password, master-keys]
     volumes:
       - credentials-automation-service:/var/lib/pingora-panel/credentials/automation-service:ro
+      - gateway-secrets:/var/lib/pingora-panel/gateway-secrets
     healthcheck:
       test: ["CMD", "/usr/local/bin/automation-service", "healthcheck"]
       interval: 5s
@@ -227,6 +231,7 @@ services:
       PINGORA_PANEL_HTTP_ADDR: 127.0.0.1:8080
       PINGORA_PANEL_CONFIG_URL: https://127.0.0.1:50061
       PINGORA_PANEL_AUDIT_URL: https://127.0.0.1:50064
+      PINGORA_PANEL_AUTOMATION_URL: https://127.0.0.1:50062
       PINGORA_PANEL_WEB_ROOT: /usr/share/pingora-panel/web
       # Creates the first account once; any later use is refused.
       PINGORA_PANEL_BOOTSTRAP_TOKEN_FILE: /run/secrets/bootstrap-token
@@ -259,6 +264,8 @@ secrets:
     file: ./secrets/bootstrap-token
   password-pepper:
     file: ./secrets/password-pepper
+  master-keys:
+    file: ./secrets/master-keys
 
 volumes:
   postgres-data:

@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
-# Creates the passwords, the one-time bootstrap token and the password
-# pepper Compose mounts as secrets, keeping existing ones.
+# Creates the passwords, the one-time bootstrap token, the password pepper
+# and the master key Compose mounts as secrets, keeping existing ones.
 set -eu
 
 directory=${1:-"$(dirname "$0")/secrets"}
@@ -17,4 +17,9 @@ for name in postgres-admin-password identity-database-password config-database-p
         chmod 644 "$file"
     fi
 done
+# One base64-encoded 256-bit key per line; the first seals new values.
+if [ ! -s "$directory/master-keys" ]; then
+    head -c 32 /dev/urandom | base64 >"$directory/master-keys"
+    chmod 644 "$directory/master-keys"
+fi
 echo "secrets in $directory"

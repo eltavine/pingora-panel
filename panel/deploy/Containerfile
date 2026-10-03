@@ -27,7 +27,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
         cp "panel/target/release/$binary" /out/bin/; \
     done
 # Directories that named volumes mount over; volumes inherit their owner.
-RUN for directory in gateway pki credentials/panel-api credentials/config-service \
+RUN for directory in gateway gateway-secrets pki credentials/panel-api credentials/config-service \
         credentials/automation-service credentials/observability-service credentials/audit-service \
         credentials/gatewayd; do \
         mkdir -p "/out/state/$directory"; \
