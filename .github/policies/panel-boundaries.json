@@ -28,13 +28,17 @@
     "automation-service": {
       "catalog": false,
       "allowed_workspace_dependencies": [
+        "panel-certificates",
         "panel-context",
+        "panel-contracts",
         "panel-control-runtime",
         "panel-errors",
         "panel-events",
         "panel-jobs",
         "panel-platform",
+        "panel-platform-codec",
         "panel-postgres",
+        "panel-secrets",
         "panel-service"
       ]
     },

@@ -15,6 +15,7 @@ fn main() {
         .compile_protos(
             &[
                 "../proto/audit/v1/audit.proto",
+                "../proto/automation/v1/certificates.proto",
                 "../proto/common/v1/common.proto",
                 "../proto/config/v1/config.proto",
                 "../proto/config/v1/configuration.proto",

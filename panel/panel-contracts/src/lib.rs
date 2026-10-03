@@ -13,6 +13,12 @@ pub mod pingora {
             }
         }
 
+        pub mod automation {
+            pub mod v1 {
+                tonic::include_proto!("pingora.panel.automation.v1");
+            }
+        }
+
         pub mod common {
             pub mod v1 {
                 tonic::include_proto!("pingora.panel.common.v1");
@@ -39,7 +45,7 @@ pub mod pingora {
     }
 }
 
-pub use pingora::panel::{audit, common, config, gateway, platform};
+pub use pingora::panel::{audit, automation, common, config, gateway, platform};
 
 /// The CloudEvents Protobuf format, generated from the vendored official schema.
 pub mod cloudevents {
@@ -64,6 +70,12 @@ pub struct ProtocolRevisions {
 
 pub const AUDIT_V1: ProtocolRevisions = ProtocolRevisions {
     package: "pingora.panel.audit.v1",
+    min: 1,
+    max: 1,
+};
+
+pub const AUTOMATION_V1: ProtocolRevisions = ProtocolRevisions {
+    package: "pingora.panel.automation.v1",
     min: 1,
     max: 1,
 };
@@ -220,6 +232,11 @@ mod tests {
     #[test]
     fn protocol_revisions_name_generated_packages() {
         for (revisions, service) in [
+            (AUDIT_V1, audit::v1::audit_query_server::SERVICE_NAME),
+            (
+                AUTOMATION_V1,
+                automation::v1::certificates_server::SERVICE_NAME,
+            ),
             (CONFIG_V1, config::v1::publication_server::SERVICE_NAME),
             (GATEWAY_V1, gateway::v1::gateway_engine_server::SERVICE_NAME),
             (PLATFORM_V1, platform::v1::service_info_server::SERVICE_NAME),

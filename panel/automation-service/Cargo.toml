@@ -10,20 +10,29 @@ publish.workspace = true
 [dependencies]
 async-trait.workspace = true
 chrono.workspace = true
+panel-certificates.workspace = true
+panel-contracts.workspace = true
 panel-control-runtime.workspace = true
 panel-errors.workspace = true
 panel-events.workspace = true
 panel-jobs.workspace = true
 panel-platform.workspace = true
+panel-platform-codec.workspace = true
 panel-postgres.workspace = true
+panel-secrets.workspace = true
 panel-service.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tonic.workspace = true
+tracing.workspace = true
 uuid.workspace = true
+zeroize = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 async-trait.workspace = true
 panel-context.workspace = true
 panel-postgres = { workspace = true, features = ["test-support"] }
-tokio.workspace = true
-tokio-util.workspace = true

@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package pingora.panel.automation.v1;
+
+import "common/v1/common.proto";
+
+// Keeps the certificate inventory: uploaded, generated and issued server
+// certificates whose private keys the service seals and delivers to the
+// gateway.
+//
+// Certificates travel as JSON documents (`pingora.panel.certificates/v1`),
+// so they can gain fields without changing this contract. Every request
+// names one operation from a closed set, which permissions and audit
+// records refer to. Private keys are accepted in change requests and never
+// returned.
+service Certificates {
+  rpc Read(ReadRequest) returns (ReadResponse);
+  rpc Change(ChangeRequest) returns (ChangeResponse);
+}
+
+message ReadRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  // `certificates.list` or `certificates.get`.
+  string operation = 2;
+  // `certificates` or `certificates/{id}`.
+  string resource = 3;
+  // Operation parameters as a JSON object.
+  bytes parameters = 4;
+}
+
+message ReadResponse {
+  // The result as JSON.
+  bytes content = 1;
+  // Entity tag of a single certificate, for conditional changes.
+  string etag = 2;
+  .pingora.panel.common.v1.Error error = 3;
+}
+
+message ChangeRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  // For example `certificates.upload`, `certificates.generate`,
+  // `certificates.replace` or `certificates.delete`.
+  string operation = 2;
+  string resource = 3;
+  // Entity tag the certificate must still have (RFC 9110 §13.1.1); empty
+  // skips the check.
+  string if_match = 4;
+  // The request body as JSON.
+  bytes content = 5;
+}
+
+message ChangeResponse {
+  bytes content = 1;
+  string etag = 2;
+  .pingora.panel.common.v1.Error error = 3;
+}
