@@ -609,3 +609,95 @@ async fn tls_listener_selects_certificates_by_sni_and_rejects_misdirected_hosts(
     assert_eq!(response.status, 421);
     gateway.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn renewed_certificates_are_served_without_a_new_revision() {
+    let upstream = echo_upstream().await;
+    let secrets = tempfile::tempdir().unwrap();
+    let issue = || rcgen::generate_simple_self_signed(vec!["example.com".to_owned()]).unwrap();
+    let (first, renewed, stranger) = (issue(), issue(), issue());
+    let write = |certified: &rcgen::CertifiedKey<rcgen::KeyPair>| {
+        std::fs::write(
+            secrets.path().join("cert-edge.key"),
+            pem("PRIVATE KEY", &certified.signing_key.serialize_der()),
+        )
+        .unwrap();
+        std::fs::write(
+            secrets.path().join("cert-edge.pem"),
+            pem("CERTIFICATE", certified.cert.der()),
+        )
+        .unwrap();
+    };
+    write(&first);
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot.tls_profiles.push(TlsProfile {
+        id: "edge".into(),
+        certificate_secret_id: "cert-edge.pem".into(),
+        private_key_secret_id: "cert-edge.key".into(),
+        min_protocol: "TLSv1.2".into(),
+        alpn: BTreeSet::new(),
+    });
+    let mut listener = ListenerRef::new("https", listen.to_string());
+    listener.tls_profile_id = Some("edge".into());
+    snapshot.listeners.push(listener);
+    snapshot.sites.push(site(&["example.com"]));
+    snapshot.upstream_pools.push(pool("app", &[upstream]));
+    snapshot
+        .routes
+        .push(route("app", 1, prefix("/"), proxy("app")));
+    let gateway = Gateway::start(
+        AdapterOptions::default().with_secrets(Arc::new(DirectorySecrets::new(secrets.path()))),
+        snapshot,
+    )
+    .await;
+    wait_for(listen).await;
+
+    let mut roots = rustls::RootCertStore::empty();
+    for certified in [&first, &renewed] {
+        roots.add(certified.cert.der().clone()).unwrap();
+    }
+    let config = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .unwrap()
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
+    let presented = || {
+        let connector = connector.clone();
+        async move {
+            let stream = TcpStream::connect(listen).await.unwrap();
+            let stream = connector
+                .connect(
+                    rustls_pki_types::ServerName::try_from("example.com").unwrap(),
+                    stream,
+                )
+                .await
+                .unwrap();
+            stream.get_ref().1.peer_certificates().unwrap()[0].to_vec()
+        }
+    };
+
+    assert_eq!(presented().await, first.cert.der().to_vec());
+    assert!(!gateway.adapter.reload_certificates().await.unwrap());
+
+    write(&renewed);
+    assert!(gateway.adapter.reload_certificates().await.unwrap());
+    assert_eq!(presented().await, renewed.cert.der().to_vec());
+
+    std::fs::write(
+        secrets.path().join("cert-edge.key"),
+        pem("PRIVATE KEY", &stranger.signing_key.serialize_der()),
+    )
+    .unwrap();
+    let refused = gateway.adapter.reload_certificates().await.unwrap_err();
+    assert!(
+        refused.message.contains("does not match"),
+        "{}",
+        refused.message
+    );
+    assert_eq!(presented().await, renewed.cert.der().to_vec());
+    gateway.stop().await;
+}

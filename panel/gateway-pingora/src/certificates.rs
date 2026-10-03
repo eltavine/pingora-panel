@@ -10,6 +10,7 @@ use rustls::{
     sign::CertifiedKey,
 };
 use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
+use sha2::{Digest, Sha256};
 use std::{any::Any, collections::HashMap, fmt, sync::Arc};
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -47,11 +48,40 @@ pub(crate) struct CertificateIndex {
     /// Keyed by the parent of `*.parent`.
     wildcard: HashMap<String, Arc<ServerCertificate>>,
     listeners: HashMap<String, Arc<ServerCertificate>>,
+    /// The digest of the files the index was built from.
+    material: [u8; 32],
 }
 
 impl CertificateIndex {
+    /// SHA-256 over the chain and key files `snapshot`'s TLS profiles name,
+    /// to notice when they change on disk.
+    pub(crate) fn material(
+        snapshot: &RuntimeSnapshot,
+        secrets: &dyn SecretSource,
+    ) -> Result<[u8; 32]> {
+        let mut digest = Sha256::new();
+        for profile in &snapshot.tls_profiles {
+            for id in [
+                &profile.certificate_secret_id,
+                &profile.private_key_secret_id,
+            ] {
+                let content = secrets.read(id)?;
+                digest.update((content.len() as u64).to_be_bytes());
+                digest.update(&content);
+            }
+        }
+        Ok(digest.finalize().into())
+    }
+
+    pub(crate) fn built_from(&self, material: &[u8; 32]) -> bool {
+        self.material == *material
+    }
+
     pub(crate) fn build(snapshot: &RuntimeSnapshot, secrets: &dyn SecretSource) -> Result<Self> {
-        let mut index = Self::default();
+        let mut index = Self {
+            material: Self::material(snapshot, secrets)?,
+            ..Self::default()
+        };
         for profile in &snapshot.tls_profiles {
             index.profiles.insert(
                 profile.id.clone(),
@@ -185,9 +215,8 @@ impl ResolvesServerCert for ListenerCertificates {
     fn resolve(&self, hello: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {
         let active = self.active.load();
         let name = hello.server_name().map(str::to_ascii_lowercase);
-        active
-            .as_ref()?
-            .certificates
+        let certificates = active.as_ref()?.certificates.load();
+        certificates
             .presented(&self.listener, name.as_deref())
             .map(|certificate| Arc::clone(&certificate.key))
     }

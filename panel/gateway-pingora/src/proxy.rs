@@ -402,9 +402,8 @@ impl PanelProxy {
         }
         let digest = session.digest()?.ssl_digest.as_ref()?;
         let handshake = digest.extension.get::<Handshake>()?;
-        let presented = snapshot
-            .certificates
-            .presented(&self.listener.id, handshake.server_name.as_deref());
+        let certificates = snapshot.certificates.load();
+        let presented = certificates.presented(&self.listener.id, handshake.server_name.as_deref());
         if let (Some(certificate), Some(version)) = (presented, handshake.version) {
             if version < certificate.minimum {
                 return Some((403, "this site requires a newer TLS version"));
@@ -414,9 +413,7 @@ impl PanelProxy {
             Some(server_name)
                 if !host.is_empty()
                     && server_name != host
-                    && !snapshot
-                        .certificates
-                        .covers(&self.listener.id, server_name, host) =>
+                    && !certificates.covers(&self.listener.id, server_name, host) =>
             {
                 Some((421, "the connection's certificate does not cover this host"))
             }

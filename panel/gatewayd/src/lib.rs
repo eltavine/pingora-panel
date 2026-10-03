@@ -245,6 +245,9 @@ pub enum GatewaydError {
 /// The gateway's workload identity in the trust domain.
 pub const GATEWAY_IDENTITY: &str = "gatewayd";
 const CREDENTIAL_RELOAD_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+/// How often the certificate files of the active snapshot are compared with
+/// what the gateway serves, so renewed certificates are picked up.
+const CERTIFICATE_RELOAD_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
 const TLS_HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 pub fn gateway_service_name() -> &'static str {
@@ -307,6 +310,10 @@ pub async fn build_gateway_runtime_with_options(
         },
     );
     let adapter = Arc::new(PingoraGatewayAdapter::with_options(options.adapter));
+    let reloading = Arc::clone(&adapter);
+    background_tasks.spawn_cooperative("certificate-reload", move |shutdown| {
+        reload_certificates(reloading, CERTIFICATE_RELOAD_INTERVAL, shutdown)
+    });
     let store = Arc::new(
         FileSnapshotStore::open_exclusive_with_limits(
             state_directory,
@@ -607,6 +614,42 @@ pub async fn build_gateway_transport(
     Ok(build_gateway_services(state_directory).await?.gateway())
 }
 
+/// Serves certificate files that changed, such as renewed certificates; a
+/// failure is reported once until the files load again.
+async fn reload_certificates(
+    adapter: Arc<PingoraGatewayAdapter>,
+    interval: std::time::Duration,
+    shutdown: BackgroundTaskShutdown,
+) {
+    let requested = shutdown.requested();
+    tokio::pin!(requested);
+    let mut failing = false;
+    loop {
+        tokio::select! {
+            () = &mut requested => return,
+            () = tokio::time::sleep(interval) => {}
+        }
+        match adapter.reload_certificates().await {
+            Ok(changed) => {
+                if changed {
+                    tracing::info!("certificate files changed; serving the new certificates");
+                }
+                failing = false;
+            }
+            Err(error) => {
+                if !failing {
+                    tracing::warn!(
+                        error_code = %error.code,
+                        error = %error.message,
+                        "certificate files do not load; serving the previous certificates"
+                    );
+                }
+                failing = true;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod composition_tests {
     use super::*;
@@ -648,7 +691,7 @@ mod composition_tests {
         .await
         .unwrap();
 
-        assert_eq!(runtime.background_tasks.task_count(), 3);
+        assert_eq!(runtime.background_tasks.task_count(), 4);
         assert_eq!(runtime.mutations.pending_tasks(), 0);
         assert_eq!(
             runtime.mutations.capacity(),

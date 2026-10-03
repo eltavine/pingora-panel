@@ -7,7 +7,7 @@ use crate::{
     upstream::{EndpointStates, PoolHealth, UpstreamPool},
     ADAPTER_VERSION, PINGORA_PACKAGE_VERSION,
 };
-use arc_swap::ArcSwapOption;
+use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::async_trait;
 use panel_engine::{validate_engine_ir, DataPlaneAdapter, EngineCapabilities, EngineCapability};
 use panel_errors::{Diagnostic, ErrorCode, PanelError, Result, ValidationReport};
@@ -105,7 +105,8 @@ pub struct PreparedPingoraSnapshot {
     pub(crate) routing: RoutingTable,
     pub(crate) pools: Vec<UpstreamPool>,
     pub(crate) statics: Vec<StaticContent>,
-    pub(crate) certificates: CertificateIndex,
+    /// Replaced when the certificate files change, without a new snapshot.
+    pub(crate) certificates: ArcSwap<CertificateIndex>,
     pub(crate) listeners: Vec<ListenerPlan>,
 }
 
@@ -132,6 +133,34 @@ impl PingoraGatewayAdapter {
 
     pub fn pingora_package_version(&self) -> &'static str {
         PINGORA_PACKAGE_VERSION
+    }
+
+    /// Serves the certificate files of the active snapshot again when they
+    /// changed on disk, such as after a renewal, without a new revision.
+    /// When the new files do not load, the current certificates stay and the
+    /// error is returned. Returns whether the certificates were replaced.
+    pub async fn reload_certificates(&self) -> Result<bool> {
+        let Some(active) = self.active.load_full() else {
+            return Ok(false);
+        };
+        let secrets = Arc::clone(&self.options.secrets);
+        let current = Arc::clone(&active);
+        let reloaded = tokio::task::spawn_blocking(move || {
+            let material = CertificateIndex::material(&current.snapshot, secrets.as_ref())?;
+            if current.certificates.load().built_from(&material) {
+                return Ok(None);
+            }
+            CertificateIndex::build(&current.snapshot, secrets.as_ref()).map(Some)
+        })
+        .await
+        .map_err(|error| PanelError::internal(format!("certificate reload stopped: {error}")))??;
+        Ok(match reloaded {
+            Some(index) => {
+                active.certificates.store(Arc::new(index));
+                true
+            }
+            None => false,
+        })
     }
 
     pub fn adapter_version(&self) -> &'static str {
@@ -315,7 +344,7 @@ impl PingoraGatewayAdapter {
             routing,
             pools,
             statics,
-            certificates,
+            certificates: ArcSwap::from_pointee(certificates),
             listeners,
         })
     }
