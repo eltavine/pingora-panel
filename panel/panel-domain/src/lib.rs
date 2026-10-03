@@ -360,6 +360,71 @@ pub struct RevisionRef {
     pub content_hash: ContentHash,
 }
 
+const MAX_CERTIFICATE_ID_LEN: usize = 64;
+
+/// Names a certificate of the inventory, such as `example.com` or
+/// `intranet-wildcard`: lowercase letters, digits and hyphens in labels
+/// separated by dots, so it is also a safe file name.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema), schema(value_type = String, example = "example.com"))]
+#[serde(transparent)]
+pub struct CertificateId(String);
+
+impl CertificateId {
+    pub fn new(value: impl AsRef<str>) -> Result<Self, DomainError> {
+        let value = value.as_ref();
+        if value.is_empty() {
+            return Err(DomainError::Empty);
+        }
+        if value.len() > MAX_CERTIFICATE_ID_LEN {
+            return Err(DomainError::TooLong(MAX_CERTIFICATE_ID_LEN));
+        }
+        let labels_valid = value.split('.').all(|label| {
+            !label.is_empty()
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        });
+        if !labels_valid {
+            return Err(DomainError::Invalid(format!(
+                "certificate id {value:?} must be lowercase letters, digits and hyphens in labels separated by dots"
+            )));
+        }
+        Ok(Self(value.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// The chain's file in the gateway's secret directory.
+    pub fn chain_file(&self) -> String {
+        format!("cert-{}.pem", self.0)
+    }
+
+    /// The private key's file in the gateway's secret directory.
+    pub fn key_file(&self) -> String {
+        format!("cert-{}.key", self.0)
+    }
+}
+
+impl fmt::Display for CertificateId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for CertificateId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Self::new(String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -447,5 +512,30 @@ mod tests {
                 .as_str(),
             "example.com"
         );
+    }
+
+    #[test]
+    fn certificate_ids_are_file_name_safe_labels() {
+        for valid in ["example.com", "a", "intranet-wildcard", "0.example"] {
+            let id = CertificateId::new(valid).unwrap();
+            assert_eq!(id.chain_file(), format!("cert-{valid}.pem"));
+            assert_eq!(id.key_file(), format!("cert-{valid}.key"));
+        }
+        for invalid in [
+            "",
+            "Example.com",
+            "a..b",
+            ".a",
+            "a.",
+            "-a",
+            "a-",
+            "a/b",
+            "*.example.com",
+            "a_b",
+            &"a".repeat(65),
+        ] {
+            assert!(CertificateId::new(invalid).is_err(), "{invalid}");
+        }
+        assert!(serde_json::from_str::<CertificateId>("\"../etc\"").is_err());
     }
 }

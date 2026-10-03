@@ -38077,7 +38077,7 @@
       },
       "CertificateId": {
         "type": "string",
-        "description": "Names a certificate of the inventory, such as `example.com` or\n`intranet-wildcard`: lowercase letters, digits, hyphens and dots that\nseparate non-empty labels.",
+        "description": "Names a certificate of the inventory, such as `example.com` or\n`intranet-wildcard`: lowercase letters, digits and hyphens in labels\nseparated by dots, so it is also a safe file name.",
         "example": "example.com"
       },
       "CertificateInspection": {

@@ -57,7 +57,9 @@ enum Target {
 fn target(resource: &str) -> Result<Target> {
     match resource.split_once('/') {
         None if resource == COLLECTION => Ok(Target::Collection),
-        Some((COLLECTION, id)) => Ok(Target::Certificate(CertificateId::new(id)?)),
+        Some((COLLECTION, id)) => CertificateId::new(id)
+            .map(Target::Certificate)
+            .map_err(|error| PanelError::invalid_argument(error.to_string())),
         _ => Err(PanelError::invalid_argument(format!(
             "unknown resource {resource:?}"
         ))),

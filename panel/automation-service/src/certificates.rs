@@ -50,6 +50,12 @@ fn owner(id: &CertificateId) -> String {
     format!("certificate/{id}/key")
 }
 
+fn stored_id(row: &PgRow) -> Result<CertificateId> {
+    let id: String = row.try_get("certificate_id").map_err(storage_error)?;
+    CertificateId::new(id)
+        .map_err(|_| PanelError::corrupt_state("a stored certificate has an invalid id"))
+}
+
 fn certificate(row: &PgRow) -> Result<Certificate> {
     let source: String = row.try_get("source").map_err(storage_error)?;
     let details: String = row.try_get("details").map_err(storage_error)?;
@@ -58,10 +64,7 @@ fn certificate(row: &PgRow) -> Result<Certificate> {
         PanelError::corrupt_state(format!("a stored certificate has an invalid {what}"))
     };
     Ok(Certificate {
-        id: CertificateId::new(
-            row.try_get::<String, _>("certificate_id")
-                .map_err(storage_error)?,
-        )?,
+        id: stored_id(row)?,
         source: serde_json::from_value(Value::String(source)).map_err(|_| corrupt("source"))?,
         details: serde_json::from_str::<CertificateDetails>(&details)
             .map_err(|_| corrupt("description"))?,
@@ -451,10 +454,7 @@ impl CertificateInventory {
             .iter()
             .map(|row| {
                 Ok((
-                    CertificateId::new(
-                        row.try_get::<String, _>("certificate_id")
-                            .map_err(storage_error)?,
-                    )?,
+                    stored_id(row)?,
                     row.try_get("chain").map_err(storage_error)?,
                     Sealed::new(
                         row.try_get::<String, _>("sealed_key")
