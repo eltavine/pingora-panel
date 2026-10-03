@@ -346,3 +346,48 @@ test('custom roles are created, edited and deleted', async ({ page }) => {
   await expect(page.getByText('Role deleted')).toBeVisible()
   expect(changes[2]!.method()).toBe('DELETE')
 })
+
+test('tokens rotate and other sessions end from the account settings', async ({ page }) => {
+  await setUp(page)
+  await signIn(page)
+  const token = {
+    id: '0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a70',
+    name: 'ci',
+    permissions: ['config.read'],
+    created_at: '2026-10-03T08:00:00Z',
+    expires_at: '2099-11-02T08:00:00Z',
+    last_used_at: null,
+    revoked_at: null,
+  }
+  const requests: Request[] = []
+  await page.route('**/api/v1/account/sessions', (route) => {
+    if (route.request().method() === 'DELETE') {
+      requests.push(route.request())
+      return route.fulfill({ json: { ended: 1 } })
+    }
+    return route.fulfill({
+      json: [
+        currentSession().session,
+        { ...currentSession().session, id: 'other', transport: 'bearer', current: false },
+      ],
+    })
+  })
+  await page.route('**/api/v1/account/tokens', (route) => route.fulfill({ json: [token] }))
+  await page.route(`**/api/v1/account/tokens/${token.id}/rotate`, (route) => {
+    requests.push(route.request())
+    return route.fulfill({
+      status: 201,
+      json: { token: { ...token, id: 'new' }, secret: 'ppat_rotated_secret' },
+    })
+  })
+
+  await page.goto('/account')
+  await page.getByRole('button', { name: 'End other sessions' }).click()
+  await expect(page.getByText('Ended 1 session', { exact: true })).toBeVisible()
+  await page.getByRole('row', { name: /ci/ }).getByRole('button', { name: 'Rotate' }).click()
+  const sheet = page.getByRole('dialog')
+  await expect(sheet.getByText('ppat_rotated_secret')).toBeVisible()
+  await expect(sheet.getByText('the old one stopped working')).toBeVisible()
+  expect(requests.map((request) => request.method())).toEqual(['DELETE', 'POST'])
+  expect(requests.every((request) => request.headers()['x-csrf-token'] === CSRF_TOKEN)).toBe(true)
+})

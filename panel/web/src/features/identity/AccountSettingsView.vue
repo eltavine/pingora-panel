@@ -1,16 +1,26 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { useMutation, useQuery } from '@tanstack/vue-query'
-import { KeyRound, LockKeyhole, MonitorSmartphone, Plus, Trash2, UserCog } from '@lucide/vue'
+import {
+  KeyRound,
+  LockKeyhole,
+  LogOut,
+  MonitorSmartphone,
+  Plus,
+  Trash2,
+  UserCog,
+} from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import type { SessionView, TokenView } from '@/api/generated'
+import type { CreatedToken, SessionView, TokenView } from '@/api/generated'
 import {
   changePasswordMutation,
+  endOtherSessionsMutation,
   endOwnSessionMutation,
   ownSessionsOptions,
   ownTokensOptions,
   revokeOwnTokenMutation,
+  rotateTokenMutation,
 } from '@/api/generated/@tanstack/vue-query.gen'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import FormField from '@/components/FormField.vue'
@@ -33,6 +43,7 @@ import { fieldProblems } from './failures'
 import PasswordInput from './PasswordInput.vue'
 import SessionTable from './SessionTable.vue'
 import TokenCreateSheet from './TokenCreateSheet.vue'
+import TokenSecretSheet from './TokenSecretSheet.vue'
 import TokenTable from './TokenTable.vue'
 
 const { t } = useI18n()
@@ -42,6 +53,8 @@ const tokens = useQuery(ownTokensOptions())
 const changePassword = useMutation(changePasswordMutation())
 const endSession = useMutation(endOwnSessionMutation())
 const revokeToken = useMutation(revokeOwnTokenMutation())
+const endOthers = useMutation(endOtherSessionsMutation())
+const rotateToken = useMutation(rotateTokenMutation())
 
 const account = computed(() => session.value?.account)
 const otherSessions = computed(() => (sessions.data.value ?? []).filter((item) => !item.current))
@@ -79,6 +92,35 @@ function end(item: SessionView) {
       onSuccess: () => {
         toast.success(t('account.sessionEnded'))
         void sessions.refetch()
+      },
+      onError: (error) => notifyFailure(error, t('common.changeFailed')),
+    },
+  )
+}
+
+function endOtherSessions() {
+  endOthers.mutate(
+    {},
+    {
+      onSuccess: (result) => {
+        toast.success(t('account.endedOthers', { count: result.ended }))
+        void sessions.refetch()
+      },
+      onError: (error) => notifyFailure(error, t('common.changeFailed')),
+    },
+  )
+}
+
+const rotated = ref<CreatedToken>()
+const rotatedOpen = ref(false)
+function rotate(token: TokenView) {
+  rotateToken.mutate(
+    { path: { id: token.id } },
+    {
+      onSuccess: (created) => {
+        rotated.value = created
+        rotatedOpen.value = true
+        void tokens.refetch()
       },
       onError: (error) => notifyFailure(error, t('common.changeFailed')),
     },
@@ -211,12 +253,24 @@ function confirmRevoke() {
     </Card>
 
     <Card>
-      <CardHeader>
-        <CardTitle class="flex items-center gap-2">
-          <MonitorSmartphone class="size-4" aria-hidden="true" />
-          {{ t('account.sessions') }}
-        </CardTitle>
-        <CardDescription>{{ t('account.sessionsDetail') }}</CardDescription>
+      <CardHeader class="flex flex-row items-start justify-between gap-4">
+        <div class="flex flex-col gap-1.5">
+          <CardTitle class="flex items-center gap-2">
+            <MonitorSmartphone class="size-4" aria-hidden="true" />
+            {{ t('account.sessions') }}
+          </CardTitle>
+          <CardDescription>{{ t('account.sessionsDetail') }}</CardDescription>
+        </div>
+        <Button
+          v-if="otherSessions.length"
+          size="sm"
+          variant="outline"
+          :disabled="endOthers.isPending.value"
+          @click="endOtherSessions"
+        >
+          <LogOut data-icon="inline-start" aria-hidden="true" />
+          {{ t('account.endOthers') }}
+        </Button>
       </CardHeader>
       <CardContent>
         <Skeleton v-if="sessions.isPending.value" class="h-24 w-full" />
@@ -254,13 +308,16 @@ function confirmRevoke() {
         <TokenTable
           v-else-if="tokens.data.value?.length"
           :tokens="tokens.data.value"
-          :busy="revokeToken.isPending.value"
+          :busy="revokeToken.isPending.value || rotateToken.isPending.value"
+          rotatable
           @revoke="revoking = $event"
+          @rotate="rotate"
         />
         <p v-else class="text-muted-foreground text-sm">{{ t('account.noTokens') }}</p>
       </CardContent>
     </Card>
 
+    <TokenSecretSheet v-model:open="rotatedOpen" :token="rotated" />
     <TokenCreateSheet
       v-model:open="creating"
       :permissions="session?.permissions ?? []"

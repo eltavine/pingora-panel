@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { KeyRound, Trash2 } from '@lucide/vue'
+import { KeyRound, RefreshCw, Trash2 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import type { TokenView } from '@/api/generated'
 import { Badge } from '@/components/ui/badge'
@@ -14,8 +14,8 @@ import {
 } from '@/components/ui/table'
 import { tokenState } from './presentation'
 
-defineProps<{ tokens: readonly TokenView[]; busy?: boolean }>()
-const emit = defineEmits<{ revoke: [token: TokenView] }>()
+defineProps<{ tokens: readonly TokenView[]; busy?: boolean; rotatable?: boolean }>()
+const emit = defineEmits<{ revoke: [token: TokenView]; rotate: [token: TokenView] }>()
 const { t, d } = useI18n()
 </script>
 
@@ -29,7 +29,7 @@ const { t, d } = useI18n()
           <TableHead>{{ t('account.expires') }}</TableHead>
           <TableHead>{{ t('account.lastUsed') }}</TableHead>
           <TableHead>{{ t('common.status') }}</TableHead>
-          <TableHead class="w-12"
+          <TableHead class="w-20"
             ><span class="sr-only">{{ t('common.actions') }}</span></TableHead
           >
         </TableRow>
@@ -67,17 +67,29 @@ const { t, d } = useI18n()
             </Badge>
           </TableCell>
           <TableCell>
-            <Button
-              v-if="tokenState(token) === 'active'"
-              variant="ghost"
-              size="icon-sm"
-              :disabled="busy"
-              :aria-label="t('account.revoke')"
-              :title="t('account.revoke')"
-              @click="emit('revoke', token)"
-            >
-              <Trash2 aria-hidden="true" />
-            </Button>
+            <span v-if="tokenState(token) === 'active'" class="flex justify-end gap-1">
+              <Button
+                v-if="rotatable"
+                variant="ghost"
+                size="icon-sm"
+                :disabled="busy"
+                :aria-label="t('account.rotate')"
+                :title="t('account.rotate')"
+                @click="emit('rotate', token)"
+              >
+                <RefreshCw aria-hidden="true" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                :disabled="busy"
+                :aria-label="t('account.revoke')"
+                :title="t('account.revoke')"
+                @click="emit('revoke', token)"
+              >
+                <Trash2 aria-hidden="true" />
+              </Button>
+            </span>
           </TableCell>
         </TableRow>
       </TableBody>

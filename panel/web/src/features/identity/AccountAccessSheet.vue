@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useMutation, useQuery } from '@tanstack/vue-query'
-import { KeyRound, MonitorSmartphone } from '@lucide/vue'
+import { KeyRound, LogOut, MonitorSmartphone } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import type { AccountView, SessionView, TokenView } from '@/api/generated'
@@ -9,8 +9,10 @@ import {
   accountSessionsOptions,
   accountTokensOptions,
   endAccountSessionMutation,
+  endAccountSessionsMutation,
   revokeAccountTokenMutation,
 } from '@/api/generated/@tanstack/vue-query.gen'
+import { Button } from '@/components/ui/button'
 import {
   Sheet,
   SheetContent,
@@ -36,6 +38,20 @@ const tokens = useQuery(
 )
 const endSession = useMutation(endAccountSessionMutation())
 const revokeToken = useMutation(revokeAccountTokenMutation())
+const endAll = useMutation(endAccountSessionsMutation())
+
+function endEverySession() {
+  endAll.mutate(
+    { path: { id: props.account.id } },
+    {
+      onSuccess: (result) => {
+        toast.success(t('account.endedOthers', { count: result.ended }))
+        void sessions.refetch()
+      },
+      onError: (error) => notifyFailure(error, t('common.changeFailed')),
+    },
+  )
+}
 
 function end(session: SessionView) {
   endSession.mutate(
@@ -73,10 +89,22 @@ function revoke(token: TokenView) {
       </SheetHeader>
       <div class="flex flex-col gap-6 px-4 pb-6">
         <section class="flex flex-col gap-3">
-          <h3 class="flex items-center gap-2 text-sm font-medium">
-            <MonitorSmartphone class="size-4" aria-hidden="true" />
-            {{ t('account.sessions') }}
-          </h3>
+          <div class="flex items-center justify-between gap-2">
+            <h3 class="flex items-center gap-2 text-sm font-medium">
+              <MonitorSmartphone class="size-4" aria-hidden="true" />
+              {{ t('account.sessions') }}
+            </h3>
+            <Button
+              v-if="canManage && sessions.data.value?.length"
+              size="sm"
+              variant="outline"
+              :disabled="endAll.isPending.value"
+              @click="endEverySession"
+            >
+              <LogOut data-icon="inline-start" aria-hidden="true" />
+              {{ t('accounts.endAll') }}
+            </Button>
+          </div>
           <Skeleton v-if="sessions.isPending.value" class="h-20 w-full" />
           <SessionTable
             v-else-if="sessions.data.value?.length"
