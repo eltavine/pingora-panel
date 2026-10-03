@@ -1,0 +1,122 @@
+syntax = "proto3";
+
+package pingora.panel.observability.v1;
+
+import "common/v1/common.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// Reads what the gateway served from the metrics Prometheus keeps
+// (ADR 0022). Values are computed by PromQL, so counts are doubles; a
+// count over a window is an estimate that Prometheus extrapolates from
+// its samples.
+service Traffic {
+  rpc Summary(SummaryRequest) returns (SummaryResponse);
+  rpc Series(SeriesRequest) returns (SeriesResponse);
+}
+
+// Which requests to read.
+message Scope {
+  // Only the requests of this site; every site when empty.
+  string site = 1;
+  // Only the requests of this route; requires `site`.
+  string route = 2;
+}
+
+message SummaryRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  Scope scope = 2;
+  // How far back to look; the service bounds it.
+  google.protobuf.Duration window = 3;
+}
+
+// Requests by the class of their status code.
+message StatusClasses {
+  // 1xx.
+  double informational = 1;
+  // 2xx.
+  double success = 2;
+  // 3xx.
+  double redirection = 3;
+  // 4xx.
+  double client_error = 4;
+  // 5xx.
+  double server_error = 5;
+}
+
+// Latency quantiles in seconds, absent when no request was measured.
+message Latency {
+  optional double p50 = 1;
+  optional double p90 = 2;
+  optional double p95 = 3;
+  optional double p99 = 4;
+}
+
+// Requests the gateway sent to one upstream.
+message UpstreamTraffic {
+  string upstream = 1;
+  double requests = 2;
+  // The share of attempts that failed, from 0 to 1.
+  double error_ratio = 3;
+  Latency latency = 4;
+}
+
+// Requests one route served.
+message RouteTraffic {
+  string site = 1;
+  string route = 2;
+  double requests = 3;
+}
+
+message Summary {
+  google.protobuf.Timestamp observed_at = 1;
+  google.protobuf.Duration window = 2;
+  double requests = 3;
+  double requests_per_second = 4;
+  StatusClasses statuses = 5;
+  Latency latency = 6;
+  // Request body bytes received.
+  double bytes_received = 7;
+  // Response body bytes sent.
+  double bytes_sent = 8;
+  double open_connections = 9;
+  double tls_handshakes = 10;
+  // Busiest first.
+  repeated UpstreamTraffic upstreams = 11;
+  // Busiest first, at most 20.
+  repeated RouteTraffic routes = 12;
+  // The revision of the gateway's active configuration.
+  optional uint64 revision = 13;
+  // When that configuration was activated.
+  google.protobuf.Timestamp activated_at = 14;
+}
+
+message SummaryResponse {
+  Summary summary = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message SeriesRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  Scope scope = 2;
+  // How far back to look; the service bounds it.
+  google.protobuf.Duration window = 3;
+  // The distance between points; the service bounds the number of points.
+  google.protobuf.Duration step = 4;
+}
+
+// The traffic at one moment, averaged over one step.
+message Point {
+  google.protobuf.Timestamp at = 1;
+  double requests_per_second = 2;
+  // Requests answered with a 5xx status per second.
+  double server_errors_per_second = 3;
+  // Seconds; absent when no request was measured.
+  optional double p95 = 4;
+}
+
+message SeriesResponse {
+  // Oldest first.
+  repeated Point points = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}

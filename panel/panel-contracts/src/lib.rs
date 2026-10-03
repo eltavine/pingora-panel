@@ -37,6 +37,12 @@ pub mod pingora {
             }
         }
 
+        pub mod observability {
+            pub mod v1 {
+                tonic::include_proto!("pingora.panel.observability.v1");
+            }
+        }
+
         pub mod platform {
             pub mod v1 {
                 tonic::include_proto!("pingora.panel.platform.v1");
@@ -45,7 +51,7 @@ pub mod pingora {
     }
 }
 
-pub use pingora::panel::{audit, automation, common, config, gateway, platform};
+pub use pingora::panel::{audit, automation, common, config, gateway, observability, platform};
 
 /// The CloudEvents Protobuf format, generated from the vendored official schema.
 pub mod cloudevents {
@@ -90,6 +96,12 @@ pub const GATEWAY_V1: ProtocolRevisions = ProtocolRevisions {
     package: "pingora.panel.gateway.v1",
     min: 1,
     max: 2,
+};
+
+pub const OBSERVABILITY_V1: ProtocolRevisions = ProtocolRevisions {
+    package: "pingora.panel.observability.v1",
+    min: 1,
+    max: 1,
 };
 
 pub const PLATFORM_V1: ProtocolRevisions = ProtocolRevisions {
@@ -240,6 +252,10 @@ mod tests {
             ),
             (CONFIG_V1, config::v1::publication_server::SERVICE_NAME),
             (GATEWAY_V1, gateway::v1::gateway_engine_server::SERVICE_NAME),
+            (
+                OBSERVABILITY_V1,
+                observability::v1::traffic_server::SERVICE_NAME,
+            ),
             (PLATFORM_V1, platform::v1::service_info_server::SERVICE_NAME),
         ] {
             assert_eq!(service.rsplit_once('.').unwrap().0, revisions.package);
