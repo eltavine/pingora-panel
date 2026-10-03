@@ -43,15 +43,19 @@ Protobuf bytes and JSON document. The official `io.cloudevents.v1` schema is
 vendored unchanged apart from `buf format`.
 
 Event data is defined in proto3 under `proto/events`, one message per event
-type, and `panel-event-contracts` generates the Rust types with `prost` and
-their JSON with `pbjson`. Data travels as JSON in the proto3 JSON mapping
-with the definition's field names and every field written, so consumers read
-plain JSON, and the message's type URL is the event's `dataschema`. Buf's
-`FILE` breaking rules, which include JSON field names, guard the definitions
-like every other contract. Producers build events from the generated types
-through `EventData`, which names the event type, so a domain type never
-becomes an event's shape by accident, and a store's adapters share one
-construction of each event.
+type, and every event carries such a message. `panel-event-contracts`
+generates the Rust types with `prost` and their JSON with `pbjson`. Data
+travels as JSON in the proto3 JSON mapping with the definition's field
+names, so consumers read plain JSON: every field is written except an unset
+`optional` one, and 64-bit integers are strings as the mapping prescribes,
+so counts that never need 64 bits are 32-bit. The message's type URL is the
+event's `dataschema`. Buf's `FILE` breaking rules, which include JSON field
+names, guard the definitions like every other contract. Producers build
+events from the generated types through `EventData`, which names the event
+type and the version of its data, so a domain type never becomes an event's
+shape by accident, and a store's adapters share one construction of each
+event. Ports in neutral crates describe what happened in domain terms, and
+the adapter that records it chooses the message.
 
 ## Alternatives
 

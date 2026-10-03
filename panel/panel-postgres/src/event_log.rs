@@ -8,9 +8,8 @@ use chrono::Utc;
 use panel_errors::Result;
 use panel_events::{
     Actor, AggregateId, AggregateRef, AggregateType, EventData, EventDraft, EventEnvelope,
-    EventOrigin, EventPayload, EventType, EventVersion, Principal, RequestScope, ServiceName,
+    EventOrigin, Principal, RequestScope, ServiceName,
 };
-use serde::Serialize;
 use sqlx::PgPool;
 
 /// Builds the events of one producer and appends them to its outbox.
@@ -82,63 +81,6 @@ impl EventLog {
     ) {
         let event = self.event_by(aggregate, scope, principal, data);
         self.append_alone(E::TYPE, event).await;
-    }
-
-    /// An event whose data has no definition yet.
-    pub fn event_named<T: Serialize>(
-        &self,
-        event_type: &str,
-        aggregate: (&str, &str),
-        scope: &RequestScope,
-        actor: &str,
-        data: &T,
-    ) -> Result<EventEnvelope> {
-        self.event_named_by(event_type, aggregate, scope, &Self::user(actor), data)
-    }
-
-    /// An event whose data has no definition yet, caused by `principal`.
-    pub fn event_named_by<T: Serialize>(
-        &self,
-        event_type: &str,
-        aggregate: (&str, &str),
-        scope: &RequestScope,
-        principal: &Principal,
-        data: &T,
-    ) -> Result<EventEnvelope> {
-        let draft = EventDraft::new(
-            EventType::new(event_type)?,
-            EventVersion::V1,
-            aggregate_ref(aggregate)?,
-            EventPayload::json(data)?,
-        );
-        Ok(self.envelope(draft, scope, principal))
-    }
-
-    /// Records an event whose data has no definition yet on its own.
-    pub async fn record_named<T: Serialize>(
-        &self,
-        event_type: &str,
-        aggregate: (&str, &str),
-        scope: &RequestScope,
-        actor: &str,
-        data: &T,
-    ) {
-        self.record_named_by(event_type, aggregate, scope, &Self::user(actor), data)
-            .await;
-    }
-
-    /// Records an event whose data has no definition yet on its own, caused
-    /// by `principal`.
-    pub async fn record_named_by<T: Serialize>(
-        &self,
-        event_type: &str,
-        aggregate: (&str, &str),
-        scope: &RequestScope,
-        principal: &Principal,
-        data: &T,
-    ) {
-        let event = self.event_named_by(event_type, aggregate, scope, principal, data);
-        self.append_alone(event_type, event).await;
     }
 
     fn envelope(

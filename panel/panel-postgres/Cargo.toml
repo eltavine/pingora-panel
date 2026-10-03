@@ -23,7 +23,6 @@ panel-events.workspace = true
 panel-health.workspace = true
 panel-outbox.workspace = true
 pbkdf2.workspace = true
-serde.workspace = true
 sha2.workspace = true
 sqlx.workspace = true
 stringprep.workspace = true
