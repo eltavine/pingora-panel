@@ -12,6 +12,8 @@ use panel_domain::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub mod template;
+
 pub const IR_SCHEMA_VERSION: &str = "pingora.panel.ir/v1alpha1";
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -385,6 +387,7 @@ pub enum RouteAction {
         policy_id: String,
     },
     Redirect {
+        /// A [template](template), evaluated per request.
         location: String,
         status: u16,
         /// Appends the request path and query to `location`.
@@ -393,6 +396,7 @@ pub enum RouteAction {
     },
     Respond {
         status: u16,
+        /// A [template](template), evaluated per request.
         body: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         content_type: Option<String>,
