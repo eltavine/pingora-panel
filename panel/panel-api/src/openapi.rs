@@ -37,6 +37,7 @@ mod tests;
         crate::audit::get_audit_event,
         crate::audit::verify_audit_events,
         crate::language::ast,
+        crate::language::explain,
         crate::language::ir,
         crate::language::import_nginx, crate::language::plan, crate::language::dry_run,
         crate::language::list_revisions, crate::language::get_revision, crate::language::diff_revision,

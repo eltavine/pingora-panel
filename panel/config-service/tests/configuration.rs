@@ -449,6 +449,43 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
         .await
         .unwrap_err();
     assert_eq!(missing.code.as_str(), ErrorCode::NOT_FOUND);
+
+    let explained = client
+        .read(
+            scope(),
+            read(
+                "config.explain",
+                "config",
+                json!({"files": {"main.conf": SHOP}, "file": "main.conf", "line": 15, "column": 9}),
+            ),
+        )
+        .await
+        .unwrap();
+    let explained = json(&explained.content);
+    assert_eq!(explained["block"], "server");
+    assert_eq!(explained["name"], "shop");
+    let listen = explained["settings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|setting| setting["name"] == "listen")
+        .unwrap();
+    assert_eq!(listen["value"], "http");
+    assert_eq!(listen["source"], "default");
+    assert!(listen["rule"].as_str().unwrap().contains("every listener"));
+    let nowhere = client
+        .read(
+            scope(),
+            read(
+                "config.explain",
+                "config",
+                json!({"files": {"main.conf": SHOP}, "file": "main.conf", "line": 1}),
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(nowhere.code.as_str(), ErrorCode::NOT_FOUND);
+
     let ir = client
         .read(scope(), read("config.ir", "config", json!({})))
         .await

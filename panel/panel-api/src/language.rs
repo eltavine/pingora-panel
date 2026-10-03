@@ -16,7 +16,7 @@ use axum::{
     Json,
 };
 use panel_application::{ApplyOutcome, ApplyRequest as Apply, GatewayUseCases};
-use panel_config_dsl::{plan::Changes, schema::DirectiveSpec, SyntaxTree};
+use panel_config_dsl::{plan::Changes, schema::DirectiveSpec, Explanation, SyntaxTree};
 use panel_config_model::{Revision, RevisionDetail, RevisionList};
 use panel_errors::PanelError;
 use serde::{Deserialize, Serialize};
@@ -63,6 +63,18 @@ pub struct SyntaxRequest {
     pub files: BTreeMap<String, String>,
     #[serde(default)]
     pub file: Option<String>,
+}
+
+/// Files and a position in one of them.
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct ExplainRequest {
+    pub files: BTreeMap<String, String>,
+    pub file: String,
+    /// 1-based.
+    pub line: usize,
+    /// 1-based, in characters; the first by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column: Option<usize>,
 }
 
 /// NGINX configuration files and the one to start from.
@@ -228,6 +240,27 @@ pub(crate) async fn ast<U: GatewayUseCases>(
         &state,
         &headers,
         "config.ast",
+        "config".into(),
+        Some(&request),
+    )
+    .await
+}
+
+/// What applies in the server, route, listener, upstream or TLS profile
+/// written at a position, and where each value comes from: the block, a
+/// block around it, a listener serving it, or a default, with the rule.
+#[utoipa::path(post, path = "/api/v1/config/explain", request_body = ExplainRequest, params(QueryHeaders),
+    responses((status = 200, body = Explanation)), tag = "configuration")]
+pub(crate) async fn explain<U: GatewayUseCases>(
+    State(state): State<ApiState<U>>,
+    headers: HeaderMap,
+    payload: Result<Json<ExplainRequest>, JsonRejection>,
+) -> Result<Response, ApiError> {
+    let Json(request) = payload.map_err(ApiError::from_json)?;
+    read(
+        &state,
+        &headers,
+        "config.explain",
         "config".into(),
         Some(&request),
     )

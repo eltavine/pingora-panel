@@ -9,8 +9,8 @@ use panel_application::{
     ActivatedDeployment, CommandContext, ConfigDocument, ContentHash, GatewayUseCases,
 };
 use panel_config_dsl::{
-    format_files, import_nginx, plan::changes, schema::DIRECTIVES, syntax_tree, Sources, ENTRY,
-    LANGUAGE_VERSION,
+    explain, format_files, import_nginx, plan::changes, schema::DIRECTIVES, syntax_tree, Sources,
+    ENTRY, LANGUAGE_VERSION,
 };
 use panel_config_model::{compile, ConfigModel, Revision, RevisionDetail, RevisionList};
 use panel_contracts::config::v1::{self as wire, configuration_server::Configuration};
@@ -67,6 +67,20 @@ struct SyntaxBody {
     files: BTreeMap<String, String>,
     #[serde(default)]
     file: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExplainBody {
+    files: BTreeMap<String, String>,
+    file: String,
+    line: usize,
+    #[serde(default = "first_column")]
+    column: usize,
+}
+
+fn first_column() -> usize {
+    1
 }
 
 #[derive(Default, Deserialize)]
@@ -285,6 +299,21 @@ impl ConfigurationService {
                 let tree = syntax_tree(&language::sources(body.files)?, &file)
                     .ok_or_else(|| PanelError::not_found(format!("there is no file {file:?}")))?;
                 json_output(&tree, String::new())
+            }
+            ("config.explain", "config") => {
+                let body: ExplainBody = decode(parameters)?;
+                let sources = language::sources(body.files)?;
+                let lowered = language::read(&sources, Some(&draft.model), Utc::now());
+                let explanation =
+                    explain(&sources, &lowered, &body.file, body.line, body.column).ok_or_else(
+                        || {
+                            PanelError::not_found(format!(
+                                "no server, route, listener, upstream or TLS profile is written at {}:{}.{}",
+                                body.file, body.line, body.column
+                            ))
+                        },
+                    )?;
+                json_output(&explanation, String::new())
             }
             ("config.import.nginx", "config") => {
                 let body: NginxBody = decode(parameters)?;

@@ -2789,6 +2789,337 @@
         }
       }
     },
+    "/api/v1/config/explain": {
+      "parameters": [
+        {
+          "name": "x-request-id",
+          "in": "header",
+          "description": "Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1
+          }
+        },
+        {
+          "name": "traceparent",
+          "in": "header",
+          "description": "W3C Trace Context parent of the caller's trace. Invalid values are ignored.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 55
+          }
+        },
+        {
+          "name": "tracestate",
+          "in": "header",
+          "description": "W3C Trace Context vendor state, propagated with a valid traceparent.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      ],
+      "post": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "What applies in the server, route, listener, upstream or TLS profile\nwritten at a position, and where each value comes from: the block, a\nblock around it, a listener serving it, or a default, with the rule.",
+        "operationId": "explain",
+        "parameters": [
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExplainRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Explanation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/config/format": {
       "parameters": [
         {
@@ -27599,6 +27930,13 @@
               }
             ]
           },
+          "inheritance": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the value comes from when the directive is not written here."
+          },
           "max_args": {
             "type": [
               "integer",
@@ -27904,6 +28242,78 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          }
+        }
+      },
+      "ExplainRequest": {
+        "type": "object",
+        "description": "Files and a position in one of them.",
+        "required": [
+          "files",
+          "file",
+          "line"
+        ],
+        "properties": {
+          "column": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "1-based, in characters; the first by default.",
+            "minimum": 0
+          },
+          "file": {
+            "type": "string"
+          },
+          "files": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "line": {
+            "type": "integer",
+            "description": "1-based.",
+            "minimum": 0
+          }
+        }
+      },
+      "Explanation": {
+        "type": "object",
+        "description": "The values that apply in one block.",
+        "required": [
+          "block",
+          "resource",
+          "source_span",
+          "settings"
+        ],
+        "properties": {
+          "block": {
+            "$ref": "#/components/schemas/Context"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The block's name, such as the server's."
+          },
+          "resource": {
+            "type": "string",
+            "description": "Its resource path, such as `sites/<id>/routes/<id>`."
+          },
+          "settings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Setting"
+            }
+          },
+          "source_span": {
+            "type": "string",
+            "description": "Where the block is written."
           }
         }
       },
@@ -28908,6 +29318,65 @@
             }
           }
         }
+      },
+      "Setting": {
+        "type": "object",
+        "description": "One value that applies in a block.",
+        "required": [
+          "name",
+          "value",
+          "source"
+        ],
+        "properties": {
+          "from": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The block it is taken over from, such as `server shop`."
+          },
+          "name": {
+            "type": "string",
+            "description": "The directive, `sni` for what a node sends, or `$name` for a constant."
+          },
+          "rule": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the value comes from when the block does not write it."
+          },
+          "scope": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What in the block the value is for: a host or a node."
+          },
+          "source": {
+            "$ref": "#/components/schemas/SettingSource"
+          },
+          "source_span": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where it is written, as `file:line.column-line.column`."
+          },
+          "value": {
+            "type": "string",
+            "description": "The value as it is written; empty when there is none."
+          }
+        }
+      },
+      "SettingSource": {
+        "type": "string",
+        "description": "Where a value comes from.",
+        "enum": [
+          "here",
+          "inherited",
+          "default"
+        ]
       },
       "Severity": {
         "type": "string",

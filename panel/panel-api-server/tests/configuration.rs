@@ -411,6 +411,30 @@ async fn sites_are_edited_validated_and_applied_through_the_api() {
         )
         .await;
     assert_eq!(tree["directives"][0]["span"], "main.conf:1.1-19");
+    let explained_text = "language_version 1;\nhttp {\n    listener edge {\n        address 127.0.0.1:8081;\n    }\n    server s {\n        server_name s.example;\n        respond 204;\n    }\n}\n";
+    let (explained, _) = api
+        .json(
+            api.client
+                .post(format!("{}/api/v1/config/explain", api.base))
+                .json(&json!({"files": {"main.conf": explained_text}, "file": "main.conf", "line": 8})),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(explained["block"], "server");
+    assert!(explained["settings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|setting| setting["name"] == "listen"
+            && setting["value"] == "edge"
+            && setting["source"] == "default"));
+    api.json(
+        api.client
+            .post(format!("{}/api/v1/config/explain", api.base))
+            .json(&json!({"files": {"main.conf": explained_text}, "file": "main.conf", "line": 1})),
+        StatusCode::NOT_FOUND,
+    )
+    .await;
     let (imported, _) = api
         .json(
             api.client

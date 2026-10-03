@@ -137,6 +137,7 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         .route("/api/v1/config/format", post(language::format::<U>))
         .route("/api/v1/config/schema", get(language::schema::<U>))
         .route("/api/v1/config/ast", post(language::ast::<U>))
+        .route("/api/v1/config/explain", post(language::explain::<U>))
         .route("/api/v1/config/ir", get(language::ir::<U>))
         .route(
             "/api/v1/config/import/nginx",
