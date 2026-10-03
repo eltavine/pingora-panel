@@ -21,8 +21,9 @@ pub use memory::MemoryJobStore;
 pub use model::{
     Job, JobError, JobId, JobKind, JobOrigin, JobSpec, JobState, Progress, ScheduleName,
 };
+pub use panel_schedule::Recurrence;
 pub use policy::RetryPolicy;
-pub use recurrence::{JobTemplate, MaintenanceWindow, Recurrence, Schedule};
+pub use recurrence::{JobTemplate, MaintenanceWindow, Schedule};
 pub use store::{
     CancelOutcome, ClaimRequest, Enqueued, Finish, JobStore, Lease, Renewal, ScheduleStore,
 };

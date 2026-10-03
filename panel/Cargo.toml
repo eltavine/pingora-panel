@@ -10,6 +10,7 @@ members = [
     "panel-event-codec",
     "panel-health",
     "panel-jobs",
+    "panel-schedule",
     "panel-domain",
     "panel-config-domain",
     "panel-config-state-codec",
@@ -151,6 +152,7 @@ panel-gateway-runtime = { version = "=0.2.0", path = "panel-gateway-runtime" }
 panel-ir = { version = "=0.1.0", path = "panel-ir" }
 panel-jetstream = { version = "=0.1.0", path = "panel-jetstream" }
 panel-jobs = { version = "=0.1.0", path = "panel-jobs" }
+panel-schedule = { version = "=0.1.0", path = "panel-schedule" }
 pingora-core = { version = "=0.9.0", path = "../pingora-core", default-features = false }
 pingora-http = { version = "=0.9.0", path = "../pingora-http", default-features = false }
 pingora-load-balancing = { version = "=0.9.0", path = "../pingora-load-balancing", default-features = false }

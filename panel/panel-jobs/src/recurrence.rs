@@ -1,101 +1,24 @@
 use crate::{JobKind, JobOrigin, JobSpec, ScheduleName};
 use chrono::{DateTime, Utc};
 use panel_context::{IdempotencyKey, RequestId};
-use panel_errors::{PanelError, Result};
-use rrule::{RRuleSet, Tz};
-use std::{fmt, str::FromStr, time::Duration};
+use panel_errors::Result;
+use panel_schedule::{Recurrence, Window};
+use std::time::Duration;
 
-/// An RFC 5545 recurrence: a `DTSTART` in UTC or with a `TZID`, and
-/// `RRULE` lines, such as
-/// `DTSTART;TZID=Asia/Shanghai:20260101T030000\nRRULE:FREQ=DAILY`.
-///
-/// Rules with a time zone keep their wall-clock time across offset changes.
-#[derive(Clone)]
-pub struct Recurrence {
-    text: String,
-    set: RRuleSet,
-}
-
-impl Recurrence {
-    pub fn parse(text: impl Into<String>) -> Result<Self> {
-        let text = text.into();
-        let set = RRuleSet::from_str(&text).map_err(|error| {
-            PanelError::invalid_argument(format!("invalid RFC 5545 recurrence: {error}"))
-        })?;
-        if set.get_rrule().is_empty() {
-            return Err(PanelError::invalid_argument(
-                "a recurrence needs at least one RRULE",
-            ));
-        }
-        Ok(Self { text, set })
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.text
-    }
-
-    /// The first occurrence strictly after `after`.
-    pub fn next_after(&self, after: DateTime<Utc>) -> Option<DateTime<Utc>> {
-        self.set
-            .clone()
-            .after(after.with_timezone(&Tz::UTC))
-            .all(2)
-            .dates
-            .into_iter()
-            .map(|date| date.with_timezone(&Utc))
-            .find(|date| *date > after)
-    }
-
-    /// The latest occurrence in `(from, to]`.
-    fn latest_in(&self, from: DateTime<Utc>, to: DateTime<Utc>) -> Option<DateTime<Utc>> {
-        self.set
-            .clone()
-            .after(from.with_timezone(&Tz::UTC))
-            .before(to.with_timezone(&Tz::UTC))
-            .all(u16::MAX)
-            .dates
-            .into_iter()
-            .map(|date| date.with_timezone(&Utc))
-            .rfind(|date| *date > from)
-    }
-}
-
-impl fmt::Debug for Recurrence {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Recurrence").field(&self.text).finish()
-    }
-}
-
-impl PartialEq for Recurrence {
-    fn eq(&self, other: &Self) -> bool {
-        self.text == other.text
-    }
-}
-
-impl Eq for Recurrence {}
-
-/// Recurring periods during which jobs that require the window may start,
-/// each beginning at an occurrence and lasting `duration`.
+/// Recurring periods during which jobs that require the window may start.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MaintenanceWindow {
     name: ScheduleName,
-    recurrence: Recurrence,
-    duration: Duration,
+    window: Window,
 }
 
 impl MaintenanceWindow {
-    pub const MAX_DURATION: Duration = Duration::from_secs(7 * 24 * 3600);
+    pub const MAX_DURATION: Duration = Window::MAX_DURATION;
 
     pub fn new(name: ScheduleName, recurrence: Recurrence, duration: Duration) -> Result<Self> {
-        if duration.is_zero() || duration > Self::MAX_DURATION {
-            return Err(PanelError::invalid_argument(
-                "maintenance windows last more than zero and at most seven days",
-            ));
-        }
         Ok(Self {
             name,
-            recurrence,
-            duration,
+            window: Window::new(recurrence, duration)?,
         })
     }
 
@@ -104,24 +27,21 @@ impl MaintenanceWindow {
     }
 
     pub fn recurrence(&self) -> &Recurrence {
-        &self.recurrence
+        self.window.recurrence()
     }
 
     pub fn duration(&self) -> Duration {
-        self.duration
+        self.window.duration()
     }
 
     /// Whether an occurrence started at or before `at` and has not ended.
     pub fn is_open(&self, at: DateTime<Utc>) -> bool {
-        let Ok(duration) = chrono::Duration::from_std(self.duration) else {
-            return false;
-        };
-        self.recurrence.latest_in(at - duration, at).is_some()
+        self.window.contains(at)
     }
 
     /// When the window next opens after `after`.
     pub fn next_opening(&self, after: DateTime<Utc>) -> Option<DateTime<Utc>> {
-        self.recurrence.next_after(after)
+        self.window.next_opening(after)
     }
 }
 
@@ -176,42 +96,6 @@ mod tests {
         DateTime::parse_from_rfc3339(value)
             .unwrap()
             .with_timezone(&Utc)
-    }
-
-    #[test]
-    fn occurrences_follow_rfc_5545_with_wall_clock_time_zones() {
-        let daily = Recurrence::parse("DTSTART:20260101T030000Z\nRRULE:FREQ=DAILY").unwrap();
-        assert_eq!(
-            daily.next_after(at("2026-03-01T02:00:00Z")),
-            Some(at("2026-03-01T03:00:00Z"))
-        );
-        assert_eq!(
-            daily.next_after(at("2026-03-01T03:00:00Z")),
-            Some(at("2026-03-02T03:00:00Z")),
-            "the next occurrence is strictly later"
-        );
-
-        // 02:30 New York time is 07:30 UTC in winter and 06:30 UTC in summer.
-        let local = Recurrence::parse(
-            "DTSTART;TZID=America/New_York:20260101T023000\nRRULE:FREQ=WEEKLY;BYDAY=SU",
-        )
-        .unwrap();
-        assert_eq!(
-            local.next_after(at("2026-01-03T00:00:00Z")),
-            Some(at("2026-01-04T07:30:00Z"))
-        );
-        assert_eq!(
-            local.next_after(at("2026-06-01T00:00:00Z")),
-            Some(at("2026-06-07T06:30:00Z"))
-        );
-
-        let finite =
-            Recurrence::parse("DTSTART:20260101T000000Z\nRRULE:FREQ=DAILY;COUNT=2").unwrap();
-        assert_eq!(finite.next_after(at("2026-01-05T00:00:00Z")), None);
-
-        for invalid in ["", "RRULE:FREQ=DAILY;BOGUS=1", "DTSTART:20260101T000000Z"] {
-            assert!(Recurrence::parse(invalid).is_err(), "{invalid:?}");
-        }
     }
 
     #[test]

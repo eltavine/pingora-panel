@@ -397,7 +397,8 @@
       "catalog": true,
       "allowed_workspace_dependencies": [
         "panel-context",
-        "panel-errors"
+        "panel-errors",
+        "panel-schedule"
       ]
     },
     "panel-outbox": {
@@ -475,6 +476,12 @@
         "panel-ir"
       ]
     },
+    "panel-schedule": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-errors"
+      ]
+    },
     "panel-secrets": {
       "catalog": true,
       "allowed_workspace_dependencies": [
@@ -547,7 +554,8 @@
       "panel-ir",
       "panel-jobs",
       "panel-outbox",
-      "panel-platform"
+      "panel-platform",
+      "panel-schedule"
     ],
     "forbidden_neutral_dependencies": [
       "async-nats",

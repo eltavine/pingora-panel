@@ -1,0 +1,22 @@
+[package]
+name = "panel-schedule"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# JSON Schema for the HTTP contract.
+openapi = ["dep:utoipa"]
+
+[dependencies]
+chrono.workspace = true
+panel-errors.workspace = true
+rrule.workspace = true
+serde.workspace = true
+utoipa = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true

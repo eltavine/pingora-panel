@@ -3025,7 +3025,7 @@ dependencies = [
  "getrandom 0.4.3",
  "panel-context",
  "panel-errors",
- "rrule",
+ "panel-schedule",
  "serde",
  "serde_json",
  "tokio",
@@ -3125,6 +3125,18 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "panel-schedule"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "panel-errors",
+ "rrule",
+ "serde",
+ "serde_json",
+ "utoipa",
 ]
 
 [[package]]
