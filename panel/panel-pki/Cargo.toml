@@ -16,6 +16,7 @@ pem.workspace = true
 rcgen.workspace = true
 rustls-pki-types.workspace = true
 time.workspace = true
+x509-parser.workspace = true
 
 [dev-dependencies]
 rustls-webpki.workspace = true

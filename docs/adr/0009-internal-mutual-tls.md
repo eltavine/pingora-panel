@@ -27,10 +27,10 @@ restarts or manual steps.
   `spiffe://<trust domain>/service/<service>`. They are valid for 24 hours by
   default and backdated five minutes for clock skew.
 - **Credential files.** A service's private key and certificate are written
-  together with one atomic rename, readable by the owner only, after an
-  RFC 7468 explanatory header that records their validity. A rotating
-  service therefore never reads a key and certificate from different
-  issuances.
+  together as PEM with one atomic rename, readable by the owner only; renewal
+  reads the validity from the certificate itself, so a replaced file is never
+  judged by stale metadata. A rotating service therefore never reads a key
+  and certificate from different issuances.
 - **Rotation.** `panel-bootstrap pki` renews any credentials past two thirds
   of their lifetime, so the default lifetime leaves eight hours to recover a
   failed renewal. Services poll their credential files and swap the TLS

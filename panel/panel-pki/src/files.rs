@@ -1,13 +1,13 @@
 use crate::IssuedCredentials;
 use chrono::{DateTime, Utc};
 use panel_errors::{PanelError, Result};
+use rustls_pki_types::{pem::PemObject, CertificateDer};
 use std::{
     io::Write,
     path::{Path, PathBuf},
 };
 
-/// A service's private key and certificate, preceded by their validity as
-/// RFC 7468 explanatory text.
+/// A service's private key and certificate, as PEM.
 pub const IDENTITY_FILE: &str = "identity.pem";
 /// The certificates a service trusts for its peers.
 pub const TRUST_FILE: &str = "trust.pem";
@@ -61,20 +61,14 @@ impl CredentialFiles {
             ))
         })?;
         write_atomic(&self.trust_path(), trust_pem, false)?;
-        let identity = format!(
-            "Not-Before: {}\nNot-After: {}\nSerial: {}\n{}{}",
-            issued.not_before.to_rfc3339(),
-            issued.not_after.to_rfc3339(),
-            issued.serial,
-            issued.private_key_pem,
-            issued.certificate_pem,
-        );
+        let identity = format!("{}{}", issued.private_key_pem, issued.certificate_pem);
         write_atomic(&self.identity_path(), &identity, true)
     }
 
-    /// The validity recorded with the identity, if one is present.
+    /// The validity of the identity's certificate, if one is present and
+    /// readable.
     pub fn validity(&self) -> Result<Option<Validity>> {
-        let identity = match std::fs::read_to_string(self.identity_path()) {
+        let identity = match std::fs::read(self.identity_path()) {
             Ok(identity) => identity,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => {
@@ -84,20 +78,21 @@ impl CredentialFiles {
                 )))
             }
         };
-        let field = |name: &str| {
-            identity
-                .lines()
-                .take_while(|line| !line.starts_with("-----BEGIN"))
-                .find_map(|line| line.strip_prefix(name))
-                .and_then(|value| DateTime::parse_from_rfc3339(value.trim()).ok())
-                .map(|value| value.with_timezone(&Utc))
+        let Some(Ok(certificate)) = CertificateDer::pem_slice_iter(&identity).next() else {
+            return Ok(None);
         };
-        Ok(field("Not-Before:")
-            .zip(field("Not-After:"))
-            .map(|(not_before, not_after)| Validity {
+        let Ok((_, certificate)) = x509_parser::parse_x509_certificate(&certificate) else {
+            return Ok(None);
+        };
+        let validity = certificate.validity();
+        let time =
+            |time: x509_parser::time::ASN1Time| DateTime::from_timestamp(time.timestamp(), 0);
+        Ok(time(validity.not_before).zip(time(validity.not_after)).map(
+            |(not_before, not_after)| Validity {
                 not_before,
                 not_after,
-            }))
+            },
+        ))
     }
 
     /// Whether the identity is missing, unreadable or due for renewal.
