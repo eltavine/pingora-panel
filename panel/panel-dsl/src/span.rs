@@ -56,6 +56,24 @@ impl LineIndex {
         (line + 1, column + 1)
     }
 
+    /// The offset of a 1-based line and character column; a column past the
+    /// end of its line is its end.
+    pub fn offset(&self, text: &str, line: usize, column: usize) -> Option<usize> {
+        let start = *self.starts.get(line.checked_sub(1)?)?;
+        let end = self
+            .starts
+            .get(line)
+            .map_or(text.len(), |next| next.saturating_sub(1));
+        let line_text = text.get(start..end)?;
+        Some(
+            start
+                + line_text
+                    .char_indices()
+                    .nth(column.checked_sub(1)?)
+                    .map_or(line_text.len(), |(offset, _)| offset),
+        )
+    }
+
     /// The span as the GNU Coding Standards format it: `file:line.column`,
     /// `file:line.column-column` within a line, or
     /// `file:line.column-line.column`, with the end column inclusive.
@@ -95,6 +113,21 @@ mod tests {
         let f = text.find('f').unwrap();
         assert_eq!(index.position(text, f), (2, 5));
         assert_eq!(index.position(text, text.len()), (3, 1));
+    }
+
+    #[test]
+    fn offsets_invert_positions() {
+        let text = "ab\ncdé f\n";
+        let index = LineIndex::new(text);
+        for offset in text.char_indices().map(|(offset, _)| offset) {
+            let (line, column) = index.position(text, offset);
+            assert_eq!(index.offset(text, line, column), Some(offset));
+        }
+        assert_eq!(index.offset(text, 1, 40), Some(2));
+        assert_eq!(index.offset(text, 3, 1), Some(text.len()));
+        assert_eq!(index.offset(text, 4, 1), None);
+        assert_eq!(index.offset(text, 0, 1), None);
+        assert_eq!(index.offset(text, 1, 0), None);
     }
 
     #[test]
