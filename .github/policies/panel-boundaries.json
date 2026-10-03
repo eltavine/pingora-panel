@@ -416,6 +416,10 @@
         "panel-schedule"
       ]
     },
+    "panel-metrics": {
+      "catalog": true,
+      "allowed_workspace_dependencies": []
+    },
     "panel-outbox": {
       "catalog": true,
       "allowed_workspace_dependencies": [

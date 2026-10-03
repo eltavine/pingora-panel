@@ -10,6 +10,7 @@ members = [
     "panel-event-contracts",
     "panel-event-codec",
     "panel-health",
+    "panel-metrics",
     "panel-jobs",
     "panel-schedule",
     "panel-domain",
@@ -118,6 +119,7 @@ pbjson-types = "=0.9.0"
 pbkdf2 = { version = "=0.13.0", default-features = false, features = ["hmac"] }
 pem = "=4.0.0"
 percent-encoding = "=2.3.2"
+prometheus-client = "=0.25.1"
 prost = "=0.14.4"
 prost-build = "=0.14.4"
 prost-types = "=0.14.4"
@@ -134,6 +136,7 @@ panel-api = { version = "=0.2.0", path = "panel-api" }
 panel-application = { version = "=0.2.0", path = "panel-application" }
 panel-identity = { version = "=0.1.0", path = "panel-identity" }
 identity-postgres = { version = "=0.1.0", path = "identity-postgres" }
+panel-metrics = { version = "=0.1.0", path = "panel-metrics" }
 panel-outbox = { version = "=0.1.0", path = "panel-outbox" }
 panel-persistence-memory = { version = "=0.1.0", path = "panel-persistence-memory" }
 panel-pki = { version = "=0.1.0", path = "panel-pki" }

@@ -56,6 +56,7 @@ panel-bootstrap -> panel-postgres + panel-jetstream + panel-pki
 | `panel-event-contracts` | Event data generated from `proto/events`: one message per event type, written as proto3 JSON | Transports, storage, domain rules |
 | `panel-event-codec` | CloudEvents Protobuf, JSON and binary-mode representations | Brokers, storage, application rules, Pingora |
 | `panel-health` | Health checks, impact-based readiness aggregation, service mode and `application/health+json` documents | Transports, drivers, Pingora |
+| `panel-metrics` | Prometheus metrics in the OpenMetrics text format: HTTP server and client metrics named by the OpenTelemetry semantic conventions, and scrape tokens | Transports, storage, Pingora |
 | `panel-platform` | Service descriptors, protocol revision ranges and negotiation, capability directory and registration ports | Transports, registries, Pingora |
 | `panel-platform-codec` | Protobuf form of service descriptors | Registries, transports, Pingora |
 | `panel-service` | Liveness/readiness endpoints, gRPC health and `ServiceInfo`, peer negotiation, trace metadata, settings, signals and logging shared by service processes | Storage, brokers, application rules, Pingora |
