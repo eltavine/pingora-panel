@@ -400,6 +400,30 @@ The console's Certificates page offers the same, with fingerprints, the
 chain and a host check, and the TLS profile form picks a certificate of the
 inventory.
 
+A TLS profile also decides what its listeners negotiate. `min_protocol` and
+`max_protocol` bound the TLS versions, `ciphers` picks cipher suites by their
+IANA names — at least one for each version allowed — and `alpn` lists the
+application protocols offered. Session resumption, through a session cache
+and TLS 1.3 tickets, stays on unless `session_resumption off;`, and
+`ocsp_stapling` is accepted but has no effect yet. A site's
+`hsts max_age=365d include_subdomains preload;` sends Strict-Transport-Security
+on HTTPS responses only; `preload` requires `include_subdomains` and a
+`max_age` of at least a year, as browsers' preload lists do.
+
+`/api/v1/tls-checks`, `ppanel listener check` and the console's listener page
+connect to a configured TLS listener as a client and report the negotiated
+version, cipher suite and ALPN, which versions it accepts on their own, the
+certificate presented and whether it covers the host, and the
+Strict-Transport-Security header. Checking needs `gateway.read`.
+
+```sh
+ppanel tls-profile set edge --certificate-id example.com --min-protocol TLSv1.2 \
+  --cipher TLS13_AES_128_GCM_SHA256 --cipher TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+ppanel site create --name shop --domain shop.example --proxy <upstream-id> \
+  --tls-profile edge --hsts-max-age 31536000 --hsts-include-subdomains
+ppanel listener check https --host shop.example
+```
+
 ## Activation invariant
 
 All fallible work required to build and durably publish the activation occurs
