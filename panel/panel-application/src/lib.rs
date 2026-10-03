@@ -12,6 +12,7 @@ mod context;
 mod gateway;
 mod idempotency;
 mod persistence;
+mod runtime;
 
 pub use configuration::{
     ApplyOutcome, ConfigurationChange, ConfigurationOutput, ConfigurationPort, ConfigurationRead,
@@ -29,4 +30,8 @@ pub use panel_domain::ContentHash;
 pub use persistence::{
     AuditEventStore, AuditFact, IdempotencyClaim, IdempotencyLookup, IdempotencyRecord,
     IdempotencyRepository, RevisionRepository,
+};
+pub use runtime::{
+    DataPlaneListener, DataPlaneState, EndpointHealth, GatewayRuntimePort, UpstreamHealth,
+    UpstreamHealthReport,
 };
