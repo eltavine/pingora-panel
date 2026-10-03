@@ -18,6 +18,7 @@ mod proxy;
 mod responses;
 mod routing;
 mod secrets;
+mod security;
 mod static_files;
 mod template;
 mod upstream;

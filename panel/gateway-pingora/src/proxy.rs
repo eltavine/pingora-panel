@@ -10,6 +10,7 @@ use crate::{
     hsts::{StrictTransport, StrictTransportBuilder},
     path, responses,
     routing::{RouteTarget, SiteRoutes},
+    security::{Admission, Candidate, ClientResolution, Refusal},
     static_files,
     template::Facts,
     upstream::{EndpointLease, UpstreamPool},
@@ -19,12 +20,12 @@ use http::header;
 use pingora_core::{
     modules::http::{compression::ResponseCompressionBuilder, HttpModules},
     upstreams::peer::HttpPeer,
-    Error, ErrorType,
+    Error, ErrorSource, ErrorType,
 };
 use pingora_http::{RequestHeader, ResponseHeader};
-use pingora_proxy::{ProxyHttp, Session};
+use pingora_proxy::{FailToProxy, ProxyHttp, Session};
 use std::{
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::{
         atomic::{AtomicUsize, Ordering::Relaxed},
         Arc,
@@ -33,6 +34,38 @@ use std::{
 };
 
 const REDIRECT_STATUS: u16 = 308;
+/// Forwarding headers dropped from peers that are not trusted proxies, so
+/// upstreams are not told a forged client.
+const UNTRUSTED_FORWARDING: [&str; 3] = ["x-forwarded-for", "x-real-ip", "forwarded"];
+static X_REAL_IP: header::HeaderName = header::HeaderName::from_static("x-real-ip");
+
+/// Answers a request a security policy refused.
+async fn refuse(session: &mut Session, refusal: Refusal) -> pingora_core::Result<()> {
+    let mut headers: Vec<(header::HeaderName, &str)> = refusal
+        .headers
+        .iter()
+        .map(|(name, value)| (name.clone(), value.as_str()))
+        .collect();
+    match &refusal.custom {
+        Some((body, content_type)) => {
+            headers.push((
+                header::CONTENT_TYPE,
+                content_type
+                    .as_deref()
+                    .unwrap_or("text/plain; charset=utf-8"),
+            ));
+            headers.push((header::CACHE_CONTROL, "no-store"));
+            responses::send(
+                session,
+                refusal.status,
+                &headers,
+                bytes::Bytes::from(body.clone()),
+            )
+            .await
+        }
+        None => responses::plain(session, refusal.status, &refusal.message, &headers).await,
+    }
+}
 
 /// What a listener contributes to each request it accepts.
 pub(crate) struct ListenerContext {
@@ -40,6 +73,7 @@ pub(crate) struct ListenerContext {
     pub tls: bool,
     pub http1: bool,
     pub challenges: Option<Arc<ChallengeDirectory>>,
+    pub client: ClientResolution,
 }
 
 pub(crate) struct PanelProxy {
@@ -81,6 +115,13 @@ pub(crate) struct RequestContext {
     lease: Option<EndpointLease>,
     sent_at: Option<Instant>,
     failure_recorded: bool,
+    /// The client, after trusted proxies.
+    client: Option<IpAddr>,
+    /// Whether the peer is a trusted proxy whose forwarding headers count.
+    trusted_peer: bool,
+    /// What security policies left the request to keep to.
+    admission: Admission,
+    body_seen: u64,
 }
 
 impl RequestContext {
@@ -112,6 +153,10 @@ impl ProxyHttp for PanelProxy {
             lease: None,
             sent_at: None,
             failure_recorded: false,
+            client: None,
+            trusted_peer: false,
+            admission: Admission::default(),
+            body_seen: 0,
         }
     }
 
@@ -134,6 +179,11 @@ impl ProxyHttp for PanelProxy {
         if !self.listener.http1 && !session.is_http2() {
             responses::plain(session, 505, "this listener requires HTTP/2", &[]).await?;
             return Ok(true);
+        }
+        if let Some(peer) = client_address(session).map(|address| address.ip()) {
+            let (client, trusted) = self.listener.client.resolve(peer, session.req_header());
+            ctx.client = Some(client);
+            ctx.trusted_peer = trusted;
         }
         if let Some(key_authorization) = self.challenge_answer(session).await {
             responses::send(
@@ -216,7 +266,37 @@ impl ProxyHttp for PanelProxy {
             return Ok(true);
         };
         ctx.route = Some(route_index);
-        match &site.route(route_index).target {
+        let route = site.route(route_index);
+        let gates: Vec<usize> = site.security.into_iter().chain(route.security).collect();
+        if !gates.is_empty() {
+            let mut admission = Admission::default();
+            let candidate = Candidate {
+                client: ctx.client.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+                header: session.req_header(),
+                path: &path,
+                host: host_name,
+                route: route.id.as_str(),
+            };
+            let mut refused = None;
+            for index in gates {
+                if let Err(refusal) = snapshot.policies[index]
+                    .check(&candidate, &mut admission)
+                    .await
+                {
+                    refused = Some(refusal);
+                    break;
+                }
+            }
+            if let Some(refusal) = refused {
+                refuse(session, refusal).await?;
+                return Ok(true);
+            }
+            if let Some(timeout) = admission.body_timeout {
+                session.set_read_timeout(Some(timeout));
+            }
+            ctx.admission = admission;
+        }
+        match &route.target {
             RouteTarget::Proxy(pool) => {
                 ctx.pool = Some(*pool);
                 Ok(false)
@@ -281,9 +361,12 @@ impl ProxyHttp for PanelProxy {
         let pool = &snapshot.pools[ctx
             .pool
             .ok_or_else(|| Error::explain(ErrorType::InternalError, "request has no pool"))?];
-        let key = pool
-            .hash
-            .extract(session.req_header(), client_address(session));
+        let key = pool.hash.extract(
+            session.req_header(),
+            ctx.client
+                .map(|client| SocketAddr::new(client, 0))
+                .or_else(|| client_address(session)),
+        );
         let endpoint = pool.select(&key, &ctx.tried).ok_or_else(|| {
             Error::explain(
                 ErrorType::HTTPStatus(503),
@@ -307,6 +390,14 @@ impl ProxyHttp for PanelProxy {
         let Some((pool, _)) = ctx.upstream() else {
             return Ok(());
         };
+        if !ctx.trusted_peer {
+            for name in UNTRUSTED_FORWARDING {
+                upstream_request.remove_header(name);
+            }
+        }
+        if ctx.admission.strip_authorization {
+            upstream_request.remove_header(&header::AUTHORIZATION);
+        }
         forwarding::apply(
             upstream_request,
             &Forwarding {
@@ -315,7 +406,30 @@ impl ProxyHttp for PanelProxy {
                 host_override: pool.host_header.as_deref(),
                 close: !pool.keepalive,
             },
-        )
+        )?;
+        if let Some(client) = ctx.client {
+            upstream_request.insert_header(X_REAL_IP.clone(), client.to_string())?;
+        }
+        Ok(())
+    }
+
+    async fn request_body_filter(
+        &self,
+        _session: &mut Session,
+        body: &mut Option<bytes::Bytes>,
+        _end_of_stream: bool,
+        ctx: &mut RequestContext,
+    ) -> pingora_core::Result<()> {
+        if let (Some(limit), Some(chunk)) = (ctx.admission.max_body_bytes, body.as_ref()) {
+            ctx.body_seen += u64::try_from(chunk.len()).unwrap_or(u64::MAX);
+            if ctx.body_seen > limit {
+                return Error::e_explain(
+                    ErrorType::HTTPStatus(413),
+                    "the request body is larger than its security policy allows",
+                );
+            }
+        }
+        Ok(())
     }
 
     async fn upstream_response_filter(
@@ -374,6 +488,36 @@ impl ProxyHttp for PanelProxy {
             error.retry.decide_reuse(client_reused);
         }
         error
+    }
+
+    /// Pingora's answers to failed requests, except that a request body
+    /// that stops arriving gets 408 (RFC 9110 §15.5.9) instead of 400.
+    async fn fail_to_proxy(
+        &self,
+        session: &mut Session,
+        error: &Error,
+        _ctx: &mut RequestContext,
+    ) -> FailToProxy {
+        let code = match (error.etype(), error.esource()) {
+            (ErrorType::HTTPStatus(code), _) => *code,
+            (ErrorType::ReadTimedout, ErrorSource::Downstream) => 408,
+            (_, ErrorSource::Upstream) => 502,
+            (
+                ErrorType::WriteError | ErrorType::ReadError | ErrorType::ConnectionClosed,
+                ErrorSource::Downstream,
+            ) => 0,
+            (_, ErrorSource::Downstream) => 400,
+            _ => 500,
+        };
+        if code > 0 {
+            if let Err(failure) = session.respond_error(code).await {
+                tracing::debug!(%failure, "the error response did not reach the client");
+            }
+        }
+        FailToProxy {
+            error_code: code,
+            can_reuse_downstream: false,
+        }
     }
 
     async fn logging(

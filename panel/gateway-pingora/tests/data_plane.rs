@@ -13,9 +13,10 @@ use panel_domain::{
 };
 use panel_engine::DataPlaneAdapter;
 use panel_ir::{
-    template::TEMPLATE_CAPABILITY, CapabilityRequirement, DomainSpec, ListenerRef, RouteAction,
-    RouteMatcher, RouteSpec, RuntimeSnapshot, SiteSpec, StaticContentPolicy,
-    StrictTransportSecurity, TlsProfile, UpstreamEndpoint, UpstreamPoolSpec, WwwRedirect,
+    template::TEMPLATE_CAPABILITY, BasicAuth, CapabilityRequirement, DomainSpec, ListenerRef,
+    RateLimit, RateLimitKey, RefererRule, RouteAction, RouteMatcher, RouteSpec, RuntimeSnapshot,
+    SecurityPolicy, SiteSpec, StaticContentPolicy, StrictTransportSecurity, TlsProfile,
+    UpstreamEndpoint, UpstreamPoolSpec, WwwRedirect,
 };
 use std::{
     collections::{BTreeSet, HashMap},
@@ -61,6 +62,21 @@ async fn echo_upstream() -> SocketAddr {
                 );
                 let _ = stream.write_all(response.as_bytes()).await;
                 let _ = stream.write_all(&head).await;
+            });
+        }
+    });
+    address
+}
+
+/// An upstream that reads whatever it is sent and never answers.
+async fn silent_upstream() -> SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let mut buffer = [0; 1024];
+                while stream.read(&mut buffer).await.unwrap_or(0) > 0 {}
             });
         }
     });
@@ -538,6 +554,230 @@ async fn waiting_http01_challenges_are_answered_before_the_site() {
     assert!(passed
         .body
         .starts_with(b"GET /.well-known/acme-challenge/other "));
+    gateway.stop().await;
+}
+
+/// Sends a raw request and reads the answer.
+async fn send(address: SocketAddr, request: &str) -> Response {
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    exchange(&mut stream, request).await
+}
+
+fn forwarded(target: &str, client: &str, extra: &str) -> String {
+    format!(
+        "GET {target} HTTP/1.1\r\nhost: shop.test\r\nx-forwarded-for: {client}\r\n{extra}connection: close\r\n\r\n"
+    )
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn security_policies_refuse_limit_and_authenticate() {
+    let upstream = echo_upstream().await;
+    let secrets = tempfile::tempdir().unwrap();
+    let hash = bcrypt::hash("s3cret", 4).unwrap();
+    std::fs::write(
+        secrets.path().join("staff.htpasswd"),
+        format!("alice:{hash}\n"),
+    )
+    .unwrap();
+    let trusting = free_address();
+    let untrusting = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    let mut behind_proxy = ListenerRef::new("proxied", trusting.to_string());
+    behind_proxy.trusted_proxies = ["127.0.0.1/32".to_owned()].into_iter().collect();
+    snapshot.listeners.push(behind_proxy);
+    snapshot
+        .listeners
+        .push(ListenerRef::new("direct", untrusting.to_string()));
+    snapshot.upstream_pools.push(pool("app", &[upstream]));
+    let mut site = site(&["shop.test"]);
+    site.security_policy_id = Some("site-rules".into());
+    snapshot.sites.push(site);
+    snapshot
+        .routes
+        .push(route("all", 1, prefix("/"), proxy("app")));
+    let mut staff = route("staff", 1, prefix("/staff"), proxy("app"));
+    staff.security_policy_id = Some("staff".into());
+    snapshot.routes.push(staff);
+    snapshot
+        .upstream_pools
+        .push(pool("silent", &[silent_upstream().await]));
+    snapshot
+        .routes
+        .push(route("upload", 1, prefix("/upload"), proxy("silent")));
+    snapshot.security_policies.push(SecurityPolicy {
+        id: "site-rules".into(),
+        denied_cidrs: ["203.0.113.0/24".to_owned()].into_iter().collect(),
+        allowed_methods: ["GET".to_owned(), "POST".to_owned()].into_iter().collect(),
+        denied_path_prefixes: vec!["/internal".into()],
+        denied_user_agents: vec!["badbot".into()],
+        max_header_bytes: Some(2048),
+        max_body_bytes: Some(16),
+        body_timeout_ms: Some(300),
+        rate_limits: vec![RateLimit {
+            key: RateLimitKey::ClientAddress,
+            requests: 3,
+            per_seconds: 60,
+            burst: 2,
+        }],
+        ..SecurityPolicy::default()
+    });
+    snapshot.security_policies.push(SecurityPolicy {
+        id: "staff".into(),
+        basic_auth: Some(BasicAuth {
+            realm: "Staff".into(),
+            users_secret_id: "staff.htpasswd".into(),
+        }),
+        referer: Some(RefererRule {
+            allowed_hosts: vec!["shop.test".into()],
+            allow_empty: true,
+        }),
+        ..SecurityPolicy::default()
+    });
+    let gateway = Gateway::start(
+        AdapterOptions::default().with_secrets(Arc::new(DirectorySecrets::new(secrets.path()))),
+        snapshot,
+    )
+    .await;
+    wait_for(trusting).await;
+    wait_for(untrusting).await;
+
+    assert_eq!(
+        send(trusting, &forwarded("/", "203.0.113.5", ""))
+            .await
+            .status,
+        403
+    );
+    let ok = send(trusting, &forwarded("/", "198.51.100.1", "")).await;
+    assert_eq!(ok.status, 200);
+    let echoed = String::from_utf8_lossy(&ok.body).to_lowercase();
+    assert!(echoed.contains("x-real-ip: 198.51.100.1"), "{echoed}");
+    assert!(
+        echoed.contains("x-forwarded-for: 198.51.100.1, 127.0.0.1"),
+        "{echoed}"
+    );
+
+    let deleted = send(
+        trusting,
+        "DELETE / HTTP/1.1\r\nhost: shop.test\r\nx-forwarded-for: 198.51.100.2\r\nconnection: close\r\n\r\n",
+    )
+    .await;
+    assert_eq!(deleted.status, 405);
+    assert_eq!(deleted.headers["allow"], "GET, HEAD, POST");
+    assert_eq!(
+        send(trusting, &forwarded("/internal/x", "198.51.100.3", ""))
+            .await
+            .status,
+        403
+    );
+    assert_eq!(
+        send(
+            trusting,
+            &forwarded("/", "198.51.100.4", "user-agent: BadBot/1.0\r\n")
+        )
+        .await
+        .status,
+        403
+    );
+    let large = format!("x-padding: {}\r\n", "a".repeat(3000));
+    assert_eq!(
+        send(trusting, &forwarded("/", "198.51.100.5", &large))
+            .await
+            .status,
+        431
+    );
+    let posted = send(
+        trusting,
+        "POST / HTTP/1.1\r\nhost: shop.test\r\nx-forwarded-for: 198.51.100.6\r\ncontent-length: 32\r\nconnection: close\r\n\r\n01234567890123456789012345678901",
+    )
+    .await;
+    assert_eq!(posted.status, 413);
+    let streamed = send(
+        trusting,
+        "POST / HTTP/1.1\r\nhost: shop.test\r\nx-forwarded-for: 198.51.100.13\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n20\r\n01234567890123456789012345678901\r\n0\r\n\r\n",
+    )
+    .await;
+    assert_eq!(
+        streamed.status, 413,
+        "bodies without a length are counted as they arrive"
+    );
+    let stalled = send(
+        trusting,
+        "POST /upload HTTP/1.1\r\nhost: shop.test\r\nx-forwarded-for: 198.51.100.14\r\ncontent-length: 10\r\n\r\n012",
+    )
+    .await;
+    assert_eq!(stalled.status, 408, "a body that stops arriving times out");
+
+    for _ in 0..3 {
+        assert_eq!(
+            send(trusting, &forwarded("/", "198.51.100.7", ""))
+                .await
+                .status,
+            200
+        );
+    }
+    let limited = send(trusting, &forwarded("/", "198.51.100.7", "")).await;
+    assert_eq!(limited.status, 429);
+    let retry: u64 = limited.headers["retry-after"].parse().unwrap();
+    assert!((1..=20).contains(&retry), "{retry}");
+    assert_eq!(
+        send(trusting, &forwarded("/", "198.51.100.8", ""))
+            .await
+            .status,
+        200
+    );
+
+    let challenge = send(trusting, &forwarded("/staff", "198.51.100.9", "")).await;
+    assert_eq!(challenge.status, 401);
+    assert_eq!(
+        challenge.headers["www-authenticate"],
+        "Basic realm=\"Staff\", charset=\"UTF-8\""
+    );
+    let basic = |user: &str, password: &str| {
+        format!(
+            "authorization: Basic {}\r\n",
+            base64::engine::general_purpose::STANDARD.encode(format!("{user}:{password}"))
+        )
+    };
+    assert_eq!(
+        send(
+            trusting,
+            &forwarded("/staff", "198.51.100.10", &basic("alice", "wrong"))
+        )
+        .await
+        .status,
+        401
+    );
+    let authorized = send(
+        trusting,
+        &forwarded("/staff", "198.51.100.11", &basic("alice", "s3cret")),
+    )
+    .await;
+    assert_eq!(authorized.status, 200);
+    assert!(
+        !String::from_utf8_lossy(&authorized.body)
+            .to_lowercase()
+            .contains("authorization:"),
+        "credentials stay with the gateway"
+    );
+    let hotlinked = format!(
+        "{}referer: https://evil.example/page\r\n",
+        basic("alice", "s3cret")
+    );
+    assert_eq!(
+        send(trusting, &forwarded("/staff", "198.51.100.12", &hotlinked))
+            .await
+            .status,
+        403
+    );
+
+    let spoofed = send(untrusting, &forwarded("/", "203.0.113.5", "")).await;
+    assert_eq!(
+        spoofed.status, 200,
+        "untrusted peers are judged by their own address"
+    );
+    let echoed = String::from_utf8_lossy(&spoofed.body).to_lowercase();
+    assert!(!echoed.contains("203.0.113.5"), "{echoed}");
+    assert!(echoed.contains("x-real-ip: 127.0.0.1"), "{echoed}");
     gateway.stop().await;
 }
 

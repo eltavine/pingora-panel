@@ -4,6 +4,7 @@ use crate::{
     listeners::{self, ListenerPlan, SocketKey},
     routing::{RoutingTable, Targets},
     secrets::{NoSecrets, SecretSource},
+    security::{LimitState, SecurityGate},
     static_files::StaticContent,
     upstream::{EndpointStates, PoolHealth, UpstreamPool},
     ADAPTER_VERSION, PINGORA_PACKAGE_VERSION,
@@ -36,6 +37,8 @@ const CAPABILITIES: &[&str] = &[
     "listener.http2",
     "listener.https",
     "listener.tls-settings",
+    "listener.trusted-proxies",
+    "request.security",
     "response.hsts",
     "route.exact-path",
     "route.glob",
@@ -106,6 +109,8 @@ pub struct PingoraGatewayAdapter {
     options: AdapterOptions,
     endpoints: Arc<EndpointStates>,
     bound: Mutex<BTreeSet<SocketKey>>,
+    /// Rate limit and concurrency state that outlives snapshots.
+    limits: Arc<LimitState>,
 }
 
 /// Opaque immutable artifact built entirely before activation.
@@ -117,6 +122,8 @@ pub struct PreparedPingoraSnapshot {
     pub(crate) routing: RoutingTable,
     pub(crate) pools: Vec<UpstreamPool>,
     pub(crate) statics: Vec<StaticContent>,
+    /// Compiled security policies, by the indexes sites and routes hold.
+    pub(crate) policies: Vec<SecurityGate>,
     /// Replaced when the certificate files change, without a new snapshot.
     pub(crate) certificates: ArcSwap<CertificateIndex>,
     pub(crate) listeners: Vec<ListenerPlan>,
@@ -140,6 +147,7 @@ impl PingoraGatewayAdapter {
             options,
             endpoints: Arc::default(),
             bound: Mutex::default(),
+            limits: Arc::default(),
         }
     }
 
@@ -261,9 +269,6 @@ impl PingoraGatewayAdapter {
         if !snapshot.cache_policies.is_empty() {
             unsupported.push("cache_policies");
         }
-        if !snapshot.security_policies.is_empty() {
-            unsupported.push("security_policies");
-        }
         if !snapshot.lua_policies.is_empty() {
             unsupported.push("lua_policies");
         }
@@ -278,7 +283,6 @@ impl PingoraGatewayAdapter {
             if route.retry_policy.is_some()
                 || route.header_policy_id.is_some()
                 || route.cache_policy_id.is_some()
-                || route.security_policy_id.is_some()
                 || route.lua_policy_id.is_some()
             {
                 unsupported.push("route policy");
@@ -317,14 +321,20 @@ impl PingoraGatewayAdapter {
         let secrets = Arc::clone(&self.options.secrets);
         let static_root = self.options.static_root.clone();
         let blocking = snapshot.clone();
-        let (certificates, statics) = tokio::task::spawn_blocking(move || {
+        let limits = Arc::clone(&self.limits);
+        let (certificates, statics, policies) = tokio::task::spawn_blocking(move || {
             let certificates = CertificateIndex::build(&blocking, secrets.as_ref())?;
             let statics = blocking
                 .static_content
                 .iter()
                 .map(|policy| StaticContent::compile(policy, static_root.as_deref()))
                 .collect::<Result<Vec<_>>>()?;
-            Ok::<_, PanelError>((certificates, statics))
+            let policies = blocking
+                .security_policies
+                .iter()
+                .map(|policy| SecurityGate::compile(policy, secrets.as_ref(), &limits))
+                .collect::<Result<Vec<_>>>()?;
+            Ok::<_, PanelError>((certificates, statics, policies))
         })
         .await
         .map_err(|error| {
@@ -348,11 +358,18 @@ impl PingoraGatewayAdapter {
             .enumerate()
             .map(|(index, policy)| (policy.id.as_str(), index))
             .collect();
+        let policy_indexes: HashMap<&str, usize> = snapshot
+            .security_policies
+            .iter()
+            .enumerate()
+            .map(|(index, policy)| (policy.id.as_str(), index))
+            .collect();
         let routing = RoutingTable::compile(
             &snapshot,
             &Targets {
                 pools: &pool_indexes,
                 statics: &static_indexes,
+                policies: &policy_indexes,
             },
         )?;
         Ok(PreparedPingoraSnapshot {
@@ -360,6 +377,7 @@ impl PingoraGatewayAdapter {
             routing,
             pools,
             statics,
+            policies,
             certificates: ArcSwap::from_pointee(certificates),
             listeners,
         })

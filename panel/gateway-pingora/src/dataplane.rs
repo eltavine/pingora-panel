@@ -382,6 +382,7 @@ impl Generation {
                     tls: plan.tls,
                     http1: plan.http1,
                     challenges: challenges.clone(),
+                    client: plan.client.clone(),
                 },
                 Arc::clone(&active),
                 Arc::clone(&in_flight),

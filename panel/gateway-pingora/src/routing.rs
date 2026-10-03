@@ -40,6 +40,8 @@ pub(crate) struct SiteRoutes {
     pub primary: Option<String>,
     /// `Strict-Transport-Security` for its HTTPS responses.
     pub hsts: Option<HeaderValue>,
+    /// The security policy every request for the site passes.
+    pub security: Option<usize>,
     www: HashMap<String, String>,
     routes: Vec<CompiledRoute>,
 }
@@ -50,6 +52,8 @@ pub(crate) struct CompiledRoute {
     host: Option<NormalizedHost>,
     path: PathMatcher,
     pub target: RouteTarget,
+    /// The security policy the route's requests pass after the site's.
+    pub security: Option<usize>,
 }
 
 enum PathMatcher {
@@ -80,6 +84,20 @@ pub(crate) enum RouteTarget {
 pub(crate) struct Targets<'a> {
     pub pools: &'a HashMap<&'a str, usize>,
     pub statics: &'a HashMap<&'a str, usize>,
+    pub policies: &'a HashMap<&'a str, usize>,
+}
+
+fn policy(
+    targets: &Targets<'_>,
+    owner: &dyn std::fmt::Display,
+    id: Option<&String>,
+) -> Result<Option<usize>> {
+    id.map(|id| {
+        targets.policies.get(id.as_str()).copied().ok_or_else(|| {
+            PanelError::validation_failed(format!("{owner} names an unknown security policy {id}"))
+        })
+    })
+    .transpose()
 }
 
 impl RoutingTable {
@@ -165,6 +183,11 @@ impl RoutingTable {
                     })?,
                 www,
                 routes: Vec::new(),
+                security: policy(
+                    targets,
+                    &format!("site {}", site.id),
+                    site.security_policy_id.as_ref(),
+                )?,
             });
         }
         for listener in &snapshot.listeners {
@@ -201,6 +224,11 @@ impl RoutingTable {
                     host,
                     path,
                     target,
+                    security: policy(
+                        targets,
+                        &format!("route {}", route.id),
+                        route.security_policy_id.as_ref(),
+                    )?,
                 },
             ));
         }
@@ -424,11 +452,13 @@ mod tests {
     fn compile(snapshot: &RuntimeSnapshot) -> Result<RoutingTable> {
         let pools = HashMap::from([("pool", 0)]);
         let statics = HashMap::from([("static", 0)]);
+        let policies = HashMap::new();
         RoutingTable::compile(
             snapshot,
             &Targets {
                 pools: &pools,
                 statics: &statics,
+                policies: &policies,
             },
         )
     }

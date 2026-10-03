@@ -1,6 +1,9 @@
 //! Listening sockets and the fixed listener set of a data plane generation.
 
-use crate::certificates::TlsVersion;
+use crate::{
+    certificates::TlsVersion,
+    security::{ClientResolution, Networks},
+};
 use panel_errors::{PanelError, Result};
 use panel_ir::{ListenerRef, TlsProfile};
 use rustls::{
@@ -40,6 +43,8 @@ pub(crate) struct ListenerPlan {
     pub alpn_http2: bool,
     /// Handshake settings from the listener's own TLS profile.
     pub handshake: Handshake,
+    /// How the client's address is learned from trusted proxies.
+    pub client: ClientResolution,
 }
 
 /// What a TLS listener accepts in every handshake.
@@ -118,6 +123,15 @@ impl ListenerPlan {
                 .map(Handshake::from_profile)
                 .transpose()?
                 .unwrap_or_default(),
+            client: ClientResolution {
+                trusted: Networks::parse(&listener.trusted_proxies).map_err(|error| {
+                    PanelError::validation_failed(format!(
+                        "listener {} trusts {}",
+                        listener.id, error.message
+                    ))
+                })?,
+                header: listener.real_ip_header,
+            },
         })
     }
 
