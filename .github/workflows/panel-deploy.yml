@@ -54,7 +54,7 @@ jobs:
             fi
             sleep 5
           done
-          for port in 9180 9181 9182 9183; do
+          for port in 9180 9181 9182 9183 9184; do
             curl --fail --silent --show-error "http://127.0.0.1:${port}/readyz" >/dev/null
           done
 
@@ -63,7 +63,7 @@ jobs:
           curl --fail --silent --show-error http://127.0.0.1:8080/api/v1/gateway/status
           services=$(curl --fail --silent --show-error http://127.0.0.1:8080/api/v1/platform/services \
             | python3 -c "import json, sys; print(len(json.load(sys.stdin)['services']))")
-          test "$services" -eq 4
+          test "$services" -eq 5
           curl --fail --silent --show-error --output /dev/null http://127.0.0.1:8080/
 
       - name: Serve a site through the gateway with the command line
@@ -78,11 +78,27 @@ jobs:
           for attempt in $(seq 1 30); do
             if curl --fail --silent --show-error --header 'Host: console.test' \
               http://127.0.0.1:18080/api/v1/gateway/status; then
-              exit 0
+              break
             fi
             sleep 1
           done
-          exit 1
+          curl --fail --silent --show-error --header 'Host: console.test' \
+            http://127.0.0.1:18080/api/v1/gateway/status
+
+      - name: Audit the changes
+        run: |
+          ppanel() { docker compose exec -T panel-api ppanel --actor ci "$@"; }
+          for attempt in $(seq 1 30); do
+            if ppanel -o json audit list --type config.draft.applied --actor-id ci \
+              | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"; then
+              break
+            fi
+            sleep 1
+          done
+          ppanel -o json audit list --type config.draft.applied --actor-id ci \
+            | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"
+          ppanel audit list --actor-id ci
+          ppanel audit verify
 
       - name: Show service logs
         if: failure()
