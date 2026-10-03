@@ -9,10 +9,10 @@ use serde_json::{json, Map, Value};
 
 #[derive(Subcommand)]
 pub(crate) enum UpstreamCommand {
+    /// Lists upstreams with their nodes and the sites using them.
     List,
-    Show {
-        id: String,
-    },
+    /// Shows an upstream with its nodes and policies.
+    Show { id: String },
     /// Creates an upstream from flags, or from a JSON document with --file.
     Create {
         #[arg(long, conflicts_with = "name")]
@@ -45,9 +45,8 @@ pub(crate) enum UpstreamCommand {
         #[arg(long)]
         file: String,
     },
-    Delete {
-        id: String,
-    },
+    /// Removes an upstream no site or route uses.
+    Delete { id: String },
     /// Nodes of an upstream.
     #[command(subcommand)]
     Node(NodeCommand),
@@ -57,19 +56,14 @@ pub(crate) enum UpstreamCommand {
         id: Option<String>,
     },
     /// Takes a node out of rotation until restored, across restarts.
-    Drain {
-        id: String,
-        node: String,
-    },
+    Drain { id: String, node: String },
     /// Returns a drained node to rotation.
-    Undrain {
-        id: String,
-        node: String,
-    },
+    Undrain { id: String, node: String },
 }
 
 #[derive(Subcommand)]
 pub(crate) enum NodeCommand {
+    /// Adds a node to the upstream.
     Add {
         id: String,
         /// HOST:PORT with optional `,weight=N`, `,backup` and `,tls`.
@@ -79,6 +73,7 @@ pub(crate) enum NodeCommand {
         #[arg(long)]
         note: Option<String>,
     },
+    /// Changes a node's address, weight, role or state.
     Update {
         id: String,
         node: String,
@@ -95,10 +90,8 @@ pub(crate) enum NodeCommand {
         #[arg(long)]
         note: Option<String>,
     },
-    Remove {
-        id: String,
-        node: String,
-    },
+    /// Removes a node from the upstream.
+    Remove { id: String, node: String },
 }
 
 const COLUMNS: &[Column] = &[

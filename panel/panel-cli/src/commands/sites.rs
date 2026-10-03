@@ -12,7 +12,7 @@ pub(crate) enum SiteCommand {
     /// Lists sites, newest page first when sorted descending.
     List {
         /// Matches names, domains, notes, groups and tags.
-        #[arg(long)]
+        #[arg(long = "search", short = 's', value_name = "TEXT")]
         q: Option<String>,
         #[arg(long, value_enum)]
         status: Option<Status>,
@@ -38,9 +38,8 @@ pub(crate) enum SiteCommand {
     },
     /// Counts sites by status, type and HTTPS.
     Summary,
-    Show {
-        id: String,
-    },
+    /// Shows a site with its domains, routes and state.
+    Show { id: String },
     /// Creates a site from flags, or from a JSON document with --file.
     Create {
         #[arg(long, conflicts_with = "name")]
@@ -73,27 +72,22 @@ pub(crate) enum SiteCommand {
         #[arg(long)]
         file: String,
     },
-    Enable {
-        id: String,
-    },
-    Disable {
-        id: String,
-    },
-    Favorite {
-        id: String,
-    },
-    Unfavorite {
-        id: String,
-    },
+    /// Serves the site once the configuration is applied.
+    Enable { id: String },
+    /// Stops serving the site once the configuration is applied.
+    Disable { id: String },
+    /// Marks the site as a favorite.
+    Favorite { id: String },
+    /// Removes the site from the favorites.
+    Unfavorite { id: String },
     /// Moves a site to the recycle bin, or removes it for good.
     Delete {
         id: String,
         #[arg(long)]
         permanent: bool,
     },
-    Restore {
-        id: String,
-    },
+    /// Brings a site back from the recycle bin.
+    Restore { id: String },
     /// Copies a site's settings and routes; domains stay with the original.
     Clone {
         id: String,

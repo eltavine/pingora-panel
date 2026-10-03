@@ -54,10 +54,8 @@ pub(crate) enum DomainCommand {
         #[arg(long)]
         no_tls_profile: bool,
     },
-    Remove {
-        site: String,
-        host: String,
-    },
+    /// Unbinds a domain from its site.
+    Remove { site: String, host: String },
 }
 
 const COLUMNS: &[Column] = &[

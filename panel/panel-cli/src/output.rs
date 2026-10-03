@@ -22,6 +22,7 @@ pub struct Output {
 pub fn text(value: &Value) -> String {
     match value {
         Value::Null => "-".into(),
+        Value::Array(items) if items.is_empty() => "-".into(),
         Value::String(text) => text.clone(),
         Value::Array(items) => items.iter().map(text).collect::<Vec<_>>().join(","),
         other => other.to_string(),

@@ -8,10 +8,10 @@ use serde_json::{json, Value};
 
 #[derive(Subcommand)]
 pub(crate) enum ListenerCommand {
+    /// Lists listeners with their protocols and default sites.
     List,
-    Show {
-        id: String,
-    },
+    /// Shows a listener.
+    Show { id: String },
     /// Creates or replaces a listener.
     Set {
         id: String,
@@ -37,17 +37,16 @@ pub(crate) enum ListenerCommand {
         #[arg(long)]
         default_site: Option<String>,
     },
-    Delete {
-        id: String,
-    },
+    /// Removes a listener no site uses.
+    Delete { id: String },
 }
 
 #[derive(Subcommand)]
 pub(crate) enum TlsProfileCommand {
+    /// Lists TLS profiles.
     List,
-    Show {
-        id: String,
-    },
+    /// Shows a TLS profile.
+    Show { id: String },
     /// Creates or replaces a profile naming files in the gateway's secret directory.
     Set {
         id: String,
@@ -59,10 +58,13 @@ pub(crate) enum TlsProfileCommand {
         key: String,
         #[arg(long, default_value = "TLSv1.2")]
         min_protocol: String,
+        /// Protocol a listener using this profile offers through ALPN, h2 or
+        /// http/1.1; repeatable. Without it the listener offers all it enables.
+        #[arg(long = "alpn")]
+        alpn: Vec<String>,
     },
-    Delete {
-        id: String,
-    },
+    /// Removes a profile nothing uses.
+    Delete { id: String },
 }
 
 #[derive(Subcommand)]
@@ -116,6 +118,7 @@ const PROFILES: &[Column] = &[
     }),
     ("KEY", |profile| text(&profile["private_key_secret_id"])),
     ("MIN TLS", |profile| text(&profile["min_protocol"])),
+    ("ALPN", |profile| text(&profile["alpn"])),
 ];
 
 /// The current entity tag of a resource, or none when it does not exist yet.
@@ -193,6 +196,7 @@ pub async fn tls_profile(api: &Api, output: &Output, command: TlsProfileCommand)
             certificate,
             key,
             min_protocol,
+            alpn,
         } => {
             let path = format!("/api/v1/tls-profiles/{id}");
             let etag = existing(api, &path).await?;
@@ -201,7 +205,7 @@ pub async fn tls_profile(api: &Api, output: &Output, command: TlsProfileCommand)
                 "certificate_secret_id": certificate,
                 "private_key_secret_id": key,
                 "min_protocol": min_protocol,
-                "alpn": [],
+                "alpn": alpn,
             });
             let profile = api
                 .change(Method::PUT, &path, Some(&body), etag.as_deref())

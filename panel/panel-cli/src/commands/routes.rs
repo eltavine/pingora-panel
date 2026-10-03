@@ -10,12 +10,9 @@ use serde_json::{json, Value};
 #[derive(Subcommand)]
 pub(crate) enum RouteCommand {
     /// Lists a site's routes in evaluation order.
-    List {
-        site: String,
-    },
-    Show {
-        id: String,
-    },
+    List { site: String },
+    /// Shows a route with its match and action.
+    Show { id: String },
     /// Adds a route; lower priorities are evaluated first.
     Add {
         site: String,
@@ -42,15 +39,12 @@ pub(crate) enum RouteCommand {
         #[arg(long)]
         file: String,
     },
-    Enable {
-        id: String,
-    },
-    Disable {
-        id: String,
-    },
-    Delete {
-        id: String,
-    },
+    /// Lets the route match again.
+    Enable { id: String },
+    /// Keeps the route but stops it matching.
+    Disable { id: String },
+    /// Removes the route.
+    Delete { id: String },
     /// Orders all of a site's routes, first to last.
     Order {
         site: String,
