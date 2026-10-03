@@ -273,3 +273,76 @@ test('administrators manage accounts and log out', async ({ page }) => {
   await expect(page).toHaveURL(/\/login$/)
   expect(ended).toBe(true)
 })
+
+test('custom roles are created, edited and deleted', async ({ page }) => {
+  await setUp(page)
+  await signIn(page)
+  const changes: Request[] = []
+  const custom = {
+    id: 'deployer',
+    name: 'Deployer',
+    description: 'Applies configuration.',
+    permissions: ['config.read', 'config.apply'],
+    built_in: false,
+  }
+  await page.route('**/api/v1/roles', (route) => {
+    if (route.request().method() === 'POST') {
+      changes.push(route.request())
+      return route.fulfill({ status: 201, json: { ...custom, id: 'auditor-lite', name: 'Lite' } })
+    }
+    return route.fulfill({ json: [...roles, custom] })
+  })
+  await page.route('**/api/v1/roles/deployer', (route) => {
+    changes.push(route.request())
+    return route.request().method() === 'DELETE'
+      ? route.fulfill({ status: 204 })
+      : route.fulfill({ json: { ...custom, permissions: ['config.read'] } })
+  })
+  await page.route('**/api/v1/permissions', (route) =>
+    route.fulfill({
+      json: [
+        { name: 'config.read', description: 'Read configuration.' },
+        { name: 'config.apply', description: 'Apply configuration.' },
+        { name: 'audit.read', description: 'Read the audit trail.' },
+      ],
+    }),
+  )
+
+  await page.goto('/roles')
+  await expect(page.getByRole('heading', { name: 'Roles' })).toBeVisible()
+  const builtIn = page.getByRole('row', { name: /Administrator/ })
+  await expect(builtIn.getByText('Built in')).toBeVisible()
+  await expect(builtIn.getByRole('button', { name: 'Edit' })).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'New role' }).click()
+  const sheet = page.getByRole('dialog')
+  await sheet.getByLabel('Identifier').fill('auditor-lite')
+  await sheet.getByLabel('Name').fill('Lite')
+  await sheet.getByLabel('audit.read').click()
+  await sheet.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByText('Created the role Lite')).toBeVisible()
+  expect(changes[0]!.postDataJSON()).toEqual({
+    id: 'auditor-lite',
+    name: 'Lite',
+    description: '',
+    permissions: ['audit.read'],
+  })
+  expect(changes[0]!.headers()['x-csrf-token']).toBe(CSRF_TOKEN)
+
+  const row = page.getByRole('row', { name: /Deployer/ })
+  await row.getByRole('button', { name: 'Edit' }).click()
+  await sheet.getByLabel('config.apply').click()
+  await sheet.getByRole('button', { name: 'Save' }).click()
+  await expect(page.getByText('Role updated')).toBeVisible()
+  expect(changes[1]!.method()).toBe('PUT')
+  expect(changes[1]!.postDataJSON()).toEqual({
+    name: 'Deployer',
+    description: 'Applies configuration.',
+    permissions: ['config.read'],
+  })
+
+  await row.getByRole('button', { name: 'Delete' }).click()
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click()
+  await expect(page.getByText('Role deleted')).toBeVisible()
+  expect(changes[2]!.method()).toBe('DELETE')
+})

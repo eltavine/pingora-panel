@@ -1,4 +1,4 @@
-import { Users } from '@lucide/vue'
+import { Shield, Users } from '@lucide/vue'
 import type { FeatureModule } from '@/features/types'
 
 export const identityFeature: FeatureModule = {
@@ -19,6 +19,15 @@ export const identityFeature: FeatureModule = {
       component: () => import('./AccountsView.vue'),
       meta: { title: 'nav.accounts' },
     },
+    {
+      path: 'roles',
+      name: 'roles',
+      component: () => import('./RolesView.vue'),
+      meta: { title: 'nav.roles' },
+    },
   ],
-  navigation: [{ id: 'accounts', title: 'nav.accounts', icon: Users, to: '/accounts' }],
+  navigation: [
+    { id: 'accounts', title: 'nav.accounts', icon: Users, to: '/accounts' },
+    { id: 'roles', title: 'nav.roles', icon: Shield, to: '/roles' },
+  ],
 }
