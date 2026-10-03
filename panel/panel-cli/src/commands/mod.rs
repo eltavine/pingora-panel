@@ -9,6 +9,7 @@ pub mod gateway;
 pub mod identity;
 pub mod revisions;
 pub mod routes;
+pub mod security;
 pub mod sites;
 pub mod upstreams;
 

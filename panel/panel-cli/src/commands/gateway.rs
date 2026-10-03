@@ -36,6 +36,15 @@ pub(crate) enum ListenerCommand {
         /// Site serving hosts no other site claims.
         #[arg(long)]
         default_site: Option<String>,
+        /// Network of proxies whose forwarding headers name the client, such
+        /// as 10.0.0.0/8; repeatable. Other peers' forwarding headers are
+        /// dropped.
+        #[arg(long = "trusted-proxy", value_name = "CIDR")]
+        trusted_proxies: Vec<String>,
+        /// The header trusted proxies name the client in: x-forwarded-for,
+        /// x-real-ip or forwarded.
+        #[arg(long, requires = "trusted_proxies")]
+        real_ip_header: Option<String>,
     },
     /// Removes a listener no site uses.
     Delete { id: String },
@@ -180,7 +189,7 @@ const TLS_CHECK: &[Column] = &[
 ];
 
 /// The current entity tag of a resource, or none when it does not exist yet.
-async fn existing(api: &Api, path: &str) -> Result<Option<String>> {
+pub(crate) async fn existing(api: &Api, path: &str) -> Result<Option<String>> {
     match api.get(path, &[]).await {
         Ok(reply) => Ok(reply.etag),
         Err(CliError::Api { status, .. }) if status.as_u16() == 404 => Ok(None),
@@ -207,10 +216,12 @@ pub async fn listener(api: &Api, output: &Output, command: ListenerCommand) -> R
             reuse_port,
             ipv6_only,
             default_site,
+            trusted_proxies,
+            real_ip_header,
         } => {
             let path = format!("/api/v1/listeners/{id}");
             let etag = existing(api, &path).await?;
-            let body = json!({
+            let mut body = json!({
                 "id": id,
                 "address": address,
                 "tls_profile_id": tls_profile,
@@ -218,7 +229,11 @@ pub async fn listener(api: &Api, output: &Output, command: ListenerCommand) -> R
                 "reuse_port": reuse_port,
                 "ipv6_only": ipv6_only,
                 "default_site_id": default_site,
+                "trusted_proxies": trusted_proxies,
             });
+            if let Some(header) = real_ip_header {
+                body["real_ip_header"] = json!(header.to_ascii_lowercase());
+            }
             let listener = api
                 .change(Method::PUT, &path, Some(&body), etag.as_deref())
                 .await?

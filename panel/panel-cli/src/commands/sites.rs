@@ -41,43 +41,7 @@ pub(crate) enum SiteCommand {
     /// Shows a site with its domains, routes and state.
     Show { id: String },
     /// Creates a site from flags, or from a JSON document with --file.
-    Create {
-        #[arg(long, conflicts_with = "name")]
-        file: Option<String>,
-        #[arg(long, required_unless_present = "file")]
-        name: Option<String>,
-        /// Repeat for each domain; the first is the primary domain.
-        #[arg(long = "domain")]
-        domains: Vec<String>,
-        #[command(flatten)]
-        action: ActionFlags,
-        #[command(flatten)]
-        options: ActionOptions,
-        #[arg(long = "tag")]
-        tags: Vec<String>,
-        #[arg(long)]
-        group: Option<String>,
-        #[arg(long)]
-        note: Option<String>,
-        /// Redirect plain HTTP to the site's HTTPS listener.
-        #[arg(long)]
-        https_redirect: bool,
-        /// Serve the site's domains over HTTPS with this TLS profile.
-        #[arg(long)]
-        tls_profile: Option<String>,
-        /// Send Strict-Transport-Security over HTTPS for this many seconds.
-        #[arg(long, value_name = "SECONDS")]
-        hsts_max_age: Option<u64>,
-        /// Let the HSTS policy cover subdomains too.
-        #[arg(long, requires = "hsts_max_age")]
-        hsts_include_subdomains: bool,
-        /// Consent to browsers' HSTS preload lists.
-        #[arg(long, requires = "hsts_max_age")]
-        hsts_preload: bool,
-        /// Create the site stopped.
-        #[arg(long)]
-        disabled: bool,
-    },
+    Create(Box<CreateSite>),
     /// Replaces a site with a JSON document (the shape `show -o json` prints).
     Update {
         id: String,
@@ -126,6 +90,48 @@ pub(crate) enum SiteCommand {
         #[arg(required = true)]
         ids: Vec<String>,
     },
+}
+
+#[derive(clap::Args)]
+pub(crate) struct CreateSite {
+    #[arg(long, conflicts_with = "name")]
+    file: Option<String>,
+    #[arg(long, required_unless_present = "file")]
+    name: Option<String>,
+    /// Repeat for each domain; the first is the primary domain.
+    #[arg(long = "domain")]
+    domains: Vec<String>,
+    #[command(flatten)]
+    action: ActionFlags,
+    #[command(flatten)]
+    options: ActionOptions,
+    #[arg(long = "tag")]
+    tags: Vec<String>,
+    #[arg(long)]
+    group: Option<String>,
+    #[arg(long)]
+    note: Option<String>,
+    /// Redirect plain HTTP to the site's HTTPS listener.
+    #[arg(long)]
+    https_redirect: bool,
+    /// Serve the site's domains over HTTPS with this TLS profile.
+    #[arg(long)]
+    tls_profile: Option<String>,
+    /// Send Strict-Transport-Security over HTTPS for this many seconds.
+    #[arg(long, value_name = "SECONDS")]
+    hsts_max_age: Option<u64>,
+    /// Let the HSTS policy cover subdomains too.
+    #[arg(long, requires = "hsts_max_age")]
+    hsts_include_subdomains: bool,
+    /// Consent to browsers' HSTS preload lists.
+    #[arg(long, requires = "hsts_max_age")]
+    hsts_preload: bool,
+    /// Requests to the site pass this security policy first.
+    #[arg(long)]
+    security_policy: Option<String>,
+    /// Create the site stopped.
+    #[arg(long)]
+    disabled: bool,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -307,22 +313,24 @@ pub async fn run(api: &Api, output: &Output, command: SiteCommand) -> Result<()>
             let site = api.get(&format!("/api/v1/sites/{id}"), &[]).await?.body;
             output.item(&site, DETAIL);
         }
-        SiteCommand::Create {
-            file,
-            name,
-            domains,
-            action,
-            options,
-            tags,
-            group,
-            note,
-            https_redirect,
-            tls_profile,
-            hsts_max_age,
-            hsts_include_subdomains,
-            hsts_preload,
-            disabled,
-        } => {
+        SiteCommand::Create(create) => {
+            let CreateSite {
+                file,
+                name,
+                domains,
+                action,
+                options,
+                tags,
+                group,
+                note,
+                https_redirect,
+                tls_profile,
+                hsts_max_age,
+                hsts_include_subdomains,
+                hsts_preload,
+                security_policy,
+                disabled,
+            } = *create;
             let body = match file {
                 Some(file) => read_json(&file)?,
                 None => json!({
@@ -340,6 +348,7 @@ pub async fn run(api: &Api, output: &Output, command: SiteCommand) -> Result<()>
                         "include_subdomains": hsts_include_subdomains,
                         "preload": hsts_preload,
                     })),
+                    "security_policy_id": security_policy,
                 }),
             };
             let site = api

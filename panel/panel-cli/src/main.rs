@@ -108,6 +108,9 @@ enum Command {
     /// Certificates served on HTTPS listeners and domains.
     #[command(subcommand, name = "tls-profile")]
     TlsProfile(commands::gateway::TlsProfileCommand),
+    /// Restrictions requests pass before sites and routes act on them.
+    #[command(subcommand, name = "security-policy")]
+    SecurityPolicy(commands::security::SecurityPolicyCommand),
     /// Certificates the panel keeps and delivers to the gateway.
     #[command(subcommand)]
     Certificate(commands::certificates::CertificateCommand),
@@ -194,6 +197,9 @@ async fn main() -> ExitCode {
             Command::Acme(command) => commands::acme::run(&api, &output, command).await,
             Command::TlsProfile(command) => {
                 commands::gateway::tls_profile(&api, &output, command).await
+            }
+            Command::SecurityPolicy(command) => {
+                commands::security::run(&api, &output, command).await
             }
             Command::Config(command) => commands::config::run(&api, &output, command).await,
             Command::Revision(command) => commands::revisions::run(&api, &output, command).await,

@@ -245,6 +245,13 @@ async fn api(
             Json(json!({"username": "ops", "disabled": body["disabled"]})).into_response()
         }
         ("PUT", "/api/v1/tls-profiles/edge") => Json(body.clone()).into_response(),
+        ("PUT", "/api/v1/security-policies/office") => Json(body.clone()).into_response(),
+        ("GET", "/api/v1/security-policies") => Json(json!([
+            {"id": "office", "allowed_cidrs": ["10.0.0.0/8"], "basic_auth": {"realm": "Staff", "users_secret_id": "staff.htpasswd"},
+             "rate_limits": [{"key": {"kind": "client_address"}, "requests": 10, "per_seconds": 1}],
+             "used_by": ["0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"], "etag": "\"p1\""}
+        ]))
+        .into_response(),
         ("POST", "/api/v1/tls-checks") => Json(json!({
             "listener": body["listener"], "address": "127.0.0.1:8443", "host": body["host"],
             "protocol": "TLSv1.3", "cipher_suite": "TLS13_AES_256_GCM_SHA384", "alpn": "h2",
@@ -1177,6 +1184,63 @@ fn tls_profiles_narrow_handshakes() {
     );
     assert_eq!(body["session_resumption"], false);
     assert_eq!(body["ocsp_stapling"], false);
+}
+
+#[test]
+fn security_policies_are_set_from_flags() {
+    let stub = Stub::start();
+    let saved = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "security-policy",
+        "set",
+        "office",
+        "--allow",
+        "10.0.0.0/8",
+        "--method",
+        "GET",
+        "--basic-auth",
+        "staff.htpasswd",
+        "--max-body-size",
+        "10m",
+        "--rate-limit",
+        "300r/m burst=50 key=header:X-Api-Key",
+        "--limited-status",
+        "503",
+    ]);
+    assert!(saved.status.success(), "{}", stderr(&saved));
+    let body = &stub.requests("PUT", "/api/v1/security-policies/office")[0].body;
+    assert_eq!(body["allowed_cidrs"], json!(["10.0.0.0/8"]));
+    assert_eq!(body["allowed_methods"], json!(["GET"]));
+    assert_eq!(
+        body["basic_auth"],
+        json!({"realm": "Restricted", "users_secret_id": "staff.htpasswd"})
+    );
+    assert_eq!(body["max_body_bytes"], 10 << 20);
+    assert_eq!(
+        body["rate_limits"][0],
+        json!({"key": {"kind": "header", "name": "X-Api-Key"}, "requests": 300, "per_seconds": 60, "burst": 50})
+    );
+    assert_eq!(body["limited_response"]["status"], 503);
+    assert!(body["referer"].is_null());
+
+    let listed = stub.ppanel(&["--token", "ppat_admin", "security-policy", "list"]);
+    assert!(listed.status.success(), "{}", stderr(&listed));
+    let table = String::from_utf8_lossy(&listed.stdout);
+    assert!(
+        table.contains("office") && table.contains("networks, password, rates"),
+        "{table}"
+    );
+    let invalid = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "security-policy",
+        "set",
+        "office",
+        "--rate-limit",
+        "10 per second",
+    ]);
+    assert_eq!(invalid.status.code(), Some(2));
 }
 
 #[test]
