@@ -16,6 +16,7 @@ panel-domain.workspace = true
 panel-errors.workspace = true
 panel-health.workspace = true
 panel-ir.workspace = true
+prost-types.workspace = true
 tonic.workspace = true
 tonic-health.workspace = true
 uuid.workspace = true
