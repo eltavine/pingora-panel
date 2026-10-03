@@ -107,10 +107,22 @@ pub fn diff_files(current: &Sources, next: &Sources) -> Vec<FileChange> {
                 (None, Some(new)) => (Change::Added, "", *new),
                 (None, None) => return None,
             };
+            let name = |side: &str, present: bool| {
+                if present {
+                    format!("{side}/{path}")
+                } else {
+                    "/dev/null".to_owned()
+                }
+            };
             Some(FileChange {
                 path: path.to_owned(),
                 change,
-                diff: unified(old, new, &format!("a/{path}"), &format!("b/{path}")),
+                diff: unified(
+                    old,
+                    new,
+                    &name("a", change != Change::Added),
+                    &name("b", change != Change::Removed),
+                ),
             })
         })
         .collect()

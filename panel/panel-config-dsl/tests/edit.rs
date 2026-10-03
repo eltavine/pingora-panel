@@ -153,6 +153,14 @@ fn edits_reprint_only_what_changed() {
         "{}",
         files[0].diff
     );
+    let mut more = edited.clone();
+    more.insert("sites/new.conf", "server n {}\n");
+    assert!(diff_files(&edited, &more)[0]
+        .diff
+        .starts_with("--- /dev/null\n+++ b/sites/new.conf\n"));
+    assert!(diff_files(&more, &edited)[0]
+        .diff
+        .starts_with("--- a/sites/new.conf\n+++ /dev/null\n"));
 }
 
 #[test]
