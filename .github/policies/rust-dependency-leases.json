@@ -28,6 +28,16 @@
       "enforcement": "identity",
       "duplicates": [
         {
+          "crate": "blake2",
+          "versions": [
+            "0.10.6",
+            "0.11.0"
+          ],
+          "owner": "pingora-panel-platform",
+          "reason": "Vendored pingora-cache 0.9 derives cache keys with blake2 0.10 while argon2 0.6, which hashes panel passwords, is on the current RustCrypto generation. 0.10.6 via pingora-cache; 0.11.0 via argon2.",
+          "expires_on": "2027-03-01"
+        },
+        {
           "crate": "block-buffer",
           "versions": [
             "0.10.4",

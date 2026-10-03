@@ -340,6 +340,13 @@
       "catalog": true,
       "allowed_workspace_dependencies": []
     },
+    "panel-identity": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-context",
+        "panel-errors"
+      ]
+    },
     "panel-ir": {
       "catalog": true,
       "allowed_workspace_dependencies": [

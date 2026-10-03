@@ -14,6 +14,7 @@ members = [
     "panel-config-domain",
     "panel-config-state-codec",
     "panel-application",
+    "panel-identity",
     "panel-outbox",
     "panel-pki",
     "panel-tls",
@@ -57,6 +58,7 @@ publish = false
 
 [workspace.dependencies]
 arc-swap = "=1.9.2"
+argon2 = { version = "=0.6.0", default-features = false, features = ["alloc", "getrandom", "password-hash"] }
 axum = "=0.8.9"
 async-nats = { version = "=0.50.0", default-features = false, features = ["jetstream", "kv", "nuid", "ring", "server_2_10", "server_2_11", "server_2_12", "server_2_14"] }
 async-trait = "=0.1.92"
@@ -105,6 +107,7 @@ panel-dsl = { version = "=0.1.0", path = "panel-dsl" }
 panel-config-dsl = { version = "=0.1.0", path = "panel-config-dsl" }
 panel-api = { version = "=0.1.0", path = "panel-api" }
 panel-application = { version = "=0.1.0", path = "panel-application" }
+panel-identity = { version = "=0.1.0", path = "panel-identity" }
 panel-outbox = { version = "=0.1.0", path = "panel-outbox" }
 panel-persistence-memory = { version = "=0.1.0", path = "panel-persistence-memory" }
 panel-pki = { version = "=0.1.0", path = "panel-pki" }
@@ -131,6 +134,7 @@ regex = { version = "=1.13.1", default-features = false, features = ["std", "per
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.145"
 sha2 = "=0.11.0"
+subtle = "=2.6.1"
 similar = "=3.2.0"
 snapshot-store-fs = { version = "=0.2.0", path = "snapshot-store-fs" }
 socket2 = { version = "=0.6.5", features = ["all"] }
@@ -156,7 +160,9 @@ tonic = { version = "=0.14.6", default-features = false, features = ["codegen", 
 tonic-health = "=0.14.6"
 tonic-prost = "=0.14.6"
 tonic-prost-build = "=0.14.6"
+unicode-normalization = "=0.1.25"
 uuid = { version = "=1.18.1", features = ["serde", "v4", "v7"] }
+zxcvbn = { version = "=3.1.1", default-features = false }
 libc = "=0.2.189"
 tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.20", features = ["env-filter", "fmt", "json"] }
