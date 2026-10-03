@@ -120,11 +120,10 @@ pub struct TokenGrant {
     pub permissions: PermissionSet,
 }
 
+/// Accounts, their passwords and the sign-in attempts against them.
 #[async_trait]
-pub trait IdentityStore: Send + Sync {
+pub trait AccountStore: Send + Sync {
     async fn has_accounts(&self) -> Result<bool>;
-
-    async fn roles(&self) -> Result<Vec<Role>>;
 
     /// Fails with a conflict when the username is taken, or when `first`
     /// is set and an account exists.
@@ -163,33 +162,17 @@ pub trait IdentityStore: Send + Sync {
     /// Records a login refused before any password was checked against an
     /// account: unknown, disabled, locked or waiting. Best effort.
     async fn login_refused(&self, attempt: &Attempt, reason: &str, cause: &Cause);
+}
 
+/// Sessions: started at sign-in, found by their secret, ended.
+#[async_trait]
+pub trait SessionStore: Send + Sync {
     /// Stores the session, clears failed logins and records the login, and
     /// the use of a break-glass account with it.
     async fn create_session(
         &self,
         session: NewSession,
         attempt: &Attempt,
-        cause: &Cause,
-    ) -> Result<()>;
-
-    /// Who may sign in with a password.
-    async fn password_sign_in(&self) -> Result<PasswordSignIn>;
-
-    /// An account's grants, oldest first.
-    async fn grants(&self, account: AccountId) -> Result<Vec<Grant>>;
-
-    /// Records `identity.grant.created`.
-    async fn create_grant(&self, grant: Grant, cause: &Cause) -> Result<()>;
-
-    /// Records `identity.grant.deleted`; false when the account has no such
-    /// grant.
-    async fn delete_grant(&self, account: AccountId, id: GrantId, cause: &Cause) -> Result<bool>;
-
-    async fn set_password_sign_in(
-        &self,
-        policy: PasswordSignIn,
-        now: DateTime<Utc>,
         cause: &Cause,
     ) -> Result<()>;
 
@@ -210,6 +193,19 @@ pub trait IdentityStore: Send + Sync {
         cause: &Cause,
     ) -> Result<bool>;
 
+    /// Ends every session of `account` but `keep`; returns how many ended.
+    async fn end_sessions(
+        &self,
+        account: AccountId,
+        keep: Option<SessionId>,
+        now: DateTime<Utc>,
+        cause: &Cause,
+    ) -> Result<u64>;
+}
+
+/// API tokens, found by their secret.
+#[async_trait]
+pub trait TokenStore: Send + Sync {
     async fn create_token(&self, token: NewToken, cause: &Cause) -> Result<()>;
 
     async fn token(&self, secret: &SecretHash) -> Result<Option<TokenGrant>>;
@@ -237,15 +233,12 @@ pub trait IdentityStore: Send + Sync {
         now: DateTime<Utc>,
         cause: &Cause,
     ) -> Result<bool>;
+}
 
-    /// Ends every session of `account` but `keep`; returns how many ended.
-    async fn end_sessions(
-        &self,
-        account: AccountId,
-        keep: Option<SessionId>,
-        now: DateTime<Utc>,
-        cause: &Cause,
-    ) -> Result<u64>;
+/// Roles and the permissions they grant.
+#[async_trait]
+pub trait RoleStore: Send + Sync {
+    async fn roles(&self) -> Result<Vec<Role>>;
 
     /// Fails with a conflict when a role with the same identifier exists.
     async fn create_role(&self, role: Role, cause: &Cause) -> Result<Role>;
@@ -255,4 +248,49 @@ pub trait IdentityStore: Send + Sync {
 
     /// Deletes a role that is not built in and that no account holds.
     async fn delete_role(&self, id: &str, cause: &Cause) -> Result<()>;
+}
+
+/// Roles given with a scope and conditions (ADR 0021).
+#[async_trait]
+pub trait GrantStore: Send + Sync {
+    /// An account's grants, oldest first.
+    async fn grants(&self, account: AccountId) -> Result<Vec<Grant>>;
+
+    /// Records `identity.grant.created`.
+    async fn create_grant(&self, grant: Grant, cause: &Cause) -> Result<()>;
+
+    /// Records `identity.grant.deleted`; false when the account has no such
+    /// grant.
+    async fn delete_grant(&self, account: AccountId, id: GrantId, cause: &Cause) -> Result<bool>;
+}
+
+/// Who may sign in with a password (ADR 0018).
+#[async_trait]
+pub trait SignInPolicyStore: Send + Sync {
+    /// Who may sign in with a password.
+    async fn password_sign_in(&self) -> Result<PasswordSignIn>;
+
+    async fn set_password_sign_in(
+        &self,
+        policy: PasswordSignIn,
+        now: DateTime<Utc>,
+        cause: &Cause,
+    ) -> Result<()>;
+}
+
+/// Everything the identity service keeps about accounts and their access.
+pub trait IdentityStore:
+    AccountStore + SessionStore + TokenStore + RoleStore + GrantStore + SignInPolicyStore
+{
+}
+
+impl<T> IdentityStore for T where
+    T: AccountStore
+        + SessionStore
+        + TokenStore
+        + RoleStore
+        + GrantStore
+        + SignInPolicyStore
+        + ?Sized
+{
 }

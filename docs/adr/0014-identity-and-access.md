@@ -17,8 +17,11 @@ Storage, Session Management and CSRF Prevention cheat sheets.
 
 - **Placement.** `panel-identity` holds the rules — accounts, password
   policy and hashing, sessions, API tokens, the permission catalog and
-  authorization — behind an `IdentityStore` port. `identity-postgres`
-  implements the port in the `identity` schema and records every change
+  authorization — behind store ports, one per concern: accounts, sessions,
+  tokens, roles, grants and the password sign-in policy, which
+  `IdentityStore` combines, beside the provider and workload stores. A new
+  concern adds a port rather than widening one. `identity-postgres`
+  implements the ports in the `identity` schema and records every change
   with its event through the outbox, so the audit trail covers logins,
   sessions, tokens and accounts ([ADR 0013](0013-audit-trail.md)). Requests
   are authenticated in process; no other service sees credentials.

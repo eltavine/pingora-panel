@@ -4,8 +4,9 @@
 use crate::{
     built_in_roles,
     store::{
-        AccountChange, Attempt, Cause, Failure, IdentityStore, NewAccount, NewSession, NewToken,
-        SessionGrant, StoredAccount, StoredPassword, TokenGrant,
+        AccountChange, AccountStore, Attempt, Cause, Failure, GrantStore, NewAccount, NewSession,
+        NewToken, RoleStore, SessionGrant, SessionStore, SignInPolicyStore, StoredAccount,
+        StoredPassword, TokenGrant, TokenStore,
     },
     Account, AccountId, ApiToken, Grant, GrantId, IdentityProvider, PasswordSignIn, PendingSignIn,
     PermissionSet, ProviderLink, ProviderSession, ProviderSignIn, ProviderStore, Role, SecretHash,
@@ -128,13 +129,9 @@ fn account_mut(state: &mut State, id: AccountId) -> Result<&mut StoredAccount> {
 }
 
 #[async_trait]
-impl IdentityStore for MemoryIdentityStore {
+impl AccountStore for MemoryIdentityStore {
     async fn has_accounts(&self) -> Result<bool> {
         Ok(!self.state().accounts.is_empty())
-    }
-
-    async fn roles(&self) -> Result<Vec<Role>> {
-        Ok(self.state().roles.clone())
     }
 
     async fn create_account(&self, new: NewAccount, cause: &Cause) -> Result<Account> {
@@ -317,7 +314,10 @@ impl IdentityStore for MemoryIdentityStore {
             json!({ "attempt": attempt, "reason": reason }),
         );
     }
+}
 
+#[async_trait]
+impl SessionStore for MemoryIdentityStore {
     async fn create_session(
         &self,
         new: NewSession,
@@ -346,63 +346,6 @@ impl IdentityStore for MemoryIdentityStore {
             );
         }
         record(&mut state, "identity.login.succeeded", cause, event);
-        Ok(())
-    }
-
-    async fn password_sign_in(&self) -> Result<PasswordSignIn> {
-        Ok(self.state().password_sign_in)
-    }
-
-    async fn grants(&self, account: AccountId) -> Result<Vec<Grant>> {
-        Ok(self
-            .state()
-            .grants
-            .iter()
-            .filter(|grant| grant.account == account)
-            .cloned()
-            .collect())
-    }
-
-    async fn create_grant(&self, grant: Grant, cause: &Cause) -> Result<()> {
-        let mut state = self.state();
-        let data = json!({ "account": grant.account, "grant": grant.id, "role": grant.role, "scope": grant.scope, "conditions": grant.conditions });
-        state.grants.push(grant);
-        record(&mut state, "identity.grant.created", cause, data);
-        Ok(())
-    }
-
-    async fn delete_grant(&self, account: AccountId, id: GrantId, cause: &Cause) -> Result<bool> {
-        let mut state = self.state();
-        let before = state.grants.len();
-        state
-            .grants
-            .retain(|grant| !(grant.account == account && grant.id == id));
-        if state.grants.len() == before {
-            return Ok(false);
-        }
-        record(
-            &mut state,
-            "identity.grant.deleted",
-            cause,
-            json!({ "account": account, "grant": id }),
-        );
-        Ok(true)
-    }
-
-    async fn set_password_sign_in(
-        &self,
-        policy: PasswordSignIn,
-        _now: DateTime<Utc>,
-        cause: &Cause,
-    ) -> Result<()> {
-        let mut state = self.state();
-        state.password_sign_in = policy;
-        record(
-            &mut state,
-            "identity.sign_in_policy.updated",
-            cause,
-            json!({ "password_sign_in": policy }),
-        );
         Ok(())
     }
 
@@ -472,6 +415,38 @@ impl IdentityStore for MemoryIdentityStore {
         Ok(true)
     }
 
+    async fn end_sessions(
+        &self,
+        account: AccountId,
+        keep: Option<SessionId>,
+        now: DateTime<Utc>,
+        cause: &Cause,
+    ) -> Result<u64> {
+        let mut state = self.state();
+        let mut ended = 0;
+        for (session, _) in &mut state.sessions {
+            if session.account == account
+                && Some(session.id) != keep
+                && session.revoked_at.is_none()
+            {
+                session.revoked_at = Some(now);
+                ended += 1;
+            }
+        }
+        if ended > 0 {
+            record(
+                &mut state,
+                "identity.session.ended",
+                cause,
+                json!({ "account": account, "reason": "revoked", "sessions": ended }),
+            );
+        }
+        Ok(ended)
+    }
+}
+
+#[async_trait]
+impl TokenStore for MemoryIdentityStore {
     async fn create_token(&self, new: NewToken, cause: &Cause) -> Result<()> {
         let mut state = self.state();
         let event = json!({
@@ -571,34 +546,12 @@ impl IdentityStore for MemoryIdentityStore {
         record(&mut state, "identity.token.rotated", cause, event);
         Ok(true)
     }
+}
 
-    async fn end_sessions(
-        &self,
-        account: AccountId,
-        keep: Option<SessionId>,
-        now: DateTime<Utc>,
-        cause: &Cause,
-    ) -> Result<u64> {
-        let mut state = self.state();
-        let mut ended = 0;
-        for (session, _) in &mut state.sessions {
-            if session.account == account
-                && Some(session.id) != keep
-                && session.revoked_at.is_none()
-            {
-                session.revoked_at = Some(now);
-                ended += 1;
-            }
-        }
-        if ended > 0 {
-            record(
-                &mut state,
-                "identity.session.ended",
-                cause,
-                json!({ "account": account, "reason": "revoked", "sessions": ended }),
-            );
-        }
-        Ok(ended)
+#[async_trait]
+impl RoleStore for MemoryIdentityStore {
+    async fn roles(&self) -> Result<Vec<Role>> {
+        Ok(self.state().roles.clone())
     }
 
     async fn create_role(&self, role: Role, cause: &Cause) -> Result<Role> {
@@ -666,6 +619,69 @@ impl IdentityStore for MemoryIdentityStore {
             "identity.role.deleted",
             cause,
             json!({ "role": id }),
+        );
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl GrantStore for MemoryIdentityStore {
+    async fn grants(&self, account: AccountId) -> Result<Vec<Grant>> {
+        Ok(self
+            .state()
+            .grants
+            .iter()
+            .filter(|grant| grant.account == account)
+            .cloned()
+            .collect())
+    }
+
+    async fn create_grant(&self, grant: Grant, cause: &Cause) -> Result<()> {
+        let mut state = self.state();
+        let data = json!({ "account": grant.account, "grant": grant.id, "role": grant.role, "scope": grant.scope, "conditions": grant.conditions });
+        state.grants.push(grant);
+        record(&mut state, "identity.grant.created", cause, data);
+        Ok(())
+    }
+
+    async fn delete_grant(&self, account: AccountId, id: GrantId, cause: &Cause) -> Result<bool> {
+        let mut state = self.state();
+        let before = state.grants.len();
+        state
+            .grants
+            .retain(|grant| !(grant.account == account && grant.id == id));
+        if state.grants.len() == before {
+            return Ok(false);
+        }
+        record(
+            &mut state,
+            "identity.grant.deleted",
+            cause,
+            json!({ "account": account, "grant": id }),
+        );
+        Ok(true)
+    }
+}
+
+#[async_trait]
+impl SignInPolicyStore for MemoryIdentityStore {
+    async fn password_sign_in(&self) -> Result<PasswordSignIn> {
+        Ok(self.state().password_sign_in)
+    }
+
+    async fn set_password_sign_in(
+        &self,
+        policy: PasswordSignIn,
+        _now: DateTime<Utc>,
+        cause: &Cause,
+    ) -> Result<()> {
+        let mut state = self.state();
+        state.password_sign_in = policy;
+        record(
+            &mut state,
+            "identity.sign_in_policy.updated",
+            cause,
+            json!({ "password_sign_in": policy }),
         );
         Ok(())
     }

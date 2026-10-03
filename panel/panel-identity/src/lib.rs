@@ -42,7 +42,10 @@ pub use service::{
 };
 pub use session::{ApiToken, Session, SessionId, SessionPolicy, TokenId, Transport};
 pub use sign_in::{ProviderSignIns, Rechecked, SignInOption, Started, RECHECK_INTERVAL};
-pub use store::{AccountChange, Cause, IdentityStore};
+pub use store::{
+    AccountChange, AccountStore, Cause, GrantStore, IdentityStore, RoleStore, SessionStore,
+    SignInPolicyStore, TokenStore,
+};
 pub use throttle::FailurePolicy;
 pub use workload::{
     VerifiedWorkload, WorkloadIdentity, WorkloadRequest, WorkloadStore, WorkloadTrust,

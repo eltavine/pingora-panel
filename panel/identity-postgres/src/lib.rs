@@ -10,8 +10,9 @@ use panel_errors::{PanelError, Result};
 use panel_identity::{
     built_in_roles,
     store::{
-        AccountChange, Attempt, Cause, Failure, IdentityStore, NewAccount, NewSession, NewToken,
-        SessionGrant, StoredAccount, StoredPassword, TokenGrant,
+        AccountChange, AccountStore, Attempt, Cause, Failure, GrantStore, NewAccount, NewSession,
+        NewToken, RoleStore, SessionGrant, SessionStore, SignInPolicyStore, StoredAccount,
+        StoredPassword, TokenGrant, TokenStore,
     },
     Account, AccountId, ApiToken, Grant, GrantId, PasswordSignIn, Permission, PermissionSet, Role,
     SecretHash, Session, SessionId, TokenId, Transport, Username,
@@ -292,33 +293,12 @@ impl PgIdentityStore {
 }
 
 #[async_trait]
-impl IdentityStore for PgIdentityStore {
+impl AccountStore for PgIdentityStore {
     async fn has_accounts(&self) -> Result<bool> {
         sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM accounts)")
             .fetch_one(&self.pool)
             .await
             .map_err(storage)
-    }
-
-    async fn roles(&self) -> Result<Vec<Role>> {
-        let rows = sqlx::query(
-            "SELECT id, name, description, permissions, built_in FROM roles \
-             ORDER BY built_in DESC, id",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(storage)?;
-        rows.iter()
-            .map(|row| {
-                Ok(Role {
-                    id: get(row, "id")?,
-                    name: get(row, "name")?,
-                    description: get(row, "description")?,
-                    permissions: permissions(get(row, "permissions")?),
-                    built_in: get(row, "built_in")?,
-                })
-            })
-            .collect()
     }
 
     async fn create_account(&self, new: NewAccount, cause: &Cause) -> Result<Account> {
@@ -569,7 +549,10 @@ impl IdentityStore for PgIdentityStore {
             )
             .await;
     }
+}
 
+#[async_trait]
+impl SessionStore for PgIdentityStore {
     async fn create_session(
         &self,
         new: NewSession,
@@ -628,125 +611,6 @@ impl IdentityStore for PgIdentityStore {
             session.account,
             cause,
             &login,
-        )
-        .await?;
-        transaction.commit().await.map_err(storage)
-    }
-
-    async fn password_sign_in(&self) -> Result<PasswordSignIn> {
-        let policy: String =
-            sqlx::query_scalar("SELECT password_sign_in FROM sign_in_policy WHERE singleton")
-                .fetch_one(&self.pool)
-                .await
-                .map_err(storage)?;
-        PasswordSignIn::parse(&policy)
-            .ok_or_else(|| PanelError::corrupt_state("the password sign-in policy is unknown"))
-    }
-
-    async fn grants(&self, account: AccountId) -> Result<Vec<Grant>> {
-        sqlx::query(
-            "SELECT id, account_id, role_id, scope::text AS scope, conditions::text AS conditions, \
-             created_at, created_by FROM grants WHERE account_id = $1 ORDER BY created_at, id",
-        )
-        .bind(account.as_uuid())
-        .fetch_all(&self.pool)
-        .await
-        .map_err(storage)?
-        .iter()
-        .map(|row| {
-            let scope: String = get(row, "scope")?;
-            let conditions: String = get(row, "conditions")?;
-            let corrupt = |_| PanelError::corrupt_state("a stored grant is invalid");
-            Ok(Grant {
-                id: GrantId::from_uuid(get(row, "id")?),
-                account: AccountId::from_uuid(get(row, "account_id")?),
-                role: get(row, "role_id")?,
-                scope: serde_json::from_str(&scope).map_err(corrupt)?,
-                conditions: serde_json::from_str(&conditions).map_err(corrupt)?,
-                created_at: get(row, "created_at")?,
-                created_by: get(row, "created_by")?,
-            })
-        })
-        .collect()
-    }
-
-    async fn create_grant(&self, grant: Grant, cause: &Cause) -> Result<()> {
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
-        sqlx::query(
-            "INSERT INTO grants (id, account_id, role_id, scope, conditions, created_at, \
-             created_by) VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7)",
-        )
-        .bind(grant.id.as_uuid())
-        .bind(grant.account.as_uuid())
-        .bind(&grant.role)
-        .bind(json!(grant.scope).to_string())
-        .bind(json!(grant.conditions).to_string())
-        .bind(grant.created_at)
-        .bind(&grant.created_by)
-        .execute(&mut *transaction)
-        .await
-        .map_err(storage)?;
-        self.emit(
-            &mut transaction,
-            "identity.grant.created",
-            grant.account,
-            cause,
-            &json!({
-                "account": grant.account,
-                "grant": grant.id,
-                "role": grant.role,
-                "scope": grant.scope,
-                "conditions": grant.conditions,
-            }),
-        )
-        .await?;
-        transaction.commit().await.map_err(storage)
-    }
-
-    async fn delete_grant(&self, account: AccountId, id: GrantId, cause: &Cause) -> Result<bool> {
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
-        let deleted = sqlx::query("DELETE FROM grants WHERE id = $1 AND account_id = $2")
-            .bind(id.as_uuid())
-            .bind(account.as_uuid())
-            .execute(&mut *transaction)
-            .await
-            .map_err(storage)?;
-        if deleted.rows_affected() == 0 {
-            return Ok(false);
-        }
-        self.emit(
-            &mut transaction,
-            "identity.grant.deleted",
-            account,
-            cause,
-            &json!({ "account": account, "grant": id }),
-        )
-        .await?;
-        transaction.commit().await.map_err(storage)?;
-        Ok(true)
-    }
-
-    async fn set_password_sign_in(
-        &self,
-        policy: PasswordSignIn,
-        now: DateTime<Utc>,
-        cause: &Cause,
-    ) -> Result<()> {
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
-        sqlx::query(
-            "UPDATE sign_in_policy SET password_sign_in = $1, updated_at = $2 WHERE singleton",
-        )
-        .bind(policy.as_str())
-        .bind(now)
-        .execute(&mut *transaction)
-        .await
-        .map_err(storage)?;
-        self.emit_on(
-            &mut transaction,
-            "identity.sign_in_policy.updated",
-            ("sign_in_policy", "password"),
-            cause,
-            &json!({ "password_sign_in": policy }),
         )
         .await?;
         transaction.commit().await.map_err(storage)
@@ -824,6 +688,42 @@ impl IdentityStore for PgIdentityStore {
         Ok(ended)
     }
 
+    async fn end_sessions(
+        &self,
+        account: AccountId,
+        keep: Option<SessionId>,
+        now: DateTime<Utc>,
+        cause: &Cause,
+    ) -> Result<u64> {
+        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        let ended = sqlx::query(
+            "UPDATE sessions SET revoked_at = $3, revoke_reason = 'revoked' \
+             WHERE account_id = $1 AND revoked_at IS NULL AND id IS DISTINCT FROM $2",
+        )
+        .bind(account.as_uuid())
+        .bind(keep.map(|session| session.as_uuid()))
+        .bind(now)
+        .execute(&mut *transaction)
+        .await
+        .map_err(storage)?
+        .rows_affected();
+        if ended > 0 {
+            self.emit(
+                &mut transaction,
+                "identity.session.ended",
+                account,
+                cause,
+                &json!({ "account": account, "reason": "revoked", "sessions": ended }),
+            )
+            .await?;
+        }
+        transaction.commit().await.map_err(storage)?;
+        Ok(ended)
+    }
+}
+
+#[async_trait]
+impl TokenStore for PgIdentityStore {
     async fn create_token(&self, new: NewToken, cause: &Cause) -> Result<()> {
         let token = &new.token;
         let mut transaction = self.pool.begin().await.map_err(storage)?;
@@ -976,38 +876,29 @@ impl IdentityStore for PgIdentityStore {
         transaction.commit().await.map_err(storage)?;
         Ok(true)
     }
+}
 
-    async fn end_sessions(
-        &self,
-        account: AccountId,
-        keep: Option<SessionId>,
-        now: DateTime<Utc>,
-        cause: &Cause,
-    ) -> Result<u64> {
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
-        let ended = sqlx::query(
-            "UPDATE sessions SET revoked_at = $3, revoke_reason = 'revoked' \
-             WHERE account_id = $1 AND revoked_at IS NULL AND id IS DISTINCT FROM $2",
+#[async_trait]
+impl RoleStore for PgIdentityStore {
+    async fn roles(&self) -> Result<Vec<Role>> {
+        let rows = sqlx::query(
+            "SELECT id, name, description, permissions, built_in FROM roles \
+             ORDER BY built_in DESC, id",
         )
-        .bind(account.as_uuid())
-        .bind(keep.map(|session| session.as_uuid()))
-        .bind(now)
-        .execute(&mut *transaction)
+        .fetch_all(&self.pool)
         .await
-        .map_err(storage)?
-        .rows_affected();
-        if ended > 0 {
-            self.emit(
-                &mut transaction,
-                "identity.session.ended",
-                account,
-                cause,
-                &json!({ "account": account, "reason": "revoked", "sessions": ended }),
-            )
-            .await?;
-        }
-        transaction.commit().await.map_err(storage)?;
-        Ok(ended)
+        .map_err(storage)?;
+        rows.iter()
+            .map(|row| {
+                Ok(Role {
+                    id: get(row, "id")?,
+                    name: get(row, "name")?,
+                    description: get(row, "description")?,
+                    permissions: permissions(get(row, "permissions")?),
+                    built_in: get(row, "built_in")?,
+                })
+            })
+            .collect()
     }
 
     async fn create_role(&self, role: Role, cause: &Cause) -> Result<Role> {
@@ -1094,6 +985,131 @@ impl IdentityStore for PgIdentityStore {
             ("role", id),
             cause,
             &json!({ "role": id }),
+        )
+        .await?;
+        transaction.commit().await.map_err(storage)
+    }
+}
+
+#[async_trait]
+impl GrantStore for PgIdentityStore {
+    async fn grants(&self, account: AccountId) -> Result<Vec<Grant>> {
+        sqlx::query(
+            "SELECT id, account_id, role_id, scope::text AS scope, conditions::text AS conditions, \
+             created_at, created_by FROM grants WHERE account_id = $1 ORDER BY created_at, id",
+        )
+        .bind(account.as_uuid())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(storage)?
+        .iter()
+        .map(|row| {
+            let scope: String = get(row, "scope")?;
+            let conditions: String = get(row, "conditions")?;
+            let corrupt = |_| PanelError::corrupt_state("a stored grant is invalid");
+            Ok(Grant {
+                id: GrantId::from_uuid(get(row, "id")?),
+                account: AccountId::from_uuid(get(row, "account_id")?),
+                role: get(row, "role_id")?,
+                scope: serde_json::from_str(&scope).map_err(corrupt)?,
+                conditions: serde_json::from_str(&conditions).map_err(corrupt)?,
+                created_at: get(row, "created_at")?,
+                created_by: get(row, "created_by")?,
+            })
+        })
+        .collect()
+    }
+
+    async fn create_grant(&self, grant: Grant, cause: &Cause) -> Result<()> {
+        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        sqlx::query(
+            "INSERT INTO grants (id, account_id, role_id, scope, conditions, created_at, \
+             created_by) VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7)",
+        )
+        .bind(grant.id.as_uuid())
+        .bind(grant.account.as_uuid())
+        .bind(&grant.role)
+        .bind(json!(grant.scope).to_string())
+        .bind(json!(grant.conditions).to_string())
+        .bind(grant.created_at)
+        .bind(&grant.created_by)
+        .execute(&mut *transaction)
+        .await
+        .map_err(storage)?;
+        self.emit(
+            &mut transaction,
+            "identity.grant.created",
+            grant.account,
+            cause,
+            &json!({
+                "account": grant.account,
+                "grant": grant.id,
+                "role": grant.role,
+                "scope": grant.scope,
+                "conditions": grant.conditions,
+            }),
+        )
+        .await?;
+        transaction.commit().await.map_err(storage)
+    }
+
+    async fn delete_grant(&self, account: AccountId, id: GrantId, cause: &Cause) -> Result<bool> {
+        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        let deleted = sqlx::query("DELETE FROM grants WHERE id = $1 AND account_id = $2")
+            .bind(id.as_uuid())
+            .bind(account.as_uuid())
+            .execute(&mut *transaction)
+            .await
+            .map_err(storage)?;
+        if deleted.rows_affected() == 0 {
+            return Ok(false);
+        }
+        self.emit(
+            &mut transaction,
+            "identity.grant.deleted",
+            account,
+            cause,
+            &json!({ "account": account, "grant": id }),
+        )
+        .await?;
+        transaction.commit().await.map_err(storage)?;
+        Ok(true)
+    }
+}
+
+#[async_trait]
+impl SignInPolicyStore for PgIdentityStore {
+    async fn password_sign_in(&self) -> Result<PasswordSignIn> {
+        let policy: String =
+            sqlx::query_scalar("SELECT password_sign_in FROM sign_in_policy WHERE singleton")
+                .fetch_one(&self.pool)
+                .await
+                .map_err(storage)?;
+        PasswordSignIn::parse(&policy)
+            .ok_or_else(|| PanelError::corrupt_state("the password sign-in policy is unknown"))
+    }
+
+    async fn set_password_sign_in(
+        &self,
+        policy: PasswordSignIn,
+        now: DateTime<Utc>,
+        cause: &Cause,
+    ) -> Result<()> {
+        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        sqlx::query(
+            "UPDATE sign_in_policy SET password_sign_in = $1, updated_at = $2 WHERE singleton",
+        )
+        .bind(policy.as_str())
+        .bind(now)
+        .execute(&mut *transaction)
+        .await
+        .map_err(storage)?;
+        self.emit_on(
+            &mut transaction,
+            "identity.sign_in_policy.updated",
+            ("sign_in_policy", "password"),
+            cause,
+            &json!({ "password_sign_in": policy }),
         )
         .await?;
         transaction.commit().await.map_err(storage)

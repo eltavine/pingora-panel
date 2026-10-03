@@ -6,7 +6,7 @@ use panel_events::ServiceName;
 use panel_identity::{
     conformance::{check, StoreUnderTest},
     memory::RecordedEvent,
-    IdentityStore, ProviderStore, WorkloadStore,
+    IdentityStore, ProviderStore, RoleStore, WorkloadStore,
 };
 use panel_postgres::{testing::TestDatabase, EventLog, ServiceDatabase};
 use std::sync::Arc;

@@ -10,7 +10,7 @@ use panel_errors::ErrorCode;
 use panel_identity::{
     memory::MemoryIdentityStore,
     store::{Cause, NewAccount},
-    AccountId, Client, IdentityStore, Transport, Username, WorkloadIdentity, WorkloadRequest,
+    AccountId, AccountStore, Client, Transport, Username, WorkloadIdentity, WorkloadRequest,
 };
 use serde_json::json;
 use std::{sync::Arc, time::Duration};

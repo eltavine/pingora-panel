@@ -4,7 +4,7 @@
 use async_trait::async_trait;
 use identity_postgres::PgIdentityStore;
 use panel_health::{CheckOutcome, ComponentType, HealthCheck};
-use panel_identity::IdentityStore;
+use panel_identity::AccountStore;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,

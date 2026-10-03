@@ -8,9 +8,9 @@ use panel_context::{RequestId, RequestScope};
 use panel_identity::{
     memory::MemoryIdentityStore,
     store::{Cause, NewAccount},
-    AccountId, ClaimNames, Client, GroupRole, IdentityStore, PasswordSignIn, ProviderDirectory,
+    AccountId, AccountStore, ClaimNames, Client, GroupRole, PasswordSignIn, ProviderDirectory,
     ProviderRequest, ProviderSignIns, ProviderStore, Rechecked, SecretChange, SessionPolicy,
-    Transport, Username,
+    SessionStore, Transport, Username,
 };
 use panel_secrets::EnvelopeVault;
 use serde_json::json;
