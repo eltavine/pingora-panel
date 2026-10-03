@@ -10,8 +10,12 @@
 
 mod console;
 mod directory;
+mod listener;
 mod operations;
 mod roles;
+
+use listener::PublicListener;
+pub use listener::UNIX_PREFIX;
 
 use audit_grpc_client::AuditClient;
 use automation_grpc_client::AutomationClient;
@@ -26,13 +30,14 @@ use panel_health::Impact;
 use panel_identity::{Identity, IdentitySettings, SecretHash, SessionPolicy};
 use panel_platform::ServiceName;
 use panel_postgres::{EventLog, SqlIdentifier};
-use panel_service::{require_loopback, Environment};
+use panel_service::Environment;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tls_probe_rustls::RustlsProbe;
 
 pub const SERVICE: &str = "panel-api";
 pub const SCHEMA: &str = "identity";
-/// The public listener; loopback-only until the API authenticates callers.
+/// The public listener: a loopback `ip:port`, or `unix:/path` for a Unix
+/// domain socket that a local reverse proxy in the socket's group reaches.
 pub const HTTP_ADDRESS_ENV: &str = "PINGORA_PANEL_HTTP_ADDR";
 pub const CONFIG_URL_ENV: &str = "PINGORA_PANEL_CONFIG_URL";
 /// `audit-service`, which serves the audit trail.
@@ -77,10 +82,9 @@ pub fn process(
     env: &mut Environment<'_>,
     settings: ProcessSettings,
 ) -> Result<ControlPlaneProcess> {
-    let http_address = require_loopback(
-        HTTP_ADDRESS_ENV,
-        env.socket_addr(HTTP_ADDRESS_ENV, DEFAULT_HTTP_ADDRESS)?,
-    )?;
+    let http_address = env
+        .string(HTTP_ADDRESS_ENV)?
+        .unwrap_or_else(|| DEFAULT_HTTP_ADDRESS.to_string());
     let config_url = env
         .string(CONFIG_URL_ENV)?
         .unwrap_or_else(|| DEFAULT_CONFIG_URL.into());
@@ -120,15 +124,8 @@ pub fn process(
                 .collect()
         })
         .unwrap_or_default();
-    // Bound now so a taken port fails the start before anything else runs.
-    let listener = std::net::TcpListener::bind(http_address).map_err(|error| {
-        PanelError::precondition_failed(format!(
-            "cannot bind the public listener on {http_address}: {error}"
-        ))
-    })?;
-    listener.set_nonblocking(true).map_err(|error| {
-        PanelError::internal(format!("cannot configure the public listener: {error}"))
-    })?;
+    // Bound now so a taken address fails the start before anything else runs.
+    let listener = PublicListener::bind(HTTP_ADDRESS_ENV, &http_address)?;
     let process = ControlPlaneProcess::new(
         ServiceName::new(SERVICE)?,
         env!("CARGO_PKG_VERSION"),
@@ -204,23 +201,12 @@ pub fn process(
                 ApiConfig::default(),
             );
             let app = console::with_console(api, &web_root)?;
-            let listener = tokio::net::TcpListener::from_std(listener).map_err(|error| {
-                PanelError::internal(format!("cannot serve the public listener: {error}"))
-            })?;
-            let address = listener.local_addr().ok();
             let shutdown = running.shutdown_token();
             running.spawn(async move {
-                if let Err(error) = axum::serve(
-                    listener,
-                    app.into_make_service_with_connect_info::<SocketAddr>(),
-                )
-                .with_graceful_shutdown(shutdown.cancelled_owned())
-                .await
-                {
+                if let Err(error) = listener.serve(app, shutdown).await {
                     tracing::error!(%error, "public listener failed");
                 }
             });
-            tracing::info!(address = ?address, "public API listening");
             Ok(())
         }))
 }

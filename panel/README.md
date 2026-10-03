@@ -131,7 +131,12 @@ Every process reads `PINGORA_PANEL_DATABASE_URL` (its role, without password),
 `PINGORA_PANEL_WEB_ROOT`, the directory of the built console, and the
 identity settings described under [Accounts and access](#accounts-and-access).
 Plaintext listeners must stay on loopback until internal transports are
-authenticated.
+authenticated. `PINGORA_PANEL_HTTP_ADDR` may instead name a Unix domain
+socket, `unix:/run/pingora-panel/api.sock`, for the reverse proxy in front
+of the console: the socket is made readable and writable by its owner and
+group only, replaces a stale socket but never another file, and is removed
+at shutdown. As on loopback, the API takes the client address from the last
+`X-Forwarded-For` entry the proxy appends.
 
 Internal gRPC runs over mutual TLS once a service has credentials
 ([decision](../docs/adr/0009-internal-mutual-tls.md)): set
