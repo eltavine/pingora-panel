@@ -28,7 +28,8 @@ password files.
   and IPv6, IPv4-mapped addresses compared as IPv4); a client is refused
   when it is in a denied network, or when allowed networks are listed and it
   is in none. It may list allowed methods, answered otherwise with 405 and
-  `Allow`; denied path prefixes; denied user agents as case-insensitive
+  an `Allow` that names HEAD wherever GET is allowed, since HEAD goes with
+  GET; denied path prefixes; denied user agents as case-insensitive
   regular expressions; and allowed referring hosts, with wildcards and a
   choice for requests without `Referer`. Refused requests get 403.
 - **Basic authentication.** A policy may require a user from an htpasswd
@@ -42,7 +43,8 @@ password files.
   policy's realm and `charset="UTF-8"`.
 - **Limits.** A policy may cap the bytes of request headers (431), the
   request body (413, from `Content-Length` before anything is forwarded and
-  while streaming otherwise) and the time between body reads.
+  while streaming otherwise) and the time between body reads (408, as RFC
+  9110 has it for a request that does not arrive in time).
 - **Rate limits.** A policy may hold token buckets keyed by client address,
   host, route or a request header, each with a rate and a burst, and a cap
   on concurrent requests per client address. Requests over a limit get 429
@@ -55,9 +57,10 @@ password files.
   walking from the TCP peer; rules, limits and forwarding headers use it.
   Forwarding headers from peers that are not trusted are dropped before the
   gateway adds its own, so upstreams cannot be told a forged address.
-- **Checks.** Validation warns about dangerous settings, such as Basic
-  authentication on listeners without TLS, and the gateway refuses private
-  keys that others than their owner may read.
+- **Checks.** Validation warns about dangerous settings: Basic
+  authentication on listeners without TLS, every address trusted as a proxy
+  and upstreams that do not verify their TLS nodes. The gateway refuses
+  private keys that others than their owner may read.
 
 ## Consequences
 

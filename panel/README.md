@@ -474,6 +474,108 @@ ppanel acme certificate request wildcard.example.com --account letsencrypt \
 ppanel tls-profile set edge --certificate-id example.com
 ```
 
+## Security policies
+
+Security policies restrict requests before sites and routes act on them
+([decision](../docs/adr/0017-request-security-policies.md)). A policy is a
+named resource of the configuration. A site's policy covers all of its
+requests and a route's policy is checked after the site's, so a login route
+can add a stricter rate limit to what the whole site allows.
+
+```nginx
+http {
+    tls_profile edge {
+        certificate_id example.com;
+    }
+
+    upstream app {
+        server 10.0.0.11:8080;
+    }
+
+    security_policy office {
+        allow 10.0.0.0/8 2001:db8::/32;          # other clients get 403
+        deny 10.9.0.0/16;                          # wins over allow
+        methods GET POST;                          # 405 with Allow; HEAD goes with GET
+        deny_paths /.git /admin/internal;          # 403
+        deny_user_agents "^sqlmap" "^curl/";       # case-insensitive, 403
+        referers none *.example.com;               # hotlink protection, 403
+        basic_auth staff.htpasswd realm=Staff;     # 401
+        max_header_size 16k;                       # 431
+        max_body_size 10m;                         # 413
+        body_timeout 30s;                          # 408 when a body stalls
+        rate_limit 10r/s burst=20;                 # per client address, 429
+        rate_limit 300r/m key=$http_x_api_key;
+        max_concurrent 20;                         # requests in progress per client
+        limited_response 503 "body=Slow down" type=text/plain;
+    }
+
+    security_policy login {
+        rate_limit 5r/m;
+    }
+
+    listener public {
+        address 0.0.0.0:443;
+        tls_profile edge;
+        trusted_proxies 192.0.2.0/24;              # the load balancer
+        real_ip_header x-forwarded-for;
+    }
+
+    server shop {
+        server_name shop.example;
+        security_policy office;
+        proxy app;
+
+        route sign-in {
+            match exact /login;
+            security_policy login;
+            proxy app;
+        }
+    }
+}
+```
+
+Rate limits are token buckets as NGINX's `limit_req` keeps them: a bucket
+holds one request plus the burst and refills at the rate, written as
+`<n>r/s`, `r/m`, `r/h`, `r/d` or `<n>r/<seconds>s`. They count by `$client_ip`
+(the default), `$host`, `$route` or a request header such as `$http_x_api_key`,
+and answer with 429 and `Retry-After` unless `limited_response` says
+otherwise. Buckets live in each gateway process.
+
+Without trusted proxies, the client is the TCP peer, and `X-Forwarded-For`,
+`X-Real-IP` and `Forwarded` it sends are dropped before the request is
+forwarded. With them, the gateway reads the header `real_ip_header` names
+from the right, skipping trusted networks; the first address outside them is
+the client that rules and limits see, and upstreams receive it as
+`X-Real-IP`.
+
+Password files are htpasswd files in the gateway's secret directory, made
+with `htpasswd -B` or an Argon2 tool; a file holding weaker hashes is refused
+when the snapshot is prepared. The gateway remembers verified credentials for
+a few minutes, so the hashes' cost is paid once per user, and does not
+forward `Authorization` upstream.
+
+`/api/v1/security-policies` lists, reads, sets and deletes policies; sites
+and routes name one with `security_policy_id`, and listeners take
+`trusted_proxies` and `real_ip_header`. A policy that a site or route uses
+cannot be deleted. Reading needs `config.read` and changing `config.write`,
+and changes become active when the configuration is applied. The console's
+Security policies page and the site, route and listener forms offer the same.
+
+```sh
+ppanel security-policy set office --allow 10.0.0.0/8 --method GET --method POST \
+  --basic-auth staff.htpasswd --max-body-size 10m --rate-limit "10r/s burst=20"
+ppanel security-policy set login --rate-limit 5r/m
+ppanel site create --name shop --domain shop.example --proxy <upstream-id> --security-policy office
+ppanel route add <site-id> --match exact:/login --proxy <upstream-id> --security-policy login
+ppanel listener set public --address 0.0.0.0:443 --tls-profile edge --trusted-proxy 192.0.2.0/24
+ppanel security-policy list
+```
+
+`ppanel config check` and the console's configuration editor warn when a
+server asks for passwords on a plain HTTP listener without `https_redirect`,
+when a listener trusts every address as a proxy, and when an upstream does
+not verify its TLS nodes.
+
 ## Activation invariant
 
 All fallible work required to build and durably publish the activation occurs

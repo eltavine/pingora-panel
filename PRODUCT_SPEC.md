@@ -133,13 +133,15 @@ Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交
 上述状态只覆盖 Initial Foundation，不把面板完整功能目录误写为已实现。
 0.2 网关核心各项已在 REST API、`ppanel` CLI 与 Web 控制台实现，并由模块、集成、真实进程与浏览器端到端测试覆盖，因此标记为 `Implemented`。其验收中的操作审计与权限检查分别随 `AUDIT-*`（0.3）与 `IAM-*`（0.4）完成；在此之前这些功能不得标记为 `Verified`。
 
-0.3 配置语言与版本（`SITE-034`～`SITE-045` 及上列 `DSL-*`）已在 REST API、`ppanel` CLI 与 Web 控制台实现：草稿以 `main.conf` 为入口的语言文件编辑，支持检查、格式化、补全 Schema、语法树、计划与 Diff、IR 导出、试运行，以及记录作者、备注与结果、可比较和一键回滚的配置版本；同样在操作审计（`AUDIT-*`）与权限（`IAM-*`）验收完成前不得标记为 `Verified`。请求变量（`DSL-010`～`DSL-017`）可用于重定向目标与响应内容，由网关按请求求值，并以 `action.template` 能力协商，无法求值的网关拒绝快照；Size 与 IP/CIDR 类型（`DSL-023`、`DSL-024`）已能解析、尚无指令使用，因此为 `In Progress`；Nginx 子集导入与迁移报告（`DSL-043`～`DSL-045`）按 ADR 0012 所列子集转换，并在 API、CLI 与控制台逐条报告未转换或含义改变的指令及其位置；继承规则写在 Schema 中，Explain（`DSL-034`）按位置列出块内每个生效值及其来源（本块、外层块或监听、默认值），无效设置给出警告；Lua 脚本引用（`DSL-042`）仍为 `Planned`。
+0.3 配置语言与版本（`SITE-034`～`SITE-045` 及上列 `DSL-*`）已在 REST API、`ppanel` CLI 与 Web 控制台实现：草稿以 `main.conf` 为入口的语言文件编辑，支持检查、格式化、补全 Schema、语法树、计划与 Diff、IR 导出、试运行，以及记录作者、备注与结果、可比较和一键回滚的配置版本；同样在操作审计（`AUDIT-*`）与权限（`IAM-*`）验收完成前不得标记为 `Verified`。请求变量（`DSL-010`～`DSL-017`）可用于重定向目标与响应内容，由网关按请求求值，并以 `action.template` 能力协商，无法求值的网关拒绝快照；Size 与 IP/CIDR 类型（`DSL-023`、`DSL-024`）用于安全策略的头部与请求体上限、客户端网络和监听的受信任代理；Nginx 子集导入与迁移报告（`DSL-043`～`DSL-045`）按 ADR 0012 所列子集转换，并在 API、CLI 与控制台逐条报告未转换或含义改变的指令及其位置；继承规则写在 Schema 中，Explain（`DSL-034`）按位置列出块内每个生效值及其来源（本块、外层块或监听、默认值），无效设置给出警告；Lua 脚本引用（`DSL-042`）仍为 `Planned`。
 
 0.3 审计（`AUDIT-001`、`AUDIT-003`、`AUDIT-004`）已由 `audit-service` 实现：各服务通过事务性 Outbox 发布每次变更及被拒绝或失败的尝试，审计服务按来源与事件 ID 幂等写入带检查点、只追加的 SHA-256 哈希链，并在 REST API、`ppanel audit` 与控制台审计日志中提供筛选、详情与完整性校验。证书操作审计（`AUDIT-005`）覆盖 TLS Profile 变更，证书的上传、生成、替换、删除和被拒绝的尝试，ACME 账户的注册与删除，自动证书的申请、签发、续期、失败与停止，以及证书到期提醒；由任务完成的签发与续期以 `automation-service` 为操作者，并与发起请求共享关联 ID；登录审计（`AUDIT-002`）已随 0.4 的登录实现；Docker 操作审计（`AUDIT-006`）随 `CTR-*` 实现，仍为 `Planned`。
 
 0.4 身份与访问（`IAM-001`～`IAM-014`、`IAM-024`、`IAM-025`、`IAM-028`～`IAM-031`）已在 REST API、`ppanel` 与 Web 控制台实现：部署生成的一次性引导令牌创建首个管理员；密码遵循 NIST SP 800-63B-4（至少 15 个字符、NFC 规范化、按强度估计拒绝常见与可预测的密码、以 Argon2id 加 pepper 存储、连续失败后递增等待并在第 100 次锁定），每个客户端地址的登录尝试另有限流；浏览器会话使用 `Secure`、`HttpOnly`、`SameSite=Strict` 的 `__Host-` Cookie 与由会话密钥派生的 CSRF 令牌，并拒绝跨站请求；命令行使用 Bearer 会话或以 `ppat_` 开头、权限不超过所有者的 API 令牌；每条路由在一张表中声明所需权限，内置管理员、运维、只读与审计角色，管理员可从权限目录组合自定义角色；用户可一次结束其他全部会话，管理员可结束任一账户的全部会话；API 令牌可轮换，新令牌沿用原令牌的权限与有效时长，旧密钥立即失效。登录、失败登录、账户、角色与令牌变更以及拒绝已登录调用者的请求都进入审计（`AUDIT-002`、`SEC-035`）。Site Group 范围与条件绑定（`IAM-026`、`IAM-027`）、OIDC 与 Break-glass（`IAM-015`～`IAM-023`）、服务账户与工作负载身份（`IAM-032`、`IAM-033`）以及审批（`IAM-034`～`IAM-038`）仍为 `Planned`。
 
 0.4 证书（`TLS-001`～`TLS-011`、`TLS-032`）由 `automation-service` 的证书库保存：上传的证书链与私钥按网关加载方式解析，须叶子在前、私钥匹配且未过期，自签证书使用新的 ECDSA P-256 密钥；私钥以部署主密钥做信封加密（AES-256-GCM）存储，并原子写入网关密钥目录；TLS 配置以 `certificate_id` 引用证书库中的证书，网站或域名据此启用或停用 HTTPS；证书文件变化后网关在数秒内改用新证书而无需新版本。REST API、`ppanel certificate` 与控制台证书页面提供上传、生成、替换、删除、SAN、有效期、SHA-256 指纹与域名覆盖检查。TLS 参数（`TLS-023`～`TLS-031`、`TLS-033`）由每个 TLS 配置决定：协议版本范围、按 IANA 名称选择的密码套件（每个启用的版本至少一个）、ALPN 与会话复用（会话缓存与 TLS 1.3 票据）在监听上生效，OCSP Stapling 仅作预留并提示不生效；网站的 HSTS（`max-age`、`includeSubDomains`、`preload`，后者要求前者且至少一年）只在 TLS 监听的响应上发送。TLS 检查以客户端方式连接已配置的监听，报告协商的版本、密码套件、ALPN、各版本是否被接受、出示的证书是否覆盖域名及 HSTS，可从 REST API、`ppanel listener check` 与控制台发起。ACME（`TLS-012`～`TLS-022`）由 `automation-service` 实现：ACME 账户注册到 Let's Encrypt、ZeroSSL、Google Trust Services 或任意 ACME 目录（可附私有 CA 根证书与外部账户绑定），账户密钥同样以主密钥封存；自动证书以证书库 ID 为一个或多个名称申请，由在多副本间只执行一次的任务签发，首次签发创建或替换该证书，之后的续期替换它，引用始终不变；HTTP-01 的密钥授权写入网关密钥目录的 `acme-challenge/`，由每个监听在路由前应答；DNS-01 经 DNS 服务商发布 `_acme-challenge` TXT 记录并等待其传播，泛域名证书由此签发。DNS 服务商接口之下的首个实现以 RFC 2136 动态更新向区域主服务器提交 TSIG（RFC 8945，HMAC-SHA256/512）签名的更新，只接受签名可验证的应答，适用于 BIND、Knot DNS、PowerDNS 等；其密钥同样以主密钥封存，仍被证书使用的服务商不能删除。证书在剩余三分之一有效期时续期；CA 提供续期信息（RFC 9773）时改在其建议窗口内的随机时刻续期，并以 `replaces` 关联旧证书；失败保留 CA 给出的原因并发布 `tls.acme.certificate.failed`，之后从 1 小时起倍增、最长 1 天重试；每小时的续期检查还在任一证书距到期 30、14、7、3、1 天及过期时发布 `tls.certificate.expiring`。REST API、`ppanel acme` 与控制台证书页面的“自动证书”“ACME 账户”“DNS 服务商”标签提供注册、DNS 服务商管理、按 HTTP-01 或 DNS-01 申请、立即续期、停止与失败原因。
+
+0.4 请求安全（`SEC-001`～`SEC-013`、`SEC-015`～`SEC-027`）由命名的安全策略提供，网站与路由按标识引用（ADR 0017）：请求先通过网站的策略，再通过路由的策略，因此登录等接口可在网站策略之外再加更严的限流（`SEC-022`）。策略可按 CIDR 允许或拒绝客户端网络（拒绝优先），只允许列出的方法（其余返回 405 与 `Allow`，允许 GET 即允许 HEAD），拒绝路径前缀与不区分大小写的 User-Agent 正则，按来源域名（含 `*.` 通配与空 Referer 开关）防盗链，以网关密钥目录中的 htpasswd 文件（仅 bcrypt 与 Argon2）要求 Basic 认证（401 与带 `charset="UTF-8"` 的质询，转发前去掉 `Authorization`），限制请求头字节数（431）、请求体大小（按 `Content-Length` 与流式读取，413）与请求体读取间隔（408）；令牌桶限流按 nginx 语义（容量为 1 加突发，速率为请求数每周期），可按客户端地址、域名、路由或请求头计数，另可限制每个客户端地址的并发请求（`SEC-021` 以进行中的请求计数），超限返回 429 与 `Retry-After` 或自定义响应。监听可列出受信任代理与客户端地址所在的请求头（X-Forwarded-For、X-Real-IP 或 RFC 7239 Forwarded）：只有来自受信任代理的连接采信这些头，多级代理链取最右侧不受信任的地址，其他来源发送的这些头在转发前被删除，上游收到 `X-Real-IP`（`SEC-024`～`SEC-027`）。策略与引用在 REST API、`ppanel security-policy`、配置语言的 `security_policy` 块与控制台安全策略页面中编辑，删除仍被使用的策略会被拒绝；网关以 `request.security` 与 `listener.trusted-proxies` 能力协商，未声明的网关拒绝快照。配置检查对危险配置给出警告（`SEC-033`）：在明文 HTTP 监听上要求密码、把所有地址列为受信任代理、上游不校验 TLS 节点证书。Slowloris 头部读取期限（`SEC-014`）、敏感请求头的日志脱敏（`SEC-028`）、私钥权限与 Web 根目录越界检查（`SEC-029`、`SEC-030`）、路径穿越与符号链接策略（`SEC-031`、`SEC-032`）以及后端 localhost/Unix Socket 约束（`SEC-034`）仍为 `Planned`。
 
 ### 3.2 目标仓库边界
 
@@ -1014,8 +1016,8 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | DSL-020 | 283 | 数字类型 | 0.3 | A/C/G | Operator | config-compiler | 执行“数字类型”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | DSL-021 | 284 | 布尔类型 | 0.3 | A/C/G | Operator | config-compiler | 执行“布尔类型”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | DSL-022 | 285 | Duration 类型 | 0.3 | A/C/G | Operator | config-compiler | 执行“Duration 类型”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
-| DSL-023 | 286 | Size 类型 | 0.3 | A/C/G | Operator | config-compiler | 执行“Size 类型”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
-| DSL-024 | 287 | IP/CIDR 类型 | 0.3 | A/C/G | Operator | config-compiler | 执行“IP/CIDR 类型”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
+| DSL-023 | 286 | Size 类型 | 0.3 | A/C/G | Operator | config-compiler | 执行“Size 类型”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| DSL-024 | 287 | IP/CIDR 类型 | 0.3 | A/C/G | Operator | config-compiler | 执行“IP/CIDR 类型”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | DSL-025 | 288 | 数组参数 | 0.3 | A/C/G | Operator | config-compiler | 执行“数组参数”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | DSL-026 | 289 | `key=value` 命名参数 | 0.3 | A/C/G | Operator | config-compiler | 执行“'key=value' 命名参数”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | DSL-027 | 290 | DSL AST 查看 | 0.3 | A/C/G | Viewer | config-compiler | 查询“DSL AST 查看”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | Yes |
@@ -1089,39 +1091,39 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | LUA-045 | 358 | Lua 脚本版本 | 0.7 | A/C/G | Administrator | lua-runtime | 查询“Lua 脚本版本”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
 | LUA-046 | 359 | Lua 脚本回滚 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 脚本回滚”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | LUA-047 | 360 | Lua Hook 调试日志 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua Hook 调试日志”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-001 | 361 | Basic Auth | 0.4 | A/C/G | Operator | policy-engine | 执行“Basic Auth”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-002 | 362 | 用户名密码文件 | 0.4 | A/C/G | Operator | policy-engine | 执行“用户名密码文件”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-003 | 363 | IP 白名单 | 0.4 | A/C/G | Operator | policy-engine | 执行“IP 白名单”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-004 | 364 | IP 黑名单 | 0.4 | A/C/G | Operator | policy-engine | 执行“IP 黑名单”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-005 | 365 | CIDR 访问控制 | 0.4 | A/C/G | Operator | policy-engine | 执行“CIDR 访问控制”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-006 | 366 | Referer 防盗链 | 0.4 | A/C/G | Operator | policy-engine | 执行“Referer 防盗链”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-007 | 367 | 空 Referer 策略 | 0.4 | A/C/G | Operator | policy-engine | 执行“空 Referer 策略”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-008 | 368 | UA 黑名单 | 0.4 | A/C/G | Operator | policy-engine | 执行“UA 黑名单”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-009 | 369 | URI 黑名单 | 0.4 | A/C/G | Operator | policy-engine | 执行“URI 黑名单”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-010 | 370 | Method 白名单 | 0.4 | A/C/G | Operator | policy-engine | 执行“Method 白名单”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-011 | 371 | 最大请求 Header | 0.4 | A/C/G | Operator | policy-engine | 执行“最大请求 Header”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-012 | 372 | 最大请求体 | 0.4 | A/C/G | Operator | policy-engine | 执行“最大请求体”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-013 | 373 | Request Body Timeout | 0.4 | A/C/G | Operator | policy-engine | 执行“Request Body Timeout”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| SEC-001 | 361 | Basic Auth | 0.4 | A/C/G | Operator | policy-engine | 执行“Basic Auth”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SEC-002 | 362 | 用户名密码文件 | 0.4 | A/C/G | Operator | policy-engine | 执行“用户名密码文件”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SEC-003 | 363 | IP 白名单 | 0.4 | A/C/G | Operator | policy-engine | 执行“IP 白名单”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SEC-004 | 364 | IP 黑名单 | 0.4 | A/C/G | Operator | policy-engine | 执行“IP 黑名单”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SEC-005 | 365 | CIDR 访问控制 | 0.4 | A/C/G | Operator | policy-engine | 执行“CIDR 访问控制”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SEC-006 | 366 | Referer 防盗链 | 0.4 | A/C/G | Operator | policy-engine | 执行“Referer 防盗链”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SEC-007 | 367 | 空 Referer 策略 | 0.4 | A/C/G | Operator | policy-engine | 执行“空 Referer 策略”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SEC-008 | 368 | UA 黑名单 | 0.4 | A/C/G | Operator | policy-engine | 执行“UA 黑名单”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SEC-009 | 369 | URI 黑名单 | 0.4 | A/C/G | Operator | policy-engine | 执行“URI 黑名单”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SEC-010 | 370 | Method 白名单 | 0.4 | A/C/G | Operator | policy-engine | 执行“Method 白名单”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SEC-011 | 371 | 最大请求 Header | 0.4 | A/C/G | Operator | policy-engine | 执行“最大请求 Header”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SEC-012 | 372 | 最大请求体 | 0.4 | A/C/G | Operator | policy-engine | 执行“最大请求体”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SEC-013 | 373 | Request Body Timeout | 0.4 | A/C/G | Operator | policy-engine | 执行“Request Body Timeout”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | SEC-014 | 374 | Slowloris 基础防护 | 0.4 | A/C/G | Operator | policy-engine | 执行“Slowloris 基础防护”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-015 | 375 | 单 IP 请求速率限制 | 0.4 | A/C/G | Operator | policy-engine | 执行“单 IP 请求速率限制”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-016 | 376 | 单域名速率限制 | 0.4 | A/C/G | Operator | policy-engine | 执行“单域名速率限制”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-017 | 377 | 单 Route 速率限制 | 0.4 | A/C/G | Operator | policy-engine | 执行“单 Route 速率限制”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-018 | 378 | Header Key 限流 | 0.4 | A/C/G | Operator | policy-engine | 执行“Header Key 限流”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-019 | 379 | Token Bucket | 0.4 | A/C/G | Operator | policy-engine | 执行“Token Bucket”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-020 | 380 | Burst | 0.4 | A/C/G | Operator | policy-engine | 执行“Burst”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-021 | 381 | 并发连接限制 | 0.4 | A/C/G | Operator | policy-engine | 执行“并发连接限制”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-022 | 382 | 登录接口特殊限流 | 0.4 | A/C/G | Operator | policy-engine | 执行“登录接口特殊限流”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-023 | 383 | 429 自定义响应 | 0.4 | A/C/G | Operator | policy-engine | 执行“429 自定义响应”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-024 | 384 | Trusted Proxy 配置 | 0.4 | A/C/G | Operator | policy-engine | 执行“Trusted Proxy 配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-025 | 385 | Real IP 提取 | 0.4 | A/C/G | Operator | policy-engine | 执行“Real IP 提取”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-026 | 386 | 多级代理链处理 | 0.4 | A/C/G | Operator | policy-engine | 执行“多级代理链处理”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-027 | 387 | XFF 欺骗保护 | 0.4 | A/C/G | Operator | policy-engine | 执行“XFF 欺骗保护”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| SEC-015 | 375 | 单 IP 请求速率限制 | 0.4 | A/C/G | Operator | policy-engine | 执行“单 IP 请求速率限制”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SEC-016 | 376 | 单域名速率限制 | 0.4 | A/C/G | Operator | policy-engine | 执行“单域名速率限制”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SEC-017 | 377 | 单 Route 速率限制 | 0.4 | A/C/G | Operator | policy-engine | 执行“单 Route 速率限制”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SEC-018 | 378 | Header Key 限流 | 0.4 | A/C/G | Operator | policy-engine | 执行“Header Key 限流”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SEC-019 | 379 | Token Bucket | 0.4 | A/C/G | Operator | policy-engine | 执行“Token Bucket”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SEC-020 | 380 | Burst | 0.4 | A/C/G | Operator | policy-engine | 执行“Burst”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SEC-021 | 381 | 并发连接限制 | 0.4 | A/C/G | Operator | policy-engine | 执行“并发连接限制”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SEC-022 | 382 | 登录接口特殊限流 | 0.4 | A/C/G | Operator | policy-engine | 执行“登录接口特殊限流”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SEC-023 | 383 | 429 自定义响应 | 0.4 | A/C/G | Operator | policy-engine | 执行“429 自定义响应”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SEC-024 | 384 | Trusted Proxy 配置 | 0.4 | A/C/G | Operator | policy-engine | 执行“Trusted Proxy 配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SEC-025 | 385 | Real IP 提取 | 0.4 | A/C/G | Operator | policy-engine | 执行“Real IP 提取”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SEC-026 | 386 | 多级代理链处理 | 0.4 | A/C/G | Operator | policy-engine | 执行“多级代理链处理”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SEC-027 | 387 | XFF 欺骗保护 | 0.4 | A/C/G | Operator | policy-engine | 执行“XFF 欺骗保护”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | SEC-028 | 388 | 敏感 Header 脱敏日志 | 0.4 | A/C/G | Operator | policy-engine | 执行“敏感 Header 脱敏日志”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | SEC-029 | 389 | TLS 私钥权限检查 | 0.4 | A/C/G | Viewer | policy-engine | 查询“TLS 私钥权限检查”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
 | SEC-030 | 390 | Web 根目录越界检查 | 0.4 | A/C/G | Viewer | policy-engine | 查询“Web 根目录越界检查”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
 | SEC-031 | 391 | Path Traversal 防护 | 0.4 | A/C/G | Operator | policy-engine | 执行“Path Traversal 防护”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | SEC-032 | 392 | Symlink 策略 | 0.4 | A/C/G | Operator | policy-engine | 执行“Symlink 策略”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SEC-033 | 393 | 配置危险项警告 | 0.4 | A/C/G | Operator | policy-engine | 执行“配置危险项警告”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| SEC-033 | 393 | 配置危险项警告 | 0.4 | A/C/G | Operator | policy-engine | 执行“配置危险项警告”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | AUDIT-001 | 394 | 操作审计日志 | 0.3 | A/C/G | Auditor | audit writer | 执行“操作审计日志”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | AUDIT-002 | 395 | 登录审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“登录审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | AUDIT-003 | 396 | 配置修改审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“配置修改审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
@@ -1423,7 +1425,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | 新增团队/平台需求 | 105 |
 | 总 Feature ID | 685 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
-| 当前 `Implemented` | 268（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-022`、`DSL-025`～`DSL-034`、`DSL-035`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-005`；身份：`IAM-001`～`IAM-014`、`IAM-024`、`IAM-025`、`IAM-028`～`IAM-031`；证书：`TLS-001`～`TLS-033`；安全：`SEC-035`） |
+| 当前 `Implemented` | 297（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-005`；身份：`IAM-001`～`IAM-014`、`IAM-024`、`IAM-025`、`IAM-028`～`IAM-031`；证书：`TLS-001`～`TLS-033`；安全：`SEC-001`～`SEC-013`、`SEC-015`～`SEC-027`、`SEC-033`、`SEC-035`） |
 | 1.0 要求 `Verified` | 685 |
 
 分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 47、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。
