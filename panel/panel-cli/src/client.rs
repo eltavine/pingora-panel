@@ -99,6 +99,7 @@ pub type Result<T> = std::result::Result<T, CliError>;
 pub struct Reply {
     pub body: Value,
     pub etag: Option<String>,
+    pub status: StatusCode,
 }
 
 pub struct Api {
@@ -206,7 +207,7 @@ impl Api {
                 .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned()))
         };
         if status.is_success() {
-            Ok(Reply { body, etag })
+            Ok(Reply { body, etag, status })
         } else {
             Err(CliError::Api {
                 status,

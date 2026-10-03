@@ -168,10 +168,26 @@ async fn api(
         ("POST", "/api/v1/config/dry-run") => {
             Json(json!({"draft": {"version": 6}, "diagnostics": []})).into_response()
         }
+        ("POST", "/api/v1/config/apply") if body["note"] == "covered" => {
+            (StatusCode::ACCEPTED, Json(approval_request("pending"))).into_response()
+        }
         ("POST", "/api/v1/config/apply") => Json(json!({
             "draft": {"version": 6}, "revision": 7, "revision_id": 12, "content_hash": "sha256:cc"
         }))
         .into_response(),
+        ("GET", "/api/v1/approvals") => Json(json!({
+            "items": [approval_request("pending")], "next_before": null
+        }))
+        .into_response(),
+        ("POST", "/api/v1/approvals/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a77/approve") => {
+            Json(approval_request("approved")).into_response()
+        }
+        ("PUT", "/api/v1/approval-policies/prod") => {
+            let mut saved = body.clone();
+            saved["id"] = json!("prod");
+            saved["version"] = json!(2);
+            Json(saved).into_response()
+        }
         ("POST", "/api/v1/revisions/3/restore") => with_etag(
             "draft-6",
             json!({"language_version": 1, "files": {"main.conf": MAIN}, "diagnostics": []}),
@@ -1470,4 +1486,120 @@ fn password_sign_in_can_be_limited_to_break_glass_accounts() {
         "--no-break-glass",
     ]);
     assert_eq!(both.status.code(), Some(2));
+}
+
+fn approval_request(state: &str) -> Value {
+    json!({
+        "id": "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a77", "state": state, "draft_version": 6,
+        "content_hash": "sha256:cc", "requested_by": "ops",
+        "requested_at": "2026-10-03T09:00:00Z", "expires_at": "2026-10-04T09:00:00Z",
+        "note": "covered", "risk": "high", "policies": [{"id": "prod", "version": 1}],
+        "required": 1, "valid_minutes": 60,
+        "changes": [{"resource": "sites/shop", "change": "changed"}],
+        "approvals": if state == "approved" {
+            json!([{"approver": "root", "approved_at": "2026-10-03T09:05:00Z",
+                    "valid_until": "2026-10-03T10:05:00Z", "revoked_at": null}])
+        } else {
+            json!([])
+        },
+        "closed_by": null, "closed_at": null, "reason": null, "revision": null
+    })
+}
+
+#[test]
+fn covered_changes_wait_for_approval_from_the_command_line() {
+    let stub = Stub::start();
+    let waiting = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "config",
+        "apply",
+        "--note",
+        "covered",
+    ]);
+    assert!(waiting.status.success(), "{}", stderr(&waiting));
+    let said = String::from_utf8_lossy(&waiting.stdout);
+    assert!(
+        said.contains("Waiting for approval: request 0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a77")
+            && said.contains("prod@v1"),
+        "{said}"
+    );
+    let bypassed = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "config",
+        "apply",
+        "--bypass-reason",
+        "checkout is down for everyone",
+        "--incident",
+        "INC-7",
+    ]);
+    assert!(bypassed.status.success(), "{}", stderr(&bypassed));
+    assert_eq!(
+        stub.requests("POST", "/api/v1/config/apply")[1].body["bypass"],
+        json!({"reason": "checkout is down for everyone", "incident": "INC-7"})
+    );
+    let half = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "config",
+        "apply",
+        "--bypass-reason",
+        "x",
+    ]);
+    assert_eq!(half.status.code(), Some(2), "a bypass needs an incident");
+
+    let listed = stub.ppanel(&["--token", "ppat_admin", "approval", "list"]);
+    assert!(listed.status.success(), "{}", stderr(&listed));
+    let table = String::from_utf8_lossy(&listed.stdout);
+    assert!(
+        table.contains("pending") && table.contains("0/1"),
+        "{table}"
+    );
+    let approved = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "approval",
+        "approve",
+        "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a77",
+    ]);
+    assert!(approved.status.success(), "{}", stderr(&approved));
+    assert!(String::from_utf8_lossy(&approved.stdout).contains("it is now approved"));
+
+    let set = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "approval-policy",
+        "set",
+        "prod",
+        "--site-tag",
+        "prod",
+        "--min-risk",
+        "high",
+        "--window",
+        "mon,tue 09:00-18:00",
+        "--approvals",
+        "2",
+    ]);
+    assert!(set.status.success(), "{}", stderr(&set));
+    let body = &stub.requests("PUT", "/api/v1/approval-policies/prod")[0].body;
+    assert_eq!(
+        body["windows"],
+        json!([{"days": ["mon", "tue"], "start": "09:00", "end": "18:00"}])
+    );
+    assert_eq!(
+        (body["min_risk"].clone(), body["approvals"].clone()),
+        (json!("high"), json!(2))
+    );
+    assert_eq!(body["enabled"], true);
+    let bad = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "approval-policy",
+        "set",
+        "prod",
+        "--window",
+        "9to5",
+    ]);
+    assert_eq!(bad.status.code(), Some(2));
 }

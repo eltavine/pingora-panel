@@ -126,6 +126,12 @@ enum Command {
     /// The draft configuration: its files, checks, plans and applying it.
     #[command(subcommand)]
     Config(commands::config::ConfigCommand),
+    /// Requests to apply changes that approval policies cover.
+    #[command(subcommand)]
+    Approval(commands::approvals::ApprovalCommand),
+    /// Policies that ask other people to approve covered changes.
+    #[command(subcommand, name = "approval-policy")]
+    ApprovalPolicy(commands::approvals::ApprovalPolicyCommand),
     /// Configurations applied or attempted, their files and notes.
     #[command(subcommand)]
     Revision(commands::revisions::RevisionCommand),
@@ -214,6 +220,12 @@ async fn main() -> ExitCode {
                 commands::security::run(&api, &output, command).await
             }
             Command::Config(command) => commands::config::run(&api, &output, command).await,
+            Command::Approval(command) => {
+                commands::approvals::approval(&api, &output, command).await
+            }
+            Command::ApprovalPolicy(command) => {
+                commands::approvals::approval_policy(&api, &output, command).await
+            }
             Command::Revision(command) => commands::revisions::run(&api, &output, command).await,
             Command::Audit(command) => commands::audit::run(&api, &output, command).await,
             Command::Gateway(command) => commands::gateway::gateway(&api, &output, command).await,

@@ -3,6 +3,7 @@
 
 use crate::{
     client::{Api, CliError, Result},
+    commands::approvals,
     output::{text, Format, Output},
 };
 use clap::Subcommand;
@@ -110,6 +111,13 @@ pub(crate) enum ConfigCommand {
         /// activating anything.
         #[arg(long)]
         dry_run: bool,
+        /// Apply without the approvals policies ask for, in an emergency;
+        /// needs approval.bypass and is recorded.
+        #[arg(long, requires = "incident", conflicts_with = "dry_run")]
+        bypass_reason: Option<String>,
+        /// The incident a bypass answers, such as a ticket reference.
+        #[arg(long, requires = "bypass_reason")]
+        incident: Option<String>,
     },
     /// Restores a revision into the draft and applies it.
     Rollback {
@@ -332,19 +340,19 @@ async fn draft_version(api: &Api) -> Result<u64> {
         .ok_or_else(|| CliError::Transport("the draft has no version".into()))
 }
 
-async fn apply(api: &Api, expected_version: Option<u64>, note: Option<String>) -> Result<Value> {
-    Ok(api
-        .change(
-            Method::POST,
-            "/api/v1/config/apply",
-            Some(&json!({ "expected_version": expected_version, "note": note })),
-            None,
-        )
-        .await?
-        .body)
+/// Applies the draft; the reply is the applied revision, or with 202 the
+/// approval request the change waits on.
+async fn apply(api: &Api, body: Value) -> Result<(Value, bool)> {
+    let reply = api
+        .change(Method::POST, "/api/v1/config/apply", Some(&body), None)
+        .await?;
+    Ok((reply.body, reply.status == StatusCode::ACCEPTED))
 }
 
-fn applied_message(applied: &Value) -> String {
+fn applied_message((applied, waiting): &(Value, bool)) -> String {
+    if *waiting {
+        return approvals::waiting_message(applied);
+    }
     format!(
         "Applied version {} as revision {} (gateway revision {}, {})",
         text(&applied["draft"]["version"]),
@@ -693,6 +701,8 @@ pub async fn run(api: &Api, output: &Output, command: ConfigCommand) -> Result<(
             expected_version,
             note,
             dry_run,
+            bypass_reason,
+            incident,
         } => {
             if dry_run {
                 let checked = api
@@ -713,8 +723,12 @@ pub async fn run(api: &Api, output: &Output, command: ConfigCommand) -> Result<(
                     &checked,
                 );
             } else {
-                let applied = apply(api, expected_version, note).await?;
-                output.done(&applied_message(&applied), &applied);
+                let mut body = json!({ "expected_version": expected_version, "note": note });
+                if let (Some(reason), Some(incident)) = (bypass_reason, incident) {
+                    body["bypass"] = json!({ "reason": reason, "incident": incident });
+                }
+                let applied = apply(api, body).await?;
+                output.done(&applied_message(&applied), &applied.0);
             }
         }
         ConfigCommand::Rollback { to, reason } => {
@@ -727,13 +741,13 @@ pub async fn run(api: &Api, output: &Output, command: ConfigCommand) -> Result<(
             .await?;
             let version = draft_version(api).await?;
             let note = reason.unwrap_or_else(|| format!("Rollback to revision {to}"));
-            let applied = apply(api, Some(version), Some(note)).await?;
+            let applied = apply(api, json!({ "expected_version": version, "note": note })).await?;
             output.done(
                 &format!(
                     "Rolled back to revision {to}. {}",
                     applied_message(&applied)
                 ),
-                &applied,
+                &applied.0,
             );
         }
     }
