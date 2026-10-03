@@ -12,6 +12,7 @@ mod edit;
 mod model;
 mod query;
 mod validate;
+mod views;
 
 pub use compile::compile;
 pub use edit::{checked, NodeInput, RouteInput, SiteBundle, SiteInput, UpstreamInput};
@@ -24,6 +25,10 @@ pub use query::{
     SiteSort, SiteStatus, SiteSummary, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE,
 };
 pub use validate::validate;
+pub use views::{
+    BatchAction, BatchRequest, DomainCheck, DomainOwner, DomainView, RouteView, SiteList, SiteView,
+    UpstreamView, ValidationResult,
+};
 
 /// Identifies the document format in storage, exports and imports.
 pub const MODEL_VERSION: &str = "pingora.panel.config/v1";
