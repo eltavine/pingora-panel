@@ -10,13 +10,18 @@
 //! restores the desired configuration to a gateway that lost it, and
 //! suspends publication while the gateway runs an unknown configuration.
 
+mod configuration;
 mod deployments;
+mod draft;
+mod operations;
 mod publication;
 mod receipts;
 mod reconcile;
 mod recording;
 
+pub use configuration::ConfigurationService;
 pub use deployments::{PendingActivation, PgDeployments, PreparedRecord};
+pub use draft::{DraftState, PgDrafts};
 pub use publication::PublicationService;
 pub use receipts::PgActivationReceipts;
 pub use reconcile::{Reconciler, Reconciliation, ReconciliationCheck, ReconciliationWatch};
@@ -25,7 +30,12 @@ pub use recording::RecordingUseCases;
 use gateway_grpc_client::{GatewayGrpcClient, GatewayGrpcClientConfig};
 use panel_application::{GatewayService, GatewayUseCases, IdempotentGatewayUseCases};
 use panel_config_json::{JsonCompilerConfig, JsonRuntimeSnapshotCompiler};
-use panel_contracts::{config::v1::publication_server::PublicationServer, CONFIG_V1};
+use panel_contracts::{
+    config::v1::{
+        configuration_server::ConfigurationServer, publication_server::PublicationServer,
+    },
+    CONFIG_V1,
+};
 use panel_control_runtime::{ControlPlaneProcess, DefaultAddresses, ProcessSettings};
 use panel_errors::Result;
 use panel_health::Impact;
@@ -55,6 +65,11 @@ pub const MIGRATIONS: &[SchemaMigration] = &[
         10_001,
         "deployments",
         include_str!("../migrations/10001_deployments.sql"),
+    ),
+    SchemaMigration::new(
+        10_002,
+        "draft configuration",
+        include_str!("../migrations/10002_draft_configuration.sql"),
     ),
 ];
 
@@ -107,13 +122,19 @@ pub fn process(
         deployments,
         reconciliation.clone(),
     ));
+    let drafts = PgDrafts::new(process.database(), ServiceName::new(SERVICE)?);
     Ok(process
         .with_migrations(MIGRATIONS)
         .with_protocol(protocol_range(CONFIG_V1))
         .with_capability(Capability::new("config.publication", "1")?)
+        .with_capability(Capability::new("config.configuration", "1")?)
         .with_check(Arc::new(gateway_health), Impact::Degrading)
         .with_peer_access(
             panel_contracts::config::v1::publication_server::SERVICE_NAME,
+            [ServiceName::new("panel-api")?],
+        )
+        .with_peer_access(
+            panel_contracts::config::v1::configuration_server::SERVICE_NAME,
             [ServiceName::new("panel-api")?],
         )
         .with_check(
@@ -124,6 +145,11 @@ pub fn process(
             running.spawn(reconciler.run(reconcile_interval, running.shutdown_token()));
             Ok(())
         })
+        .with_grpc_service(
+            ConfigurationServer::new(ConfigurationService::new(drafts, Arc::clone(&use_cases)))
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES),
+        )
         .with_grpc_service(
             PublicationServer::from_arc(Arc::new(PublicationService::new(use_cases)))
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
