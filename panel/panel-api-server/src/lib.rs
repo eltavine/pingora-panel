@@ -10,15 +10,17 @@
 
 mod console;
 mod directory;
+mod operations;
 
 use config_grpc_client::{ConfigClientConfig, ConfigPublicationClient};
 use gateway_grpc_client::{GatewayGrpcClient, GatewayGrpcClientConfig};
 use panel_api::{router_with_config, ApiConfig, ApiState};
+use panel_application::RecordedRuntime;
 use panel_control_runtime::{ControlPlaneProcess, DefaultAddresses, ProcessSettings};
 use panel_errors::{PanelError, Result};
 use panel_health::Impact;
 use panel_platform::ServiceName;
-use panel_postgres::SqlIdentifier;
+use panel_postgres::{EventLog, SqlIdentifier};
 use panel_service::{require_loopback, Environment};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
@@ -92,6 +94,13 @@ pub fn process(
         None => GatewayGrpcClient::connect_lazy(gateway_url, GatewayGrpcClientConfig::default())?,
     };
     let config_health = config.health_check();
+    let runtime = RecordedRuntime::new(
+        Arc::new(gateway),
+        Arc::new(operations::OutboxOperations(EventLog::new(
+            process.database(),
+            ServiceName::new(SERVICE)?,
+        ))),
+    );
     Ok(process
         .with_database_impact(Impact::Degrading)
         .with_check(Arc::new(config_health), Impact::Degrading)
@@ -100,7 +109,7 @@ pub fn process(
             let api = router_with_config(
                 ApiState::new(Arc::clone(&config))
                     .with_configuration(config)
-                    .with_runtime(Arc::new(gateway))
+                    .with_runtime(Arc::new(runtime))
                     .with_health(running.health())
                     .with_directory(Arc::new(directory::RegistryDirectory::new(
                         running.jetstream().clone(),

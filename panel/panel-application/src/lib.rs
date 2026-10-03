@@ -11,6 +11,7 @@ mod configuration;
 mod context;
 mod gateway;
 mod idempotency;
+mod operations;
 mod persistence;
 mod runtime;
 
@@ -26,6 +27,7 @@ pub use gateway::{
     GatewayPort, GatewayService, GatewayStatus, GatewayUseCases, PreparedDeployment,
 };
 pub use idempotency::IdempotentGatewayUseCases;
+pub use operations::{OperationLog, RecordedRuntime};
 pub use panel_domain::ContentHash;
 pub use persistence::{
     AuditEventStore, AuditFact, IdempotencyClaim, IdempotencyLookup, IdempotencyRecord,
