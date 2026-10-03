@@ -6,6 +6,7 @@ import {
   CalendarSync,
   Eye,
   FileBadge,
+  Network,
   RefreshCw,
   Sparkles,
   Trash2,
@@ -14,7 +15,7 @@ import {
 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import type { CertificateView } from '@/api/generated'
+import type { CertificateView, DnsProviderView } from '@/api/generated'
 import {
   deleteCertificateMutation,
   listAcmeAccountsOptions,
@@ -22,6 +23,8 @@ import {
   listAutomaticCertificatesOptions,
   listAutomaticCertificatesQueryKey,
   listCertificatesOptions,
+  listDnsProvidersOptions,
+  listDnsProvidersQueryKey,
 } from '@/api/generated/@tanstack/vue-query.gen'
 import ApiFailureAlert from '@/components/ApiFailureAlert.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
@@ -56,10 +59,12 @@ import AutomaticCertificatesTable from './AutomaticCertificatesTable.vue'
 import CertificateDetailsSheet from './CertificateDetailsSheet.vue'
 import CertificateGenerateSheet from './CertificateGenerateSheet.vue'
 import CertificateUploadSheet from './CertificateUploadSheet.vue'
+import DnsProviderSheet from './DnsProviderSheet.vue'
+import DnsProvidersTable from './DnsProvidersTable.vue'
 import { STATUS_TONES, daysLeft } from './presentation'
 
 const SHOWN_NAMES = 3
-const TABS = ['inventory', 'automatic', 'accounts'] as const
+const TABS = ['inventory', 'automatic', 'accounts', 'dns'] as const
 type Tab = (typeof TABS)[number]
 
 const { t, d } = useI18n()
@@ -84,8 +89,16 @@ const accountIds = computed(() => (accounts.data.value ?? []).map((account) => a
 const automaticIds = computed(() =>
   (automatic.data.value ?? []).map((certificate) => certificate.id),
 )
+const providers = useQuery(listDnsProvidersOptions())
+const providerIds = computed(() => (providers.data.value ?? []).map((provider) => provider.id))
 const requesting = ref(false)
 const registering = ref(false)
+const editingProvider = ref<DnsProviderView>()
+const providerOpen = ref(false)
+function openProvider(provider?: DnsProviderView) {
+  editingProvider.value = provider
+  providerOpen.value = true
+}
 function register() {
   tab.value = 'accounts'
   registering.value = true
@@ -181,26 +194,37 @@ function confirmRemove() {
           <CalendarSync data-icon="inline-start" aria-hidden="true" />
           {{ t('certificates.acme.request') }}
         </Button>
-        <Button v-else size="sm" @click="registering = true">
+        <Button v-else-if="tab === 'accounts'" size="sm" @click="registering = true">
           <UserRoundKey data-icon="inline-start" aria-hidden="true" />
           {{ t('certificates.acme.register') }}
+        </Button>
+        <Button v-else size="sm" @click="openProvider()">
+          <Network data-icon="inline-start" aria-hidden="true" />
+          {{ t('certificates.dns.add') }}
         </Button>
       </template>
     </PageHeader>
 
     <Tabs v-model="tab" class="gap-4">
-      <TabsList :aria-label="t('certificates.title')">
+      <TabsList
+        class="h-auto max-w-full justify-start overflow-x-auto"
+        :aria-label="t('certificates.title')"
+      >
         <TabsTrigger value="inventory">
-          <FileBadge aria-hidden="true" />
+          <FileBadge class="max-sm:hidden" aria-hidden="true" />
           {{ t('certificates.tabs.inventory') }}
         </TabsTrigger>
         <TabsTrigger value="automatic">
-          <CalendarSync aria-hidden="true" />
+          <CalendarSync class="max-sm:hidden" aria-hidden="true" />
           {{ t('certificates.tabs.automatic') }}
         </TabsTrigger>
         <TabsTrigger value="accounts">
-          <UserRoundKey aria-hidden="true" />
+          <UserRoundKey class="max-sm:hidden" aria-hidden="true" />
           {{ t('certificates.tabs.accounts') }}
+        </TabsTrigger>
+        <TabsTrigger value="dns">
+          <Network class="max-sm:hidden" aria-hidden="true" />
+          {{ t('certificates.tabs.dns') }}
         </TabsTrigger>
       </TabsList>
       <TabsContent value="inventory">
@@ -342,11 +366,15 @@ function confirmRemove() {
       <TabsContent value="accounts">
         <AcmeAccountsTable :can-manage="canManage" @register="registering = true" />
       </TabsContent>
+      <TabsContent value="dns">
+        <DnsProvidersTable :can-manage="canManage" @add="openProvider()" @edit="openProvider" />
+      </TabsContent>
     </Tabs>
 
     <AutomaticCertificateSheet
       v-model:open="requesting"
       :accounts="accounts.data.value ?? []"
+      :providers="providers.data.value ?? []"
       :taken="automaticIds"
       @saved="refresh(listAutomaticCertificatesQueryKey())"
     />
@@ -354,6 +382,12 @@ function confirmRemove() {
       v-model:open="registering"
       :taken="accountIds"
       @saved="refresh(listAcmeAccountsQueryKey())"
+    />
+    <DnsProviderSheet
+      v-model:open="providerOpen"
+      :provider="editingProvider"
+      :taken="providerIds"
+      @saved="refresh(listDnsProvidersQueryKey())"
     />
     <CertificateUploadSheet v-model:open="uploading" :taken="ids" @saved="certificates.refetch()" />
     <CertificateUploadSheet

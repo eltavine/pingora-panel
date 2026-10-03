@@ -199,9 +199,12 @@ function confirmStop() {
               }}</span
             >
           </TableCell>
-          <TableCell class="hidden align-top font-mono text-xs md:table-cell">{{
-            certificate.account
-          }}</TableCell>
+          <TableCell class="hidden align-top md:table-cell">
+            <span class="block font-mono text-xs">{{ certificate.account }}</span>
+            <span class="text-muted-foreground block text-xs">{{
+              certificate.dns_provider ? `DNS-01 · ${certificate.dns_provider}` : 'HTTP-01'
+            }}</span>
+          </TableCell>
           <TableCell class="align-top">
             <span v-if="canManage" class="flex flex-col items-end gap-1 sm:flex-row sm:justify-end">
               <Button

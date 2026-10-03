@@ -174,3 +174,107 @@ test('automatic certificates are requested, renewed and stopped', async ({ page 
   expect(changes[2]!.method()).toBe('DELETE')
   expect(changes[2]!.headers()['if-match']).toBe('"1"')
 })
+
+const provider = {
+  id: 'primary-ns',
+  kind: 'rfc2136',
+  rfc2136: {
+    server: 'ns1.example.com:53',
+    zones: ['example.com'],
+    key_name: 'acme-update',
+    algorithm: 'hmac-sha256',
+  },
+  propagation_seconds: 30,
+  version: 2,
+  created_at: '2026-10-01T00:00:00Z',
+  updated_at: '2026-10-01T00:00:00Z',
+  etag: '"2"',
+}
+
+async function mockProviders(page: Page, providers: unknown[], changes: Request[]) {
+  await page.route('**/api/v1/dns-providers', (route) => {
+    if (route.request().method() !== 'POST') {
+      return route.fulfill({ json: providers })
+    }
+    changes.push(route.request())
+    return route.fulfill({ status: 201, headers: { etag: '"1"' }, json: provider })
+  })
+  await page.route('**/api/v1/dns-providers/*', (route) => {
+    changes.push(route.request())
+    return route.request().method() === 'DELETE'
+      ? route.fulfill({ status: 204 })
+      : route.fulfill({ json: provider })
+  })
+}
+
+test('DNS providers are added and edited without showing their secret', async ({ page }) => {
+  const changes: Request[] = []
+  await mockAcme(page, [account], [])
+  await mockProviders(page, [], changes)
+  await page.goto('/certificates?tab=dns')
+  await expect(page.getByText('No DNS providers yet')).toBeVisible()
+  await page.getByRole('button', { name: 'Add DNS provider' }).first().click()
+
+  const sheet = page.getByRole('dialog')
+  await sheet.getByLabel('ID', { exact: true }).fill('primary-ns')
+  await sheet.getByLabel('Primary server').fill('ns1.example.com:53')
+  await sheet.getByLabel('Zones').fill('example.com, example.org')
+  await sheet.getByLabel('TSIG key name').fill('acme-update')
+  const add = sheet.getByRole('button', { name: 'Add DNS provider' })
+  await expect(add).toBeDisabled()
+  await sheet.getByLabel('TSIG secret').fill('c2VjcmV0')
+  await add.click()
+  await expect.poll(() => changes.length).toBe(1)
+  expect(changes[0]!.postDataJSON()).toEqual({
+    id: 'primary-ns',
+    kind: 'rfc2136',
+    rfc2136: {
+      server: 'ns1.example.com:53',
+      zones: ['example.com', 'example.org'],
+      key_name: 'acme-update',
+      algorithm: 'hmac-sha256',
+    },
+    secret: 'c2VjcmV0',
+    propagation_seconds: 30,
+  })
+})
+
+test('existing DNS providers keep their secret unless a new one is given', async ({ page }) => {
+  const changes: Request[] = []
+  await mockAcme(page, [account], [])
+  await mockProviders(page, [provider], changes)
+  await page.goto('/certificates?tab=dns')
+  const row = page.getByRole('row').filter({ hasText: 'primary-ns' })
+  await row.getByRole('button', { name: 'Edit' }).click()
+  const sheet = page.getByRole('dialog')
+  await sheet.getByLabel('Primary server').fill('ns2.example.com:53')
+  await sheet.getByRole('button', { name: 'Save' }).click()
+  await expect.poll(() => changes.length).toBe(1)
+  expect(changes[0]!.method()).toBe('PUT')
+  expect(changes[0]!.headers()['if-match']).toBe('"2"')
+  const body = changes[0]!.postDataJSON() as Record<string, unknown>
+  expect(body).not.toHaveProperty('secret')
+  expect(body.rfc2136).toMatchObject({ server: 'ns2.example.com:53' })
+})
+
+test('wildcard certificates are requested over DNS-01', async ({ page }) => {
+  const changes: Request[] = []
+  await mockAcme(page, [account], changes)
+  await mockProviders(page, [provider], [])
+  await page.goto('/certificates?tab=automatic')
+  await page.getByRole('button', { name: 'Request certificate' }).click()
+  const sheet = page.getByRole('dialog')
+  await sheet.getByLabel('Names').fill('*.example.com\nexample.com')
+  await expect(sheet.getByText('Wildcard names need DNS-01 validation.')).toBeVisible()
+  await sheet.getByRole('tab', { name: 'DNS-01' }).click()
+  await expect(sheet.getByText('Wildcard names need DNS-01 validation.')).toBeHidden()
+  await sheet.getByRole('button', { name: 'Request certificate' }).click()
+  await expect.poll(() => changes.length).toBe(1)
+  expect(changes[0]!.postDataJSON()).toEqual({
+    id: 'example.com',
+    account: 'letsencrypt',
+    names: ['*.example.com', 'example.com'],
+    challenge: 'dns-01',
+    dns_provider: 'primary-ns',
+  })
+})

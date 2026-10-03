@@ -46,6 +46,10 @@ export const KNOWN_TYPES = [
   'tls.acme.certificate.failed',
   'tls.acme.certificate.deleted',
   'tls.acme.certificate.refused',
+  'tls.acme.dns_provider.created',
+  'tls.acme.dns_provider.updated',
+  'tls.acme.dns_provider.deleted',
+  'tls.acme.dns_provider.refused',
 ] as const
 
 export type KnownType = (typeof KNOWN_TYPES)[number]
@@ -153,7 +157,11 @@ export function summaryOf(event: AuditEvent, t: Translate): string {
       return `${text(data.id)} · ${list(data.names)} · ${text(data.source)}`
     case 'tls.certificate.replaced':
       return `${text(data.id)} · v${text(data.version)} · ${list(data.names)}`
+    case 'tls.acme.dns_provider.created':
+    case 'tls.acme.dns_provider.updated':
+      return `${text(data.id)} · ${text(data.server)} · ${list(data.zones)}`
     case 'tls.certificate.deleted':
+    case 'tls.acme.dns_provider.deleted':
     case 'tls.acme.account.deleted':
     case 'tls.acme.certificate.deleted':
     case 'tls.acme.certificate.renewal_requested':
@@ -161,6 +169,7 @@ export function summaryOf(event: AuditEvent, t: Translate): string {
     case 'tls.certificate.refused':
     case 'tls.acme.account.refused':
     case 'tls.acme.certificate.refused':
+    case 'tls.acme.dns_provider.refused':
       return [`${text(data.operation)} ${text(data.id)}`, data.code, data.message]
         .map(text)
         .filter(Boolean)

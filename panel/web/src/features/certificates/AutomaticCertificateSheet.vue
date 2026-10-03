@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
 import { useMutation } from '@tanstack/vue-query'
-import { CalendarSync, Info } from '@lucide/vue'
+import { CalendarSync, Globe, Info, Network } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import type { AcmeAccountView } from '@/api/generated'
+import type { AcmeAccountView, AcmeChallenge, DnsProviderView } from '@/api/generated'
 import { createAutomaticCertificateMutation } from '@/api/generated/@tanstack/vue-query.gen'
 import FormField from '@/components/FormField.vue'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Select,
   SelectContent,
@@ -32,6 +33,7 @@ import { CERTIFICATE_ID, directoryHost, parseNames, suggestedId } from './presen
 const open = defineModel<boolean>('open', { required: true })
 const props = defineProps<{
   accounts: readonly AcmeAccountView[]
+  providers: readonly DnsProviderView[]
   /** IDs of automatic certificates already there. */
   taken: readonly string[]
 }>()
@@ -40,7 +42,14 @@ const emit = defineEmits<{ saved: [] }>()
 const { t } = useI18n()
 const create = useMutation(createAutomaticCertificateMutation())
 
-const form = reactive({ account: '', names: '', id: '', idEdited: false })
+const form = reactive({
+  account: '',
+  names: '',
+  id: '',
+  idEdited: false,
+  challenge: 'http-01' as AcmeChallenge,
+  provider: '',
+})
 watch(open, (isOpen) => {
   if (isOpen) {
     Object.assign(form, {
@@ -48,6 +57,8 @@ watch(open, (isOpen) => {
       names: '',
       id: '',
       idEdited: false,
+      challenge: 'http-01',
+      provider: props.providers[0]?.id ?? '',
     })
   }
 })
@@ -59,7 +70,7 @@ watch(names, (current) => {
 })
 
 const namesError = computed(() =>
-  names.value.some((name) => name.startsWith('*.'))
+  form.challenge === 'http-01' && names.value.some((name) => name.startsWith('*.'))
     ? t('certificates.acme.wildcardNeedsDns')
     : null,
 )
@@ -78,13 +89,20 @@ const ready = computed(
     names.value.length > 0 &&
     namesError.value === null &&
     form.id !== '' &&
-    idError.value === null,
+    idError.value === null &&
+    (form.challenge === 'http-01' || form.provider !== ''),
 )
 
 function submit() {
   create.mutate(
     {
-      body: { id: form.id, account: form.account, names: names.value, challenge: 'http-01' },
+      body: {
+        id: form.id,
+        account: form.account,
+        names: names.value,
+        challenge: form.challenge,
+        ...(form.challenge === 'dns-01' ? { dns_provider: form.provider } : {}),
+      },
       headers: plainHeaders(),
     },
     {
@@ -157,9 +175,48 @@ function submit() {
               @input="form.idEdited = true"
             />
           </FormField>
+          <div class="flex flex-col gap-2">
+            <span class="text-sm font-medium">{{ t('certificates.acme.challenge') }}</span>
+            <Tabs v-model="form.challenge">
+              <TabsList class="w-full" :aria-label="t('certificates.acme.challenge')">
+                <TabsTrigger value="http-01">
+                  <Globe aria-hidden="true" />
+                  HTTP-01
+                </TabsTrigger>
+                <TabsTrigger value="dns-01">
+                  <Network aria-hidden="true" />
+                  DNS-01
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
+          <FormField
+            v-if="form.challenge === 'dns-01'"
+            id="automatic-provider"
+            :label="t('certificates.dns.provider')"
+            :hint="providers.length === 0 ? t('certificates.dns.noneYet') : undefined"
+          >
+            <Select v-model="form.provider" :disabled="providers.length === 0">
+              <SelectTrigger id="automatic-provider" class="w-full">
+                <SelectValue :placeholder="t('certificates.dns.pick')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="provider in providers" :key="provider.id" :value="provider.id">
+                  <span class="font-mono text-xs">{{ provider.id }}</span>
+                  <span class="text-muted-foreground truncate text-xs">{{
+                    ` · ${provider.rfc2136.zones.join(', ')}`
+                  }}</span>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </FormField>
           <Alert>
             <Info aria-hidden="true" />
-            <AlertDescription>{{ t('certificates.acme.http01Detail') }}</AlertDescription>
+            <AlertDescription>{{
+              form.challenge === 'http-01'
+                ? t('certificates.acme.http01Detail')
+                : t('certificates.acme.dns01Detail')
+            }}</AlertDescription>
           </Alert>
         </div>
         <SheetFooter>
