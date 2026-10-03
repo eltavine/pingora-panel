@@ -1,4 +1,4 @@
-use panel_application::ConfigurationPort;
+use panel_application::{ConfigurationPort, GatewayRuntimePort};
 use panel_health::HealthWatch;
 use panel_platform::ServiceDirectory;
 use std::sync::Arc;
@@ -8,6 +8,7 @@ pub struct ApiState<U> {
     pub(crate) health: Option<HealthWatch>,
     pub(crate) directory: Option<Arc<dyn ServiceDirectory>>,
     pub(crate) configuration: Option<Arc<dyn ConfigurationPort>>,
+    pub(crate) runtime: Option<Arc<dyn GatewayRuntimePort>>,
 }
 
 impl<U> Clone for ApiState<U> {
@@ -17,6 +18,7 @@ impl<U> Clone for ApiState<U> {
             health: self.health.clone(),
             directory: self.directory.clone(),
             configuration: self.configuration.clone(),
+            runtime: self.runtime.clone(),
         }
     }
 }
@@ -28,7 +30,14 @@ impl<U> ApiState<U> {
             health: None,
             directory: None,
             configuration: None,
+            runtime: None,
         }
+    }
+
+    /// Serves data plane status, reloads, workers, shutdown and upstream health.
+    pub fn with_runtime(mut self, runtime: Arc<dyn GatewayRuntimePort>) -> Self {
+        self.runtime = Some(runtime);
+        self
     }
 
     /// Serves sites, upstreams, listeners and the draft under `/api/v1`.

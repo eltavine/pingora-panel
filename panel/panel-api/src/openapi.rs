@@ -30,9 +30,15 @@ mod tests;
         crate::configuration::delete_listener, crate::configuration::list_tls_profiles,
         crate::configuration::get_tls_profile, crate::configuration::put_tls_profile,
         crate::configuration::delete_tls_profile, crate::configuration::draft, crate::configuration::validation,
-        crate::configuration::apply
+        crate::configuration::apply,
+        crate::gateway_runtime::data_plane, crate::gateway_runtime::reload, crate::gateway_runtime::workers,
+        crate::gateway_runtime::shutdown, crate::gateway_runtime::upstream_health, crate::gateway_runtime::drain,
+        crate::gateway_runtime::restore
     ),
-    tags((name = "configuration", description = "Sites, domains, routes, upstreams, listeners and TLS profiles, edited as a draft and applied to the gateway")),
+    tags(
+        (name = "configuration", description = "Sites, domains, routes, upstreams, listeners and TLS profiles, edited as a draft and applied to the gateway"),
+        (name = "gateway", description = "The running gateway: data plane, workers, shutdown and upstream health")
+    ),
     modifiers(&HttpConventions),
     components(schemas(
         SnapshotEnvelope,

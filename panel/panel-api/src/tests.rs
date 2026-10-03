@@ -19,6 +19,7 @@ mod admission;
 mod conditional;
 mod platform;
 mod request_identity;
+mod runtime;
 
 struct IdentityCompiler;
 

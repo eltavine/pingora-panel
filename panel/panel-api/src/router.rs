@@ -1,6 +1,6 @@
 use crate::{
     admission::{admit, Admission},
-    configuration as config, middleware, routes, ApiConfig, ApiState,
+    configuration as config, gateway_runtime as runtime, middleware, routes, ApiConfig, ApiState,
 };
 use axum::{
     extract::DefaultBodyLimit,
@@ -29,6 +29,18 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         .route("/api/v1/gateway/activate", post(routes::activate::<U>))
         .route("/api/v1/gateway/abort", post(routes::abort::<U>))
         .route("/api/v1/gateway/status", get(routes::status::<U>))
+        .route("/api/v1/gateway/data-plane", get(runtime::data_plane::<U>))
+        .route("/api/v1/gateway/reload", post(runtime::reload::<U>))
+        .route("/api/v1/gateway/workers", put(runtime::workers::<U>))
+        .route("/api/v1/gateway/shutdown", post(runtime::shutdown::<U>))
+        .route(
+            "/api/v1/upstreams/health",
+            get(runtime::upstream_health::<U>),
+        )
+        .route(
+            "/api/v1/upstreams/{id}/nodes/{node}/drain",
+            put(runtime::drain::<U>).delete(runtime::restore::<U>),
+        )
         .route("/api/v1/gateway/receipts/{key}", get(routes::receipt::<U>))
         .route("/api/v1/platform/services", get(routes::services::<U>))
         .route(

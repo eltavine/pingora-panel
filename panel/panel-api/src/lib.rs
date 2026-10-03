@@ -13,6 +13,7 @@ mod configuration;
 mod contract;
 mod error;
 mod error_contract;
+mod gateway_runtime;
 mod middleware;
 mod openapi;
 mod request_context;
@@ -26,6 +27,10 @@ pub use configuration::{
     ImportResponse, RouteOrderRequest,
 };
 pub use contract::*;
+pub use gateway_runtime::{
+    DataPlaneListenerResponse, DataPlaneResponse, EndpointHealthResponse, ShutdownResponse,
+    UpstreamHealthReportResponse, UpstreamHealthResponse, WorkerCountRequest,
+};
 pub use openapi::ApiDoc;
 pub use router::{router, router_with_config};
 pub use state::ApiState;
