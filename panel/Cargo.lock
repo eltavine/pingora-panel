@@ -2249,6 +2249,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "panel-config-model"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "chrono",
+ "panel-domain",
+ "panel-engine",
+ "panel-errors",
+ "panel-ir",
+ "serde",
+ "serde_json",
+ "utoipa",
+ "uuid",
+]
+
+[[package]]
 name = "panel-config-state-codec"
 version = "0.1.0"
 dependencies = [
