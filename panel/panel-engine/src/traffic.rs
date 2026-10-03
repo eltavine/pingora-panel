@@ -602,6 +602,16 @@ mod tests {
     }
 
     #[test]
+    fn route_patterns_compile_as_engines_compile_them() {
+        assert_eq!(crate::route_regex_error(r"(?i)\.(png|jpg)$"), None);
+        assert_eq!(crate::route_regex_error(r"^/user/(?<id>\d+)$"), None);
+        assert_eq!(
+            crate::route_regex_error("^(/api").as_deref(),
+            Some("unclosed group")
+        );
+    }
+
+    #[test]
     fn route_actions_and_names_are_checked() {
         let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
         snapshot.sites.push(site());
