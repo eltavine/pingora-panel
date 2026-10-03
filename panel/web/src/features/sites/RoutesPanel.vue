@@ -105,7 +105,10 @@ function move(index: number, step: number) {
   if (target < 0 || target >= order.value.length) {
     return
   }
-  moveArrayElement(order, index, target)
+  const next = [...order.value]
+  const [route] = next.splice(index, 1)
+  next.splice(target, 0, route!)
+  order.value = next
   save()
 }
 
