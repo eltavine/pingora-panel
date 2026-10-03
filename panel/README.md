@@ -417,6 +417,24 @@ refresh token, and sessions it refuses end; disabling or deleting a provider
 ends its sessions at once. Refused sign-ins are recorded as failed logins
 with the provider and the reason.
 
+Besides the roles an account holds everywhere, account managers can grant it
+a role for one site group (the sites' `group`), for one site, or for
+everything, counting only before an expiry, from given client networks or
+within weekly UTC windows
+([decision](../docs/adr/0021-scoped-and-conditional-grants.md)). The API
+evaluates grants on every request; a configuration permission held only for
+some sites lets the request through with a site scope that the
+configuration service enforces: lists and summaries show only those sites,
+changes must stay within them, a draft applies only when every change in its
+plan is one of them, and shared resources can be read but not changed.
+`/api/v1/accounts/{id}/grants` lists, creates and deletes grants.
+
+```sh
+ppanel account grant ops --role operator --site-group shop \
+  --network 10.0.0.0/8 --window "mon,tue,wed,thu,fri 09:00-18:00" --until 2026-12-31T00:00:00Z
+ppanel account grants ops
+```
+
 Programs get service accounts
 ([decision](../docs/adr/0020-service-accounts-and-workload-identity.md)):
 they have no password, never sign in and cannot be break-glass accounts, and
