@@ -28,3 +28,39 @@ message SnapshotRefused {
   string code = 2;
   string message = 3;
 }
+
+// `gateway.reloaded`: the gateway loaded its configuration again.
+message Reloaded {
+  uint64 generation = 1;
+  uint32 workers = 2;
+}
+
+// `gateway.workers.changed`
+message WorkersChanged {
+  uint64 generation = 1;
+  uint32 workers = 2;
+}
+
+// `gateway.shutdown.requested`
+message ShutdownRequested {}
+
+// `gateway.endpoint.drained`: an upstream endpoint takes no new requests.
+message EndpointDrained {
+  string upstream = 1;
+  string endpoint = 2;
+}
+
+// `gateway.endpoint.restored`
+message EndpointRestored {
+  string upstream = 1;
+  string endpoint = 2;
+}
+
+// `gateway.operation.refused`
+message OperationRefused {
+  // The type of the event the operation would have published, without
+  // `gateway.`, such as `workers.changed`.
+  string operation = 1;
+  string code = 2;
+  string message = 3;
+}

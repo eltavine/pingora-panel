@@ -2633,6 +2633,8 @@ dependencies = [
  "panel-domain",
  "panel-engine",
  "panel-errors",
+ "panel-event-contracts",
+ "panel-events",
  "panel-health",
  "panel-identity",
  "panel-ir",

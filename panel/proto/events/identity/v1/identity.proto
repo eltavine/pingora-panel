@@ -216,3 +216,14 @@ message WorkloadTrustUpdated {
 message WorkloadTrustDeleted {
   string workload_identity = 1;
 }
+
+// `identity.access.denied`: a request of a signed-in caller was refused.
+message AccessDenied {
+  string method = 1;
+  // The route's path template, such as `/api/v1/sites/{id}`.
+  string route = 2;
+  // `permission`, `csrf` or `cross_site`.
+  string reason = 3;
+  // The permission the route needs, when that was missing.
+  optional string permission = 4;
+}

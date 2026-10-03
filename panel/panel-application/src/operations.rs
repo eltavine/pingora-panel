@@ -6,29 +6,34 @@ use crate::{
     UpstreamHealthReport,
 };
 use async_trait::async_trait;
-use panel_errors::Result;
-use serde_json::{json, Value};
+use panel_errors::{PanelError, Result};
 use std::sync::Arc;
+
+/// An operation that changes the data plane, with its outcome: the data
+/// plane after it, or why it was refused.
+#[derive(Clone, Copy, Debug)]
+pub enum Operation<'a> {
+    Reload(std::result::Result<&'a DataPlaneState, &'a PanelError>),
+    SetWorkerCount(std::result::Result<&'a DataPlaneState, &'a PanelError>),
+    Shutdown(std::result::Result<(), &'a PanelError>),
+    SetEndpointDrained {
+        upstream: &'a str,
+        endpoint: &'a str,
+        drained: bool,
+        result: std::result::Result<(), &'a PanelError>,
+    },
+}
 
 /// Where operations are recorded.
 #[async_trait]
 pub trait OperationLog: Send + Sync {
-    /// Records `event_type` about `target`, an aggregate type and ID. What
-    /// it describes already happened, so recording does not fail the caller.
-    async fn record(
-        &self,
-        context: &CommandContext,
-        event_type: &str,
-        target: (&str, &str),
-        data: Value,
-    );
+    /// Records `operation`. What it describes already happened, so
+    /// recording does not fail the caller.
+    async fn record(&self, context: &CommandContext, operation: Operation<'_>);
 }
 
-/// The data plane as a whole, the target of its operations.
-const DATA_PLANE: (&str, &str) = ("gateway", "data-plane");
-
-/// A runtime port that records each change it makes, and each refusal, as
-/// `gateway.<change>` or `gateway.operation.refused`.
+/// A runtime port that records each operation that changes the data plane,
+/// refused or not.
 pub struct RecordedRuntime {
     inner: Arc<dyn GatewayRuntimePort>,
     log: Arc<dyn OperationLog>,
@@ -38,46 +43,6 @@ impl RecordedRuntime {
     pub fn new(inner: Arc<dyn GatewayRuntimePort>, log: Arc<dyn OperationLog>) -> Self {
         Self { inner, log }
     }
-
-    async fn record<T>(
-        &self,
-        context: &CommandContext,
-        operation: &str,
-        target: (&str, &str),
-        result: &Result<T>,
-        data: impl FnOnce(&T) -> Value,
-    ) {
-        match result {
-            Ok(value) => {
-                self.log
-                    .record(
-                        context,
-                        &format!("gateway.{operation}"),
-                        target,
-                        data(value),
-                    )
-                    .await;
-            }
-            Err(error) => {
-                self.log
-                    .record(
-                        context,
-                        "gateway.operation.refused",
-                        target,
-                        json!({
-                            "operation": operation,
-                            "code": error.code.as_str(),
-                            "message": error.message,
-                        }),
-                    )
-                    .await;
-            }
-        }
-    }
-}
-
-fn generation(state: &DataPlaneState) -> Value {
-    json!({ "generation": state.generation, "workers": state.worker_count })
 }
 
 #[async_trait]
@@ -88,7 +53,8 @@ impl GatewayRuntimePort for RecordedRuntime {
 
     async fn reload(&self, context: CommandContext) -> Result<DataPlaneState> {
         let result = self.inner.reload(context.clone()).await;
-        self.record(&context, "reloaded", DATA_PLANE, &result, generation)
+        self.log
+            .record(&context, Operation::Reload(result.as_ref()))
             .await;
         result
     }
@@ -99,17 +65,17 @@ impl GatewayRuntimePort for RecordedRuntime {
         workers: u32,
     ) -> Result<DataPlaneState> {
         let result = self.inner.set_worker_count(context.clone(), workers).await;
-        self.record(&context, "workers.changed", DATA_PLANE, &result, generation)
+        self.log
+            .record(&context, Operation::SetWorkerCount(result.as_ref()))
             .await;
         result
     }
 
     async fn shutdown(&self, context: CommandContext) -> Result<()> {
         let result = self.inner.shutdown(context.clone()).await;
-        self.record(&context, "shutdown.requested", DATA_PLANE, &result, |()| {
-            json!({})
-        })
-        .await;
+        self.log
+            .record(&context, Operation::Shutdown(result.as_ref().map(|_| ())))
+            .await;
         result
     }
 
@@ -132,19 +98,13 @@ impl GatewayRuntimePort for RecordedRuntime {
             .inner
             .set_endpoint_drained(context.clone(), upstream.clone(), endpoint.clone(), drained)
             .await;
-        let operation = if drained {
-            "endpoint.drained"
-        } else {
-            "endpoint.restored"
+        let operation = Operation::SetEndpointDrained {
+            upstream: &upstream,
+            endpoint: &endpoint,
+            drained,
+            result: result.as_ref().map(|_| ()),
         };
-        self.record(
-            &context,
-            operation,
-            ("upstream", &upstream),
-            &result,
-            |_| json!({ "upstream": upstream.as_str(), "endpoint": endpoint.as_str() }),
-        )
-        .await;
+        self.log.record(&context, operation).await;
         result
     }
 }
@@ -204,24 +164,43 @@ mod tests {
         }
     }
 
+    /// An operation as the test log keeps it: what, and its error code if
+    /// it was refused.
+    type Recorded = (String, String, std::result::Result<String, String>);
+
     #[derive(Default)]
-    struct Log(Mutex<Vec<(String, String, String, Value)>>);
+    struct Log(Mutex<Vec<Recorded>>);
 
     #[async_trait]
     impl OperationLog for Log {
-        async fn record(
-            &self,
-            context: &CommandContext,
-            event_type: &str,
-            target: (&str, &str),
-            data: Value,
-        ) {
-            self.0.lock().unwrap().push((
-                context.actor().to_owned(),
-                event_type.to_owned(),
-                format!("{}/{}", target.0, target.1),
-                data,
-            ));
+        async fn record(&self, context: &CommandContext, operation: Operation<'_>) {
+            let code = |error: &PanelError| error.code.as_str().to_owned();
+            let (name, outcome) = match operation {
+                Operation::Reload(result) => (
+                    "reload".to_owned(),
+                    result.map(|state| format!("{}/{}", state.generation, state.worker_count)),
+                ),
+                Operation::SetWorkerCount(result) => (
+                    "workers".to_owned(),
+                    result.map(|state| state.worker_count.to_string()),
+                ),
+                Operation::Shutdown(result) => {
+                    ("shutdown".to_owned(), result.map(|()| String::new()))
+                }
+                Operation::SetEndpointDrained {
+                    upstream,
+                    endpoint,
+                    drained,
+                    result,
+                } => (
+                    format!("drained={drained}"),
+                    result.map(|()| format!("{upstream}/{endpoint}")),
+                ),
+            };
+            self.0
+                .lock()
+                .unwrap()
+                .push((context.actor().to_owned(), name, outcome.map_err(code)));
         }
     }
 
@@ -249,37 +228,20 @@ mod tests {
             .await
             .unwrap();
         let recorded = log.0.lock().unwrap().clone();
+        let ops = |name: &str, outcome: std::result::Result<&str, &str>| {
+            (
+                "ops".to_owned(),
+                name.to_owned(),
+                outcome.map(str::to_owned).map_err(str::to_owned),
+            )
+        };
         assert_eq!(
             recorded,
             [
-                (
-                    "ops".into(),
-                    "gateway.reloaded".into(),
-                    "gateway/data-plane".into(),
-                    json!({ "generation": 3, "workers": 2 })
-                ),
-                (
-                    "ops".into(),
-                    "gateway.operation.refused".into(),
-                    "gateway/data-plane".into(),
-                    json!({
-                        "operation": "workers.changed",
-                        "code": "INVALID_ARGUMENT",
-                        "message": "workers must be between 1 and 64"
-                    })
-                ),
-                (
-                    "ops".into(),
-                    "gateway.shutdown.requested".into(),
-                    "gateway/data-plane".into(),
-                    json!({})
-                ),
-                (
-                    "ops".into(),
-                    "gateway.endpoint.drained".into(),
-                    "upstream/pool".into(),
-                    json!({ "upstream": "pool", "endpoint": "node" })
-                ),
+                ops("reload", Ok("3/2")),
+                ops("workers", Err("INVALID_ARGUMENT")),
+                ops("shutdown", Ok("")),
+                ops("drained=true", Ok("pool/node")),
             ]
         );
     }

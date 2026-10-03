@@ -22,7 +22,6 @@ use panel_identity::{
     Access as HeldAccess, Client, GrantScope, Identity, Permission, Principal, Transport, SCOPABLE,
     TOKEN_PREFIX,
 };
-use serde::Serialize;
 use std::{net::SocketAddr, num::NonZeroU32, sync::Arc, time::Duration};
 
 pub(crate) const SESSION_COOKIE: &str = "__Host-ppanel_session";
@@ -452,7 +451,7 @@ pub(crate) static ROUTES: &[(&str, &str, Access)] = &[
 ];
 
 /// A request refused to an authenticated caller.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug)]
 pub struct Refusal {
     pub method: String,
     /// The route's path template, such as `/api/v1/sites/{id}`.
