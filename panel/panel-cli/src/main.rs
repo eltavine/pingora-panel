@@ -90,6 +90,9 @@ enum Command {
     /// Roles and the permissions they grant.
     #[command(subcommand)]
     Role(commands::identity::RoleCommand),
+    /// Identity providers people sign in with.
+    #[command(subcommand, name = "identity-provider")]
+    IdentityProvider(commands::providers::IdentityProviderCommand),
     /// Websites and their state.
     #[command(subcommand)]
     Site(commands::sites::SiteCommand),
@@ -186,6 +189,9 @@ async fn main() -> ExitCode {
             Command::Token(command) => commands::identity::token(&api, &output, command).await,
             Command::Account(command) => commands::identity::account(&api, &output, command).await,
             Command::Role(command) => commands::identity::role(&api, &output, command).await,
+            Command::IdentityProvider(command) => {
+                commands::providers::identity_provider(&api, &output, command).await
+            }
             Command::Site(command) => commands::sites::run(&api, &output, command).await,
             Command::Domain(command) => commands::domains::run(&api, &output, command).await,
             Command::Route(command) => commands::routes::run(&api, &output, command).await,

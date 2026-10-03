@@ -246,6 +246,17 @@ async fn api(
         }
         ("PUT", "/api/v1/tls-profiles/edge") => Json(body.clone()).into_response(),
         ("PUT", "/api/v1/security-policies/office") => Json(body.clone()).into_response(),
+        ("PUT", "/api/v1/identity-providers/corp") => Json(body.clone()).into_response(),
+        ("GET", "/api/v1/identity-providers") => Json(json!([
+            {"id": "corp", "display_name": "Corporate", "issuer": "https://id.example",
+             "client_id": "panel", "has_client_secret": true, "scopes": ["profile"],
+             "claims": {"username": "preferred_username", "display_name": "name",
+                        "email": "email", "groups": "groups"},
+             "group_roles": [{"group": "ops", "role": "operator"}],
+             "create_accounts": true, "enabled": true,
+             "created_at": "2026-10-03T00:00:00.000Z", "updated_at": "2026-10-03T00:00:00.000Z"}
+        ]))
+        .into_response(),
         ("PUT", "/api/v1/listeners/edge") => Json(body.clone()).into_response(),
         ("GET", "/api/v1/gateway/file-checks") => Json(json!({
             "checked_at": "2026-10-03T00:00:00.000Z", "active_revision_id": 7,
@@ -1320,4 +1331,93 @@ fn listeners_are_checked_as_clients_see_them() {
     ] {
         assert!(shown.contains(expected), "{expected}: {shown}");
     }
+}
+
+#[test]
+fn identity_providers_take_their_secret_from_a_file() {
+    let stub = Stub::start();
+    let secret = std::env::temp_dir().join(format!("ppanel-oidc-{}", std::process::id()));
+    std::fs::write(&secret, "s3cret\n").unwrap();
+    let saved = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "identity-provider",
+        "set",
+        "corp",
+        "--name",
+        "Corporate",
+        "--issuer",
+        "https://id.example",
+        "--client-id",
+        "panel",
+        "--client-secret-file",
+        secret.to_str().unwrap(),
+        "--group-role",
+        "ops=operator",
+        "--create-accounts",
+        "--groups-claim",
+        "roles",
+    ]);
+    std::fs::remove_file(&secret).unwrap();
+    assert!(saved.status.success(), "{}", stderr(&saved));
+    let body = &stub.requests("PUT", "/api/v1/identity-providers/corp")[0].body;
+    assert_eq!(body["client_secret"], "s3cret");
+    assert_eq!(
+        body["group_roles"],
+        json!([{"group": "ops", "role": "operator"}])
+    );
+    assert_eq!(body["claims"]["groups"], "roles");
+    assert_eq!(body["claims"]["username"], "preferred_username");
+    assert_eq!(
+        (body["create_accounts"].clone(), body["enabled"].clone()),
+        (json!(true), json!(true))
+    );
+    assert!(
+        body.get("scopes").is_none(),
+        "the server's default scopes apply"
+    );
+
+    let public = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "identity-provider",
+        "set",
+        "corp",
+        "--name",
+        "Corporate",
+        "--issuer",
+        "https://id.example",
+        "--client-id",
+        "panel",
+        "--public-client",
+        "--disabled",
+    ]);
+    assert!(public.status.success(), "{}", stderr(&public));
+    let body = &stub.requests("PUT", "/api/v1/identity-providers/corp")[1].body;
+    assert!(body["client_secret"].is_null() && body.get("client_secret").is_some());
+    assert_eq!(body["enabled"], false);
+
+    let listed = stub.ppanel(&["--token", "ppat_admin", "identity-provider", "list"]);
+    assert!(listed.status.success(), "{}", stderr(&listed));
+    let table = String::from_utf8_lossy(&listed.stdout);
+    assert!(
+        table.contains("ops=operator") && table.contains("enabled"),
+        "{table}"
+    );
+    let invalid = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "identity-provider",
+        "set",
+        "corp",
+        "--name",
+        "C",
+        "--issuer",
+        "https://id.example",
+        "--client-id",
+        "panel",
+        "--group-role",
+        "ops",
+    ]);
+    assert_eq!(invalid.status.code(), Some(2));
 }
