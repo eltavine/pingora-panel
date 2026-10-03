@@ -8,6 +8,7 @@
 //! without changing the public application contract.
 
 mod audit;
+mod certificates;
 mod configuration;
 mod context;
 mod gateway;
@@ -17,6 +18,7 @@ mod persistence;
 mod runtime;
 
 pub use audit::{AuditFilter, AuditPage, AuditPort, AuditRecord, AuditVerification};
+pub use certificates::{CertificateChange, CertificateOutput, CertificatePort, CertificateRead};
 pub use configuration::{
     ApplyOutcome, ApplyRequest, ConfigurationChange, ConfigurationOutput, ConfigurationPort,
     ConfigurationRead, DraftInfo,

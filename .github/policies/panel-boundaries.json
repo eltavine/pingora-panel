@@ -475,6 +475,15 @@
         "panel-domain",
         "panel-errors"
       ]
+    },
+    "automation-grpc-client": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-application",
+        "panel-contracts",
+        "panel-errors",
+        "panel-service"
+      ]
     }
   },
   "rules": {

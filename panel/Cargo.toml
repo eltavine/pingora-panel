@@ -40,6 +40,7 @@ members = [
     "config-proto-codec",
     "config-grpc-client",
     "audit-grpc-client",
+    "automation-grpc-client",
     "gateway-grpc",
     "gateway-grpc-client",
     "gatewayd",
@@ -74,6 +75,7 @@ chrono = { version = "=0.4.45", default-features = false, features = ["clock", "
 futures-util = "=0.3.34"
 audit-grpc-client = { version = "=0.1.0", path = "audit-grpc-client" }
 audit-service = { version = "=0.1.0", path = "audit-service" }
+automation-grpc-client = { version = "=0.1.0", path = "automation-grpc-client" }
 config-grpc-client = { version = "=0.1.0", path = "config-grpc-client" }
 config-proto-codec = { version = "=0.1.0", path = "config-proto-codec" }
 config-service = { version = "=0.1.0", path = "config-service" }
