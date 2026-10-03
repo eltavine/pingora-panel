@@ -3,7 +3,6 @@ import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -11,6 +10,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { Button } from '@/components/ui/button'
 
 const open = defineModel<boolean>('open', { required: true })
 
@@ -25,6 +25,13 @@ defineProps<{
 
 const emit = defineEmits<{ confirm: [] }>()
 const { t } = useI18n()
+
+// The dialog closes only after `confirm` is handled: closing first would
+// clear what callers keep about the item being confirmed.
+function confirm() {
+  emit('confirm')
+  open.value = false
+}
 </script>
 
 <template>
@@ -40,13 +47,13 @@ const { t } = useI18n()
       <slot />
       <AlertDialogFooter>
         <AlertDialogCancel>{{ t('common.cancel') }}</AlertDialogCancel>
-        <AlertDialogAction
+        <Button
           :variant="destructive ? 'destructive' : 'default'"
           :disabled="busy"
-          @click.prevent="emit('confirm')"
+          @click="confirm"
         >
           {{ confirmLabel }}
-        </AlertDialogAction>
+        </Button>
       </AlertDialogFooter>
     </AlertDialogContent>
   </AlertDialog>
