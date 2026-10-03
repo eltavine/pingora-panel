@@ -20,6 +20,15 @@ export const KNOWN_TYPES = [
   'gateway.endpoint.drained',
   'gateway.endpoint.restored',
   'gateway.operation.refused',
+  'identity.account.created',
+  'identity.account.updated',
+  'identity.password.changed',
+  'identity.login.succeeded',
+  'identity.login.failed',
+  'identity.session.ended',
+  'identity.token.created',
+  'identity.token.revoked',
+  'identity.access.denied',
 ] as const
 
 export type KnownType = (typeof KNOWN_TYPES)[number]
@@ -35,7 +44,7 @@ export function typeKey(type: KnownType): string {
 
 /** Refusals and failures read as negative; everything else happened. */
 export function toneOf(type: string): StatusTone {
-  return /\.(refused|failed|rejected)$/.test(type) ? 'negative' : 'positive'
+  return /\.(refused|failed|rejected|denied)$/.test(type) ? 'negative' : 'positive'
 }
 
 type Translate = (key: string, values?: Record<string, unknown>) => string
@@ -80,6 +89,34 @@ export function summaryOf(event: AuditEvent, t: Translate): string {
     case 'gateway.endpoint.drained':
     case 'gateway.endpoint.restored':
       return text(data.endpoint)
+    case 'identity.account.created':
+      return `${text(data.username)} · ${list(data.roles)}`
+    case 'identity.account.updated':
+      return [
+        data.disabled === true && t('audit.summary.disabled'),
+        data.disabled === false && t('audit.summary.enabled'),
+        data.unlocked === true && t('audit.summary.unlocked'),
+        Array.isArray(data.roles) && list(data.roles),
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    case 'identity.login.succeeded':
+    case 'identity.login.failed': {
+      const attempt = (data.attempt ?? {}) as Record<string, unknown>
+      return [attempt.username, attempt.client_address, data.reason ?? data.transport]
+        .map(text)
+        .filter(Boolean)
+        .join(' · ')
+    }
+    case 'identity.session.ended':
+      return text(data.reason)
+    case 'identity.token.created':
+      return `${text(data.name)} · ${list(data.permissions)}`
+    case 'identity.access.denied':
+      return [`${text(data.method)} ${text(data.route)}`, data.permission ?? data.reason]
+        .map(text)
+        .filter(Boolean)
+        .join(' · ')
     default:
       return JSON.stringify(data).slice(0, 120)
   }

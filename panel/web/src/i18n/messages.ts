@@ -786,6 +786,9 @@ const zhCN = {
     },
     summary: {
       generation: '第 {generation} 代 · {workers} 个 Worker',
+      disabled: '已停用',
+      enabled: '已启用',
+      unlocked: '已解锁密码',
     },
     types: {
       config_draft_changed: '修改草稿',
@@ -805,6 +808,15 @@ const zhCN = {
       gateway_endpoint_drained: '摘除节点',
       gateway_endpoint_restored: '恢复节点',
       gateway_operation_refused: '拒绝网关操作',
+      identity_account_created: '创建账户',
+      identity_account_updated: '修改账户',
+      identity_password_changed: '修改密码',
+      identity_login_succeeded: '登录',
+      identity_login_failed: '登录失败',
+      identity_session_ended: '结束会话',
+      identity_token_created: '创建 API 令牌',
+      identity_token_revoked: '撤销 API 令牌',
+      identity_access_denied: '拒绝访问',
     },
   },
   changes: {
@@ -1637,6 +1649,9 @@ const en: DeepString<Messages> = {
     },
     summary: {
       generation: 'Generation {generation} · {workers} workers',
+      disabled: 'disabled',
+      enabled: 'enabled',
+      unlocked: 'password unlocked',
     },
     types: {
       config_draft_changed: 'Changed the draft',
@@ -1656,6 +1671,15 @@ const en: DeepString<Messages> = {
       gateway_endpoint_drained: 'Drained a node',
       gateway_endpoint_restored: 'Restored a node',
       gateway_operation_refused: 'Refused a gateway operation',
+      identity_account_created: 'Created an account',
+      identity_account_updated: 'Changed an account',
+      identity_password_changed: 'Changed a password',
+      identity_login_succeeded: 'Logged in',
+      identity_login_failed: 'Login failed',
+      identity_session_ended: 'Ended a session',
+      identity_token_created: 'Created an API token',
+      identity_token_revoked: 'Revoked an API token',
+      identity_access_denied: 'Refused access',
     },
   },
   changes: {

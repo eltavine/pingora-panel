@@ -40,6 +40,34 @@ describe('audit presentation', () => {
     expect(toneOf('config.apply.failed')).toBe('negative')
     expect(toneOf('config.apply.rejected')).toBe('negative')
     expect(toneOf('config.draft.applied')).toBe('positive')
+    expect(toneOf('identity.access.denied')).toBe('negative')
+    expect(toneOf('identity.login.succeeded')).toBe('positive')
+  })
+
+  it('summarizes logins, account changes and refused access', () => {
+    expect(
+      summaryOf(
+        event('identity.login.failed', {
+          attempt: { username: 'root', client_address: '192.0.2.7' },
+          reason: 'wrong_password',
+        }),
+        t,
+      ),
+    ).toBe('root · 192.0.2.7 · wrong_password')
+    expect(
+      summaryOf(event('identity.account.updated', { disabled: true, roles: ['viewer'] }), t),
+    ).toBe('audit.summary.disabled · viewer')
+    expect(
+      summaryOf(
+        event('identity.access.denied', {
+          method: 'GET',
+          route: '/api/v1/accounts',
+          reason: 'permission',
+          permission: 'identity.read',
+        }),
+        t,
+      ),
+    ).toBe('GET /api/v1/accounts · identity.read')
   })
 
   it('summarizes what each event did', () => {
