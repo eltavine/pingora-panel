@@ -678,16 +678,11 @@ impl<'a> Importer<'a> {
             if url == "https://$host$request_uri" || url == "https://$server_name$request_uri" {
                 return Some(vec![Directive::simple("https_redirect", ["on"])]);
             }
-            if url.contains('$') {
-                self.unsupported(
-                    located,
-                    format!(
-                        "the redirect target {url:?} uses variables, which are not supported yet"
-                    ),
-                );
-                return None;
-            }
-            return Some(vec![Directive::simple("return", [code, url])]);
+            let url = self.template(located, url)?;
+            return Some(vec![Directive::simple(
+                "return",
+                [code.to_owned(), url, "preserve_path=off".to_owned()],
+            )]);
         }
         if code == "444" {
             self.unsupported(
@@ -702,16 +697,25 @@ impl<'a> Importer<'a> {
         }
         let mut respond = vec![code.to_owned()];
         if let Some(body) = target {
-            if body.contains('$') {
-                self.unsupported(
-                    located,
-                    "response bodies with variables are not supported yet".into(),
-                );
-                return None;
-            }
+            let body = self.template(located, body)?;
             respond.push(format!("body={body}"));
         }
         Some(vec![Directive::simple("respond", respond)])
+    }
+
+    /// An NGINX string with variables as a template, when each variable
+    /// has a counterpart.
+    fn template(&mut self, located: &Located, value: &str) -> Option<String> {
+        match nginx_template(value) {
+            Ok(template) => Some(template),
+            Err(variable) => {
+                self.unsupported(
+                    located,
+                    format!("the variable ${variable} has no counterpart"),
+                );
+                None
+            }
+        }
     }
 
     fn proxy(&mut self, located: &Located) -> Option<Directive> {
@@ -878,6 +882,61 @@ fn static_root(root: &str, index: &[String], spa: bool) -> Directive {
     Directive::simple("root", values)
 }
 
+/// The request variable an NGINX variable reads, when there is one.
+fn variable(name: &str) -> Option<&str> {
+    Some(match name {
+        "host" => "host",
+        "uri" | "document_uri" => "uri",
+        "request_method" => "method",
+        "scheme" => "scheme",
+        "remote_addr" => "client_ip",
+        "request_id" => "request_id",
+        "upstream_addr" => "upstream_addr",
+        name if name.starts_with("http_") || name.starts_with("cookie_") => name,
+        _ => return None,
+    })
+}
+
+/// An NGINX string as a template: variables renamed, other dollars
+/// escaped; the first variable without a counterpart otherwise.
+fn nginx_template(value: &str) -> Result<String, String> {
+    let mut out = String::with_capacity(value.len());
+    let mut rest = value;
+    while let Some(index) = rest.find('$') {
+        out.push_str(&rest[..index]);
+        let after = &rest[index + 1..];
+        let (name, length) = if let Some(braced) = after.strip_prefix('{') {
+            match braced.find('}') {
+                Some(end) => (&braced[..end], end + 2),
+                None => ("", 0),
+            }
+        } else {
+            let end = after
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .unwrap_or(after.len());
+            (&after[..end], end)
+        };
+        if name.is_empty() || !name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
+            out.push_str("$$");
+            rest = after;
+            continue;
+        }
+        let ours = variable(name).ok_or_else(|| name.to_owned())?;
+        let next = &after[length..];
+        if next.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_') {
+            out.push_str("${");
+            out.push_str(ours);
+            out.push('}');
+        } else {
+            out.push('$');
+            out.push_str(ours);
+        }
+        rest = next;
+    }
+    out.push_str(rest);
+    Ok(out)
+}
+
 /// The language's hash key for an NGINX hash key.
 fn hash_key(key: &str) -> Option<String> {
     match key {
@@ -891,6 +950,19 @@ fn hash_key(key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nginx_variables_become_request_variables() {
+        assert_eq!(
+            nginx_template("https://$host${uri}x?m=$request_method&ip=$remote_addr").as_deref(),
+            Ok("https://$host${uri}x?m=$method&ip=$client_ip")
+        );
+        assert_eq!(nginx_template("costs $5").as_deref(), Ok("costs $$5"));
+        assert_eq!(
+            nginx_template("$request_uri"),
+            Err("request_uri".to_owned())
+        );
+    }
 
     #[test]
     fn identifiers_are_safe_names() {
