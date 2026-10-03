@@ -39,7 +39,7 @@ pub use persistence::{
     IdempotencyRepository, RevisionRepository,
 };
 pub use runtime::{
-    DataPlaneListener, DataPlaneState, EndpointHealth, GatewayRuntimePort, UpstreamHealth,
-    UpstreamHealthReport,
+    DataPlaneListener, DataPlaneState, EndpointHealth, EscapingLink, FileChecks,
+    GatewayRuntimePort, PrivateKeyCheck, StaticRootCheck, UpstreamHealth, UpstreamHealthReport,
 };
 pub use tls_probe::{TlsProbe, TlsProbeReport, TlsProbeTarget};

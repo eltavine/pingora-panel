@@ -9,6 +9,7 @@ mod acme;
 mod adapter;
 mod certificates;
 mod dataplane;
+mod file_checks;
 mod forwarding;
 mod head_deadline;
 mod hosts;
@@ -27,7 +28,10 @@ mod upstream;
 pub use acme::ChallengeDirectory;
 pub use adapter::{AdapterOptions, PingoraGatewayAdapter, PreparedPingoraSnapshot};
 pub use dataplane::{DataPlane, DataPlaneOptions, DataPlaneStatus, ListenerStatus};
-pub use secrets::{DirectorySecrets, NoSecrets, SecretSource};
+pub use file_checks::{
+    EscapingLink, FileChecks, PrivateKeyCheck, StaticRootCheck, MAX_STATIC_ENTRIES,
+};
+pub use secrets::{DirectorySecrets, NoSecrets, SecretPermissions, SecretSource};
 pub use upstream::{EndpointHealth, PoolHealth};
 
 pub const ADAPTER_VERSION: &str = env!("CARGO_PKG_VERSION");

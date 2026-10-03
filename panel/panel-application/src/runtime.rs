@@ -1,7 +1,7 @@
 use crate::{CommandContext, RequestScope};
 use async_trait::async_trait;
 use panel_domain::ContentHash;
-use panel_errors::Result;
+use panel_errors::{PanelError, Result};
 use std::time::SystemTime;
 
 /// The serving process as it runs now.
@@ -81,6 +81,83 @@ pub struct UpstreamHealthReport {
     pub active_hash: Option<ContentHash>,
 }
 
+/// What the gateway finds in the files it serves from.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct FileChecks {
+    pub checked_at: Option<SystemTime>,
+    pub active_revision_id: Option<u64>,
+    pub private_keys: Vec<PrivateKeyCheck>,
+    pub static_roots: Vec<StaticRootCheck>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct PrivateKeyCheck {
+    /// The file name in the gateway's secret directory.
+    pub file: String,
+    pub tls_profile_ids: Vec<String>,
+    /// Unix permission bits, where the platform has them.
+    pub mode: Option<u32>,
+    /// Whether only the owner may read or write the file.
+    pub owner_only: bool,
+    /// Why the file could not be inspected.
+    pub error: Option<String>,
+}
+
+impl PrivateKeyCheck {
+    pub fn new(file: impl Into<String>) -> Self {
+        Self {
+            file: file.into(),
+            ..Self::default()
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct StaticRootCheck {
+    /// The static content the root serves.
+    pub id: String,
+    pub root: String,
+    /// Whether the root resolves to a directory inside the static content
+    /// root.
+    pub inside: bool,
+    /// Links below the root that lead out of it; they are not served.
+    pub escaping_links: Vec<EscapingLink>,
+    pub entries_checked: u32,
+    /// Whether the root holds more entries than one check looks at.
+    pub truncated: bool,
+    pub error: Option<String>,
+}
+
+impl StaticRootCheck {
+    pub fn new(id: impl Into<String>, root: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            root: root.into(),
+            ..Self::default()
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct EscapingLink {
+    /// The link, relative to the root.
+    pub path: String,
+    pub target: String,
+}
+
+impl EscapingLink {
+    pub fn new(path: impl Into<String>, target: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            target: target.into(),
+        }
+    }
+}
+
 /// Operations on the running gateway rather than on its configuration.
 #[async_trait]
 pub trait GatewayRuntimePort: Send + Sync {
@@ -107,4 +184,11 @@ pub trait GatewayRuntimePort: Send + Sync {
         endpoint: String,
         drained: bool,
     ) -> Result<UpstreamHealth>;
+
+    /// Inspects the files the active configuration serves from.
+    async fn file_checks(&self, _scope: RequestScope) -> Result<FileChecks> {
+        Err(PanelError::unavailable(
+            "this gateway does not check its files",
+        ))
+    }
 }

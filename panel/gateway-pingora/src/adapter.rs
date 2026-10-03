@@ -1,6 +1,7 @@
 use crate::{
     acme::ChallengeDirectory,
     certificates::CertificateIndex,
+    file_checks::{self, FileChecks},
     listeners::{self, ListenerPlan, SocketKey},
     routing::{RoutingTable, Targets},
     secrets::{NoSecrets, SecretSource},
@@ -192,6 +193,17 @@ impl PingoraGatewayAdapter {
         self.active
             .load_full()
             .map(|prepared| prepared.snapshot.clone())
+    }
+
+    /// What the files the active snapshot serves from look like; reads the
+    /// file system, so call it off the request threads.
+    pub fn check_files(&self) -> FileChecks {
+        let snapshot = self.active_snapshot();
+        file_checks::check(
+            snapshot.as_ref(),
+            self.options.secrets.as_ref(),
+            self.options.static_root.as_deref(),
+        )
     }
 
     /// Live health of every upstream pool in the active snapshot.

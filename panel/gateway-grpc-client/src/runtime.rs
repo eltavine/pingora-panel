@@ -3,8 +3,9 @@
 use crate::{context, hash, query_context, response_error, status_error, GatewayGrpcClient};
 use async_trait::async_trait;
 use panel_application::{
-    CommandContext, DataPlaneListener, DataPlaneState, EndpointHealth, GatewayRuntimePort,
-    RequestScope, UpstreamHealth, UpstreamHealthReport,
+    CommandContext, DataPlaneListener, DataPlaneState, EndpointHealth, EscapingLink, FileChecks,
+    GatewayRuntimePort, PrivateKeyCheck, RequestScope, StaticRootCheck, UpstreamHealth,
+    UpstreamHealthReport,
 };
 use panel_contracts::gateway::v1::{self as wire, gateway_runtime_client::GatewayRuntimeClient};
 use panel_errors::{PanelError, Result};
@@ -170,6 +171,56 @@ impl GatewayRuntimePort for GatewayGrpcClient {
             .active_hash
             .map(|value| hash(Some(value)))
             .transpose()?;
+        Ok(report)
+    }
+
+    async fn file_checks(&self, scope: RequestScope) -> Result<FileChecks> {
+        let request = wire::CheckFilesRequest {
+            context: Some(query_context(&scope)),
+        };
+        let response = self
+            .runtime()
+            .check_files(self.request(request, scope.trace_context()))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        let checks = response
+            .checks
+            .ok_or_else(|| PanelError::internal("the gateway sent no file checks"))?;
+        let mut report = FileChecks::default();
+        report.checked_at = time(checks.checked_at);
+        report.active_revision_id =
+            (checks.active_revision_id != 0).then_some(checks.active_revision_id);
+        report.private_keys = checks
+            .private_keys
+            .into_iter()
+            .map(|key| {
+                let mut check = PrivateKeyCheck::new(key.file);
+                check.tls_profile_ids = key.tls_profile_ids;
+                check.mode = key.mode;
+                check.owner_only = key.owner_only;
+                check.error = Some(key.error).filter(|error| !error.is_empty());
+                check
+            })
+            .collect();
+        report.static_roots = checks
+            .static_roots
+            .into_iter()
+            .map(|root| {
+                let mut check = StaticRootCheck::new(root.id, root.root);
+                check.inside = root.inside;
+                check.escaping_links = root
+                    .escaping_links
+                    .into_iter()
+                    .map(|link| EscapingLink::new(link.path, link.target))
+                    .collect();
+                check.entries_checked = root.entries_checked;
+                check.truncated = root.truncated;
+                check.error = Some(root.error).filter(|error| !error.is_empty());
+                check
+            })
+            .collect();
         Ok(report)
     }
 

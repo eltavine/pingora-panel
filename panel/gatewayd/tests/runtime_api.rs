@@ -193,6 +193,10 @@ async fn runtime_operations_persist_and_shut_the_gateway_down() {
         .set_endpoint_drained(command("missing"), "app".into(), "ghost".into(), true)
         .await
         .is_err());
+    let files = client.file_checks(scope()).await.unwrap();
+    assert_eq!(files.active_revision_id, Some(1));
+    assert!(files.checked_at.is_some());
+    assert!(files.private_keys.is_empty() && files.static_roots.is_empty());
 
     client.shutdown(command("shutdown")).await.unwrap();
     assert_eq!(gateway.exit_code().await, Some(0));

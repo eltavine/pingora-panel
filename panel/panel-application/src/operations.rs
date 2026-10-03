@@ -2,7 +2,7 @@
 //! such as calls to the gateway, for the audit trail.
 
 use crate::{
-    CommandContext, DataPlaneState, GatewayRuntimePort, RequestScope, UpstreamHealth,
+    CommandContext, DataPlaneState, FileChecks, GatewayRuntimePort, RequestScope, UpstreamHealth,
     UpstreamHealthReport,
 };
 use async_trait::async_trait;
@@ -115,6 +115,10 @@ impl GatewayRuntimePort for RecordedRuntime {
 
     async fn upstream_health(&self, scope: RequestScope) -> Result<UpstreamHealthReport> {
         self.inner.upstream_health(scope).await
+    }
+
+    async fn file_checks(&self, scope: RequestScope) -> Result<FileChecks> {
+        self.inner.file_checks(scope).await
     }
 
     async fn set_endpoint_drained(

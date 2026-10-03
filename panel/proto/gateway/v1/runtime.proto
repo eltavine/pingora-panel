@@ -19,6 +19,8 @@ service GatewayRuntime {
   rpc ListUpstreamHealth(ListUpstreamHealthRequest) returns (ListUpstreamHealthResponse);
   // Takes an endpoint out of rotation, or returns it.
   rpc SetEndpointDrained(SetEndpointDrainedRequest) returns (SetEndpointDrainedResponse);
+  // Inspects the files the active configuration serves from.
+  rpc CheckFiles(CheckFilesRequest) returns (CheckFilesResponse);
 }
 
 message DataPlane {
@@ -126,5 +128,54 @@ message SetEndpointDrainedRequest {
 
 message SetEndpointDrainedResponse {
   UpstreamHealth upstream = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+// What the gateway finds in the files it serves from.
+message FileChecks {
+  google.protobuf.Timestamp checked_at = 1;
+  uint64 active_revision_id = 2;
+  repeated PrivateKeyCheck private_keys = 3;
+  repeated StaticRootCheck static_roots = 4;
+}
+
+message PrivateKeyCheck {
+  // The file name in the secret directory.
+  string file = 1;
+  repeated string tls_profile_ids = 2;
+  // Unix permission bits, where the platform has them.
+  optional uint32 mode = 3;
+  // Whether only the owner may read or write the file.
+  bool owner_only = 4;
+  // Why the file could not be inspected.
+  string error = 5;
+}
+
+message StaticRootCheck {
+  // The static content the root serves.
+  string id = 1;
+  string root = 2;
+  // Whether the root resolves to a directory inside the static content root.
+  bool inside = 3;
+  // Links below the root that lead out of it; they are not served.
+  repeated EscapingLink escaping_links = 4;
+  uint32 entries_checked = 5;
+  // Whether the root holds more entries than one check looks at.
+  bool truncated = 6;
+  string error = 7;
+}
+
+message EscapingLink {
+  // The link, relative to the root.
+  string path = 1;
+  string target = 2;
+}
+
+message CheckFilesRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+}
+
+message CheckFilesResponse {
+  FileChecks checks = 1;
   .pingora.panel.common.v1.Error error = 2;
 }

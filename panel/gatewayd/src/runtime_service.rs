@@ -1,8 +1,8 @@
 //! The gateway runtime API: data plane state, reloads, worker counts,
-//! shutdown, upstream health and endpoint drains.
+//! shutdown, upstream health, endpoint drains and file checks.
 
 use crate::{runtime_settings::RuntimeSettingsStore, MAX_GATEWAY_WORKERS};
-use gateway_pingora::{DataPlane, DataPlaneStatus, PingoraGatewayAdapter, PoolHealth};
+use gateway_pingora::{DataPlane, DataPlaneStatus, FileChecks, PingoraGatewayAdapter, PoolHealth};
 use gateway_proto_codec::encode_hash;
 use panel_contracts::{
     common::v1 as common,
@@ -37,6 +37,44 @@ fn timestamp(time: SystemTime) -> prost_types::Timestamp {
 
 fn failure(error: &PanelError) -> Option<common::Error> {
     Some(error.into())
+}
+
+fn encode_checks(checks: FileChecks) -> wire::FileChecks {
+    wire::FileChecks {
+        checked_at: checks.checked_at.map(timestamp),
+        active_revision_id: checks.active_revision_id.unwrap_or(0),
+        private_keys: checks
+            .private_keys
+            .into_iter()
+            .map(|key| wire::PrivateKeyCheck {
+                file: key.file,
+                tls_profile_ids: key.tls_profile_ids,
+                mode: key.mode,
+                owner_only: key.owner_only,
+                error: key.error.unwrap_or_default(),
+            })
+            .collect(),
+        static_roots: checks
+            .static_roots
+            .into_iter()
+            .map(|root| wire::StaticRootCheck {
+                id: root.id,
+                root: root.root,
+                inside: root.inside,
+                escaping_links: root
+                    .escaping_links
+                    .into_iter()
+                    .map(|link| wire::EscapingLink {
+                        path: link.path,
+                        target: link.target,
+                    })
+                    .collect(),
+                entries_checked: root.entries_checked,
+                truncated: root.truncated,
+                error: root.error.unwrap_or_default(),
+            })
+            .collect(),
+    }
 }
 
 pub(crate) fn encode_pool(pool: &PoolHealth) -> wire::UpstreamHealth {
@@ -216,6 +254,26 @@ impl GatewayRuntime for GatewayRuntimeService {
             Err(error) => wire::ListUpstreamHealthResponse {
                 error: failure(&error),
                 ..wire::ListUpstreamHealthResponse::default()
+            },
+        }))
+    }
+
+    async fn check_files(
+        &self,
+        _request: Request<wire::CheckFilesRequest>,
+    ) -> std::result::Result<Response<wire::CheckFilesResponse>, Status> {
+        let adapter = Arc::clone(&self.adapter);
+        let checked = tokio::task::spawn_blocking(move || adapter.check_files())
+            .await
+            .map_err(|error| PanelError::internal(format!("the file check stopped: {error}")));
+        Ok(Response::new(match checked {
+            Ok(checks) => wire::CheckFilesResponse {
+                checks: Some(encode_checks(checks)),
+                error: None,
+            },
+            Err(error) => wire::CheckFilesResponse {
+                checks: None,
+                error: failure(&error),
             },
         }))
     }
