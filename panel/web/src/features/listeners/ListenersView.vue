@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useMutation, useQuery } from '@tanstack/vue-query'
-import { KeyRound, Lock, LockOpen, Pencil, Plus, Radio, Trash2 } from '@lucide/vue'
+import { FileBadge, KeyRound, Lock, LockOpen, Pencil, Plus, Radio, Trash2 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import type { ListenerView, TlsProfileView } from '@/api/generated'
@@ -255,8 +255,7 @@ function confirmRemove() {
             <TableHeader>
               <TableRow>
                 <TableHead>{{ t('listeners.id') }}</TableHead>
-                <TableHead>{{ t('listeners.profiles.certificate') }}</TableHead>
-                <TableHead>{{ t('listeners.profiles.privateKey') }}</TableHead>
+                <TableHead>{{ t('listeners.profiles.inventoryCertificate') }}</TableHead>
                 <TableHead>{{ t('listeners.profiles.minProtocol') }}</TableHead>
                 <TableHead>{{ t('listeners.profiles.alpn') }}</TableHead>
                 <TableHead class="w-20"
@@ -267,8 +266,15 @@ function confirmRemove() {
             <TableBody>
               <TableRow v-for="profile in profiles.data.value" :key="profile.id">
                 <TableCell class="font-mono text-xs">{{ profile.id }}</TableCell>
-                <TableCell class="font-mono text-xs">{{ profile.certificate_secret_id }}</TableCell>
-                <TableCell class="font-mono text-xs">{{ profile.private_key_secret_id }}</TableCell>
+                <TableCell class="font-mono text-xs">
+                  <span v-if="profile.certificate_id" class="flex items-center gap-1.5">
+                    <FileBadge class="size-3.5" aria-hidden="true" />
+                    {{ profile.certificate_id }}
+                  </span>
+                  <span v-else
+                    >{{ profile.certificate_secret_id }} · {{ profile.private_key_secret_id }}</span
+                  >
+                </TableCell>
                 <TableCell>{{ profile.min_protocol }}</TableCell>
                 <TableCell>
                   <div class="flex flex-wrap gap-1">

@@ -160,3 +160,47 @@ test('certificates are generated, checked against hosts and deleted', async ({ p
   expect(changes[1]!.method()).toBe('DELETE')
   expect(changes[1]!.headers()['if-match']).toBe('"1"')
 })
+
+test('TLS profiles serve certificates of the inventory', async ({ page }) => {
+  await mockInventory(page, [])
+  await page.route('**/api/v1/listeners', (route) => route.fulfill({ json: [] }))
+  await page.route('**/api/v1/tls-profiles', (route) => route.fulfill({ json: [] }))
+  await page.route(/\/api\/v1\/sites\?/, (route) =>
+    route.fulfill({ json: { items: [], total: 0, next_cursor: null } }),
+  )
+  const saved: Request[] = []
+  await page.route('**/api/v1/tls-profiles/edge', (route) => {
+    saved.push(route.request())
+    return route.fulfill({
+      json: {
+        id: 'edge',
+        certificate_id: 'example.com',
+        certificate_secret_id: '',
+        private_key_secret_id: '',
+        min_protocol: 'TLSv1.2',
+        alpn: ['h2', 'http/1.1'],
+        etag: '"p1"',
+      },
+    })
+  })
+
+  await page.goto('/listeners')
+  await page.getByRole('button', { name: 'New TLS profile' }).click()
+  const sheet = page.getByRole('dialog')
+  await sheet.getByLabel('Identifier').fill('edge')
+  await expect(sheet.getByRole('tab', { name: 'Certificates' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  await expect(sheet.getByRole('button', { name: 'Save' })).toBeDisabled()
+  await sheet.getByRole('combobox', { name: 'Certificate' }).click()
+  await page.getByRole('option', { name: /example\.com/ }).click()
+  await sheet.getByRole('button', { name: 'Save' }).click()
+  await expect(page.getByText('Saved TLS profile edge')).toBeVisible()
+  expect(saved[0]!.postDataJSON()).toEqual({
+    id: 'edge',
+    certificate_id: 'example.com',
+    min_protocol: 'TLSv1.2',
+    alpn: ['h2', 'http/1.1'],
+  })
+})

@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
-import { useMutation } from '@tanstack/vue-query'
-import { Save } from '@lucide/vue'
+import { useMutation, useQuery } from '@tanstack/vue-query'
+import { FileBadge, FolderKey, Save } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import type { TlsProfileView } from '@/api/generated'
-import { putTlsProfileMutation } from '@/api/generated/@tanstack/vue-query.gen'
+import {
+  listCertificatesOptions,
+  putTlsProfileMutation,
+} from '@/api/generated/@tanstack/vue-query.gen'
 import FormField from '@/components/FormField.vue'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -25,12 +28,14 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   changeHeaders,
   notifyFailure,
   plainHeaders,
   useRefreshConfiguration,
 } from '@/lib/configuration'
+import { useSession } from '@/lib/session'
 import {
   ALPN_PROTOCOLS,
   RESOURCE_ID,
@@ -44,15 +49,22 @@ const open = defineModel<boolean>('open', { required: true })
 const props = defineProps<{ profile?: TlsProfileView; taken: readonly string[] }>()
 
 const { t } = useI18n()
+const { can } = useSession()
 const refresh = useRefreshConfiguration()
 const put = useMutation(putTlsProfileMutation())
+const canReadCertificates = computed(() => can('certificate.read'))
+const certificates = useQuery({ ...listCertificatesOptions(), enabled: canReadCertificates })
 
 const form = reactive<TlsProfileForm>(tlsProfileForm())
 watch(open, (isOpen) => {
   if (isOpen) {
     Object.assign(form, tlsProfileForm(props.profile))
+    if (!props.profile && !canReadCertificates.value) {
+      form.source = 'files'
+    }
   }
 })
+const certificateMissing = computed(() => form.source === 'inventory' && !form.certificateId)
 
 const idError = computed(() => {
   if (props.profile || form.id === '') {
@@ -117,34 +129,77 @@ function submit() {
               autocomplete="off"
             />
           </FormField>
-          <FormField
-            id="profile-certificate"
-            :label="t('listeners.profiles.certificate')"
-            :hint="t('listeners.profiles.secretHint')"
-          >
-            <Input
-              id="profile-certificate"
-              v-model="form.certificateSecretId"
-              required
-              class="font-mono text-xs"
-              placeholder="example.com.crt"
-              autocomplete="off"
-            />
-          </FormField>
-          <FormField
-            id="profile-key"
-            :label="t('listeners.profiles.privateKey')"
-            :hint="t('listeners.profiles.secretHint')"
-          >
-            <Input
-              id="profile-key"
-              v-model="form.privateKeySecretId"
-              required
-              class="font-mono text-xs"
-              placeholder="example.com.key"
-              autocomplete="off"
-            />
-          </FormField>
+          <Tabs v-model="form.source" class="gap-3">
+            <TabsList class="w-full" :aria-label="t('listeners.profiles.source')">
+              <TabsTrigger value="inventory" :disabled="!canReadCertificates">
+                <FileBadge aria-hidden="true" />
+                {{ t('listeners.profiles.fromInventory') }}
+              </TabsTrigger>
+              <TabsTrigger value="files">
+                <FolderKey aria-hidden="true" />
+                {{ t('listeners.profiles.fromFiles') }}
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="inventory">
+              <FormField
+                id="profile-certificate-id"
+                :label="t('listeners.profiles.inventoryCertificate')"
+                :hint="
+                  certificates.data.value?.length === 0
+                    ? t('listeners.profiles.noCertificates')
+                    : t('listeners.profiles.inventoryHint')
+                "
+              >
+                <Select v-model="form.certificateId">
+                  <SelectTrigger id="profile-certificate-id" class="w-full">
+                    <SelectValue :placeholder="t('listeners.profiles.pickCertificate')" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem
+                      v-for="certificate in certificates.data.value"
+                      :key="certificate.id"
+                      :value="certificate.id"
+                    >
+                      <span class="font-mono text-xs">{{ certificate.id }}</span>
+                      <span class="text-muted-foreground truncate text-xs">{{
+                        ` · ${certificate.names.join(', ')}`
+                      }}</span>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </FormField>
+            </TabsContent>
+            <TabsContent value="files" class="flex flex-col gap-4">
+              <FormField
+                id="profile-certificate"
+                :label="t('listeners.profiles.certificate')"
+                :hint="t('listeners.profiles.secretHint')"
+              >
+                <Input
+                  id="profile-certificate"
+                  v-model="form.certificateSecretId"
+                  required
+                  class="font-mono text-xs"
+                  placeholder="example.com.crt"
+                  autocomplete="off"
+                />
+              </FormField>
+              <FormField
+                id="profile-key"
+                :label="t('listeners.profiles.privateKey')"
+                :hint="t('listeners.profiles.secretHint')"
+              >
+                <Input
+                  id="profile-key"
+                  v-model="form.privateKeySecretId"
+                  required
+                  class="font-mono text-xs"
+                  placeholder="example.com.key"
+                  autocomplete="off"
+                />
+              </FormField>
+            </TabsContent>
+          </Tabs>
           <FormField id="profile-min" :label="t('listeners.profiles.minProtocol')">
             <Select v-model="form.minProtocol">
               <SelectTrigger id="profile-min" class="w-full"><SelectValue /></SelectTrigger>
@@ -171,7 +226,10 @@ function submit() {
           </fieldset>
         </div>
         <SheetFooter>
-          <Button type="submit" :disabled="put.isPending.value || idError !== null">
+          <Button
+            type="submit"
+            :disabled="put.isPending.value || idError !== null || certificateMissing"
+          >
             <Save data-icon="inline-start" aria-hidden="true" />
             {{ t('common.save') }}
           </Button>

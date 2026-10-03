@@ -16,8 +16,13 @@ export interface ListenerForm {
   defaultSiteId: string
 }
 
+/** Where a profile's certificate comes from. */
+export type CertificateSource = 'inventory' | 'files'
+
 export interface TlsProfileForm {
   id: string
+  source: CertificateSource
+  certificateId: string
   certificateSecretId: string
   privateKeySecretId: string
   minProtocol: string
@@ -53,6 +58,8 @@ export function listenerBody(form: ListenerForm) {
 export function tlsProfileForm(profile?: TlsProfileView): TlsProfileForm {
   return {
     id: profile?.id ?? '',
+    source: profile && !profile.certificate_id ? 'files' : 'inventory',
+    certificateId: profile?.certificate_id ?? '',
     certificateSecretId: profile?.certificate_secret_id ?? '',
     privateKeySecretId: profile?.private_key_secret_id ?? '',
     minProtocol: profile?.min_protocol ?? 'TLSv1.2',
@@ -61,10 +68,16 @@ export function tlsProfileForm(profile?: TlsProfileView): TlsProfileForm {
 }
 
 export function tlsProfileBody(form: TlsProfileForm) {
+  const certificate =
+    form.source === 'inventory'
+      ? { certificate_id: form.certificateId }
+      : {
+          certificate_secret_id: form.certificateSecretId.trim(),
+          private_key_secret_id: form.privateKeySecretId.trim(),
+        }
   return {
     id: form.id.trim(),
-    certificate_secret_id: form.certificateSecretId.trim(),
-    private_key_secret_id: form.privateKeySecretId.trim(),
+    ...certificate,
     min_protocol: form.minProtocol,
     alpn: [...form.alpn],
   }
