@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub mod template;
+pub mod tls;
 
 pub const IR_SCHEMA_VERSION: &str = "pingora.panel.ir/v1alpha1";
 
@@ -247,6 +248,37 @@ pub struct SiteSpec {
     pub https_redirect: bool,
     #[serde(default, skip_serializing_if = "WwwRedirect::is_none")]
     pub www_redirect: WwwRedirect,
+    /// Sent with every HTTPS response for the site's hosts (RFC 6797).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hsts: Option<StrictTransportSecurity>,
+}
+
+/// An HTTP Strict Transport Security policy (RFC 6797 §6.1).
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StrictTransportSecurity {
+    /// How long browsers keep using HTTPS only; zero makes them forget it.
+    pub max_age_seconds: u64,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub include_subdomains: bool,
+    /// Consents to inclusion in browsers' preload lists.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub preload: bool,
+}
+
+impl StrictTransportSecurity {
+    /// The `Strict-Transport-Security` header value.
+    pub fn header_value(&self) -> String {
+        let mut value = format!("max-age={}", self.max_age_seconds);
+        if self.include_subdomains {
+            value.push_str("; includeSubDomains");
+        }
+        if self.preload {
+            value.push_str("; preload");
+        }
+        value
+    }
 }
 
 impl SiteSpec {
@@ -259,6 +291,7 @@ impl SiteSpec {
             listener_ids: BTreeSet::new(),
             https_redirect: false,
             www_redirect: WwwRedirect::None,
+            hsts: None,
         }
     }
 }
@@ -659,6 +692,18 @@ pub struct TlsProfile {
     pub certificate_secret_id: String,
     pub private_key_secret_id: String,
     pub min_protocol: String,
+    /// The newest TLS version accepted; the newest the engine supports when
+    /// absent. Like the cipher suites and session resumption, it applies to
+    /// listeners that use this profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_protocol: Option<String>,
+    /// IANA names of the cipher suites accepted, from [`tls::CIPHER_SUITES`];
+    /// empty accepts the engine's defaults.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cipher_suites: Vec<String>,
+    /// Off refuses resuming sessions by session IDs and tickets.
+    #[serde(default = "enabled", skip_serializing_if = "is_true")]
+    pub session_resumption: bool,
     /// ALPN protocol IDs a listener using this profile offers, narrowing the
     /// listener's enabled protocols; empty offers all of them. A profile chosen
     /// by SNI for a domain does not change its listener's offer.

@@ -89,7 +89,7 @@ pub const CONFIG_V1: ProtocolRevisions = ProtocolRevisions {
 pub const GATEWAY_V1: ProtocolRevisions = ProtocolRevisions {
     package: "pingora.panel.gateway.v1",
     min: 1,
-    max: 1,
+    max: 2,
 };
 
 pub const PLATFORM_V1: ProtocolRevisions = ProtocolRevisions {

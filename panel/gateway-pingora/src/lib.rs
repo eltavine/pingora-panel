@@ -10,6 +10,7 @@ mod certificates;
 mod dataplane;
 mod forwarding;
 mod hosts;
+mod hsts;
 mod listeners;
 mod path;
 mod proxy;

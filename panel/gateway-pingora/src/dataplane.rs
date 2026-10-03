@@ -13,8 +13,8 @@ use crate::{
 };
 use panel_errors::{PanelError, Result};
 use pingora_core::{
-    apps::HttpServerOptions, listeners::tls::TlsSettings, protocols::ALPN,
-    server::configuration::ServerConf, services::Service as _,
+    apps::HttpServerOptions, listeners::tls::TlsSettings, server::configuration::ServerConf,
+    services::Service as _,
 };
 use pingora_proxy::ProxyServiceBuilder;
 use std::{
@@ -390,19 +390,12 @@ impl Generation {
                 .build();
             let address = plan.socket.address.to_string();
             if plan.tls {
-                let mut settings = TlsSettings::with_callbacks(Box::new(HandshakeRecorder))
-                    .map_err(|error| {
-                        PanelError::internal(format!("TLS listener setup: {error}"))
-                    })?;
-                settings.set_cert_resolver(Arc::new(ListenerCertificates::new(
+                let config = plan.server_config(Arc::new(ListenerCertificates::new(
                     Arc::clone(&active),
                     plan.id.clone(),
-                )));
-                settings.set_alpn(match (plan.alpn_http1, plan.alpn_http2) {
-                    (true, true) => ALPN::H2H1,
-                    (false, _) => ALPN::H2,
-                    (true, false) => ALPN::H1,
-                });
+                )))?;
+                let settings =
+                    TlsSettings::from_server_config(config, Some(Box::new(HandshakeRecorder)));
                 service.add_tls_with_settings(&address, None, settings);
             } else {
                 service.add_tcp(&address);

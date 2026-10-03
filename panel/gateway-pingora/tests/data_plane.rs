@@ -13,8 +13,8 @@ use panel_domain::{
 use panel_engine::DataPlaneAdapter;
 use panel_ir::{
     template::TEMPLATE_CAPABILITY, CapabilityRequirement, DomainSpec, ListenerRef, RouteAction,
-    RouteMatcher, RouteSpec, RuntimeSnapshot, SiteSpec, StaticContentPolicy, TlsProfile,
-    UpstreamEndpoint, UpstreamPoolSpec, WwwRedirect,
+    RouteMatcher, RouteSpec, RuntimeSnapshot, SiteSpec, StaticContentPolicy,
+    StrictTransportSecurity, TlsProfile, UpstreamEndpoint, UpstreamPoolSpec, WwwRedirect,
 };
 use std::{
     collections::{BTreeSet, HashMap},
@@ -538,6 +538,9 @@ async fn tls_listener_selects_certificates_by_sni_and_rejects_misdirected_hosts(
             certificate_secret_id: format!("{id}.crt"),
             private_key_secret_id: format!("{id}.key"),
             min_protocol: "TLSv1.2".into(),
+            max_protocol: None,
+            cipher_suites: Vec::new(),
+            session_resumption: true,
             alpn: BTreeSet::new(),
         });
     }
@@ -636,6 +639,9 @@ async fn renewed_certificates_are_served_without_a_new_revision() {
         certificate_secret_id: "cert-edge.pem".into(),
         private_key_secret_id: "cert-edge.key".into(),
         min_protocol: "TLSv1.2".into(),
+        max_protocol: None,
+        cipher_suites: Vec::new(),
+        session_resumption: true,
         alpn: BTreeSet::new(),
     });
     let mut listener = ListenerRef::new("https", listen.to_string());
@@ -699,5 +705,123 @@ async fn renewed_certificates_are_served_without_a_new_revision() {
         refused.message
     );
     assert_eq!(presented().await, renewed.cert.der().to_vec());
+    gateway.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn listener_tls_settings_narrow_handshakes_and_hsts_reaches_https() {
+    let upstream = echo_upstream().await;
+    let secrets = tempfile::tempdir().unwrap();
+    let certified = rcgen::generate_simple_self_signed(vec!["example.com".to_owned()]).unwrap();
+    std::fs::write(
+        secrets.path().join("edge.crt"),
+        pem("CERTIFICATE", certified.cert.der()),
+    )
+    .unwrap();
+    std::fs::write(
+        secrets.path().join("edge.key"),
+        pem("PRIVATE KEY", &certified.signing_key.serialize_der()),
+    )
+    .unwrap();
+    let (https, http) = (free_address(), free_address());
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot.tls_profiles.push(TlsProfile {
+        id: "edge".into(),
+        certificate_secret_id: "edge.crt".into(),
+        private_key_secret_id: "edge.key".into(),
+        min_protocol: "TLSv1.2".into(),
+        max_protocol: Some("TLSv1.2".into()),
+        cipher_suites: vec!["TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256".into()],
+        session_resumption: true,
+        alpn: BTreeSet::new(),
+    });
+    let mut tls = ListenerRef::new("https", https.to_string());
+    tls.tls_profile_id = Some("edge".into());
+    snapshot.listeners.push(tls);
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", http.to_string()));
+    let mut main = site(&["example.com"]);
+    main.hsts = Some(StrictTransportSecurity {
+        max_age_seconds: 31_536_000,
+        include_subdomains: true,
+        preload: false,
+    });
+    snapshot.sites.push(main);
+    snapshot.upstream_pools.push(pool("app", &[upstream]));
+    snapshot
+        .routes
+        .push(route("app", 1, prefix("/app"), proxy("app")));
+    let gateway = Gateway::start(
+        AdapterOptions::default().with_secrets(Arc::new(DirectorySecrets::new(secrets.path()))),
+        snapshot,
+    )
+    .await;
+    wait_for(https).await;
+    wait_for(http).await;
+
+    let mut roots = rustls::RootCertStore::empty();
+    roots.add(certified.cert.der().clone()).unwrap();
+    let connector = |versions: &[&'static rustls::SupportedProtocolVersion]| {
+        let config = rustls::ClientConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_protocol_versions(versions)
+        .unwrap()
+        .with_root_certificates(roots.clone())
+        .with_no_client_auth();
+        tokio_rustls::TlsConnector::from(Arc::new(config))
+    };
+    let both = connector(&[&rustls::version::TLS12, &rustls::version::TLS13]);
+    let connect = || {
+        let both = both.clone();
+        async move {
+            both.connect(
+                rustls_pki_types::ServerName::try_from("example.com").unwrap(),
+                TcpStream::connect(https).await.unwrap(),
+            )
+            .await
+            .unwrap()
+        }
+    };
+
+    let mut stream = connect().await;
+    let (_, connection) = stream.get_ref();
+    assert_eq!(
+        connection.protocol_version(),
+        Some(rustls::ProtocolVersion::TLSv1_2)
+    );
+    assert_eq!(
+        connection.negotiated_cipher_suite().unwrap().suite(),
+        rustls::CipherSuite::TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+    );
+    let policy = "max-age=31536000; includeSubDomains";
+    let proxied = exchange(
+        &mut stream,
+        "GET /app HTTP/1.1\r\nhost: example.com\r\nconnection: close\r\n\r\n",
+    )
+    .await;
+    assert_eq!(proxied.status, 200);
+    assert_eq!(proxied.headers["strict-transport-security"], policy);
+    let mut stream = connect().await;
+    let generated = exchange(
+        &mut stream,
+        "GET /missing HTTP/1.1\r\nhost: example.com\r\nconnection: close\r\n\r\n",
+    )
+    .await;
+    assert_eq!(generated.status, 404);
+    assert_eq!(generated.headers["strict-transport-security"], policy);
+
+    let newest_only = connector(&[&rustls::version::TLS13])
+        .connect(
+            rustls_pki_types::ServerName::try_from("example.com").unwrap(),
+            TcpStream::connect(https).await.unwrap(),
+        )
+        .await;
+    assert!(newest_only.is_err());
+
+    let plain = get(http, Some("example.com"), "/app", "").await;
+    assert_eq!(plain.status, 200);
+    assert!(!plain.headers.contains_key("strict-transport-security"));
     gateway.stop().await;
 }

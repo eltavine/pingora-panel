@@ -2,6 +2,7 @@
 
 use crate::template::Template;
 use globset::{GlobBuilder, GlobMatcher};
+use http::HeaderValue;
 use panel_domain::{NormalizedHost, PathPrefix, RouteId, SiteId};
 use panel_engine::ROUTE_REGEX_SIZE_LIMIT;
 use panel_errors::{PanelError, Result};
@@ -37,6 +38,8 @@ pub(crate) struct SiteRoutes {
     /// Port of the TLS listener used for HTTPS redirects; `None` is 443.
     pub https_port: Option<u16>,
     pub primary: Option<String>,
+    /// `Strict-Transport-Security` for its HTTPS responses.
+    pub hsts: Option<HeaderValue>,
     www: HashMap<String, String>,
     routes: Vec<CompiledRoute>,
 }
@@ -150,6 +153,16 @@ impl RoutingTable {
                     .iter()
                     .find(|domain| domain.primary)
                     .map(|domain| domain.host.as_str().to_owned()),
+                hsts: site
+                    .hsts
+                    .map(|policy| HeaderValue::from_str(&policy.header_value()))
+                    .transpose()
+                    .map_err(|_| {
+                        PanelError::validation_failed(format!(
+                            "site {} has an invalid HSTS policy",
+                            site.id
+                        ))
+                    })?,
                 www,
                 routes: Vec::new(),
             });

@@ -34,6 +34,8 @@ const CAPABILITIES: &[&str] = &[
     "listener.http",
     "listener.http2",
     "listener.https",
+    "listener.tls-settings",
+    "response.hsts",
     "route.exact-path",
     "route.glob",
     "route.host",

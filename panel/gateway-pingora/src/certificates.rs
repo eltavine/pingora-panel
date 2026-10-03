@@ -21,7 +21,7 @@ pub(crate) enum TlsVersion {
 
 impl TlsVersion {
     /// Accepts `TLSv1.3`, `TLS1.3` and the `TLSv1_3` form rustls reports.
-    fn parse(value: &str) -> Option<Self> {
+    pub(crate) fn parse(value: &str) -> Option<Self> {
         let normalized: String = value
             .to_ascii_lowercase()
             .chars()
@@ -295,6 +295,9 @@ pub(crate) mod tests {
             certificate_secret_id: format!("{id}.crt"),
             private_key_secret_id: format!("{id}.key"),
             min_protocol: "TLSv1.2".into(),
+            max_protocol: None,
+            cipher_suites: Vec::new(),
+            session_resumption: true,
             alpn: BTreeSet::new(),
         }
     }

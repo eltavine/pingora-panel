@@ -6,6 +6,7 @@ use crate::{
     certificates::Handshake,
     forwarding::{self, Forwarding},
     hosts::{self, HostError, RequestHost},
+    hsts::{StrictTransport, StrictTransportBuilder},
     path, responses,
     routing::{RouteTarget, SiteRoutes},
     static_files,
@@ -14,7 +15,11 @@ use crate::{
 };
 use async_trait::async_trait;
 use http::header;
-use pingora_core::{upstreams::peer::HttpPeer, Error, ErrorType};
+use pingora_core::{
+    modules::http::{compression::ResponseCompressionBuilder, HttpModules},
+    upstreams::peer::HttpPeer,
+    Error, ErrorType,
+};
 use pingora_http::{RequestHeader, ResponseHeader};
 use pingora_proxy::{ProxyHttp, Session};
 use std::{
@@ -87,6 +92,11 @@ impl RequestContext {
 impl ProxyHttp for PanelProxy {
     type CTX = RequestContext;
 
+    fn init_downstream_modules(&self, modules: &mut HttpModules) {
+        modules.add_module(ResponseCompressionBuilder::enable(0));
+        modules.add_module(Box::new(StrictTransportBuilder));
+    }
+
     fn new_ctx(&self) -> RequestContext {
         self.in_flight.fetch_add(1, Relaxed);
         RequestContext {
@@ -158,6 +168,11 @@ impl ProxyHttp for PanelProxy {
         };
         ctx.site = Some(site_index);
         let site = routing.site(site_index);
+        if self.listener.tls && site.hsts.is_some() {
+            if let Some(module) = session.downstream_modules_ctx.get_mut::<StrictTransport>() {
+                module.header.clone_from(&site.hsts);
+            }
+        }
         if let Some(location) = site_redirect(
             site,
             host.as_ref(),

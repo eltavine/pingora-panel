@@ -609,6 +609,9 @@ mod tests {
             certificate_secret_id: "cert".into(),
             private_key_secret_id: "key".into(),
             min_protocol: "TLSv1.2".into(),
+            max_protocol: None,
+            cipher_suites: Vec::new(),
+            session_resumption: true,
             alpn: BTreeSet::new(),
         });
         let mut https = ListenerRef::new("https", "0.0.0.0:443");

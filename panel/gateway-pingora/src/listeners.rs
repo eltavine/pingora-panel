@@ -1,14 +1,23 @@
 //! Listening sockets and the fixed listener set of a data plane generation.
 
+use crate::certificates::TlsVersion;
 use panel_errors::{PanelError, Result};
 use panel_ir::{ListenerRef, TlsProfile};
+use rustls::{
+    crypto::CryptoProvider,
+    server::{NoServerSessionStorage, ResolvesServerCert, ServerSessionMemoryCache},
+    ServerConfig, SupportedProtocolVersion,
+};
 use socket2::{Domain, Protocol, Socket, Type};
 use std::{
     io,
     net::{SocketAddr, TcpListener},
+    sync::Arc,
 };
 
 const BACKLOG: i32 = 65_535;
+/// Sessions each listener remembers for resumption.
+const SESSION_CACHE: usize = 4_096;
 
 /// Socket options fixed at bind time; changing any of them needs a new socket.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -29,6 +38,60 @@ pub(crate) struct ListenerPlan {
     /// own TLS profile allows.
     pub alpn_http1: bool,
     pub alpn_http2: bool,
+    /// Handshake settings from the listener's own TLS profile.
+    pub handshake: Handshake,
+}
+
+/// What a TLS listener accepts in every handshake.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct Handshake {
+    pub oldest: TlsVersion,
+    pub newest: TlsVersion,
+    /// IANA names; empty accepts every supported suite.
+    pub cipher_suites: Vec<String>,
+    pub session_resumption: bool,
+}
+
+impl Default for Handshake {
+    fn default() -> Self {
+        Self {
+            oldest: TlsVersion::Tls12,
+            newest: TlsVersion::Tls13,
+            cipher_suites: Vec::new(),
+            session_resumption: true,
+        }
+    }
+}
+
+impl Handshake {
+    fn from_profile(profile: &TlsProfile) -> Result<Self> {
+        let version = |name: &str| {
+            TlsVersion::parse(name).ok_or_else(|| {
+                PanelError::validation_failed(format!(
+                    "TLS profile {} names unsupported protocol {name}",
+                    profile.id
+                ))
+            })
+        };
+        let handshake = Self {
+            oldest: version(&profile.min_protocol)?,
+            newest: profile
+                .max_protocol
+                .as_deref()
+                .map(version)
+                .transpose()?
+                .unwrap_or(TlsVersion::Tls13),
+            cipher_suites: profile.cipher_suites.clone(),
+            session_resumption: profile.session_resumption,
+        };
+        if handshake.newest < handshake.oldest {
+            return Err(PanelError::validation_failed(format!(
+                "TLS profile {} accepts no protocol version",
+                profile.id
+            )));
+        }
+        Ok(handshake)
+    }
 }
 
 impl ListenerPlan {
@@ -51,15 +114,88 @@ impl ListenerPlan {
             http2: listener.protocols.http2,
             alpn_http1: listener.protocols.http1 && offers(listener, profiles, "http/1.1"),
             alpn_http2: listener.protocols.http2 && offers(listener, profiles, "h2"),
+            handshake: profile(listener, profiles)
+                .map(Handshake::from_profile)
+                .transpose()?
+                .unwrap_or_default(),
         })
+    }
+
+    /// The server side of the listener's handshakes, with certificates from
+    /// `resolver`.
+    pub(crate) fn server_config(
+        &self,
+        resolver: Arc<dyn ResolvesServerCert>,
+    ) -> Result<Arc<ServerConfig>> {
+        let invalid = |detail: String| {
+            PanelError::validation_failed(format!("listener {}: {detail}", self.id))
+        };
+        let base = rustls::crypto::ring::default_provider();
+        let cipher_suites = if self.handshake.cipher_suites.is_empty() {
+            base.cipher_suites.clone()
+        } else {
+            self.handshake
+                .cipher_suites
+                .iter()
+                .map(|name| {
+                    base.cipher_suites
+                        .iter()
+                        .find(|suite| format!("{:?}", suite.suite()) == *name)
+                        .copied()
+                        .ok_or_else(|| invalid(format!("unsupported cipher suite {name}")))
+                })
+                .collect::<Result<Vec<_>>>()?
+        };
+        let versions: Vec<&'static SupportedProtocolVersion> = [
+            (TlsVersion::Tls12, &rustls::version::TLS12),
+            (TlsVersion::Tls13, &rustls::version::TLS13),
+        ]
+        .into_iter()
+        .filter(|(version, _)| (self.handshake.oldest..=self.handshake.newest).contains(version))
+        .map(|(_, supported)| supported)
+        .collect();
+        if let Some(version) = versions.iter().find(|version| {
+            !cipher_suites
+                .iter()
+                .any(|suite| suite.version() == **version)
+        }) {
+            return Err(invalid(format!(
+                "no cipher suite works with {:?}",
+                version.version
+            )));
+        }
+        let mut config = ServerConfig::builder_with_provider(Arc::new(CryptoProvider {
+            cipher_suites,
+            ..base
+        }))
+        .with_protocol_versions(&versions)
+        .map_err(|error| invalid(format!("TLS settings do not fit together: {error}")))?
+        .with_no_client_auth()
+        .with_cert_resolver(resolver);
+        config.alpn_protocols = match (self.alpn_http1, self.alpn_http2) {
+            (true, true) => vec![b"h2".to_vec(), b"http/1.1".to_vec()],
+            (false, _) => vec![b"h2".to_vec()],
+            (true, false) => vec![b"http/1.1".to_vec()],
+        };
+        if self.handshake.session_resumption {
+            config.session_storage = ServerSessionMemoryCache::new(SESSION_CACHE);
+        } else {
+            config.session_storage = Arc::new(NoServerSessionStorage {});
+            config.send_tls13_tickets = 0;
+        }
+        Ok(Arc::new(config))
     }
 }
 
-fn offers(listener: &ListenerRef, profiles: &[TlsProfile], protocol: &str) -> bool {
+fn profile<'a>(listener: &ListenerRef, profiles: &'a [TlsProfile]) -> Option<&'a TlsProfile> {
     listener
         .tls_profile_id
         .as_ref()
         .and_then(|id| profiles.iter().find(|profile| &profile.id == id))
+}
+
+fn offers(listener: &ListenerRef, profiles: &[TlsProfile], protocol: &str) -> bool {
+    profile(listener, profiles)
         .is_none_or(|profile| profile.alpn.is_empty() || profile.alpn.contains(protocol))
 }
 
@@ -114,6 +250,9 @@ mod tests {
             certificate_secret_id: "cert.pem".into(),
             private_key_secret_id: "key.pem".into(),
             min_protocol: "TLSv1.2".into(),
+            max_protocol: None,
+            cipher_suites: Vec::new(),
+            session_resumption: true,
             alpn: ["http/1.1".to_owned()].into(),
         };
         let plan = ListenerPlan::from_ir(&listener, std::slice::from_ref(&profile)).unwrap();
@@ -122,6 +261,58 @@ mod tests {
         profile.alpn.clear();
         let plan = ListenerPlan::from_ir(&listener, &[profile]).unwrap();
         assert!(plan.alpn_http1 && plan.alpn_http2);
+    }
+
+    #[test]
+    fn handshakes_follow_the_listener_profile() {
+        let mut listener = ListenerRef::new("https", "127.0.0.1:443");
+        listener.tls_profile_id = Some("tls".into());
+        let mut profile = TlsProfile {
+            id: "tls".into(),
+            certificate_secret_id: "cert.pem".into(),
+            private_key_secret_id: "key.pem".into(),
+            min_protocol: "TLSv1.2".into(),
+            max_protocol: Some("TLSv1.2".into()),
+            cipher_suites: vec!["TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256".into()],
+            session_resumption: false,
+            alpn: ["http/1.1".to_owned()].into(),
+        };
+        let resolver = || Arc::new(rustls::server::ResolvesServerCertUsingSni::new());
+        let plan = ListenerPlan::from_ir(&listener, std::slice::from_ref(&profile)).unwrap();
+        assert_eq!(plan.handshake.newest, TlsVersion::Tls12);
+        let config = plan.server_config(resolver()).unwrap();
+        let suites: Vec<_> = config
+            .crypto_provider()
+            .cipher_suites
+            .iter()
+            .map(|suite| format!("{:?}", suite.suite()))
+            .collect();
+        assert_eq!(suites, ["TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256"]);
+        assert_eq!(config.alpn_protocols, [b"http/1.1".to_vec()]);
+        assert_eq!(config.send_tls13_tickets, 0);
+
+        profile.max_protocol = None;
+        profile.session_resumption = true;
+        profile.cipher_suites = panel_ir::tls::CIPHER_SUITES
+            .iter()
+            .map(|(name, _)| (*name).to_owned())
+            .collect();
+        let plan = ListenerPlan::from_ir(&listener, std::slice::from_ref(&profile)).unwrap();
+        let config = plan.server_config(resolver()).unwrap();
+        assert_eq!(
+            config.crypto_provider().cipher_suites.len(),
+            panel_ir::tls::CIPHER_SUITES.len()
+        );
+        assert!(config.send_tls13_tickets > 0);
+
+        profile.cipher_suites = vec!["TLS13_AES_128_GCM_SHA256".into()];
+        let plan = ListenerPlan::from_ir(&listener, std::slice::from_ref(&profile)).unwrap();
+        assert!(plan.server_config(resolver()).is_err());
+
+        profile.cipher_suites.clear();
+        profile.min_protocol = "TLSv1.3".into();
+        profile.max_protocol = Some("TLSv1.2".into());
+        assert!(ListenerPlan::from_ir(&listener, &[profile]).is_err());
     }
 
     #[test]

@@ -135,7 +135,7 @@ mod tests {
         assert_eq!(version.component, "config-service");
         assert_eq!(
             version.protocol,
-            "pingora.panel.gateway.v1@1..=1,pingora.panel.platform.v1@1..=1"
+            "pingora.panel.gateway.v1@1..=2,pingora.panel.platform.v1@1..=1"
         );
         assert_eq!(version.capability_set, "revision.plan@1");
     }

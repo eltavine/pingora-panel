@@ -75,6 +75,9 @@ impl TlsProfile {
             certificate_secret_id,
             private_key_secret_id,
             min_protocol: self.min_protocol.clone(),
+            max_protocol: None,
+            cipher_suites: Vec::new(),
+            session_resumption: true,
             alpn: self.alpn.clone(),
         }
     }

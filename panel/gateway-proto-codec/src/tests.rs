@@ -7,7 +7,8 @@ use panel_ir::{
     ActiveHealthCheck, CachePolicy, CapabilityRequirement, DomainSpec, HeaderPolicy,
     HealthCheckProtocol, ListenerRef, LoadBalancingPolicy, LuaPolicy, PassiveHealthPolicy,
     RetryPolicy, RouteAction, RouteMatcher, RouteSpec, RuntimeSnapshot, SecurityPolicy, SiteSpec,
-    StaticContentPolicy, TlsProfile, UpstreamEndpoint, UpstreamPoolSpec, WwwRedirect,
+    StaticContentPolicy, StrictTransportSecurity, TlsProfile, UpstreamEndpoint, UpstreamPoolSpec,
+    WwwRedirect,
 };
 
 #[test]
@@ -41,6 +42,11 @@ fn populated_snapshot_round_trips_additive_v1_fields() {
     );
     site.listener_ids.insert("https".into());
     site.https_redirect = true;
+    site.hsts = Some(StrictTransportSecurity {
+        max_age_seconds: 31_536_000,
+        include_subdomains: true,
+        preload: false,
+    });
     site.www_redirect = WwwRedirect::RemoveWww;
     snapshot.sites.push(site);
     let mut route = RouteSpec::new(
@@ -151,6 +157,9 @@ fn populated_snapshot_round_trips_additive_v1_fields() {
         certificate_secret_id: "cert".into(),
         private_key_secret_id: "key".into(),
         min_protocol: "TLS1.2".into(),
+        max_protocol: Some("TLSv1.3".into()),
+        cipher_suites: vec!["TLS13_AES_128_GCM_SHA256".into()],
+        session_resumption: false,
         alpn: ["h2".into(), "http/1.1".into()].into_iter().collect(),
     });
     snapshot.header_policies.push(HeaderPolicy {

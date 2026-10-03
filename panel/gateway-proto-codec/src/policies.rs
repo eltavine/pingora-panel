@@ -12,6 +12,9 @@ pub(super) fn decode_tls(value: wire::TlsProfile) -> TlsProfile {
         certificate_secret_id: value.certificate_ref,
         private_key_secret_id: value.private_key_secret_id,
         min_protocol: value.min_protocol,
+        max_protocol: (!value.max_protocol.is_empty()).then_some(value.max_protocol),
+        cipher_suites: value.cipher_suites,
+        session_resumption: !value.session_resumption_disabled,
         alpn: value.alpn.into_iter().collect(),
     }
 }
@@ -23,6 +26,9 @@ pub(super) fn encode_tls(value: &TlsProfile) -> wire::TlsProfile {
         private_key_secret_id: value.private_key_secret_id.clone(),
         min_protocol: value.min_protocol.clone(),
         alpn: value.alpn.iter().cloned().collect(),
+        max_protocol: value.max_protocol.clone().unwrap_or_default(),
+        cipher_suites: value.cipher_suites.clone(),
+        session_resumption_disabled: !value.session_resumption,
     }
 }
 

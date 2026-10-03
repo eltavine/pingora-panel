@@ -9,7 +9,7 @@ use panel_domain::{NormalizedHost, PathPrefix, RouteId, SiteId, UpstreamPoolId};
 use panel_errors::{PanelError, Result};
 use panel_ir::{
     DomainSpec, ListenerProtocols, ListenerRef, RouteAction, RouteMatcher, RouteSpec, SiteSpec,
-    WwwRedirect,
+    StrictTransportSecurity, WwwRedirect,
 };
 
 pub(super) fn decode_listener(value: wire::ListenerRef) -> Result<ListenerRef> {
@@ -92,6 +92,11 @@ pub(super) fn decode_site(value: wire::SiteSpec) -> Result<SiteSpec> {
         listener_ids: value.listener_ids.into_iter().collect(),
         https_redirect: value.https_redirect,
         www_redirect,
+        hsts: value.hsts.map(|hsts| StrictTransportSecurity {
+            max_age_seconds: hsts.max_age_seconds,
+            include_subdomains: hsts.include_subdomains,
+            preload: hsts.preload,
+        }),
     })
 }
 
@@ -119,6 +124,11 @@ pub(super) fn encode_site(value: &SiteSpec) -> wire::SiteSpec {
         listener_ids: value.listener_ids.iter().cloned().collect(),
         https_redirect: value.https_redirect,
         www_redirect: www_redirect.into(),
+        hsts: value.hsts.map(|hsts| wire::StrictTransportSecurity {
+            max_age_seconds: hsts.max_age_seconds,
+            include_subdomains: hsts.include_subdomains,
+            preload: hsts.preload,
+        }),
     }
 }
 

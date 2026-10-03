@@ -66,6 +66,17 @@ message SiteSpec {
   repeated string listener_ids = 5;
   bool https_redirect = 6;
   WwwRedirect www_redirect = 7;
+  // Sent with every HTTPS response for the site's hosts (RFC 6797).
+  StrictTransportSecurity hsts = 8;
+}
+
+// An HTTP Strict Transport Security policy (RFC 6797 §6.1).
+message StrictTransportSecurity {
+  // How long browsers keep using HTTPS only; zero makes them forget it.
+  uint64 max_age_seconds = 1;
+  bool include_subdomains = 2;
+  // Consents to inclusion in browsers' preload lists.
+  bool preload = 3;
 }
 
 enum WwwRedirect {
@@ -227,6 +238,12 @@ message TlsProfile {
   // listener's enabled protocols; empty offers all of them. A profile chosen
   // by SNI for a domain does not change its listener's offer.
   repeated string alpn = 5;
+  // The newest TLS version accepted; the newest supported when empty.
+  string max_protocol = 6;
+  // IANA names of the cipher suites accepted; empty accepts the defaults.
+  repeated string cipher_suites = 7;
+  // Refuses resuming sessions by session IDs and tickets.
+  bool session_resumption_disabled = 8;
 }
 
 message HeaderPolicy {
