@@ -2,13 +2,22 @@
 
 //! A [`DnsProvider`] that publishes DNS-01 records through RFC 2136 dynamic
 //! updates signed with TSIG (RFC 8945), which BIND, Knot DNS, PowerDNS and
-//! most authoritative servers accept. Updates go to the zone's primary over
-//! TCP, and its answers must carry a valid signature.
-
-mod wire;
+//! most authoritative servers accept. Messages and signatures come from
+//! `hickory-proto` with `ring`; updates go to the zone's primary over TCP,
+//! and its answers must carry a valid signature.
 
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD, Engine};
+use hickory_proto::{
+    op::{update_message, Message, ResponseCode},
+    rr::{
+        rdata::{
+            tsig::{TsigAlgorithm, TsigError},
+            TXT,
+        },
+        Name, RData, Record, RecordSet, TSigner,
+    },
+};
 use panel_acme::DnsProvider;
 use panel_errors::{PanelError, Result};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -17,13 +26,46 @@ use tokio::{
     net::TcpStream,
     time::timeout,
 };
-use wire::{Change, Key};
 use zeroize::Zeroizing;
-
-pub use wire::Algorithm;
 
 const DEFAULT_TTL: u32 = 60;
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Seconds of clock difference a signature tolerates (RFC 8945 §10).
+const FUDGE: u16 = 300;
+
+/// A TSIG algorithm (RFC 8945 §6).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum Algorithm {
+    HmacSha256,
+    HmacSha512,
+}
+
+impl Algorithm {
+    pub fn parse(value: &str) -> Result<Self> {
+        match value.trim_end_matches('.').to_ascii_lowercase().as_str() {
+            "hmac-sha256" => Ok(Self::HmacSha256),
+            "hmac-sha512" => Ok(Self::HmacSha512),
+            _ => Err(PanelError::invalid_argument(format!(
+                "{value:?} is not a supported TSIG algorithm: use hmac-sha256 or hmac-sha512"
+            ))),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::HmacSha256 => "hmac-sha256",
+            Self::HmacSha512 => "hmac-sha512",
+        }
+    }
+
+    fn tsig(self) -> TsigAlgorithm {
+        match self {
+            Self::HmacSha256 => TsigAlgorithm::HmacSha256,
+            Self::HmacSha512 => TsigAlgorithm::HmacSha512,
+        }
+    }
+}
 
 /// Where and how to send updates.
 #[derive(Clone)]
@@ -47,28 +89,31 @@ pub struct Rfc2136 {
     server: String,
     /// Zone names, without the root's dot, longest first.
     zones: Vec<String>,
-    key: Key,
+    signer: TSigner,
     ttl: u32,
     timeout: Duration,
 }
 
-fn rcode_name(code: u16) -> &'static str {
-    match code {
-        1 => "FORMERR: the server could not read the update",
-        2 => "SERVFAIL: the server failed to apply the update",
-        3 => "NXDOMAIN",
-        4 => "NOTIMP: the server does not accept updates",
-        5 => "REFUSED: the server does not allow this update",
-        6 => "YXDOMAIN",
-        7 => "YXRRSET",
-        8 => "NXRRSET",
-        9 => "NOTAUTH: the server is not authoritative for the zone or does not accept the key",
-        10 => "NOTZONE: the record is outside the zone",
-        16 => "BADSIG: the server could not verify the signature",
-        17 => "BADKEY: the server does not know the key",
-        18 => "BADTIME: the clocks differ by too much",
-        _ => "an unknown error",
+/// Whether an update adds a record or removes it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Change {
+    Add,
+    Remove,
+}
+
+/// A fully qualified, lowercase domain name.
+fn name(text: &str) -> Result<Name> {
+    let invalid = || PanelError::invalid_argument(format!("{text:?} is not a DNS name"));
+    if !text.is_ascii() {
+        return Err(invalid());
     }
+    let mut name = Name::from_ascii(text.trim()).map_err(|_| invalid())?;
+    name.set_fqdn(true);
+    Ok(name.to_lowercase())
+}
+
+fn zone_name(zone: &str) -> String {
+    zone.trim().trim_end_matches('.').to_ascii_lowercase()
 }
 
 fn now() -> u64 {
@@ -78,8 +123,25 @@ fn now() -> u64 {
         .unwrap_or_default()
 }
 
-fn zone_name(zone: &str) -> String {
-    zone.trim().trim_end_matches('.').to_ascii_lowercase()
+/// What a refusal means, with the TSIG error first since it explains the
+/// response code it comes with (RFC 8945 §5.3).
+fn refusal(code: ResponseCode, error: Option<&TsigError>) -> String {
+    match (error, code) {
+        (Some(TsigError::BadSig), _) => "BADSIG: the server could not verify the signature".into(),
+        (Some(TsigError::BadKey), _) => "BADKEY: the server does not know the key".into(),
+        (Some(TsigError::BadTime), _) => "BADTIME: the clocks differ by too much".into(),
+        (Some(error), _) => format!("TSIG error {error:?}"),
+        (None, ResponseCode::FormErr) => "FORMERR: the server could not read the update".into(),
+        (None, ResponseCode::ServFail) => "SERVFAIL: the server failed to apply the update".into(),
+        (None, ResponseCode::NotImp) => "NOTIMP: the server does not accept updates".into(),
+        (None, ResponseCode::Refused) => "REFUSED: the server does not allow this update".into(),
+        (None, ResponseCode::NotAuth) => {
+            "NOTAUTH: the server is not authoritative for the zone or does not accept the key"
+                .into()
+        }
+        (None, ResponseCode::NotZone) => "NOTZONE: the record is outside the zone".into(),
+        (None, code) => code.to_str().into(),
+    }
 }
 
 impl Rfc2136 {
@@ -91,7 +153,7 @@ impl Rfc2136 {
             .ok_or_else(|| PanelError::invalid_argument("the TSIG secret is not base64-encoded"))?;
         let mut zones = Vec::with_capacity(settings.zones.len());
         for zone in &settings.zones {
-            wire::name(zone)?;
+            name(zone)?;
             zones.push(zone_name(zone));
         }
         if zones.is_empty() || zones.iter().any(String::is_empty) {
@@ -105,14 +167,17 @@ impl Rfc2136 {
                 "name the DNS server to update",
             ));
         }
+        let signer = TSigner::new(
+            secret,
+            settings.algorithm.tsig(),
+            name(&settings.key_name)?,
+            FUDGE,
+        )
+        .map_err(|error| PanelError::invalid_argument(format!("the TSIG key: {error}")))?;
         Ok(Self {
             server: settings.server.trim().to_owned(),
             zones,
-            key: Key {
-                name: wire::name(&settings.key_name)?,
-                algorithm: settings.algorithm,
-                secret: Zeroizing::new(secret),
-            },
+            signer,
             ttl: settings.ttl.unwrap_or(DEFAULT_TTL),
             timeout: DEFAULT_TIMEOUT,
         })
@@ -138,22 +203,40 @@ impl Rfc2136 {
             })
     }
 
-    async fn send(&self, change: Change, record: &str, value: &str) -> Result<()> {
-        let zone = self.zone_of(record)?;
-        let mut id = [0_u8; 2];
-        getrandom::fill(&mut id)
-            .map_err(|error| PanelError::internal(format!("random generation failed: {error}")))?;
-        let id = u16::from_be_bytes(id);
-        let mut message = wire::update(
-            id,
-            &wire::name(zone)?,
-            &wire::name(record)?,
-            value,
+    /// An unsigned UPDATE of the record's zone that adds or removes the TXT
+    /// record `value` at `record`; removing names the exact record (RFC 2136
+    /// §2.5.1, §2.5.4).
+    fn update(&self, change: Change, record: &str, value: &str) -> Result<Message> {
+        let zone = name(self.zone_of(record)?)?;
+        let record = name(record)?;
+        if value.len() > 255 {
+            return Err(PanelError::invalid_argument(
+                "a TXT string holds at most 255 bytes",
+            ));
+        }
+        let rrset = RecordSet::from(Record::from_rdata(
+            record,
             self.ttl,
-            change,
-        )?;
-        let mac = wire::sign(&mut message, &self.key, now())?;
-        let bytes = timeout(self.timeout, exchange(&self.server, &message))
+            RData::TXT(TXT::new(vec![value.to_owned()])),
+        ));
+        Ok(match change {
+            Change::Add => update_message::append(rrset, zone, false, false),
+            Change::Remove => update_message::delete_by_rdata(rrset, zone, false),
+        })
+    }
+
+    async fn send(&self, change: Change, record: &str, value: &str) -> Result<()> {
+        let zone = self.zone_of(record)?.to_owned();
+        let mut message = self.update(change, record, value)?;
+        let unsigned = || PanelError::internal("the update cannot be signed");
+        let mut verifier = message
+            .finalize(&self.signer, now())
+            .map_err(|_| unsigned())?
+            .ok_or_else(unsigned)?;
+        let request = message
+            .to_vec()
+            .map_err(|error| PanelError::invalid_argument(format!("the update: {error}")))?;
+        let bytes = timeout(self.timeout, exchange(&self.server, &request))
             .await
             .map_err(|_| {
                 PanelError::deadline_exceeded(format!(
@@ -170,25 +253,28 @@ impl Rfc2136 {
                 ))
                 .retryable(true)
             })?;
-        let answer = wire::answer(&bytes)?;
-        if answer.id != id {
+        let answer = Message::from_vec(&bytes).map_err(|error| {
+            PanelError::unavailable(format!("the DNS server sent a malformed answer: {error}"))
+        })?;
+        if answer.metadata.id != message.metadata.id {
             return Err(PanelError::unavailable(
                 "the DNS server answered another request",
             ));
         }
         let error = answer
-            .signature
-            .as_ref()
-            .map(|signature| signature.error)
-            .filter(|error| *error != 0);
-        if answer.rcode != 0 || error.is_some() {
-            let code = error.unwrap_or(answer.rcode);
+            .signature()
+            .and_then(|signature| signature.data.error.as_ref());
+        if answer.metadata.response_code != ResponseCode::NoError || error.is_some() {
             return Err(PanelError::validation_failed(format!(
                 "the DNS server refused the update of {zone} ({})",
-                rcode_name(code)
+                refusal(answer.metadata.response_code, error)
             )));
         }
-        wire::verify_answer(&bytes, &answer, &self.key, &mac, now())
+        verifier.verify(&bytes).map(drop).map_err(|error| {
+            PanelError::unavailable(format!(
+                "the DNS server's answer does not verify with the key: {error}"
+            ))
+        })
     }
 }
 
