@@ -273,6 +273,23 @@ pub(crate) static ROUTES: &[(&str, &str, Access)] = &[
         "/api/v1/acme-certificates/{id}/renewals",
         Requires(CertificateManage),
     ),
+    ("GET", "/api/v1/dns-providers", Requires(CertificateRead)),
+    ("POST", "/api/v1/dns-providers", Requires(CertificateManage)),
+    (
+        "GET",
+        "/api/v1/dns-providers/{id}",
+        Requires(CertificateRead),
+    ),
+    (
+        "PUT",
+        "/api/v1/dns-providers/{id}",
+        Requires(CertificateManage),
+    ),
+    (
+        "DELETE",
+        "/api/v1/dns-providers/{id}",
+        Requires(CertificateManage),
+    ),
     ("POST", "/api/v1/tls-checks", Requires(GatewayRead)),
     ("GET", "/api/v1/audit-events", Requires(AuditRead)),
     ("GET", "/api/v1/audit-events/verify", Requires(AuditRead)),

@@ -209,6 +209,16 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
             "/api/v1/acme-certificates/{id}/renewals",
             post(acme::renew_automatic_certificate::<U>),
         )
+        .route(
+            "/api/v1/dns-providers",
+            get(acme::list_dns_providers::<U>).post(acme::create_dns_provider::<U>),
+        )
+        .route(
+            "/api/v1/dns-providers/{id}",
+            get(acme::get_dns_provider::<U>)
+                .put(acme::update_dns_provider::<U>)
+                .delete(acme::delete_dns_provider::<U>),
+        )
         .route("/api/v1/tls-checks", post(tls_checks::check_tls::<U>))
         .route("/api/v1/openapi.json", get(routes::openapi))
         .route(

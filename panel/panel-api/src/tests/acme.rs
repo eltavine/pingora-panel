@@ -32,6 +32,7 @@ fn automatic(state: &str) -> Value {
         "account": "letsencrypt",
         "names": ["example.com", "www.example.com"],
         "challenge": "http-01",
+        "dns_provider": null,
         "state": state,
         "renew_after": "2026-10-01T00:00:00Z",
         "renewal_explanation_url": null,
@@ -40,6 +41,23 @@ fn automatic(state: &str) -> Value {
         "version": 2,
         "created_at": "2026-10-01T00:00:00Z",
         "updated_at": "2026-10-01T00:00:00Z",
+    })
+}
+
+fn provider() -> Value {
+    json!({
+        "id": "primary-ns",
+        "kind": "rfc2136",
+        "rfc2136": {
+            "server": "ns1.example.com:53",
+            "zones": ["example.com"],
+            "key_name": "acme-update",
+            "algorithm": "hmac-sha256",
+        },
+        "propagation_seconds": 30,
+        "version": 2,
+        "created_at": "2026-10-01T00:00:00Z",
+        "updated_at": "2026-10-02T00:00:00Z",
     })
 }
 
@@ -70,6 +88,10 @@ impl CertificatePort for FakeAutomation {
             ("acme.certificates.get", "acme-certificates/example.com") => {
                 Ok(output(automatic("issued"), Some("\"2\"")))
             }
+            ("acme.dns_providers.list", "dns-providers") => Ok(output(json!([provider()]), None)),
+            ("acme.dns_providers.get", "dns-providers/primary-ns") => {
+                Ok(output(provider(), Some("\"2\"")))
+            }
             _ => Err(PanelError::not_found("there is no such resource")),
         }
     }
@@ -95,6 +117,9 @@ impl CertificatePort for FakeAutomation {
             "acme.accounts.create" => output(account(), Some("\"1\"")),
             "acme.certificates.create" => output(automatic("pending"), Some("\"1\"")),
             "acme.certificates.renew" => output(automatic("issued"), Some("\"2\"")),
+            "acme.dns_providers.create" | "acme.dns_providers.update" => {
+                output(provider(), Some("\"2\""))
+            }
             _ => output(Value::Null, None),
         })
     }
@@ -338,4 +363,135 @@ async fn automatic_certificates_map_onto_the_automation_port() {
         ]
     );
     assert_eq!(calls[0].3, order);
+}
+
+#[tokio::test]
+async fn dns_providers_map_onto_the_automation_port_without_their_secret() {
+    let automation = Arc::new(FakeAutomation::default());
+    let app = app(&automation);
+
+    let (status, _, listed) = send(&app, request("GET", "/api/v1/dns-providers", None, None)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(listed[0]["rfc2136"]["zones"], json!(["example.com"]));
+    assert_eq!(listed[0]["etag"], "\"2\"");
+
+    let created_body = json!({
+        "id": "primary-ns",
+        "kind": "rfc2136",
+        "rfc2136": {
+            "server": "ns1.example.com:53",
+            "zones": ["example.com"],
+            "key_name": "acme-update",
+            "algorithm": "hmac-sha256",
+        },
+        "secret": "c2VjcmV0",
+    });
+    let (status, etag, created) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/dns-providers",
+            None,
+            Some(created_body.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(
+        (status, etag.as_deref()),
+        (StatusCode::CREATED, Some("\"2\""))
+    );
+    assert!(!created.to_string().contains("c2VjcmV0"));
+
+    let (status, _, _) = send(
+        &app,
+        request(
+            "POST",
+            "/api/v1/dns-providers",
+            None,
+            Some(json!({"id": "x", "kind": "cloudflare", "rfc2136": created_body["rfc2136"], "secret": "c2VjcmV0"})),
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "unknown kinds are refused"
+    );
+
+    let change = json!({
+        "rfc2136": {
+            "server": "ns2.example.com:53",
+            "zones": ["example.com"],
+            "key_name": "acme-update",
+            "algorithm": "hmac-sha512",
+        },
+        "propagation_seconds": 60,
+    });
+    let (status, _, _) = send(
+        &app,
+        request(
+            "PUT",
+            "/api/v1/dns-providers/primary-ns",
+            None,
+            Some(change.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::PRECONDITION_REQUIRED);
+    let (status, _, _) = send(
+        &app,
+        request(
+            "PUT",
+            "/api/v1/dns-providers/primary-ns",
+            Some("\"2\""),
+            Some(change.clone()),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, etag, _) = send(
+        &app,
+        request("GET", "/api/v1/dns-providers/primary-ns", None, None),
+    )
+    .await;
+    assert_eq!((status, etag.as_deref()), (StatusCode::OK, Some("\"2\"")));
+    let (status, _, _) = send(
+        &app,
+        request(
+            "DELETE",
+            "/api/v1/dns-providers/primary-ns",
+            Some("\"2\""),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let calls = automation.calls.lock().unwrap().clone();
+    let operations: Vec<(&str, &str, Option<&str>)> = calls
+        .iter()
+        .map(|(operation, resource, if_match, _)| {
+            (operation.as_str(), resource.as_str(), if_match.as_deref())
+        })
+        .collect();
+    assert_eq!(
+        operations,
+        [
+            ("acme.dns_providers.list", "dns-providers", None),
+            ("acme.dns_providers.create", "dns-providers", None),
+            (
+                "acme.dns_providers.update",
+                "dns-providers/primary-ns",
+                Some("\"2\"")
+            ),
+            ("acme.dns_providers.get", "dns-providers/primary-ns", None),
+            (
+                "acme.dns_providers.delete",
+                "dns-providers/primary-ns",
+                Some("\"2\"")
+            ),
+        ]
+    );
+    assert_eq!(calls[1].3, created_body);
+    assert_eq!(calls[2].3, change);
 }

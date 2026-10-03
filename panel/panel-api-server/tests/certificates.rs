@@ -502,6 +502,63 @@ async fn certificates_are_kept_delivered_and_audited() {
             )
             .await;
         assert_eq!(automatic["challenge"], "http-01");
+        let (provider, _) = api
+            .send(
+                api.mutate(Method::POST, "/api/v1/dns-providers", "dns-provider-1")
+                    .json(&json!({
+                        "id": "primary-ns",
+                        "kind": "rfc2136",
+                        "rfc2136": {
+                            "server": "127.0.0.1:53",
+                            "zones": ["shop.example"],
+                            "key_name": "acme-update",
+                            "algorithm": "hmac-sha256",
+                        },
+                        "secret": "c2VjcmV0",
+                    })),
+                StatusCode::CREATED,
+            )
+            .await;
+        assert_eq!(provider["propagation_seconds"], 30);
+        assert!(!provider.to_string().contains("c2VjcmV0"));
+        let (wildcard, _) = api
+            .send(
+                api.mutate(
+                    Method::POST,
+                    "/api/v1/acme-certificates",
+                    "acme-certificate-2",
+                )
+                .json(&json!({
+                    "id": "wild.shop.example",
+                    "account": "pebble",
+                    "names": ["*.shop.example"],
+                    "challenge": "dns-01",
+                    "dns_provider": "primary-ns",
+                })),
+                StatusCode::CREATED,
+            )
+            .await;
+        assert_eq!(wildcard["dns_provider"], "primary-ns");
+        api.send(
+            api.mutate(
+                Method::DELETE,
+                "/api/v1/acme-certificates/wild.shop.example",
+                "acme-delete-3",
+            )
+            .header("if-match", wildcard["etag"].as_str().unwrap()),
+            StatusCode::NO_CONTENT,
+        )
+        .await;
+        api.send(
+            api.mutate(
+                Method::DELETE,
+                "/api/v1/dns-providers/primary-ns",
+                "dns-delete-1",
+            )
+            .header("if-match", "\"1\""),
+            StatusCode::NO_CONTENT,
+        )
+        .await;
         let (listed, _) = api
             .send(api.get("/api/v1/acme-certificates"), StatusCode::OK)
             .await;
