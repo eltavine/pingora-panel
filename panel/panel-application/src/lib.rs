@@ -7,6 +7,7 @@
 //! boundary. Internal modules are private so their organization can evolve
 //! without changing the public application contract.
 
+mod audit;
 mod configuration;
 mod context;
 mod gateway;
@@ -15,6 +16,7 @@ mod operations;
 mod persistence;
 mod runtime;
 
+pub use audit::{AuditFilter, AuditPage, AuditPort, AuditRecord, AuditVerification};
 pub use configuration::{
     ApplyOutcome, ApplyRequest, ConfigurationChange, ConfigurationOutput, ConfigurationPort,
     ConfigurationRead, DraftInfo,

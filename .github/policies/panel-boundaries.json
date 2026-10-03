@@ -1,6 +1,15 @@
 {
   "schema_version": 1,
   "members": {
+    "audit-grpc-client": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-application",
+        "panel-contracts",
+        "panel-errors",
+        "panel-service"
+      ]
+    },
     "audit-service": {
       "catalog": false,
       "allowed_workspace_dependencies": [
