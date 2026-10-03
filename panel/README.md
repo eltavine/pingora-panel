@@ -95,7 +95,11 @@ panel-bootstrap -> panel-postgres + panel-jetstream + panel-pki
 ([decision](../docs/adr/0010-pingora-data-plane.md)) next to its gRPC
 management transport. TLS profiles name certificate and key files in
 `PINGORA_PANEL_SECRET_DIR`, static sites live below
-`PINGORA_PANEL_STATIC_ROOT`, `PINGORA_PANEL_WORKERS` sets the initial worker
+`PINGORA_PANEL_STATIC_ROOT` — a site's root must resolve to a directory
+inside it, request paths are decoded and their dot segments resolved before
+they are appended, and symbolic links are followed only when they lead to a
+file inside the site's root; others are not served —
+`PINGORA_PANEL_WORKERS` sets the initial worker
 count and `PINGORA_PANEL_DRAIN_TIMEOUT_MS` bounds how long a replaced
 generation finishes in-flight requests. Worker counts and node drains set at
 runtime persist in the state directory and survive restarts. See the
