@@ -33,4 +33,5 @@ zeroize = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 panel-domain.workspace = true
+rustls-pki-types.workspace = true
 tokio.workspace = true

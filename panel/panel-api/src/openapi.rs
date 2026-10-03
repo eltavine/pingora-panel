@@ -39,7 +39,7 @@ mod tests;
         crate::certificates::list_certificates, crate::certificates::create_certificate,
         crate::certificates::get_certificate, crate::certificates::replace_certificate,
         crate::certificates::delete_certificate, crate::certificates::certificate_coverage,
-        crate::certificates::inspect_certificate,
+        crate::certificates::inspect_certificate, crate::tls_checks::check_tls,
         crate::language::ast,
         crate::language::explain,
         crate::language::ir,

@@ -22,6 +22,7 @@ mod conditional;
 mod platform;
 mod request_identity;
 mod runtime;
+mod tls_checks;
 
 struct IdentityCompiler;
 

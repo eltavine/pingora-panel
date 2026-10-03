@@ -2,7 +2,7 @@ use crate::{
     access,
     admission::{admit, Admission},
     audit, certificates, configuration as config, gateway_runtime as runtime, identity, language,
-    middleware, routes, ApiConfig, ApiState,
+    middleware, routes, tls_checks, ApiConfig, ApiState,
 };
 use axum::{
     extract::DefaultBodyLimit,
@@ -187,6 +187,7 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
             "/api/v1/certificate-inspections",
             post(certificates::inspect_certificate),
         )
+        .route("/api/v1/tls-checks", post(tls_checks::check_tls::<U>))
         .route("/api/v1/openapi.json", get(routes::openapi))
         .route(
             "/api/v1/setup",

@@ -25,6 +25,7 @@ mod request_context;
 mod router;
 mod routes;
 mod state;
+mod tls_checks;
 
 pub use access::{AccessAudit, AccessSettings, Refusal};
 pub use config::ApiConfig;

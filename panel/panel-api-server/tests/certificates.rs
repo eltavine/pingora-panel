@@ -2,7 +2,7 @@
 
 //! The certificate inventory through the public HTTP API: certificates are
 //! kept by `automation-service`, delivered to the gateway's secret
-//! directory and audited.
+//! directory and audited, and configured HTTPS listeners are checked.
 
 mod support;
 
@@ -19,9 +19,14 @@ use panel_postgres::testing::TestDatabase;
 use panel_secrets::EnvelopeVault;
 use panel_service::Environment;
 use reqwest::{Client, Method, RequestBuilder, StatusCode};
+use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
 use serde_json::{json, Value};
 use std::{collections::HashMap, ffi::OsString, net::SocketAddr, sync::Arc, time::Duration};
-use tokio::net::TcpListener;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpListener,
+};
+use tokio_rustls::TlsAcceptor;
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::Server;
 
@@ -42,6 +47,43 @@ async fn gateway() -> SocketAddr {
             .add_service(gateway.transport_policy().gateway_server(gateway))
             .serve_with_incoming(TcpListenerStream::new(listener)),
     );
+    address
+}
+
+/// Serves `chain` over HTTPS, standing in for a gateway listener.
+async fn https_endpoint(chain: &str, key: &str) -> SocketAddr {
+    let chain = CertificateDer::pem_slice_iter(chain.as_bytes())
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    let key = PrivateKeyDer::from_pem_slice(key.as_bytes()).unwrap();
+    let config = rustls::ServerConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .unwrap()
+    .with_no_client_auth()
+    .with_single_cert(chain, key)
+    .unwrap();
+    let acceptor = TlsAcceptor::from(Arc::new(config));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let acceptor = acceptor.clone();
+            tokio::spawn(async move {
+                let Ok(mut stream) = acceptor.accept(tcp).await else {
+                    return;
+                };
+                let mut request = [0_u8; 1024];
+                let _ = stream.read(&mut request).await;
+                let _ = stream
+                    .write_all(b"HTTP/1.1 204 No Content\r\nStrict-Transport-Security: max-age=600\r\n\r\n")
+                    .await;
+                let _ = stream.shutdown().await;
+            });
+        }
+    });
     address
 }
 
@@ -332,6 +374,45 @@ async fn certificates_are_kept_delivered_and_audited() {
         StatusCode::BAD_REQUEST,
     )
     .await;
+    let served = https_endpoint(&renewed.chain, &renewed.key).await;
+    api.send(
+        api.mutate(Method::PUT, "/api/v1/tls-profiles/edge", "profile-1")
+            .json(&json!({"id": "edge", "certificate_id": "shop.example"})),
+        StatusCode::OK,
+    )
+    .await;
+    for (id, address, profile) in [
+        ("https", served.to_string(), json!("edge")),
+        ("http", "127.0.0.1:9".to_owned(), Value::Null),
+    ] {
+        api.send(
+            api.mutate(Method::PUT, &format!("/api/v1/listeners/{id}"), id)
+                .json(&json!({"id": id, "address": address, "tls_profile_id": profile})),
+            StatusCode::OK,
+        )
+        .await;
+    }
+    let (check, _) = api
+        .send(
+            api.mutate(Method::POST, "/api/v1/tls-checks", "check-1")
+                .json(&json!({"listener": "https", "host": "shop.example"})),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(check["protocol"], "TLSv1.3");
+    assert_eq!(check["covers_host"], true);
+    assert_eq!(
+        check["certificate"]["fingerprint"],
+        renewed.details.fingerprint
+    );
+    assert_eq!(check["strict_transport_security"], "max-age=600");
+    api.send(
+        api.mutate(Method::POST, "/api/v1/tls-checks", "check-2")
+            .json(&json!({"listener": "http", "host": "shop.example"})),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
     api.send(
         api.mutate(Method::DELETE, "/api/v1/certificates/intranet", "delete-1")
             .header("if-match", "\"1\""),

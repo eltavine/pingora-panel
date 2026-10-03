@@ -1,5 +1,7 @@
 use crate::access::{AccessAudit, AccessSettings, Gate};
-use panel_application::{AuditPort, CertificatePort, ConfigurationPort, GatewayRuntimePort};
+use panel_application::{
+    AuditPort, CertificatePort, ConfigurationPort, GatewayRuntimePort, TlsProbe,
+};
 use panel_health::HealthWatch;
 use panel_identity::Identity;
 use panel_platform::ServiceDirectory;
@@ -13,6 +15,7 @@ pub struct ApiState<U> {
     pub(crate) runtime: Option<Arc<dyn GatewayRuntimePort>>,
     pub(crate) audit: Option<Arc<dyn AuditPort>>,
     pub(crate) certificates: Option<Arc<dyn CertificatePort>>,
+    pub(crate) tls_probe: Option<Arc<dyn TlsProbe>>,
     pub(crate) identity: Option<Arc<Gate>>,
     pub(crate) access_audit: Option<Arc<dyn AccessAudit>>,
 }
@@ -27,6 +30,7 @@ impl<U> Clone for ApiState<U> {
             runtime: self.runtime.clone(),
             audit: self.audit.clone(),
             certificates: self.certificates.clone(),
+            tls_probe: self.tls_probe.clone(),
             identity: self.identity.clone(),
             access_audit: self.access_audit.clone(),
         }
@@ -43,6 +47,7 @@ impl<U> ApiState<U> {
             runtime: None,
             audit: None,
             certificates: None,
+            tls_probe: None,
             identity: None,
             access_audit: None,
         }
@@ -78,6 +83,12 @@ impl<U> ApiState<U> {
     /// Serves the certificate inventory under `/api/v1/certificates`.
     pub fn with_certificates(mut self, certificates: Arc<dyn CertificatePort>) -> Self {
         self.certificates = Some(certificates);
+        self
+    }
+
+    /// Checks HTTPS listeners under `/api/v1/tls-checks`.
+    pub fn with_tls_probe(mut self, probe: Arc<dyn TlsProbe>) -> Self {
+        self.tls_probe = Some(probe);
         self
     }
 

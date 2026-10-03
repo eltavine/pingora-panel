@@ -219,7 +219,8 @@
         "panel-postgres",
         "panel-secrets",
         "panel-service",
-        "panel-tls"
+        "panel-tls",
+        "tls-probe-rustls"
       ]
     },
     "panel-application": {

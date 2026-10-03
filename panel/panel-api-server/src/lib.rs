@@ -28,6 +28,7 @@ use panel_platform::ServiceName;
 use panel_postgres::{EventLog, SqlIdentifier};
 use panel_service::{require_loopback, Environment};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use tls_probe_rustls::RustlsProbe;
 
 pub const SERVICE: &str = "panel-api";
 pub const SCHEMA: &str = "identity";
@@ -192,6 +193,7 @@ pub fn process(
                     .with_runtime(Arc::new(runtime))
                     .with_audit(Arc::new(audit))
                     .with_certificates(Arc::new(automation))
+                    .with_tls_probe(Arc::new(RustlsProbe::default()))
                     .with_identity(identity, access)
                     .with_access_audit(operations)
                     .with_health(running.health())
