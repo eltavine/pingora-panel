@@ -41,10 +41,12 @@ Web Signature and Keys (RFC 7515, RFC 7517, RFC 7518).
   PS512, ES256, ES384 and EdDSA; `none` and HMAC algorithms are refused. Its
   `iss` must equal the issuer, `aud` must contain the client ID, `azp` must
   be the client ID when present, `exp` must lie ahead and `iat` not ahead,
-  with a minute of leeway, and `nonce` must match the attempt. Signatures are
-  checked with `ring`, which the panel already uses for TLS, rather than a
-  second cryptography stack: the JOSE layer is small, and it is tested
-  against keys and tokens from independent tools.
+  with a minute of leeway, and `nonce` must match the attempt. Tokens are
+  parsed and their registered claims validated by `jsonwebtoken`, whose
+  pluggable crypto provider is filled with `ring`, which the panel already
+  uses for TLS, rather than a second cryptography stack such as the RustCrypto
+  `rsa` crate. Headers naming critical extensions are refused, and keys are
+  chosen by `kid`, type, curve, `use`, `key_ops` and `alg` (RFC 7517 §4).
 - **Accounts.** A person is linked to an account by the provider and the
   token's `sub`, never by email or username alone. On first sign-in, an
   account is created when the provider allows it, named after the username
@@ -76,7 +78,8 @@ Web Signature and Keys (RFC 7515, RFC 7517, RFC 7518).
 - The panel becomes a relying party of each provider and needs its public
   origin configured; sign-in fails closed when the provider or its keys are
   unreachable, while break-glass accounts keep working.
-- The JOSE verification code is the panel's own and must keep its tests
-  against independently produced keys and tokens.
+- The panel's own JOSE code is limited to the `ring` provider and key
+  selection, and keeps its tests against the RFC 7515 and RFC 8037 examples
+  and keys from independent tools.
 - Service accounts, workload identity, scoped bindings and approvals build
   on the same accounts, roles and audit events.

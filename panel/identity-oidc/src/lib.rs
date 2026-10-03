@@ -5,7 +5,7 @@
 
 mod client;
 mod http;
-pub mod jose;
+mod jose;
 #[cfg(feature = "test-support")]
 pub mod testing;
 

@@ -13,6 +13,7 @@ use base64::{
     engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
     Engine,
 };
+use jsonwebtoken::{Algorithm, Header};
 use percent_encoding::percent_decode_str;
 use ring::{
     digest::{digest, SHA256},
@@ -41,6 +42,7 @@ struct Provider {
     client_id: String,
     client_secret: Option<String>,
     key: EcdsaKeyPair,
+    pkcs8: Vec<u8>,
     random: SystemRandom,
     users: Mutex<HashMap<String, Map<String, Value>>>,
     current: Mutex<Option<String>>,
@@ -72,6 +74,7 @@ impl TestProvider {
             client_id: client_id.into(),
             client_secret: client_secret.map(Into::into),
             key,
+            pkcs8: pkcs8.as_ref().to_vec(),
             random,
             users: Mutex::new(HashMap::new()),
             current: Mutex::new(None),
@@ -145,11 +148,9 @@ impl Provider {
     }
 
     fn sign(&self, claims: &Value) -> String {
-        let header = URL_SAFE_NO_PAD.encode(json!({"alg": "ES256", "kid": KEY_ID}).to_string());
-        let payload = URL_SAFE_NO_PAD.encode(claims.to_string());
-        let signed = format!("{header}.{payload}");
-        let signature = self.key.sign(&self.random, signed.as_bytes()).unwrap();
-        format!("{signed}.{}", URL_SAFE_NO_PAD.encode(signature.as_ref()))
+        let mut header = Header::new(Algorithm::ES256);
+        header.kid = Some(KEY_ID.into());
+        crate::jose::sign(&header, claims, &self.pkcs8).unwrap()
     }
 
     fn authenticated(&self, headers: &HeaderMap, form: &HashMap<String, String>) -> bool {

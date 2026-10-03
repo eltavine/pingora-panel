@@ -3,7 +3,7 @@
 
 use crate::{
     http::{self, Http, UNRESERVED},
-    jose::{self, Algorithm, JwkSet},
+    jose,
 };
 use ::http::{HeaderValue, StatusCode};
 use async_trait::async_trait;
@@ -11,6 +11,7 @@ use base64::{
     engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
     Engine,
 };
+use jsonwebtoken::{dangerous::insecure_decode_claims, jwk::JwkSet, Algorithm, Validation};
 use panel_errors::{PanelError, Result};
 use panel_identity::{
     OpenIdConnect, ProviderSettings, Refreshed, SignInRequest, SignedIn, VerifiedWorkload,
@@ -289,33 +290,46 @@ impl OidcClient {
         id_token: &str,
         nonce: &str,
     ) -> Result<Map<String, Value>> {
+        let mut validation = validation(&settings.issuer);
+        validation.set_audience(&[&settings.client_id]);
         let claims = self
-            .signed_claims(&settings.issuer, provider, id_token)
+            .signed_claims(
+                &settings.issuer,
+                provider,
+                id_token,
+                &validation,
+                "the ID token",
+            )
             .await?;
         check_claims(&claims, settings, nonce, now_seconds())?;
         Ok(claims)
     }
 
-    /// The claims of a token whose signature one of the issuer's keys
-    /// verifies, reading the keys again once if the issuer may have rotated
-    /// them.
+    /// The claims of `what`, a token one of the issuer's keys signed and
+    /// `validation` accepts, reading the keys again once if the issuer may
+    /// have rotated them.
     async fn signed_claims(
         &self,
         issuer: &str,
         provider: Arc<Cached>,
         token: &str,
+        validation: &Validation,
+        what: &str,
     ) -> Result<Map<String, Value>> {
         let allowed = algorithms(&provider.metadata);
-        let verified = match jose::verify(token, &provider.keys, &allowed) {
-            Ok(verified) => verified,
-            Err(error) if provider.keys_fetched.elapsed() >= KEY_REFETCH => {
-                let refreshed = self.provider(issuer, true).await?;
-                jose::verify(token, &refreshed.keys, &allowed).map_err(|_| error)?
-            }
-            Err(error) => return Err(error),
+        let refused = |refusal: jose::Refusal| {
+            PanelError::unauthenticated(format!("{what} {}", refusal.phrase()))
         };
-        serde_json::from_slice(&verified.payload)
-            .map_err(|_| PanelError::unauthenticated("the token's claims are not a JSON object"))
+        match jose::verify(token, &provider.keys, &allowed, validation) {
+            Ok(claims) => Ok(claims),
+            Err(refusal)
+                if refusal.concerns_keys() && provider.keys_fetched.elapsed() >= KEY_REFETCH =>
+            {
+                let refreshed = self.provider(issuer, true).await?;
+                jose::verify(token, &refreshed.keys, &allowed, validation).map_err(refused)
+            }
+            Err(refusal) => Err(refused(refusal)),
+        }
     }
 
     /// The provider's checked discovery document and keys, from the cache
@@ -461,11 +475,12 @@ fn algorithms(metadata: &Metadata) -> Vec<Algorithm> {
     let named: Vec<Algorithm> = metadata
         .id_token_signing_alg_values_supported
         .iter()
-        .filter_map(|name| Algorithm::parse(name))
+        .filter_map(|name| name.parse().ok())
+        .filter(|algorithm| jose::ACCEPTED.contains(algorithm))
         .collect();
     if named.is_empty() {
         // OpenID Connect Core §15.1: RS256 is the default.
-        vec![Algorithm::Rs256]
+        vec![Algorithm::RS256]
     } else {
         named
     }
@@ -499,8 +514,16 @@ impl WorkloadVerifier for OidcClient {
             ));
         }
         let provider = self.provider(&issuer, false).await?;
-        let claims = self.signed_claims(&issuer, provider, token).await?;
-        check_workload_claims(&claims, &issuer, now_seconds())?;
+        let claims = self
+            .signed_claims(
+                &issuer,
+                provider,
+                token,
+                &validation(&issuer),
+                "the workload token",
+            )
+            .await?;
+        check_workload_claims(&claims, now_seconds())?;
         Ok(VerifiedWorkload {
             subject: claims
                 .get("sub")
@@ -518,14 +541,24 @@ impl WorkloadVerifier for OidcClient {
 /// used to pick the keys that must then verify it.
 fn unverified_issuer(token: &str) -> Result<String> {
     let refused = || PanelError::unauthenticated("the workload token is not a signed JWT");
-    let payload = token.split('.').nth(1).ok_or_else(refused)?;
-    let bytes = URL_SAFE_NO_PAD.decode(payload).map_err(|_| refused())?;
-    let claims: Map<String, Value> = serde_json::from_slice(&bytes).map_err(|_| refused())?;
+    let claims: Map<String, Value> = insecure_decode_claims(token).map_err(|_| refused())?;
     claims
         .get("iss")
         .and_then(Value::as_str)
         .map(str::to_owned)
         .ok_or_else(refused)
+}
+
+/// RFC 7519 §4.1 for tokens from `issuer`: a subject, an audience, an expiry
+/// and, when given, a start, each with a minute of leeway.
+fn validation(issuer: &str) -> Validation {
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.leeway = LEEWAY_SECONDS;
+    validation.validate_nbf = true;
+    validation.validate_aud = false;
+    validation.set_issuer(&[issuer]);
+    validation.set_required_spec_claims(&["exp", "iss", "aud", "sub"]);
+    validation
 }
 
 fn audiences(claims: &Map<String, Value>) -> Vec<&str> {
@@ -536,20 +569,14 @@ fn audiences(claims: &Map<String, Value>) -> Vec<&str> {
     }
 }
 
-/// RFC 7519 §4.1 for a workload token whose signature verified.
-pub(crate) fn check_workload_claims(
-    claims: &Map<String, Value>,
-    issuer: &str,
-    now: u64,
-) -> Result<()> {
+/// What [`validation`] leaves of RFC 7519 §4.1 for a workload token: who it
+/// names, for whom, and when it was issued.
+pub(crate) fn check_workload_claims(claims: &Map<String, Value>, now: u64) -> Result<()> {
     let refused = |message: &str| {
         Err(PanelError::unauthenticated(format!(
             "the workload token {message}"
         )))
     };
-    if claims.get("iss").and_then(Value::as_str) != Some(issuer) {
-        return refused("comes from another issuer");
-    }
     if claims
         .get("sub")
         .and_then(Value::as_str)
@@ -560,28 +587,21 @@ pub(crate) fn check_workload_claims(
     if audiences(claims).is_empty() {
         return refused("names no audience");
     }
-    let Some(expires) = claims.get("exp").and_then(Value::as_u64) else {
-        return refused("has no expiry");
-    };
-    if expires + LEEWAY_SECONDS <= now {
-        return refused("has expired");
-    }
-    for (claim, what) in [
-        ("nbf", "is not valid yet"),
-        ("iat", "was issued in the future"),
-    ] {
-        if claims
-            .get(claim)
-            .and_then(Value::as_u64)
-            .is_some_and(|time| time > now + LEEWAY_SECONDS)
-        {
-            return refused(what);
-        }
+    if issued_in_the_future(claims, now) {
+        return refused("was issued in the future");
     }
     Ok(())
 }
 
-/// OpenID Connect Core §3.1.3.7 for a token whose signature verified.
+fn issued_in_the_future(claims: &Map<String, Value>, now: u64) -> bool {
+    claims
+        .get("iat")
+        .and_then(Value::as_u64)
+        .is_some_and(|issued| issued > now + LEEWAY_SECONDS)
+}
+
+/// What [`validation`] leaves of OpenID Connect Core §3.1.3.7: the
+/// authorized party, when the token was issued, and the sign-in it answers.
 pub(crate) fn check_claims(
     claims: &Map<String, Value>,
     settings: &ProviderSettings,
@@ -593,17 +613,7 @@ pub(crate) fn check_claims(
             "the ID token {message}"
         )))
     };
-    if claims.get("iss").and_then(Value::as_str) != Some(settings.issuer.as_str()) {
-        return refused("comes from another issuer");
-    }
-    let audiences: Vec<&str> = match claims.get("aud") {
-        Some(Value::String(audience)) => vec![audience.as_str()],
-        Some(Value::Array(audiences)) => audiences.iter().filter_map(Value::as_str).collect(),
-        _ => Vec::new(),
-    };
-    if !audiences.contains(&settings.client_id.as_str()) {
-        return refused("is meant for another client");
-    }
+    let audiences = audiences(claims);
     match claims.get("azp").and_then(Value::as_str) {
         Some(party) if party != settings.client_id => {
             return refused("was issued to another party")
@@ -613,17 +623,7 @@ pub(crate) fn check_claims(
         }
         _ => {}
     }
-    let Some(expires) = claims.get("exp").and_then(Value::as_u64) else {
-        return refused("has no expiry");
-    };
-    if expires + LEEWAY_SECONDS <= now {
-        return refused("has expired");
-    }
-    if claims
-        .get("iat")
-        .and_then(Value::as_u64)
-        .is_some_and(|issued| issued > now + LEEWAY_SECONDS)
-    {
+    if issued_in_the_future(claims, now) {
         return refused("was issued in the future");
     }
     if claims.get("nonce").and_then(Value::as_str) != Some(nonce) {
@@ -654,17 +654,11 @@ mod tests {
             "iss": "https://token.example", "aud": ["pingora-panel"], "sub": "repo:a/b",
             "exp": now + 300, "iat": now, "nbf": now
         });
-        let check = |claims: &Value| {
-            check_workload_claims(claims.as_object().unwrap(), "https://token.example", now)
-        };
+        let check = |claims: &Value| check_workload_claims(claims.as_object().unwrap(), now);
         assert!(check(&good).is_ok());
         for (field, value) in [
-            ("iss", json!("https://evil.example")),
             ("sub", json!("")),
             ("aud", json!([])),
-            ("exp", json!(now - 61)),
-            ("exp", Value::Null),
-            ("nbf", json!(now + 61)),
             ("iat", json!(now + 61)),
         ] {
             let mut bad = good.clone();
@@ -684,12 +678,8 @@ mod tests {
             |claims: &Value| check_claims(claims.as_object().unwrap(), &settings(), "n-1", now);
         assert!(check(&good).is_ok());
         for (field, value) in [
-            ("iss", json!("https://evil.example")),
-            ("aud", json!("other")),
             ("aud", json!(["panel", "other"])),
             ("azp", json!("other")),
-            ("exp", json!(now - 61)),
-            ("exp", Value::Null),
             ("iat", json!(now + 120)),
             ("nonce", json!("n-2")),
         ] {
@@ -701,9 +691,6 @@ mod tests {
         shared["aud"] = json!(["panel", "other"]);
         shared["azp"] = json!("panel");
         assert!(check(&shared).is_ok());
-        let mut late = good;
-        late["exp"] = json!(now - 30);
-        assert!(check(&late).is_ok(), "a minute of leeway");
     }
 
     #[test]

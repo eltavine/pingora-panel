@@ -20,6 +20,7 @@ http.workspace = true
 http-body-util.workspace = true
 hyper-rustls.workspace = true
 hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2"] }
+jsonwebtoken.workspace = true
 panel-errors.workspace = true
 panel-identity.workspace = true
 percent-encoding.workspace = true
