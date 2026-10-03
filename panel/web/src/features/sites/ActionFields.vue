@@ -120,7 +120,7 @@ const id = (field: string) => `${props.idPrefix}-${field}`
           autocomplete="off"
         />
       </FormField>
-      <FormField :id="id('body')" :label="t('sites.form.body')">
+      <FormField :id="id('body')" :label="t('sites.form.body')" :hint="t('sites.form.bodyHint')">
         <Textarea :id="id('body')" v-model="action.body" rows="4" class="font-mono text-xs" />
       </FormField>
     </template>
