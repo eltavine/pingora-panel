@@ -2524,6 +2524,7 @@ dependencies = [
  "axum",
  "chrono",
  "governor",
+ "httpdate",
  "panel-application",
  "panel-certificates",
  "panel-config-dsl",

@@ -72,15 +72,10 @@ pub(crate) fn insert_draft(headers: &mut HeaderMap, draft: &DraftInfo) {
     if let Some(updated) = draft.updated_at {
         headers.insert(
             header::LAST_MODIFIED,
-            HeaderValue::from_str(&httpdate(updated)).expect("HTTP dates are visible ASCII"),
+            HeaderValue::from_str(&httpdate::fmt_http_date(updated))
+                .expect("HTTP dates are visible ASCII"),
         );
     }
-}
-
-fn httpdate(time: std::time::SystemTime) -> String {
-    DateTime::<Utc>::from(time)
-        .format("%a, %d %b %Y %H:%M:%S GMT")
-        .to_string()
 }
 
 pub(crate) async fn read<U>(

@@ -11,6 +11,7 @@ publish.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 governor.workspace = true
+httpdate.workspace = true
 axum.workspace = true
 panel-application.workspace = true
 panel-certificates = { workspace = true, features = ["openapi"] }
