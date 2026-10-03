@@ -280,6 +280,39 @@ block being edited, problems checked as the text changes, an outline and
 the effective values at the cursor, imports NGINX configuration for review,
 and shows revisions with their differences, notes and rollback.
 
+## Approvals
+
+Approval policies decide which changes need someone other than the person
+applying them to approve first
+([decision](../docs/adr/0019-change-approvals.md)). A policy covers changes
+to given resource kinds, to sites with given tags, of at least a given risk,
+or applied in weekly UTC windows, and asks for one to five approvals that
+stay valid for a set time. A change is high-risk when it removes anything or
+touches listeners, TLS profiles or security policies. Applying a covered
+draft answers `202` with an approval request instead of publishing; the
+request pins the draft's content and the policies' versions, and applying
+again goes ahead once enough other people approved. Nobody approves their
+own request, approvals can be revoked until the change is applied, the
+requester can withdraw the request, and a different draft or an edited
+policy needs a new request. In an emergency, Administrators can apply
+without approvals by giving a reason and an incident, which is recorded as
+`config.approval.bypassed` before anything is published.
+`/api/v1/approval-policies` needs `approval.manage` to change policies, and
+`/api/v1/approvals` needs `approval.decide` to approve, reject or revoke.
+
+```sh
+ppanel approval-policy set prod --site-tag prod --min-risk high \
+  --window "mon,tue,wed,thu,fri 09:00-18:00" --approvals 1
+ppanel config apply --note "raise the shop limits"
+ppanel approval list
+ppanel approval approve <request-id>
+ppanel config apply --bypass-reason "checkout is down for everyone" --incident INC-7
+```
+
+The console's Approvals page lists requests with their changes and lets
+people decide on them, manages policies, and shows recent emergency
+bypasses.
+
 ## Audit trail
 
 Every change, and every refused or failed attempt, is recorded once by
@@ -332,7 +365,8 @@ origins for browsers that send no `Sec-Fetch-Site`.
 
 Each route requires a permission from the catalog at
 `GET /api/v1/permissions`. The built-in roles grant Administrator every
-permission, Operator configuration changes and gateway operations, Viewer
+permission, Operator configuration changes, decisions on others' changes and
+gateway operations, Viewer
 reading, and Auditor reading with the audit trail and accounts; they cannot
 change. Administrators compose further roles from the catalog and delete
 those no account holds. `/api/v1/account` manages the caller's password,
