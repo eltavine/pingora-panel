@@ -9,6 +9,7 @@
 mod admission;
 mod conditional;
 mod config;
+mod configuration;
 mod contract;
 mod error;
 mod error_contract;
@@ -20,6 +21,10 @@ mod routes;
 mod state;
 
 pub use config::ApiConfig;
+pub use configuration::{
+    ApplyRequest, ApplyResponse, CloneSiteRequest, DomainCheckRequest, DraftResponse,
+    ImportResponse, RouteOrderRequest,
+};
 pub use contract::*;
 pub use openapi::ApiDoc;
 pub use router::{router, router_with_config};

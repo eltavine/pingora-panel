@@ -139,8 +139,10 @@
       "catalog": true,
       "allowed_workspace_dependencies": [
         "panel-application",
+        "panel-config-model",
         "panel-errors",
         "panel-health",
+        "panel-ir",
         "panel-platform"
       ]
     },

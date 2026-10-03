@@ -2150,6 +2150,7 @@ dependencies = [
  "axum",
  "chrono",
  "panel-application",
+ "panel-config-model",
  "panel-domain",
  "panel-errors",
  "panel-health",
@@ -2162,6 +2163,7 @@ dependencies = [
  "tower-http 0.7.1",
  "tracing",
  "utoipa",
+ "uuid",
 ]
 
 [[package]]

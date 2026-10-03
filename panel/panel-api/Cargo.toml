@@ -11,8 +11,10 @@ publish.workspace = true
 chrono.workspace = true
 axum.workspace = true
 panel-application.workspace = true
+panel-config-model = { workspace = true, features = ["openapi"] }
 panel-errors.workspace = true
 panel-health.workspace = true
+panel-ir = { workspace = true, features = ["openapi"] }
 panel-platform.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -20,9 +22,9 @@ tower-http.workspace = true
 tower.workspace = true
 tracing.workspace = true
 utoipa.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 async-trait.workspace = true
 panel-domain.workspace = true
-panel-ir.workspace = true
 tokio.workspace = true

@@ -1,3 +1,4 @@
+use panel_application::ConfigurationPort;
 use panel_health::HealthWatch;
 use panel_platform::ServiceDirectory;
 use std::sync::Arc;
@@ -6,6 +7,7 @@ pub struct ApiState<U> {
     pub(crate) use_cases: Arc<U>,
     pub(crate) health: Option<HealthWatch>,
     pub(crate) directory: Option<Arc<dyn ServiceDirectory>>,
+    pub(crate) configuration: Option<Arc<dyn ConfigurationPort>>,
 }
 
 impl<U> Clone for ApiState<U> {
@@ -14,6 +16,7 @@ impl<U> Clone for ApiState<U> {
             use_cases: Arc::clone(&self.use_cases),
             health: self.health.clone(),
             directory: self.directory.clone(),
+            configuration: self.configuration.clone(),
         }
     }
 }
@@ -24,7 +27,14 @@ impl<U> ApiState<U> {
             use_cases,
             health: None,
             directory: None,
+            configuration: None,
         }
+    }
+
+    /// Serves sites, upstreams, listeners and the draft under `/api/v1`.
+    pub fn with_configuration(mut self, configuration: Arc<dyn ConfigurationPort>) -> Self {
+        self.configuration = Some(configuration);
+        self
     }
 
     /// Lists live service instances under `/api/v1/platform/services`.
