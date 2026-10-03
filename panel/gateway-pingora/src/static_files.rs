@@ -436,4 +436,42 @@ mod tests {
         }
         assert!(StaticContent::compile(&policy("site"), None).is_err());
     }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn symbolic_links_are_followed_only_inside_the_root() {
+        use std::os::unix::fs::symlink;
+        let base = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.txt"), "secret").unwrap();
+        let site = base.path().join("site");
+        std::fs::create_dir_all(site.join("docs")).unwrap();
+        std::fs::write(site.join("docs/page.html"), "page").unwrap();
+        symlink(site.join("docs/page.html"), site.join("alias.html")).unwrap();
+        symlink(outside.path().join("secret.txt"), site.join("escape.txt")).unwrap();
+        symlink(outside.path(), site.join("elsewhere")).unwrap();
+        symlink(outside.path(), base.path().join("linked-root")).unwrap();
+        let policy = |root: &str| StaticContentPolicy {
+            id: "static".into(),
+            root: root.into(),
+            index_files: vec!["index.html".into()],
+            spa_fallback: false,
+        };
+        let content = StaticContent::compile(&policy("site"), Some(base.path())).unwrap();
+        let located = |path: &'static str| {
+            let components: Vec<String> = path.split('/').map(str::to_owned).collect();
+            let content = &content;
+            async move { content.locate(&components).await }
+        };
+        assert!(matches!(located("alias.html").await, Located::File(..)));
+        assert!(matches!(located("escape.txt").await, Located::Missing));
+        assert!(matches!(
+            located("elsewhere/secret.txt").await,
+            Located::Missing
+        ));
+        assert!(
+            StaticContent::compile(&policy("linked-root"), Some(base.path())).is_err(),
+            "a root may not lead out of the static content root"
+        );
+    }
 }
