@@ -135,11 +135,11 @@ Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交
 
 0.3 配置语言与版本（`SITE-034`～`SITE-045` 及上列 `DSL-*`）已在 REST API、`ppanel` CLI 与 Web 控制台实现：草稿以 `main.conf` 为入口的语言文件编辑，支持检查、格式化、补全 Schema、语法树、计划与 Diff、IR 导出、试运行，以及记录作者、备注与结果、可比较和一键回滚的配置版本；同样在操作审计（`AUDIT-*`）与权限（`IAM-*`）验收完成前不得标记为 `Verified`。请求变量（`DSL-010`～`DSL-017`）可用于重定向目标与响应内容，由网关按请求求值，并以 `action.template` 能力协商，无法求值的网关拒绝快照；Size 与 IP/CIDR 类型（`DSL-023`、`DSL-024`）已能解析、尚无指令使用，因此为 `In Progress`；Nginx 子集导入与迁移报告（`DSL-043`～`DSL-045`）按 ADR 0012 所列子集转换，并在 API、CLI 与控制台逐条报告未转换或含义改变的指令及其位置；继承规则写在 Schema 中，Explain（`DSL-034`）按位置列出块内每个生效值及其来源（本块、外层块或监听、默认值），无效设置给出警告；Lua 脚本引用（`DSL-042`）仍为 `Planned`。
 
-0.3 审计（`AUDIT-001`、`AUDIT-003`、`AUDIT-004`）已由 `audit-service` 实现：各服务通过事务性 Outbox 发布每次变更及被拒绝或失败的尝试，审计服务按来源与事件 ID 幂等写入带检查点、只追加的 SHA-256 哈希链，并在 REST API、`ppanel audit` 与控制台审计日志中提供筛选、详情与完整性校验。证书操作审计（`AUDIT-005`）已覆盖 TLS Profile 变更以及证书的上传、生成、替换、删除和被拒绝的尝试，ACME 签发与续期随 `TLS-012`～`TLS-022` 补齐，因此仍为 `In Progress`；登录审计（`AUDIT-002`）已随 0.4 的登录实现；Docker 操作审计（`AUDIT-006`）随 `CTR-*` 实现，仍为 `Planned`。
+0.3 审计（`AUDIT-001`、`AUDIT-003`、`AUDIT-004`）已由 `audit-service` 实现：各服务通过事务性 Outbox 发布每次变更及被拒绝或失败的尝试，审计服务按来源与事件 ID 幂等写入带检查点、只追加的 SHA-256 哈希链，并在 REST API、`ppanel audit` 与控制台审计日志中提供筛选、详情与完整性校验。证书操作审计（`AUDIT-005`）覆盖 TLS Profile 变更，证书的上传、生成、替换、删除和被拒绝的尝试，ACME 账户的注册与删除，自动证书的申请、签发、续期、失败与停止，以及证书到期提醒；由任务完成的签发与续期以 `automation-service` 为操作者，并与发起请求共享关联 ID；登录审计（`AUDIT-002`）已随 0.4 的登录实现；Docker 操作审计（`AUDIT-006`）随 `CTR-*` 实现，仍为 `Planned`。
 
 0.4 身份与访问（`IAM-001`～`IAM-014`、`IAM-024`、`IAM-025`、`IAM-028`～`IAM-031`）已在 REST API、`ppanel` 与 Web 控制台实现：部署生成的一次性引导令牌创建首个管理员；密码遵循 NIST SP 800-63B-4（至少 15 个字符、NFC 规范化、按强度估计拒绝常见与可预测的密码、以 Argon2id 加 pepper 存储、连续失败后递增等待并在第 100 次锁定），每个客户端地址的登录尝试另有限流；浏览器会话使用 `Secure`、`HttpOnly`、`SameSite=Strict` 的 `__Host-` Cookie 与由会话密钥派生的 CSRF 令牌，并拒绝跨站请求；命令行使用 Bearer 会话或以 `ppat_` 开头、权限不超过所有者的 API 令牌；每条路由在一张表中声明所需权限，内置管理员、运维、只读与审计角色，管理员可从权限目录组合自定义角色；用户可一次结束其他全部会话，管理员可结束任一账户的全部会话；API 令牌可轮换，新令牌沿用原令牌的权限与有效时长，旧密钥立即失效。登录、失败登录、账户、角色与令牌变更以及拒绝已登录调用者的请求都进入审计（`AUDIT-002`、`SEC-035`）。Site Group 范围与条件绑定（`IAM-026`、`IAM-027`）、OIDC 与 Break-glass（`IAM-015`～`IAM-023`）、服务账户与工作负载身份（`IAM-032`、`IAM-033`）以及审批（`IAM-034`～`IAM-038`）仍为 `Planned`。
 
-0.4 证书（`TLS-001`～`TLS-011`、`TLS-032`）由 `automation-service` 的证书库保存：上传的证书链与私钥按网关加载方式解析，须叶子在前、私钥匹配且未过期，自签证书使用新的 ECDSA P-256 密钥；私钥以部署主密钥做信封加密（AES-256-GCM）存储，并原子写入网关密钥目录；TLS 配置以 `certificate_id` 引用证书库中的证书，网站或域名据此启用或停用 HTTPS；证书文件变化后网关在数秒内改用新证书而无需新版本。REST API、`ppanel certificate` 与控制台证书页面提供上传、生成、替换、删除、SAN、有效期、SHA-256 指纹与域名覆盖检查。TLS 参数（`TLS-023`～`TLS-031`、`TLS-033`）由每个 TLS 配置决定：协议版本范围、按 IANA 名称选择的密码套件（每个启用的版本至少一个）、ALPN 与会话复用（会话缓存与 TLS 1.3 票据）在监听上生效，OCSP Stapling 仅作预留并提示不生效；网站的 HSTS（`max-age`、`includeSubDomains`、`preload`，后者要求前者且至少一年）只在 TLS 监听的响应上发送。TLS 检查以客户端方式连接已配置的监听，报告协商的版本、密码套件、ALPN、各版本是否被接受、出示的证书是否覆盖域名及 HSTS，可从 REST API、`ppanel listener check` 与控制台发起。ACME 签发与续期（`TLS-012`～`TLS-022`）仍为 `Planned`。
+0.4 证书（`TLS-001`～`TLS-011`、`TLS-032`）由 `automation-service` 的证书库保存：上传的证书链与私钥按网关加载方式解析，须叶子在前、私钥匹配且未过期，自签证书使用新的 ECDSA P-256 密钥；私钥以部署主密钥做信封加密（AES-256-GCM）存储，并原子写入网关密钥目录；TLS 配置以 `certificate_id` 引用证书库中的证书，网站或域名据此启用或停用 HTTPS；证书文件变化后网关在数秒内改用新证书而无需新版本。REST API、`ppanel certificate` 与控制台证书页面提供上传、生成、替换、删除、SAN、有效期、SHA-256 指纹与域名覆盖检查。TLS 参数（`TLS-023`～`TLS-031`、`TLS-033`）由每个 TLS 配置决定：协议版本范围、按 IANA 名称选择的密码套件（每个启用的版本至少一个）、ALPN 与会话复用（会话缓存与 TLS 1.3 票据）在监听上生效，OCSP Stapling 仅作预留并提示不生效；网站的 HSTS（`max-age`、`includeSubDomains`、`preload`，后者要求前者且至少一年）只在 TLS 监听的响应上发送。TLS 检查以客户端方式连接已配置的监听，报告协商的版本、密码套件、ALPN、各版本是否被接受、出示的证书是否覆盖域名及 HSTS，可从 REST API、`ppanel listener check` 与控制台发起。ACME（`TLS-012`～`TLS-015`、`TLS-018`～`TLS-022`）由 `automation-service` 实现：ACME 账户注册到 Let's Encrypt、ZeroSSL、Google Trust Services 或任意 ACME 目录（可附私有 CA 根证书与外部账户绑定），账户密钥同样以主密钥封存；自动证书以证书库 ID 为一个或多个名称申请，由在多副本间只执行一次的任务签发，首次签发创建或替换该证书，之后的续期替换它，引用始终不变；HTTP-01 的密钥授权写入网关密钥目录的 `acme-challenge/`，由每个监听在路由前应答。证书在剩余三分之一有效期时续期；CA 提供续期信息（RFC 9773）时改在其建议窗口内的随机时刻续期，并以 `replaces` 关联旧证书；失败保留 CA 给出的原因并发布 `tls.acme.certificate.failed`，之后从 1 小时起倍增、最长 1 天重试；每小时的续期检查还在任一证书距到期 30、14、7、3、1 天及过期时发布 `tls.certificate.expiring`。REST API、`ppanel acme` 与控制台证书页面的“自动证书”“ACME 账户”标签提供注册、申请、立即续期、停止与失败原因。DNS-01 服务商接口（`TLS-016`）与依赖它的泛域名证书（`TLS-017`）仍为 `Planned`。
 
 ### 3.2 目标仓库边界
 
@@ -970,17 +970,17 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | TLS-009 | 239 | SAN 展示 | 0.4 | A/C/G | Viewer | automation-service | 查询“SAN 展示”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
 | TLS-010 | 240 | 证书指纹展示 | 0.4 | A/C/G | Viewer | automation-service | 查询“证书指纹展示”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
 | TLS-011 | 241 | 自签证书生成 | 0.4 | A/C/G | Operator | automation-service | 执行“自签证书生成”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
-| TLS-012 | 242 | ACME 账户管理 | 0.4 | A/C/G | Operator | automation-service | 执行“ACME 账户管理”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| TLS-013 | 243 | Let's Encrypt | 0.4 | A/C/G | Operator | automation-service | 执行“Let's Encrypt”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| TLS-014 | 244 | 自定义 ACME Directory | 0.4 | A/C/G | Operator | automation-service | 执行“自定义 ACME Directory”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| TLS-015 | 245 | HTTP-01 | 0.4 | A/C/G | Operator | automation-service | 执行“HTTP-01”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| TLS-012 | 242 | ACME 账户管理 | 0.4 | A/C/G | Operator | automation-service | 执行“ACME 账户管理”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| TLS-013 | 243 | Let's Encrypt | 0.4 | A/C/G | Operator | automation-service | 执行“Let's Encrypt”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| TLS-014 | 244 | 自定义 ACME Directory | 0.4 | A/C/G | Operator | automation-service | 执行“自定义 ACME Directory”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| TLS-015 | 245 | HTTP-01 | 0.4 | A/C/G | Operator | automation-service | 执行“HTTP-01”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | TLS-016 | 246 | DNS-01 插件接口 | 0.4 | A/C/G | Operator | automation-service | 执行“DNS-01 插件接口”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | TLS-017 | 247 | 泛域名证书 | 0.4 | A/C/G | Operator | automation-service | 执行“泛域名证书”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| TLS-018 | 248 | 多域名证书 | 0.4 | A/C/G | Operator | automation-service | 执行“多域名证书”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| TLS-019 | 249 | 自动申请证书 | 0.4 | A/C/G | Operator | automation-service | 执行“自动申请证书”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| TLS-020 | 250 | 自动续期证书 | 0.4 | A/C/G | Operator | automation-service | 执行“自动续期证书”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| TLS-021 | 251 | 续期失败告警 | 0.4 | A/C/G | Operator | automation-service | 执行“续期失败告警”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| TLS-022 | 252 | 证书到期提醒 | 0.4 | A/C/G | Operator | automation-service | 执行“证书到期提醒”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| TLS-018 | 248 | 多域名证书 | 0.4 | A/C/G | Operator | automation-service | 执行“多域名证书”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| TLS-019 | 249 | 自动申请证书 | 0.4 | A/C/G | Operator | automation-service | 执行“自动申请证书”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| TLS-020 | 250 | 自动续期证书 | 0.4 | A/C/G | Operator | automation-service | 执行“自动续期证书”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| TLS-021 | 251 | 续期失败告警 | 0.4 | A/C/G | Operator | automation-service | 执行“续期失败告警”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| TLS-022 | 252 | 证书到期提醒 | 0.4 | A/C/G | Operator | automation-service | 执行“证书到期提醒”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | TLS-023 | 253 | TLS 版本最低限制 | 0.4 | A/C/G | Operator | automation-service | 执行“TLS 版本最低限制”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | TLS-024 | 254 | TLS 版本最高限制 | 0.4 | A/C/G | Operator | automation-service | 执行“TLS 版本最高限制”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | TLS-025 | 255 | Cipher Suite 基础配置 | 0.4 | A/C/G | Operator | automation-service | 执行“Cipher Suite 基础配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
@@ -1126,7 +1126,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | AUDIT-002 | 395 | 登录审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“登录审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | AUDIT-003 | 396 | 配置修改审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“配置修改审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | AUDIT-004 | 397 | 配置发布审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“配置发布审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
-| AUDIT-005 | 398 | 证书操作审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“证书操作审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
+| AUDIT-005 | 398 | 证书操作审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“证书操作审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | AUDIT-006 | 399 | Docker 操作审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“Docker 操作审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | OBS-001 | 400 | Access Log | 0.5 | A/C/G | Operator | observability-service | 执行“Access Log”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | OBS-002 | 401 | Error Log | 0.5 | A/C/G | Operator | observability-service | 执行“Error Log”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
@@ -1423,7 +1423,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | 新增团队/平台需求 | 105 |
 | 总 Feature ID | 685 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
-| 当前 `Implemented` | 256（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-022`、`DSL-025`～`DSL-034`、`DSL-035`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-004`；身份：`IAM-001`～`IAM-014`、`IAM-024`、`IAM-025`、`IAM-028`～`IAM-031`；证书：`TLS-001`～`TLS-011`、`TLS-023`～`TLS-033`；安全：`SEC-035`） |
+| 当前 `Implemented` | 266（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-022`、`DSL-025`～`DSL-034`、`DSL-035`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-005`；身份：`IAM-001`～`IAM-014`、`IAM-024`、`IAM-025`、`IAM-028`～`IAM-031`；证书：`TLS-001`～`TLS-015`、`TLS-018`～`TLS-033`；安全：`SEC-035`） |
 | 1.0 要求 `Verified` | 685 |
 
 分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 47、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。

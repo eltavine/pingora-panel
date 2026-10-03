@@ -424,6 +424,46 @@ ppanel site create --name shop --domain shop.example --proxy <upstream-id> \
 ppanel listener check https --host shop.example
 ```
 
+### Automatic certificates
+
+Certificates can also come from an ACME CA
+([decision](../docs/adr/0016-acme-issuance-and-renewal.md)). An ACME account
+is registered with one directory — Let's Encrypt, ZeroSSL, Google Trust
+Services or any other, with PEM roots for a private CA — after agreeing to
+the CA's terms, and with an external account binding where the CA requires
+one; the binding's MAC key is used once and not kept. The account key is
+sealed with the master keys like certificate keys.
+
+An automatic certificate names an account, its names and an inventory ID. A
+job issues it into the inventory under that ID, replacing a certificate
+already there, and renews it in place, so TLS profiles that name the ID
+never change. HTTP-01 key authorizations are written to `acme-challenge/` in
+the gateway's secret directory, and every listener answers
+`/.well-known/acme-challenge/<token>` from there before routing, so each name
+must reach a listener on port 80. Renewal happens when a third of the
+validity remains or, when the CA publishes renewal information (RFC 9773),
+at a random moment inside its suggested window. A failed attempt keeps the
+CA's reason, is published as `tls.acme.certificate.failed` and is retried
+after an hour, doubling up to a day. The hourly renewal check also publishes
+`tls.certificate.expiring` when any certificate comes within 30, 14, 7, 3
+and 1 days of its end and once it has expired. Wildcard names need DNS-01,
+which is not offered yet.
+
+`/api/v1/acme-accounts` and `/api/v1/acme-certificates`, with
+`/api/v1/acme-certificates/{id}/renewals` to renew at once, need
+`certificate.read` to read and `certificate.manage` to change, as does the
+console's Certificates page, which shows each automatic certificate's state
+and last failure.
+
+```sh
+ppanel acme account register letsencrypt --directory letsencrypt \
+  --email ops@example.com --agree-tos
+ppanel acme certificate request example.com --account letsencrypt \
+  --name example.com --name www.example.com
+ppanel acme certificate show example.com
+ppanel tls-profile set edge --certificate-id example.com
+```
+
 ## Activation invariant
 
 All fallible work required to build and durably publish the activation occurs
@@ -527,14 +567,18 @@ decision, after the final failed attempt, or from the max-deliveries advisory. R
 returns them to that consumer alone. See
 [the delivery decision](../docs/adr/0006-jetstream-delivery-and-dead-letters.md).
 
-Integration tests use disposable servers named by `PANEL_TEST_DATABASE_URL` and
-`PANEL_TEST_NATS_URL` and skip without them; CI sets `PANEL_REQUIRE_INTEGRATION_SERVICES` so a missing server fails
-instead. Locally:
+Integration tests use disposable servers named by `PANEL_TEST_DATABASE_URL`,
+`PANEL_TEST_NATS_URL` and `PANEL_TEST_ACME_*` and skip without them; CI sets
+`PANEL_REQUIRE_INTEGRATION_SERVICES` so a missing server fails instead. The
+ACME server is Pebble, Let's Encrypt's test CA, with its DNS test server
+resolving every name to 127.0.0.1; its release binaries are downloaded once
+and checked against pinned digests. Locally:
 
 ```sh
 panel/scripts/dev-services.sh up
 eval "$(panel/scripts/dev-services.sh env)"
-cargo test --manifest-path panel/Cargo.toml --package panel-postgres --package panel-jetstream --all-features
+cargo test --manifest-path panel/Cargo.toml --package panel-postgres --package panel-jetstream \
+  --package panel-acme --package automation-service --all-features
 panel/scripts/dev-services.sh down
 ```
 
