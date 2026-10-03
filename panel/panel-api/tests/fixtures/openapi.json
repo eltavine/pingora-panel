@@ -452,7 +452,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ValidationResult"
+                  "$ref": "#/components/schemas/CheckResult"
                 }
               }
             }
@@ -25082,6 +25082,25 @@
           }
         }
       },
+      "CheckResult": {
+        "type": "object",
+        "description": "Whether files would be accepted, with every problem found.",
+        "required": [
+          "valid",
+          "diagnostics"
+        ],
+        "properties": {
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiagnosticDetails"
+            }
+          },
+          "valid": {
+            "type": "boolean"
+          }
+        }
+      },
       "CloneSiteRequest": {
         "type": "object",
         "description": "Body of `POST /sites/{id}/clone`.",
@@ -25124,7 +25143,7 @@
           "diagnostics": {
             "type": "array",
             "items": {
-              "type": "object"
+              "$ref": "#/components/schemas/DiagnosticDetails"
             },
             "description": "Warnings about the files, such as deprecated directives."
           },
@@ -25292,6 +25311,7 @@
         "type": "object",
         "required": [
           "code",
+          "severity",
           "message"
         ],
         "properties": {
@@ -25312,6 +25332,9 @@
               "string",
               "null"
             ]
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Severity"
           },
           "source_span": {
             "type": [
@@ -25585,7 +25608,7 @@
           "diagnostics": {
             "type": "array",
             "items": {
-              "type": "object"
+              "$ref": "#/components/schemas/DiagnosticDetails"
             },
             "description": "Warnings found on the way."
           },
@@ -25699,7 +25722,7 @@
           "diagnostics": {
             "type": "array",
             "items": {
-              "type": "object"
+              "$ref": "#/components/schemas/DiagnosticDetails"
             },
             "description": "Syntax errors of the files left unchanged."
           },
@@ -26606,6 +26629,15 @@
             }
           }
         }
+      },
+      "Severity": {
+        "type": "string",
+        "description": "How serious a diagnostic is; only errors block a change.",
+        "enum": [
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ]
       },
       "ShutdownResponse": {
         "type": "object",

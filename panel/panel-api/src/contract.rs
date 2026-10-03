@@ -2,7 +2,7 @@ use panel_application::{
     AbortOutcome, ActivatedDeployment, ConfigDocument, DeploymentOutcome, GatewayStatus,
     IdempotencyRecord, PreparedDeployment,
 };
-use panel_errors::{Diagnostic, PanelError, ValidationReport};
+use panel_errors::{Diagnostic, DiagnosticSeverity, PanelError, ValidationReport};
 use panel_platform::ServiceListing;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -54,9 +54,30 @@ impl From<AbortOutcome> for AbortResponse {
     }
 }
 
+/// How serious a diagnostic is; only errors block a change.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, ToSchema)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[non_exhaustive]
+pub enum Severity {
+    Info,
+    Warning,
+    Error,
+}
+
+impl From<DiagnosticSeverity> for Severity {
+    fn from(value: DiagnosticSeverity) -> Self {
+        match value {
+            DiagnosticSeverity::Info => Self::Info,
+            DiagnosticSeverity::Warning => Self::Warning,
+            DiagnosticSeverity::Error => Self::Error,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, ToSchema)]
 pub struct DiagnosticDetails {
     pub code: String,
+    pub severity: Severity,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_span: Option<String>,
@@ -70,6 +91,7 @@ impl From<Diagnostic> for DiagnosticDetails {
     fn from(value: Diagnostic) -> Self {
         Self {
             code: value.code.to_string(),
+            severity: value.severity.into(),
             message: value.message,
             source_span: value.source_span,
             resource_id: value.resource_id,

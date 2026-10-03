@@ -3,6 +3,7 @@
 
 use crate::{
     configuration::{change, insert_draft, port, read, DraftResponse, Precondition},
+    contract::DiagnosticDetails,
     error::ApiError,
     request_context::{command_context, MutationHeaders, QueryHeaders},
     ApiState,
@@ -16,7 +17,7 @@ use axum::{
 };
 use panel_application::{ApplyOutcome, ApplyRequest as Apply, GatewayUseCases};
 use panel_config_dsl::{plan::Changes, schema::DirectiveSpec};
-use panel_config_model::{Revision, RevisionDetail, RevisionList, ValidationResult};
+use panel_config_model::{Revision, RevisionDetail, RevisionList};
 use panel_errors::PanelError;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -29,22 +30,27 @@ pub struct ConfigFiles {
 }
 
 /// The draft in the configuration language.
-#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct ConfigSource {
     pub language_version: u32,
     pub files: BTreeMap<String, String>,
     /// Warnings about the files, such as deprecated directives.
-    #[schema(value_type = Vec<Object>)]
-    pub diagnostics: Vec<serde_json::Value>,
+    pub diagnostics: Vec<DiagnosticDetails>,
+}
+
+/// Whether files would be accepted, with every problem found.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct CheckResult {
+    pub valid: bool,
+    pub diagnostics: Vec<DiagnosticDetails>,
 }
 
 /// Files formatted canonically; files with syntax errors are unchanged.
-#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct FormattedFiles {
     pub files: BTreeMap<String, String>,
     /// Syntax errors of the files left unchanged.
-    #[schema(value_type = Vec<Object>)]
-    pub diagnostics: Vec<serde_json::Value>,
+    pub diagnostics: Vec<DiagnosticDetails>,
 }
 
 /// Every directive of the language, for editors.
@@ -66,8 +72,7 @@ pub struct DryRunRequest {
 pub struct DryRunResponse {
     pub draft: DraftResponse,
     /// Warnings found on the way.
-    #[schema(value_type = Vec<Object>)]
-    pub diagnostics: Vec<panel_errors::Diagnostic>,
+    pub diagnostics: Vec<DiagnosticDetails>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, ToSchema)]
@@ -141,7 +146,7 @@ pub(crate) async fn replace_source<U: GatewayUseCases>(
 
 /// Checks files without saving them.
 #[utoipa::path(post, path = "/api/v1/config/check", request_body = ConfigFiles, params(QueryHeaders),
-    responses((status = 200, body = ValidationResult)), tag = "configuration")]
+    responses((status = 200, body = CheckResult)), tag = "configuration")]
 pub(crate) async fn check<U: GatewayUseCases>(
     State(state): State<ApiState<U>>,
     headers: HeaderMap,
@@ -240,7 +245,7 @@ pub(crate) async fn dry_run<U: GatewayUseCases>(
         ApplyOutcome::Checked { draft, report, .. } => {
             let mut response = Json(DryRunResponse {
                 draft: (&draft).into(),
-                diagnostics: report.diagnostics,
+                diagnostics: report.diagnostics.into_iter().map(Into::into).collect(),
             })
             .into_response();
             insert_draft(response.headers_mut(), &draft);
