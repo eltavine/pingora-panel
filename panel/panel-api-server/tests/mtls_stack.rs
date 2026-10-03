@@ -7,6 +7,7 @@ use panel_application::{
     CommandContext, ConfigDocument, GatewayUseCases, IdempotencyKey, RequestDeadline, RequestId,
 };
 use panel_context::ServiceName;
+use panel_contracts::audit::v1::{audit_query_client::AuditQueryClient, ListRequest};
 use panel_control_runtime::{
     ProcessSettings, RunningProcess, DATABASE_PASSWORD_ENV, DATABASE_URL_ENV, NATS_URL_ENV,
     TLS_DIR_ENV,
@@ -34,11 +35,12 @@ use std::{
 use tokio::net::TcpListener;
 use tonic::transport::Server;
 
-const SERVICES: [&str; 4] = [
+const SERVICES: [&str; 5] = [
     "panel-api",
     "config-service",
     "gatewayd",
     "automation-service",
+    "audit-service",
 ];
 
 fn issue(root: &Path) -> HashMap<&'static str, PathBuf> {
@@ -140,7 +142,11 @@ async fn every_internal_hop_is_mutually_authenticated() {
     let root = std::env::temp_dir().join(format!("panel-mtls-stack-{}", std::process::id()));
     let directories = issue(&root);
     let secrets = database
-        .bootstrap(&[("config", "config"), ("identity", "identity")])
+        .bootstrap(&[
+            ("config", "config"),
+            ("identity", "identity"),
+            ("audit", "audit"),
+        ])
         .await;
     let nats = std::env::var(TEST_NATS_URL_ENV).unwrap();
     let gateway = tls_gateway(&directories["gatewayd"]).await;
@@ -173,6 +179,29 @@ async fn every_internal_hop_is_mutually_authenticated() {
         .await
         .unwrap();
     ready(&config).await;
+    let mut audit_env = environment(vec![
+        (DATABASE_URL_ENV, database.service_url("audit")),
+        (DATABASE_PASSWORD_ENV, secrets[2].expose().into()),
+        (NATS_URL_ENV, nats.clone()),
+        (
+            TLS_DIR_ENV,
+            directories["audit-service"].display().to_string(),
+        ),
+    ]);
+    let audit_settings = ProcessSettings::read(&mut audit_env, audit_service::default_addresses())
+        .unwrap()
+        .with_listeners(
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .with_health_interval(Duration::from_millis(50));
+    let audit = audit_service::process(&mut audit_env, audit_settings)
+        .unwrap()
+        .with_jetstream_settings((*broker.settings).clone())
+        .start()
+        .await
+        .unwrap();
+    ready(&audit).await;
 
     let http = std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()
@@ -191,6 +220,10 @@ async fn every_internal_hop_is_mutually_authenticated() {
         (
             panel_api_server::WEB_ROOT_ENV,
             root.join("no-console").display().to_string(),
+        ),
+        (
+            panel_api_server::AUDIT_URL_ENV,
+            format!("https://{}", audit.grpc_address()),
         ),
     ]);
     let api_settings = ProcessSettings::read(&mut api_env, panel_api_server::default_addresses())
@@ -235,6 +268,47 @@ async fn every_internal_hop_is_mutually_authenticated() {
         .unwrap();
     assert_eq!(activated.status(), 200);
 
+    // The activation reaches the audit trail, read back over mutual TLS.
+    let audited = tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let page: Value = client
+                .get(format!("{base}/api/v1/audit-events?type=gateway.snapshot."))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            if page["items"].as_array().is_some_and(|items| {
+                items
+                    .iter()
+                    .any(|item| item["event_type"] == "gateway.snapshot.activated")
+            }) {
+                return page;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("the activation is audited");
+    assert_eq!(audited["items"][0]["actor_id"], "operator");
+    // Only the public API may read the audit trail.
+    let mut snooper = AuditQueryClient::new(
+        panel_tls::channel(
+            &audit.grpc_address().to_string(),
+            &WorkloadIdentity::new(
+                ServiceName::new("audit-service").unwrap(),
+                TrustDomain::default(),
+            ),
+            credentials(&directories["automation-service"], "automation-service"),
+            Duration::from_secs(2),
+            Duration::from_secs(5),
+        )
+        .unwrap(),
+    );
+    let denied = snooper.list(ListRequest::default()).await.unwrap_err();
+    assert_eq!(denied.code(), tonic::Code::PermissionDenied);
+
     // A service the policy does not list cannot publish.
     let intruder = ConfigPublicationClient::from_channel(
         panel_tls::channel(
@@ -263,6 +337,7 @@ async fn every_internal_hop_is_mutually_authenticated() {
     );
 
     api.stop().await;
+    audit.stop().await;
     config.stop().await;
     std::fs::remove_dir_all(root).unwrap();
     let _ = broker

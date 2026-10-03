@@ -77,7 +77,11 @@ async fn the_public_api_publishes_through_config_service_and_serves_the_console(
         return;
     };
     let secrets = database
-        .bootstrap(&[("config", "config"), ("identity", "identity")])
+        .bootstrap(&[
+            ("config", "config"),
+            ("identity", "identity"),
+            ("audit", "audit"),
+        ])
         .await;
     let nats = std::env::var(TEST_NATS_URL_ENV).unwrap();
     let gateway = fake_gateway().await;
@@ -97,6 +101,20 @@ async fn the_public_api_publishes_through_config_service_and_serves_the_console(
         .await
         .unwrap();
     ready(&config).await;
+    let mut audit_env = environment(vec![
+        (DATABASE_URL_ENV, database.service_url("audit")),
+        (DATABASE_PASSWORD_ENV, secrets[2].expose().into()),
+        (NATS_URL_ENV, nats.clone()),
+    ]);
+    let audit_settings =
+        local(ProcessSettings::read(&mut audit_env, audit_service::default_addresses()).unwrap());
+    let audit = audit_service::process(&mut audit_env, audit_settings)
+        .unwrap()
+        .with_jetstream_settings((*broker.settings).clone())
+        .start()
+        .await
+        .unwrap();
+    ready(&audit).await;
 
     let web = std::env::temp_dir().join(format!("panel-web-{}", std::process::id()));
     std::fs::create_dir_all(web.join("assets")).unwrap();
@@ -117,6 +135,10 @@ async fn the_public_api_publishes_through_config_service_and_serves_the_console(
             format!("http://{}", config.grpc_address()),
         ),
         (panel_api_server::WEB_ROOT_ENV, web.display().to_string()),
+        (
+            panel_api_server::AUDIT_URL_ENV,
+            format!("http://{}", audit.grpc_address()),
+        ),
     ]);
     let api_settings =
         local(ProcessSettings::read(&mut api_env, panel_api_server::default_addresses()).unwrap());
@@ -184,12 +206,12 @@ async fn the_public_api_publishes_through_config_service_and_serves_the_console(
             .iter()
             .map(|service| service["service"].as_str().unwrap().to_owned())
             .collect();
-        if listed.len() == 2 {
+        if listed.len() == 3 {
             break;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    assert_eq!(listed, ["config-service", "panel-api"]);
+    assert_eq!(listed, ["audit-service", "config-service", "panel-api"]);
 
     let console = client.get(format!("{base}/")).send().await.unwrap();
     assert_eq!(console.status(), 200);
@@ -223,6 +245,7 @@ async fn the_public_api_publishes_through_config_service_and_serves_the_console(
     );
 
     api.stop().await;
+    audit.stop().await;
     config.stop().await;
     assert!(tokio::net::TcpStream::connect(http).await.is_err());
     std::fs::remove_dir_all(web).unwrap();

@@ -184,6 +184,7 @@
         "panel-api",
         "panel-application",
         "panel-context",
+        "panel-contracts",
         "panel-control-runtime",
         "panel-domain",
         "panel-engine",

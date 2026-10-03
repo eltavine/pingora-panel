@@ -41,6 +41,7 @@ config-grpc-client.workspace = true
 config-service.workspace = true
 gateway-grpc.workspace = true
 panel-context.workspace = true
+panel-contracts.workspace = true
 panel-domain.workspace = true
 panel-engine.workspace = true
 panel-ir.workspace = true
