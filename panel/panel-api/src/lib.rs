@@ -25,6 +25,7 @@ mod openapi;
 mod request_context;
 mod router;
 mod routes;
+mod sign_in;
 mod state;
 mod tls_checks;
 
@@ -47,6 +48,10 @@ pub use identity::{
 };
 pub use openapi::ApiDoc;
 pub use router::{router, router_with_config};
+pub use sign_in::{
+    ClaimNamesBody, GroupRoleBody, IdentityProviderInput, IdentityProviderResponse,
+    SignInOptionResponse,
+};
 pub use state::ApiState;
 
 #[cfg(test)]

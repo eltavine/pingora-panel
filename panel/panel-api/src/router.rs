@@ -2,7 +2,7 @@ use crate::{
     access, acme,
     admission::{admit, Admission},
     audit, certificates, configuration as config, gateway_runtime as runtime, identity, language,
-    middleware, routes, tls_checks, ApiConfig, ApiState,
+    middleware, routes, sign_in, tls_checks, ApiConfig, ApiState,
 };
 use axum::{
     extract::DefaultBodyLimit,
@@ -305,6 +305,25 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         .route(
             "/api/v1/roles/{id}",
             put(identity::replace_role::<U>).delete(identity::delete_role::<U>),
+        )
+        .route(
+            "/api/v1/identity-providers",
+            get(sign_in::list_identity_providers::<U>),
+        )
+        .route(
+            "/api/v1/identity-providers/{id}",
+            get(sign_in::get_identity_provider::<U>)
+                .put(sign_in::put_identity_provider::<U>)
+                .delete(sign_in::delete_identity_provider::<U>),
+        )
+        .route("/api/v1/auth/providers", get(sign_in::sign_in_options::<U>))
+        .route(
+            "/api/v1/auth/oidc/{id}/start",
+            get(sign_in::start_sign_in::<U>),
+        )
+        .route(
+            "/api/v1/auth/oidc/{id}/callback",
+            get(sign_in::finish_sign_in::<U>),
         )
         .route_layer(from_fn_with_state(state.clone(), access::guard::<U>))
         .layer(DefaultBodyLimit::max(config.max_body_bytes()))

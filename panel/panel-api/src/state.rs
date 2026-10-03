@@ -1,9 +1,12 @@
-use crate::access::{AccessAudit, AccessSettings, Gate};
+use crate::{
+    access::{AccessAudit, AccessSettings, Gate},
+    sign_in::ProviderAccess,
+};
 use panel_application::{
     AuditPort, CertificatePort, ConfigurationPort, GatewayRuntimePort, TlsProbe,
 };
 use panel_health::HealthWatch;
-use panel_identity::Identity;
+use panel_identity::{Identity, ProviderDirectory, ProviderSignIns};
 use panel_platform::ServiceDirectory;
 use std::sync::Arc;
 
@@ -17,6 +20,7 @@ pub struct ApiState<U> {
     pub(crate) certificates: Option<Arc<dyn CertificatePort>>,
     pub(crate) tls_probe: Option<Arc<dyn TlsProbe>>,
     pub(crate) identity: Option<Arc<Gate>>,
+    pub(crate) providers: Option<Arc<ProviderAccess>>,
     pub(crate) access_audit: Option<Arc<dyn AccessAudit>>,
 }
 
@@ -32,6 +36,7 @@ impl<U> Clone for ApiState<U> {
             certificates: self.certificates.clone(),
             tls_probe: self.tls_probe.clone(),
             identity: self.identity.clone(),
+            providers: self.providers.clone(),
             access_audit: self.access_audit.clone(),
         }
     }
@@ -49,8 +54,23 @@ impl<U> ApiState<U> {
             certificates: None,
             tls_probe: None,
             identity: None,
+            providers: None,
             access_audit: None,
         }
+    }
+
+    /// Manages identity providers, and signs people in through them once
+    /// the panel knows the public origin they return to.
+    pub fn with_identity_providers(
+        mut self,
+        directory: ProviderDirectory,
+        sign_ins: Option<ProviderSignIns>,
+    ) -> Self {
+        self.providers = Some(Arc::new(ProviderAccess {
+            directory,
+            sign_ins,
+        }));
+        self
     }
 
     /// Records the requests the identity guard refuses to authenticated

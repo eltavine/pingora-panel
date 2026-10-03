@@ -26,6 +26,10 @@ impl ApiError {
         }
     }
 
+    pub(crate) fn code(&self) -> &str {
+        self.source.code.as_str()
+    }
+
     /// Advertises when the request may succeed (RFC 9110 `Retry-After`).
     pub(crate) fn with_retry_after(mut self, delay: Duration) -> Self {
         self.retry_after = Some(delay);

@@ -21,17 +21,22 @@ use audit_grpc_client::AuditClient;
 use automation_grpc_client::AutomationClient;
 use config_grpc_client::{ConfigClientConfig, ConfigPublicationClient};
 use gateway_grpc_client::{GatewayGrpcClient, GatewayGrpcClientConfig};
+use identity_oidc::OidcClient;
 use identity_postgres::PgIdentityStore;
 use panel_api::{router_with_config, AccessSettings, ApiConfig, ApiState};
 use panel_application::RecordedRuntime;
 use panel_control_runtime::{ControlPlaneProcess, DefaultAddresses, ProcessSettings};
 use panel_errors::{PanelError, Result};
 use panel_health::Impact;
-use panel_identity::{Identity, IdentitySettings, SecretHash, SessionPolicy};
+use panel_identity::{
+    Identity, IdentitySettings, OpenIdConnect, ProviderDirectory, ProviderSignIns, SecretHash,
+    SessionPolicy,
+};
 use panel_platform::ServiceName;
 use panel_postgres::{EventLog, SqlIdentifier};
+use panel_secrets::{EnvelopeVault, SecretVault};
 use panel_service::Environment;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tls_probe_rustls::RustlsProbe;
 
 pub const SERVICE: &str = "panel-api";
@@ -62,6 +67,12 @@ pub const SESSION_LIFETIME_ENV: &str = "PINGORA_PANEL_SESSION_LIFETIME_MS";
 /// `https://panel.example`, checked against unsafe browser requests that
 /// carry no `Sec-Fetch-Site`.
 pub const PUBLIC_ORIGINS_ENV: &str = "PINGORA_PANEL_PUBLIC_ORIGINS";
+/// Master keys that seal identity provider secrets and refresh tokens, one
+/// base64-encoded 256-bit key per line; the first seals new values. Usually
+/// given as `_FILE`.
+pub const MASTER_KEYS_ENV: &str = "PINGORA_PANEL_MASTER_KEYS";
+/// How long one request to an identity provider may take.
+const PROVIDER_TIMEOUT: Duration = Duration::from_secs(10);
 
 const DEFAULT_HTTP_ADDRESS: SocketAddr =
     SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 8080);
@@ -124,6 +135,10 @@ pub fn process(
                 .collect()
         })
         .unwrap_or_default();
+    let vault = env
+        .secret(MASTER_KEYS_ENV)?
+        .map(|keys| EnvelopeVault::from_keys(&keys))
+        .transpose()?;
     // Bound now so a taken address fails the start before anything else runs.
     let listener = PublicListener::bind(HTTP_ADDRESS_ENV, &http_address)?;
     let process = ControlPlaneProcess::new(
@@ -162,6 +177,7 @@ pub fn process(
     let runtime = RecordedRuntime::new(Arc::new(gateway), operations.clone());
     let store = Arc::new(PgIdentityStore::new(process.database(), events));
     let roles = roles::BuiltInRoles::new(Arc::clone(&store), bootstrap.is_some());
+    let providers = identity_providers(&store, vault, origins.first().cloned(), sessions)?;
     let identity = Identity::new(
         store,
         IdentitySettings {
@@ -184,22 +200,24 @@ pub fn process(
         .with_check(Arc::new(automation_health), Impact::Informational)
         .on_start(move |running| {
             let config = Arc::new(config);
-            let api = router_with_config(
-                ApiState::new(Arc::clone(&config))
-                    .with_configuration(config)
-                    .with_runtime(Arc::new(runtime))
-                    .with_audit(Arc::new(audit))
-                    .with_certificates(Arc::new(automation))
-                    .with_tls_probe(Arc::new(RustlsProbe::default()))
-                    .with_identity(identity, access)
-                    .with_access_audit(operations)
-                    .with_health(running.health())
-                    .with_directory(Arc::new(directory::RegistryDirectory::new(
-                        running.jetstream().clone(),
-                        Arc::clone(running.jetstream_settings()),
-                    ))),
-                ApiConfig::default(),
-            );
+            let state = ApiState::new(Arc::clone(&config))
+                .with_configuration(config)
+                .with_runtime(Arc::new(runtime))
+                .with_audit(Arc::new(audit))
+                .with_certificates(Arc::new(automation))
+                .with_tls_probe(Arc::new(RustlsProbe::default()))
+                .with_identity(identity, access)
+                .with_access_audit(operations)
+                .with_health(running.health())
+                .with_directory(Arc::new(directory::RegistryDirectory::new(
+                    running.jetstream().clone(),
+                    Arc::clone(running.jetstream_settings()),
+                )));
+            let state = match providers {
+                Some((directory, sign_ins)) => state.with_identity_providers(directory, sign_ins),
+                None => state,
+            };
+            let api = router_with_config(state, ApiConfig::default());
             let app = console::with_console(api, &web_root)?;
             let shutdown = running.shutdown_token();
             running.spawn(async move {
@@ -209,4 +227,42 @@ pub fn process(
             });
             Ok(())
         }))
+}
+
+/// Identity providers need master keys to seal their secrets, and sign-ins
+/// through them a public origin for people to return to.
+fn identity_providers(
+    store: &Arc<PgIdentityStore>,
+    vault: Option<EnvelopeVault>,
+    public_origin: Option<String>,
+    sessions: SessionPolicy,
+) -> Result<Option<(ProviderDirectory, Option<ProviderSignIns>)>> {
+    let Some(vault) = vault else {
+        tracing::warn!("{MASTER_KEYS_ENV} is not set; identity providers are not available");
+        return Ok(None);
+    };
+    let vault: Arc<dyn SecretVault> = Arc::new(vault);
+    let connect: Arc<dyn OpenIdConnect> = Arc::new(OidcClient::new(PROVIDER_TIMEOUT)?);
+    let directory = ProviderDirectory::new(
+        store.clone(),
+        store.clone(),
+        Arc::clone(&vault),
+        Arc::clone(&connect),
+    );
+    let Some(origin) = public_origin else {
+        tracing::warn!(
+            "{PUBLIC_ORIGINS_ENV} is not set; nobody can sign in through identity providers"
+        );
+        return Ok(Some((directory, None)));
+    };
+    let sign_ins = ProviderSignIns::new(
+        directory.clone(),
+        store.clone(),
+        store.clone(),
+        connect,
+        vault,
+        origin,
+        sessions,
+    );
+    Ok(Some((directory, Some(sign_ins))))
 }
