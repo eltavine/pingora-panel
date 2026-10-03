@@ -1,0 +1,37 @@
+[package]
+name = "audit-service"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-nats.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+chrono.workspace = true
+hex.workspace = true
+panel-contracts.workspace = true
+panel-control-runtime.workspace = true
+panel-errors.workspace = true
+panel-events.workspace = true
+panel-jetstream.workspace = true
+panel-platform-codec.workspace = true
+panel-platform.workspace = true
+panel-postgres.workspace = true
+panel-service.workspace = true
+prost-types.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+tokio-util.workspace = true
+tokio.workspace = true
+tonic.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+panel-health.workspace = true
+panel-jetstream = { workspace = true, features = ["test-support"] }
+panel-postgres = { workspace = true, features = ["test-support"] }

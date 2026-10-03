@@ -39,6 +39,7 @@ members = [
     "gateway-grpc-client",
     "gatewayd",
     "config-service",
+    "audit-service",
     "automation-service",
     "observability-service",
     "panel-bootstrap",
