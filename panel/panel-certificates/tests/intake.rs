@@ -1,7 +1,7 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use chrono::{DateTime, Duration, Utc};
 use panel_certificates::{
-    accept, self_signed, CertificateStatus, KeyAlgorithm, MAX_SELF_SIGNED_DAYS,
+    accept, describe, self_signed, CertificateStatus, KeyAlgorithm, MAX_SELF_SIGNED_DAYS,
 };
 use panel_domain::NormalizedHost;
 use rcgen::{
@@ -110,6 +110,19 @@ fn pkcs1_rsa_keys_are_accepted_and_described() {
         leaf
     );
     assert!(!format!("{accepted:?}").contains("PRIVATE"));
+}
+
+#[test]
+fn chains_are_described_without_their_key() {
+    let details = describe(EC_CHAIN).unwrap();
+    assert_eq!(
+        details,
+        accept(EC_CHAIN, EC_KEY, Utc::now()).unwrap().details
+    );
+    assert!(describe(WEAK_CHAIN)
+        .unwrap_err()
+        .message
+        .contains("at least 2048 bits"));
 }
 
 #[test]

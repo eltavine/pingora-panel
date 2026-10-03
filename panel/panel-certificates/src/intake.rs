@@ -74,6 +74,12 @@ pub fn accept(chain: &str, key: &str, now: DateTime<Utc>) -> Result<Accepted> {
     })
 }
 
+/// Describes a PEM chain, leaf first, without a key, for example to show a
+/// certificate before its key is supplied.
+pub fn describe(chain: &str) -> Result<CertificateDetails> {
+    inspect(&parse_chain(chain)?)
+}
+
 fn parse_chain(text: &str) -> Result<Vec<CertificateDer<'static>>> {
     if text.len() > MAX_CHAIN_BYTES {
         return Err(PanelError::validation_failed(format!(
