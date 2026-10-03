@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod support;
+
 use gateway_grpc::GatewayGrpcService;
 use panel_control_runtime::{
     ProcessSettings, RunningProcess, DATABASE_PASSWORD_ENV, DATABASE_URL_ENV, NATS_URL_ENV,
@@ -131,6 +133,10 @@ async fn the_public_api_publishes_through_config_service_and_serves_the_console(
         (NATS_URL_ENV, nats),
         (panel_api_server::HTTP_ADDRESS_ENV, http.to_string()),
         (
+            panel_api_server::BOOTSTRAP_TOKEN_ENV,
+            support::BOOTSTRAP.into(),
+        ),
+        (
             panel_api_server::CONFIG_URL_ENV,
             format!("http://{}", config.grpc_address()),
         ),
@@ -150,8 +156,8 @@ async fn the_public_api_publishes_through_config_service_and_serves_the_console(
         .unwrap();
     ready(&api).await;
 
-    let client = reqwest::Client::new();
     let base = format!("http://{http}");
+    let client = support::signed_in(&base).await;
     let status: Value = client
         .get(format!("{base}/api/v1/gateway/status"))
         .send()
@@ -169,7 +175,6 @@ async fn the_public_api_publishes_through_config_service_and_serves_the_console(
     let mutation = |path: &str, key: &str| {
         client
             .post(format!("{base}{path}"))
-            .header("x-actor", "operator")
             .header("x-deadline", "2099-01-01T00:00:00Z")
             .header("idempotency-key", key)
     };

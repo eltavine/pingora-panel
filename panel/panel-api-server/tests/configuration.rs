@@ -3,6 +3,8 @@
 //! Configuration resources through the public HTTP API, from creation to
 //! applying the draft on a gateway.
 
+mod support;
+
 use gateway_grpc::GatewayGrpcService;
 use panel_control_runtime::{
     ProcessSettings, RunningProcess, DATABASE_PASSWORD_ENV, DATABASE_URL_ENV, NATS_URL_ENV,
@@ -88,7 +90,6 @@ impl Api {
     fn mutate(&self, method: reqwest::Method, path: &str, key: &str) -> RequestBuilder {
         self.client
             .request(method, format!("{}{path}", self.base))
-            .header("x-actor", "operator")
             .header("x-deadline", "2099-01-01T00:00:00Z")
             .header("idempotency-key", key)
     }
@@ -164,6 +165,10 @@ async fn sites_are_edited_validated_and_applied_through_the_api() {
         (NATS_URL_ENV, nats),
         (panel_api_server::HTTP_ADDRESS_ENV, http.to_string()),
         (
+            panel_api_server::BOOTSTRAP_TOKEN_ENV,
+            support::BOOTSTRAP.into(),
+        ),
+        (
             panel_api_server::CONFIG_URL_ENV,
             format!("http://{}", config.grpc_address()),
         ),
@@ -185,9 +190,10 @@ async fn sites_are_edited_validated_and_applied_through_the_api() {
         .await
         .unwrap();
     ready(&server).await;
+    let base = format!("http://{http}");
     let api = Api {
-        client: Client::new(),
-        base: format!("http://{http}"),
+        client: support::signed_in(&base).await,
+        base,
     };
     use reqwest::Method;
 
@@ -605,6 +611,27 @@ async fn sites_are_edited_validated_and_applied_through_the_api() {
         .await
         .unwrap();
     assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+    // Setting up and logging in are audited like every other change.
+    let (identity, _) = api
+        .json(
+            api.get("/api/v1/audit-events?type=identity.&limit=10"),
+            StatusCode::OK,
+        )
+        .await;
+    let types: Vec<&str> = identity["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["event_type"].as_str().unwrap())
+        .collect();
+    assert!(types.contains(&"identity.login.succeeded"), "{types:?}");
+    assert!(types.contains(&"identity.account.created"), "{types:?}");
+    assert!(identity["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|item| item["actor_id"] == "operator"));
 
     server.stop().await;
     audit.stop().await;

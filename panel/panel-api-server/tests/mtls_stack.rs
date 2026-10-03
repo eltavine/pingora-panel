@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod support;
+
 use chrono::Utc;
 use config_grpc_client::{ConfigClientConfig, ConfigPublicationClient};
 use gateway_grpc::GatewayGrpcService;
@@ -214,6 +216,10 @@ async fn every_internal_hop_is_mutually_authenticated() {
         (TLS_DIR_ENV, directories["panel-api"].display().to_string()),
         (panel_api_server::HTTP_ADDRESS_ENV, http.to_string()),
         (
+            panel_api_server::BOOTSTRAP_TOKEN_ENV,
+            support::BOOTSTRAP.into(),
+        ),
+        (
             panel_api_server::CONFIG_URL_ENV,
             format!("https://{}", config.grpc_address()),
         ),
@@ -241,12 +247,11 @@ async fn every_internal_hop_is_mutually_authenticated() {
         .unwrap();
     ready(&api).await;
 
-    let client = reqwest::Client::new();
     let base = format!("http://{http}");
+    let client = support::signed_in(&base).await;
     let mutation = |path: &str, key: &str| {
         client
             .post(format!("{base}{path}"))
-            .header("x-actor", "operator")
             .header("x-deadline", "2099-01-01T00:00:00Z")
             .header("idempotency-key", key)
     };

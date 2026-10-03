@@ -11,15 +11,18 @@
 mod console;
 mod directory;
 mod operations;
+mod roles;
 
 use audit_grpc_client::AuditClient;
 use config_grpc_client::{ConfigClientConfig, ConfigPublicationClient};
 use gateway_grpc_client::{GatewayGrpcClient, GatewayGrpcClientConfig};
-use panel_api::{router_with_config, ApiConfig, ApiState};
+use identity_postgres::PgIdentityStore;
+use panel_api::{router_with_config, AccessSettings, ApiConfig, ApiState};
 use panel_application::RecordedRuntime;
 use panel_control_runtime::{ControlPlaneProcess, DefaultAddresses, ProcessSettings};
 use panel_errors::{PanelError, Result};
 use panel_health::Impact;
+use panel_identity::{Identity, IdentitySettings, SecretHash, SessionPolicy};
 use panel_platform::ServiceName;
 use panel_postgres::{EventLog, SqlIdentifier};
 use panel_service::{require_loopback, Environment};
@@ -36,6 +39,20 @@ pub const AUDIT_URL_ENV: &str = "PINGORA_PANEL_AUDIT_URL";
 pub const GATEWAY_URL_ENV: &str = "PINGORA_PANEL_GATEWAY_URL";
 /// Directory holding the built web console; the API is served without it.
 pub const WEB_ROOT_ENV: &str = "PINGORA_PANEL_WEB_ROOT";
+/// The one-time token that creates the first account; `_FILE` names a file
+/// holding it.
+pub const BOOTSTRAP_TOKEN_ENV: &str = "PINGORA_PANEL_BOOTSTRAP_TOKEN";
+/// At least 16 bytes keying every password hash; `_FILE` names a file
+/// holding it. Changing it invalidates every password.
+pub const PASSWORD_PEPPER_ENV: &str = "PINGORA_PANEL_PASSWORD_PEPPER";
+/// Milliseconds without activity after which a session ends.
+pub const SESSION_IDLE_ENV: &str = "PINGORA_PANEL_SESSION_IDLE_MS";
+/// Milliseconds after login after which a session ends.
+pub const SESSION_LIFETIME_ENV: &str = "PINGORA_PANEL_SESSION_LIFETIME_MS";
+/// Comma-separated origins the console is reached at, such as
+/// `https://panel.example`, checked against unsafe browser requests that
+/// carry no `Sec-Fetch-Site`.
+pub const PUBLIC_ORIGINS_ENV: &str = "PINGORA_PANEL_PUBLIC_ORIGINS";
 
 const DEFAULT_HTTP_ADDRESS: SocketAddr =
     SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 8080);
@@ -72,6 +89,29 @@ pub fn process(
         env.string(WEB_ROOT_ENV)?
             .unwrap_or_else(|| DEFAULT_WEB_ROOT.into()),
     );
+    let bootstrap = env.secret(BOOTSTRAP_TOKEN_ENV)?;
+    let pepper = env.secret(PASSWORD_PEPPER_ENV)?;
+    if pepper.as_ref().is_some_and(|pepper| pepper.len() < 16) {
+        return Err(PanelError::invalid_argument(format!(
+            "{PASSWORD_PEPPER_ENV} must have at least 16 bytes"
+        )));
+    }
+    let defaults = SessionPolicy::default();
+    let sessions = SessionPolicy {
+        idle: env.millis(SESSION_IDLE_ENV, defaults.idle)?,
+        absolute: env.millis(SESSION_LIFETIME_ENV, defaults.absolute)?,
+        ..defaults
+    };
+    let origins: Vec<String> = env
+        .string(PUBLIC_ORIGINS_ENV)?
+        .map(|origins| {
+            origins
+                .split(',')
+                .map(|origin| origin.trim().trim_end_matches('/').to_owned())
+                .filter(|origin| !origin.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
     // Bound now so a taken port fails the start before anything else runs.
     let listener = std::net::TcpListener::bind(http_address).map_err(|error| {
         PanelError::precondition_failed(format!(
@@ -106,15 +146,30 @@ pub fn process(
     };
     let audit_health = audit.health_check();
     let config_health = config.health_check();
+    let events = EventLog::new(process.database(), ServiceName::new(SERVICE)?);
     let runtime = RecordedRuntime::new(
         Arc::new(gateway),
-        Arc::new(operations::OutboxOperations(EventLog::new(
-            process.database(),
-            ServiceName::new(SERVICE)?,
-        ))),
+        Arc::new(operations::OutboxOperations(events.clone())),
     );
+    let store = Arc::new(PgIdentityStore::new(process.database(), events));
+    let roles = roles::BuiltInRoles::new(Arc::clone(&store), bootstrap.is_some());
+    let identity = Identity::new(
+        store,
+        IdentitySettings {
+            sessions,
+            pepper: pepper.map(String::into_bytes),
+            bootstrap: bootstrap.as_deref().map(SecretHash::of),
+            ..IdentitySettings::default()
+        },
+    );
+    let access = AccessSettings {
+        origins,
+        ..AccessSettings::default()
+    };
     Ok(process
+        .with_migrations(identity_postgres::MIGRATIONS)
         .with_database_impact(Impact::Degrading)
+        .with_check(Arc::new(roles), Impact::Required)
         .with_check(Arc::new(config_health), Impact::Degrading)
         .with_check(Arc::new(audit_health), Impact::Informational)
         .on_start(move |running| {
@@ -124,6 +179,7 @@ pub fn process(
                     .with_configuration(config)
                     .with_runtime(Arc::new(runtime))
                     .with_audit(Arc::new(audit))
+                    .with_identity(identity, access)
                     .with_health(running.health())
                     .with_directory(Arc::new(directory::RegistryDirectory::new(
                         running.jetstream().clone(),
@@ -138,9 +194,12 @@ pub fn process(
             let address = listener.local_addr().ok();
             let shutdown = running.shutdown_token();
             running.spawn(async move {
-                if let Err(error) = axum::serve(listener, app)
-                    .with_graceful_shutdown(shutdown.cancelled_owned())
-                    .await
+                if let Err(error) = axum::serve(
+                    listener,
+                    app.into_make_service_with_connect_info::<SocketAddr>(),
+                )
+                .with_graceful_shutdown(shutdown.cancelled_owned())
+                .await
                 {
                     tracing::error!(%error, "public listener failed");
                 }

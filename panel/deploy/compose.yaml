@@ -228,7 +228,11 @@ services:
       PINGORA_PANEL_CONFIG_URL: https://127.0.0.1:50061
       PINGORA_PANEL_AUDIT_URL: https://127.0.0.1:50064
       PINGORA_PANEL_WEB_ROOT: /usr/share/pingora-panel/web
-    secrets: [identity-database-password]
+      # Creates the first account once; any later use is refused.
+      PINGORA_PANEL_BOOTSTRAP_TOKEN_FILE: /run/secrets/bootstrap-token
+      # Keys password hashes; replacing it invalidates every password.
+      PINGORA_PANEL_PASSWORD_PEPPER_FILE: /run/secrets/password-pepper
+    secrets: [identity-database-password, bootstrap-token, password-pepper]
     volumes:
       - credentials-panel-api:/var/lib/pingora-panel/credentials/panel-api:ro
     healthcheck:
@@ -251,6 +255,10 @@ secrets:
     file: ./secrets/observability-database-password
   audit-database-password:
     file: ./secrets/audit-database-password
+  bootstrap-token:
+    file: ./secrets/bootstrap-token
+  password-pepper:
+    file: ./secrets/password-pepper
 
 volumes:
   postgres-data:
