@@ -135,6 +135,7 @@ impl<'de> Deserialize<'de> for ContentHash {
 /// A DNS host name in canonical A-label form, or a wildcard pattern whose
 /// leftmost label is `*` (RFC 6125 §6.4.3 without partial-label wildcards).
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema), schema(value_type = String, example = "example.com"))]
 #[serde(transparent)]
 pub struct NormalizedHost(String);
 

@@ -137,7 +137,7 @@ rustls = { version = "=0.23.45", default-features = false, features = ["ring", "
 rustls-pki-types = { version = "=1.15.1", features = ["std"] }
 rustls-webpki = { version = "=0.103.15", default-features = false, features = ["ring", "std"] }
 tower-http = { version = "=0.7.1", features = ["fs", "request-id", "set-header", "trace"] }
-utoipa = "=5.5.0"
+utoipa = { version = "=5.5.0", features = ["chrono", "uuid"] }
 tonic = { version = "=0.14.6", default-features = false, features = ["codegen", "router", "transport"] }
 tonic-health = "=0.14.6"
 tonic-prost = "=0.14.6"

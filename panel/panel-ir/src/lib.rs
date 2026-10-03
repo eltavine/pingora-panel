@@ -205,6 +205,7 @@ impl ListenerRef {
 
 /// HTTP versions accepted on a listener. With TLS, HTTP/2 is negotiated with
 /// ALPN; without TLS it is accepted with prior knowledge (h2c).
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ListenerProtocols {
@@ -260,6 +261,7 @@ impl SiteSpec {
     }
 }
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WwwRedirect {
@@ -461,6 +463,7 @@ impl UpstreamPoolSpec {
 }
 
 /// Timeouts are in milliseconds; `None` uses the engine default.
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UpstreamConnectionPolicy {
@@ -504,6 +507,7 @@ impl UpstreamConnectionPolicy {
     }
 }
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UpstreamTlsPolicy {
@@ -536,6 +540,7 @@ impl UpstreamTlsPolicy {
     }
 }
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HealthCheckProtocol {
@@ -544,6 +549,7 @@ pub enum HealthCheckProtocol {
 }
 
 /// Probes every endpoint; thresholds count consecutive results.
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ActiveHealthCheck {
@@ -563,6 +569,7 @@ pub struct ActiveHealthCheck {
 }
 
 /// Ejects an endpoint after consecutive proxy failures for `ejection_ms`.
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PassiveHealthPolicy {
@@ -602,6 +609,7 @@ impl UpstreamEndpoint {
 }
 
 /// Consistent hash keys are `client_ip`, `uri`, `header:<name>` or `cookie:<name>`.
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[serde(deny_unknown_fields)]
@@ -639,6 +647,7 @@ pub struct HeaderPolicy {
     pub response_remove: BTreeSet<String>,
 }
 
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TlsProfile {
