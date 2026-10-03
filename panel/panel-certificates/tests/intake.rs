@@ -1,7 +1,8 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use chrono::{DateTime, Duration, Utc};
 use panel_certificates::{
-    accept, describe, self_signed, CertificateStatus, KeyAlgorithm, MAX_SELF_SIGNED_DAYS,
+    accept, describe, describe_der, self_signed, CertificateStatus, KeyAlgorithm,
+    MAX_SELF_SIGNED_DAYS,
 };
 use panel_domain::NormalizedHost;
 use rcgen::{
@@ -123,6 +124,16 @@ fn chains_are_described_without_their_key() {
         .unwrap_err()
         .message
         .contains("at least 2048 bits"));
+}
+
+#[test]
+fn chains_presented_in_handshakes_are_described() {
+    let leaf = CertificateDer::from_pem_slice(EC_CHAIN.as_bytes()).unwrap();
+    assert_eq!(
+        describe_der(&[leaf.to_vec()]).unwrap(),
+        describe(EC_CHAIN).unwrap()
+    );
+    assert!(describe_der(&[]).is_err());
 }
 
 #[test]

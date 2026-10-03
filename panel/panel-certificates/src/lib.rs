@@ -16,5 +16,5 @@ mod pem;
 
 pub use details::{CertificateDetails, CertificateStatus, KeyAlgorithm, EXPIRING_WITHIN};
 pub use generate::{self_signed, MAX_SELF_SIGNED_DAYS};
-pub use intake::{accept, describe, Accepted};
+pub use intake::{accept, describe, describe_der, Accepted};
 pub use inventory::{Certificate, CertificateId, CertificateSource};

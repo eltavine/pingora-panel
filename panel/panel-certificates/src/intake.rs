@@ -80,6 +80,21 @@ pub fn describe(chain: &str) -> Result<CertificateDetails> {
     inspect(&parse_chain(chain)?)
 }
 
+/// Describes a chain of DER certificates, leaf first, such as a server
+/// presented in a handshake.
+pub fn describe_der(chain: &[Vec<u8>]) -> Result<CertificateDetails> {
+    if chain.is_empty() {
+        return Err(PanelError::validation_failed(
+            "the certificate chain holds no certificate",
+        ));
+    }
+    let certificates: Vec<CertificateDer<'_>> = chain
+        .iter()
+        .map(|der| CertificateDer::from(der.as_slice()))
+        .collect();
+    inspect(&certificates)
+}
+
 fn parse_chain(text: &str) -> Result<Vec<CertificateDer<'static>>> {
     if text.len() > MAX_CHAIN_BYTES {
         return Err(PanelError::validation_failed(format!(
