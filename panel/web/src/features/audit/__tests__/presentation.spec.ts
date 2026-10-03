@@ -141,4 +141,38 @@ describe('audit presentation', () => {
     ).toBe('replace example.com · VALIDATION_FAILED · the certificate expired')
     expect(toneOf('tls.certificate.refused')).toBe('negative')
   })
+
+  it('summarizes ACME changes, failed issuance and expiring certificates', () => {
+    expect(
+      summaryOf(
+        event('tls.acme.account.created', {
+          id: 'letsencrypt',
+          directory: 'https://acme-v02.api.letsencrypt.org/directory',
+        }),
+        t,
+      ),
+    ).toBe('letsencrypt · acme-v02.api.letsencrypt.org')
+    expect(
+      summaryOf(
+        event('tls.acme.certificate.failed', {
+          id: 'shop.example',
+          code: 'VALIDATION_FAILED',
+          message: 'the CA refused (connection): no answer',
+        }),
+        t,
+      ),
+    ).toBe('shop.example · VALIDATION_FAILED · the CA refused (connection): no answer')
+    expect(
+      summaryOf(
+        event('tls.certificate.expiring', { id: 'shop.example', within_days: 7, expired: false }),
+        t,
+      ),
+    ).toBe('shop.example · audit.summary.expiresWithin{"count":7}')
+    expect(
+      summaryOf(event('tls.certificate.expiring', { id: 'old.example', expired: true }), t),
+    ).toBe('old.example · audit.summary.expired')
+    expect(toneOf('tls.acme.certificate.failed')).toBe('negative')
+    expect(toneOf('tls.certificate.expiring')).toBe('warning')
+    expect(toneOf('tls.acme.certificate.created')).toBe('positive')
+  })
 })

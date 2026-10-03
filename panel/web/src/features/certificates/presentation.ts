@@ -1,4 +1,4 @@
-import type { CertificateStatus, KeyAlgorithm } from '@/api/generated'
+import type { CertificateStatus, IssuanceState, KeyAlgorithm } from '@/api/generated'
 import type { StatusTone } from '@/components/StatusIndicator.vue'
 
 /** Lowercase letters, digits and hyphens in labels separated by dots. */
@@ -50,4 +50,63 @@ export function suggestedId(names: readonly string[]): string {
   const name = names.find((candidate) => !/^[\d.:]+$/.test(candidate)) ?? names[0] ?? ''
   const id = name.replace(/^\*\./, '').toLowerCase()
   return CERTIFICATE_ID.test(id) ? id : ''
+}
+
+/** Lowercase letters, digits and hyphens, such as `letsencrypt`. */
+export const ACCOUNT_ID = /^(?=.{1,64}$)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/
+
+/** A well-known public ACME CA. */
+export interface AcmeDirectory {
+  readonly id: 'letsencrypt' | 'letsencrypt-staging' | 'zerossl' | 'google'
+  readonly url: string
+  readonly terms: string
+  /** Registering needs an external account binding from the CA. */
+  readonly binding: boolean
+}
+
+export const ACME_DIRECTORIES: readonly AcmeDirectory[] = [
+  {
+    id: 'letsencrypt',
+    url: 'https://acme-v02.api.letsencrypt.org/directory',
+    terms: 'https://letsencrypt.org/repository/',
+    binding: false,
+  },
+  {
+    id: 'letsencrypt-staging',
+    url: 'https://acme-staging-v02.api.letsencrypt.org/directory',
+    terms: 'https://letsencrypt.org/repository/',
+    binding: false,
+  },
+  {
+    id: 'zerossl',
+    url: 'https://acme.zerossl.com/v2/DV90',
+    terms: 'https://zerossl.com/terms/',
+    binding: true,
+  },
+  {
+    id: 'google',
+    url: 'https://dv.acme-v02.api.pki.goog/directory',
+    terms: 'https://pki.goog/repository/',
+    binding: true,
+  },
+]
+
+/** The well-known CA a directory URL belongs to. */
+export function knownDirectory(url: string): AcmeDirectory | undefined {
+  return ACME_DIRECTORIES.find((directory) => directory.url === url)
+}
+
+/** The host of a directory URL. */
+export function directoryHost(url: string): string {
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
+}
+
+export const ISSUANCE_TONES: Record<IssuanceState, StatusTone> = {
+  pending: 'pending',
+  issued: 'positive',
+  failing: 'negative',
 }

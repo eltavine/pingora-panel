@@ -37,6 +37,15 @@ export const KNOWN_TYPES = [
   'tls.certificate.replaced',
   'tls.certificate.deleted',
   'tls.certificate.refused',
+  'tls.certificate.expiring',
+  'tls.acme.account.created',
+  'tls.acme.account.deleted',
+  'tls.acme.account.refused',
+  'tls.acme.certificate.created',
+  'tls.acme.certificate.renewal_requested',
+  'tls.acme.certificate.failed',
+  'tls.acme.certificate.deleted',
+  'tls.acme.certificate.refused',
 ] as const
 
 export type KnownType = (typeof KNOWN_TYPES)[number]
@@ -50,9 +59,13 @@ export function typeKey(type: KnownType): string {
   return `audit.types.${type.replace(/\./g, '_')}`
 }
 
-/** Refusals and failures read as negative; everything else happened. */
+/** Refusals and failures read as negative and warnings as such; everything
+ * else happened. */
 export function toneOf(type: string): StatusTone {
-  return /\.(refused|failed|rejected|denied)$/.test(type) ? 'negative' : 'positive'
+  if (/\.(refused|failed|rejected|denied)$/.test(type)) {
+    return 'negative'
+  }
+  return type.endsWith('.expiring') ? 'warning' : 'positive'
 }
 
 type Translate = (key: string, values?: Record<string, unknown>, plural?: number) => string
@@ -63,6 +76,14 @@ function text(value: unknown): string {
 
 function list(value: unknown): string {
   return Array.isArray(value) ? value.map(text).join(', ') : text(value)
+}
+
+function host(value: unknown): string {
+  try {
+    return new URL(text(value)).host
+  } catch {
+    return text(value)
+  }
 }
 
 /** A one-line account of what happened, from the event's data. */
@@ -133,12 +154,33 @@ export function summaryOf(event: AuditEvent, t: Translate): string {
     case 'tls.certificate.replaced':
       return `${text(data.id)} · v${text(data.version)} · ${list(data.names)}`
     case 'tls.certificate.deleted':
+    case 'tls.acme.account.deleted':
+    case 'tls.acme.certificate.deleted':
+    case 'tls.acme.certificate.renewal_requested':
       return text(data.id)
     case 'tls.certificate.refused':
+    case 'tls.acme.account.refused':
+    case 'tls.acme.certificate.refused':
       return [`${text(data.operation)} ${text(data.id)}`, data.code, data.message]
         .map(text)
         .filter(Boolean)
         .join(' · ')
+    case 'tls.certificate.expiring':
+      return `${text(data.id)} · ${
+        data.expired
+          ? t('audit.summary.expired')
+          : t(
+              'audit.summary.expiresWithin',
+              { count: Number(data.within_days) },
+              Number(data.within_days),
+            )
+      }`
+    case 'tls.acme.account.created':
+      return `${text(data.id)} · ${host(data.directory)}`
+    case 'tls.acme.certificate.created':
+      return `${text(data.id)} · ${list(data.names)} · ${text(data.challenge)}`
+    case 'tls.acme.certificate.failed':
+      return [data.id, data.code, data.message].map(text).filter(Boolean).join(' · ')
     case 'identity.access.denied':
       return [`${text(data.method)} ${text(data.route)}`, data.permission ?? data.reason]
         .map(text)
