@@ -68,23 +68,6 @@ pub(crate) enum TlsProfileCommand {
 }
 
 #[derive(Subcommand)]
-pub(crate) enum ConfigCommand {
-    /// The draft's version and whether the gateway runs it.
-    Draft,
-    /// Validates the draft, or only the given sites.
-    Validate {
-        #[arg(long = "site")]
-        sites: Vec<String>,
-    },
-    /// Compiles the draft and activates it on the gateway.
-    Apply {
-        /// Refuse if the draft changed since this version.
-        #[arg(long)]
-        expected_version: Option<u64>,
-    },
-}
-
-#[derive(Subcommand)]
 pub(crate) enum GatewayCommand {
     /// Versions, uptime, workers, listeners and the active revision.
     Status,
@@ -221,67 +204,6 @@ pub async fn tls_profile(api: &Api, output: &Output, command: TlsProfileCommand)
                 .await?
                 .body;
             output.done(&format!("Deleted TLS profile {id}"), &reply);
-        }
-    }
-    Ok(())
-}
-
-pub async fn config(api: &Api, output: &Output, command: ConfigCommand) -> Result<()> {
-    match command {
-        ConfigCommand::Draft => {
-            let draft = api.get("/api/v1/config/draft", &[]).await?.body;
-            output.item(
-                &draft,
-                &[
-                    ("Version", |draft| text(&draft["version"])),
-                    ("Updated", |draft| text(&draft["updated_at"])),
-                    ("Applied version", |draft| text(&draft["applied_version"])),
-                    ("Applied", |draft| text(&draft["applied_at"])),
-                    ("Pending changes", |draft| text(&draft["pending"])),
-                ],
-            );
-        }
-        ConfigCommand::Validate { sites } => {
-            let query: Vec<(&str, String)> = if sites.is_empty() {
-                Vec::new()
-            } else {
-                vec![("site_ids", sites.join(","))]
-            };
-            let result = api.get("/api/v1/config/validation", &query).await?.body;
-            output.list(
-                &result["diagnostics"],
-                &[
-                    ("RESOURCE", |diagnostic| text(&diagnostic["resource_id"])),
-                    ("MESSAGE", |diagnostic| text(&diagnostic["message"])),
-                ],
-            );
-            if result["valid"] != true {
-                return Err(CliError::Api {
-                    status: reqwest::StatusCode::BAD_REQUEST,
-                    problem: json!({"detail": "the configuration has errors"}),
-                });
-            }
-            output.done("The configuration is valid", &result);
-        }
-        ConfigCommand::Apply { expected_version } => {
-            let applied = api
-                .change(
-                    Method::POST,
-                    "/api/v1/config/apply",
-                    Some(&json!({ "expected_version": expected_version })),
-                    None,
-                )
-                .await?
-                .body;
-            output.done(
-                &format!(
-                    "Applied version {} (revision {}, {})",
-                    text(&applied["draft"]["version"]),
-                    text(&applied["revision_id"]),
-                    text(&applied["content_hash"])
-                ),
-                &applied,
-            );
         }
     }
     Ok(())

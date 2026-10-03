@@ -66,9 +66,12 @@ enum Command {
     /// Certificates served on HTTPS listeners and domains.
     #[command(subcommand, name = "tls-profile")]
     TlsProfile(commands::gateway::TlsProfileCommand),
-    /// The draft configuration and applying it.
+    /// The draft configuration: its files, checks, plans and applying it.
     #[command(subcommand)]
-    Config(commands::gateway::ConfigCommand),
+    Config(commands::config::ConfigCommand),
+    /// Configurations applied or attempted, their files and notes.
+    #[command(subcommand)]
+    Revision(commands::revisions::RevisionCommand),
     /// The running gateway.
     #[command(subcommand)]
     Gateway(commands::gateway::GatewayCommand),
@@ -110,7 +113,8 @@ async fn main() -> ExitCode {
             Command::TlsProfile(command) => {
                 commands::gateway::tls_profile(&api, &output, command).await
             }
-            Command::Config(command) => commands::gateway::config(&api, &output, command).await,
+            Command::Config(command) => commands::config::run(&api, &output, command).await,
+            Command::Revision(command) => commands::revisions::run(&api, &output, command).await,
             Command::Gateway(command) => commands::gateway::gateway(&api, &output, command).await,
             Command::Completion { .. } => Ok(()),
         }
@@ -174,6 +178,27 @@ mod tests {
             ],
             vec!["ppanel", "-o", "json", "gateway", "workers", "4"],
             vec!["ppanel", "config", "apply", "--expected-version", "7"],
+            vec!["ppanel", "config", "apply", "--dry-run"],
+            vec!["ppanel", "config", "apply", "--note", "launch"],
+            vec!["ppanel", "config", "export", "--dir", "conf"],
+            vec![
+                "ppanel",
+                "config",
+                "import",
+                "conf",
+                "--expected-version",
+                "3",
+            ],
+            vec!["ppanel", "config", "check", "main.conf"],
+            vec!["ppanel", "config", "fmt", "conf", "--check"],
+            vec!["ppanel", "config", "plan"],
+            vec![
+                "ppanel", "config", "rollback", "--to", "4", "--reason", "errors",
+            ],
+            vec!["ppanel", "revision", "list", "--before", "9"],
+            vec!["ppanel", "revision", "show", "4", "--file", "main.conf"],
+            vec!["ppanel", "revision", "diff", "4", "--against", "active"],
+            vec!["ppanel", "revision", "note", "4", ""],
             vec![
                 "ppanel",
                 "listener",

@@ -2234,11 +2234,13 @@ dependencies = [
 name = "panel-cli"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "chrono",
  "clap",
  "clap_complete",
  "reqwest",
  "serde_json",
+ "tempfile",
  "tokio",
  "uuid",
 ]

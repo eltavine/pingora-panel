@@ -1,7 +1,9 @@
 //! One module per resource; each maps subcommands onto API calls.
 
+pub mod config;
 pub mod domains;
 pub mod gateway;
+pub mod revisions;
 pub mod routes;
 pub mod sites;
 pub mod upstreams;

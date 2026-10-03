@@ -64,8 +64,9 @@ impl fmt::Display for CliError {
                     .or_else(|| problem["diagnostics"].as_array())
                 {
                     for error in errors {
-                        let resource = error["resource_id"]
+                        let resource = error["source_span"]
                             .as_str()
+                            .or_else(|| error["resource_id"].as_str())
                             .or_else(|| error["field"].as_str())
                             .unwrap_or("");
                         let message = error["message"].as_str().unwrap_or("");
