@@ -109,6 +109,15 @@ async fn a_ready_process_serves_registers_relays_and_deregisters() {
         .unwrap();
     assert_eq!(readiness["status"], "pass");
     assert_eq!(readiness["serviceId"], "config-service");
+    let metrics = get(format!("http://{}/metrics", process.ops_address()))
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        metrics.contains("pingora_panel_service_ready 1\n"),
+        "{metrics}"
+    );
     for check in ["schema", "postgresql", "nats"] {
         assert_eq!(
             readiness["checks"][format!("{check}:responseTime")][0]["status"],

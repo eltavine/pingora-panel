@@ -1,4 +1,5 @@
-use http::{header, HeaderMap};
+use crate::Metrics;
+use http::{header, HeaderMap, Response, StatusCode};
 use subtle::ConstantTimeEq;
 
 /// Where every process serves its metrics.
@@ -46,6 +47,25 @@ impl ScrapeToken {
     }
 }
 
+/// The answer to a scrape that sent `headers`: every metric in the
+/// OpenMetrics text format, or 401 when `token` is required and missing.
+pub fn scrape(metrics: &Metrics, token: &ScrapeToken, headers: &HeaderMap) -> Response<String> {
+    let response = Response::builder();
+    let response = if token.admits(headers) {
+        response
+            .header(header::CONTENT_TYPE, CONTENT_TYPE)
+            .header(header::CACHE_CONTROL, "no-store")
+            .body(metrics.encode())
+    } else {
+        response
+            .status(StatusCode::UNAUTHORIZED)
+            .header(header::WWW_AUTHENTICATE, "Bearer")
+            .body(String::new())
+    };
+    // Every header above is a valid static value.
+    response.unwrap_or_default()
+}
+
 impl std::fmt::Debug for ScrapeToken {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("ScrapeToken")
@@ -77,6 +97,18 @@ mod tests {
         assert!(!token.admits(&headers("Basic s3cret")));
         assert!(!token.admits(&HeaderMap::new()));
         assert_eq!(format!("{token:?}"), "ScrapeToken(Some(\"<redacted>\"))");
+    }
+
+    #[test]
+    fn scrapes_answer_openmetrics_or_ask_for_the_token() {
+        let metrics = Metrics::new();
+        let answered = scrape(&metrics, &ScrapeToken::none(), &HeaderMap::new());
+        assert_eq!(answered.status(), StatusCode::OK);
+        assert_eq!(answered.headers()[header::CONTENT_TYPE], CONTENT_TYPE);
+        assert_eq!(answered.body(), "# EOF\n");
+        let refused = scrape(&metrics, &ScrapeToken::bearer("s3cret"), &HeaderMap::new());
+        assert_eq!(refused.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(refused.headers()[header::WWW_AUTHENTICATE], "Bearer");
     }
 
     #[test]

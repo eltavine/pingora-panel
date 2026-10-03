@@ -11,10 +11,10 @@
 mod scrape;
 mod semconv;
 
-pub use scrape::{ScrapeToken, CONTENT_TYPE, PATH};
+pub use scrape::{scrape, ScrapeToken, CONTENT_TYPE, PATH};
 pub use semconv::{
     method, protocol_version, ActiveRequest, ClientRequest, ErrorType, HttpClientMetrics,
-    HttpServerMetrics, ServerRequest, DURATION_BUCKETS, SIZE_BUCKETS,
+    HttpServerMetrics, RequestLabels, RoutedRequest, ServerRequest, DURATION_BUCKETS, SIZE_BUCKETS,
 };
 
 use prometheus_client::registry::Registry;

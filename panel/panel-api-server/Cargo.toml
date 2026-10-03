@@ -30,6 +30,7 @@ panel-event-contracts.workspace = true
 panel-events.workspace = true
 panel-health.workspace = true
 panel-identity.workspace = true
+panel-metrics.workspace = true
 panel-jetstream.workspace = true
 panel-platform.workspace = true
 panel-postgres.workspace = true

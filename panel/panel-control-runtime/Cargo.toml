@@ -16,6 +16,7 @@ chrono.workspace = true
 panel-contracts.workspace = true
 panel-errors.workspace = true
 panel-health.workspace = true
+panel-metrics.workspace = true
 panel-jetstream.workspace = true
 panel-outbox.workspace = true
 panel-platform.workspace = true

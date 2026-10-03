@@ -169,6 +169,21 @@ async fn the_public_api_publishes_through_config_service_and_serves_the_console(
         .await
         .unwrap();
     assert_eq!(status["ready"], true);
+    let metrics = reqwest::get(format!("http://{}/metrics", api.ops_address()))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        metrics.contains(
+            "http_server_request_duration_seconds_count{http_request_method=\"GET\",\
+             url_scheme=\"http\",http_route=\"/api/v1/gateway/status\",\
+             http_response_status_code=\"200\",network_protocol_version=\"1.1\",\
+             error_type=\"\"} 1"
+        ),
+        "{metrics}"
+    );
 
     let document = json!({
         "schema_version": IR_SCHEMA_VERSION,

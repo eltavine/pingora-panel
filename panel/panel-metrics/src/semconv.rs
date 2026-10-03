@@ -93,6 +93,29 @@ pub struct ServerRequest {
     pub route: Option<Arc<str>>,
 }
 
+/// The labels of a request a server routed by a template, such as an API.
+#[derive(Clone, Debug, Eq, Hash, PartialEq, EncodeLabelSet)]
+pub struct RoutedRequest {
+    pub http_request_method: &'static str,
+    pub url_scheme: &'static str,
+    /// The matched route template, such as `/api/v1/sites/{id}`.
+    pub http_route: Option<String>,
+    pub http_response_status_code: Option<u16>,
+    pub network_protocol_version: Option<&'static str>,
+    pub error_type: Option<ErrorType>,
+}
+
+/// What a set of request labels needs to key a metric family.
+pub trait RequestLabels:
+    Clone + std::fmt::Debug + Eq + std::hash::Hash + EncodeLabelSet + Send + Sync + 'static
+{
+}
+
+impl<T> RequestLabels for T where
+    T: Clone + std::fmt::Debug + Eq + std::hash::Hash + EncodeLabelSet + Send + Sync + 'static
+{
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, EncodeLabelSet)]
 struct ActiveLabels {
     http_request_method: &'static str,
@@ -110,16 +133,17 @@ fn sizes<L: Clone + Eq + std::hash::Hash>() -> Histograms<L> {
 }
 
 /// `http.server.request.duration`, `http.server.active_requests` and the
-/// request and response body sizes, whose sums are the traffic in and out.
+/// request and response body sizes, whose sums are the traffic in and out,
+/// labelled by `L`.
 #[derive(Clone, Debug)]
-pub struct HttpServerMetrics {
-    duration: Histograms<ServerRequest>,
+pub struct HttpServerMetrics<L: RequestLabels = ServerRequest> {
+    duration: Histograms<L>,
     active: Family<ActiveLabels, Gauge>,
-    request_size: Histograms<ServerRequest>,
-    response_size: Histograms<ServerRequest>,
+    request_size: Histograms<L>,
+    response_size: Histograms<L>,
 }
 
-impl HttpServerMetrics {
+impl<L: RequestLabels> HttpServerMetrics<L> {
     pub fn register(registry: &mut Registry) -> Self {
         let metrics = Self {
             duration: durations(),
@@ -167,13 +191,7 @@ impl HttpServerMetrics {
     }
 
     /// Records a request that is done.
-    pub fn finish(
-        &self,
-        request: &ServerRequest,
-        duration: Duration,
-        request_bytes: u64,
-        response_bytes: u64,
-    ) {
+    pub fn finish(&self, request: &L, duration: Duration, request_bytes: u64, response_bytes: u64) {
         self.duration
             .get_or_create(request)
             .observe(duration.as_secs_f64());

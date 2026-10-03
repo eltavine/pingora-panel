@@ -125,7 +125,8 @@ readiness, recovery and current limits.
 and `audit-service` are composed by `panel-control-runtime`
 ([decision](../docs/adr/0007-service-processes-health-and-discovery.md)). Each
 binds an operational listener with `/livez` and `/readyz`
-(`application/health+json`) and a gRPC listener with `grpc.health.v1.Health`
+(`application/health+json`) and `/metrics`, where `panel-api` also counts
+its requests by route template, and a gRPC listener with `grpc.health.v1.Health`
 and `pingora.panel.platform.v1.ServiceInfo`, then migrates its schema, registers
 in the service directory and relays its outbox in the background. Run a binary
 with `healthcheck` to probe its own readiness, as container health checks do.

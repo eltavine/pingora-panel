@@ -13,6 +13,7 @@ use panel_health::{
 use panel_jetstream::{
     JetStreamHealthCheck, JetStreamPublisher, JetStreamServiceRegistry, JetStreamSettings,
 };
+use panel_metrics::Metrics;
 use panel_outbox::RelayOptions;
 use panel_pki::{CredentialFiles, WorkloadIdentity};
 use panel_platform::{
@@ -22,7 +23,7 @@ use panel_platform_codec::protocol_range;
 use panel_postgres::{
     PgHealthCheck, PgOutbox, SchemaMigration, ServiceDatabase, ServiceDatabaseConfig, SqlIdentifier,
 };
-use panel_service::{ops_router, publish_grpc_health, ServiceInfoService};
+use panel_service::{ops_router, publish_grpc_health, register_readiness, ServiceInfoService};
 use panel_tls::{PeerPolicy, TlsCredentials};
 use std::{convert::Infallible, future::Future, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{net::TcpListener, sync::watch, task::JoinHandle};
@@ -62,6 +63,7 @@ pub struct ControlPlaneProcess {
     start_hooks: Vec<StartHook>,
     tls: Option<Arc<TlsCredentials>>,
     peer_policy: PeerPolicy,
+    metrics: Metrics,
 }
 
 impl ControlPlaneProcess {
@@ -111,7 +113,14 @@ impl ControlPlaneProcess {
             start_hooks: Vec::new(),
             tls,
             peer_policy: PeerPolicy::new(trust_domain),
+            metrics: Metrics::new(),
         })
+    }
+
+    /// The metrics the operational listener serves at `/metrics`, to
+    /// register the service's own.
+    pub fn metrics(&mut self) -> &mut Metrics {
+        &mut self.metrics
     }
 
     /// The mutual TLS credentials, when the process serves and calls peers
@@ -307,7 +316,9 @@ impl ControlPlaneProcess {
             cancel.clone(),
         ));
 
-        let ops = axum::serve(ops_listener, ops_router(health.clone()))
+        let mut metrics = self.metrics;
+        register_readiness(&mut metrics, health.clone());
+        let ops = axum::serve(ops_listener, ops_router(health.clone(), Arc::new(metrics)))
             .with_graceful_shutdown(cancel.clone().cancelled_owned());
         tasks.spawn(async move {
             if let Err(error) = ops.await {

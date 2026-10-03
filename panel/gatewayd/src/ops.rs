@@ -2,12 +2,12 @@
 
 use axum::{
     extract::State,
-    http::{header, HeaderMap, StatusCode},
+    http::HeaderMap,
     response::{IntoResponse, Response},
     routing::get,
     Router,
 };
-use panel_metrics::{Metrics, ScrapeToken, CONTENT_TYPE, PATH};
+use panel_metrics::{Metrics, ScrapeToken, PATH};
 use std::sync::Arc;
 
 struct Scrape {
@@ -23,27 +23,16 @@ pub fn ops_router(metrics: Arc<Metrics>, token: ScrapeToken) -> Router {
 }
 
 async fn scrape(State(scrape): State<Arc<Scrape>>, headers: HeaderMap) -> Response {
-    if !scrape.token.admits(&headers) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            [(header::WWW_AUTHENTICATE, "Bearer")],
-        )
-            .into_response();
-    }
-    (
-        [
-            (header::CONTENT_TYPE, CONTENT_TYPE),
-            (header::CACHE_CONTROL, "no-store"),
-        ],
-        scrape.metrics.encode(),
-    )
-        .into_response()
+    panel_metrics::scrape(&scrape.metrics, &scrape.token, &headers).into_response()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{body::Body, http::Request};
+    use axum::{
+        body::Body,
+        http::{header, Request, StatusCode},
+    };
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 

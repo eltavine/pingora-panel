@@ -239,6 +239,7 @@
         "panel-identity",
         "panel-ir",
         "panel-jetstream",
+        "panel-metrics",
         "panel-pki",
         "panel-platform",
         "panel-postgres",
@@ -331,6 +332,7 @@
         "panel-events",
         "panel-health",
         "panel-jetstream",
+        "panel-metrics",
         "panel-outbox",
         "panel-pki",
         "panel-platform",
@@ -497,6 +499,7 @@
         "panel-environment",
         "panel-errors",
         "panel-health",
+        "panel-metrics",
         "panel-platform",
         "panel-platform-codec"
       ]

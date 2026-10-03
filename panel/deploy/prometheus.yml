@@ -1,5 +1,6 @@
-# Prometheus for Pingora Panel: keeps the gateway's metrics. It listens on
-# loopback, and only observability-service queries it.
+# Prometheus for Pingora Panel: keeps the metrics of the gateway and the
+# services. It listens on loopback, and only observability-service queries
+# it.
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
@@ -8,3 +9,11 @@ scrape_configs:
   - job_name: gatewayd
     static_configs:
       - targets: ["127.0.0.1:9185"]
+  - job_name: services
+    static_configs:
+      - targets:
+          - 127.0.0.1:9180
+          - 127.0.0.1:9181
+          - 127.0.0.1:9182
+          - 127.0.0.1:9183
+          - 127.0.0.1:9184

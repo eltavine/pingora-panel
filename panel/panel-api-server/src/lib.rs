@@ -33,10 +33,11 @@ use panel_identity::{
     Identity, IdentitySettings, OpenIdConnect, ProviderDirectory, ProviderSignIns, SecretHash,
     SessionPolicy, WorkloadIdentity,
 };
+use panel_metrics::{HttpServerMetrics, RoutedRequest};
 use panel_platform::ServiceName;
 use panel_postgres::{EventLog, SqlIdentifier};
 use panel_secrets::{EnvelopeVault, SecretVault};
-use panel_service::Environment;
+use panel_service::{measured, Environment};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tls_probe_rustls::RustlsProbe;
 use tokio::time::MissedTickBehavior;
@@ -152,12 +153,13 @@ pub fn process(
         .transpose()?;
     // Bound now so a taken address fails the start before anything else runs.
     let listener = PublicListener::bind(HTTP_ADDRESS_ENV, &http_address)?;
-    let process = ControlPlaneProcess::new(
+    let mut process = ControlPlaneProcess::new(
         ServiceName::new(SERVICE)?,
         env!("CARGO_PKG_VERSION"),
         settings,
         SqlIdentifier::new(SCHEMA)?,
     )?;
+    let api_metrics = HttpServerMetrics::<RoutedRequest>::register(process.metrics().registry());
     let config = match process.peer_channel(&config_url, ServiceName::new("config-service")?)? {
         Some(channel) => {
             ConfigPublicationClient::from_channel(channel, ConfigClientConfig::default())
@@ -247,7 +249,7 @@ pub fn process(
                 Some((directory, sign_ins)) => state.with_identity_providers(directory, sign_ins),
                 None => state,
             };
-            let api = router_with_config(state, ApiConfig::default());
+            let api = measured(router_with_config(state, ApiConfig::default()), api_metrics);
             let app = console::with_console(api, &web_root)?;
             let shutdown = running.shutdown_token();
             running.spawn(async move {

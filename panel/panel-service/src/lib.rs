@@ -9,6 +9,7 @@
 
 mod grpc;
 mod grpc_client;
+mod metrics;
 mod ops;
 mod probe;
 mod process;
@@ -18,6 +19,7 @@ pub use grpc::{describe_peer, negotiate_with_peer, publish_grpc_health, ServiceI
 pub use grpc_client::{
     loopback_channel, request_context, response_error, status_error, GrpcHealthCheck,
 };
+pub use metrics::{measured, register_readiness};
 pub use ops::{health_response, ops_router, LIVENESS_PATH, READINESS_PATH};
 pub use panel_environment::{require_loopback, Environment};
 pub use probe::probe_http;
