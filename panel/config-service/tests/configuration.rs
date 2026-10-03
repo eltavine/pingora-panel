@@ -692,3 +692,176 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
         assert!(recorded.contains(&qualified), "{expected}: {recorded:?}");
     }
 }
+
+/// A caller who may read, change and apply only the shop's sites.
+fn shop_keeper() -> panel_application::SiteScope {
+    let access = |permission: &str| panel_application::SiteAccess {
+        permission: permission.into(),
+        groups: vec!["shop".into()],
+        sites: Vec::new(),
+    };
+    panel_application::SiteScope {
+        unrestricted: Vec::new(),
+        limited: vec![
+            access("config.read"),
+            access("config.write"),
+            access("config.apply"),
+        ],
+    }
+}
+
+#[tokio::test]
+async fn callers_limited_to_a_site_group_act_only_on_its_sites() {
+    let Some(harness) = start().await else { return };
+    let client = &harness.client;
+    let scoped = |key: &str| command(key).with_site_scope(Some(shop_keeper()));
+    let scoped_read = || scope().with_site_scope(Some(shop_keeper()));
+    client
+        .change(
+            command("listener"),
+            change(
+                "listeners.put",
+                "listeners/http",
+                json!({"id": "http", "address": "0.0.0.0:80"}),
+            ),
+        )
+        .await
+        .unwrap();
+    let site = |name: &str, group: &str| {
+        change(
+            "sites.create",
+            "sites",
+            json!({
+                "name": name,
+                "group": group,
+                "action": {"type": "respond"},
+                "domains": [{"host": format!("{name}.example.com")}]
+            }),
+        )
+    };
+    let shop = json(
+        &client
+            .change(command("shop"), site("shop", "shop"))
+            .await
+            .unwrap()
+            .content,
+    );
+    let corp = json(
+        &client
+            .change(command("corp"), site("intranet", "corp"))
+            .await
+            .unwrap()
+            .content,
+    );
+    let shop = format!("sites/{}", shop["id"].as_str().unwrap());
+    let corp = format!("sites/{}", corp["id"].as_str().unwrap());
+    let ApplyOutcome::Applied { .. } = client
+        .apply(command("apply-1"), ApplyRequest::new(0))
+        .await
+        .unwrap()
+    else {
+        panic!("the unscoped operator applies");
+    };
+
+    let listed = json(
+        &client
+            .read(scoped_read(), read("sites.list", "sites", json!({})))
+            .await
+            .unwrap()
+            .content,
+    );
+    let names: Vec<&str> = listed["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|site| site["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["shop"]);
+    let hidden = client
+        .read(scoped_read(), read("sites.get", &corp, json!({})))
+        .await
+        .unwrap_err();
+    assert_eq!(hidden.code.as_str(), ErrorCode::NOT_FOUND);
+    let whole = client
+        .read(
+            scoped_read(),
+            read("config.source", "config/source", json!({})),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(whole.code.as_str(), ErrorCode::PERMISSION_DENIED);
+
+    let refused = |error: panel_errors::PanelError| error.code.as_str().to_owned();
+    assert_eq!(
+        refused(
+            client
+                .change(
+                    scoped("theirs"),
+                    change("sites.disable", &corp, Value::Null)
+                )
+                .await
+                .unwrap_err()
+        ),
+        ErrorCode::PERMISSION_DENIED
+    );
+    assert_eq!(
+        refused(
+            client
+                .change(
+                    scoped("shared"),
+                    change(
+                        "listeners.put",
+                        "listeners/https",
+                        json!({"id": "https", "address": "0.0.0.0:443"})
+                    ),
+                )
+                .await
+                .unwrap_err()
+        ),
+        ErrorCode::PERMISSION_DENIED
+    );
+    let moved = client
+        .change(
+            scoped("move"),
+            change(
+                "sites.replace",
+                &shop,
+                json!({
+                    "name": "shop",
+                    "group": "corp",
+                    "action": {"type": "respond"},
+                    "domains": [{"host": "shop.example.com"}]
+                }),
+            ),
+        )
+        .await;
+    assert!(moved.is_err(), "a site cannot be moved out of reach");
+    client
+        .change(scoped("mine"), change("sites.disable", &shop, Value::Null))
+        .await
+        .unwrap();
+    let ApplyOutcome::Applied { .. } = client
+        .apply(scoped("apply-2"), ApplyRequest::new(0))
+        .await
+        .unwrap()
+    else {
+        panic!("the shop keeper applies the shop's change");
+    };
+
+    client
+        .change(
+            command("theirs-2"),
+            change("sites.disable", &corp, Value::Null),
+        )
+        .await
+        .unwrap();
+    let mixed = client
+        .apply(scoped("apply-3"), ApplyRequest::new(0))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        mixed.code.as_str(),
+        ErrorCode::PERMISSION_DENIED,
+        "the draft holds someone else's change"
+    );
+}

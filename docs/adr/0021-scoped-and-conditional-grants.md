@@ -35,15 +35,16 @@ already belong to groups in the configuration model.
   context to the configuration service, which knows each site's group.
   There, reads list and show only sites in scope, changes are refused unless
   the site is in scope both before and after the change, and applying is
-  refused unless every change in the plan is a site in scope. Everything
-  that is not a site, such as upstreams, listeners, TLS profiles and the
-  configuration files as a whole, needs the permission without restriction.
-  Refusals are audited like other refused changes.
+  refused unless every change in the plan is a site in scope. Shared
+  resources such as upstreams, listeners and TLS profiles stay readable,
+  since sites refer to them, but changing them, and reading or replacing the
+  configuration files and revisions as a whole, needs the permission
+  without restriction. Refusals are audited like other refused changes.
 
 ## Consequences
 
-- An account sees fewer sites than exist when it is scoped; summaries and
-  plans count only what it may see.
+- An account sees fewer sites than exist when it is scoped; site lists and
+  summaries count only what it may see.
 - Conditions are evaluated per request, so an expired grant stops working
   without anyone revoking it, and a network condition follows the client
   address the API trusts (ADR 0014, trusted proxies).

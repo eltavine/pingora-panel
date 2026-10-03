@@ -21,6 +21,7 @@ mod receipts;
 mod reconcile;
 mod recording;
 mod revisions;
+mod scope;
 
 pub use configuration::ConfigurationService;
 pub use deployments::{PendingActivation, PgDeployments, PreparedRecord};

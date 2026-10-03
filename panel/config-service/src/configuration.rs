@@ -3,6 +3,7 @@ use crate::{
     draft::{ChangeOutput, ChangeRequest, DraftChange, DraftState, PgDrafts, DRAFT},
     language, operations,
     revisions::{NewRevision, PgRevisions},
+    scope,
 };
 use chrono::{DateTime, Utc};
 use config_proto_codec as codec;
@@ -68,6 +69,18 @@ struct ApprovalPage {
 struct ReasonBody {
     reason: Option<String>,
 }
+
+/// Reads of the configuration as a whole, which a caller limited to some
+/// sites may not make.
+const WHOLE_READS: &[&str] = &[
+    "config.source",
+    "config.explain",
+    "config.ir",
+    "config.plan",
+    "revisions.list",
+    "revisions.get",
+    "revisions.diff",
+];
 
 const DEFAULT_APPROVAL_PAGE: u32 = 50;
 const MAX_APPROVAL_PAGE: u32 = 200;
@@ -615,6 +628,10 @@ impl ConfigurationService {
                 "the draft has no changes to apply",
             ));
         }
+        if context.site_scope().is_some() {
+            let (active, _) = self.active().await?;
+            scope::check_changes(&active, &draft.model, context.site_scope(), scope::APPLY)?;
+        }
         let status = self.publication.status().await?;
         self.revisions
             .settle(status.active_hash().map(ContentHash::as_str))
@@ -793,7 +810,17 @@ impl Configuration for ConfigurationService {
         let trace = trace_context(request.metadata());
         let request = request.into_inner();
         let result: Result<_> = async {
-            codec::decode_scope(request.context, trace)?;
+            let request_scope = codec::decode_scope(request.context, trace)?;
+            let site_scope = request_scope.site_scope();
+            if WHOLE_READS.contains(&request.operation.as_str())
+                || request.operation.starts_with("approval")
+            {
+                scope::require_everywhere(
+                    site_scope,
+                    scope::READ,
+                    "this view of the whole configuration",
+                )?;
+            }
             let draft = self.drafts.load().await?;
             if let Some(output) = self
                 .read_approvals(
@@ -817,7 +844,7 @@ impl Configuration for ConfigurationService {
             {
                 Some(output) => output,
                 None => operations::read(
-                    &draft.model,
+                    &scope::readable(&draft.model, site_scope),
                     &request.operation,
                     &request.resource,
                     &request.parameters,
@@ -860,6 +887,16 @@ impl Configuration for ConfigurationService {
             if let Some(output) = self.change_approvals(&context, &request).await? {
                 let draft = self.drafts.load().await?;
                 return Ok((draft, output));
+            }
+            if matches!(
+                request.operation.as_str(),
+                "revisions.note" | "revisions.restore" | "config.source.replace"
+            ) {
+                scope::require_everywhere(
+                    context.site_scope(),
+                    scope::WRITE,
+                    "changing the configuration files or revisions",
+                )?;
             }
             if request.operation == "revisions.note" {
                 let body: NoteBody = decode(&request.content)?;
@@ -933,6 +970,7 @@ impl Configuration for ConfigurationService {
                             &request.content,
                             Utc::now(),
                         )?;
+                        scope::check_changes(&draft.model, &model, context.site_scope(), scope::WRITE)?;
                         Ok(DraftChange {
                             model,
                             sources: None,
