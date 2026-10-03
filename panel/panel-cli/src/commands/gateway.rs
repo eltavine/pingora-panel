@@ -47,15 +47,19 @@ pub(crate) enum TlsProfileCommand {
     List,
     /// Shows a TLS profile.
     Show { id: String },
-    /// Creates or replaces a profile naming files in the gateway's secret directory.
+    /// Creates or replaces a profile serving a certificate of the inventory
+    /// or files placed in the gateway's secret directory.
     Set {
         id: String,
+        /// A certificate of the inventory; see `ppanel certificate list`.
+        #[arg(long, conflicts_with_all = ["certificate", "key"], required_unless_present = "certificate")]
+        certificate_id: Option<String>,
         /// File name of the PEM certificate chain.
-        #[arg(long)]
-        certificate: String,
+        #[arg(long, requires = "key")]
+        certificate: Option<String>,
         /// File name of the PEM private key.
-        #[arg(long)]
-        key: String,
+        #[arg(long, requires = "certificate")]
+        key: Option<String>,
         #[arg(long, default_value = "TLSv1.2")]
         min_protocol: String,
         /// Protocol a listener using this profile offers through ALPN, h2 or
@@ -97,7 +101,10 @@ const LISTENERS: &[Column] = &[
 const PROFILES: &[Column] = &[
     ("ID", |profile| text(&profile["id"])),
     ("CERTIFICATE", |profile| {
-        text(&profile["certificate_secret_id"])
+        match profile["certificate_id"].as_str() {
+            Some(id) => format!("{id} (inventory)"),
+            None => text(&profile["certificate_secret_id"]),
+        }
     }),
     ("KEY", |profile| text(&profile["private_key_secret_id"])),
     ("MIN TLS", |profile| text(&profile["min_protocol"])),
@@ -176,6 +183,7 @@ pub async fn tls_profile(api: &Api, output: &Output, command: TlsProfileCommand)
         ),
         TlsProfileCommand::Set {
             id,
+            certificate_id,
             certificate,
             key,
             min_protocol,
@@ -185,8 +193,9 @@ pub async fn tls_profile(api: &Api, output: &Output, command: TlsProfileCommand)
             let etag = existing(api, &path).await?;
             let body = json!({
                 "id": id,
-                "certificate_secret_id": certificate,
-                "private_key_secret_id": key,
+                "certificate_id": certificate_id,
+                "certificate_secret_id": certificate.unwrap_or_default(),
+                "private_key_secret_id": key.unwrap_or_default(),
                 "min_protocol": min_protocol,
                 "alpn": alpn,
             });

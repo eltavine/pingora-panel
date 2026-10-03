@@ -22,11 +22,10 @@ use panel_application::{
 };
 use panel_config_model::{
     BatchRequest, Domain, DomainCheck, DomainView, Listener, ListenerView, NodeInput, RouteInput,
-    RouteView, SiteBundle, SiteInput, SiteList, SiteQuery, SiteSummary, SiteView, TlsProfileView,
-    UpstreamInput, UpstreamView, ValidationResult,
+    RouteView, SiteBundle, SiteInput, SiteList, SiteQuery, SiteSummary, SiteView, TlsProfile,
+    TlsProfileInput, TlsProfileView, UpstreamInput, UpstreamView, ValidationResult,
 };
 use panel_errors::PanelError;
-use panel_ir::TlsProfile;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use utoipa::{IntoParams, ToSchema};
@@ -976,7 +975,7 @@ pub(crate) async fn delete_node<U: GatewayUseCases>(
 }
 
 macro_rules! named_resource {
-    ($get:ident, $put:ident, $delete:ident, $path:literal, $prefix:literal, $kind:literal, $body:ty) => {
+    ($get:ident, $put:ident, $delete:ident, $path:literal, $prefix:literal, $kind:literal, $body:ty, $input:ty) => {
         #[utoipa::path(get, path = $path, params(QueryHeaders, NamedPath),
             responses((status = 200, body = $body, headers(("ETag" = String)))), tag = "configuration")]
         pub(crate) async fn $get<U: GatewayUseCases>(
@@ -988,7 +987,7 @@ macro_rules! named_resource {
         }
 
         /// Creates or replaces the resource; replacing needs `If-Match`.
-        #[utoipa::path(put, path = $path, request_body = $body,
+        #[utoipa::path(put, path = $path, request_body = $input,
             params(MutationHeaders, NamedPath, ("If-Match" = Option<String>, Header, description = "ETag when replacing")),
             responses((status = 200, body = $body)), tag = "configuration")]
         pub(crate) async fn $put<U: GatewayUseCases>(
@@ -1020,6 +1019,7 @@ named_resource!(
     "/api/v1/listeners/{id}",
     "listeners",
     "listeners",
+    Listener,
     Listener
 );
 named_resource!(
@@ -1029,7 +1029,8 @@ named_resource!(
     "/api/v1/tls-profiles/{id}",
     "tls-profiles",
     "tls_profiles",
-    TlsProfile
+    TlsProfile,
+    TlsProfileInput
 );
 
 /// The draft's version and whether the gateway runs it.

@@ -5,12 +5,11 @@ use chrono::{DateTime, Utc};
 use panel_config_model::{
     abnormal_sites, checked, entity_tag, query_sites, summarize, validate, BatchAction,
     BatchRequest, ConfigModel, Domain, DomainCheck, DomainView, Listener, ListenerView, NodeInput,
-    Route, RouteInput, RouteView, SiteBundle, SiteInput, SiteList, SiteQuery, SiteView,
-    TlsProfileView, UpstreamInput, UpstreamView, ValidationResult,
+    Route, RouteInput, RouteView, SiteBundle, SiteInput, SiteList, SiteQuery, SiteView, TlsProfile,
+    TlsProfileInput, TlsProfileView, UpstreamInput, UpstreamView, ValidationResult,
 };
 use panel_domain::NormalizedHost;
 use panel_errors::{Diagnostic, PanelError, Result};
-use panel_ir::TlsProfile;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -535,7 +534,7 @@ pub fn change(
             Ok((next, Output::json(&serde_json::json!({}))))
         }
         ("tls_profiles.put", Path::TlsProfile(id)) => {
-            let profile: TlsProfile = decode(content)?;
+            let profile = TlsProfile::from(decode::<TlsProfileInput>(content)?);
             if profile.id != id {
                 return Err(PanelError::invalid_argument(
                     "the body id must match the path",

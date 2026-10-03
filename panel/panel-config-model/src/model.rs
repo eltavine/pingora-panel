@@ -1,9 +1,9 @@
 //! The editable configuration document.
 
 use chrono::{DateTime, Utc};
-use panel_domain::{ContentHash, NormalizedHost};
+use panel_domain::{CertificateId, ContentHash, NormalizedHost};
 use panel_ir::{
-    ActiveHealthCheck, ListenerProtocols, LoadBalancingPolicy, PassiveHealthPolicy, TlsProfile,
+    ActiveHealthCheck, ListenerProtocols, LoadBalancingPolicy, PassiveHealthPolicy,
     UpstreamConnectionPolicy, UpstreamTlsPolicy, WwwRedirect,
 };
 use serde::{Deserialize, Serialize};
@@ -31,6 +31,90 @@ pub struct ConfigModel {
     pub upstreams: Vec<Upstream>,
     #[serde(default)]
     pub sites: Vec<Site>,
+}
+
+/// A certificate and the TLS settings listeners and hosts serve it with.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
+pub struct TlsProfile {
+    pub id: String,
+    /// A certificate of the inventory, which the panel delivers to the gateway.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certificate_id: Option<CertificateId>,
+    /// The PEM chain's file in the gateway's secret directory; empty when
+    /// `certificate_id` names the certificate.
+    pub certificate_secret_id: String,
+    /// The PEM private key's file in the gateway's secret directory; empty
+    /// when `certificate_id` names the certificate.
+    pub private_key_secret_id: String,
+    pub min_protocol: String,
+    /// ALPN protocol IDs a listener using this profile offers, narrowing the
+    /// listener's enabled protocols; empty offers all of them. A profile chosen
+    /// by SNI for a domain does not change its listener's offer.
+    pub alpn: BTreeSet<String>,
+}
+
+impl TlsProfile {
+    /// The files the gateway reads the chain and key from: those delivered
+    /// for its certificate, or those it names.
+    pub fn secret_files(&self) -> (String, String) {
+        match &self.certificate_id {
+            Some(id) => (id.chain_file(), id.key_file()),
+            None => (
+                self.certificate_secret_id.clone(),
+                self.private_key_secret_id.clone(),
+            ),
+        }
+    }
+
+    pub fn runtime(&self) -> panel_ir::TlsProfile {
+        let (certificate_secret_id, private_key_secret_id) = self.secret_files();
+        panel_ir::TlsProfile {
+            id: self.id.clone(),
+            certificate_secret_id,
+            private_key_secret_id,
+            min_protocol: self.min_protocol.clone(),
+            alpn: self.alpn.clone(),
+        }
+    }
+}
+
+fn tls12() -> String {
+    "TLSv1.2".into()
+}
+
+/// A TLS profile as written: a certificate of the inventory, or a chain and
+/// key placed in the gateway's secret directory.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
+pub struct TlsProfileInput {
+    pub id: String,
+    #[serde(default)]
+    pub certificate_id: Option<CertificateId>,
+    #[serde(default)]
+    pub certificate_secret_id: String,
+    #[serde(default)]
+    pub private_key_secret_id: String,
+    /// `TLSv1.2` or `TLSv1.3`; `TLSv1.2` when absent.
+    #[serde(default = "tls12")]
+    pub min_protocol: String,
+    #[serde(default)]
+    pub alpn: BTreeSet<String>,
+}
+
+impl From<TlsProfileInput> for TlsProfile {
+    fn from(input: TlsProfileInput) -> Self {
+        Self {
+            id: input.id,
+            certificate_id: input.certificate_id,
+            certificate_secret_id: input.certificate_secret_id,
+            private_key_secret_id: input.private_key_secret_id,
+            min_protocol: input.min_protocol,
+            alpn: input.alpn,
+        }
+    }
 }
 
 /// A fixed listening socket shared by the sites it serves.

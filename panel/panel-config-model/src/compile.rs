@@ -1,6 +1,6 @@
 //! Compiles the editable model into an engine-neutral runtime snapshot.
 
-use crate::model::{Action, ConfigModel, MatchKind, Route, Site};
+use crate::model::{Action, ConfigModel, MatchKind, Route, Site, TlsProfile};
 use panel_domain::{
     EndpointAddress, EndpointId, PathPrefix, RevisionId, RouteId, SiteId, UpstreamPoolId,
 };
@@ -51,7 +51,7 @@ pub fn compile(
     for listener in &model.listeners {
         compiler.listener(listener, &live);
     }
-    compiler.snapshot.tls_profiles = model.tls_profiles.clone();
+    compiler.snapshot.tls_profiles = model.tls_profiles.iter().map(TlsProfile::runtime).collect();
     for upstream in model
         .upstreams
         .iter()

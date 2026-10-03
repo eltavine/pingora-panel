@@ -279,6 +279,38 @@ fn printing_round_trips_and_is_canonical() {
 }
 
 #[test]
+fn tls_profiles_name_certificates_of_the_inventory() {
+    let text = "language_version 1;\nhttp {\n    tls_profile edge {\n        certificate_id example.com;\n    }\n}\n";
+    let lowered = read(text);
+    assert!(lowered.is_valid(), "{:#?}", lowered.diagnostics);
+    let profile = &lowered.model.tls_profiles[0];
+    assert_eq!(
+        profile.certificate_id.as_ref().map(|id| id.as_str()),
+        Some("example.com")
+    );
+    assert!(profile.certificate_secret_id.is_empty());
+    let printed = print(&lowered.model);
+    assert!(
+        printed.contains("    tls_profile edge {\n        certificate_id example.com;\n    }\n"),
+        "{printed}"
+    );
+    assert!(same_configuration(&lowered.model, &read(&printed).model));
+
+    let invalid = read(&text.replace("example.com", "Example_COM"));
+    assert!(invalid
+        .errors()
+        .any(|diagnostic| diagnostic.code.as_str() == codes::TYPE
+            && diagnostic.message.contains("certificate id")));
+    let both = read(&text.replace(
+        "certificate_id example.com;",
+        "certificate_id example.com;\n        certificate site.pem;\n        key site.key;",
+    ));
+    assert!(both
+        .errors()
+        .any(|diagnostic| diagnostic.message.contains("not both")));
+}
+
+#[test]
 fn literal_dollars_survive_a_round_trip() {
     let text = "language_version 1;\nhttp {\n    upstream app {\n        server 10.0.0.1:80;\n    }\n    server s {\n        server_name s.example;\n        note \"uses $HOME\";\n        respond 200 \"body=cost $$5 or $$amount\";\n    }\n}\n";
     let lowered = read(text);

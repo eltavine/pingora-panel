@@ -1,13 +1,13 @@
 //! Read representations shared by the service that produces them and the
 //! HTTP contract that documents them.
 
+use crate::TlsProfile;
 use crate::{
     model::{ConfigModel, Domain, Listener, Route, Site, SiteKind, Upstream},
     query::{serves_https, site_status, SiteStatus},
 };
 use panel_domain::NormalizedHost;
 use panel_errors::Diagnostic;
-use panel_ir::TlsProfile;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;

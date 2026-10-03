@@ -6,9 +6,8 @@ use crate::{
     schema::{self, Context},
     Lowered, Sources, Written,
 };
-use panel_config_model::{Listener, Route, Site, Upstream};
+use panel_config_model::{Listener, Route, Site, TlsProfile, Upstream};
 use panel_dsl::{LineIndex, Span};
-use panel_ir::TlsProfile;
 use serde::Serialize;
 use std::collections::BTreeMap;
 

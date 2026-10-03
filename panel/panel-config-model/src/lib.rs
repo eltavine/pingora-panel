@@ -19,7 +19,7 @@ pub use compile::compile;
 pub use edit::{checked, NodeInput, RouteInput, SiteBundle, SiteInput, UpstreamInput};
 pub use model::{
     entity_tag, Action, ConfigModel, Domain, Listener, MatchKind, Route, RouteMatch, Site,
-    SiteKind, Upstream, UpstreamNode,
+    SiteKind, TlsProfile, TlsProfileInput, Upstream, UpstreamNode,
 };
 pub use query::{
     abnormal_sites, query_sites, serves_https, site_status, summarize, SitePage, SiteQuery,

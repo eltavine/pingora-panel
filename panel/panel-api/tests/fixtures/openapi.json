@@ -33055,7 +33055,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TlsProfile"
+                "$ref": "#/components/schemas/TlsProfileInput"
               }
             }
           },
@@ -40957,6 +40957,7 @@
       },
       "TlsProfile": {
         "type": "object",
+        "description": "A certificate and the TLS settings listeners and hosts serve it with.",
         "required": [
           "id",
           "certificate_secret_id",
@@ -40973,6 +40974,58 @@
             "description": "ALPN protocol IDs a listener using this profile offers, narrowing the\nlistener's enabled protocols; empty offers all of them. A profile chosen\nby SNI for a domain does not change its listener's offer.",
             "uniqueItems": true
           },
+          "certificate_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CertificateId",
+                "description": "A certificate of the inventory, which the panel delivers to the gateway."
+              }
+            ]
+          },
+          "certificate_secret_id": {
+            "type": "string",
+            "description": "The PEM chain's file in the gateway's secret directory; empty when\n`certificate_id` names the certificate."
+          },
+          "id": {
+            "type": "string"
+          },
+          "min_protocol": {
+            "type": "string"
+          },
+          "private_key_secret_id": {
+            "type": "string",
+            "description": "The PEM private key's file in the gateway's secret directory; empty\nwhen `certificate_id` names the certificate."
+          }
+        },
+        "additionalProperties": false
+      },
+      "TlsProfileInput": {
+        "type": "object",
+        "description": "A TLS profile as written: a certificate of the inventory, or a chain and\nkey placed in the gateway's secret directory.",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "alpn": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          },
+          "certificate_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CertificateId"
+              }
+            ]
+          },
           "certificate_secret_id": {
             "type": "string"
           },
@@ -40980,7 +41033,8 @@
             "type": "string"
           },
           "min_protocol": {
-            "type": "string"
+            "type": "string",
+            "description": "`TLSv1.2` or `TLSv1.3`; `TLSv1.2` when absent."
           },
           "private_key_secret_id": {
             "type": "string"

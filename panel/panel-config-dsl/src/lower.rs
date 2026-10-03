@@ -11,15 +11,15 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use panel_config_model::{
-    validate, Action, ConfigModel, Domain, Listener, MatchKind, Route, RouteMatch, Site, Upstream,
-    UpstreamNode,
+    validate, Action, ConfigModel, Domain, Listener, MatchKind, Route, RouteMatch, Site,
+    TlsProfile, Upstream, UpstreamNode,
 };
-use panel_domain::NormalizedHost;
+use panel_domain::{CertificateId, NormalizedHost};
 use panel_dsl::{Argument, Body, Directive, Document, LineIndex, Span};
 use panel_errors::{Diagnostic, DiagnosticSeverity};
 use panel_ir::{
     ActiveHealthCheck, HealthCheckProtocol, ListenerProtocols, LoadBalancingPolicy,
-    PassiveHealthPolicy, TlsProfile, UpstreamConnectionPolicy, UpstreamTlsPolicy, WwwRedirect,
+    PassiveHealthPolicy, UpstreamConnectionPolicy, UpstreamTlsPolicy, WwwRedirect,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -856,6 +856,7 @@ impl<'a> Lowerer<'a> {
         }
         let mut profile = TlsProfile {
             id,
+            certificate_id: None,
             certificate_secret_id: String::new(),
             private_key_secret_id: String::new(),
             min_protocol: "TLSv1.2".into(),
@@ -875,6 +876,19 @@ impl<'a> Lowerer<'a> {
                 &mut |lowerer, file, directive, spec, _| {
                     let arg = &directive.args[0];
                     match spec.name {
+                        "certificate_id" => {
+                            if let Some(value) = lowerer.value(file, arg) {
+                                match CertificateId::new(&value) {
+                                    Ok(id) => profile.certificate_id = Some(id),
+                                    Err(error) => lowerer.error(
+                                        file,
+                                        arg.span,
+                                        codes::TYPE,
+                                        error.to_string(),
+                                    ),
+                                }
+                            }
+                        }
                         "certificate" => {
                             profile.certificate_secret_id =
                                 lowerer.value(file, arg).unwrap_or_default()
@@ -917,16 +931,21 @@ impl<'a> Lowerer<'a> {
                 },
             );
         });
-        for (field, value) in [
+        let files = [
             ("certificate", &profile.certificate_secret_id),
             ("key", &profile.private_key_secret_id),
-        ] {
-            if value.is_empty() {
+        ];
+        let named = profile.certificate_id.is_some();
+        for (field, value) in files {
+            if value.is_empty() && !named {
                 self.error(
                     file,
                     directive.span,
                     codes::ARGUMENTS,
-                    format!("TLS profile {:?} needs '{field}'", profile.id),
+                    format!(
+                        "TLS profile {:?} needs 'certificate_id' or '{field}'",
+                        profile.id
+                    ),
                 );
             }
         }

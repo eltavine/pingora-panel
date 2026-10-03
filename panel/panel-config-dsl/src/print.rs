@@ -6,11 +6,11 @@ use crate::{
     variables::{escape, print_hash_key},
     LANGUAGE_VERSION,
 };
-use panel_config_model::{Action, ConfigModel, Listener, Route, Site, Upstream, UpstreamNode};
-use panel_dsl::{Directive, Document, Trivia};
-use panel_ir::{
-    HealthCheckProtocol, ListenerProtocols, LoadBalancingPolicy, TlsProfile, WwwRedirect,
+use panel_config_model::{
+    Action, ConfigModel, Listener, Route, Site, TlsProfile, Upstream, UpstreamNode,
 };
+use panel_dsl::{Directive, Document, Trivia};
+use panel_ir::{HealthCheckProtocol, ListenerProtocols, LoadBalancingPolicy, WwwRedirect};
 
 /// The whole model as `main.conf`.
 pub fn print(model: &ConfigModel) -> String {
@@ -55,10 +55,13 @@ fn expanded(value: &str) -> String {
 }
 
 pub fn tls_profile(profile: &TlsProfile) -> Directive {
-    let mut body = vec![
-        Directive::simple("certificate", [expanded(&profile.certificate_secret_id)]),
-        Directive::simple("key", [expanded(&profile.private_key_secret_id)]),
-    ];
+    let mut body = match &profile.certificate_id {
+        Some(id) => vec![Directive::simple("certificate_id", [id.to_string()])],
+        None => vec![
+            Directive::simple("certificate", [expanded(&profile.certificate_secret_id)]),
+            Directive::simple("key", [expanded(&profile.private_key_secret_id)]),
+        ],
+    };
     if profile.min_protocol != "TLSv1.2" {
         body.push(Directive::simple(
             "min_protocol",

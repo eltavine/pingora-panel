@@ -134,15 +134,33 @@ fn validate_tls_profiles<'a>(model: &'a ConfigModel, report: &mut Report) -> BTr
                 format!("TLS profile id {:?} is invalid or duplicated", profile.id),
             );
         }
-        for (field, secret) in [
-            ("certificate", &profile.certificate_secret_id),
-            ("private key", &profile.private_key_secret_id),
-        ] {
-            if !is_token(secret) || secret.starts_with('.') {
+        let named_files =
+            !profile.certificate_secret_id.is_empty() || !profile.private_key_secret_id.is_empty();
+        if profile.certificate_id.is_some() {
+            if named_files {
                 report.error(
                     &resource,
-                    format!("{field} secret {secret:?} must be a plain file name"),
+                    "name either a certificate of the inventory or files in the secret directory, not both",
                 );
+            }
+        } else {
+            for (field, secret) in [
+                ("certificate", &profile.certificate_secret_id),
+                ("private key", &profile.private_key_secret_id),
+            ] {
+                if !is_token(secret) || secret.starts_with('.') {
+                    report.error(
+                        &resource,
+                        format!("{field} secret {secret:?} must be a plain file name"),
+                    );
+                } else if secret.starts_with(DELIVERED_PREFIX) {
+                    report.error(
+                        &resource,
+                        format!(
+                            "{field} secret {secret:?} is a file delivered for a certificate of the inventory; name that certificate with certificate_id instead"
+                        ),
+                    );
+                }
             }
         }
         if !matches!(profile.min_protocol.as_str(), "TLSv1.2" | "TLSv1.3") {
@@ -452,6 +470,9 @@ fn check_text(
     }
 }
 
+/// Files of certificates of the inventory in the gateway's secret directory.
+const DELIVERED_PREFIX: &str = "cert-";
+
 pub(crate) fn is_token(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
@@ -547,6 +568,62 @@ mod tests {
         ));
         model.upstreams.push(upstream);
         assert!(validate(&model).is_empty(), "{:?}", messages(&model));
+    }
+
+    fn profile(id: &str, certificate_id: Option<&str>, files: (&str, &str)) -> crate::TlsProfile {
+        crate::TlsProfile {
+            id: id.into(),
+            certificate_id: certificate_id.map(|id| panel_domain::CertificateId::new(id).unwrap()),
+            certificate_secret_id: files.0.into(),
+            private_key_secret_id: files.1.into(),
+            min_protocol: "TLSv1.2".into(),
+            alpn: BTreeSet::new(),
+        }
+    }
+
+    #[test]
+    fn tls_profiles_name_an_inventory_certificate_or_files() {
+        let mut model = ConfigModel {
+            tls_profiles: vec![
+                profile("managed", Some("example.com"), ("", "")),
+                profile("files", None, ("site.pem", "site.key")),
+            ],
+            ..ConfigModel::default()
+        };
+        assert!(validate(&model).is_empty(), "{:?}", messages(&model));
+        let compiled: Vec<_> = model
+            .tls_profiles
+            .iter()
+            .map(crate::TlsProfile::runtime)
+            .map(|profile| (profile.certificate_secret_id, profile.private_key_secret_id))
+            .collect();
+        assert_eq!(
+            compiled,
+            [
+                (
+                    "cert-example.com.pem".to_owned(),
+                    "cert-example.com.key".to_owned()
+                ),
+                ("site.pem".into(), "site.key".into()),
+            ]
+        );
+
+        model.tls_profiles = vec![
+            profile("both", Some("example.com"), ("site.pem", "site.key")),
+            profile("taken", None, ("cert-example.com.pem", "site.key")),
+            profile("empty", None, ("", "site.key")),
+        ];
+        let found = messages(&model);
+        for expected in [
+            "not both",
+            "is a file delivered for a certificate of the inventory",
+            "certificate secret \"\" must be a plain file name",
+        ] {
+            assert!(
+                found.iter().any(|message| message.contains(expected)),
+                "{expected}: {found:?}"
+            );
+        }
     }
 
     #[test]

@@ -4,7 +4,8 @@
 
 use crate::{
     model::{
-        Action, ConfigModel, Domain, Listener, Route, RouteMatch, Site, Upstream, UpstreamNode,
+        Action, ConfigModel, Domain, Listener, Route, RouteMatch, Site, TlsProfile, Upstream,
+        UpstreamNode,
     },
     validate::validate,
     MODEL_VERSION,
@@ -13,8 +14,8 @@ use chrono::{DateTime, Utc};
 use panel_domain::NormalizedHost;
 use panel_errors::{Diagnostic, PanelError, Result};
 use panel_ir::{
-    ActiveHealthCheck, LoadBalancingPolicy, PassiveHealthPolicy, TlsProfile,
-    UpstreamConnectionPolicy, UpstreamTlsPolicy, WwwRedirect,
+    ActiveHealthCheck, LoadBalancingPolicy, PassiveHealthPolicy, UpstreamConnectionPolicy,
+    UpstreamTlsPolicy, WwwRedirect,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};

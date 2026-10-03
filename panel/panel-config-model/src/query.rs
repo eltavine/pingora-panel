@@ -430,8 +430,9 @@ mod tests {
                 default_site_id: None,
             }],
             upstreams: vec![upstream],
-            tls_profiles: vec![panel_ir::TlsProfile {
+            tls_profiles: vec![crate::TlsProfile {
                 id: "main".into(),
+                certificate_id: None,
                 certificate_secret_id: "main.crt".into(),
                 private_key_secret_id: "main.key".into(),
                 min_protocol: "TLSv1.2".into(),
