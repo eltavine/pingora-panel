@@ -323,7 +323,7 @@ fn sign_in_cookie(state: Option<&str>) -> HeaderValue {
         None => ("", 0),
     };
     HeaderValue::from_str(&format!(
-        "{SIGN_IN_COOKIE}={value}; Path=/api/v1/auth/oidc; Secure; HttpOnly; SameSite=Lax; Max-Age={max_age}"
+        "{SIGN_IN_COOKIE}={value}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age={max_age}"
     ))
     .expect("sign-in states are header-safe")
 }
@@ -484,4 +484,32 @@ pub(crate) async fn put_sign_in_policy<U>(
         .set_password_sign_in(policy, &request_scope(&headers)?, principal.actor())
         .await?;
     Ok(Json(policy.into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn host_prefixed_cookies_are_secure_and_cover_the_whole_host() {
+        for cookie in [
+            sign_in_cookie(Some("state")),
+            sign_in_cookie(None),
+            session_cookie(Some("secret"), Duration::from_secs(60)),
+            session_cookie(None, Duration::ZERO),
+        ] {
+            let text = cookie.to_str().unwrap();
+            let attributes: Vec<&str> = text.split("; ").skip(1).collect();
+            assert!(text.starts_with("__Host-"), "{text}");
+            assert!(attributes.contains(&"Secure"), "{text}");
+            assert!(attributes.contains(&"Path=/"), "{text}");
+            assert!(
+                !attributes
+                    .iter()
+                    .any(|attribute| attribute.starts_with("Domain=")),
+                "{text}"
+            );
+        }
+    }
 }
