@@ -1,0 +1,130 @@
+syntax = "proto3";
+
+package pingora.panel.gateway.v1;
+
+import "common/v1/common.proto";
+import "gateway/v1/gateway.proto";
+import "google/protobuf/timestamp.proto";
+
+// Operates the running data plane. These operations act on the serving
+// process rather than on the configuration; worker counts and drained
+// endpoints persist across restarts.
+service GatewayRuntime {
+  rpc GetDataPlane(GetDataPlaneRequest) returns (GetDataPlaneResponse);
+  // Starts a new listener generation and drains the previous one.
+  rpc ReloadDataPlane(ReloadDataPlaneRequest) returns (ReloadDataPlaneResponse);
+  rpc SetWorkerCount(SetWorkerCountRequest) returns (SetWorkerCountResponse);
+  // Stops accepting traffic, drains in-flight requests and exits.
+  rpc ShutdownGateway(ShutdownGatewayRequest) returns (ShutdownGatewayResponse);
+  rpc ListUpstreamHealth(ListUpstreamHealthRequest) returns (ListUpstreamHealthResponse);
+  // Takes an endpoint out of rotation, or returns it.
+  rpc SetEndpointDrained(SetEndpointDrainedRequest) returns (SetEndpointDrainedResponse);
+}
+
+message DataPlane {
+  // Increases with every reload; zero before the first generation.
+  uint64 generation = 1;
+  uint32 worker_count = 2;
+  repeated DataPlaneListener listeners = 3;
+  google.protobuf.Timestamp generation_started_at = 4;
+  // Why the configured listeners are not all served.
+  string error = 5;
+  GatewayRuntimeInfo runtime = 6;
+  google.protobuf.Timestamp observed_at = 7;
+  uint64 active_revision_id = 8;
+  .pingora.panel.common.v1.ContentHash active_hash = 9;
+}
+
+message DataPlaneListener {
+  string id = 1;
+  string address = 2;
+  bool tls = 3;
+  bool http1 = 4;
+  bool http2 = 5;
+}
+
+message GetDataPlaneRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+}
+
+message GetDataPlaneResponse {
+  DataPlane data_plane = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message ReloadDataPlaneRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+}
+
+message ReloadDataPlaneResponse {
+  DataPlane data_plane = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message SetWorkerCountRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  uint32 worker_count = 2;
+}
+
+message SetWorkerCountResponse {
+  DataPlane data_plane = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message ShutdownGatewayRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+}
+
+message ShutdownGatewayResponse {
+  bool accepted = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message EndpointHealth {
+  string endpoint_id = 1;
+  string address = 2;
+  uint32 weight = 3;
+  bool enabled = 4;
+  bool backup = 5;
+  // Active health; endpoints without checks stay healthy.
+  bool healthy = 6;
+  bool drained = 7;
+  // Set while passive health keeps the endpoint out of rotation.
+  google.protobuf.Timestamp ejected_until = 8;
+  uint32 in_flight = 9;
+  uint64 requests = 10;
+  uint64 failures = 11;
+  // Smoothed time to the upstream response header.
+  optional uint64 latency_us = 12;
+}
+
+message UpstreamHealth {
+  string upstream_id = 1;
+  // Whether active health checks run for this upstream.
+  bool checked = 2;
+  repeated EndpointHealth endpoints = 3;
+}
+
+message ListUpstreamHealthRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+}
+
+message ListUpstreamHealthResponse {
+  repeated UpstreamHealth upstreams = 1;
+  google.protobuf.Timestamp observed_at = 2;
+  uint64 active_revision_id = 3;
+  .pingora.panel.common.v1.ContentHash active_hash = 4;
+  .pingora.panel.common.v1.Error error = 5;
+}
+
+message SetEndpointDrainedRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string upstream_id = 2;
+  string endpoint_id = 3;
+  bool drained = 4;
+}
+
+message SetEndpointDrainedResponse {
+  UpstreamHealth upstream = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
