@@ -303,7 +303,7 @@ impl ControlPlaneProcess {
             PgOutbox::new(&database),
             JetStreamPublisher::new(context.clone(), Arc::clone(&jetstream)),
             self.relay,
-            migration_state,
+            migration_state.clone(),
             cancel.clone(),
         ));
 
@@ -377,6 +377,7 @@ impl ControlPlaneProcess {
         let running = RunningProcess {
             descriptor,
             health,
+            migrated: migration_state,
             database,
             context,
             jetstream,
@@ -400,6 +401,7 @@ impl ControlPlaneProcess {
 pub struct RunningProcess {
     descriptor: ServiceDescriptor,
     health: HealthWatch,
+    migrated: watch::Receiver<bool>,
     database: ServiceDatabase,
     context: Context,
     jetstream: Arc<JetStreamSettings>,
@@ -421,6 +423,13 @@ impl RunningProcess {
 
     pub fn database(&self) -> &ServiceDatabase {
         &self.database
+    }
+
+    /// Resolves once the service schema is migrated, or with `false` when
+    /// the process stops first; service tasks that use the schema wait for it.
+    pub fn migrated(&self) -> impl Future<Output = bool> + Send + 'static {
+        let mut state = self.migrated.clone();
+        async move { state.wait_for(|migrated| *migrated).await.is_ok() }
     }
 
     pub fn jetstream(&self) -> &Context {
