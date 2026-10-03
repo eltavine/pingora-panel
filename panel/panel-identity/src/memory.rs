@@ -640,6 +640,21 @@ impl ProviderStore for MemoryIdentityStore {
         }
         state.links.retain(|link| link.provider != id);
         state.pending.retain(|pending| pending.provider != id);
+        let ended: Vec<SessionId> = state
+            .provider_sessions
+            .iter()
+            .filter(|(_, provider, _)| provider == id)
+            .map(|(session, _, _)| *session)
+            .collect();
+        let now = Utc::now();
+        for (session, _) in &mut state.sessions {
+            if ended.contains(&session.id) && session.revoked_at.is_none() {
+                session.revoked_at = Some(now);
+            }
+        }
+        state
+            .provider_sessions
+            .retain(|(_, provider, _)| provider != id);
         record(
             &mut state,
             "identity.provider.deleted",

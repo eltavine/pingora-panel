@@ -3,9 +3,12 @@
 //! reads back the events the store recorded.
 
 use crate::{
-    memory::RecordedEvent, Account, AccountChange, AccountRequest, Client, FailurePolicy, Identity,
-    IdentitySettings, IdentityStore, Login, Permission, PermissionSet, Principal, RoleRequest,
-    SecretHash, TokenRequest, Transport,
+    memory::RecordedEvent,
+    store::{Attempt, Cause, NewAccount, NewSession},
+    Account, AccountChange, AccountId, AccountRequest, ClaimNames, Client, FailurePolicy,
+    GroupRole, Identity, IdentityProvider, IdentitySettings, IdentityStore, Login, PendingSignIn,
+    Permission, PermissionSet, Principal, ProviderLink, ProviderSignIn, ProviderStore, RoleRequest,
+    Secret, SecretHash, Session, SessionId, TokenRequest, Transport, Username,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
@@ -20,6 +23,9 @@ use std::{
 #[async_trait]
 pub trait StoreUnderTest: Send + Sync {
     fn store(&self) -> Arc<dyn IdentityStore>;
+
+    /// The same store, as it keeps identity providers.
+    fn providers(&self) -> Arc<dyn ProviderStore>;
 
     async fn events(&self) -> Vec<RecordedEvent>;
 }
@@ -40,6 +46,7 @@ where
     custom_roles_grant_what_they_list_and_built_in_roles_stay(fresh().await).await;
     every_other_session_of_an_account_can_end_at_once(fresh().await).await;
     rotated_tokens_keep_their_grant_and_stop_the_old_secret(fresh().await).await;
+    providers_link_accounts_and_keep_sign_ins_once(fresh().await).await;
 }
 
 const PASSWORD: &str = "glacier violin tapestry orbit";
@@ -870,4 +877,165 @@ async fn rotated_tokens_keep_their_grant_and_stop_the_old_secret(subject: impl S
     let event = harness.events("identity.token.rotated").await;
     assert_eq!(event.len(), 1);
     assert_eq!(event[0]["replaces"], token.id.to_string());
+}
+
+async fn providers_link_accounts_and_keep_sign_ins_once(subject: impl StoreUnderTest) {
+    let harness = Harness::new(subject, IdentitySettings::default());
+    harness.admin().await;
+    let store = harness.subject.store();
+    let providers = harness.subject.providers();
+    let now = *harness.now.lock().unwrap();
+    let cause = Cause {
+        scope: scope(),
+        actor: "root".into(),
+    };
+    let mut corp = IdentityProvider {
+        id: "corp".into(),
+        display_name: "Corporate".into(),
+        issuer: "https://id.example".into(),
+        client_id: "panel".into(),
+        client_secret: Some("v1.sealed".into()),
+        scopes: vec!["profile".into()],
+        claims: ClaimNames::default(),
+        group_roles: vec![GroupRole {
+            group: "ops".into(),
+            role: "operator".into(),
+        }],
+        create_accounts: true,
+        enabled: true,
+        created_at: now,
+        updated_at: now,
+    };
+    assert!(providers.put_provider(corp.clone(), &cause).await.unwrap());
+    corp.display_name = "Corp".into();
+    assert!(!providers.put_provider(corp.clone(), &cause).await.unwrap());
+    assert_eq!(providers.providers().await.unwrap(), [corp.clone()]);
+
+    let state = SecretHash::of("state-1");
+    let pending = PendingSignIn {
+        state,
+        provider: "corp".into(),
+        nonce: "nonce".into(),
+        verifier: "verifier".into(),
+        return_to: "/sites".into(),
+        expires_at: now + Duration::minutes(10),
+    };
+    providers.save_sign_in(pending.clone()).await.unwrap();
+    assert_eq!(
+        providers.take_sign_in(&state, now).await.unwrap(),
+        Some(pending.clone())
+    );
+    assert_eq!(
+        providers.take_sign_in(&state, now).await.unwrap(),
+        None,
+        "used once"
+    );
+    providers.save_sign_in(pending).await.unwrap();
+    assert_eq!(
+        providers
+            .take_sign_in(&state, now + Duration::minutes(11))
+            .await
+            .unwrap(),
+        None,
+        "expired"
+    );
+
+    let attempt = Attempt {
+        username: "alice".into(),
+        client_address: None,
+        user_agent: None,
+    };
+    let sign_in = |account: AccountId, new: Option<NewAccount>, roles: Vec<String>| {
+        let secret = Secret::generate().unwrap();
+        let session = Session {
+            id: SessionId::generate(),
+            account,
+            transport: Transport::Cookie,
+            created_at: now,
+            last_seen_at: now,
+            expires_at: now + Duration::hours(8),
+            client_address: None,
+            user_agent: None,
+            revoked_at: None,
+        };
+        (
+            ProviderSignIn {
+                link: ProviderLink {
+                    provider: "corp".into(),
+                    subject: "u-1".into(),
+                    account,
+                    granted_roles: roles.clone(),
+                },
+                new_account: new,
+                roles,
+                session: NewSession {
+                    session,
+                    secret: secret.hash(),
+                },
+                refresh_token: Some("v1.sealed-refresh".into()),
+            },
+            secret,
+        )
+    };
+    let alice = AccountId::generate();
+    let new = |id: AccountId, name: &str| NewAccount {
+        id,
+        username: Username::new(name).unwrap(),
+        display_name: Some("Alice".into()),
+        password_hash: None,
+        roles: Vec::new(),
+        now,
+        first: false,
+    };
+    let (first, secret) = sign_in(alice, Some(new(alice, "alice")), vec!["operator".into()]);
+    let account = providers
+        .sign_in_with_provider(first, &attempt, &cause)
+        .await
+        .unwrap();
+    assert_eq!(account.roles, ["operator"]);
+    assert!(store.session(&secret.hash()).await.unwrap().is_some());
+    let link = providers.link("corp", "u-1").await.unwrap().unwrap();
+    assert_eq!(
+        (link.account, link.granted_roles),
+        (alice, vec!["operator".to_owned()])
+    );
+
+    let (again, secret) = sign_in(alice, None, Vec::new());
+    let account = providers
+        .sign_in_with_provider(again, &attempt, &cause)
+        .await
+        .unwrap();
+    assert!(account.roles.is_empty());
+    let other = AccountId::generate();
+    let (taken, _) = sign_in(other, Some(new(other, "root")), Vec::new());
+    let refused = providers
+        .sign_in_with_provider(taken, &attempt, &cause)
+        .await;
+    assert_eq!(
+        refused.unwrap_err().code.as_str(),
+        ErrorCode::CONFLICT,
+        "a new account never takes an existing name"
+    );
+
+    providers.delete_provider("corp", &cause).await.unwrap();
+    assert!(providers.link("corp", "u-1").await.unwrap().is_none());
+    let grant = store.session(&secret.hash()).await.unwrap().unwrap();
+    assert!(
+        grant.session.revoked_at.is_some(),
+        "its sessions end with it"
+    );
+    assert!(
+        store.account(alice).await.unwrap().is_some(),
+        "the account stays"
+    );
+    assert!(providers.delete_provider("corp", &cause).await.is_err());
+    for event in [
+        "identity.provider.created",
+        "identity.provider.updated",
+        "identity.provider.deleted",
+    ] {
+        assert_eq!(harness.events(event).await.len(), 1, "{event}");
+    }
+    let logins = harness.events("identity.login.succeeded").await;
+    assert!(logins.iter().any(|login| login["provider"] == "corp"));
 }

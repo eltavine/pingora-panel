@@ -6,7 +6,7 @@ use panel_events::ServiceName;
 use panel_identity::{
     conformance::{check, StoreUnderTest},
     memory::RecordedEvent,
-    IdentityStore,
+    IdentityStore, ProviderStore,
 };
 use panel_postgres::{testing::TestDatabase, EventLog, ServiceDatabase};
 use std::sync::Arc;
@@ -19,6 +19,10 @@ struct Postgres {
 #[async_trait]
 impl StoreUnderTest for Postgres {
     fn store(&self) -> Arc<dyn IdentityStore> {
+        self.store.clone()
+    }
+
+    fn providers(&self) -> Arc<dyn ProviderStore> {
         self.store.clone()
     }
 

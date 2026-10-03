@@ -22,11 +22,20 @@ use serde_json::json;
 use sqlx::{postgres::PgRow, PgConnection, PgPool, Row};
 use std::sync::LazyLock;
 
-pub const MIGRATIONS: &[SchemaMigration] = &[SchemaMigration::new(
-    10_000,
-    "accounts, roles, sessions and API tokens",
-    include_str!("../migrations/10000_accounts.sql"),
-)];
+mod providers;
+
+pub const MIGRATIONS: &[SchemaMigration] = &[
+    SchemaMigration::new(
+        10_000,
+        "accounts, roles, sessions and API tokens",
+        include_str!("../migrations/10000_accounts.sql"),
+    ),
+    SchemaMigration::new(
+        10_100,
+        "identity providers, their links and sign-ins",
+        include_str!("../migrations/10100_identity_providers.sql"),
+    ),
+];
 
 /// Ended sessions are deleted this many days after they expire.
 const SESSION_RETENTION_DAYS: i64 = 30;
