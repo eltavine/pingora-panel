@@ -47,6 +47,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import { isApprovalRequest } from '@/lib/approvals'
 import { notifyFailure, plainHeaders, useRefreshConfiguration } from '@/lib/configuration'
 import { sortPaths } from '@/features/config-studio/useConfigFiles'
 import { isComparison, outcomeTones, type Comparison } from './presentation'
@@ -176,8 +177,13 @@ function confirmRollback() {
             onSuccess: (result) => {
               rollingBack.value = false
               reason.value = ''
-              toast.success(t('revisions.rolledBack', { revision: result.revision }))
               void refresh()
+              if (isApprovalRequest(result)) {
+                toast.info(t('studio.waitingTitle'))
+                void router.push('/approvals')
+                return
+              }
+              toast.success(t('revisions.rolledBack', { revision: result.revision }))
               void router.push(`/revisions/${result.revision}`)
             },
             onError: (error) => notifyFailure(error, t('draft.applyFailed')),

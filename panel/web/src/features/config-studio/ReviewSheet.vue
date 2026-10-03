@@ -6,17 +6,21 @@ import {
   FlaskConical,
   GitCompareArrows,
   ShieldCheck,
+  Siren,
+  Stamp,
   TriangleAlert,
 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import type { DiagnosticDetails } from '@/api/generated'
+import type { ApprovalRequest, DiagnosticDetails } from '@/api/generated'
 import { applyMutation, dryRunMutation, planOptions } from '@/api/generated/@tanstack/vue-query.gen'
 import ApiFailureAlert from '@/components/ApiFailureAlert.vue'
 import ChangeSet from '@/components/ChangeSet.vue'
 import DiagnosticList from '@/components/DiagnosticList.vue'
+import FormField from '@/components/FormField.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   Sheet,
@@ -30,7 +34,9 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
 import { Textarea } from '@/components/ui/textarea'
 import { toApiFailure } from '@/lib/api'
+import { isApprovalRequest } from '@/lib/approvals'
 import { notifyFailure, plainHeaders, useRefreshConfiguration } from '@/lib/configuration'
+import { useSession } from '@/lib/session'
 
 const open = defineModel<boolean>('open', { required: true })
 const props = defineProps<{
@@ -41,6 +47,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const { can } = useSession()
 const refresh = useRefreshConfiguration()
 const plan = useQuery(computed(() => ({ ...planOptions(), enabled: open.value })))
 const dryRun = useMutation(dryRunMutation())
@@ -48,6 +55,13 @@ const apply = useMutation(applyMutation())
 const note = ref('')
 const problems = ref<DiagnosticDetails[]>([])
 const passed = ref(false)
+/** The approval request applying waits on. */
+const waiting = ref<ApprovalRequest>()
+const bypassReason = ref('')
+const incident = ref('')
+const bypassReady = computed(
+  () => bypassReason.value.trim().length >= 10 && incident.value.trim().length > 0,
+)
 
 const empty = computed(
   () => plan.data.value && !plan.data.value.resources.length && !plan.data.value.files.length,
@@ -57,6 +71,9 @@ watch(open, (value) => {
   if (value) {
     problems.value = []
     passed.value = false
+    waiting.value = undefined
+    bypassReason.value = ''
+    incident.value = ''
     void plan.refetch()
   }
 })
@@ -90,14 +107,25 @@ function runDryRun() {
   )
 }
 
-function runApply() {
+function runApply(bypass = false) {
   apply.mutate(
     {
-      body: { expected_version: props.version, note: note.value.trim() || undefined },
+      body: {
+        expected_version: props.version,
+        note: note.value.trim() || undefined,
+        bypass: bypass
+          ? { reason: bypassReason.value.trim(), incident: incident.value.trim() }
+          : undefined,
+      },
       headers: plainHeaders(),
     },
     {
       onSuccess: (result) => {
+        if (isApprovalRequest(result)) {
+          waiting.value = result
+          toast.info(t('studio.waitingTitle'))
+          return
+        }
         toast.success(t('studio.applied', { revision: result.revision }))
         note.value = ''
         open.value = false
@@ -149,6 +177,47 @@ function runApply() {
           <DiagnosticList :diagnostics="problems" />
         </section>
 
+        <Alert v-if="waiting" role="status">
+          <Stamp aria-hidden="true" />
+          <AlertTitle>{{ t('studio.waitingTitle') }}</AlertTitle>
+          <AlertDescription>
+            {{
+              t('studio.waitingDetail', {
+                count: waiting.required,
+                policies: waiting.policies.map((policy) => policy.id).join(', '),
+              })
+            }}
+            <RouterLink to="/approvals" class="underline">{{
+              t('studio.openApprovals')
+            }}</RouterLink>
+          </AlertDescription>
+        </Alert>
+        <fieldset
+          v-if="waiting && can('approval.bypass')"
+          class="flex flex-col gap-3 rounded-md border border-dashed p-3"
+        >
+          <legend class="flex items-center gap-2 px-1 text-sm font-medium">
+            <Siren class="size-4" aria-hidden="true" />
+            {{ t('studio.bypass') }}
+          </legend>
+          <p class="text-muted-foreground text-xs">{{ t('studio.bypassHint') }}</p>
+          <FormField id="bypass-reason" :label="t('studio.bypassReason')">
+            <Textarea id="bypass-reason" v-model="bypassReason" rows="2" maxlength="512" />
+          </FormField>
+          <FormField id="bypass-incident" :label="t('studio.incident')">
+            <Input id="bypass-incident" v-model="incident" maxlength="128" />
+          </FormField>
+          <Button
+            variant="destructive"
+            class="self-end"
+            :disabled="apply.isPending.value || !bypassReady"
+            @click="runApply(true)"
+          >
+            <Siren data-icon="inline-start" aria-hidden="true" />
+            {{ t('studio.applyBypass') }}
+          </Button>
+        </fieldset>
+
         <div class="flex flex-col gap-1.5">
           <Label for="revision-note">{{ t('studio.note') }}</Label>
           <Textarea
@@ -168,7 +237,7 @@ function runApply() {
           <FlaskConical v-else data-icon="inline-start" aria-hidden="true" />
           {{ t('studio.dryRun') }}
         </Button>
-        <Button :disabled="apply.isPending.value || empty" @click="runApply">
+        <Button :disabled="apply.isPending.value || empty" @click="runApply()">
           <Spinner v-if="apply.isPending.value" data-icon="inline-start" />
           <CloudUpload v-else data-icon="inline-start" aria-hidden="true" />
           {{ t('studio.apply', { version: version ?? 0 }) }}
