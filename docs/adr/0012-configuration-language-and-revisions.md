@@ -41,6 +41,17 @@ comments, and the language must evolve without breaking stored revisions.
   variables — `$host`, `$uri`, `$method`, `$scheme`, `$client_ip`,
   `$request_id` and `$upstream_addr` — are kept as templates and expanded by
   the gateway where a directive accepts them.
+- **Inheritance.** Values flow down explicitly: a route takes its server's
+  listeners, redirects and enabled state; a host's certificate is its
+  domain's `tls_profile=`, else its server's, else the listener's; an
+  upstream node's SNI is its own `sni=`, else the upstream's, else its host
+  name; constants reach the blocks inside the one that sets them. The
+  schema states each rule beside the directive, and an explain query
+  answers, for the block at a position, every value that applies there with
+  where it is written: in the block, in a block around it or a listener
+  serving it, or nowhere, as a default. A setting nothing inherits or
+  everything overrides — a server certificate without a TLS listener, an
+  upstream `tls` without TLS nodes, an unused constant — is a warning.
 - **Identity.** `server`, `upstream`, `route` and upstream nodes carry their
   stable identifier as `id`, which the service adds when a block lacks one,
   so renaming keeps history and drained nodes keep their state. Listeners

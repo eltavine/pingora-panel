@@ -230,22 +230,29 @@ every directive for editors, `GET /api/v1/config/plan` lists the resources
 and file lines the draft changes relative to the active revision,
 `GET /api/v1/config/ir` returns the runtime snapshot it compiles to, and
 `POST /api/v1/config/dry-run` prepares that snapshot on the gateway without
-activating it. Redirect targets and response bodies are templates the
-gateway fills in per request: `$host`, `$uri`, `$method`, `$scheme`,
+activating it. Values are inherited explicitly — a route takes its server's
+listeners and redirects, a host's certificate falls back from its domain to
+its server to the listener — and the schema states each rule.
+`POST /api/v1/config/explain` lists, for the block at a position, every
+value that applies there and whether it is written in the block, inherited
+from where, or a default; settings that have no effect where they are
+written are warnings. Redirect targets and response bodies are templates
+the gateway fills in per request: `$host`, `$uri`, `$method`, `$scheme`,
 `$client_ip`, `$request_id`, `$upstream_addr`, `$http_<name>` and
 `$cookie_<name>`, with `$$` for a literal dollar; gateways that cannot
-evaluate them refuse the snapshot. `POST /api/v1/config/import/nginx` converts the documented
-NGINX subset — `server`, `listen`, `server_name`, `location`, `proxy_pass`,
-`root`, `index`, `try_files`, `return` and `upstream` — and reports every
-directive it did not carry over at its position. Every apply records a revision with its files, author, note
-and outcome under `/api/v1/revisions`; a revision can be compared with
-another, the active one or the draft, annotated, and restored into the
-draft.
+evaluate them refuse the snapshot. `POST /api/v1/config/import/nginx`
+converts the documented NGINX subset — `server`, `listen`, `server_name`,
+`location`, `proxy_pass`, `root`, `index`, `try_files`, `return` and
+`upstream` — and reports every directive it did not carry over at its
+position. Every apply records a revision with its files, author, note and
+outcome under `/api/v1/revisions`; a revision can be compared with another,
+the active one or the draft, annotated, and restored into the draft.
 
 ```sh
 ppanel config export --dir conf
 ppanel config check conf
 ppanel config fmt conf --write
+ppanel config explain sites/shop.conf:12 conf
 ppanel config import conf --expected-version 3
 ppanel config plan
 ppanel config apply --dry-run
@@ -257,9 +264,9 @@ ppanel config import-nginx /etc/nginx/nginx.conf --dir conf
 ```
 
 The console edits the same files with highlighting, completion for the
-block being edited, problems checked as the text changes and an outline,
-imports NGINX configuration for review, and shows revisions with their
-differences, notes and rollback.
+block being edited, problems checked as the text changes, an outline and
+the effective values at the cursor, imports NGINX configuration for review,
+and shows revisions with their differences, notes and rollback.
 
 ## Audit trail
 
