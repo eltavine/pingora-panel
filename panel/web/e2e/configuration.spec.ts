@@ -122,6 +122,11 @@ test('sites are summarized, listed and created', async ({ page }) => {
   await expect(page.getByRole('status').filter({ hasText: 'Running' })).toBeVisible()
   await expectNoHorizontalOverflow(page)
 
+  // Opening a select renders reka-ui's inline viewport style under the production policy.
+  await page.getByRole('combobox', { name: 'Status' }).click()
+  await page.getByRole('option', { name: 'Running' }).click()
+  await expect(page.getByRole('combobox', { name: 'Status' })).toContainText('Running')
+
   await page.getByRole('button', { name: 'New site' }).first().click()
   const sheet = page.getByRole('dialog')
   await sheet.getByLabel('Site name').fill('Blog')

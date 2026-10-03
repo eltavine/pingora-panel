@@ -315,6 +315,9 @@ OpenAPI fixture. See [`web/README.md`](web/README.md) and
 `panel-api` sends the security headers in
 [`web/security-headers.json`](web/security-headers.json). The preview server used by
 end-to-end tests sends the same headers, and the tests fail on any policy violation.
+The only inline style the policy admits is the scrollbar rule reka-ui's select viewport
+renders, by its SHA-256 hash; the end-to-end tests open a select, so a dependency update
+that changes the rule fails them.
 
 ## Extension rules
 
