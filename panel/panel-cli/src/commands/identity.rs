@@ -86,6 +86,13 @@ pub(crate) enum AccountCommand {
         #[command(flatten)]
         input: SecretInput,
     },
+    /// An account's grants: roles given with a scope and conditions.
+    Grants { account: String },
+    /// Gives an account a role for one site group or site, or only under
+    /// conditions.
+    Grant(Box<GrantArgs>),
+    /// Takes a grant back.
+    RevokeGrant { account: String, grant: String },
     /// Issues an API token for a service account; it is shown once.
     IssueToken {
         account: String,
@@ -136,6 +143,74 @@ pub(crate) enum AccountCommand {
     /// Revokes an API token of an account.
     RevokeToken { account: String, token: String },
 }
+
+#[derive(Args)]
+pub(crate) struct GrantArgs {
+    account: String,
+    #[arg(long)]
+    role: String,
+    /// Only the sites in this group; limits configuration permissions alone.
+    #[arg(long, conflicts_with = "site")]
+    site_group: Option<String>,
+    /// Only this site, by ID.
+    #[arg(long)]
+    site: Option<String>,
+    /// Only for requests from this network, such as 10.0.0.0/8.
+    #[arg(long = "network")]
+    networks: Vec<String>,
+    /// Only within this UTC window, as "[DAYS ]HH:MM-HH:MM".
+    #[arg(long = "window", value_parser = crate::commands::approvals::window)]
+    windows: Vec<Value>,
+    /// Only until this time, in RFC 3339.
+    #[arg(long)]
+    until: Option<String>,
+}
+
+fn grant_scope(grant: &Value) -> String {
+    match grant["scope"]["kind"].as_str() {
+        Some("site_group") => format!("group {}", text(&grant["scope"]["group"])),
+        Some("site") => format!("site {}", text(&grant["scope"]["site"])),
+        _ => "everything".into(),
+    }
+}
+
+fn grant_conditions(grant: &Value) -> String {
+    let conditions = &grant["conditions"];
+    let mut parts = Vec::new();
+    if !conditions["not_after"].is_null() {
+        parts.push(format!("until {}", text(&conditions["not_after"])));
+    }
+    let networks = text(&conditions["networks"]);
+    if networks != "-" {
+        parts.push(format!("from {networks}"));
+    }
+    for window in conditions["windows"].as_array().into_iter().flatten() {
+        let days = text(&window["days"]);
+        parts.push(format!(
+            "{}{}-{} UTC",
+            if days == "-" {
+                String::new()
+            } else {
+                format!("{days} ")
+            },
+            text(&window["start"]),
+            text(&window["end"])
+        ));
+    }
+    if parts.is_empty() {
+        "always".into()
+    } else {
+        parts.join("; ")
+    }
+}
+
+const GRANTS: &[Column] = &[
+    ("ID", |grant| text(&grant["id"])),
+    ("ROLE", |grant| text(&grant["role"])),
+    ("SCOPE", grant_scope),
+    ("CONDITIONS", grant_conditions),
+    ("BY", |grant| text(&grant["created_by"])),
+];
 
 /// What a custom role is.
 #[derive(Args, Clone, Debug)]
@@ -505,6 +580,61 @@ pub(crate) async fn account(api: &Api, output: &Output, command: AccountCommand)
                 .await?
                 .body;
             output.done(&format!("Created {}", text(&created["username"])), &created);
+        }
+        AccountCommand::Grants { account } => {
+            let id = account_id(api, &account).await?;
+            let grants = api
+                .get(&format!("/api/v1/accounts/{id}/grants"), &[])
+                .await?
+                .body;
+            output.list(&grants, GRANTS);
+        }
+        AccountCommand::Grant(grant) => {
+            let id = account_id(api, &grant.account).await?;
+            let scope = match (&grant.site_group, &grant.site) {
+                (Some(group), _) => json!({"kind": "site_group", "group": group}),
+                (None, Some(site)) => json!({"kind": "site", "site": site}),
+                (None, None) => json!({"kind": "everything"}),
+            };
+            let created = api
+                .change(
+                    Method::POST,
+                    &format!("/api/v1/accounts/{id}/grants"),
+                    Some(&json!({
+                        "role": grant.role,
+                        "scope": scope,
+                        "conditions": {
+                            "not_after": grant.until,
+                            "networks": grant.networks,
+                            "windows": grant.windows,
+                        },
+                    })),
+                    None,
+                )
+                .await?
+                .body;
+            output.done(
+                &format!(
+                    "Granted {} to {} for {} ({}); grant {}",
+                    grant.role,
+                    grant.account,
+                    grant_scope(&created),
+                    grant_conditions(&created),
+                    text(&created["id"])
+                ),
+                &created,
+            );
+        }
+        AccountCommand::RevokeGrant { account, grant } => {
+            let id = account_id(api, &account).await?;
+            api.change(
+                Method::DELETE,
+                &format!("/api/v1/accounts/{id}/grants/{grant}"),
+                None,
+                None,
+            )
+            .await?;
+            output.done(&format!("Revoked the grant {grant}"), &Value::Null);
         }
         AccountCommand::IssueToken {
             account,

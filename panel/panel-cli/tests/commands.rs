@@ -270,6 +270,19 @@ async fn api(
         )
             .into_response(),
         ("PUT", "/api/v1/workload-identities/shop") => Json(body.clone()).into_response(),
+        ("POST", "/api/v1/accounts/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/grants") => {
+            let mut grant = body.clone();
+            grant["id"] = json!("0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a88");
+            grant["created_by"] = json!("root");
+            (StatusCode::CREATED, Json(grant)).into_response()
+        }
+        ("GET", "/api/v1/accounts/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/grants") => Json(json!([{
+            "id": "0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a88", "role": "operator",
+            "scope": {"kind": "site_group", "group": "shop"},
+            "conditions": {"networks": ["10.0.0.0/8"], "windows": []},
+            "created_at": "2026-10-03T00:00:00Z", "created_by": "root"
+        }]))
+        .into_response(),
         ("POST", "/api/v1/auth/workload") => (
             StatusCode::CREATED,
             Json(json!({"secret": "session-secret", "expires_at": "2026-10-03T09:15:00Z",
@@ -1719,4 +1732,64 @@ fn programs_get_service_accounts_and_workload_identities() {
         stub.requests("POST", "/api/v1/auth/workload")[0].body,
         json!({"token": "header.payload.signature"})
     );
+}
+
+#[test]
+fn accounts_are_granted_roles_for_site_groups_under_conditions() {
+    let stub = Stub::start();
+    let granted = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "account",
+        "grant",
+        "ops",
+        "--role",
+        "operator",
+        "--site-group",
+        "shop",
+        "--network",
+        "10.0.0.0/8",
+        "--window",
+        "mon,tue 09:00-18:00",
+        "--until",
+        "2026-12-31T00:00:00Z",
+    ]);
+    assert!(granted.status.success(), "{}", stderr(&granted));
+    let body = &stub.requests(
+        "POST",
+        "/api/v1/accounts/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b/grants",
+    )[0]
+    .body;
+    assert_eq!(
+        body["scope"],
+        json!({"kind": "site_group", "group": "shop"})
+    );
+    assert_eq!(body["conditions"]["networks"], json!(["10.0.0.0/8"]));
+    assert_eq!(
+        body["conditions"]["windows"],
+        json!([{"days": ["mon", "tue"], "start": "09:00", "end": "18:00"}])
+    );
+    assert_eq!(body["conditions"]["not_after"], "2026-12-31T00:00:00Z");
+    assert!(String::from_utf8_lossy(&granted.stdout).contains("group shop"));
+    let listed = stub.ppanel(&["--token", "ppat_admin", "account", "grants", "ops"]);
+    assert!(listed.status.success(), "{}", stderr(&listed));
+    let table = String::from_utf8_lossy(&listed.stdout);
+    assert!(
+        table.contains("group shop") && table.contains("from 10.0.0.0/8"),
+        "{table}"
+    );
+    let both = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "account",
+        "grant",
+        "ops",
+        "--role",
+        "operator",
+        "--site-group",
+        "shop",
+        "--site",
+        "s-1",
+    ]);
+    assert_eq!(both.status.code(), Some(2));
 }

@@ -37,7 +37,7 @@ pub(crate) enum Risk {
     High,
 }
 
-fn window(value: &str) -> std::result::Result<Value, String> {
+pub(crate) fn window(value: &str) -> std::result::Result<Value, String> {
     let (days, span) = match value.trim().rsplit_once(' ') {
         Some((days, span)) => (days.trim(), span),
         None => ("", value.trim()),
