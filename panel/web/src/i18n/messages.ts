@@ -298,7 +298,8 @@ const zhCN = {
       writeTimeout: '写入超时（毫秒）',
       idleTimeout: '空闲超时（毫秒）',
       keepalive: '保持连接',
-      maxConnections: '最大空闲连接',
+      maxConnections: '每节点最大连接数',
+      maxConnectionsHint: '并发请求达到上限的节点会被跳过。',
       http2: '使用 HTTP/2',
     },
     tls: {
@@ -783,7 +784,8 @@ const en: DeepString<Messages> = {
       writeTimeout: 'Write timeout (ms)',
       idleTimeout: 'Idle timeout (ms)',
       keepalive: 'Keep connections alive',
-      maxConnections: 'Max idle connections',
+      maxConnections: 'Max connections per node',
+      maxConnectionsHint: 'Nodes at their limit are skipped.',
       http2: 'Use HTTP/2',
     },
     tls: {

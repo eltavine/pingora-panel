@@ -215,7 +215,11 @@ function submit() {
               <FormField id="upstream-idle" :label="t('upstreams.connection.idleTimeout')">
                 <Input id="upstream-idle" v-model.number="form.idleTimeout" type="number" min="1" />
               </FormField>
-              <FormField id="upstream-max" :label="t('upstreams.connection.maxConnections')">
+              <FormField
+                id="upstream-max"
+                :label="t('upstreams.connection.maxConnections')"
+                :hint="t('upstreams.connection.maxConnectionsHint')"
+              >
                 <Input
                   id="upstream-max"
                   v-model.number="form.maxConnections"
