@@ -16,6 +16,7 @@ async-nats.workspace = true
 async-trait.workspace = true
 axum.workspace = true
 config-grpc-client.workspace = true
+gateway-grpc-client.workspace = true
 panel-api.workspace = true
 panel-control-runtime.workspace = true
 panel-errors.workspace = true

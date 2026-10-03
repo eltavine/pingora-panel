@@ -2180,6 +2180,7 @@ dependencies = [
  "config-grpc-client",
  "config-service",
  "gateway-grpc",
+ "gateway-grpc-client",
  "panel-api",
  "panel-application",
  "panel-context",

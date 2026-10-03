@@ -12,6 +12,7 @@ mod console;
 mod directory;
 
 use config_grpc_client::{ConfigClientConfig, ConfigPublicationClient};
+use gateway_grpc_client::{GatewayGrpcClient, GatewayGrpcClientConfig};
 use panel_api::{router_with_config, ApiConfig, ApiState};
 use panel_control_runtime::{ControlPlaneProcess, DefaultAddresses, ProcessSettings};
 use panel_errors::{PanelError, Result};
@@ -26,12 +27,15 @@ pub const SCHEMA: &str = "identity";
 /// The public listener; loopback-only until the API authenticates callers.
 pub const HTTP_ADDRESS_ENV: &str = "PINGORA_PANEL_HTTP_ADDR";
 pub const CONFIG_URL_ENV: &str = "PINGORA_PANEL_CONFIG_URL";
+/// The gateway's runtime API, for data plane operations and upstream health.
+pub const GATEWAY_URL_ENV: &str = "PINGORA_PANEL_GATEWAY_URL";
 /// Directory holding the built web console; the API is served without it.
 pub const WEB_ROOT_ENV: &str = "PINGORA_PANEL_WEB_ROOT";
 
 const DEFAULT_HTTP_ADDRESS: SocketAddr =
     SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 8080);
 const DEFAULT_CONFIG_URL: &str = "http://127.0.0.1:50061";
+const DEFAULT_GATEWAY_URL: &str = "http://127.0.0.1:50051";
 const DEFAULT_WEB_ROOT: &str = "/usr/share/pingora-panel/web";
 
 pub fn default_addresses() -> DefaultAddresses {
@@ -52,6 +56,9 @@ pub fn process(
     let config_url = env
         .string(CONFIG_URL_ENV)?
         .unwrap_or_else(|| DEFAULT_CONFIG_URL.into());
+    let gateway_url = env
+        .string(GATEWAY_URL_ENV)?
+        .unwrap_or_else(|| DEFAULT_GATEWAY_URL.into());
     let web_root = PathBuf::from(
         env.string(WEB_ROOT_ENV)?
             .unwrap_or_else(|| DEFAULT_WEB_ROOT.into()),
@@ -77,6 +84,13 @@ pub fn process(
         }
         None => ConfigPublicationClient::connect_lazy(config_url, ConfigClientConfig::default())?,
     };
+    let gateway = match process.peer_channel(&gateway_url, ServiceName::new("gatewayd")?)? {
+        Some(channel) => GatewayGrpcClient::from_channel_with_config(
+            channel,
+            GatewayGrpcClientConfig::default(),
+        )?,
+        None => GatewayGrpcClient::connect_lazy(gateway_url, GatewayGrpcClientConfig::default())?,
+    };
     let config_health = config.health_check();
     Ok(process
         .with_database_impact(Impact::Degrading)
@@ -86,6 +100,7 @@ pub fn process(
             let api = router_with_config(
                 ApiState::new(Arc::clone(&config))
                     .with_configuration(config)
+                    .with_runtime(Arc::new(gateway))
                     .with_health(running.health())
                     .with_directory(Arc::new(directory::RegistryDirectory::new(
                         running.jetstream().clone(),
