@@ -42,6 +42,8 @@ pub struct Origin {
     pub file: String,
     /// The directive's span, from its name through its closing `}`.
     pub span: Span,
+    /// The span with the comments leading into it.
+    pub outer: Span,
     /// Nesting depth within its file.
     pub depth: usize,
 }
@@ -547,6 +549,7 @@ impl<'a> Lowerer<'a> {
         Origin {
             file: file.to_owned(),
             span: directive.span,
+            outer: directive.span_with_leading(),
             depth,
         }
     }

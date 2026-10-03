@@ -6,13 +6,16 @@
 //! as canonical text.
 
 mod checks;
+mod edit;
 mod lower;
+pub mod plan;
 pub mod print;
 pub mod schema;
 mod source;
 pub mod values;
 pub mod variables;
 
+pub use edit::{reconcile, write_identifiers};
 pub use lower::{lower, Insertion, LowerOptions, Lowered, Origin};
 pub use print::print;
 pub use source::{Sources, ENTRY};

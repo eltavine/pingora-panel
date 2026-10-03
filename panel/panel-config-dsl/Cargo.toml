@@ -17,6 +17,7 @@ panel-errors.workspace = true
 panel-ir.workspace = true
 regex.workspace = true
 serde.workspace = true
+similar.workspace = true
 utoipa = { workspace = true, optional = true }
 uuid.workspace = true
 
