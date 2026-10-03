@@ -6,6 +6,7 @@ members = [
     "panel-control-runtime",
     "panel-contracts",
     "panel-errors",
+    "panel-environment",
     "panel-events",
     "panel-event-contracts",
     "panel-event-codec",
@@ -134,6 +135,7 @@ panel-dsl = { version = "=0.1.0", path = "panel-dsl" }
 panel-config-dsl = { version = "=0.1.0", path = "panel-config-dsl" }
 panel-api = { version = "=0.2.0", path = "panel-api" }
 panel-application = { version = "=0.2.0", path = "panel-application" }
+panel-environment = { version = "=0.1.0", path = "panel-environment" }
 panel-identity = { version = "=0.1.0", path = "panel-identity" }
 identity-postgres = { version = "=0.1.0", path = "identity-postgres" }
 panel-metrics = { version = "=0.1.0", path = "panel-metrics" }

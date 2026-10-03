@@ -1,3 +1,8 @@
+#![forbid(unsafe_code)]
+
+//! Process settings read from the environment, or from files named by it
+//! as container secrets are mounted.
+
 use panel_errors::{PanelError, Result};
 use std::{ffi::OsString, net::SocketAddr, time::Duration};
 

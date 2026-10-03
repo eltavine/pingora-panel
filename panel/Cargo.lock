@@ -2901,6 +2901,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "panel-environment"
+version = "0.1.0"
+dependencies = [
+ "panel-errors",
+]
+
+[[package]]
 name = "panel-errors"
 version = "0.1.0"
 dependencies = [
@@ -3203,6 +3210,7 @@ dependencies = [
  "hyper-util",
  "panel-context",
  "panel-contracts",
+ "panel-environment",
  "panel-errors",
  "panel-health",
  "panel-platform",

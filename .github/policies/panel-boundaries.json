@@ -343,6 +343,12 @@
         "panel-ir"
       ]
     },
+    "panel-environment": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-errors"
+      ]
+    },
     "panel-errors": {
       "catalog": true,
       "allowed_workspace_dependencies": []
@@ -473,6 +479,7 @@
       "allowed_workspace_dependencies": [
         "panel-context",
         "panel-contracts",
+        "panel-environment",
         "panel-errors",
         "panel-health",
         "panel-platform",
@@ -567,6 +574,7 @@
       "panel-domain",
       "panel-dsl",
       "panel-engine",
+      "panel-environment",
       "panel-errors",
       "panel-events",
       "panel-gateway-runtime",
