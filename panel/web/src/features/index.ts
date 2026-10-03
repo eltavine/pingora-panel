@@ -1,4 +1,5 @@
 import { gatewayFeature } from './gateway'
+import { listenersFeature } from './listeners'
 import { publishingFeature } from './publishing'
 import { receiptsFeature } from './receipts'
 import { sitesFeature } from './sites'
@@ -12,6 +13,7 @@ export const features: readonly FeatureModule[] = [
   receiptsFeature,
   sitesFeature,
   upstreamsFeature,
+  listenersFeature,
 ]
 
 export const navigationGroups: readonly { id: NavigationGroup; title: string }[] = [
