@@ -417,6 +417,30 @@ refresh token, and sessions it refuses end; disabling or deleting a provider
 ends its sessions at once. Refused sign-ins are recorded as failed logins
 with the provider and the reason.
 
+Programs get service accounts
+([decision](../docs/adr/0020-service-accounts-and-workload-identity.md)):
+they have no password, never sign in and cannot be break-glass accounts, and
+account managers issue their API tokens through
+`POST /api/v1/accounts/{id}/tokens`, never with permissions the service
+account lacks. Instead of a stored token, a CI job can prove what it is with
+the short-lived OpenID Connect token its CI system issues: a workload
+identity at `/api/v1/workload-identities` trusts an issuer's tokens for a
+service account when they name an audience, match a subject exactly or by a
+prefix ending in `*`, and carry given claims, and
+`POST /api/v1/auth/workload` exchanges such a token, verified against the
+issuer's published keys, for a bearer session of five to sixty minutes.
+Exchanges and refusals are recorded like logins.
+
+```sh
+ppanel account create deployer --service --role operator
+ppanel workload-identity set shop --account deployer \
+  --issuer https://token.actions.githubusercontent.com --audience pingora-panel \
+  --subject "repo:shop/site:ref:refs/heads/main"
+# in the job, with its ID token for the audience pingora-panel in $ID_TOKEN:
+export PPANEL_TOKEN=$(printf %s "$ID_TOKEN" | ppanel workload-identity exchange --token-file -)
+ppanel config apply
+```
+
 Accounts can be marked as break-glass, and `/api/v1/sign-in-policy` can then
 limit password sign-in to them so that everyone else goes through a provider.
 The limit needs an enabled provider and an enabled break-glass account that
