@@ -7,6 +7,10 @@
 
 [advisories]
 ignore = [
+    # paste is a compile-time macro reached only through foundations'
+    # optional Linux memory-profiling feature via tikv-jemalloc-ctl, whose
+    # released versions all still depend on it.
+    "RUSTSEC-2024-0436", # paste: no longer maintained
     "RUSTSEC-2026-0098", # rustls-webpki: URI name constraints incorrectly accepted
     "RUSTSEC-2026-0099", # rustls-webpki: name constraints accepted for wildcard certs
     "RUSTSEC-2026-0104", # rustls-webpki: reachable panic in CRL parsing

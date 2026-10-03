@@ -2,6 +2,14 @@
   "schema_version": 2,
   "exceptions": [
     {
+      "advisory_id": "RUSTSEC-2024-0436",
+      "workspaces": ["Cargo.toml"],
+      "expires_on": "2027-02-01",
+      "owner": "pingora-panel-security",
+      "reason": "No tikv-jemalloc-ctl release drops the archived paste macro yet; its main branch removed it in tikv/jemallocator#189, and foundations must adopt that release.",
+      "scope": "Compile-time proc-macro only, reached through pingora-foundations' optional Linux memory-profiling feature via foundations and tikv-jemalloc-ctl; no runtime code."
+    },
+    {
       "advisory_id": "RUSTSEC-2026-0098",
       "workspaces": ["Cargo.toml"],
       "expires_on": "2027-02-01",

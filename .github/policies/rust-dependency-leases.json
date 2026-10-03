@@ -11,9 +11,9 @@
           "expires_on": "2027-03-01"
         },
         "unmaintained": {
-          "max_findings": 5,
+          "max_findings": 0,
           "owner": "pingora-panel-security",
-          "reason": "Upstream retains a small number of unmaintained proc-macro and TLS helper crates with no released replacements. The ceiling fails as soon as another one appears.",
+          "reason": "Unmaintained crates in the vendored Pingora tree are either replaced or carried as scoped advisory exceptions in rust-advisory-exceptions.json, so none may appear unaccounted for; the ceiling fails as soon as one does.",
           "expires_on": "2027-03-01"
         },
         "yanked": {
