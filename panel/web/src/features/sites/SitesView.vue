@@ -333,7 +333,7 @@ function primaryHost(site: SiteView) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem :value="ALL">{{ t('common.all') }}</SelectItem>
+            <SelectItem :value="ALL">{{ t('sites.allStatuses') }}</SelectItem>
             <SelectItem v-for="value in STATUSES" :key="value" :value="value">
               {{ t(`sites.status.${value}`) }}
             </SelectItem>
@@ -345,7 +345,7 @@ function primaryHost(site: SiteView) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem :value="ALL">{{ t('common.all') }}</SelectItem>
+            <SelectItem :value="ALL">{{ t('sites.allKinds') }}</SelectItem>
             <SelectItem v-for="value in SITE_KINDS" :key="value" :value="value">
               {{ t(`sites.kind.${value}`) }}
             </SelectItem>
