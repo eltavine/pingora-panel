@@ -362,6 +362,10 @@ pub struct RevisionRef {
 
 const MAX_CERTIFICATE_ID_LEN: usize = 64;
 
+/// The subdirectory of the gateway's secret directory where HTTP-01 key
+/// authorizations wait while certificates are issued, one file per token.
+pub const ACME_CHALLENGE_DIRECTORY: &str = "acme-challenge";
+
 /// Names a certificate of the inventory, such as `example.com` or
 /// `intranet-wildcard`: lowercase letters, digits and hyphens in labels
 /// separated by dots, so it is also a safe file name.

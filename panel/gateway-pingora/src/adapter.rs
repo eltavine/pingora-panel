@@ -1,4 +1,5 @@
 use crate::{
+    acme::ChallengeDirectory,
     certificates::CertificateIndex,
     listeners::{self, ListenerPlan, SocketKey},
     routing::{RoutingTable, Targets},
@@ -56,6 +57,7 @@ const CAPABILITIES: &[&str] = &[
 pub struct AdapterOptions {
     secrets: Arc<dyn SecretSource>,
     static_root: Option<PathBuf>,
+    challenges: Option<Arc<ChallengeDirectory>>,
 }
 
 impl Default for AdapterOptions {
@@ -63,6 +65,7 @@ impl Default for AdapterOptions {
         Self {
             secrets: Arc::new(NoSecrets),
             static_root: None,
+            challenges: None,
         }
     }
 }
@@ -72,6 +75,7 @@ impl fmt::Debug for AdapterOptions {
         formatter
             .debug_struct("AdapterOptions")
             .field("static_root", &self.static_root)
+            .field("challenges", &self.challenges)
             .finish_non_exhaustive()
     }
 }
@@ -80,6 +84,12 @@ impl AdapterOptions {
     /// Source of TLS certificates, keys and CA bundles named by snapshots.
     pub fn with_secrets(mut self, secrets: Arc<dyn SecretSource>) -> Self {
         self.secrets = secrets;
+        self
+    }
+
+    /// Where HTTP-01 key authorizations wait while certificates are issued.
+    pub fn with_challenges(mut self, challenges: ChallengeDirectory) -> Self {
+        self.challenges = Some(Arc::new(challenges));
         self
     }
 
@@ -218,6 +228,10 @@ impl PingoraGatewayAdapter {
 
     pub(crate) fn active(&self) -> ActiveSnapshot {
         Arc::clone(&self.active)
+    }
+
+    pub(crate) fn challenges(&self) -> Option<Arc<ChallengeDirectory>> {
+        self.options.challenges.clone()
     }
 
     pub(crate) fn active_prepared(&self) -> Option<Arc<PreparedPingoraSnapshot>> {

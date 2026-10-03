@@ -49,13 +49,15 @@ use gateway_grpc::{
     GatewayTransportPolicy, StandardGatewayRequestPolicy,
 };
 use gateway_pingora::{
-    AdapterOptions, DataPlane, DataPlaneOptions, DirectorySecrets, PingoraGatewayAdapter,
+    AdapterOptions, ChallengeDirectory, DataPlane, DataPlaneOptions, DirectorySecrets,
+    PingoraGatewayAdapter,
 };
 use panel_context::ServiceName;
 use panel_contracts::gateway::v1::{
     gateway_engine_server::GatewayEngineServer,
     gateway_runtime_server::{self, GatewayRuntimeServer},
 };
+use panel_domain::ACME_CHALLENGE_DIRECTORY;
 use panel_engine::{GatewayEngine, GatewayRuntimeInfoProvider};
 use panel_errors::Result;
 use panel_gateway_runtime::{
@@ -422,7 +424,11 @@ pub async fn serve_gatewayd(
     let resource_limits = config.resource_limits();
     let mut adapter_options = AdapterOptions::default();
     if let Some(directory) = config.secret_directory() {
-        adapter_options = adapter_options.with_secrets(Arc::new(DirectorySecrets::new(directory)));
+        adapter_options = adapter_options
+            .with_secrets(Arc::new(DirectorySecrets::new(directory)))
+            .with_challenges(ChallengeDirectory::new(
+                directory.join(ACME_CHALLENGE_DIRECTORY),
+            ));
     }
     if let Some(root) = config.static_root() {
         adapter_options = adapter_options.with_static_root(root);

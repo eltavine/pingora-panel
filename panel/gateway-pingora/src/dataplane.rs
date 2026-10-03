@@ -6,6 +6,7 @@
 //! the next generation while the previous one finishes in-flight requests.
 
 use crate::{
+    acme::ChallengeDirectory,
     adapter::{ActiveSnapshot, PingoraGatewayAdapter},
     certificates::{HandshakeRecorder, ListenerCertificates},
     listeners::{self, ListenerPlan, SocketKey},
@@ -257,6 +258,7 @@ impl DataPlane {
                 workers,
                 &state.sockets,
                 self.adapter.active(),
+                self.adapter.challenges(),
                 self.options.upstream_pool_size,
             )?;
             state.generations = id;
@@ -352,6 +354,7 @@ impl Generation {
         workers: usize,
         sockets: &BTreeMap<SocketKey, TcpListener>,
         active: ActiveSnapshot,
+        challenges: Option<Arc<ChallengeDirectory>>,
         upstream_pool_size: usize,
     ) -> Result<Self> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -378,6 +381,7 @@ impl Generation {
                     id: plan.id.clone(),
                     tls: plan.tls,
                     http1: plan.http1,
+                    challenges: challenges.clone(),
                 },
                 Arc::clone(&active),
                 Arc::clone(&in_flight),

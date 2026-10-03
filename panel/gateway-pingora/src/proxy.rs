@@ -2,6 +2,7 @@
 //! upstream selection against the active snapshot.
 
 use crate::{
+    acme::ChallengeDirectory,
     adapter::{ActiveSnapshot, PreparedPingoraSnapshot},
     certificates::Handshake,
     forwarding::{self, Forwarding},
@@ -38,6 +39,7 @@ pub(crate) struct ListenerContext {
     pub id: String,
     pub tls: bool,
     pub http1: bool,
+    pub challenges: Option<Arc<ChallengeDirectory>>,
 }
 
 pub(crate) struct PanelProxy {
@@ -131,6 +133,19 @@ impl ProxyHttp for PanelProxy {
         ctx.snapshot = Some(Arc::clone(&snapshot));
         if !self.listener.http1 && !session.is_http2() {
             responses::plain(session, 505, "this listener requires HTTP/2", &[]).await?;
+            return Ok(true);
+        }
+        if let Some(key_authorization) = self.challenge_answer(session).await {
+            responses::send(
+                session,
+                200,
+                &[
+                    (header::CONTENT_TYPE, "application/octet-stream"),
+                    (header::CACHE_CONTROL, "no-store"),
+                ],
+                key_authorization,
+            )
+            .await?;
             return Ok(true);
         }
         let host = match hosts::request_host(session.req_header()) {
@@ -404,6 +419,16 @@ impl ProxyHttp for PanelProxy {
 }
 
 impl PanelProxy {
+    /// The key authorization for an HTTP-01 challenge this request fetches.
+    async fn challenge_answer(&self, session: &Session) -> Option<bytes::Bytes> {
+        let challenges = self.listener.challenges.as_ref()?;
+        let request = session.req_header();
+        if request.method != http::Method::GET && request.method != http::Method::HEAD {
+            return None;
+        }
+        challenges.answer(request.uri.path()).await
+    }
+
     /// Enforces the presented certificate's minimum TLS version and rejects
     /// requests for hosts the connection's certificate does not cover.
     fn tls_rejection(

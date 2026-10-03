@@ -5,6 +5,7 @@
 //! The implementation modules are private so upstream Pingora types cannot
 //! become part of this crate's public contract.
 
+mod acme;
 mod adapter;
 mod certificates;
 mod dataplane;
@@ -21,6 +22,7 @@ mod static_files;
 mod template;
 mod upstream;
 
+pub use acme::ChallengeDirectory;
 pub use adapter::{AdapterOptions, PingoraGatewayAdapter, PreparedPingoraSnapshot};
 pub use dataplane::{DataPlane, DataPlaneOptions, DataPlaneStatus, ListenerStatus};
 pub use secrets::{DirectorySecrets, NoSecrets, SecretSource};

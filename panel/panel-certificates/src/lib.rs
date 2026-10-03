@@ -18,3 +18,4 @@ pub use details::{CertificateDetails, CertificateStatus, KeyAlgorithm, EXPIRING_
 pub use generate::{self_signed, MAX_SELF_SIGNED_DAYS};
 pub use intake::{accept, describe, describe_der, Accepted};
 pub use inventory::{Certificate, CertificateId, CertificateSource};
+pub use panel_domain::ACME_CHALLENGE_DIRECTORY;

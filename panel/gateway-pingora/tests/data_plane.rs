@@ -4,7 +4,8 @@
 
 use base64::Engine;
 use gateway_pingora::{
-    AdapterOptions, DataPlane, DataPlaneOptions, DirectorySecrets, PingoraGatewayAdapter,
+    AdapterOptions, ChallengeDirectory, DataPlane, DataPlaneOptions, DirectorySecrets,
+    PingoraGatewayAdapter,
 };
 use panel_domain::{
     EndpointAddress, EndpointId, NormalizedHost, PathPrefix, RevisionId, RouteId, SiteId,
@@ -489,6 +490,54 @@ async fn static_content_honours_conditionals_and_ranges() {
             .status,
         404
     );
+    gateway.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn waiting_http01_challenges_are_answered_before_the_site() {
+    let upstream = echo_upstream().await;
+    let challenges = tempfile::tempdir().unwrap();
+    std::fs::write(challenges.path().join("Token_1-a"), "Token_1-a.thumbprint").unwrap();
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    snapshot.upstream_pools.push(pool("app", &[upstream]));
+    snapshot.sites.push(site(&["shop.test"]));
+    snapshot
+        .routes
+        .push(route("all", 1, prefix("/"), proxy("app")));
+    let gateway = Gateway::start(
+        AdapterOptions::default().with_challenges(ChallengeDirectory::new(challenges.path())),
+        snapshot,
+    )
+    .await;
+    wait_for(listen).await;
+
+    for host in ["shop.test", "unknown.test"] {
+        let answer = get(
+            listen,
+            Some(host),
+            "/.well-known/acme-challenge/Token_1-a",
+            "",
+        )
+        .await;
+        assert_eq!(answer.status, 200, "{host}");
+        assert_eq!(answer.body, b"Token_1-a.thumbprint");
+        assert_eq!(answer.headers["content-type"], "application/octet-stream");
+    }
+    let passed = get(
+        listen,
+        Some("shop.test"),
+        "/.well-known/acme-challenge/other",
+        "",
+    )
+    .await;
+    assert_eq!(passed.status, 200);
+    assert!(passed
+        .body
+        .starts_with(b"GET /.well-known/acme-challenge/other "));
     gateway.stop().await;
 }
 
