@@ -204,12 +204,11 @@
         {
           "crate": "syn",
           "versions": [
-            "1.0.109",
             "2.0.119",
             "3.0.5"
           ],
           "owner": "pingora-panel-platform",
-          "reason": "Inherited transitive duplicate with no unified release line: 1.0.109 via derivative; 2.0.119 via pin-project-internal, prettyplease, prost-build; 3.0.5 via async-trait, clap_derive, futures-macro.",
+          "reason": "Inherited transitive duplicate with no unified release line: 2.0.119 via pin-project-internal, prettyplease, prost-build; 3.0.5 via async-trait, clap_derive, futures-macro.",
           "expires_on": "2027-03-01"
         },
         {
@@ -284,16 +283,6 @@
         }
       ],
       "unmaintained": [
-        {
-          "advisory_id": "RUSTSEC-2024-0388",
-          "crate": "derivative",
-          "versions": [
-            "2.2.0"
-          ],
-          "owner": "pingora-panel-security",
-          "reason": "The derivative proc-macro is unmaintained upstream; it reaches the build only through Pingora's own dependencies, which have no derive_more migration released yet.",
-          "expires_on": "2027-03-01"
-        },
         {
           "advisory_id": "RUSTSEC-2025-0134",
           "crate": "rustls-pemfile",
