@@ -141,7 +141,11 @@ pub enum SiteSort {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::IntoParams))]
+#[cfg_attr(
+    feature = "openapi",
+    derive(utoipa::IntoParams),
+    into_params(parameter_in = Query)
+)]
 #[serde(default)]
 pub struct SiteQuery {
     /// Matches names, domains, notes, groups and tags, case-insensitively.
