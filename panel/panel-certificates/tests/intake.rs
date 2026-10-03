@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use chrono::{DateTime, Duration, Utc};
 use panel_certificates::{
     accept, describe, describe_der, self_signed, CertificateStatus, KeyAlgorithm,
