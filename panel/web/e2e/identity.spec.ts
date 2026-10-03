@@ -507,3 +507,95 @@ test('administrators connect identity providers', async ({ page }) => {
   await expect(page.getByText('Provider deleted')).toBeVisible()
   expect(changes[2]!.method()).toBe('DELETE')
 })
+
+test('password sign-in is limited to break-glass accounts', async ({ page }) => {
+  await setUp(page)
+  await signIn(page)
+  const changes: Request[] = []
+  await page.route('**/api/v1/roles', (route) => route.fulfill({ json: roles }))
+  await page.route('**/api/v1/identity-providers', (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: 'corp',
+          display_name: 'Corporate',
+          issuer: 'https://id.example',
+          client_id: 'panel',
+          has_client_secret: true,
+          scopes: [],
+          claims: {
+            username: 'preferred_username',
+            display_name: 'name',
+            email: 'email',
+            groups: 'groups',
+          },
+          group_roles: [],
+          create_accounts: false,
+          enabled: true,
+          created_at: '2026-10-03T00:00:00.000Z',
+          updated_at: '2026-10-03T00:00:00.000Z',
+        },
+      ],
+    }),
+  )
+  await page.route('**/api/v1/sign-in-policy', (route) => {
+    if (route.request().method() === 'PUT') {
+      changes.push(route.request())
+      return route.fulfill({ json: route.request().postDataJSON() })
+    }
+    return route.fulfill({ json: { password_sign_in: 'everyone' } })
+  })
+  await page.route(/\/api\/v1\/audit-events\?/, (route) => {
+    expect(new URL(route.request().url()).searchParams.get('type')).toBe(
+      'identity.break_glass.used',
+    )
+    return route.fulfill({
+      json: {
+        items: [
+          {
+            sequence: 9,
+            event_id: 'e9',
+            source: 'panel-api',
+            event_type: 'identity.break_glass.used',
+            event_version: 1,
+            subject: 'account/root',
+            actor_type: 'user',
+            actor_id: 'root',
+            occurred_at: '2026-10-03T09:30:00Z',
+            recorded_at: '2026-10-03T09:30:00Z',
+            data: { attempt: { username: 'root', client_address: '192.0.2.7', break_glass: true } },
+          },
+        ],
+      },
+    })
+  })
+  await page.route('**/api/v1/accounts', (route) =>
+    route.fulfill({ json: [{ ...viewer, locked: false, break_glass: true }] }),
+  )
+  await page.route(`**/api/v1/accounts/${viewer.id}`, (route) => {
+    changes.push(route.request())
+    return route.fulfill({ json: { ...viewer, ...route.request().postDataJSON() } })
+  })
+
+  await page.goto('/identity-providers')
+  const card = page
+    .getByText('Password sign-in', { exact: true })
+    .locator('xpath=ancestor::*[@data-slot="card"]')
+  await expect(page.getByText('Recent break-glass sign-ins')).toBeVisible()
+  await expect(page.getByText(/root · .* · 192\.0\.2\.7/)).toBeVisible()
+  await page.getByRole('radio', { name: 'Break-glass accounts only' }).click()
+  await expect(
+    page.getByText('Other accounts are refused even with the right password.', { exact: false }),
+  ).toBeVisible()
+  await card.getByRole('button', { name: 'Save' }).click()
+  await expect(page.getByText('Password sign-in saved')).toBeVisible()
+  expect(changes[0]!.postDataJSON()).toEqual({ password_sign_in: 'break_glass_only' })
+
+  await page.goto('/accounts')
+  const row = page.getByRole('row', { name: /watcher/ })
+  await expect(row.getByText('Break-glass')).toBeVisible()
+  await row.getByRole('button', { name: 'Actions' }).click()
+  await page.getByRole('menuitem', { name: 'Remove break-glass' }).click()
+  await expect(page.getByText('Account updated')).toBeVisible()
+  expect(changes[1]!.postDataJSON()).toEqual({ break_glass: false })
+})

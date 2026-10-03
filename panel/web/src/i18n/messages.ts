@@ -862,6 +862,9 @@ const zhCN = {
     endAll: '结束全部会话',
     emptyTitle: '还没有其他账户',
     emptyDetail: '为团队成员创建账户并分配角色。',
+    breakGlass: '应急账户',
+    markBreakGlass: '设为应急账户',
+    unmarkBreakGlass: '取消应急账户',
   },
   roles: {
     title: '角色',
@@ -923,6 +926,15 @@ const zhCN = {
     deleted: '身份提供方已删除',
     deleteTitle: '删除身份提供方 {name}？',
     deleteDetail: '通过它登录的会话会立即结束，账户会保留。',
+    passwordSignIn: '密码登录',
+    passwordSignInHint: '限制后，只有应急账户能用密码登录，其他人需通过身份提供方登录。',
+    passwordEveryone: '所有有密码的账户',
+    passwordEveryoneHint: '任何设置了密码的账户都可以用密码登录。',
+    passwordBreakGlass: '仅应急账户',
+    passwordBreakGlassHint:
+      '其他账户即使密码正确也会被拒绝。需要已启用的身份提供方，以及一个能管理账户的已启用应急账户。',
+    policySaved: '密码登录策略已保存',
+    breakGlassUsed: '近期的应急账户登录',
   },
   permissions: {
     gateway_read: '读取网关状态、数据面与上游健康',
@@ -2181,6 +2193,9 @@ const en: DeepString<Messages> = {
     endAll: 'End all sessions',
     emptyTitle: 'No other accounts yet',
     emptyDetail: 'Create accounts for your team and give them roles.',
+    breakGlass: 'Break-glass',
+    markBreakGlass: 'Mark as break-glass',
+    unmarkBreakGlass: 'Remove break-glass',
   },
   roles: {
     title: 'Roles',
@@ -2245,6 +2260,16 @@ const en: DeepString<Messages> = {
     deleted: 'Provider deleted',
     deleteTitle: 'Delete the provider {name}?',
     deleteDetail: 'Sessions signed in through it end at once; the accounts stay.',
+    passwordSignIn: 'Password sign-in',
+    passwordSignInHint:
+      'When limited, only break-glass accounts sign in with a password; everyone else uses an identity provider.',
+    passwordEveryone: 'Every account with a password',
+    passwordEveryoneHint: 'Any account that has a password can sign in with it.',
+    passwordBreakGlass: 'Break-glass accounts only',
+    passwordBreakGlassHint:
+      'Other accounts are refused even with the right password. Needs an enabled provider and an enabled break-glass account that can manage accounts.',
+    policySaved: 'Password sign-in saved',
+    breakGlassUsed: 'Recent break-glass sign-ins',
   },
   permissions: {
     gateway_read: 'Read the gateway status, data plane and upstream health',

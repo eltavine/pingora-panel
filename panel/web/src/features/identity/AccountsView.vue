@@ -8,6 +8,7 @@ import {
   LockKeyholeOpen,
   Pencil,
   Plus,
+  Siren,
   UserCheck,
   UserX,
   Users,
@@ -71,7 +72,7 @@ function openAccess(account: AccountView) {
 
 function change(
   account: AccountView,
-  body: { disabled?: boolean; unlock?: boolean },
+  body: { disabled?: boolean; unlock?: boolean; break_glass?: boolean },
   done: string,
 ) {
   update.mutate(
@@ -157,6 +158,10 @@ const disableOpen = computed({
                 <UserCheck v-else aria-hidden="true" />
                 {{ t(`accounts.${accountState(account)}`) }}
               </Badge>
+              <Badge v-if="account.break_glass" variant="secondary" class="ml-1">
+                <Siren aria-hidden="true" />
+                {{ t('accounts.breakGlass') }}
+              </Badge>
             </TableCell>
             <TableCell class="text-muted-foreground text-xs tabular-nums">
               {{
@@ -192,6 +197,22 @@ const disableOpen = computed({
                     >
                       <LockKeyholeOpen aria-hidden="true" />
                       {{ t('accounts.unlock') }}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      @select="
+                        change(
+                          account,
+                          { break_glass: !account.break_glass },
+                          t('accounts.updated'),
+                        )
+                      "
+                    >
+                      <Siren aria-hidden="true" />
+                      {{
+                        account.break_glass
+                          ? t('accounts.unmarkBreakGlass')
+                          : t('accounts.markBreakGlass')
+                      }}
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
