@@ -1609,16 +1609,19 @@ fn covered_changes_wait_for_approval_from_the_command_line() {
         "--min-risk",
         "high",
         "--window",
-        "mon,tue 09:00-18:00",
+        "mon,tue 09:00-18:00 Europe/Berlin",
         "--approvals",
         "2",
     ]);
     assert!(set.status.success(), "{}", stderr(&set));
     let body = &stub.requests("PUT", "/api/v1/approval-policies/prod")[0].body;
-    assert_eq!(
-        body["windows"],
-        json!([{"days": ["mon", "tue"], "start": "09:00", "end": "18:00"}])
+    let recurrence = body["windows"][0]["recurrence"].as_str().unwrap();
+    assert!(
+        recurrence.starts_with("DTSTART;TZID=Europe/Berlin:")
+            && recurrence.ends_with("T090000\nRRULE:FREQ=WEEKLY;BYDAY=MO,TU"),
+        "{recurrence}"
     );
+    assert_eq!(body["windows"][0]["minutes"], 540);
     assert_eq!(
         (body["min_risk"].clone(), body["approvals"].clone()),
         (json!("high"), json!(2))
@@ -1765,9 +1768,13 @@ fn accounts_are_granted_roles_for_site_groups_under_conditions() {
         json!({"kind": "site_group", "group": "shop"})
     );
     assert_eq!(body["conditions"]["networks"], json!(["10.0.0.0/8"]));
-    assert_eq!(
-        body["conditions"]["windows"],
-        json!([{"days": ["mon", "tue"], "start": "09:00", "end": "18:00"}])
+    let recurrence = body["conditions"]["windows"][0]["recurrence"]
+        .as_str()
+        .unwrap();
+    assert!(
+        recurrence.starts_with("DTSTART:")
+            && recurrence.ends_with("T090000Z\nRRULE:FREQ=WEEKLY;BYDAY=MO,TU"),
+        "{recurrence}"
     );
     assert_eq!(body["conditions"]["not_after"], "2026-12-31T00:00:00Z");
     assert!(String::from_utf8_lossy(&granted.stdout).contains("group shop"));

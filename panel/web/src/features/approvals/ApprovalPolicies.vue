@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/table'
 import { notifyFailure, plainHeaders } from '@/lib/configuration'
 import { useSession } from '@/lib/session'
+import { describeWindow } from '@/lib/windows'
 import ApprovalPolicyFormSheet from './ApprovalPolicyFormSheet.vue'
 
 const { t } = useI18n()
@@ -80,8 +81,7 @@ function covers(policy: ApprovalPolicy): string[] {
     parts.push(t('approvals.highRiskOnly'))
   }
   for (const window of policy.windows ?? []) {
-    const days = (window.days ?? []).map((day) => t(`approvals.days.${day}`)).join(' ')
-    parts.push(`${days ? `${days} ` : ''}${window.start}–${window.end} UTC`)
+    parts.push(describeWindow(window, (day) => t(`windows.days.${day}`)))
   }
   return parts
 }

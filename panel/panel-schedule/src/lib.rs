@@ -88,7 +88,8 @@ pub struct Window {
     duration: Duration,
 }
 
-/// How a window is written.
+/// Recurring periods, each opening at an occurrence of `recurrence` and
+/// lasting `minutes`.
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]

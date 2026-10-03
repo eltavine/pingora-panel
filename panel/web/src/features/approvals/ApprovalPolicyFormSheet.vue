@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
 import { useMutation } from '@tanstack/vue-query'
-import { Plus, Save, ShieldCheck, X } from '@lucide/vue'
+import { Save, ShieldCheck } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import type { ApprovalPolicy, Day } from '@/api/generated'
+import type { ApprovalPolicy } from '@/api/generated'
 import { putApprovalPolicyMutation } from '@/api/generated/@tanstack/vue-query.gen'
 import FormField from '@/components/FormField.vue'
 import SwitchField from '@/components/SwitchField.vue'
+import WindowsField from '@/components/WindowsField.vue'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -29,7 +30,7 @@ import {
 } from '@/components/ui/sheet'
 import { Spinner } from '@/components/ui/spinner'
 import { notifyFailure, plainHeaders } from '@/lib/configuration'
-import { DAYS, policyForm, policyInput, RESOURCE_KINDS } from './presentation'
+import { policyForm, policyInput, RESOURCE_KINDS } from './presentation'
 
 const open = defineModel<boolean>('open', { required: true })
 const props = defineProps<{ policy?: ApprovalPolicy }>()
@@ -131,65 +132,12 @@ function submit() {
             </Select>
           </FormField>
 
-          <fieldset class="flex flex-col gap-2">
-            <legend class="mb-1 text-sm font-medium">{{ t('approvals.windows') }}</legend>
-            <p class="text-muted-foreground text-xs">{{ t('approvals.windowsHint') }}</p>
-            <div
-              v-for="(window, index) in form.windows"
-              :key="index"
-              class="flex flex-col gap-2 rounded-md border p-3"
-            >
-              <div class="flex flex-wrap gap-x-3 gap-y-1">
-                <div v-for="day in DAYS" :key="day" class="flex items-center gap-1">
-                  <Checkbox
-                    :id="`window-${index}-${day}`"
-                    :model-value="window.days.includes(day)"
-                    @update:model-value="toggle(window.days as Day[], day, $event)"
-                  />
-                  <Label :for="`window-${index}-${day}`" class="font-normal">{{
-                    t(`approvals.days.${day}`)
-                  }}</Label>
-                </div>
-              </div>
-              <div class="flex items-center gap-2">
-                <Input
-                  v-model="window.start"
-                  type="time"
-                  :aria-label="t('approvals.windowStart')"
-                  class="min-w-0 flex-1"
-                  required
-                />
-                <span aria-hidden="true">–</span>
-                <Input
-                  v-model="window.end"
-                  type="time"
-                  :aria-label="t('approvals.windowEnd')"
-                  class="min-w-0 flex-1"
-                  required
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  :aria-label="t('approvals.removeWindow')"
-                  :title="t('approvals.removeWindow')"
-                  @click="form.windows.splice(index, 1)"
-                >
-                  <X aria-hidden="true" />
-                </Button>
-              </div>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              class="self-start"
-              @click="form.windows.push({ days: [], start: '09:00', end: '18:00' })"
-            >
-              <Plus data-icon="inline-start" aria-hidden="true" />
-              {{ t('approvals.addWindow') }}
-            </Button>
-          </fieldset>
+          <WindowsField
+            id="policy-windows"
+            v-model="form.windows"
+            :legend="t('approvals.windows')"
+            :hint="t('approvals.windowsHint')"
+          />
 
           <div class="grid grid-cols-2 gap-4">
             <FormField id="policy-approvals" :label="t('approvals.required')">

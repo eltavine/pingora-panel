@@ -44,7 +44,7 @@ pub use gateway_runtime::{
     DataPlaneListenerResponse, DataPlaneResponse, EndpointHealthResponse, ShutdownResponse,
     UpstreamHealthReportResponse, UpstreamHealthResponse, WorkerCountRequest,
 };
-pub use grants::{GrantConditionsBody, GrantScopeBody, GrantView, GrantWindowBody, NewGrant};
+pub use grants::{GrantConditionsBody, GrantScopeBody, GrantView, NewGrant};
 pub use identity::{
     AccountPatch, AccountView, CreatedToken, CredentialKind, CurrentSession, EndedSessions,
     LoginRequest, LoginResponse, NewAccount, NewRole, NewToken, PasswordChange, PasswordReset,

@@ -9,8 +9,9 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use panel_identity::{
-    AccountId, Grant, GrantConditions, GrantId, GrantRequest, GrantScope, GrantWindow, Principal,
+    AccountId, Grant, GrantConditions, GrantId, GrantRequest, GrantScope, Principal,
 };
+use panel_schedule::Window;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
@@ -51,19 +52,6 @@ impl From<GrantScopeBody> for GrantScope {
     }
 }
 
-/// A weekly span of time in UTC.
-#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
-#[serde(deny_unknown_fields)]
-pub struct GrantWindowBody {
-    /// `mon` to `sun`; every day when empty.
-    #[serde(default)]
-    pub days: Vec<String>,
-    /// `HH:MM`, included.
-    pub start: String,
-    /// `HH:MM`, excluded.
-    pub end: String,
-}
-
 /// When a grant counts; every condition set must hold.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, ToSchema)]
 #[serde(deny_unknown_fields)]
@@ -74,7 +62,7 @@ pub struct GrantConditionsBody {
     #[serde(default)]
     pub networks: Vec<String>,
     #[serde(default)]
-    pub windows: Vec<GrantWindowBody>,
+    pub windows: Vec<Window>,
 }
 
 impl From<GrantConditions> for GrantConditionsBody {
@@ -82,15 +70,7 @@ impl From<GrantConditions> for GrantConditionsBody {
         Self {
             not_after: conditions.not_after,
             networks: conditions.networks,
-            windows: conditions
-                .windows
-                .into_iter()
-                .map(|window| GrantWindowBody {
-                    days: window.days,
-                    start: window.start,
-                    end: window.end,
-                })
-                .collect(),
+            windows: conditions.windows,
         }
     }
 }
@@ -100,15 +80,7 @@ impl From<GrantConditionsBody> for GrantConditions {
         Self {
             not_after: conditions.not_after,
             networks: conditions.networks,
-            windows: conditions
-                .windows
-                .into_iter()
-                .map(|window| GrantWindow {
-                    days: window.days,
-                    start: window.start,
-                    end: window.end,
-                })
-                .collect(),
+            windows: conditions.windows,
         }
     }
 }

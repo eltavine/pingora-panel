@@ -66,12 +66,6 @@
       "name": "HealthCheckProtocol",
       "owner": "pingora-panel-platform",
       "reason": "gateway-proto-codec encodes every probe protocol onto the wire, and gateway-pingora builds a probe for each. A new protocol must fail to compile in both rather than probe the wrong way."
-    },
-    {
-      "package": "panel-config-model",
-      "name": "Day",
-      "owner": "pingora-panel-platform",
-      "reason": "The seven days of the week are a closed set; approval windows match on them exhaustively, and a new variant could never be meaningful."
     }
   ]
 }

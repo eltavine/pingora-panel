@@ -132,6 +132,8 @@ test('approval policies decide which changes need approval', async ({ page }) =>
   await sheet.getByLabel('Site tags').fill('prod, payments')
   await sheet.getByRole('button', { name: 'Add window' }).click()
   await sheet.getByLabel('Mon', { exact: true }).click()
+  await sheet.getByLabel('End', { exact: true }).fill('02:00')
+  await sheet.getByLabel('Time zone').fill('Europe/Berlin')
   await sheet.getByLabel('Approvals needed').fill('2')
   await sheet.getByRole('button', { name: 'Create' }).click()
   await expect(page.getByText('Saved the approval policy prod')).toBeVisible()
@@ -141,7 +143,14 @@ test('approval policies decide which changes need approval', async ({ page }) =>
     resources: ['sites'],
     site_tags: ['prod', 'payments'],
     min_risk: 'low',
-    windows: [{ days: ['mon'], start: '09:00', end: '18:00' }],
+    windows: [
+      {
+        recurrence: expect.stringMatching(
+          /^DTSTART;TZID=Europe\/Berlin:\d{8}T090000\nRRULE:FREQ=WEEKLY;BYDAY=MO$/,
+        ),
+        minutes: 1020,
+      },
+    ],
     approvals: 2,
     valid_minutes: 60,
     enabled: true,

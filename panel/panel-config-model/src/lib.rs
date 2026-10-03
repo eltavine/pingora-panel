@@ -19,8 +19,8 @@ mod views;
 
 pub use approvals::{
     ApprovalDecision, ApprovalPolicy, ApprovalPolicyInput, ApprovalRequest, ApprovalRequestList,
-    ApprovalState, Assessment, Day, PlannedChange, PolicyVersion, Risk, TimeWindow,
-    DEFAULT_VALID_MINUTES, MAX_APPROVALS, MAX_VALID_MINUTES, MIN_VALID_MINUTES, REQUEST_LIFETIME,
+    ApprovalState, Assessment, PlannedChange, PolicyVersion, Risk, DEFAULT_VALID_MINUTES,
+    MAX_APPROVALS, MAX_VALID_MINUTES, MAX_WINDOWS, MIN_VALID_MINUTES, REQUEST_LIFETIME,
     RESOURCE_KINDS,
 };
 pub use compile::compile;

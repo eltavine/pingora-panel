@@ -53415,7 +53415,7 @@
           "windows": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/TimeWindow"
+              "$ref": "#/components/schemas/Window"
             },
             "description": "Covers changes applied inside one of these windows; always when empty."
           }
@@ -54473,19 +54473,6 @@
           }
         }
       },
-      "Day": {
-        "type": "string",
-        "description": "A day of the week.",
-        "enum": [
-          "mon",
-          "tue",
-          "wed",
-          "thu",
-          "fri",
-          "sat",
-          "sun"
-        ]
-      },
       "Deprecation": {
         "type": "object",
         "required": [
@@ -55260,7 +55247,7 @@
           "windows": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/GrantWindowBody"
+              "$ref": "#/components/schemas/Window"
             }
           }
         },
@@ -55356,32 +55343,6 @@
             "$ref": "#/components/schemas/GrantScopeBody"
           }
         }
-      },
-      "GrantWindowBody": {
-        "type": "object",
-        "description": "A weekly span of time in UTC.",
-        "required": [
-          "start",
-          "end"
-        ],
-        "properties": {
-          "days": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "`mon` to `sun`; every day when empty."
-          },
-          "end": {
-            "type": "string",
-            "description": "`HH:MM`, excluded."
-          },
-          "start": {
-            "type": "string",
-            "description": "`HH:MM`, included."
-          }
-        },
-        "additionalProperties": false
       },
       "GroupRoleBody": {
         "type": "object",
@@ -58225,32 +58186,6 @@
           }
         }
       },
-      "TimeWindow": {
-        "type": "object",
-        "description": "A span of time on some days, in UTC.",
-        "required": [
-          "start",
-          "end"
-        ],
-        "properties": {
-          "days": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Day"
-            },
-            "description": "Every day when empty."
-          },
-          "end": {
-            "type": "string",
-            "description": "`HH:MM`, excluded; after `start`."
-          },
-          "start": {
-            "type": "string",
-            "description": "`HH:MM`, included."
-          }
-        },
-        "additionalProperties": false
-      },
       "TlsCheck": {
         "type": "object",
         "description": "What a client sees when it connects to the listener for the host.",
@@ -58971,6 +58906,28 @@
             "type": "string"
           }
         }
+      },
+      "Window": {
+        "type": "object",
+        "description": "Recurring periods, each opening at an occurrence of `recurrence` and\nlasting `minutes`.",
+        "required": [
+          "recurrence",
+          "minutes"
+        ],
+        "properties": {
+          "minutes": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How long each period lasts.",
+            "maximum": 10080,
+            "minimum": 1
+          },
+          "recurrence": {
+            "type": "string",
+            "description": "An RFC 5545 recurrence repeating at most daily, with `DTSTART` in UTC\nor with a `TZID`, such as\n`DTSTART;TZID=Europe/Berlin:20260105T090000\\nRRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR`."
+          }
+        },
+        "additionalProperties": false
       },
       "WorkerCountRequest": {
         "type": "object",

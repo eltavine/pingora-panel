@@ -18,7 +18,9 @@ already belong to groups in the configuration model.
   manager can grant it a role with a scope and conditions. The scope is
   everything, one site group (the `group` of sites in the configuration) or
   one site. Conditions limit when the grant counts: an expiry, client
-  networks the request must come from, and weekly windows in UTC. A grant
+  networks the request must come from, and time windows, the RFC 5545
+  recurrences with a time zone and a length that approval policies use. A
+  grant
   counts for a request only while all of its conditions hold; grants are
   audited like role changes.
 - **What scopes cover.** Only the configuration permissions,

@@ -19,8 +19,10 @@ revision history depend on them.
   draft but not inside it, so changing a policy never needs an approval of
   its own. A policy names the changes it covers: changed resources of given
   kinds (`sites`, `listeners`, `tls-profiles` and so on), sites carrying
-  given tags (the environment labels), a minimum risk, and time windows in
-  UTC. Every condition a policy sets must hold; one it leaves empty holds
+  given tags (the environment labels), a minimum risk, and time windows:
+  RFC 5545 recurrences with a time zone and a length, the same windows that
+  hold back jobs (ADR 0008). Every condition a policy sets must hold; one it
+  leaves empty holds
   always. A policy also says how many people must approve and for how long
   an approval stays valid. Policies have a version that every change
   increases. Managing them needs `approval.manage`.

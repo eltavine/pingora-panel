@@ -2,8 +2,9 @@
 //! roles an account holds everywhere and always.
 
 use crate::{AccountId, Permission, PermissionSet};
-use chrono::{DateTime, Datelike, NaiveTime, Utc, Weekday};
+use chrono::{DateTime, Utc};
 use ipnet::IpNet;
+use panel_schedule::Window;
 use serde::{Deserialize, Serialize};
 use std::{fmt, net::IpAddr};
 use uuid::Uuid;
@@ -17,16 +18,6 @@ pub const SCOPABLE: [Permission; 3] = [
 ];
 const MAX_NETWORKS: usize = 32;
 const MAX_WINDOWS: usize = 16;
-const DAYS: [(&str, Weekday); 7] = [
-    ("mon", Weekday::Mon),
-    ("tue", Weekday::Tue),
-    ("wed", Weekday::Wed),
-    ("thu", Weekday::Thu),
-    ("fri", Weekday::Fri),
-    ("sat", Weekday::Sat),
-    ("sun", Weekday::Sun),
-];
-
 /// Identifies a grant.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -67,56 +58,6 @@ pub enum GrantScope {
     },
 }
 
-/// A weekly span of time in UTC.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct GrantWindow {
-    /// `mon` to `sun`; every day when empty.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub days: Vec<String>,
-    /// `HH:MM`, included.
-    pub start: String,
-    /// `HH:MM`, excluded; after `start`.
-    pub end: String,
-}
-
-fn clock(value: &str) -> Option<NaiveTime> {
-    NaiveTime::parse_from_str(value, "%H:%M").ok()
-}
-
-impl GrantWindow {
-    fn contains(&self, at: DateTime<Utc>) -> bool {
-        let (Some(start), Some(end)) = (clock(&self.start), clock(&self.end)) else {
-            return false;
-        };
-        let today = DAYS
-            .iter()
-            .find(|(_, day)| *day == at.weekday())
-            .map(|(name, _)| *name);
-        (self.days.is_empty()
-            || today.is_some_and(|today| self.days.iter().any(|day| day == today)))
-            && start <= at.time()
-            && at.time() < end
-    }
-
-    fn problem(&self) -> Option<String> {
-        if let Some(day) = self
-            .days
-            .iter()
-            .find(|day| !DAYS.iter().any(|(name, _)| name == day))
-        {
-            return Some(format!("{day:?} is not a day; use mon to sun"));
-        }
-        match (clock(&self.start), clock(&self.end)) {
-            (Some(start), Some(end)) if start < end => None,
-            _ => Some(format!(
-                "the window {}-{} needs HH:MM times ending after they start",
-                self.start, self.end
-            )),
-        }
-    }
-}
-
 /// When a grant counts; every condition set must hold.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -128,7 +69,7 @@ pub struct GrantConditions {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub networks: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub windows: Vec<GrantWindow>,
+    pub windows: Vec<Window>,
 }
 
 fn network(value: &str) -> Option<IpNet> {
@@ -165,7 +106,6 @@ impl GrantConditions {
                 problems.push(format!("{value:?} is not a network such as 10.0.0.0/8"));
             }
         }
-        problems.extend(self.windows.iter().filter_map(GrantWindow::problem));
         problems
     }
 }
@@ -285,11 +225,11 @@ mod tests {
         let conditions = GrantConditions {
             not_after: Some(at("2026-10-06T00:00:00Z")),
             networks: vec!["10.0.0.0/8".into(), "192.0.2.7".into()],
-            windows: vec![GrantWindow {
-                days: vec!["mon".into()],
-                start: "09:00".into(),
-                end: "18:00".into(),
-            }],
+            windows: vec![serde_json::from_value(serde_json::json!({
+                "recurrence": "DTSTART:20260105T090000Z\nRRULE:FREQ=WEEKLY;BYDAY=MO",
+                "minutes": 540
+            }))
+            .unwrap()],
         };
         assert!(conditions.problems().is_empty());
         assert!(conditions.hold(monday_noon, office));
@@ -302,15 +242,10 @@ mod tests {
             "expired"
         );
         let wrong = GrantConditions {
-            networks: vec!["10.0.0.0/33".into()],
-            windows: vec![GrantWindow {
-                days: vec!["someday".into()],
-                start: "18:00".into(),
-                end: "09:00".into(),
-            }],
+            networks: vec!["10.0.0.0/33".into(); MAX_NETWORKS + 1],
             ..GrantConditions::default()
         };
-        assert_eq!(wrong.problems().len(), 2, "{:?}", wrong.problems());
+        assert_eq!(wrong.problems().len(), 34, "{:?}", wrong.problems());
     }
 
     #[test]

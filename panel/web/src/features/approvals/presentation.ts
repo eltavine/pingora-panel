@@ -3,9 +3,9 @@ import type {
   ApprovalPolicyInput,
   ApprovalRequest,
   ApprovalState,
-  Day,
   Risk,
 } from '@/api/generated'
+import { windowForm, windowInput, type WindowForm } from '@/lib/windows'
 
 export type Decision = 'approve' | 'reject' | 'revoke' | 'withdraw'
 
@@ -16,7 +16,6 @@ export const RESOURCE_KINDS = [
   'tls-profiles',
   'security-policies',
 ] as const
-export const DAYS: readonly Day[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
 
 /** Approvals that still count at `now`. */
 export function validApprovals(request: ApprovalRequest, now = Date.now()): number {
@@ -64,12 +63,6 @@ export function actions(
   }
 }
 
-export interface WindowForm {
-  days: Day[]
-  start: string
-  end: string
-}
-
 export interface PolicyForm {
   id: string
   description: string
@@ -89,11 +82,7 @@ export function policyForm(policy?: ApprovalPolicy): PolicyForm {
     resources: [...(policy?.resources ?? [])],
     siteTags: (policy?.site_tags ?? []).join(', '),
     minRisk: policy?.min_risk ?? 'low',
-    windows: (policy?.windows ?? []).map((window) => ({
-      days: [...(window.days ?? [])],
-      start: window.start,
-      end: window.end,
-    })),
+    windows: (policy?.windows ?? []).map(windowForm),
     approvals: policy?.approvals ?? 1,
     validMinutes: policy?.valid_minutes ?? 60,
     enabled: policy?.enabled ?? true,
@@ -109,11 +98,7 @@ export function policyInput(form: PolicyForm): ApprovalPolicyInput {
       .map((tag) => tag.trim())
       .filter(Boolean),
     min_risk: form.minRisk,
-    windows: form.windows.map((window) => ({
-      days: DAYS.filter((day) => window.days.includes(day)),
-      start: window.start,
-      end: window.end,
-    })),
+    windows: form.windows.map((window) => windowInput(window)),
     approvals: Number(form.approvals),
     valid_minutes: Number(form.validMinutes),
     enabled: form.enabled,

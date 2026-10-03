@@ -188,7 +188,8 @@
         "panel-health",
         "panel-identity",
         "panel-ir",
-        "panel-platform"
+        "panel-platform",
+        "panel-schedule"
       ]
     },
     "panel-api-server": {
@@ -280,7 +281,8 @@
         "panel-domain",
         "panel-engine",
         "panel-errors",
-        "panel-ir"
+        "panel-ir",
+        "panel-schedule"
       ]
     },
     "panel-config-state-codec": {
@@ -373,6 +375,7 @@
       "allowed_workspace_dependencies": [
         "panel-context",
         "panel-errors",
+        "panel-schedule",
         "panel-secrets"
       ]
     },

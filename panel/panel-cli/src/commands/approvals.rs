@@ -2,6 +2,7 @@
 
 use crate::{
     client::{Api, Result},
+    commands::windows,
     output::{text, Column, Output},
 };
 use clap::{Args, Subcommand, ValueEnum};
@@ -37,22 +38,6 @@ pub(crate) enum Risk {
     High,
 }
 
-pub(crate) fn window(value: &str) -> std::result::Result<Value, String> {
-    let (days, span) = match value.trim().rsplit_once(' ') {
-        Some((days, span)) => (days.trim(), span),
-        None => ("", value.trim()),
-    };
-    let (start, end) = span
-        .split_once('-')
-        .ok_or("expected [DAYS ]HH:MM-HH:MM, such as \"mon,tue 09:00-18:00\"")?;
-    let days: Vec<&str> = days
-        .split(',')
-        .map(str::trim)
-        .filter(|day| !day.is_empty())
-        .collect();
-    Ok(json!({"days": days, "start": start, "end": end}))
-}
-
 #[derive(Args)]
 pub(crate) struct SetPolicy {
     id: String,
@@ -68,9 +53,10 @@ pub(crate) struct SetPolicy {
     /// Covers changes at least this risky.
     #[arg(long, value_enum, default_value_t = Risk::Low)]
     min_risk: Risk,
-    /// Covers changes applied in this UTC window, as
-    /// "[DAYS ]HH:MM-HH:MM"; always without it.
-    #[arg(long = "window", value_parser = window)]
+    /// Covers changes applied in this window, as
+    /// "[DAYS ]HH:MM-HH:MM[ ZONE]" with an IANA time zone, UTC without one;
+    /// always without it.
+    #[arg(long = "window", value_parser = windows::window)]
     windows: Vec<Value>,
     /// How many people other than the requester must approve.
     #[arg(long, default_value_t = 1)]
@@ -202,22 +188,7 @@ fn covers(policy: &Value) -> String {
         parts.push("high risk".into());
     }
     for window in policy["windows"].as_array().into_iter().flatten() {
-        let days: Vec<String> = window["days"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .map(text)
-            .collect();
-        parts.push(format!(
-            "{}{}-{} UTC",
-            if days.is_empty() {
-                String::new()
-            } else {
-                format!("{} ", days.join(","))
-            },
-            text(&window["start"]),
-            text(&window["end"])
-        ));
+        parts.push(windows::describe(window));
     }
     parts.join(", ")
 }

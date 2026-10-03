@@ -25,9 +25,7 @@ mod throttle;
 mod workload;
 
 pub use account::{Account, AccountId, PasswordSignIn, Username};
-pub use grant::{
-    Access, Grant, GrantConditions, GrantId, GrantScope, GrantWindow, HeldGrant, SCOPABLE,
-};
+pub use grant::{Access, Grant, GrantConditions, GrantId, GrantScope, HeldGrant, SCOPABLE};
 pub use password::{PasswordHasher, PasswordPolicy, PasswordProblem, Verification};
 pub use permission::{built_in_roles, Permission, PermissionSet, Role};
 pub use principal::{Credential, Principal};

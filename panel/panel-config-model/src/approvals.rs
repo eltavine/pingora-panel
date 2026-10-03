@@ -1,13 +1,16 @@
 //! Approvals of configuration changes (ADR 0019): the policies that decide
 //! which changes need them, and the requests people approve.
 
-use chrono::{DateTime, Datelike, Duration, NaiveTime, Utc, Weekday};
+use chrono::{DateTime, Duration, Utc};
+use panel_schedule::Window;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
 /// The most approvals a policy can ask for.
 pub const MAX_APPROVALS: u32 = 5;
+/// The most windows a policy names.
+pub const MAX_WINDOWS: usize = 16;
 pub const MIN_VALID_MINUTES: u32 = 5;
 /// A week.
 pub const MAX_VALID_MINUTES: u32 = 7 * 24 * 60;
@@ -40,78 +43,6 @@ pub enum Risk {
     High,
 }
 
-/// A day of the week.
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum Day {
-    Mon,
-    Tue,
-    Wed,
-    Thu,
-    Fri,
-    Sat,
-    Sun,
-}
-
-impl From<Weekday> for Day {
-    fn from(day: Weekday) -> Self {
-        match day {
-            Weekday::Mon => Self::Mon,
-            Weekday::Tue => Self::Tue,
-            Weekday::Wed => Self::Wed,
-            Weekday::Thu => Self::Thu,
-            Weekday::Fri => Self::Fri,
-            Weekday::Sat => Self::Sat,
-            Weekday::Sun => Self::Sun,
-        }
-    }
-}
-
-/// A span of time on some days, in UTC.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[serde(deny_unknown_fields)]
-pub struct TimeWindow {
-    /// Every day when empty.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub days: Vec<Day>,
-    /// `HH:MM`, included.
-    pub start: String,
-    /// `HH:MM`, excluded; after `start`.
-    pub end: String,
-}
-
-fn clock(value: &str) -> Option<NaiveTime> {
-    NaiveTime::parse_from_str(value, "%H:%M").ok()
-}
-
-impl TimeWindow {
-    pub fn contains(&self, at: DateTime<Utc>) -> bool {
-        let (Some(start), Some(end)) = (clock(&self.start), clock(&self.end)) else {
-            return false;
-        };
-        let time = at.time();
-        (self.days.is_empty() || self.days.contains(&at.weekday().into()))
-            && start <= time
-            && time < end
-    }
-
-    fn problem(&self) -> Option<String> {
-        match (clock(&self.start), clock(&self.end)) {
-            (Some(start), Some(end)) if start < end => None,
-            (Some(_), Some(_)) => Some(format!(
-                "the window {}–{} must end after it starts; split one that crosses midnight",
-                self.start, self.end
-            )),
-            _ => Some(format!(
-                "the window {}–{} must use HH:MM times",
-                self.start, self.end
-            )),
-        }
-    }
-}
-
 const fn one() -> u32 {
     1
 }
@@ -142,7 +73,7 @@ pub struct ApprovalPolicyInput {
     pub min_risk: Risk,
     /// Covers changes applied inside one of these windows; always when empty.
     #[serde(default)]
-    pub windows: Vec<TimeWindow>,
+    pub windows: Vec<Window>,
     /// How many people other than the requester must approve.
     #[serde(default = "one")]
     pub approvals: u32,
@@ -185,7 +116,9 @@ impl ApprovalPolicyInput {
                 problems.push(format!("the site tag {tag:?} is empty or too long"));
             }
         }
-        problems.extend(self.windows.iter().filter_map(TimeWindow::problem));
+        if self.windows.len() > MAX_WINDOWS {
+            problems.push(format!("a policy names at most {MAX_WINDOWS} windows"));
+        }
         if !(1..=MAX_APPROVALS).contains(&self.approvals) {
             problems.push(format!("a policy asks for 1 to {MAX_APPROVALS} approvals"));
         }
@@ -456,11 +389,7 @@ mod tests {
         };
         assert!(!policy(risky_only).covers(&tagged, monday_noon));
         let office_hours = ApprovalPolicyInput {
-            windows: vec![TimeWindow {
-                days: vec![Day::Mon, Day::Tue],
-                start: "09:00".into(),
-                end: "18:00".into(),
-            }],
+            windows: vec![office_hours()],
             ..input()
         };
         assert!(policy(office_hours.clone()).covers(&tagged, monday_noon));
@@ -474,16 +403,21 @@ mod tests {
         assert!(!policy(input()).covers(&Assessment::default(), monday_noon));
     }
 
+    /// Mondays and Tuesdays from 09:00 to 18:00 UTC.
+    fn office_hours() -> Window {
+        serde_json::from_value(serde_json::json!({
+            "recurrence": "DTSTART:20260105T090000Z\nRRULE:FREQ=WEEKLY;BYDAY=MO,TU",
+            "minutes": 540
+        }))
+        .unwrap()
+    }
+
     #[test]
     fn policies_are_checked_before_they_are_kept() {
         assert!(input().problems("prod").is_empty());
         let wrong = ApprovalPolicyInput {
             resources: vec!["routes".into()],
-            windows: vec![TimeWindow {
-                days: Vec::new(),
-                start: "22:00".into(),
-                end: "06:00".into(),
-            }],
+            windows: vec![office_hours(); MAX_WINDOWS + 1],
             approvals: 0,
             valid_minutes: 1,
             ..input()

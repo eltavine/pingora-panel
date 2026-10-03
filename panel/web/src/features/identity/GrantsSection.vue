@@ -12,12 +12,10 @@ import {
   listRolesOptions,
 } from '@/api/generated/@tanstack/vue-query.gen'
 import FormField from '@/components/FormField.vue'
-import SwitchField from '@/components/SwitchField.vue'
+import WindowsField from '@/components/WindowsField.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -26,10 +24,10 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { notifyFailure } from '@/lib/configuration'
+import { describeWindow, windowInput, type WindowForm } from '@/lib/windows'
 
 const props = defineProps<{ account: AccountView; canManage: boolean }>()
 
-const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const
 const { t, d } = useI18n()
 const grants = useQuery(computed(() => listGrantsOptions({ path: { id: props.account.id } })))
 const roles = useQuery(listRolesOptions())
@@ -43,19 +41,12 @@ const blank = () => ({
   target: '',
   until: '',
   networks: '',
-  windowed: false,
-  days: [] as string[],
-  start: '09:00',
-  end: '18:00',
+  windows: [] as WindowForm[],
 })
 const form = reactive(blank())
 const complete = computed(
   () => form.role && (form.scope === 'everything' || form.target.trim().length > 0),
 )
-
-function toggleDay(day: string, checked: boolean | 'indeterminate') {
-  form.days = checked ? [...new Set([...form.days, day])] : form.days.filter((item) => item !== day)
-}
 
 function scopeOf(): GrantScopeBody {
   if (form.scope === 'site_group') {
@@ -77,15 +68,7 @@ function submit() {
         conditions: {
           not_after: form.until ? new Date(form.until).toISOString() : null,
           networks: form.networks.split(/[\s,]+/).filter(Boolean),
-          windows: form.windowed
-            ? [
-                {
-                  days: DAYS.filter((day) => form.days.includes(day)),
-                  start: form.start,
-                  end: form.end,
-                },
-              ]
-            : [],
+          windows: form.windows.map((window) => windowInput(window)),
         },
       },
     },
@@ -135,8 +118,7 @@ function conditionText(grant: GrantView): string[] {
     parts.push(t('grants.from', { networks: conditions.networks.join(', ') }))
   }
   for (const window of conditions.windows ?? []) {
-    const days = (window.days ?? []).map((day) => t(`approvals.days.${day}`)).join(' ')
-    parts.push(`${days ? `${days} ` : ''}${window.start}–${window.end} UTC`)
+    parts.push(describeWindow(window, (day) => t(`windows.days.${day}`)))
   }
   return parts
 }
@@ -233,26 +215,12 @@ function conditionText(grant: GrantView): string[] {
           <Input id="grant-networks" v-model="form.networks" spellcheck="false" />
         </FormField>
       </div>
-      <SwitchField id="grant-windowed" v-model="form.windowed" :label="t('grants.windowed')" />
-      <div v-if="form.windowed" class="flex flex-col gap-2">
-        <div class="flex flex-wrap gap-x-3 gap-y-1">
-          <div v-for="day in DAYS" :key="day" class="flex items-center gap-1">
-            <Checkbox
-              :id="`grant-day-${day}`"
-              :model-value="form.days.includes(day)"
-              @update:model-value="toggleDay(day, $event)"
-            />
-            <Label :for="`grant-day-${day}`" class="font-normal">{{
-              t(`approvals.days.${day}`)
-            }}</Label>
-          </div>
-        </div>
-        <div class="flex items-center gap-2">
-          <Input v-model="form.start" type="time" :aria-label="t('approvals.windowStart')" />
-          <span aria-hidden="true">–</span>
-          <Input v-model="form.end" type="time" :aria-label="t('approvals.windowEnd')" />
-        </div>
-      </div>
+      <WindowsField
+        id="grant-windows"
+        v-model="form.windows"
+        :legend="t('grants.windows')"
+        :hint="t('grants.windowsHint')"
+      />
       <div class="flex justify-end gap-2">
         <Button type="button" variant="ghost" @click="adding = false">{{
           t('common.cancel')

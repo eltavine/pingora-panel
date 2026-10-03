@@ -59,7 +59,8 @@ panel-bootstrap -> panel-postgres + panel-jetstream + panel-pki
 | `panel-platform-codec` | Protobuf form of service descriptors | Registries, transports, Pingora |
 | `panel-service` | Liveness/readiness endpoints, gRPC health and `ServiceInfo`, peer negotiation, trace metadata, settings, signals and logging shared by service processes | Storage, brokers, application rules, Pingora |
 | `panel-control-runtime` | Composition of control-plane processes: lazy dependencies, migrations, registration, outbox relay leadership, health and graceful shutdown | Application rules, Pingora |
-| `panel-jobs` | Durable job model, leasing worker, retry policy, RFC 5545 schedules and maintenance windows, and an in-memory store | Storage, transports, Pingora |
+| `panel-schedule` | RFC 5545 recurrences and the time windows they open, shared by schedules, maintenance windows, approval policies and grants | Storage, transports, Pingora |
+| `panel-jobs` | Durable job model, leasing worker, retry policy, schedules and maintenance windows, and an in-memory store | Storage, transports, Pingora |
 | `panel-pki` | Internal certificate authority, workload identities, credential files and renewal | Transports, storage, Pingora |
 | `panel-tls` | TLS 1.3 mutual authentication with reloadable credentials, tonic server and client integration, and per-service peer authorization | Storage, application rules, Pingora |
 | `panel-outbox` | Ordered at-least-once outbox relay over `OutboxSource`, `OutboxWakeup` and `EventPublisher` ports | Storage, brokers, Pingora |
@@ -286,7 +287,7 @@ Approval policies decide which changes need someone other than the person
 applying them to approve first
 ([decision](../docs/adr/0019-change-approvals.md)). A policy covers changes
 to given resource kinds, to sites with given tags, of at least a given risk,
-or applied in weekly UTC windows, and asks for one to five approvals that
+or applied in time windows, and asks for one to five approvals that
 stay valid for a set time. A change is high-risk when it removes anything or
 touches listeners, TLS profiles or security policies. Applying a covered
 draft answers `202` with an approval request instead of publishing; the
@@ -296,13 +297,17 @@ own request, approvals can be revoked until the change is applied, the
 requester can withdraw the request, and a different draft or an edited
 policy needs a new request. In an emergency, Administrators can apply
 without approvals by giving a reason and an incident, which is recorded as
-`config.approval.bypassed` before anything is published.
+`config.approval.bypassed` before anything is published. A time window is an
+RFC 5545 recurrence, with a time zone or in UTC, and a length in minutes, so
+it keeps local hours across daylight-saving changes and may cross midnight;
+the console and `ppanel` write weekly ones from days and hours such as
+`mon-fri 09:00-18:00 Europe/Berlin`.
 `/api/v1/approval-policies` needs `approval.manage` to change policies, and
 `/api/v1/approvals` needs `approval.decide` to approve, reject or revoke.
 
 ```sh
 ppanel approval-policy set prod --site-tag prod --min-risk high \
-  --window "mon,tue,wed,thu,fri 09:00-18:00" --approvals 1
+  --window "mon-fri 09:00-18:00 Europe/Berlin" --approvals 1
 ppanel config apply --note "raise the shop limits"
 ppanel approval list
 ppanel approval approve <request-id>
@@ -420,7 +425,7 @@ with the provider and the reason.
 Besides the roles an account holds everywhere, account managers can grant it
 a role for one site group (the sites' `group`), for one site, or for
 everything, counting only before an expiry, from given client networks or
-within weekly UTC windows
+within time windows
 ([decision](../docs/adr/0021-scoped-and-conditional-grants.md)). The API
 evaluates grants on every request; a configuration permission held only for
 some sites lets the request through with a site scope that the
@@ -431,7 +436,7 @@ plan is one of them, and shared resources can be read but not changed.
 
 ```sh
 ppanel account grant ops --role operator --site-group shop \
-  --network 10.0.0.0/8 --window "mon,tue,wed,thu,fri 09:00-18:00" --until 2026-12-31T00:00:00Z
+  --network 10.0.0.0/8 --window "mon-fri 09:00-18:00 Asia/Shanghai" --until 2026-12-31T00:00:00Z
 ppanel account grants ops
 ```
 

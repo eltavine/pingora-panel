@@ -158,8 +158,9 @@ pub(crate) struct GrantArgs {
     /// Only for requests from this network, such as 10.0.0.0/8.
     #[arg(long = "network")]
     networks: Vec<String>,
-    /// Only within this UTC window, as "[DAYS ]HH:MM-HH:MM".
-    #[arg(long = "window", value_parser = crate::commands::approvals::window)]
+    /// Only within this window, as "[DAYS ]HH:MM-HH:MM[ ZONE]" with an IANA
+    /// time zone, UTC without one.
+    #[arg(long = "window", value_parser = crate::commands::windows::window)]
     windows: Vec<Value>,
     /// Only until this time, in RFC 3339.
     #[arg(long)]
@@ -185,17 +186,7 @@ fn grant_conditions(grant: &Value) -> String {
         parts.push(format!("from {networks}"));
     }
     for window in conditions["windows"].as_array().into_iter().flatten() {
-        let days = text(&window["days"]);
-        parts.push(format!(
-            "{}{}-{} UTC",
-            if days == "-" {
-                String::new()
-            } else {
-                format!("{days} ")
-            },
-            text(&window["start"]),
-            text(&window["end"])
-        ));
+        parts.push(crate::commands::windows::describe(window));
     }
     if parts.is_empty() {
         "always".into()

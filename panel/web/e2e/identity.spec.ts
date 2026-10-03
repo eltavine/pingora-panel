@@ -781,15 +781,28 @@ test('accounts are granted roles for a site group under conditions', async ({ pa
   await page.getByRole('option', { name: 'Operator' }).click()
   await sheet.getByLabel('Site group name').fill('shop')
   await sheet.getByLabel('From networks (optional)').fill('10.0.0.0/8')
+  await sheet.getByRole('button', { name: 'Add window' }).click()
+  await sheet.getByLabel('Mon', { exact: true }).click()
+  await sheet.getByLabel('Time zone').fill('UTC')
   await sheet.getByRole('button', { name: 'Grant', exact: true }).click()
   await expect(page.getByText('Grant added')).toBeVisible()
   expect(changes[0]!.postDataJSON()).toEqual({
     role: 'operator',
     scope: { kind: 'site_group', group: 'shop' },
-    conditions: { not_after: null, networks: ['10.0.0.0/8'], windows: [] },
+    conditions: {
+      not_after: null,
+      networks: ['10.0.0.0/8'],
+      windows: [
+        {
+          recurrence: expect.stringMatching(/^DTSTART:\d{8}T090000Z\nRRULE:FREQ=WEEKLY;BYDAY=MO$/),
+          minutes: 540,
+        },
+      ],
+    },
   })
   await expect(sheet.getByText('site group shop')).toBeVisible()
   await expect(sheet.getByText('from 10.0.0.0/8')).toBeVisible()
+  await expect(sheet.getByText('Mon 09:00–18:00 UTC')).toBeVisible()
   await sheet.getByRole('button', { name: 'Revoke grant' }).click()
   await expect(page.getByText('Grant revoked')).toBeVisible()
   expect(changes[1]!.method()).toBe('DELETE')

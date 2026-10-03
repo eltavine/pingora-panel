@@ -67,13 +67,20 @@ describe('approval policy form', () => {
     const form = policyForm()
     form.id = 'prod'
     form.siteTags = 'prod, payments  eu'
-    form.windows = [{ days: ['fri', 'mon'], start: '09:00', end: '18:00' }]
+    form.windows = [{ days: ['fri', 'mon'], start: '09:00', end: '18:00', timeZone: 'UTC' }]
     expect(policyInput(form)).toEqual({
       description: '',
       resources: [],
       site_tags: ['prod', 'payments', 'eu'],
       min_risk: 'low',
-      windows: [{ days: ['mon', 'fri'], start: '09:00', end: '18:00' }],
+      windows: [
+        {
+          recurrence: expect.stringMatching(
+            /^DTSTART:\d{8}T090000Z\nRRULE:FREQ=WEEKLY;BYDAY=MO,FR$/,
+          ),
+          minutes: 540,
+        },
+      ],
       approvals: 1,
       valid_minutes: 60,
       enabled: true,
