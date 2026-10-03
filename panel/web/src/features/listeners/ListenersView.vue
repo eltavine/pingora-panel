@@ -1,7 +1,17 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useMutation, useQuery } from '@tanstack/vue-query'
-import { FileBadge, KeyRound, Lock, LockOpen, Pencil, Plus, Radio, Trash2 } from '@lucide/vue'
+import {
+  FileBadge,
+  KeyRound,
+  Lock,
+  LockOpen,
+  Pencil,
+  Plus,
+  Radio,
+  ShieldCheck,
+  Trash2,
+} from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import type { ListenerView, TlsProfileView } from '@/api/generated'
@@ -36,7 +46,9 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { changeHeaders, notifyFailure, useRefreshConfiguration } from '@/lib/configuration'
+import { useSession } from '@/lib/session'
 import ListenerFormSheet from './ListenerFormSheet.vue'
+import TlsCheckSheet from './TlsCheckSheet.vue'
 import TlsProfileFormSheet from './TlsProfileFormSheet.vue'
 
 const { t } = useI18n()
@@ -68,6 +80,15 @@ function openListener(listener?: ListenerView) {
   editingListener.value = listener
   listenerOpen.value = true
 }
+const { can } = useSession()
+const canCheck = computed(() => can('gateway.read'))
+const checking = ref<ListenerView>()
+const checkOpen = ref(false)
+function openCheck(listener: ListenerView) {
+  checking.value = listener
+  checkOpen.value = true
+}
+
 const editingProfile = ref<TlsProfileView | undefined>()
 const profileOpen = ref(false)
 function openProfile(profile?: TlsProfileView) {
@@ -203,6 +224,16 @@ function confirmRemove() {
                 <TableCell>
                   <div class="flex justify-end gap-1">
                     <Button
+                      v-if="listener.tls_profile_id && canCheck"
+                      variant="ghost"
+                      size="icon-sm"
+                      :aria-label="t('listeners.check.action')"
+                      :title="t('listeners.check.action')"
+                      @click="openCheck(listener)"
+                    >
+                      <ShieldCheck aria-hidden="true" />
+                    </Button>
+                    <Button
                       variant="ghost"
                       size="icon-sm"
                       :aria-label="t('common.edit')"
@@ -318,6 +349,7 @@ function confirmRemove() {
       :taken="listenerIds"
     />
     <TlsProfileFormSheet v-model:open="profileOpen" :profile="editingProfile" :taken="profileIds" />
+    <TlsCheckSheet v-model:open="checkOpen" :listener="checking" />
 
     <ConfirmDialog
       v-model:open="removeOpen"

@@ -212,3 +212,61 @@ test('TLS profiles serve certificates of the inventory', async ({ page }) => {
     alpn: ['h2', 'http/1.1'],
   })
 })
+
+test('HTTPS listeners are checked as clients see them', async ({ page }) => {
+  await page.route('**/api/v1/listeners', (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: 'https',
+          address: '0.0.0.0:443',
+          tls_profile_id: 'edge',
+          protocols: { http1: true, http2: true, http3: false },
+          reuse_port: false,
+          ipv6_only: null,
+          default_site_id: null,
+          etag: '"l1"',
+        },
+      ],
+    }),
+  )
+  await page.route('**/api/v1/tls-profiles', (route) => route.fulfill({ json: [] }))
+  await page.route(/\/api\/v1\/sites\?/, (route) =>
+    route.fulfill({ json: { items: [], total: 0, next_cursor: null } }),
+  )
+  const checks: Request[] = []
+  await page.route('**/api/v1/tls-checks', (route) => {
+    checks.push(route.request())
+    return route.fulfill({
+      json: {
+        listener: 'https',
+        address: '127.0.0.1:443',
+        host: 'shop.example',
+        protocol: 'TLSv1.3',
+        cipher_suite: 'TLS13_AES_256_GCM_SHA384',
+        alpn: 'h2',
+        handshake_ms: 4,
+        versions: [
+          { version: 'TLSv1.2', accepted: false },
+          { version: 'TLSv1.3', accepted: true },
+        ],
+        certificate: { ...certificate, names: ['shop.example'], subject: 'CN=shop.example' },
+        certificate_status: 'valid',
+        covers_host: true,
+        http_status: null,
+        strict_transport_security: 'max-age=31536000; includeSubDomains',
+      },
+    })
+  })
+
+  await page.goto('/listeners')
+  await page.getByRole('button', { name: 'Check TLS' }).click()
+  const sheet = page.getByRole('dialog')
+  await sheet.getByRole('textbox', { name: 'Host to check' }).fill('shop.example')
+  await sheet.getByRole('button', { name: 'Check' }).click()
+  await expect(sheet.getByText('TLS13_AES_256_GCM_SHA384')).toBeVisible()
+  await expect(sheet.getByText('Covers the host')).toBeVisible()
+  await expect(sheet.getByText('max-age=31536000; includeSubDomains')).toBeVisible()
+  await expect(sheet.getByText('4 ms')).toBeVisible()
+  expect(checks[0]!.postDataJSON()).toEqual({ listener: 'https', host: 'shop.example' })
+})
