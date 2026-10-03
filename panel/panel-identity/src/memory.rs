@@ -8,13 +8,17 @@ use crate::{
         SessionGrant, StoredAccount, StoredPassword, TokenGrant,
     },
     Account, AccountId, ApiToken, IdentityProvider, PendingSignIn, PermissionSet, ProviderLink,
-    ProviderSignIn, ProviderStore, Role, SecretHash, Session, SessionId, TokenId, Username,
+    ProviderSession, ProviderSignIn, ProviderStore, Role, SecretHash, Session, SessionId, TokenId,
+    Username,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use panel_errors::{PanelError, Result};
 use serde_json::{json, Value};
-use std::sync::Mutex;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Mutex,
+};
 
 /// An event as a durable store would record it.
 #[derive(Clone, Debug, PartialEq)]
@@ -33,8 +37,15 @@ struct State {
     pending: Vec<PendingSignIn>,
     links: Vec<ProviderLink>,
     /// Sessions signed in through a provider, with the sealed refresh token.
-    provider_sessions: Vec<(SessionId, String, Option<String>)>,
+    provider_sessions: Vec<ProviderSessionRow>,
     events: Vec<RecordedEvent>,
+}
+
+struct ProviderSessionRow {
+    session: SessionId,
+    provider: String,
+    refresh_token: Option<String>,
+    checked_at: DateTime<Utc>,
 }
 
 pub struct MemoryIdentityStore {
@@ -620,6 +631,9 @@ impl ProviderStore for MemoryIdentityStore {
                 true
             }
         };
+        if !data["enabled"].as_bool().unwrap_or(true) {
+            end_provider_sessions(&mut state, data["provider"].as_str().unwrap_or_default());
+        }
         let event = if created {
             "identity.provider.created"
         } else {
@@ -640,21 +654,8 @@ impl ProviderStore for MemoryIdentityStore {
         }
         state.links.retain(|link| link.provider != id);
         state.pending.retain(|pending| pending.provider != id);
-        let ended: Vec<SessionId> = state
-            .provider_sessions
-            .iter()
-            .filter(|(_, provider, _)| provider == id)
-            .map(|(session, _, _)| *session)
-            .collect();
-        let now = Utc::now();
-        for (session, _) in &mut state.sessions {
-            if ended.contains(&session.id) && session.revoked_at.is_none() {
-                session.revoked_at = Some(now);
-            }
-        }
-        state
-            .provider_sessions
-            .retain(|(_, provider, _)| provider != id);
+        end_provider_sessions(&mut state, id);
+        state.provider_sessions.retain(|row| row.provider != id);
         record(
             &mut state,
             "identity.provider.deleted",
@@ -762,16 +763,90 @@ impl ProviderStore for MemoryIdentityStore {
             "session": sign_in.session.session.id,
             "transport": sign_in.session.session.transport,
         });
-        state.provider_sessions.push((
-            sign_in.session.session.id,
-            link.provider.clone(),
-            sign_in.refresh_token,
-        ));
+        state.provider_sessions.push(ProviderSessionRow {
+            session: sign_in.session.session.id,
+            provider: link.provider.clone(),
+            refresh_token: sign_in.refresh_token,
+            checked_at: sign_in.session.session.created_at,
+        });
         state.links.push(link);
         state
             .sessions
             .push((sign_in.session.session, sign_in.session.secret));
         record(&mut state, "identity.login.succeeded", cause, event);
         Ok(account)
+    }
+
+    async fn claim_rechecks(
+        &self,
+        checked_before: DateTime<Utc>,
+        seen_after: DateTime<Utc>,
+        now: DateTime<Utc>,
+        limit: u32,
+    ) -> Result<Vec<ProviderSession>> {
+        let mut guard = self.state();
+        let state = &mut *guard;
+        let live: HashMap<SessionId, AccountId> = state
+            .sessions
+            .iter()
+            .map(|(session, _)| session)
+            .filter(|session| {
+                session.revoked_at.is_none()
+                    && session.expires_at > now
+                    && session.last_seen_at > seen_after
+            })
+            .map(|session| (session.id, session.account))
+            .collect();
+        let mut due: Vec<&mut ProviderSessionRow> = state
+            .provider_sessions
+            .iter_mut()
+            .filter(|row| {
+                row.refresh_token.is_some()
+                    && row.checked_at < checked_before
+                    && live.contains_key(&row.session)
+            })
+            .collect();
+        due.sort_by_key(|row| row.checked_at);
+        due.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
+        Ok(due
+            .into_iter()
+            .filter_map(|row| {
+                row.checked_at = now;
+                Some(ProviderSession {
+                    session: row.session,
+                    account: live[&row.session],
+                    provider: row.provider.clone(),
+                    refresh_token: row.refresh_token.clone()?,
+                })
+            })
+            .collect())
+    }
+
+    async fn rotate_refresh_token(&self, session: SessionId, refresh_token: String) -> Result<()> {
+        if let Some(row) = self
+            .state()
+            .provider_sessions
+            .iter_mut()
+            .find(|row| row.session == session)
+        {
+            row.refresh_token = Some(refresh_token);
+        }
+        Ok(())
+    }
+}
+
+/// Ends the sessions signed in through `provider`.
+fn end_provider_sessions(state: &mut State, provider: &str) {
+    let ended: HashSet<SessionId> = state
+        .provider_sessions
+        .iter()
+        .filter(|row| row.provider == provider)
+        .map(|row| row.session)
+        .collect();
+    let now = Utc::now();
+    for (session, _) in &mut state.sessions {
+        if ended.contains(&session.id) && session.revoked_at.is_none() {
+            session.revoked_at = Some(now);
+        }
     }
 }

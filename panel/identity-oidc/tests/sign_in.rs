@@ -9,7 +9,7 @@ use panel_identity::{
     memory::MemoryIdentityStore,
     store::{Cause, NewAccount},
     AccountId, ClaimNames, Client, GroupRole, IdentityStore, ProviderDirectory, ProviderRequest,
-    ProviderSignIns, ProviderStore, SecretChange, SessionPolicy, Transport, Username,
+    ProviderSignIns, ProviderStore, Rechecked, SecretChange, SessionPolicy, Transport, Username,
 };
 use panel_secrets::EnvelopeVault;
 use serde_json::json;
@@ -221,4 +221,30 @@ async fn people_get_accounts_roles_and_sessions_from_their_provider() {
         2
     );
     assert!(events.iter().all(|event| event != "identity.login.failed"));
+
+    // The provider is asked about sessions every fifteen minutes; it rotates
+    // refresh tokens, so the second recheck works only with the kept ones.
+    let at = |minutes| {
+        sign_ins
+            .clone()
+            .with_clock(move || Utc::now() + chrono::Duration::minutes(minutes))
+    };
+    let rechecked = at(16).recheck().await.unwrap();
+    assert_eq!(
+        (rechecked.kept, rechecked.ended, rechecked.unanswered),
+        (4, 0, 0)
+    );
+    assert_eq!(at(16).recheck().await.unwrap(), Rechecked::default());
+    assert_eq!(at(32).recheck().await.unwrap().kept, 4);
+    provider.disable("u-1");
+    let rechecked = at(48).recheck().await.unwrap();
+    assert_eq!((rechecked.kept, rechecked.ended), (0, 4));
+    let grant = store.session(&login.secret.hash()).await.unwrap().unwrap();
+    assert!(grant.session.revoked_at.is_some());
+    let ended = store
+        .events()
+        .into_iter()
+        .filter(|event| event.event_type == "identity.session.ended")
+        .count();
+    assert_eq!(ended, 4);
 }

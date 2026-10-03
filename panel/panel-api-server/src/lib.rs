@@ -38,6 +38,8 @@ use panel_secrets::{EnvelopeVault, SecretVault};
 use panel_service::Environment;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tls_probe_rustls::RustlsProbe;
+use tokio::time::MissedTickBehavior;
+use tokio_util::sync::CancellationToken;
 
 pub const SERVICE: &str = "panel-api";
 pub const SCHEMA: &str = "identity";
@@ -73,6 +75,8 @@ pub const PUBLIC_ORIGINS_ENV: &str = "PINGORA_PANEL_PUBLIC_ORIGINS";
 pub const MASTER_KEYS_ENV: &str = "PINGORA_PANEL_MASTER_KEYS";
 /// How long one request to an identity provider may take.
 const PROVIDER_TIMEOUT: Duration = Duration::from_secs(10);
+/// How often sessions due to be rechecked with their provider are looked for.
+const RECHECK_SWEEP: Duration = Duration::from_secs(60);
 
 const DEFAULT_HTTP_ADDRESS: SocketAddr =
     SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 8080);
@@ -213,6 +217,12 @@ pub fn process(
                     running.jetstream().clone(),
                     Arc::clone(running.jetstream_settings()),
                 )));
+            if let Some(sign_ins) = providers
+                .as_ref()
+                .and_then(|(_, sign_ins)| sign_ins.clone())
+            {
+                running.spawn(recheck_sessions(sign_ins, running.shutdown_token()));
+            }
             let state = match providers {
                 Some((directory, sign_ins)) => state.with_identity_providers(directory, sign_ins),
                 None => state,
@@ -265,4 +275,25 @@ fn identity_providers(
         sessions,
     );
     Ok(Some((directory, Some(sign_ins))))
+}
+
+/// Asks providers about the sessions signed in through them, until shutdown.
+async fn recheck_sessions(sign_ins: ProviderSignIns, shutdown: CancellationToken) {
+    let mut sweep = tokio::time::interval(RECHECK_SWEEP);
+    sweep.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            () = shutdown.cancelled() => return,
+            _ = sweep.tick() => match sign_ins.recheck().await {
+                Ok(rechecked) if rechecked.ended + rechecked.unanswered > 0 => tracing::info!(
+                    kept = rechecked.kept,
+                    ended = rechecked.ended,
+                    unanswered = rechecked.unanswered,
+                    "rechecked sessions with their identity providers"
+                ),
+                Ok(_) => {}
+                Err(error) => tracing::warn!(%error, "sessions could not be rechecked"),
+            },
+        }
+    }
 }

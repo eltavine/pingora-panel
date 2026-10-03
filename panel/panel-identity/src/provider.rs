@@ -4,7 +4,7 @@
 
 use crate::{
     store::{Attempt, Cause, NewAccount, NewSession},
-    Account, AccountId, SecretHash,
+    Account, AccountId, SecretHash, SessionId,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -133,6 +133,21 @@ pub trait ProviderStore: Send + Sync {
         attempt: &Attempt,
         cause: &Cause,
     ) -> Result<Account>;
+
+    /// Claims up to `limit` live sessions that hold a refresh token, were
+    /// seen since `seen_after` and last checked before `checked_before`,
+    /// longest unchecked first. They count as checked at `now`, so that
+    /// concurrent rechecks skip them.
+    async fn claim_rechecks(
+        &self,
+        checked_before: DateTime<Utc>,
+        seen_after: DateTime<Utc>,
+        now: DateTime<Utc>,
+        limit: u32,
+    ) -> Result<Vec<ProviderSession>>;
+
+    /// Keeps the sealed refresh token a provider rotated a session to.
+    async fn rotate_refresh_token(&self, session: SessionId, refresh_token: String) -> Result<()>;
 }
 
 /// What the panel tells a provider about itself.
@@ -163,6 +178,16 @@ pub struct SignedIn {
     /// Every claim of the ID token.
     pub claims: Map<String, Value>,
     pub refresh_token: Option<String>,
+}
+
+/// A session signed in through a provider, due to be rechecked with it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProviderSession {
+    pub session: SessionId,
+    pub account: AccountId,
+    pub provider: String,
+    /// Sealed.
+    pub refresh_token: String,
 }
 
 /// What became of a refresh.

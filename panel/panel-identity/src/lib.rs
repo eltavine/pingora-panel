@@ -28,7 +28,8 @@ pub use permission::{built_in_roles, Permission, PermissionSet, Role};
 pub use principal::{Credential, Principal};
 pub use provider::{
     ClaimNames, GroupRole, IdentityProvider, OpenIdConnect, PendingSignIn, ProviderLink,
-    ProviderSettings, ProviderSignIn, ProviderStore, Refreshed, SignInRequest, SignedIn,
+    ProviderSession, ProviderSettings, ProviderSignIn, ProviderStore, Refreshed, SignInRequest,
+    SignedIn,
 };
 pub use providers::{ProviderDirectory, ProviderRequest, ProviderView, SecretChange};
 pub use secret::{csrf_token, Secret, SecretHash, TOKEN_PREFIX};
@@ -36,6 +37,6 @@ pub use service::{
     AccountRequest, Client, Identity, IdentitySettings, Login, RoleRequest, TokenRequest,
 };
 pub use session::{ApiToken, Session, SessionId, SessionPolicy, TokenId, Transport};
-pub use sign_in::{ProviderSignIns, SignInOption, Started};
+pub use sign_in::{ProviderSignIns, Rechecked, SignInOption, Started, RECHECK_INTERVAL};
 pub use store::{AccountChange, Cause, IdentityStore};
 pub use throttle::FailurePolicy;

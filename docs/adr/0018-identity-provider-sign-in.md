@@ -52,11 +52,15 @@ Web Signature and Keys (RFC 7515, RFC 7517, RFC 7518).
   linked. Roles granted through group mappings are recalculated at every
   sign-in and kept apart from roles an Administrator granted by hand.
 - **Ending access.** When the provider issues refresh tokens, they are
-  sealed with the session, and a session older than fifteen minutes since
-  its last check refreshes them before it is used again. When the provider
-  refuses, the session ends; an account the provider created is disabled.
-  Without refresh tokens, sessions end with their usual idle and absolute
-  lifetimes.
+  sealed with the session, and every fifteen minutes the panel refreshes
+  them in the background, keeping the tokens the provider rotates to. Each
+  check claims its sessions first, so that several API replicas never spend
+  the same refresh token twice. When the provider refuses, the session
+  ends and the person has to sign in again; the account stays as it is,
+  because a refusal cannot tell a person who left from a provider session
+  that simply ran out. Disabling or deleting a provider ends its sessions at
+  once. Without refresh tokens, sessions end with their usual idle and
+  absolute lifetimes.
 - **Break-glass access.** Once a provider exists, Administrators may
   restrict password sign-in to accounts marked as break-glass. Those keep
   their password whatever happens to the provider, and every sign-in with

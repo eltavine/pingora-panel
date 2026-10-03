@@ -7,16 +7,17 @@ use crate::{
     service::{cause, ensure_managers, role_permissions},
     store::{Attempt, NewAccount, NewSession},
     AccountId, Client, IdentityProvider, IdentityStore, Login, OpenIdConnect, PendingSignIn,
-    ProviderDirectory, ProviderLink, ProviderSignIn, ProviderStore, Secret, SecretHash, Session,
-    SessionId, SessionPolicy, Transport, Username,
+    ProviderDirectory, ProviderLink, ProviderSession, ProviderSignIn, ProviderStore, Refreshed,
+    Secret, SecretHash, Session, SessionId, SessionPolicy, Transport, Username,
 };
 use chrono::{DateTime, Utc};
-use panel_context::RequestScope;
+use panel_context::{RequestId, RequestScope};
 use panel_errors::{PanelError, Result};
-use panel_secrets::SecretVault;
+use panel_secrets::{Sealed, SecretVault};
 use serde_json::{Map, Value};
 use std::{collections::BTreeSet, sync::Arc, time::Duration};
 use subtle::ConstantTimeEq;
+use uuid::Uuid;
 
 /// How long a sign-in may take at the provider.
 const ATTEMPT_LIFETIME: Duration = Duration::from_secs(600);
@@ -36,6 +37,22 @@ pub struct Started {
 }
 
 type Clock = Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>;
+
+/// How often a provider is asked whether it still vouches for a session.
+pub const RECHECK_INTERVAL: Duration = Duration::from_secs(15 * 60);
+/// The most sessions one recheck takes.
+const RECHECK_BATCH: u32 = 200;
+
+/// What a recheck found.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct Rechecked {
+    /// Still vouched for.
+    pub kept: usize,
+    /// Refused, and ended.
+    pub ended: usize,
+    /// Not answered for; tried again at a later recheck.
+    pub unanswered: usize,
+}
 
 /// Sign-ins through identity providers.
 #[derive(Clone)]
@@ -377,6 +394,81 @@ impl ProviderSignIns {
             },
             pending.return_to,
         ))
+    }
+
+    /// Asks providers about the sessions they have not vouched for in
+    /// [`RECHECK_INTERVAL`]. Refused sessions end; ones a provider could not
+    /// answer for are tried again at a later recheck.
+    pub async fn recheck(&self) -> Result<Rechecked> {
+        let now = (self.clock)();
+        let due = self
+            .providers
+            .claim_rechecks(
+                now - duration(RECHECK_INTERVAL),
+                now - duration(self.sessions.idle),
+                now,
+                RECHECK_BATCH,
+            )
+            .await?;
+        let mut rechecked = Rechecked::default();
+        for session in due {
+            match self.recheck_one(&session, now).await {
+                Ok(true) => rechecked.kept += 1,
+                Ok(false) => rechecked.ended += 1,
+                Err(_) => rechecked.unanswered += 1,
+            }
+        }
+        Ok(rechecked)
+    }
+
+    /// Whether the provider still vouches for `session`, which ends if not.
+    async fn recheck_one(&self, session: &ProviderSession, now: DateTime<Utc>) -> Result<bool> {
+        let provider = self
+            .providers
+            .provider(&session.provider)
+            .await?
+            .filter(|provider| provider.enabled);
+        let vouched = match provider {
+            Some(provider) => {
+                let settings = self
+                    .directory
+                    .settings(&provider, self.redirect_uri(&provider.id))
+                    .await?;
+                let owner = refresh_owner(session.session);
+                let opened = self
+                    .vault
+                    .open(&owner, &Sealed::new(session.refresh_token.clone()))
+                    .await?;
+                let token = String::from_utf8(opened.to_vec())
+                    .map_err(|_| PanelError::corrupt_state("the refresh token is not text"))?;
+                match self.connect.refresh(&settings, &token).await? {
+                    Refreshed::Valid { refresh_token } => {
+                        if let Some(rotated) = refresh_token {
+                            let sealed = self.vault.seal(&owner, rotated.as_bytes()).await?;
+                            self.providers
+                                .rotate_refresh_token(session.session, sealed.as_str().to_owned())
+                                .await?;
+                        }
+                        true
+                    }
+                    Refreshed::Refused => false,
+                }
+            }
+            None => false,
+        };
+        if !vouched {
+            let scope = RequestScope::new(RequestId::new(Uuid::now_v7().to_string())?);
+            self.identity
+                .end_session(
+                    session.account,
+                    session.session,
+                    "provider_refused",
+                    now,
+                    &cause(&scope, &format!("identity-provider/{}", session.provider)),
+                )
+                .await?;
+        }
+        Ok(vouched)
     }
 }
 

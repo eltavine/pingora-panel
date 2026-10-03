@@ -1017,6 +1017,67 @@ async fn providers_link_accounts_and_keep_sign_ins_once(subject: impl StoreUnder
         "a new account never takes an existing name"
     );
 
+    let (seen, later) = (now - Duration::hours(1), now + Duration::minutes(20));
+    let due = providers
+        .claim_rechecks(later, seen, later, 10)
+        .await
+        .unwrap();
+    assert_eq!(due.len(), 2, "both sessions hold a refresh token");
+    assert!(due
+        .iter()
+        .all(|due| due.account == alice && due.provider == "corp"));
+    assert!(
+        providers
+            .claim_rechecks(later, seen, later, 10)
+            .await
+            .unwrap()
+            .is_empty(),
+        "claimed sessions count as checked"
+    );
+    let much_later = later + Duration::hours(1);
+    assert!(
+        providers
+            .claim_rechecks(much_later, now, later, 10)
+            .await
+            .unwrap()
+            .is_empty(),
+        "sessions idle since `seen_after` are not rechecked"
+    );
+    providers
+        .rotate_refresh_token(due[0].session, "v1.rotated".into())
+        .await
+        .unwrap();
+    let first_claim = providers
+        .claim_rechecks(much_later, seen, much_later, 1)
+        .await
+        .unwrap();
+    assert_eq!(first_claim.len(), 1, "the limit holds");
+    let rest = providers
+        .claim_rechecks(much_later, seen, much_later, 10)
+        .await
+        .unwrap();
+    let rotated = first_claim
+        .iter()
+        .chain(&rest)
+        .find(|again| again.session == due[0].session)
+        .unwrap();
+    assert_eq!(rotated.refresh_token, "v1.rotated");
+
+    corp.enabled = false;
+    providers.put_provider(corp.clone(), &cause).await.unwrap();
+    let grant = store.session(&secret.hash()).await.unwrap().unwrap();
+    assert!(
+        grant.session.revoked_at.is_some(),
+        "a disabled provider's sessions end"
+    );
+    corp.enabled = true;
+    providers.put_provider(corp.clone(), &cause).await.unwrap();
+    let (third, secret) = sign_in(alice, None, Vec::new());
+    providers
+        .sign_in_with_provider(third, &attempt, &cause)
+        .await
+        .unwrap();
+
     providers.delete_provider("corp", &cause).await.unwrap();
     assert!(providers.link("corp", "u-1").await.unwrap().is_none());
     let grant = store.session(&secret.hash()).await.unwrap().unwrap();
@@ -1029,12 +1090,12 @@ async fn providers_link_accounts_and_keep_sign_ins_once(subject: impl StoreUnder
         "the account stays"
     );
     assert!(providers.delete_provider("corp", &cause).await.is_err());
-    for event in [
-        "identity.provider.created",
-        "identity.provider.updated",
-        "identity.provider.deleted",
+    for (event, count) in [
+        ("identity.provider.created", 1),
+        ("identity.provider.updated", 3),
+        ("identity.provider.deleted", 1),
     ] {
-        assert_eq!(harness.events(event).await.len(), 1, "{event}");
+        assert_eq!(harness.events(event).await.len(), count, "{event}");
     }
     let logins = harness.events("identity.login.succeeded").await;
     assert!(logins.iter().any(|login| login["provider"] == "corp"));
