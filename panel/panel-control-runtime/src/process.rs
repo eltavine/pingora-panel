@@ -150,6 +150,31 @@ impl ControlPlaneProcess {
         .map(Some)
     }
 
+    /// A mutual TLS channel to `peer` on the Unix domain socket at `path`.
+    /// A socket peer is never reached over plaintext, so this needs the
+    /// process's credentials.
+    #[cfg(unix)]
+    pub fn peer_unix_channel(
+        &self,
+        path: &std::path::Path,
+        peer: ServiceName,
+    ) -> Result<tonic::transport::Channel> {
+        let Some(credentials) = &self.tls else {
+            return Err(PanelError::invalid_argument(format!(
+                "{peer} is reached over mutual TLS; set {}",
+                crate::TLS_DIR_ENV
+            )));
+        };
+        let identity = WorkloadIdentity::new(peer, credentials.identity().trust_domain().clone());
+        panel_tls::unix_channel(
+            path,
+            &identity,
+            Arc::clone(credentials),
+            PEER_CONNECT_TIMEOUT,
+            PEER_REQUEST_TIMEOUT,
+        )
+    }
+
     /// Lets `peers` call `grpc_service` once mutual TLS is enabled.
     pub fn with_peer_access(
         mut self,

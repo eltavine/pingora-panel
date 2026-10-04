@@ -214,6 +214,31 @@ async fn an_unreachable_database_keeps_the_process_unavailable_but_stoppable() {
         .expect("stopping does not wait for unreachable dependencies");
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn socket_peers_are_never_reached_over_plaintext() {
+    let process = ControlPlaneProcess::new(
+        ServiceName::new("panel-api").unwrap(),
+        "0.1.0-test",
+        settings(&[
+            (DATABASE_URL_ENV, "postgres://panel@127.0.0.1:1/panel"),
+            (NATS_URL_ENV, "nats://127.0.0.1:1"),
+        ]),
+        SqlIdentifier::new("identity").unwrap(),
+    )
+    .unwrap();
+    let refused = process
+        .peer_unix_channel(
+            std::path::Path::new("/run/pingora-panel-ops/agent.sock"),
+            ServiceName::new("ops-agent").unwrap(),
+        )
+        .unwrap_err();
+    assert!(
+        refused.message.contains("PINGORA_PANEL_TLS_DIR"),
+        "{refused}"
+    );
+}
+
 /// GETs `url` once the panel's ring provider is installed, which reqwest
 /// needs to set up TLS even for plain HTTP.
 async fn get(url: String) -> reqwest::Response {
