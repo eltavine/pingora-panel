@@ -14,6 +14,7 @@ import type {
   UpstreamView,
 } from '@/api/generated'
 import { alertHandlers } from './alerts'
+import { containerHandlers } from './containers'
 import { hostAgentHandlers } from './host'
 import { logHandlers } from './logs'
 import type { Sampler } from './openapi'
@@ -295,6 +296,7 @@ export function handlers(sampler: Sampler): AnyHandler[] {
     ),
     http.get('*/api/v1/host', () => HttpResponse.json(host)),
     ...hostAgentHandlers(),
+    ...containerHandlers(),
     ...logHandlers(),
     ...alertHandlers(),
     http.all('*/api/*', ({ request }) => {

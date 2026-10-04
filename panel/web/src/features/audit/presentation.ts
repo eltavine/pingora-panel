@@ -65,6 +65,9 @@ export const KNOWN_TYPES = [
   'host.gateway_unit.stopped',
   'host.gateway_unit.restarted',
   'host.operation.refused',
+  'container.engine.enabled',
+  'container.engine.disabled',
+  'container.operation.refused',
 ] as const
 
 export type KnownType = (typeof KNOWN_TYPES)[number]
@@ -233,6 +236,14 @@ export function summaryOf(event: AuditEvent, t: Translate): string {
     case 'host.gateway_unit.stopped':
     case 'host.gateway_unit.restarted':
       return `${text(data.unit)} · ${text(data.active_state)}`
+    case 'container.engine.enabled':
+    case 'container.engine.disabled':
+      return text(data.engine)
+    case 'container.operation.refused':
+      return [`${text(data.operation)} ${text(data.engine)}`, data.code, data.message]
+        .map(text)
+        .filter(Boolean)
+        .join(' · ')
     case 'identity.access.denied':
       return [`${text(data.method)} ${text(data.route)}`, data.permission ?? data.reason]
         .map(text)
