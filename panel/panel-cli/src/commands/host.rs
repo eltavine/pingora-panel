@@ -21,6 +21,12 @@ enum HostCommand {
     /// The space the panel's configuration, log and certificate directories
     /// take.
     Directories,
+    /// Which processes listen on TCP ports, 80 and 443 unless named.
+    Listeners {
+        /// A port to look at; repeat for more, up to 16.
+        #[arg(long = "port", value_name = "PORT")]
+        ports: Vec<u16>,
+    },
 }
 
 const SUMMARY: &[Column] = &[
@@ -100,6 +106,28 @@ const CAPABILITIES: &[Column] = &[
     ("DETAIL", |capability| text(&capability["detail"])),
 ];
 
+const LISTENERS: &[Column] = &[
+    ("PORT", |listener| text(&listener["port"])),
+    ("ADDRESS", |listener| text(&listener["address"])),
+    ("PROCESS", |listener| {
+        let processes: Vec<String> = listener["processes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|process| format!("{} ({})", text(&process["name"]), text(&process["pid"])))
+            .collect();
+        if processes.is_empty() {
+            "-".into()
+        } else {
+            processes.join(", ")
+        }
+    }),
+    ("EXECUTABLE", |listener| {
+        text(&listener["processes"][0]["executable"])
+    }),
+    ("UID", |listener| text(&listener["uid"])),
+];
+
 const DIRECTORIES: &[Column] = &[
     ("KIND", |directory| text(&directory["kind"])),
     ("PATH", |directory| text(&directory["path"])),
@@ -126,7 +154,34 @@ pub async fn run(api: &Api, output: &Output, args: HostArgs) -> Result<()> {
         None => summary(api, output).await,
         Some(HostCommand::Agent) => agent(api, output).await,
         Some(HostCommand::Directories) => directories(api, output).await,
+        Some(HostCommand::Listeners { ports }) => listeners(api, output, &ports).await,
     }
+}
+
+async fn listeners(api: &Api, output: &Output, ports: &[u16]) -> Result<()> {
+    let query: Vec<(&str, String)> = if ports.is_empty() {
+        Vec::new()
+    } else {
+        let ports: Vec<String> = ports.iter().map(u16::to_string).collect();
+        vec![("ports", ports.join(","))]
+    };
+    let report = api.get("/api/v1/host/listeners", &query).await?.body;
+    if output.format == Format::Json {
+        output.json(&report);
+        return Ok(());
+    }
+    if output.quiet {
+        return Ok(());
+    }
+    if report["listeners"]
+        .as_array()
+        .is_some_and(|listeners| listeners.is_empty())
+    {
+        eprintln!("nothing listens on those ports");
+        return Ok(());
+    }
+    output.list(&report["listeners"], LISTENERS);
+    Ok(())
 }
 
 async fn agent(api: &Api, output: &Output) -> Result<()> {

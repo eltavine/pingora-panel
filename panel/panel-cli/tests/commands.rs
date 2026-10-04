@@ -208,6 +208,18 @@ async fn api(
             ]
         }))
         .into_response(),
+        ("GET", "/api/v1/host/listeners") => Json(json!({
+            "observed_at": "2026-10-04T10:00:00Z",
+            "listeners": [
+                {"address": "0.0.0.0", "port": 443, "uid": 0,
+                 "processes": [{"pid": 812, "name": "nginx", "executable": "/usr/sbin/nginx",
+                                "uid": 0},
+                               {"pid": 813, "name": "nginx", "executable": "/usr/sbin/nginx",
+                                "uid": 33}]},
+                {"address": "::", "port": 443, "uid": 0, "processes": []}
+            ]
+        }))
+        .into_response(),
         ("GET", "/api/v1/host/directories") => Json(json!({
             "observed_at": "2026-10-04T10:00:00Z",
             "directories": [
@@ -1106,6 +1118,15 @@ fn the_host_agent_and_the_panels_directories_are_shown() {
     ] {
         assert!(printed.contains(expected), "{expected} in\n{printed}");
     }
+
+    let listeners = stub.ppanel(&["host", "listeners", "--port", "443"]);
+    assert!(listeners.status.success(), "{}", stderr(&listeners));
+    let printed = stdout(&listeners);
+    for expected in ["nginx (812), nginx (813)", "/usr/sbin/nginx", "::"] {
+        assert!(printed.contains(expected), "{expected} in\n{printed}");
+    }
+    let asked = stub.requests("GET", "/api/v1/host/listeners");
+    assert_eq!(asked[0].query, "ports=443");
 }
 
 #[test]
