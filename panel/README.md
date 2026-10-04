@@ -557,8 +557,7 @@ a start.
 ## Alerts
 
 `observability-service` evaluates alert rules
-([decision](../docs/adr/0027-alerts.md)) every 30 seconds on the instance
-that holds its alert lock. A rule compares one measure over the last five
+([decision](../docs/adr/0027-alerts.md)) every 30 seconds. A rule compares one measure over the last five
 minutes — the share of 5xx responses, P95 latency, the request rate, the
 share of failed upstream attempts or open connections — with a threshold,
 for every site, one site, one route or one upstream, and fires once the
@@ -567,8 +566,8 @@ notification for each of the rule's channels, which a sender posts in
 Alertmanager's webhook payload, signed as Standard Webhooks specify, and
 retries for a day. A channel's URL and signing secret are sealed with the
 master keys; only the URL's origin is shown, and the secret only when the
-channel is created or rotated. Set `PINGORA_PANEL_PUBLIC_ORIGINS` on
-`observability-service` so notifications link to the console. Email
+channel is created or rotated. Set `PINGORA_PANEL_PUBLIC_ORIGINS` on the
+control plane so notifications link to the console. Email
 channels are reserved and refused as unsupported.
 
 `/api/v1/alert-rules`, `/api/v1/alert-channels` and
