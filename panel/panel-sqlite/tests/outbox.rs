@@ -47,6 +47,18 @@ fn event(aggregate: &str, sequence: u32) -> EventEnvelope {
     )
 }
 
+/// Takes one of the failures left, if any.
+fn take_failure(failures: &AtomicUsize) -> bool {
+    let mut left = failures.load(Ordering::SeqCst);
+    while left > 0 {
+        match failures.compare_exchange_weak(left, left - 1, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => return true,
+            Err(actual) => left = actual,
+        }
+    }
+    false
+}
+
 #[derive(Default)]
 struct RecordingPublisher {
     failures: AtomicUsize,
@@ -56,13 +68,7 @@ struct RecordingPublisher {
 #[async_trait]
 impl EventPublisher for RecordingPublisher {
     async fn publish(&self, envelope: &EventEnvelope) -> Result<PublishReceipt> {
-        if self
-            .failures
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |value| {
-                value.checked_sub(1)
-            })
-            .is_ok()
-        {
+        if take_failure(&self.failures) {
             return Err(PanelError::storage_unavailable("broker unavailable"));
         }
         self.delivered.lock().unwrap().push(envelope.clone());

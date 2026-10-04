@@ -69,13 +69,24 @@ impl EndpointState {
 
     fn record_latency(&self, latency: Duration) {
         let sample = u64::try_from(latency.as_micros()).unwrap_or(u64::MAX);
-        let _ = self.latency_us.fetch_update(Relaxed, Relaxed, |current| {
-            Some(if current == 0 {
+        let mut current = self.latency_us.load(Relaxed);
+        loop {
+            let next = if current == 0 {
                 sample
             } else {
-                (current * (100 - LATENCY_WEIGHT_PERCENT) + sample * LATENCY_WEIGHT_PERCENT) / 100
-            })
-        });
+                let weighted = (u128::from(current) * u128::from(100 - LATENCY_WEIGHT_PERCENT)
+                    + u128::from(sample) * u128::from(LATENCY_WEIGHT_PERCENT))
+                    / 100;
+                u64::try_from(weighted).unwrap_or(u64::MAX)
+            };
+            match self
+                .latency_us
+                .compare_exchange_weak(current, next, Relaxed, Relaxed)
+            {
+                Ok(_) => break,
+                Err(actual) => current = actual,
+            }
+        }
     }
 }
 
