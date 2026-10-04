@@ -533,6 +533,8 @@ keeps that choice in its state directory.
 ppanel container engines
 ppanel container engine disable podman
 ppanel container list --search nginx --state running
+ppanel container restart shop-web-1 --yes
+ppanel container remove nightly-report --volumes --yes
 ```
 
 `GET /api/v1/container-engines` reports each engine: whether it is enabled
@@ -541,9 +543,16 @@ and answers, its version, and how many containers and images it has.
 containers, searched by name or image and filtered by state, with their
 published ports and Compose project. Both need `containers.read`.
 `POST /api/v1/container-engines/{engine}/{enable,disable}` needs
-`containers.manage`, and the audit trail records each change, refused or
+`containers.manage`, as do
+`POST /api/v1/container-engines/{engine}/containers/{container}/{start,stop,restart,kill}`
+and `DELETE /api/v1/container-engines/{engine}/containers/{container}`,
+which removes a running container only with `force` and its anonymous
+volumes with `volumes`. A container is named by its ID, a unique prefix
+of its ID or its name, and the installation's own containers are only
+ever started. The audit trail records each change and action, refused or
 not. The console's Containers page shows the engines and their
-containers.
+containers, with a menu on each container that asks before anything but
+a start.
 
 ## Alerts
 

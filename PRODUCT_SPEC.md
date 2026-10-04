@@ -153,7 +153,7 @@ Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交
 
 0.5 主机代理按 ADR 0030 实现：`ops-agent` 以宿主机原生 systemd 服务运行，使用动态用户与沙箱，不开 TCP 端口；它在权限为 0660、属组为容器用户的 Unix 套接字上以 mTLS 提供 gRPC，握手前校验对端用户，握手后按工作负载身份只允许 `panel-api` 调用，每项能力是独立的 gRPC 服务。凭据由安装的证书机构签发，经 systemd `LoadCredential=` 交给 agent，续期后由路径单元重启它；Compose 安装通过 `compose.ops-agent.yaml` 签发凭据并只把套接字挂进控制面容器。每项能力单独启用、只获得所需权限，agent 报告每项能力是否可用及原因。目录容量（`HOST-016`～`HOST-018`）统计配置、日志与证书目录（Compose 安装中即网关的卷，安装脚本向容器引擎查询它们在主机上的位置）中常规文件的大小与数量，只在同一文件系统内、不跟随链接，超过条目或时间上限时标明不完整；读取所需的 `CAP_DAC_READ_SEARCH` 只在挂载命名空间隐藏 `/var` 其余部分与主机凭据时授予。`GET /api/v1/host/agent`、`GET /api/v1/host/directories`（需要 `host.read`）、`ppanel host agent`、`ppanel host directories` 与控制台主机页提供同样的数据，未安装或无响应的 agent 显示为状态而非错误；CI 的 Compose 检查在运行器上安装并连接 agent。端口占用诊断（`HOST-012`）在 Linux 上从 `/proc` 读取所询端口（默认 80 与 443）上的监听套接字及持有它们的进程的名称、PID、可执行文件与用户，从不返回命令行；读取其他进程的描述符所需的 `CAP_DAC_READ_SEARCH` 与 `CAP_SYS_PTRACE` 由 `listeners.conf` 授予，系统调用过滤仍禁止 `ptrace`，agent 只在获得这些权限后才提供该能力。`GET /api/v1/host/listeners`（需要 `host.read`）、`ppanel host listeners` 与控制台主机页提供同样的数据，并标明端口由网关还是其他进程占用。网关服务管理（`HOST-013`～`HOST-015`）管理实际运行网关的容器：agent 在已启用的容器引擎上按安装的 Compose 项目与服务标签（默认 `pingora-panel` 与 `gatewayd`）找到网关容器，报告其状态、健康检查、上次启动与停止时间、退出码与引擎自动重启次数，并经 Engine API 启动、停止或重启它，引擎完成后返回容器的新状态；该能力依赖容器能力提供的引擎，安装自身的容器中只有网关容器可被停止或重启。契约标明由什么托管网关，原生安装的 systemd 单元可在不改变现有字段的前提下加入。`GET /api/v1/host/gateway-service`（需要 `host.read`）与 `POST /api/v1/host/gateway-service/{start,stop,restart}`（需要只有管理员持有的 `host.manage`）、`ppanel host gateway-service` 与控制台主机页提供同样的能力，停止与重启需要确认；每次变更无论成功与否都以 `host.gateway_service.*` 或 `host.operation.refused` 事件写入审计。CI 的 Compose 检查在运行器上停止、启动并重启真实的网关容器，确认网关随之下线与恢复，并核对审计。
 
-0.5 容器按 ADR 0031 实现：主机代理的容器能力经 `bollard` 连接 `containers.conf` 指定的 Docker 或 Podman socket；agent 因此加入 socket 的属组，经引擎等同宿主机 root，文件中写明了这一点以及加入 Podman socket 的方法。配置的每个引擎默认启用，操作员可以停用，此后面板不再触碰其中运行的内容；这一选择保存在 agent 的状态目录中，保存失败时状态不变。引擎的状态与版本（`CTR-001`、`CTR-002`）、启用与停用（`CTR-003`）、容器列表、按名称或镜像搜索、按状态筛选与端口映射（`CTR-004`～`CTR-006`、`CTR-018`）由 `GET /api/v1/container-engines`、`GET /api/v1/container-engines/{engine}/containers`（需要 `containers.read`）与 `POST /api/v1/container-engines/{engine}/{enable,disable}`（需要 `containers.manage`）、`ppanel container` 与控制台容器页提供；每次引擎变更无论成功与否都以 `container.engine.*` 或 `container.operation.refused` 事件写入审计。CI 的 Compose 检查在运行器上停用并重新启用 Docker，确认选择在 agent 重启后仍然保留，并列出安装自身的容器。
+0.5 容器按 ADR 0031 实现：主机代理的容器能力经 `bollard` 连接 `containers.conf` 指定的 Docker 或 Podman socket；agent 因此加入 socket 的属组，经引擎等同宿主机 root，文件中写明了这一点以及加入 Podman socket 的方法。配置的每个引擎默认启用，操作员可以停用，此后面板不再触碰其中运行的内容；这一选择保存在 agent 的状态目录中，保存失败时状态不变。引擎的状态与版本（`CTR-001`、`CTR-002`）、启用与停用（`CTR-003`）、容器列表、按名称或镜像搜索、按状态筛选与端口映射（`CTR-004`～`CTR-006`、`CTR-018`）由 `GET /api/v1/container-engines`、`GET /api/v1/container-engines/{engine}/containers`（需要 `containers.read`）与 `POST /api/v1/container-engines/{engine}/{enable,disable}`（需要 `containers.manage`）、`ppanel container` 与控制台容器页提供；每次引擎变更无论成功与否都以 `container.engine.*` 或 `container.operation.refused` 事件写入审计。容器的启动、停止、重启、强制停止与删除（`CTR-007`～`CTR-011`）由 `POST /api/v1/container-engines/{engine}/containers/{container}/{start,stop,restart,kill}` 与 `DELETE /api/v1/container-engines/{engine}/containers/{container}`（可选 `force` 与 `volumes`，均需要 `containers.manage`）、`ppanel container start|stop|restart|kill|remove`（除启动外需要 `--yes`）与控制台容器页每行的操作菜单（除启动外需要确认）提供，按 ID、ID 前缀或名称指定容器；安装自身 Compose 项目的容器只允许启动。每次操作无论成功与否都以 `container.started`、`container.stopped`、`container.restarted`、`container.killed`、`container.removed` 或 `container.operation.refused` 事件写入审计，审计页按引擎与容器名展示（`AUDIT-006`）。CI 的 Compose 检查在运行器上停用并重新启用 Docker，确认选择在 agent 重启后仍然保留，列出安装自身的容器，对一个临时容器依次停止、启动、重启、强制停止并删除，逐步向引擎核对状态，确认停止安装自身的容器被拒绝，并核对审计。
 
 ### 3.2 目标仓库边界
 
@@ -1138,7 +1138,7 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | AUDIT-003 | 396 | 配置修改审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“配置修改审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | AUDIT-004 | 397 | 配置发布审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“配置发布审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | AUDIT-005 | 398 | 证书操作审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“证书操作审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
-| AUDIT-006 | 399 | Docker 操作审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“Docker 操作审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| AUDIT-006 | 399 | Docker 操作审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“Docker 操作审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | OBS-001 | 400 | Access Log | 0.5 | A/C/G | Operator | observability-service | 执行“Access Log”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | OBS-002 | 401 | Error Log | 0.5 | A/C/G | Operator | observability-service | 执行“Error Log”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | OBS-003 | 402 | JSON 日志 | 0.5 | A/C/G | Operator | observability-service | 执行“JSON 日志”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
@@ -1198,11 +1198,11 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | CTR-004 | 456 | 容器列表 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“容器列表”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
 | CTR-005 | 457 | 容器搜索 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“容器搜索”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
 | CTR-006 | 458 | 容器状态筛选 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“容器状态筛选”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
-| CTR-007 | 459 | 容器启动 | 0.5 | A/C/G/I | Operator | ops-agent | 执行“容器启动”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CTR-008 | 460 | 容器停止 | 0.5 | A/C/G/I | Operator | ops-agent | 执行“容器停止”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CTR-009 | 461 | 容器重启 | 0.5 | A/C/G/I | Operator | ops-agent | 执行“容器重启”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CTR-010 | 462 | 容器强制停止 | 0.5 | A/C/G/I | Operator | ops-agent | 执行“容器强制停止”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CTR-011 | 463 | 容器删除 | 0.5 | A/C/G/I | Operator | ops-agent | 执行“容器删除”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| CTR-007 | 459 | 容器启动 | 0.5 | A/C/G/I | Operator | ops-agent | 执行“容器启动”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CTR-008 | 460 | 容器停止 | 0.5 | A/C/G/I | Operator | ops-agent | 执行“容器停止”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CTR-009 | 461 | 容器重启 | 0.5 | A/C/G/I | Operator | ops-agent | 执行“容器重启”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CTR-010 | 462 | 容器强制停止 | 0.5 | A/C/G/I | Operator | ops-agent | 执行“容器强制停止”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CTR-011 | 463 | 容器删除 | 0.5 | A/C/G/I | Operator | ops-agent | 执行“容器删除”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | CTR-012 | 464 | 容器日志 | 0.5 | A/C/G/I | Operator | ops-agent | 执行“容器日志”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | CTR-013 | 465 | 容器日志实时查看 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“容器日志实时查看”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
 | CTR-014 | 466 | 容器基本 Inspect | 0.5 | A/C/G/I | Operator | ops-agent | 执行“容器基本 Inspect”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
@@ -1434,7 +1434,7 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | 新增团队/平台需求 | 105 |
 | 总 Feature ID | 685 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
-| 当前 `Implemented` | 398（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-005`；身份：`IAM-001`～`IAM-038`；证书：`TLS-001`～`TLS-033`；安全：`SEC-001`～`SEC-035`；可观测：`OBS-001`～`OBS-044`、`OBS-047`～`OBS-053`；主机：`HOST-001`～`HOST-018`；容器：`CTR-001`～`CTR-006`、`CTR-018`） |
+| 当前 `Implemented` | 404（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-006`；身份：`IAM-001`～`IAM-038`；证书：`TLS-001`～`TLS-033`；安全：`SEC-001`～`SEC-035`；可观测：`OBS-001`～`OBS-044`、`OBS-047`～`OBS-053`；主机：`HOST-001`～`HOST-018`；容器：`CTR-001`～`CTR-011`、`CTR-018`） |
 | 1.0 要求 `Verified` | 685 |
 
 分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 47、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。
