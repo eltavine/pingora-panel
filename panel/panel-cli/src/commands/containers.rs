@@ -1,7 +1,7 @@
 //! The container engines the host agent reaches and what runs on them.
 
 use crate::{
-    client::{Api, Result},
+    client::{Api, CliError, Result},
     output::{text, Column, Format, Output},
 };
 use clap::Subcommand;
@@ -30,6 +30,76 @@ pub(crate) enum ContainerCommand {
         #[arg(long = "state", value_name = "STATE")]
         states: Vec<String>,
     },
+    /// Starts a container.
+    Start {
+        #[command(flatten)]
+        target: Target,
+    },
+    /// Stops a container: its stop signal, then SIGKILL once its stop
+    /// timeout passes.
+    Stop {
+        #[command(flatten)]
+        target: Target,
+        /// Confirms that what runs in it stops.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Restarts a container.
+    Restart {
+        #[command(flatten)]
+        target: Target,
+        /// Confirms that what runs in it stops while it restarts.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Kills a container at once with SIGKILL.
+    Kill {
+        #[command(flatten)]
+        target: Target,
+        /// Confirms that what runs in it stops without a chance to finish.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Removes a container.
+    Remove {
+        #[command(flatten)]
+        target: Target,
+        /// Kills and removes a running container instead of refusing to.
+        #[arg(long)]
+        force: bool,
+        /// Removes its anonymous volumes with it.
+        #[arg(long)]
+        volumes: bool,
+        /// Confirms that the container is removed.
+        #[arg(long)]
+        yes: bool,
+    },
+}
+
+/// The container an action is taken on.
+#[derive(clap::Args)]
+pub(crate) struct Target {
+    /// Its ID, a unique prefix of its ID or its name.
+    #[arg(value_parser = reference)]
+    container: String,
+    /// `docker` or `podman`.
+    #[arg(long, default_value = "docker")]
+    engine: String,
+}
+
+/// A container's ID or name, by the characters the engines allow in either.
+fn reference(value: &str) -> std::result::Result<String, String> {
+    let valid = !value.is_empty()
+        && value.len() <= 128
+        && value.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'));
+    if valid {
+        Ok(value.to_owned())
+    } else {
+        Err("not a container's ID or name".to_owned())
+    }
 }
 
 #[derive(Subcommand)]
@@ -145,6 +215,61 @@ pub async fn run(api: &Api, output: &Output, command: ContainerCommand) -> Resul
                 }
             }
         }
+        ContainerCommand::Start { target } => act(api, output, &target, "start").await?,
+        ContainerCommand::Stop { target, yes } => {
+            confirmed(yes)?;
+            act(api, output, &target, "stop").await?;
+        }
+        ContainerCommand::Restart { target, yes } => {
+            confirmed(yes)?;
+            act(api, output, &target, "restart").await?;
+        }
+        ContainerCommand::Kill { target, yes } => {
+            confirmed(yes)?;
+            act(api, output, &target, "kill").await?;
+        }
+        ContainerCommand::Remove {
+            target,
+            force,
+            volumes,
+            yes,
+        } => {
+            confirmed(yes)?;
+            let path = format!(
+                "/api/v1/container-engines/{}/containers/{}?force={force}&volumes={volumes}",
+                target.engine, target.container
+            );
+            let change = api.change(Method::DELETE, &path, None, None).await?.body;
+            if output.format == Format::Json {
+                output.json(&change);
+            } else if !output.quiet {
+                println!("removed {}", text(&change["name"]));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn confirmed(yes: bool) -> Result<()> {
+    if yes {
+        Ok(())
+    } else {
+        Err(CliError::Usage(
+            "what runs in the container stops; pass --yes to confirm".into(),
+        ))
+    }
+}
+
+async fn act(api: &Api, output: &Output, target: &Target, action: &str) -> Result<()> {
+    let path = format!(
+        "/api/v1/container-engines/{}/containers/{}/{action}",
+        target.engine, target.container
+    );
+    let change = api.change(Method::POST, &path, None, None).await?.body;
+    if output.format == Format::Json {
+        output.json(&change);
+    } else if !output.quiet {
+        output.item(&change["container"], CONTAINERS);
     }
     Ok(())
 }

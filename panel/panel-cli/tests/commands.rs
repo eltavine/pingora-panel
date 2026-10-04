@@ -235,6 +235,18 @@ async fn api(
             ]
         }))
         .into_response(),
+        ("POST", "/api/v1/container-engines/docker/containers/shop-web-1/stop") => Json(json!({
+            "id": "b2", "name": "shop-web-1",
+            "container": {"id": "b2", "names": ["shop-web-1"], "image": "nginx:1.27",
+                          "image_id": "sha256:aa", "created": "2026-10-04T07:00:00Z",
+                          "state": "exited", "status": "Exited (0) 1 second ago", "ports": [],
+                          "labels": {}, "compose_project": "shop"}
+        }))
+        .into_response(),
+        ("DELETE", "/api/v1/container-engines/docker/containers/shop-web-1") => Json(json!({
+            "id": "b2", "name": "shop-web-1", "container": null
+        }))
+        .into_response(),
         ("GET", "/api/v1/host/gateway-service") => Json(json!({
             "observed_at": "2026-10-04T10:00:00Z", "supervisor": "container",
             "container": {"engine": "docker", "id": "g7", "name": "pingora-panel-gatewayd-1",
@@ -1246,6 +1258,34 @@ fn container_engines_and_their_containers_from_the_command_line() {
     }
     let asked = stub.requests("GET", "/api/v1/container-engines/docker/containers");
     assert_eq!(asked[0].query, "search=nginx&state=running%2Cpaused");
+}
+
+#[test]
+fn containers_are_stopped_and_removed_with_confirmation() {
+    let stub = Stub::start();
+    let stop = "/api/v1/container-engines/docker/containers/shop-web-1/stop";
+    let unconfirmed = stub.ppanel(&["container", "stop", "shop-web-1"]);
+    assert!(!unconfirmed.status.success());
+    assert!(stderr(&unconfirmed).contains("--yes"));
+    assert!(stub.requests("POST", stop).is_empty());
+
+    let stopped = stub.ppanel(&["container", "stop", "shop-web-1", "--yes"]);
+    assert!(stopped.status.success(), "{}", stderr(&stopped));
+    assert!(stdout(&stopped).contains("exited"), "{}", stdout(&stopped));
+    assert_eq!(stub.requests("POST", stop).len(), 1);
+
+    let removed = stub.ppanel(&["container", "remove", "shop-web-1", "--force", "--yes"]);
+    assert!(removed.status.success(), "{}", stderr(&removed));
+    assert!(stdout(&removed).contains("removed shop-web-1"));
+    let asked = stub.requests(
+        "DELETE",
+        "/api/v1/container-engines/docker/containers/shop-web-1",
+    );
+    assert_eq!(asked[0].query, "force=true&volumes=false");
+
+    let refused = stub.ppanel(&["container", "start", "../enable"]);
+    assert!(!refused.status.success());
+    assert!(stderr(&refused).contains("not a container's ID or name"));
 }
 
 #[test]
