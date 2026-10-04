@@ -73,6 +73,29 @@ Web Signature and Keys (RFC 7515, RFC 7517, RFC 7518).
   page so that it is noticed and reviewed. Other accounts are refused even
   with the right password, which tells nobody without it anything.
 
+## Alternatives
+
+Compared in October 2026:
+
+- **`openidconnect` 4.0.1**, the most used Rust relying-party library,
+  covers discovery, the code flow with PKCE and ID token verification. It
+  verifies signatures with RustCrypto's `rsa` 0.9, `p256`, `p384` and
+  `ed25519-dalek`, a second cryptography stack beside `ring`. No `rsa`
+  release fixes RUSTSEC-2023-0071, so the dependency policy would need a
+  standing exception, and the crate brings older majors of `base64`,
+  `rand`, `thiserror` and `itertools` beside the panel's. Its latest
+  release is from July 2025.
+- **`oauth2` 5 for the code exchange alone** would replace the token
+  request and PKCE, a small part of the client, and still bring `rand` 0.8
+  and RustCrypto's `sha2`.
+- **The panel's client** keeps the protocol steps (discovery, the code
+  flow, PKCE, `state`, `nonce`, key selection and refresh) in about 1,400
+  lines with their unit tests, and leaves JWT parsing and claim checks to
+  `jsonwebtoken` and signatures to `ring`.
+
+The choice is revisited when `openidconnect` can verify signatures through
+`ring` or another provider the panel already uses.
+
 ## Consequences
 
 - The panel becomes a relying party of each provider and needs its public
