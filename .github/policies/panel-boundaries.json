@@ -180,6 +180,18 @@
         "panel-service"
       ]
     },
+    "ops-agent": {
+      "catalog": false,
+      "allowed_workspace_dependencies": [
+        "panel-context",
+        "panel-contracts",
+        "panel-environment",
+        "panel-errors",
+        "panel-pki",
+        "panel-service",
+        "panel-tls"
+      ]
+    },
     "observability-service": {
       "catalog": false,
       "allowed_workspace_dependencies": [

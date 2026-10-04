@@ -2615,6 +2615,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
+name = "ops-agent"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "panel-context",
+ "panel-contracts",
+ "panel-environment",
+ "panel-errors",
+ "panel-pki",
+ "panel-service",
+ "panel-tls",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tonic",
+ "tonic-health",
+ "tracing",
+ "walkdir",
+]
+
+[[package]]
 name = "ouroboros"
 version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
