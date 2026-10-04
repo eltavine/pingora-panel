@@ -97,6 +97,22 @@ services:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
 
+  # Publishes the host's CPU, memory, filesystems, load, network, release
+  # and clock to Prometheus, reading the host's root without changing it.
+  node-exporter:
+    image: docker.io/prom/node-exporter:v1.12.1@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
+    network_mode: host
+    pid: host
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    command:
+      - --path.rootfs=/host
+      - --web.listen-address=127.0.0.1:9100
+    volumes:
+      - /:/host:ro,rslave
+
   # Keeps the gateway's access and error logs; only observability-service
   # queries it.
   loki:
