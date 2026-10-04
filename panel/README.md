@@ -117,7 +117,12 @@ metrics
 ([decision](../docs/adr/0022-metrics-logs-and-traces.md)) from `/metrics` on
 `PINGORA_PANEL_OPS_ADDR`, `127.0.0.1:9185` by default; off loopback, scrapes
 must present `PINGORA_PANEL_METRICS_TOKEN` (or the file
-`PINGORA_PANEL_METRICS_TOKEN_FILE` names) as a bearer token. See the
+`PINGORA_PANEL_METRICS_TOKEN_FILE` names) as a bearer token. With
+`PINGORA_PANEL_LOG_DIR` it writes access and error logs
+([decision](../docs/adr/0025-access-and-error-logs.md)) under that directory:
+`sites/<site>.access.log`, `access.log` for requests no site took and
+`error.log`. The Compose installation's `otel-collector` ships them to
+`loki` with `deploy/otel-collector.yaml` and `deploy/loki.yaml`. See the
 [gateway foundation runbook](../docs/gateway-foundation-runbook.md) for startup,
 readiness, recovery and current limits.
 

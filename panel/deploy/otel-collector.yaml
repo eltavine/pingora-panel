@@ -1,0 +1,110 @@
+# Ships the gateway's log files to Loki over OTLP (ADR 0025). JSON lines
+# already carry OpenTelemetry attribute names; Combined lines are parsed and
+# renamed to them, and take their site from the file name. Read offsets and
+# the send queue are kept on disk, so a restart neither loses nor repeats
+# records.
+
+extensions:
+  file_storage:
+    directory: ${env:COLLECTOR_STORAGE_DIR}
+    create_directory: true
+
+receivers:
+  file_log/gateway:
+    include:
+      - ${env:PINGORA_PANEL_LOG_DIR}/access.log
+      - ${env:PINGORA_PANEL_LOG_DIR}/error.log
+      - ${env:PINGORA_PANEL_LOG_DIR}/sites/*.access.log
+    start_at: beginning
+    include_file_name: false
+    include_file_path: true
+    storage: file_storage
+    resource:
+      service.name: pingora-panel-gateway
+    operators:
+      - type: router
+        routes:
+          - output: json
+            expr: 'body startsWith "{"'
+        default: combined
+
+      - id: json
+        type: json_parser
+        timestamp:
+          parse_from: attributes.timestamp
+          layout_type: gotime
+          layout: "2006-01-02T15:04:05.999999Z07:00"
+        output: severity
+
+      - id: combined
+        type: regex_parser
+        regex: '^(?P<client>\S+) \S+ \S+ \[(?P<time>[^\]]+)\] "(?P<method>\S+) (?P<target>\S+) (?P<protocol>[^"]+)" (?P<status>\d{3}) (?P<bytes>\d+) "(?P<referer>[^"]*)" "(?P<agent>[^"]*)"$'
+        timestamp:
+          parse_from: attributes.time
+          layout: "%d/%b/%Y:%H:%M:%S %z"
+      - type: move
+        from: attributes.client
+        to: attributes["client.address"]
+      - type: move
+        from: attributes.method
+        to: attributes["http.request.method"]
+      - type: move
+        from: attributes.target
+        to: attributes["url.original"]
+      - type: move
+        from: attributes.status
+        to: attributes["http.response.status_code"]
+      - type: move
+        from: attributes.bytes
+        to: attributes["http.response.body.size"]
+      - type: move
+        from: attributes.referer
+        to: attributes["http.request.header.referer"]
+      - type: move
+        from: attributes.agent
+        to: attributes["user_agent.original"]
+      - type: remove
+        field: attributes.protocol
+      - type: remove
+        field: attributes.time
+      - type: regex_parser
+        parse_from: attributes["log.file.path"]
+        regex: '/sites/(?P<site>[^/]+)\.access\.log$'
+        if: 'attributes["log.file.path"] matches "/sites/[^/]+\\.access\\.log$"'
+      - type: move
+        if: "attributes.site != nil"
+        from: attributes.site
+        to: attributes["pingora_panel.site.id"]
+
+      - id: severity
+        type: severity_parser
+        if: "attributes.severity_text != nil"
+        parse_from: attributes.severity_text
+
+exporters:
+  otlp_http/loki:
+    endpoint: ${env:LOKI_OTLP_ENDPOINT}
+    sending_queue:
+      enabled: true
+      storage: file_storage
+    retry_on_failure:
+      enabled: true
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+  batch: {}
+
+service:
+  extensions: [file_storage]
+  telemetry:
+    logs:
+      level: warn
+    metrics:
+      level: none
+  pipelines:
+    logs:
+      receivers: [file_log/gateway]
+      processors: [memory_limiter, batch]
+      exporters: [otlp_http/loki]

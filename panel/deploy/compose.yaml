@@ -97,6 +97,46 @@ services:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
 
+  # Keeps the gateway's access and error logs; only observability-service
+  # queries it.
+  loki:
+    image: docker.io/grafana/loki:3.7.8@sha256:1107dd5274e0ada47e42472b7a7e71f3b2a2fe878878108f3e2f9e51528f0193
+    network_mode: host
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    command: ["-config.file=/etc/loki/loki.yaml", "-config.expand-env=true"]
+    environment:
+      LOKI_DATA_DIR: /loki
+    volumes:
+      - ./loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+    tmpfs: [/tmp]
+
+  # Ships the gateway's log files to Loki. It runs as the files' owner to
+  # read them, without any capability to read other users' files.
+  otel-collector:
+    image: docker.io/otel/opentelemetry-collector-contrib:0.161.0@sha256:fd328de2552466ad78385e1b1289c3f2402b1c45f265b252aab1955b42845ac1
+    network_mode: host
+    restart: unless-stopped
+    user: "0:0"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    environment:
+      PINGORA_PANEL_LOG_DIR: /var/log/pingora-panel
+      COLLECTOR_STORAGE_DIR: /var/lib/otelcol
+      LOKI_OTLP_ENDPOINT: http://127.0.0.1:3100/otlp
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+      - gateway-logs:/var/log/pingora-panel:ro
+      - collector-data:/var/lib/otelcol
+    depends_on:
+      loki:
+        condition: service_started
+
   # Creates the certificate authority and every service's credentials.
   pki-init:
     <<: *pki
@@ -153,8 +193,11 @@ services:
       PINGORA_PANEL_STATIC_ROOT: /srv/pingora-panel/sites
       # Serves /metrics to Prometheus.
       PINGORA_PANEL_OPS_ADDR: 127.0.0.1:9185
+      # Access and error logs, which otel-collector ships to Loki.
+      PINGORA_PANEL_LOG_DIR: /var/log/pingora-panel
     volumes:
       - gateway-state:/var/lib/pingora-panel/gateway
+      - gateway-logs:/var/log/pingora-panel
       - gateway-secrets:/var/lib/pingora-panel/gateway-secrets:ro
       - sites:/srv/pingora-panel/sites:ro
       - credentials-gatewayd:/var/lib/pingora-panel/credentials/gatewayd:ro
@@ -294,7 +337,10 @@ volumes:
   postgres-data:
   nats-data:
   prometheus-data:
+  loki-data:
+  collector-data:
   gateway-state:
+  gateway-logs:
   gateway-secrets:
   sites:
   pki-authority:

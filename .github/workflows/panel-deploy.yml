@@ -144,6 +144,28 @@ jobs:
           done
           test "$requests" -gt 0
 
+      - name: Keep the gateway's logs in Loki
+        run: |
+          for _ in $(seq 1 60); do
+            if curl --fail --silent --output /dev/null http://127.0.0.1:3100/ready; then
+              break
+            fi
+            sleep 2
+          done
+          records=0
+          for _ in $(seq 1 45); do
+            records=$(curl --silent --get http://127.0.0.1:3100/loki/api/v1/query_range \
+              --data-urlencode 'query={service_name="pingora-panel-gateway"} | pingora_panel_site_id != ""' \
+              --data-urlencode "start=$(( $(date +%s) - 3600 ))000000000" \
+              | python3 -c "import json, sys; r = json.load(sys.stdin).get('data', {}).get('result', []); print(sum(len(s['values']) for s in r))" \
+              || echo 0)
+            if [ "$records" -gt 0 ]; then
+              break
+            fi
+            sleep 2
+          done
+          test "$records" -gt 0
+
       - name: Audit the changes
         run: |
           ppanel() { docker compose exec -T -e PPANEL_TOKEN panel-api ppanel "$@"; }
