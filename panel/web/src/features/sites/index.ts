@@ -20,5 +20,5 @@ export const sitesFeature: FeatureModule = {
       meta: { title: 'nav.sites' },
     },
   ],
-  navigation: [{ id: 'sites', title: 'nav.sites', icon: Globe, to: '/sites' }],
+  navigation: [{ id: 'sites', title: 'nav.sites', icon: Globe, to: '/sites', navigationBar: 30 }],
 }

@@ -10,6 +10,13 @@ export interface NavigationItem {
   to: string
   /** Shown only to accounts with this permission; the feature's by default. */
   permission?: string
+  /**
+   * Offers the destination to the navigation bar of compact windows, which
+   * shows the four lowest the account may open (ADR 0023).
+   */
+  navigationBar?: number
+  /** i18n key of a shorter label where space is tight, as in the navigation bar. */
+  shortTitle?: string
 }
 
 export type NavigationGroup = 'operate' | 'configure' | 'administer'

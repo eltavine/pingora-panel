@@ -44,7 +44,7 @@ async function setUp(page: Page) {
 async function smallTargets(page: Page): Promise<string[]> {
   return page.evaluate((minimum) => {
     const controls = document.querySelectorAll<HTMLElement>(
-      'button, [role="combobox"], input:not([type="hidden"]), a[data-sidebar="menu-button"]',
+      'button, [role="combobox"], input:not([type="hidden"]), a[data-sidebar="menu-button"], nav a',
     )
     const small: string[] = []
     for (const control of controls) {

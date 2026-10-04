@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { watch } from 'vue'
 import { Waypoints } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
@@ -13,37 +13,27 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  useSidebar,
 } from '@/components/ui/sidebar'
-import { features, navigationGroups } from '@/features'
-import { useSession } from '@/lib/session'
+import { useNavigation } from './navigation'
 
 const { t } = useI18n()
 const route = useRoute()
-const { can } = useSession()
+const { groups, isActive } = useNavigation()
+const { setOpenMobile } = useSidebar()
 
-const groups = computed(() =>
-  navigationGroups
-    .map((group) => ({
-      ...group,
-      items: features
-        .filter((feature) => feature.group === group.id)
-        .flatMap((feature) =>
-          feature.navigation.filter((item) => {
-            const permission = item.permission ?? feature.permission
-            return !permission || can(permission)
-          }),
-        ),
-    }))
-    .filter((group) => group.items.length > 0),
+watch(
+  () => route.fullPath,
+  () => setOpenMobile(false),
 )
-
-function isActive(to: string) {
-  return to === '/' ? route.path === '/' : route.path.startsWith(to)
-}
 </script>
 
 <template>
-  <Sidebar collapsible="icon">
+  <Sidebar
+    collapsible="icon"
+    :mobile-title="t('shell.navigation')"
+    :mobile-description="t('shell.navigationDescription')"
+  >
     <SidebarHeader>
       <SidebarMenu>
         <SidebarMenuItem>
@@ -79,6 +69,6 @@ function isActive(to: string) {
         </SidebarMenu>
       </SidebarGroup>
     </SidebarContent>
-    <SidebarRail />
+    <SidebarRail :aria-label="t('shell.toggleSidebar')" :title="t('shell.toggleSidebar')" />
   </Sidebar>
 </template>

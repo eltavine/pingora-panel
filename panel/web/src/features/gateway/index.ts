@@ -13,5 +13,14 @@ export const gatewayFeature: FeatureModule = {
       meta: { title: 'nav.overview' },
     },
   ],
-  navigation: [{ id: 'gateway-overview', title: 'nav.overview', icon: Gauge, to: '/' }],
+  navigation: [
+    {
+      id: 'gateway-overview',
+      title: 'nav.overview',
+      icon: Gauge,
+      to: '/',
+      navigationBar: 10,
+      shortTitle: 'nav.overviewShort',
+    },
+  ],
 }

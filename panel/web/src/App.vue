@@ -12,5 +12,5 @@ useTitle(() => t('app.name'))
   <TooltipProvider :delay-duration="300">
     <RouterView />
   </TooltipProvider>
-  <Toaster />
+  <Toaster :mobile-offset="{ bottom: 'calc(5rem + env(safe-area-inset-bottom))' }" />
 </template>

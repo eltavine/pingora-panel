@@ -20,5 +20,7 @@ export const upstreamsFeature: FeatureModule = {
       meta: { title: 'nav.upstreams' },
     },
   ],
-  navigation: [{ id: 'upstreams', title: 'nav.upstreams', icon: Server, to: '/upstreams' }],
+  navigation: [
+    { id: 'upstreams', title: 'nav.upstreams', icon: Server, to: '/upstreams', navigationBar: 50 },
+  ],
 }

@@ -13,5 +13,7 @@ export const trafficFeature: FeatureModule = {
       meta: { title: 'nav.traffic' },
     },
   ],
-  navigation: [{ id: 'traffic', title: 'nav.traffic', icon: Activity, to: '/traffic' }],
+  navigation: [
+    { id: 'traffic', title: 'nav.traffic', icon: Activity, to: '/traffic', navigationBar: 20 },
+  ],
 }

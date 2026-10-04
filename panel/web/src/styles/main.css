@@ -67,6 +67,11 @@
   /* Material 3 standard easing (ADR 0023). */
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  /* Material 3 window size classes for the shell (ADR 0023); src/lib/window.ts matches them. */
+  --breakpoint-medium: 37.5rem;
+  --breakpoint-expanded: 52.5rem;
+  --breakpoint-large: 75rem;
+  --breakpoint-extra-large: 100rem;
   --font-sans:
     'Geist Variable', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC',
     ui-sans-serif, system-ui, sans-serif;

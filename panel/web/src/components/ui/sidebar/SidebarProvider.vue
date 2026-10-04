@@ -2,8 +2,9 @@
 import type { HTMLAttributes, Ref } from 'vue'
 import { defaultDocument, useEventListener, useMediaQuery, useVModel } from '@vueuse/core'
 import { TooltipProvider } from 'reka-ui'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { cn } from '@/lib/utils'
+import { COMPACT_WINDOW, MEDIUM_WINDOW } from '@/lib/window'
 import {
   provideSidebarContext,
   SIDEBAR_COOKIE_MAX_AGE,
@@ -29,13 +30,28 @@ const emits = defineEmits<{
   'update:open': [open: boolean]
 }>()
 
-const isMobile = useMediaQuery('(max-width: 768px)')
+const isMobile = useMediaQuery(COMPACT_WINDOW)
 const openMobile = ref(false)
 
 const open = useVModel(props, 'open', emits, {
   defaultValue: props.defaultOpen ?? false,
   passive: (props.open === undefined) as false,
 }) as Ref<boolean>
+
+// Medium windows start with the rail; leaving them restores the drawer.
+// The saved preference stays as it was.
+const isRail = useMediaQuery(MEDIUM_WINDOW)
+watch(
+  isRail,
+  (rail, wasRail) => {
+    if (rail) {
+      open.value = false
+    } else if (wasRail) {
+      open.value = true
+    }
+  },
+  { immediate: true },
+)
 
 function setOpen(value: boolean) {
   open.value = value // emits('update:open', value)
@@ -80,8 +96,8 @@ provideSidebarContext({
     <div
       data-slot="sidebar-wrapper"
       :style="{
-        '--sidebar-width': SIDEBAR_WIDTH,
-        '--sidebar-width-icon': SIDEBAR_WIDTH_ICON,
+        '--sidebar-width': `calc(${SIDEBAR_WIDTH} + env(safe-area-inset-left))`,
+        '--sidebar-width-icon': `calc(${SIDEBAR_WIDTH_ICON} + env(safe-area-inset-left))`,
       }"
       :class="
         cn(

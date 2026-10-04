@@ -13,5 +13,7 @@ export const approvalsFeature: FeatureModule = {
       meta: { title: 'nav.approvals' },
     },
   ],
-  navigation: [{ id: 'approvals', title: 'nav.approvals', icon: Stamp, to: '/approvals' }],
+  navigation: [
+    { id: 'approvals', title: 'nav.approvals', icon: Stamp, to: '/approvals', navigationBar: 40 },
+  ],
 }

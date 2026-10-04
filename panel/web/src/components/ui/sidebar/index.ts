@@ -6,6 +6,9 @@ export interface SidebarProps {
   side?: 'left' | 'right'
   variant?: 'sidebar' | 'floating' | 'inset'
   collapsible?: 'offcanvas' | 'icon' | 'none'
+  /** Accessible name and description of the drawer on compact windows. */
+  mobileTitle?: string
+  mobileDescription?: string
   class?: HTMLAttributes['class']
 }
 

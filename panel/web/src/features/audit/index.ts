@@ -13,5 +13,7 @@ export const auditFeature: FeatureModule = {
       meta: { title: 'nav.audit' },
     },
   ],
-  navigation: [{ id: 'audit', title: 'nav.audit', icon: ScrollText, to: '/audit' }],
+  navigation: [
+    { id: 'audit', title: 'nav.audit', icon: ScrollText, to: '/audit', navigationBar: 60 },
+  ],
 }
