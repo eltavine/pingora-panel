@@ -1,0 +1,131 @@
+syntax = "proto3";
+
+package pingora.panel.ops.v1;
+
+import "common/v1/common.proto";
+import "google/protobuf/timestamp.proto";
+
+// The container engines the agent reaches and what runs on them (ADR 0031).
+// Engines are named `docker` or `podman`; which sockets they are is the
+// agent's configuration, never the caller's.
+service Containers {
+  rpc Engines(ContainersEnginesRequest) returns (ContainersEnginesResponse);
+  // Enables or disables an engine; the agent keeps the choice.
+  rpc SetEngine(ContainersSetEngineRequest) returns (ContainersSetEngineResponse);
+  rpc List(ContainersListRequest) returns (ContainersListResponse);
+}
+
+message EngineVersion {
+  // Such as `28.3.3`.
+  string version = 1;
+  string api_version = 2;
+  string os = 3;
+  string architecture = 4;
+  string kernel_version = 5;
+  string go_version = 6;
+}
+
+message EngineInfo {
+  uint32 containers = 1;
+  uint32 running = 2;
+  uint32 paused = 3;
+  uint32 stopped = 4;
+  uint32 images = 5;
+  string storage_driver = 6;
+  string cgroup_driver = 7;
+  string operating_system = 8;
+  uint32 cpus = 9;
+  uint64 memory_bytes = 10;
+  // The host's name as the engine reports it.
+  string name = 11;
+}
+
+message Engine {
+  // `docker` or `podman`.
+  string id = 1;
+  // The socket on the host.
+  string socket = 2;
+  bool enabled = 3;
+  // False when the agent cannot reach it; version and info are then unset.
+  bool reachable = 4;
+  // Why it is unreachable.
+  string detail = 5;
+  EngineVersion version = 6;
+  EngineInfo info = 7;
+}
+
+message ContainersEnginesRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+}
+
+message ContainersEnginesResponse {
+  repeated Engine engines = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message ContainersSetEngineRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string engine = 2;
+  bool enabled = 3;
+}
+
+message ContainersSetEngineResponse {
+  Engine engine = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+enum ContainerState {
+  CONTAINER_STATE_UNSPECIFIED = 0;
+  CONTAINER_STATE_CREATED = 1;
+  CONTAINER_STATE_RUNNING = 2;
+  CONTAINER_STATE_PAUSED = 3;
+  CONTAINER_STATE_RESTARTING = 4;
+  CONTAINER_STATE_EXITED = 5;
+  CONTAINER_STATE_REMOVING = 6;
+  CONTAINER_STATE_DEAD = 7;
+  CONTAINER_STATE_STOPPING = 8;
+}
+
+message PortMapping {
+  // The container's port.
+  uint32 private_port = 1;
+  // The host's port; 0 when it is not published.
+  uint32 public_port = 2;
+  // The host address it is published on, such as `0.0.0.0`.
+  string host_ip = 3;
+  // `tcp`, `udp` or `sctp`.
+  string protocol = 4;
+}
+
+// A container as a list shows it; its command is left out, since command
+// lines carry secrets.
+message Container {
+  string id = 1;
+  // Without the leading slash.
+  repeated string names = 2;
+  string image = 3;
+  string image_id = 4;
+  google.protobuf.Timestamp created = 5;
+  ContainerState state = 6;
+  // Such as `Up 3 hours (healthy)`.
+  string status = 7;
+  repeated PortMapping ports = 8;
+  map<string, string> labels = 9;
+  // The Compose project that created it, if one did.
+  string compose_project = 10;
+}
+
+message ContainersListRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string engine = 2;
+  // Matched against names and images, ignoring case; empty for every one.
+  string search = 3;
+  // Only containers in these states; every state when empty.
+  repeated ContainerState states = 4;
+}
+
+message ContainersListResponse {
+  google.protobuf.Timestamp observed_at = 1;
+  repeated Container containers = 2;
+  .pingora.panel.common.v1.Error error = 3;
+}
