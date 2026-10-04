@@ -85,6 +85,16 @@ fn bytes(value: &Value) -> String {
     format!("{size:.1} TiB")
 }
 
+/// An address and port as a socket address, with brackets around IPv6.
+fn node(address: &Value, port: &Value) -> String {
+    let address = text(address);
+    if address.contains(':') {
+        format!("[{address}]:{}", text(port))
+    } else {
+        format!("{address}:{}", text(port))
+    }
+}
+
 fn percent(value: &Value) -> String {
     value
         .as_f64()
@@ -157,6 +167,15 @@ const ROUTES: &[Column] = &[
     ("REQUESTS", |route| count(&route["requests"])),
 ];
 
+const UPSTREAM_FAILURES: &[Column] = &[
+    ("UPSTREAM", |failure| text(&failure["upstream"])),
+    ("NODE", |failure| {
+        node(&failure["address"], &failure["port"])
+    }),
+    ("ERROR", |failure| text(&failure["error_type"])),
+    ("FAILURES", |failure| count(&failure["failures"])),
+];
+
 const DOMAINS: &[Column] = &[
     ("SITE", |domain| text(&domain["site"])),
     ("DOMAIN", |domain| text(&domain["domain"])),
@@ -184,6 +203,13 @@ pub async fn run(api: &Api, output: &Output, command: TrafficCommand) -> Result<
                 {
                     println!();
                     output.list(&summary["upstreams"], UPSTREAMS);
+                }
+                if summary["upstream_failures"]
+                    .as_array()
+                    .is_some_and(|items| !items.is_empty())
+                {
+                    println!();
+                    output.list(&summary["upstream_failures"], UPSTREAM_FAILURES);
                 }
                 if summary["routes"]
                     .as_array()
@@ -230,5 +256,10 @@ mod tests {
         assert_eq!(bytes(&json!(2048)), "2.0 KiB");
         assert_eq!(percent(&json!(0.125)), "12.5%");
         assert_eq!(count(&json!(119.6)), "120");
+        assert_eq!(node(&json!("10.0.0.7"), &json!(8080)), "10.0.0.7:8080");
+        assert_eq!(
+            node(&json!("2001:db8::7"), &json!(443)),
+            "[2001:db8::7]:443"
+        );
     }
 }

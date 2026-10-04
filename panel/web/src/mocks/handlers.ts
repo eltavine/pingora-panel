@@ -127,6 +127,15 @@ function summary(windowSeconds: number): TrafficSummaryResponse {
       { site: 'docs', route: 'pages', requests: requests * 0.2 },
       { site: 'blog', route: 'posts', requests: requests * 0.1 },
     ],
+    upstream_failures: [
+      {
+        upstream: 'docs-app',
+        address: '10.0.1.11',
+        port: 8080,
+        error_type: 'connect_timeout',
+        failures: Math.round(requests * 0.001),
+      },
+    ],
     domains: [
       { site: 'shop', domain: 'shop.example', requests: requests * 0.52 },
       { site: 'docs', domain: 'docs.example', requests: requests * 0.2 },

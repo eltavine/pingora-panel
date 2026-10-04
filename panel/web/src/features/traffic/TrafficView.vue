@@ -15,6 +15,7 @@ import {
   RefreshCw,
   Globe,
   Route as RouteIcon,
+  Unplug,
   Server,
   Timer,
   TriangleAlert,
@@ -50,7 +51,7 @@ import {
 import { useSession } from '@/lib/session'
 import StatusBreakdown from './StatusBreakdown.vue'
 import TrafficChart from './TrafficChart.vue'
-import { formatters, REFRESH_INTERVAL_MS, WINDOWS } from './presentation'
+import { formatters, nodeOf, REFRESH_INTERVAL_MS, WINDOWS } from './presentation'
 
 const ALL = '*'
 
@@ -354,6 +355,41 @@ function refresh() {
               </TableBody>
             </Table>
             <p v-else class="text-muted-foreground text-sm">{{ t('traffic.noUpstreams') }}</p>
+          </CardContent>
+        </Card>
+        <Card class="min-w-0">
+          <CardHeader>
+            <CardTitle class="flex items-center gap-2">
+              <Unplug class="size-4" aria-hidden="true" />{{ t('traffic.upstreamFailures') }}
+            </CardTitle>
+          </CardHeader>
+          <CardContent class="overflow-x-auto">
+            <Table v-if="figures.upstream_failures.length">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{{ t('traffic.upstream') }}</TableHead>
+                  <TableHead>{{ t('traffic.node') }}</TableHead>
+                  <TableHead>{{ t('traffic.errorType') }}</TableHead>
+                  <TableHead class="text-right">{{ t('traffic.failures') }}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow
+                  v-for="failure in figures.upstream_failures"
+                  :key="`${failure.upstream}/${failure.address}:${failure.port}/${failure.error_type}`"
+                >
+                  <TableCell class="font-medium">{{ failure.upstream }}</TableCell>
+                  <TableCell class="font-mono text-xs">{{ nodeOf(failure) }}</TableCell>
+                  <TableCell class="font-mono text-xs">{{ failure.error_type }}</TableCell>
+                  <TableCell class="text-destructive text-right tabular-nums">
+                    {{ format.count(failure.failures) }}
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+            <p v-else class="text-muted-foreground text-sm">
+              {{ t('traffic.noUpstreamFailures') }}
+            </p>
           </CardContent>
         </Card>
         <Card class="min-w-0">

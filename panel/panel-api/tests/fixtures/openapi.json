@@ -61585,7 +61585,8 @@
           "tls_handshakes",
           "upstreams",
           "routes",
-          "domains"
+          "domains",
+          "upstream_failures"
         ],
         "properties": {
           "activated_at": {
@@ -61657,6 +61658,13 @@
           "tls_handshakes": {
             "type": "number",
             "format": "double"
+          },
+          "upstream_failures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpstreamFailureItem"
+            },
+            "description": "Failed upstream attempts by node and why, most first, at most 20, of\nevery upstream whatever the scope."
           },
           "upstreams": {
             "type": "array",
@@ -61812,6 +61820,39 @@
           }
         },
         "additionalProperties": false
+      },
+      "UpstreamFailureItem": {
+        "type": "object",
+        "description": "Failed attempts at one upstream node, by why they failed.",
+        "required": [
+          "upstream",
+          "address",
+          "port",
+          "error_type",
+          "failures"
+        ],
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "The node's IP address."
+          },
+          "error_type": {
+            "type": "string",
+            "description": "The `error.type` of the attempts, such as `connect_refused` or `503`."
+          },
+          "failures": {
+            "type": "number",
+            "format": "double"
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "upstream": {
+            "type": "string"
+          }
+        }
       },
       "UpstreamHealthReportResponse": {
         "type": "object",

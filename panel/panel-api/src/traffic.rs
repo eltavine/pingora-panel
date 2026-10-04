@@ -16,7 +16,7 @@ use axum::{
 use chrono::{DateTime, SecondsFormat, Utc};
 use panel_application::{
     DomainTraffic, Latency, RouteTraffic, StatusClasses, TrafficPoint, TrafficPort, TrafficQuery,
-    TrafficSummary, UpstreamTraffic,
+    TrafficSummary, UpstreamFailure, UpstreamTraffic,
 };
 use panel_domain::{RouteId, SiteId};
 use panel_errors::PanelError;
@@ -129,6 +129,30 @@ impl From<RouteTraffic> for RouteTrafficItem {
     }
 }
 
+/// Failed attempts at one upstream node, by why they failed.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct UpstreamFailureItem {
+    pub upstream: String,
+    /// The node's IP address.
+    pub address: String,
+    pub port: u16,
+    /// The `error.type` of the attempts, such as `connect_refused` or `503`.
+    pub error_type: String,
+    pub failures: f64,
+}
+
+impl From<UpstreamFailure> for UpstreamFailureItem {
+    fn from(value: UpstreamFailure) -> Self {
+        Self {
+            upstream: value.upstream,
+            address: value.address,
+            port: value.port,
+            error_type: value.error_type,
+            failures: value.failures,
+        }
+    }
+}
+
 /// Requests a site took by one of its domains.
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct DomainTrafficItem {
@@ -172,6 +196,9 @@ pub struct TrafficSummaryResponse {
     pub routes: Vec<RouteTrafficItem>,
     /// Busiest first, at most 20; a route's summary lists its site's.
     pub domains: Vec<DomainTrafficItem>,
+    /// Failed upstream attempts by node and why, most first, at most 20, of
+    /// every upstream whatever the scope.
+    pub upstream_failures: Vec<UpstreamFailureItem>,
     /// The revision of the gateway's active configuration.
     pub revision: Option<u64>,
     /// When that configuration was activated, RFC 3339.
@@ -194,6 +221,11 @@ impl From<TrafficSummary> for TrafficSummaryResponse {
             upstreams: value.upstreams.into_iter().map(Into::into).collect(),
             routes: value.routes.into_iter().map(Into::into).collect(),
             domains: value.domains.into_iter().map(Into::into).collect(),
+            upstream_failures: value
+                .upstream_failures
+                .into_iter()
+                .map(Into::into)
+                .collect(),
             revision: value.revision,
             activated_at: value.activated_at.map(rfc3339),
         }

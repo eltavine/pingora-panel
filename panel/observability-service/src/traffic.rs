@@ -19,6 +19,7 @@ const DEFAULT_POINTS: u32 = 120;
 const MAX_POINTS: u32 = 720;
 const ROUTES: usize = 20;
 const DOMAINS: usize = 20;
+const UPSTREAM_FAILURES: usize = 20;
 const QUANTILES: [f64; 4] = [0.5, 0.9, 0.95, 0.99];
 
 pub struct TrafficService {
@@ -131,6 +132,26 @@ impl TrafficService {
         Ok(domains)
     }
 
+    async fn upstream_failures(&self, queries: &Queries) -> Result<Vec<wire::UpstreamFailure>> {
+        let mut failures: Vec<wire::UpstreamFailure> = self
+            .instant(queries.upstream_failures(UPSTREAM_FAILURES))
+            .await?
+            .into_iter()
+            .filter(|(_, failures)| failures.is_finite() && *failures > 0.0)
+            .filter_map(|(mut labels, failures)| {
+                Some(wire::UpstreamFailure {
+                    upstream: labels.remove("upstream")?,
+                    address: labels.remove("server_address")?,
+                    port: labels.remove("server_port")?.parse().ok()?,
+                    error_type: labels.remove("error_type")?,
+                    failures,
+                })
+            })
+            .collect();
+        failures.sort_by(|left, right| right.failures.total_cmp(&left.failures));
+        Ok(failures)
+    }
+
     pub async fn summarize(&self, scope: Scope, window: Duration) -> Result<wire::Summary> {
         let queries = Queries::new(scope, window);
         let (
@@ -152,12 +173,15 @@ impl TrafficService {
             self.value(OPEN_CONNECTIONS.to_owned()),
             self.value(queries.tls_handshakes()),
         )?;
-        let (attempts, failures, upstream_latency, routes, domains, revision, activated_at) = tokio::try_join!(
+        let (attempts, failures, upstream_latency, upstream_failures, routes, domains) = tokio::try_join!(
             self.by(queries.upstream_requests(false), "upstream"),
             self.by(queries.upstream_requests(true), "upstream"),
             self.upstream_latency(&queries),
+            self.upstream_failures(&queries),
             self.routes(&queries),
             self.domains(&queries),
+        )?;
+        let (revision, activated_at) = tokio::try_join!(
             self.value(REVISION.to_owned()),
             self.value(ACTIVATED_AT.to_owned()),
         )?;
@@ -195,6 +219,7 @@ impl TrafficService {
             upstreams,
             routes,
             domains,
+            upstream_failures,
             revision: revision.and_then(|revision| {
                 (revision >= 0.0 && revision <= u64::MAX as f64).then_some(revision as u64)
             }),

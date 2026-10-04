@@ -152,6 +152,8 @@ async fn api(
                            "latency": {"p50": null, "p90": null, "p95": 1.5, "p99": null}}],
             "routes": [{"site": "shop", "route": "checkout", "requests": 60}],
             "domains": [{"site": "shop", "domain": "*.shop.example", "requests": 45}],
+            "upstream_failures": [{"upstream": "app", "address": "10.0.0.7", "port": 8080,
+                                   "error_type": "connect_refused", "failures": 4}],
             "revision": 7, "activated_at": "2026-10-04T09:00:00Z"
         }))
         .into_response(),
@@ -881,6 +883,8 @@ fn traffic_is_summarized_and_charted() {
         "12.5%",
         "checkout",
         "*.shop.example",
+        "10.0.0.7:8080",
+        "connect_refused",
     ] {
         assert!(printed.contains(expected), "{expected} in\n{printed}");
     }

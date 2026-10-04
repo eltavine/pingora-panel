@@ -28,6 +28,27 @@ fn answer(query: &str) -> Vec<serde_json::Value> {
             sample(&[("class", "2")], "90"),
             sample(&[("class", "5")], "10"),
         ]
+    } else if query.contains("sum by (upstream, server_address, server_port, error_type)") {
+        vec![
+            sample(
+                &[
+                    ("upstream", "app"),
+                    ("server_address", "10.0.0.7"),
+                    ("server_port", "8080"),
+                    ("error_type", "connect_refused"),
+                ],
+                "4",
+            ),
+            sample(
+                &[
+                    ("upstream", "app"),
+                    ("server_address", "10.0.0.8"),
+                    ("server_port", "8080"),
+                    ("error_type", "504"),
+                ],
+                "1",
+            ),
+        ]
     } else if query.contains("pingora_panel_gateway_domain_requests_total") {
         vec![
             sample(&[("site", "shop"), ("domain", "*.shop.example")], "30"),
@@ -143,6 +164,19 @@ async fn summaries_gather_every_figure_of_a_scope() {
         .map(|route| route.route.as_str())
         .collect();
     assert_eq!(routes, ["checkout", "home"], "busiest first");
+    let failure = &summary.upstream_failures[0];
+    assert_eq!(
+        (
+            failure.upstream.as_str(),
+            failure.address.as_str(),
+            failure.port,
+            failure.error_type.as_str(),
+            failure.failures
+        ),
+        ("app", "10.0.0.7", 8080, "connect_refused", 4.0),
+        "most first"
+    );
+    assert_eq!(summary.upstream_failures.len(), 2);
     let domains: Vec<_> = summary
         .domains
         .iter()

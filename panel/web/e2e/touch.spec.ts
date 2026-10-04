@@ -24,6 +24,7 @@ const summary = {
   upstreams: [],
   routes: [],
   domains: [],
+  upstream_failures: [],
   revision: 7,
   activated_at: '2026-10-04T09:00:00Z',
 }

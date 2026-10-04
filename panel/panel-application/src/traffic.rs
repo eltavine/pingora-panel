@@ -55,6 +55,18 @@ pub struct RouteTraffic {
     pub requests: f64,
 }
 
+/// Failed attempts at one upstream node, by why they failed.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct UpstreamFailure {
+    pub upstream: String,
+    /// The node's IP address.
+    pub address: String,
+    pub port: u16,
+    /// The `error.type` of the attempts, such as `connect_refused` or `503`.
+    pub error_type: String,
+    pub failures: f64,
+}
+
 /// Requests a site took by one of its domains.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DomainTraffic {
@@ -84,6 +96,8 @@ pub struct TrafficSummary {
     pub routes: Vec<RouteTraffic>,
     /// Busiest first; a route's summary lists its site's.
     pub domains: Vec<DomainTraffic>,
+    /// Most first, of every upstream whatever the scope.
+    pub upstream_failures: Vec<UpstreamFailure>,
     /// The revision of the gateway's active configuration.
     pub revision: Option<u64>,
     pub activated_at: Option<SystemTime>,

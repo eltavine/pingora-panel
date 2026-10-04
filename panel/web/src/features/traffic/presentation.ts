@@ -35,6 +35,13 @@ export function formatters(locale: string) {
 }
 
 /** The largest value of every series, for a common scale; at least 1. */
+/** A node's address and port, with brackets around IPv6 addresses. */
+export function nodeOf(node: { address: string; port: number }): string {
+  return node.address.includes(':')
+    ? `[${node.address}]:${node.port}`
+    : `${node.address}:${node.port}`
+}
+
 export function scaleOf(series: readonly (readonly (number | null)[])[]): number {
   let largest = 0
   for (const values of series) {

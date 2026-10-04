@@ -192,6 +192,15 @@ impl Queries {
         )
     }
 
+    /// Failed attempts by upstream node and why, most first.
+    pub fn upstream_failures(&self, limit: usize) -> String {
+        format!(
+            "topk({limit}, sum by (upstream, server_address, server_port, error_type) \
+             (increase({UPSTREAM_REQUESTS}{{error_type!=\"\"}}[{}])))",
+            self.range
+        )
+    }
+
     pub fn upstream_latency(&self, quantile: f64) -> String {
         format!(
             "histogram_quantile({quantile}, sum by (upstream, le) (rate({UPSTREAM_BUCKETS}[{}])))",
@@ -239,6 +248,11 @@ mod tests {
             everything.domains(20),
             "topk(20, sum by (site, domain) \
              (increase(pingora_panel_gateway_domain_requests_total[300s])))"
+        );
+        assert_eq!(
+            everything.upstream_failures(20),
+            "topk(20, sum by (upstream, server_address, server_port, error_type) \
+             (increase(http_client_request_duration_seconds_count{error_type!=\"\"}[300s])))"
         );
         assert_eq!(
             queries.domains(20),

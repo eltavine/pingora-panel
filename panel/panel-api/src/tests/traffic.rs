@@ -1,7 +1,7 @@
 use super::*;
 use panel_application::{
     DomainTraffic, Latency, RequestScope, RouteTraffic, StatusClasses, TrafficPoint, TrafficPort,
-    TrafficQuery, TrafficSummary, UpstreamTraffic,
+    TrafficQuery, TrafficSummary, UpstreamFailure, UpstreamTraffic,
 };
 use panel_domain::{RouteId, SiteId};
 use serde_json::{json, Value};
@@ -43,6 +43,13 @@ impl TrafficPort for Traffic {
                 site: "shop".into(),
                 route: "checkout".into(),
                 requests: 60.0,
+            }],
+            upstream_failures: vec![UpstreamFailure {
+                upstream: "app".into(),
+                address: "10.0.0.7".into(),
+                port: 8080,
+                error_type: "connect_refused".into(),
+                failures: 4.0,
             }],
             domains: vec![DomainTraffic {
                 site: "shop".into(),
@@ -110,6 +117,16 @@ async fn summaries_read_one_scope_over_a_window() {
     assert_eq!(
         summary["routes"],
         json!([{"site": "shop", "route": "checkout", "requests": 60.0}])
+    );
+    assert_eq!(
+        summary["upstream_failures"],
+        json!([{
+            "upstream": "app",
+            "address": "10.0.0.7",
+            "port": 8080,
+            "error_type": "connect_refused",
+            "failures": 4.0
+        }])
     );
     assert_eq!(
         summary["domains"],

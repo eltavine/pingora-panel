@@ -68,6 +68,17 @@ message RouteTraffic {
   double requests = 3;
 }
 
+// Failed attempts at one upstream node, by why they failed.
+message UpstreamFailure {
+  string upstream = 1;
+  // The node's IP address.
+  string address = 2;
+  uint32 port = 3;
+  // The `error.type` of the attempts, such as `connect_refused` or `503`.
+  string error_type = 4;
+  double failures = 5;
+}
+
 // Requests a site took by one of its domains.
 message DomainTraffic {
   string site = 1;
@@ -99,6 +110,8 @@ message Summary {
   google.protobuf.Timestamp activated_at = 14;
   // Busiest first, at most 20; a route's summary lists its site's.
   repeated DomainTraffic domains = 15;
+  // Most first, at most 20, of every upstream whatever the scope.
+  repeated UpstreamFailure upstream_failures = 16;
 }
 
 message SummaryResponse {

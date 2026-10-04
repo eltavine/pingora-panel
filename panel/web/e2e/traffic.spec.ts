@@ -28,6 +28,15 @@ const summary = {
   ],
   routes: [{ site: 'shop', route: 'checkout', requests: 600 }],
   domains: [{ site: 'shop', domain: '*.shop.example', requests: 450 }],
+  upstream_failures: [
+    {
+      upstream: 'app',
+      address: '10.0.0.7',
+      port: 8080,
+      error_type: 'connect_refused',
+      failures: 12,
+    },
+  ],
   revision: 7,
   activated_at: '2026-10-04T09:00:00Z',
 }
@@ -84,6 +93,7 @@ test('the traffic of a window is summarized and charted', async ({ page }) => {
   await expect(page.getByRole('img', { name: 'Request rate' })).toBeVisible()
   await expect(page.getByRole('cell', { name: 'checkout' })).toBeVisible()
   await expect(page.getByRole('cell', { name: '*.shop.example' })).toBeVisible()
+  await expect(page.getByRole('cell', { name: '10.0.0.7:8080' })).toBeVisible()
   await expect(page.getByRole('cell', { name: '12.5%' })).toBeVisible()
   await expect(page.getByText('Active configuration revision #7')).toBeVisible()
   await expect(page.getByRole('img', { name: '4xx: 4% of requests' })).toBeVisible()
@@ -110,6 +120,7 @@ test('a quiet window says so', async ({ page }) => {
         upstreams: [],
         routes: [],
         domains: [],
+        upstream_failures: [],
         revision: null,
       },
     }),

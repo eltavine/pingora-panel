@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { areaPath, formatters, linePath, scaleOf } from '../presentation'
+import { areaPath, formatters, linePath, nodeOf, scaleOf } from '../presentation'
 
 describe('traffic figures', () => {
   const format = formatters('en')
@@ -19,6 +19,13 @@ describe('traffic figures', () => {
     expect(format.count(119.6)).toBe('120')
     expect(format.rate(0.125)).toBe('0.13')
     expect(format.percent(0.125)).toBe('12.5%')
+  })
+})
+
+describe('upstream nodes', () => {
+  it('read as socket addresses', () => {
+    expect(nodeOf({ address: '10.0.0.7', port: 8080 })).toBe('10.0.0.7:8080')
+    expect(nodeOf({ address: '2001:db8::7', port: 443 })).toBe('[2001:db8::7]:443')
   })
 })
 
