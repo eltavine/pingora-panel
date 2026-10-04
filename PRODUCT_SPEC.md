@@ -166,6 +166,8 @@ Pingora 上游 crates 继续保留在根 workspace，以便固定版本、审计
 3. 在兼容矩阵中标记偏差。
 4. 上游发布修复后优先删除本地 patch。
 
+当前的本地 patch、测试与文档偏差记录在 [docs/upstream-patches.md](docs/upstream-patches.md)。
+
 ---
 
 ## 4. 系统上下文
@@ -340,9 +342,9 @@ trait GatewayEngine {
 
 ### 6.2 兼容矩阵
 
-| Product | IR | Adapter | Pinned Pingora | Upstream canary | 状态 |
-|---|---|---|---|---|---|
-| 0.1 | v1 | pingora-v1 | 0.9.0 / exact commit | `main` scheduled canary | Implemented |
+| Product | IR | Adapter | Pinned Pingora | 本地 patch | Upstream canary | 状态 |
+|---|---|---|---|---|---|---|
+| 0.1 | v1 | pingora-v1 | 0.9.0 / exact commit | 4 个（[记录](docs/upstream-patches.md)） | `main` scheduled canary | Implemented |
 
 每次升级必须记录 API 变化、语义变化、性能变化、安全公告、迁移步骤和回滚办法。缓存等上游标记为 experimental/volatile 的 API 必须再包一层 capability，不得成为公共稳定承诺的直接依据。
 

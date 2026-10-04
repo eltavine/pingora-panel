@@ -29,6 +29,7 @@ with tempfile.TemporaryDirectory(prefix="pingora-panel-docs-") as directory:
     (root / "PRODUCT_SPEC.md").write_text('> 当前 Pingora crates：0.9.0\n')
     (root / "panel/README.md").write_text('[ADR](../docs/adr/decision.md)\n')
     (root / "docs/adr/decision.md").write_text('# Decision\n')
+    (root / "docs/upstream-patches.md").write_text('[Specification](../PRODUCT_SPEC.md)\n')
     assert module.check(root) == [], module.check(root)
 
     readme = root / "README.md"

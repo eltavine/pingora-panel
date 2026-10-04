@@ -9,7 +9,7 @@ import tomllib
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-MAINTAINED_DOCS = ("README.md", "panel/README.md", "PRODUCT_SPEC.md")
+MAINTAINED_DOCS = ("README.md", "panel/README.md", "PRODUCT_SPEC.md", "docs/upstream-patches.md")
 LINK = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
 VERSION_MARKER = re.compile(r"^> 当前 Pingora crates：([0-9]+\.[0-9]+\.[0-9]+)$", re.M)
 ADAPTER_VERSION = re.compile(

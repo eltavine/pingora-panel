@@ -47,6 +47,7 @@ on:
       - "README.md"
       - "PRODUCT_SPEC.md"
       - "docs/adr/**"
+      - "docs/upstream-patches.md"
       - ".github/workflows/panel.yml"
   pull_request:
     paths:
@@ -93,6 +94,7 @@ on:
       - "README.md"
       - "PRODUCT_SPEC.md"
       - "docs/adr/**"
+      - "docs/upstream-patches.md"
       - ".github/workflows/panel.yml"
 
 permissions:
