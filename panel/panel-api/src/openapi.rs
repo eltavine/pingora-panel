@@ -54,6 +54,8 @@ mod tests;
         crate::containers::remove_container,
         crate::containers::container_logs,
         crate::containers::tail_container_logs,
+        crate::containers::list_container_stats,
+        crate::containers::container_stats,
         crate::alerts::list_alert_rules, crate::alerts::put_alert_rule,
         crate::alerts::delete_alert_rule, crate::alerts::list_alert_channels,
         crate::alerts::create_alert_channel, crate::alerts::rotate_alert_channel,

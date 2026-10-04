@@ -22,8 +22,9 @@ use futures_util::{future::ready, Stream, StreamExt};
 use panel_application::{
     ContainerAction, ContainerChange, ContainerDetail, ContainerEngine, ContainerFilter,
     ContainerList, ContainerLogLine, ContainerLogQuery, ContainerLogStart, ContainerLogStream,
-    ContainerLogTail, ContainerLogs, ContainerMount, ContainerNetwork, ContainerState,
-    ContainerSummary, EngineInfo, EngineVersion, PortMapping,
+    ContainerLogTail, ContainerLogs, ContainerMount, ContainerNetwork, ContainerNetworkStats,
+    ContainerState, ContainerStats, ContainerStatsList, ContainerSummary, EngineInfo,
+    EngineVersion, PortMapping,
 };
 use panel_errors::PanelError;
 use serde::{Deserialize, Serialize};
@@ -844,4 +845,137 @@ pub(crate) async fn tail_container_logs<U>(
         reason: Utf8Bytes::from_static("the container stopped"),
     };
     Ok(upgrade.on_upgrade(move |socket| relay(socket, tail_messages(tail), Some(stopped))))
+}
+
+/// A container's traffic, summed over its interfaces.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct ContainerNetworkStatsView {
+    pub received_bytes: u64,
+    pub sent_bytes: u64,
+    pub received_packets: u64,
+    pub sent_packets: u64,
+    /// Packets received or sent in error.
+    pub errors: u64,
+    /// Packets dropped on the way in or out.
+    pub dropped: u64,
+}
+
+impl From<ContainerNetworkStats> for ContainerNetworkStatsView {
+    fn from(value: ContainerNetworkStats) -> Self {
+        Self {
+            received_bytes: value.received_bytes,
+            sent_bytes: value.sent_bytes,
+            received_packets: value.received_packets,
+            sent_packets: value.sent_packets,
+            errors: value.errors,
+            dropped: value.dropped,
+        }
+    }
+}
+
+/// What a running container uses, read once as `docker stats --no-stream`
+/// reads it.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct ContainerStatsView {
+    pub id: String,
+    /// Without the leading slash.
+    pub name: String,
+    /// When the engine read them, RFC 3339.
+    pub read_at: Option<String>,
+    /// Of one CPU, over about a second: 250 is two and a half CPUs busy.
+    pub cpu_percent: f64,
+    /// The CPUs the container may use.
+    pub online_cpus: u32,
+    /// Without the page cache the kernel can reclaim.
+    pub memory_bytes: u64,
+    /// The host's memory when the container has no limit.
+    pub memory_limit_bytes: u64,
+    /// Absent for a container without a network of its own, such as one
+    /// on the host's.
+    pub network: Option<ContainerNetworkStatsView>,
+    pub block_read_bytes: u64,
+    pub block_written_bytes: u64,
+    /// Processes and threads.
+    pub pids: u64,
+}
+
+impl From<ContainerStats> for ContainerStatsView {
+    fn from(value: ContainerStats) -> Self {
+        Self {
+            id: value.id,
+            name: value.name,
+            read_at: value.read_at.map(precise),
+            cpu_percent: value.cpu_percent,
+            online_cpus: value.online_cpus,
+            memory_bytes: value.memory_bytes,
+            memory_limit_bytes: value.memory_limit_bytes,
+            network: value.network.map(Into::into),
+            block_read_bytes: value.block_read_bytes,
+            block_written_bytes: value.block_written_bytes,
+            pids: value.pids,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct ContainerStatsListView {
+    /// When the agent read them, RFC 3339.
+    pub observed_at: Option<String>,
+    /// Every running container, by name.
+    pub stats: Vec<ContainerStatsView>,
+}
+
+impl From<ContainerStatsList> for ContainerStatsListView {
+    fn from(value: ContainerStatsList) -> Self {
+        Self {
+            observed_at: value.observed_at.map(rfc3339),
+            stats: value.stats.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// What every running container on an enabled engine uses, read at most
+/// 16 at a time; each takes the engine about a second.
+#[utoipa::path(get, path = "/api/v1/container-engines/{engine}/stats",
+    params(("engine" = String, Path, description = "docker or podman"), QueryHeaders),
+    responses((status = 200, body = ContainerStatsListView)), tag = "containers")]
+pub(crate) async fn list_container_stats<U>(
+    State(state): State<ApiState<U>>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<ContainerStatsListView>, ApiError> {
+    let stats = state
+        .containers
+        .stats(request_scope(&headers)?, engine(name)?, None)
+        .await?;
+    Ok(Json(stats.into()))
+}
+
+/// What a running container uses.
+#[utoipa::path(get, path = "/api/v1/container-engines/{engine}/containers/{container}/stats",
+    params(
+        ("engine" = String, Path, description = "docker or podman"),
+        ("container" = String, Path, description = "Its ID, a unique prefix of its ID or its name"),
+        QueryHeaders,
+    ),
+    responses((status = 200, body = ContainerStatsView)), tag = "containers")]
+pub(crate) async fn container_stats<U>(
+    State(state): State<ApiState<U>>,
+    Path((name, reference)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<ContainerStatsView>, ApiError> {
+    let stats = state
+        .containers
+        .stats(
+            request_scope(&headers)?,
+            engine(name)?,
+            Some(container(reference)?),
+        )
+        .await?;
+    let one = stats
+        .stats
+        .into_iter()
+        .next()
+        .ok_or_else(|| PanelError::internal("the agent sent no statistics"))?;
+    Ok(Json(one.into()))
 }

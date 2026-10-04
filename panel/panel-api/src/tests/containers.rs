@@ -624,3 +624,29 @@ async fn following_a_missing_container_or_too_many_lines_is_refused_before_upgra
         }
     }
 }
+
+#[tokio::test]
+async fn what_running_containers_use_is_read() {
+    let app = app(true);
+    let (status, list) = get(&app, "/api/v1/container-engines/docker/stats").await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["observed_at"], "2027-01-15T08:00:10Z");
+    let web = &list["stats"][0];
+    assert_eq!(web["name"], "shop-web-1");
+    assert_eq!(web["read_at"], "2027-01-15T08:00:09.500Z");
+    assert_eq!(web["cpu_percent"], 12.5);
+    assert_eq!(web["memory_bytes"], 200 * 1024 * 1024);
+    assert_eq!(web["network"]["received_bytes"], 1_500);
+    assert_eq!(web["network"]["dropped"], 2);
+    assert_eq!(web["pids"], 5);
+
+    let path = "/api/v1/container-engines/docker/containers";
+    let (status, one) = get(&app, &format!("{path}/shop-web-1/stats")).await;
+    assert_eq!(status, StatusCode::OK, "{one}");
+    assert_eq!(one["block_written_bytes"], 8_192);
+    let (status, stopped) = get(&app, &format!("{path}/nightly-report/stats")).await;
+    assert_ne!(status, StatusCode::OK);
+    assert_eq!(stopped["code"], "PRECONDITION_FAILED");
+    let (status, _) = get(&app, &format!("{path}/ghost/stats")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

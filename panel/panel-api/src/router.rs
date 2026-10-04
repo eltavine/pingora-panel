@@ -264,6 +264,14 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
             get(containers::container_logs::<U>),
         )
         .route(
+            "/api/v1/container-engines/{engine}/containers/{container}/stats",
+            get(containers::container_stats::<U>),
+        )
+        .route(
+            "/api/v1/container-engines/{engine}/stats",
+            get(containers::list_container_stats::<U>),
+        )
+        .route(
             "/api/v1/container-engines/{engine}/containers/{container}/logs/tail",
             get(containers::tail_container_logs::<U>).connect(containers::tail_container_logs::<U>),
         )
