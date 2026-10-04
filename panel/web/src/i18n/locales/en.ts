@@ -951,6 +951,54 @@ const en: Messages = {
     receive: 'Received',
     transmit: 'Sent',
     noDevices: 'The host reports no network devices.',
+    agent: {
+      title: 'Host agent',
+      description:
+        'ops-agent acts on the host for the panel, with only the privileges each capability needs.',
+      version: 'Version {version}',
+      capabilitiesLabel: 'Capabilities',
+      status: {
+        connected: 'Connected',
+        not_configured: 'Not installed',
+        unreachable: 'Not answering',
+      },
+      hint: {
+        not_configured:
+          'Install ops-agent on this host to see how much space the panel takes, what holds ports 80 and 443, and to manage the gateway service and containers.',
+        unreachable:
+          'The panel cannot reach the host agent. Check that ops-agent is running and that its socket is mounted into panel-api.',
+      },
+      capabilities: {
+        directories: 'Directory sizes',
+        listeners: 'Port diagnostics',
+        gateway_unit: 'Gateway service',
+        containers: 'Containers',
+      },
+      states: {
+        available: 'Available',
+        not_enabled: 'Not enabled',
+        unsupported: 'Not supported on this host',
+        denied: 'Missing a privilege',
+        unreachable: 'Not answering',
+      },
+    },
+    directories: {
+      title: 'Panel directories',
+      kind: 'Directory',
+      size: 'Size',
+      files: 'Files',
+      note: 'Note',
+      kinds: {
+        configuration: 'Configuration',
+        logs: 'Logs',
+        certificates: 'Certificates',
+      },
+      missing: 'Does not exist',
+      partial: 'Partial',
+      partialDetail: 'The agent stopped at its limit, so the figures are incomplete.',
+      unreadable: '{n} entry unreadable | {n} entries unreadable',
+      empty: 'The agent reports no directories.',
+    },
   },
   publish: {
     title: 'Publish configuration',

@@ -1,8 +1,58 @@
-import type { DiskLevel, HostSummaryView } from '@/api/generated'
+import type {
+  AgentStatusName,
+  CapabilityStateName,
+  DirectoryUsageView,
+  DiskLevel,
+  HostSummaryView,
+} from '@/api/generated'
 import type { StatusTone } from '@/components/StatusIndicator.vue'
 
 /** How the host page reads figures again. */
 export const REFRESH_INTERVAL_MS = 30_000
+/** Directory sizes take the agent a walk of the disk, so they are read less often. */
+export const DIRECTORY_REFRESH_MS = 300_000
+
+export function agentTone(status: AgentStatusName): StatusTone {
+  switch (status) {
+    case 'connected':
+      return 'positive'
+    case 'unreachable':
+      return 'negative'
+    default:
+      return 'neutral'
+  }
+}
+
+export function capabilityTone(state: CapabilityStateName): StatusTone {
+  switch (state) {
+    case 'available':
+      return 'positive'
+    case 'denied':
+      return 'warning'
+    case 'unreachable':
+      return 'negative'
+    default:
+      return 'neutral'
+  }
+}
+
+export type DirectoryNote =
+  { kind: 'missing' } | { kind: 'partial' } | { kind: 'unreadable'; n: number }
+
+/** What qualifies a directory's figures, if anything. */
+export function directoryNotes(directory: DirectoryUsageView): DirectoryNote[] {
+  if (!directory.present) {
+    return [{ kind: 'missing' }]
+  }
+  const notes: DirectoryNote[] = []
+  if (directory.truncated) {
+    notes.push({ kind: 'partial' })
+  }
+  if (directory.unreadable > 0) {
+    notes.push({ kind: 'unreadable', n: directory.unreadable })
+  }
+  return notes
+}
 
 export function levelTone(level: DiskLevel): StatusTone {
   switch (level) {

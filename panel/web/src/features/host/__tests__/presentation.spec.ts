@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import type { HostSummaryView } from '@/api/generated'
-import { levelTone, memoryUsed, uptimeParts } from '../presentation'
+import type { DirectoryUsageView, HostSummaryView } from '@/api/generated'
+import {
+  agentTone,
+  capabilityTone,
+  directoryNotes,
+  levelTone,
+  memoryUsed,
+  uptimeParts,
+} from '../presentation'
 
 describe('host figures', () => {
   it('read full filesystems as warnings and critical ones as negative', () => {
@@ -26,5 +33,41 @@ describe('host figures', () => {
     const host = { memory_total_bytes: 8, memory_available_bytes: 2 } as HostSummaryView
     expect(memoryUsed(host)).toBe(0.75)
     expect(memoryUsed({ ...host, memory_total_bytes: 0 })).toBe(0)
+  })
+})
+
+describe('host agent', () => {
+  it('reads a missing agent as neutral and a silent one as negative', () => {
+    expect(agentTone('connected')).toBe('positive')
+    expect(agentTone('not_configured')).toBe('neutral')
+    expect(agentTone('unreachable')).toBe('negative')
+  })
+
+  it('warns about missing privileges and leaves disabled capabilities neutral', () => {
+    expect(capabilityTone('available')).toBe('positive')
+    expect(capabilityTone('denied')).toBe('warning')
+    expect(capabilityTone('unreachable')).toBe('negative')
+    expect(capabilityTone('not_enabled')).toBe('neutral')
+    expect(capabilityTone('unsupported')).toBe('neutral')
+  })
+
+  it('qualifies directories that are missing, partial or partly unreadable', () => {
+    const directory: DirectoryUsageView = {
+      kind: 'logs',
+      path: '/var/log/pingora-panel',
+      present: true,
+      bytes: 10,
+      files: 1,
+      unreadable: 0,
+      truncated: false,
+    }
+    expect(directoryNotes(directory)).toEqual([])
+    expect(directoryNotes({ ...directory, present: false, truncated: true })).toEqual([
+      { kind: 'missing' },
+    ])
+    expect(directoryNotes({ ...directory, truncated: true, unreadable: 3 })).toEqual([
+      { kind: 'partial' },
+      { kind: 'unreadable', n: 3 },
+    ])
   })
 })

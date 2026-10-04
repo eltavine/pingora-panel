@@ -918,6 +918,53 @@ const zhCN = {
     receive: '接收',
     transmit: '发送',
     noDevices: '主机没有上报网卡。',
+    agent: {
+      title: '主机代理',
+      description: 'ops-agent 在主机上替面板执行操作，每项能力只获得它所需的权限。',
+      version: '版本 {version}',
+      capabilitiesLabel: '能力',
+      status: {
+        connected: '已连接',
+        not_configured: '未安装',
+        unreachable: '无响应',
+      },
+      hint: {
+        not_configured:
+          '在此主机上安装 ops-agent，即可查看面板占用的空间、80 和 443 端口被谁占用，并管理网关服务与容器。',
+        unreachable:
+          '面板无法连接主机代理。请检查 ops-agent 是否在运行，以及它的套接字是否已挂载进 panel-api。',
+      },
+      capabilities: {
+        directories: '目录容量',
+        listeners: '端口占用诊断',
+        gateway_unit: '网关服务',
+        containers: '容器',
+      },
+      states: {
+        available: '可用',
+        not_enabled: '未启用',
+        unsupported: '此主机不支持',
+        denied: '缺少权限',
+        unreachable: '无响应',
+      },
+    },
+    directories: {
+      title: '面板目录',
+      kind: '目录',
+      size: '大小',
+      files: '文件数',
+      note: '备注',
+      kinds: {
+        configuration: '配置',
+        logs: '日志',
+        certificates: '证书',
+      },
+      missing: '不存在',
+      partial: '不完整',
+      partialDetail: '代理在达到统计上限时停止，数据不完整。',
+      unreadable: '{n} 项无法读取',
+      empty: '代理没有报告任何目录。',
+    },
   },
   publish: {
     title: '配置发布',

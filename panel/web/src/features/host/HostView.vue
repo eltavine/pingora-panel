@@ -30,6 +30,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { formatters } from '@/features/traffic/presentation'
+import HostAgentSection from './HostAgentSection.vue'
 import { levelTone, memoryUsed, REFRESH_INTERVAL_MS, uptimeParts } from './presentation'
 
 const { t, d, locale } = useI18n()
@@ -251,5 +252,7 @@ const facts = computed(() => {
         </Card>
       </div>
     </template>
+
+    <HostAgentSection />
   </div>
 </template>

@@ -43,7 +43,57 @@ const host = {
   ],
 }
 
-async function setUp(page: Page, body: object, permissions = ALL_PERMISSIONS) {
+const noAgent = { status: 'not_configured', build: null, hostname: null, capabilities: [] }
+
+const agent = {
+  status: 'connected',
+  build: '0.1.0',
+  hostname: 'web-1',
+  capabilities: [
+    { capability: 'directories', state: 'available', detail: '' },
+    { capability: 'listeners', state: 'denied', detail: 'grant CAP_DAC_READ_SEARCH' },
+  ],
+}
+
+const directories = {
+  observed_at: '2026-10-04T10:00:00Z',
+  directories: [
+    {
+      kind: 'configuration',
+      path: '/var/lib/pingora-panel/gateway',
+      present: true,
+      bytes: 3 * 1024 ** 2,
+      files: 148,
+      unreadable: 0,
+      truncated: false,
+    },
+    {
+      kind: 'logs',
+      path: '/var/log/pingora-panel',
+      present: true,
+      bytes: 2048,
+      files: 3,
+      unreadable: 2,
+      truncated: true,
+    },
+    {
+      kind: 'certificates',
+      path: '/etc/pingora-panel/certificates',
+      present: false,
+      bytes: 0,
+      files: 0,
+      unreadable: 0,
+      truncated: false,
+    },
+  ],
+}
+
+async function setUp(
+  page: Page,
+  body: object,
+  permissions = ALL_PERMISSIONS,
+  hostAgent: object = noAgent,
+) {
   await signIn(page, permissions)
   await page.addInitScript(() => {
     window.localStorage.setItem('pingora-panel.locale', 'en')
@@ -57,6 +107,8 @@ async function setUp(page: Page, body: object, permissions = ALL_PERMISSIONS) {
     route.fulfill({ json: { version: 4, pending: false, applied_version: 4 } }),
   )
   await page.route('**/api/v1/host', (route) => route.fulfill({ json: body }))
+  await page.route('**/api/v1/host/agent', (route) => route.fulfill({ json: hostAgent }))
+  await page.route('**/api/v1/host/directories', (route) => route.fulfill({ json: directories }))
 }
 
 test.afterEach(async ({ page }) => {
@@ -103,4 +155,35 @@ test('the host page is offered only to accounts that read it', async ({ page }) 
   await expect(
     page.locator('[data-slot="sidebar"]').getByRole('link', { name: 'Host' }),
   ).toHaveCount(0)
+})
+
+test('a host without the agent says how to install it', async ({ page }) => {
+  await setUp(page, host)
+  await page.goto('/host')
+  await expect(page.getByText('Not installed')).toBeVisible()
+  await expect(page.getByText(/Install ops-agent on this host/)).toBeVisible()
+  await expect(page.getByText('Panel directories')).toHaveCount(0)
+})
+
+test('the agent shows its capabilities and the space the panel takes', async ({ page }) => {
+  await setUp(page, host, ALL_PERMISSIONS, agent)
+  await page.goto('/host')
+  await expect(page.getByText('Connected')).toBeVisible()
+  await expect(page.getByText('Version 0.1.0')).toBeVisible()
+  const capabilities = page.getByRole('list', { name: 'Capabilities' })
+  await expect(
+    capabilities.getByRole('listitem').filter({ hasText: 'Directory sizes' }),
+  ).toContainText('Available')
+  const listeners = capabilities.getByRole('listitem').filter({ hasText: 'Port diagnostics' })
+  await expect(listeners).toContainText('Missing a privilege')
+  await expect(listeners).toContainText('grant CAP_DAC_READ_SEARCH')
+
+  await expect(page.getByText('Panel directories')).toBeVisible()
+  await expect(page.getByRole('row').filter({ hasText: 'Configuration' })).toContainText('3 MiB')
+  const logs = page.getByRole('row').filter({ hasText: '/var/log/pingora-panel' })
+  await expect(logs).toContainText('Partial')
+  await expect(logs).toContainText('2 entries unreadable')
+  await expect(page.getByRole('row').filter({ hasText: 'Certificates' })).toContainText(
+    'Does not exist',
+  )
 })
