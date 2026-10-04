@@ -212,6 +212,12 @@ jobs:
           test "$(wc -l < followed.jsonl)" -ge 2
           ppanel container start panel-ci-throwaway
           test "$(status)" = running
+          # What it uses, alone and among every running container.
+          ppanel -o json container stats panel-ci-throwaway \
+            | python3 -c "import json, sys; s = json.load(sys.stdin); assert s['name'] == 'panel-ci-throwaway' and s['pids'] >= 1 and s['memory_bytes'] > 0 and s['read_at'], s"
+          ppanel -o json container stats \
+            | python3 -c "import json, sys; names = [s['name'] for s in json.load(sys.stdin)['stats']]; assert {'panel-ci-throwaway', 'pingora-panel-control-1'} <= set(names), names"
+          ppanel container stats
           ppanel container kill panel-ci-throwaway --yes
           test "$(status)" = exited
           ppanel container remove panel-ci-throwaway --yes
