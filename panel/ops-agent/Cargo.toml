@@ -24,8 +24,6 @@ tonic.workspace = true
 tonic-health.workspace = true
 tracing.workspace = true
 walkdir.workspace = true
-zbus.workspace = true
-zbus_systemd.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs.workspace = true
@@ -34,4 +32,3 @@ procfs.workspace = true
 axum.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
-zbus = { workspace = true, features = ["p2p"] }

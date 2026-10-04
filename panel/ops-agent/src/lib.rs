@@ -10,7 +10,6 @@ pub mod config;
 mod containers;
 mod directories;
 mod gateway_service;
-mod gateway_unit;
 mod listeners;
 mod socket;
 
@@ -22,7 +21,6 @@ use panel_contracts::ops::v1::{
     containers_server::{self, ContainersServer},
     directories_server::{self, DirectoriesServer},
     gateway_service_server::{self, GatewayServiceServer},
-    gateway_unit_server::{self, GatewayUnitServer},
     CapabilityState,
 };
 use panel_errors::{PanelError, Result};
@@ -51,11 +49,9 @@ pub async fn serve(config: AgentConfig, shutdown: impl Future<Output = ()> + Sen
 
     let listeners = listeners::capability(config.listeners);
     let serves_listeners = listeners.state() == CapabilityState::Available;
-    let (unit, unit_capability) = gateway_unit::open(config.gateway_unit.clone()).await;
     let agent = agent::AgentService::new(vec![
         agent::directories(&config),
         listeners,
-        unit_capability,
         containers::capability(&config.engines),
         gateway_service::capability(&config.engines),
     ]);
@@ -91,15 +87,6 @@ pub async fn serve(config: AgentConfig, shutdown: impl Future<Output = ()> + Sen
             config.directories.clone(),
         )))
     };
-    let unit_service = match unit {
-        Some(unit) => {
-            policy = policy.allow(gateway_unit_server::SERVICE_NAME, panel_api.clone());
-            Some(GatewayUnitServer::new(
-                gateway_unit::GatewayUnitService::new(unit),
-            ))
-        }
-        None => None,
-    };
     #[cfg(target_os = "linux")]
     let listener_service = if serves_listeners {
         policy = policy.allow(
@@ -134,7 +121,6 @@ pub async fn serve(config: AgentConfig, shutdown: impl Future<Output = ()> + Sen
         .add_service(health)
         .add_service(AgentServer::new(agent))
         .add_optional_service(directories)
-        .add_optional_service(unit_service)
         .add_optional_service(container_service)
         .add_optional_service(gateway_service);
     #[cfg(target_os = "linux")]

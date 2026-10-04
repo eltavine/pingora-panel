@@ -20,8 +20,6 @@ pub const LOGS_DIR_ENV: &str = "PINGORA_PANEL_OPS_LOGS_DIR";
 pub const CERTIFICATES_DIR_ENV: &str = "PINGORA_PANEL_OPS_CERTIFICATES_DIR";
 /// `on` to name the processes listening on TCP ports.
 pub const LISTENERS_ENV: &str = "PINGORA_PANEL_OPS_LISTENERS";
-/// The gateway's systemd service, the one unit the agent may act on.
-pub const GATEWAY_UNIT_ENV: &str = "PINGORA_PANEL_OPS_GATEWAY_UNIT";
 /// Comma-separated `engine=socket` pairs, the engine `docker` or `podman`.
 pub const ENGINES_ENV: &str = "PINGORA_PANEL_OPS_ENGINES";
 /// Where the agent keeps what operators chose; systemd's state directory
@@ -59,7 +57,6 @@ pub struct AgentConfig {
     /// The directories whose sizes the agent reports, by what they hold.
     pub directories: Vec<(DirectoryKind, PathBuf)>,
     pub listeners: bool,
-    pub gateway_unit: Option<String>,
     /// The container engines' sockets, by engine.
     pub engines: Vec<(String, PathBuf)>,
     pub state: Option<PathBuf>,
@@ -128,16 +125,6 @@ impl AgentConfig {
                 )))
             }
         };
-        let gateway_unit = env
-            .string(GATEWAY_UNIT_ENV)?
-            .map(|unit| {
-                service_unit(&unit).then_some(unit).ok_or_else(|| {
-                    PanelError::invalid_argument(format!(
-                        "{GATEWAY_UNIT_ENV} names a systemd service, such as pingora-panel-gatewayd.service"
-                    ))
-                })
-            })
-            .transpose()?;
         let mut engines: Vec<(String, PathBuf)> = Vec::new();
         for entry in env
             .string(ENGINES_ENV)?
@@ -185,7 +172,6 @@ impl AgentConfig {
             trust_domain,
             directories,
             listeners,
-            gateway_unit,
             engines,
             state,
             installation_project,
@@ -201,17 +187,6 @@ fn compose_service(name: &str) -> bool {
         && name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
-}
-
-/// A systemd service unit's name, by the characters systemd allows.
-fn service_unit(name: &str) -> bool {
-    name.len() <= 255
-        && name.strip_suffix(".service").is_some_and(|stem| {
-            !stem.is_empty()
-                && stem.chars().all(|c| {
-                    c.is_ascii_alphanumeric() || matches!(c, ':' | '_' | '.' | '-' | '@' | '\\')
-                })
-        })
 }
 
 fn id(name: &str, value: &str) -> Result<u32> {
@@ -245,7 +220,6 @@ mod tests {
         assert_eq!(config.credentials, PathBuf::from("/run/credentials/agent"));
         assert!(config.directories.is_empty());
         assert!(!config.listeners);
-        assert!(config.gateway_unit.is_none());
         assert!(config.engines.is_empty());
         assert!(config.state.is_none());
         assert_eq!(config.gateway_service, DEFAULT_GATEWAY_SERVICE);
@@ -259,7 +233,6 @@ mod tests {
             (PEER_USERS_ENV, "1000, 65532"),
             (LOGS_DIR_ENV, "/var/log/pingora-panel"),
             (LISTENERS_ENV, "on"),
-            (GATEWAY_UNIT_ENV, "pingora-panel-gatewayd.service"),
             (
                 ENGINES_ENV,
                 "docker=/run/docker.sock, podman=/run/podman/podman.sock",
@@ -282,10 +255,6 @@ mod tests {
             Some(PathBuf::from("/var/lib/pingora-panel-ops"))
         );
         assert!(config.listeners);
-        assert_eq!(
-            config.gateway_unit.as_deref(),
-            Some("pingora-panel-gatewayd.service")
-        );
         assert_eq!(config.socket_group, Some(1000));
         assert_eq!(config.peer_users, vec![1000, 65532]);
         assert_eq!(config.credentials, PathBuf::from("/etc/agent/tls"));
@@ -304,9 +273,6 @@ mod tests {
             [(SOCKET_GROUP_ENV, "-1")],
             [(LOGS_DIR_ENV, "logs")],
             [(LISTENERS_ENV, "sometimes")],
-            [(GATEWAY_UNIT_ENV, "gatewayd")],
-            [(GATEWAY_UNIT_ENV, "../sshd.service")],
-            [(GATEWAY_UNIT_ENV, ".service")],
             [(ENGINES_ENV, "containerd=/run/containerd.sock")],
             [(ENGINES_ENV, "docker=docker.sock")],
             [(ENGINES_ENV, "docker=/a.sock,docker=/b.sock")],

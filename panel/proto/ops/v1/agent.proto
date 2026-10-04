@@ -11,13 +11,13 @@ service Agent {
 }
 
 enum Capability {
+  reserved 3;
+  reserved "CAPABILITY_GATEWAY_UNIT";
   CAPABILITY_UNSPECIFIED = 0;
   // `Directories`: the space the panel's directories take.
   CAPABILITY_DIRECTORIES = 1;
   // `Listeners`: which processes listen on TCP ports.
   CAPABILITY_LISTENERS = 2;
-  // `GatewayUnit`: the gateway's systemd unit.
-  CAPABILITY_GATEWAY_UNIT = 3;
   // `Containers`: the Docker or Podman engine.
   CAPABILITY_CONTAINERS = 4;
   // `GatewayService`: what runs the gateway.
@@ -29,7 +29,7 @@ enum CapabilityState {
   CAPABILITY_STATE_AVAILABLE = 1;
   // The operator has not enabled it.
   CAPABILITY_STATE_NOT_ENABLED = 2;
-  // This platform cannot provide it, such as systemd on macOS.
+  // This platform cannot provide it, such as port diagnostics on macOS.
   CAPABILITY_STATE_UNSUPPORTED = 3;
   // Enabled, but the agent lacks the privilege it needs.
   CAPABILITY_STATE_DENIED = 4;

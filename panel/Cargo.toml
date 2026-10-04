@@ -223,8 +223,6 @@ unicode-normalization = "=0.1.25"
 uuid = { version = "=1.18.1", features = ["serde", "v4", "v7"] }
 walkdir = "=2.5.0"
 x509-parser = "=0.16.0"
-zbus = { version = "=5.19.0", default-features = false, features = ["tokio"] }
-zbus_systemd = { version = "=0.26200.0", default-features = false, features = ["systemd1", "zbus-async-tokio"] }
 zeroize = "=1.9.0"
 zxcvbn = { version = "=3.1.1", default-features = false }
 libc = "=0.2.189"

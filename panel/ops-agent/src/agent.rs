@@ -88,7 +88,6 @@ fn name(capability: Capability) -> &'static str {
         Capability::Unspecified => "unspecified",
         Capability::Directories => "directories",
         Capability::Listeners => "listeners",
-        Capability::GatewayUnit => "gateway-unit",
         Capability::Containers => "containers",
         Capability::GatewayService => "gateway-service",
     }
