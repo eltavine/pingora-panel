@@ -1,4 +1,6 @@
 import type {
+  AccessLog,
+  AccessLogFormat,
   Action,
   MatchKind,
   Route,
@@ -22,6 +24,7 @@ export const SITE_KINDS: readonly SiteKind[] = [
 export const MATCH_KINDS: readonly MatchKind[] = ['prefix', 'exact', 'glob', 'regex']
 export const REDIRECT_STATUSES = [301, 302, 303, 307, 308] as const
 export const WWW_REDIRECTS: readonly WwwRedirect[] = ['none', 'add_www', 'remove_www']
+export const ACCESS_LOG_FORMATS: readonly AccessLogFormat[] = ['json', 'combined']
 
 export const siteKindAction: Record<SiteKind, ActionType> = {
   reverse_proxy: 'proxy',
@@ -54,6 +57,17 @@ export interface HstsForm {
   preload: boolean
 }
 
+/**
+ * Access logging as the form edits it (ADR 0025); `inherit` follows the
+ * enclosing scope: the gateway's settings for a site, the site's for a route.
+ */
+export interface AccessLogForm {
+  enabled: 'inherit' | 'on' | 'off'
+  format: 'inherit' | AccessLogFormat
+  /** One `name = template` per line. */
+  fields: string
+}
+
 const DAY_SECONDS = 86_400
 /** Browsers' preload lists accept a year or more. */
 export const PRELOAD_DAYS = 365
@@ -71,6 +85,7 @@ export interface SiteForm {
   group: string
   tags: string
   note: string
+  accessLog: AccessLogForm
 }
 
 export interface RouteForm {
@@ -82,6 +97,7 @@ export interface RouteForm {
   host: string
   action: ActionForm
   securityPolicyId: string
+  accessLog: AccessLogForm
 }
 
 /** Empty text is absent, not an empty value. */
@@ -174,6 +190,39 @@ export function toAction(form: ActionForm): Action {
   }
 }
 
+export function accessLogForm(access?: AccessLog | null): AccessLogForm {
+  const enabled = access?.enabled
+  return {
+    enabled: enabled === undefined || enabled === null ? 'inherit' : enabled ? 'on' : 'off',
+    format: access?.format ?? 'inherit',
+    fields: Object.entries(access?.fields ?? {})
+      .map(([name, template]) => `${name} = ${template}`)
+      .join('\n'),
+  }
+}
+
+/** Lines of extra fields that are not `name = template`, counted from one. */
+export function invalidFieldLines(fields: string): number[] {
+  return fields
+    .split('\n')
+    .flatMap((line, index) => (line.trim() === '' || line.indexOf('=') > 0 ? [] : [index + 1]))
+}
+
+export function toAccessLog(form: AccessLogForm): AccessLog {
+  const fields: Record<string, string> = {}
+  for (const line of form.fields.split('\n')) {
+    const separator = line.indexOf('=')
+    if (separator > 0) {
+      fields[line.slice(0, separator).trim()] = line.slice(separator + 1).trim()
+    }
+  }
+  return {
+    enabled: form.enabled === 'inherit' ? null : form.enabled === 'on',
+    format: form.format === 'inherit' ? null : form.format,
+    fields,
+  }
+}
+
 export function siteForm(site?: SiteView): SiteForm {
   return {
     name: site?.name ?? '',
@@ -193,6 +242,7 @@ export function siteForm(site?: SiteView): SiteForm {
     group: site?.group ?? '',
     tags: (site?.tags ?? []).join(', '),
     note: site?.note ?? '',
+    accessLog: accessLogForm(site?.access_log),
   }
 }
 
@@ -226,6 +276,7 @@ export function siteInput(form: SiteForm, site?: SiteView): SiteInput {
     group: optionalText(form.group),
     tags: splitList(form.tags),
     note: optionalText(form.note),
+    access_log: toAccessLog(form.accessLog),
   }
 }
 
@@ -238,6 +289,7 @@ export function routeInputOf(route: Route): RouteInput {
     match: route.match,
     action: route.action,
     security_policy_id: route.security_policy_id ?? null,
+    access_log: route.access_log ?? null,
   }
 }
 
@@ -251,6 +303,7 @@ export function routeForm(route: Route | undefined, priority: number): RouteForm
     host: route?.match.host ?? '',
     action: actionForm(route?.action),
     securityPolicyId: route?.security_policy_id ?? '',
+    accessLog: accessLogForm(route?.access_log),
   }
 }
 
@@ -263,6 +316,7 @@ export function routeInput(form: RouteForm, id?: string): RouteInput {
     match: { kind: form.kind, path: form.path.trim(), host: optionalText(form.host) },
     action: toAction(form.action),
     security_policy_id: optionalText(form.securityPolicyId),
+    access_log: toAccessLog(form.accessLog),
   }
 }
 

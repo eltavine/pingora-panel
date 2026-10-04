@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import type { Action, Route, SiteView } from '@/api/generated'
 import {
+  accessLogForm,
   actionForm,
+  invalidFieldLines,
   nextPriority,
   routeForm,
   routeInput,
   siteForm,
   siteInput,
+  toAccessLog,
   toAction,
 } from '../forms'
 
@@ -18,6 +21,7 @@ const route: Route = {
   match: { kind: 'prefix', path: '/api/', host: null },
   action: { type: 'proxy', upstream_id: 'b9c1' },
   security_policy_id: 'api-limits',
+  access_log: { enabled: false, format: null, fields: {} },
 }
 
 const site: SiteView = {
@@ -143,5 +147,23 @@ describe('route forms', () => {
     expect(nextPriority([])).toBe(10)
     expect(nextPriority([route, { ...route, priority: 35 }])).toBe(45)
     expect(routeForm(undefined, 45).priority).toBe(45)
+  })
+})
+
+describe('access log forms', () => {
+  it('round-trip extra fields and follow the enclosing scope when unset', () => {
+    const fields = { 'tenant.id': '$http_x_tenant', 'query.raw': 'a=b' }
+    const form = accessLogForm({ enabled: true, format: 'combined', fields })
+    expect(form).toEqual({
+      enabled: 'on',
+      format: 'combined',
+      fields: 'tenant.id = $http_x_tenant\nquery.raw = a=b',
+    })
+    expect(toAccessLog(form)).toEqual({ enabled: true, format: 'combined', fields })
+    expect(toAccessLog(accessLogForm())).toEqual({ enabled: null, format: null, fields: {} })
+  })
+
+  it('point out lines that are not name = template', () => {
+    expect(invalidFieldLines('a = $host\n\n= b\nplain')).toEqual([3, 4])
   })
 })

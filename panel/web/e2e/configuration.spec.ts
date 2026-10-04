@@ -135,6 +135,13 @@ test('sites are summarized, listed and created', async ({ page }) => {
   await sheet.getByRole('radio', { name: 'Static site' }).click()
   await sheet.getByLabel('Site directory').fill('blog')
   await sheet.getByLabel('Domains').fill('blog.example\nwww.blog.example')
+  await sheet.getByRole('combobox', { name: 'Format' }).click()
+  await page.getByRole('option', { name: 'Combined (NGINX)' }).click()
+  const fields = sheet.getByLabel('Extra fields')
+  await fields.fill('tenant.id $http_x_tenant')
+  await expect(sheet.getByRole('alert')).toHaveText('Line 1 is not name = template')
+  await expect(sheet.getByRole('button', { name: 'Create' })).toBeDisabled()
+  await fields.fill('tenant.id = $http_x_tenant')
   await sheet.getByRole('button', { name: 'Create' }).click()
   await expect(page.getByText('Created site Blog')).toBeVisible()
 
@@ -147,6 +154,7 @@ test('sites are summarized, listed and created', async ({ page }) => {
       { host: 'blog.example', primary: true, enabled: true },
       { host: 'www.blog.example', primary: false, enabled: true },
     ],
+    access_log: { enabled: null, format: 'combined', fields: { 'tenant.id': '$http_x_tenant' } },
   })
 })
 

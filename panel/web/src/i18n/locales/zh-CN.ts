@@ -69,6 +69,25 @@ const zhCN = {
     appliedRevision: '已应用为版本 #{revision}',
   },
   sites: {
+    accessLog: {
+      title: '访问日志',
+      enabled: '记录',
+      on: '开启',
+      off: '关闭',
+      inherit: {
+        site: '网关默认',
+        route: '与网站相同',
+      },
+      format: '格式',
+      formats: {
+        json: 'JSON',
+        combined: 'Combined（NGINX）',
+      },
+      fields: '额外字段',
+      fieldsHint:
+        '每行一个“名称 = 模板”，如 tenant.id = $http_x_tenant。名称是以点连接的小写单词；模板可用 $host、$uri、$method、$scheme、$client_ip、$request_id、$upstream_addr、$http_<请求头> 和 $cookie_<名称>。',
+      invalidLines: '第 {lines} 行不是“名称 = 模板”',
+    },
     title: '网站',
     description: '按域名托管反向代理、静态站点、重定向与维护页。',
     new: '新建网站',

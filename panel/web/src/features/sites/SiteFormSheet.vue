@@ -41,8 +41,10 @@ import {
   useRefreshConfiguration,
 } from '@/lib/configuration'
 import SecurityPolicySelect from '@/features/security/SecurityPolicySelect.vue'
+import AccessLogFields from './AccessLogFields.vue'
 import ActionFields from './ActionFields.vue'
 import {
+  invalidFieldLines,
   PRELOAD_DAYS,
   SITE_KINDS,
   WWW_REDIRECTS,
@@ -250,6 +252,8 @@ function submit() {
             :hint="t('security.select.siteHint')"
           />
 
+          <AccessLogFields v-model="form.accessLog" id-prefix="site-access-log" scope="site" />
+
           <div class="grid gap-4 sm:grid-cols-2">
             <FormField id="site-group" :label="t('sites.form.group')">
               <Input id="site-group" v-model="form.group" autocomplete="off" />
@@ -269,7 +273,10 @@ function submit() {
         </div>
 
         <SheetFooter>
-          <Button type="submit" :disabled="busy">
+          <Button
+            type="submit"
+            :disabled="busy || invalidFieldLines(form.accessLog.fields).length > 0"
+          >
             <Save data-icon="inline-start" aria-hidden="true" />
             {{ site ? t('common.save') : t('common.create') }}
           </Button>

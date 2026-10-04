@@ -73,6 +73,25 @@ const en: Messages = {
     appliedRevision: 'Applied as revision #{revision}',
   },
   sites: {
+    accessLog: {
+      title: 'Access log',
+      enabled: 'Logging',
+      on: 'On',
+      off: 'Off',
+      inherit: {
+        site: 'Gateway default',
+        route: 'As the site',
+      },
+      format: 'Format',
+      formats: {
+        json: 'JSON',
+        combined: 'Combined (NGINX)',
+      },
+      fields: 'Extra fields',
+      fieldsHint:
+        'One name = template per line, such as tenant.id = $http_x_tenant. Names are lowercase words joined by dots; templates may use $host, $uri, $method, $scheme, $client_ip, $request_id, $upstream_addr, $http_<header> and $cookie_<name>.',
+      invalidLines: 'Line {lines} is not name = template | Lines {lines} are not name = template',
+    },
     title: 'Sites',
     description: 'Reverse proxies, static sites, redirects and maintenance pages by domain.',
     new: 'New site',

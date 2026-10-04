@@ -34,8 +34,16 @@ import {
   useRefreshConfiguration,
 } from '@/lib/configuration'
 import SecurityPolicySelect from '@/features/security/SecurityPolicySelect.vue'
+import AccessLogFields from './AccessLogFields.vue'
 import ActionFields from './ActionFields.vue'
-import { ACTION_TYPES, MATCH_KINDS, routeForm, routeInput, type RouteForm } from './forms'
+import {
+  ACTION_TYPES,
+  invalidFieldLines,
+  MATCH_KINDS,
+  routeForm,
+  routeInput,
+  type RouteForm,
+} from './forms'
 import { actionIcons } from './presentation'
 
 const ANY_HOST = '-'
@@ -179,10 +187,15 @@ function submit() {
             />
           </div>
           <ActionFields v-model="form.action" id-prefix="route-action" />
+
+          <AccessLogFields v-model="form.accessLog" id-prefix="route-access-log" scope="route" />
         </div>
 
         <SheetFooter>
-          <Button type="submit" :disabled="busy">
+          <Button
+            type="submit"
+            :disabled="busy || invalidFieldLines(form.accessLog.fields).length > 0"
+          >
             <Save data-icon="inline-start" aria-hidden="true" />
             {{ route ? t('common.save') : t('common.create') }}
           </Button>
