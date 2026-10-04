@@ -102,6 +102,24 @@
       "name": "AlertSeverity",
       "owner": "pingora-panel-platform",
       "reason": "Severity travels to receivers as a notification label; a new severity must fail to compile until every adapter carries it, rather than reaching receivers as another severity."
+    },
+    {
+      "package": "panel-application",
+      "name": "AgentCapability",
+      "owner": "pingora-panel-platform",
+      "reason": "The console offers a host action only for a capability the agent reports; a new capability must fail to compile in every adapter until it is mapped, rather than being shown as another one."
+    },
+    {
+      "package": "panel-application",
+      "name": "CapabilityState",
+      "owner": "pingora-panel-platform",
+      "reason": "A capability's state decides whether its actions are offered; a new state must fail to compile until every adapter maps it, rather than reading as available."
+    },
+    {
+      "package": "panel-application",
+      "name": "DirectoryKind",
+      "owner": "pingora-panel-platform",
+      "reason": "Each kind is a directory the agent's configuration names; a new kind must fail to compile until every adapter labels it, rather than being reported as another directory."
     }
   ]
 }

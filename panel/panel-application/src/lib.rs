@@ -14,6 +14,7 @@ mod configuration;
 mod context;
 mod gateway;
 mod host;
+mod host_agent;
 mod idempotency;
 mod logs;
 mod operations;
@@ -42,6 +43,10 @@ pub use gateway::{
     GatewayPort, GatewayService, GatewayStatus, GatewayUseCases, PreparedDeployment,
 };
 pub use host::{HostFilesystem, HostNetworkDevice, HostPort, HostSummary};
+pub use host_agent::{
+    AgentCapability, AgentDescription, CapabilityState, CapabilityStatus, DirectoriesReport,
+    DirectoryKind, DirectoryUsage, HostAgentPort, NoHostAgent,
+};
 pub use idempotency::IdempotentGatewayUseCases;
 pub use logs::{
     LogBatch, LogDeletion, LogDeletionState, LogFilter, LogKind, LogPage, LogRecord, LogSearch,
