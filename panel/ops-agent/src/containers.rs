@@ -6,16 +6,20 @@ use crate::config::ENGINES_ENV;
 use bollard::{
     errors::Error as EngineError,
     models::{ContainerSummary, ContainerSummaryStateEnum, PortSummary},
-    query_parameters::ListContainersOptionsBuilder,
+    query_parameters::{
+        InspectContainerOptions, KillContainerOptionsBuilder, ListContainersOptionsBuilder,
+        RemoveContainerOptionsBuilder, RestartContainerOptions, StartContainerOptions,
+        StopContainerOptions,
+    },
     Docker, API_DEFAULT_VERSION,
 };
 use panel_contracts::ops::v1::{
     self as wire, containers_server::Containers, AgentCapability, Capability, CapabilityState,
-    ContainerState, Engine, EngineInfo, EngineVersion,
+    ContainerAction, ContainerState, Engine, EngineInfo, EngineVersion,
 };
 use panel_errors::PanelError;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -24,6 +28,9 @@ use tonic::{Request, Response, Status};
 
 /// How long an engine has to answer before it counts as unreachable.
 const ENGINE_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long an action may take; stopping waits out the container's stop
+/// timeout before it kills.
+const ACTION_TIMEOUT: Duration = Duration::from_secs(120);
 /// The label Compose puts on the containers it creates.
 const COMPOSE_PROJECT: &str = "com.docker.compose.project";
 /// Where the agent keeps which engines are enabled, in its state directory.
@@ -286,11 +293,109 @@ fn matches(container: &wire::Container, search: &str, states: &[i32]) -> bool {
 /// The engines and their containers to panel-api.
 pub(crate) struct ContainerService {
     engines: Arc<Engines>,
+    /// The Compose project of the panel's own installation.
+    installation: String,
 }
 
 impl ContainerService {
-    pub(crate) fn new(engines: Arc<Engines>) -> Self {
-        Self { engines }
+    pub(crate) fn new(engines: Arc<Engines>, installation: String) -> Self {
+        Self {
+            engines,
+            installation,
+        }
+    }
+
+    /// Acts on a container, then reads it again unless it was removed.
+    async fn act_on(
+        &self,
+        request: &wire::ContainersActRequest,
+        action: ContainerAction,
+    ) -> Result<wire::ContainersActResponse, PanelError> {
+        let unspecified = || PanelError::invalid_argument("start, stop, restart, kill or remove");
+        if action == ContainerAction::Unspecified {
+            return Err(unspecified());
+        }
+        let reference = request.container.trim();
+        if reference.is_empty() {
+            return Err(PanelError::invalid_argument("name the container"));
+        }
+        let client = self
+            .engines
+            .enabled(&request.engine)?
+            .with_timeout(ACTION_TIMEOUT);
+        let found = client
+            .inspect_container(reference, None::<InspectContainerOptions>)
+            .await
+            .map_err(|error| failure(&error))?;
+        let id = found.id.unwrap_or_default();
+        let name = found
+            .name
+            .unwrap_or_default()
+            .trim_start_matches('/')
+            .to_owned();
+        let project = found
+            .config
+            .and_then(|config| config.labels)
+            .and_then(|mut labels| labels.remove(COMPOSE_PROJECT));
+        if action != ContainerAction::Start && project.as_deref() == Some(&self.installation) {
+            return Err(PanelError::precondition_failed(format!(
+                "{name} belongs to the panel's installation; manage it with Compose"
+            )));
+        }
+        let done = match action {
+            ContainerAction::Start => {
+                client
+                    .start_container(&id, None::<StartContainerOptions>)
+                    .await
+            }
+            ContainerAction::Stop => {
+                client
+                    .stop_container(&id, None::<StopContainerOptions>)
+                    .await
+            }
+            ContainerAction::Restart => {
+                client
+                    .restart_container(&id, None::<RestartContainerOptions>)
+                    .await
+            }
+            ContainerAction::Kill => {
+                let options = KillContainerOptionsBuilder::default()
+                    .signal("SIGKILL")
+                    .build();
+                client.kill_container(&id, Some(options)).await
+            }
+            ContainerAction::Remove => {
+                let options = RemoveContainerOptionsBuilder::default()
+                    .force(request.force)
+                    .v(request.remove_volumes)
+                    .build();
+                client.remove_container(&id, Some(options)).await
+            }
+            ContainerAction::Unspecified => return Err(unspecified()),
+        };
+        done.map_err(|error| failure(&error))?;
+        let container = if action == ContainerAction::Remove {
+            None
+        } else {
+            let filters = HashMap::from([("id", vec![id.as_str()])]);
+            let options = ListContainersOptionsBuilder::default()
+                .all(true)
+                .filters(&filters)
+                .build();
+            client
+                .list_containers(Some(options))
+                .await
+                .map_err(|error| failure(&error))?
+                .into_iter()
+                .next()
+                .map(container)
+        };
+        Ok(wire::ContainersActResponse {
+            id,
+            name,
+            container,
+            error: None,
+        })
     }
 }
 
@@ -369,16 +474,96 @@ impl Containers for ContainerService {
             error,
         }))
     }
+
+    async fn act(
+        &self,
+        request: Request<wire::ContainersActRequest>,
+    ) -> Result<Response<wire::ContainersActResponse>, Status> {
+        let request = request.into_inner();
+        let action =
+            ContainerAction::try_from(request.action).unwrap_or(ContainerAction::Unspecified);
+        let result = tokio::time::timeout(ACTION_TIMEOUT, self.act_on(&request, action))
+            .await
+            .unwrap_or_else(|_| {
+                Err(PanelError::deadline_exceeded(
+                    "the engine did not finish in time",
+                ))
+            });
+        Ok(Response::new(match result {
+            Ok(done) => {
+                tracing::info!(
+                    event = "container_action",
+                    engine = %request.engine,
+                    container = %done.name,
+                    action = action.as_str_name(),
+                );
+                done
+            }
+            Err(error) => {
+                tracing::warn!(
+                    event = "container_action_refused",
+                    engine = %request.engine,
+                    container = %request.container,
+                    action = action.as_str_name(),
+                    error_code = %error.code,
+                );
+                wire::ContainersActResponse {
+                    error: Some((&error).into()),
+                    ..wire::ContainersActResponse::default()
+                }
+            }
+        }))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{routing::get, Json, Router};
-    use serde_json::json;
+    use axum::{
+        extract::{Path as Segments, Query},
+        http::StatusCode,
+        response::{IntoResponse, Response as Answer},
+        routing::{delete, get, post},
+        Json, Router,
+    };
+    use serde_json::{json, Value};
+
+    /// What the fake engine was asked to do, such as `stop b2`.
+    type Calls = Arc<Mutex<Vec<String>>>;
+
+    /// A container the fake engine knows, as inspecting it answers.
+    fn inspected(reference: &str) -> Option<Value> {
+        let (id, name, running, project) = match reference {
+            "b2" | "shop-web-1" => ("b2", "shop-web-1", true, Some("shop")),
+            "a1" | "cache" => ("a1", "cache", false, None),
+            "c3" | "pingora-panel-panel-api-1" => (
+                "c3",
+                "pingora-panel-panel-api-1",
+                true,
+                Some("pingora-panel"),
+            ),
+            _ => return None,
+        };
+        let mut labels = serde_json::Map::new();
+        if let Some(project) = project {
+            labels.insert(COMPOSE_PROJECT.into(), project.into());
+        }
+        Some(json!({"Id": id, "Name": format!("/{name}"),
+                    "State": {"Status": if running { "running" } else { "exited" },
+                              "Running": running},
+                    "Config": {"Labels": labels}}))
+    }
+
+    fn refusal(status: StatusCode, message: &str) -> Answer {
+        (status, Json(json!({ "message": message }))).into_response()
+    }
 
     /// Enough of the Engine API to answer what the agent asks.
     async fn engine(directory: &Path) -> PathBuf {
+        engine_with(directory, Calls::default()).await
+    }
+
+    async fn engine_with(directory: &Path, calls: Calls) -> PathBuf {
         let socket = directory.join("engine.sock");
         let listener = tokio::net::UnixListener::bind(&socket).unwrap();
         let router = Router::new()
@@ -406,8 +591,15 @@ mod tests {
             )
             .route(
                 "/containers/json",
-                get(|| async {
-                    Json(json!([
+                get(|Query(query): Query<HashMap<String, String>>| async move {
+                    let ids = query
+                        .get("filters")
+                        .and_then(|filters| {
+                            serde_json::from_str::<HashMap<String, Vec<String>>>(filters).ok()
+                        })
+                        .and_then(|mut filters| filters.remove("id"))
+                        .unwrap_or_default();
+                    let every = json!([
                         {"Id": "b2", "Names": ["/shop-web-1"], "Image": "nginx:1.27",
                          "ImageID": "sha256:aa", "Created": 1_800_000_000, "State": "running",
                          "Status": "Up 3 hours (healthy)",
@@ -417,8 +609,71 @@ mod tests {
                         {"Id": "a1", "Names": ["/cache"], "Image": "redis:7",
                          "ImageID": "sha256:bb", "Created": 1_800_000_100, "State": "exited",
                          "Status": "Exited (0) 2 days ago", "Ports": [], "Labels": {}}
-                    ]))
+                    ]);
+                    let listed: Vec<Value> = every
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter(|container| {
+                            ids.is_empty() || ids.iter().any(|id| container["Id"] == id.as_str())
+                        })
+                        .cloned()
+                        .collect();
+                    Json(listed)
                 }),
+            )
+            .route(
+                "/containers/{reference}/json",
+                get(|Segments(reference): Segments<String>| async move {
+                    match inspected(&reference) {
+                        Some(found) => Json(found).into_response(),
+                        None => refusal(StatusCode::NOT_FOUND, "No such container"),
+                    }
+                }),
+            );
+        let acted = calls.clone();
+        let router = router
+            .route(
+                "/containers/{reference}/{action}",
+                post(
+                    move |Segments((reference, action)): Segments<(String, String)>| async move {
+                        let Some(found) = inspected(&reference) else {
+                            return refusal(StatusCode::NOT_FOUND, "No such container");
+                        };
+                        if action == "kill" && found["State"]["Running"] != true {
+                            return refusal(StatusCode::CONFLICT, "container is not running");
+                        }
+                        acted.lock().unwrap().push(format!(
+                            "{action} {}",
+                            found["Id"].as_str().unwrap_or_default()
+                        ));
+                        StatusCode::NO_CONTENT.into_response()
+                    },
+                ),
+            )
+            .route(
+                "/containers/{reference}",
+                delete(
+                    move |Segments(reference): Segments<String>,
+                          Query(query): Query<HashMap<String, String>>| async move {
+                        let Some(found) = inspected(&reference) else {
+                            return refusal(StatusCode::NOT_FOUND, "No such container");
+                        };
+                        let force = query.get("force").is_some_and(|value| value == "true");
+                        if found["State"]["Running"] == true && !force {
+                            return refusal(
+                                StatusCode::CONFLICT,
+                                "You cannot remove a running container",
+                            );
+                        }
+                        calls.lock().unwrap().push(format!(
+                            "remove {} force={force} volumes={}",
+                            found["Id"].as_str().unwrap_or_default(),
+                            query.get("v").map_or("false", String::as_str)
+                        ));
+                        StatusCode::NO_CONTENT.into_response()
+                    },
+                ),
             );
         let router = router.fallback(|uri: axum::http::Uri| async move {
             (axum::http::StatusCode::NOT_FOUND, format!("unrouted {uri}"))
@@ -452,7 +707,7 @@ mod tests {
     async fn engines_report_their_version_and_figures() {
         let directory = tempfile::tempdir().unwrap();
         let socket = engine(directory.path()).await;
-        let service = ContainerService::new(engines(socket.clone(), None));
+        let service = ContainerService::new(engines(socket.clone(), None), "pingora-panel".into());
         let engines = service
             .engines(Request::new(wire::ContainersEnginesRequest::default()))
             .await
@@ -482,7 +737,10 @@ mod tests {
     #[tokio::test]
     async fn containers_are_listed_searched_and_filtered() {
         let directory = tempfile::tempdir().unwrap();
-        let service = ContainerService::new(engines(engine(directory.path()).await, None));
+        let service = ContainerService::new(
+            engines(engine(directory.path()).await, None),
+            "pingora-panel".into(),
+        );
 
         let every = list(&service, "", Vec::new()).await;
         assert!(
@@ -518,7 +776,10 @@ mod tests {
         let socket = engine(directory.path()).await;
         let state = directory.path().join("state");
         std::fs::create_dir(&state).unwrap();
-        let service = ContainerService::new(engines(socket.clone(), Some(state.clone())));
+        let service = ContainerService::new(
+            engines(socket.clone(), Some(state.clone())),
+            "pingora-panel".into(),
+        );
 
         let set = service
             .set_engine(Request::new(wire::ContainersSetEngineRequest {
@@ -549,6 +810,103 @@ mod tests {
             .unwrap()
             .into_inner();
         assert_eq!(unknown.error.unwrap().code, "NOT_FOUND");
+    }
+
+    async fn act(
+        service: &ContainerService,
+        container: &str,
+        action: ContainerAction,
+        force: bool,
+    ) -> wire::ContainersActResponse {
+        service
+            .act(Request::new(wire::ContainersActRequest {
+                context: None,
+                engine: "docker".into(),
+                container: container.into(),
+                action: action.into(),
+                force,
+                remove_volumes: false,
+            }))
+            .await
+            .unwrap()
+            .into_inner()
+    }
+
+    #[tokio::test]
+    async fn containers_are_started_stopped_restarted_killed_and_removed() {
+        let directory = tempfile::tempdir().unwrap();
+        let calls = Calls::default();
+        let socket = engine_with(directory.path(), calls.clone()).await;
+        let service = ContainerService::new(engines(socket, None), "pingora-panel".into());
+
+        let started = act(&service, "shop-web-1", ContainerAction::Start, false).await;
+        assert!(started.error.is_none(), "{:?}", started.error);
+        assert_eq!(
+            (started.id.as_str(), started.name.as_str()),
+            ("b2", "shop-web-1")
+        );
+        assert_eq!(started.container.unwrap().names, ["shop-web-1"]);
+        for action in [
+            ContainerAction::Stop,
+            ContainerAction::Restart,
+            ContainerAction::Kill,
+        ] {
+            let done = act(&service, "b2", action, false).await;
+            assert!(done.error.is_none(), "{action:?}: {:?}", done.error);
+        }
+        let running = act(&service, "shop-web-1", ContainerAction::Remove, false).await;
+        assert_eq!(running.error.unwrap().code, "CONFLICT");
+        let removed = act(&service, "shop-web-1", ContainerAction::Remove, true).await;
+        assert!(removed.error.is_none(), "{:?}", removed.error);
+        assert!(removed.container.is_none());
+        assert_eq!(removed.name, "shop-web-1");
+
+        let exited = act(&service, "cache", ContainerAction::Kill, false).await;
+        assert_eq!(exited.error.unwrap().code, "CONFLICT");
+        let missing = act(&service, "ghost", ContainerAction::Start, false).await;
+        assert_eq!(missing.error.unwrap().code, "NOT_FOUND");
+        assert_eq!(
+            *calls.lock().unwrap(),
+            [
+                "start b2",
+                "stop b2",
+                "restart b2",
+                "kill b2",
+                "remove b2 force=true volumes=false"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn the_installation_is_only_ever_started() {
+        let directory = tempfile::tempdir().unwrap();
+        let calls = Calls::default();
+        let socket = engine_with(directory.path(), calls.clone()).await;
+        let service = ContainerService::new(engines(socket, None), "pingora-panel".into());
+        for action in [
+            ContainerAction::Stop,
+            ContainerAction::Restart,
+            ContainerAction::Kill,
+            ContainerAction::Remove,
+        ] {
+            let refused = act(&service, "pingora-panel-panel-api-1", action, true).await;
+            assert_eq!(
+                refused.error.unwrap().code,
+                "PRECONDITION_FAILED",
+                "{action:?}"
+            );
+        }
+        let started = act(
+            &service,
+            "pingora-panel-panel-api-1",
+            ContainerAction::Start,
+            false,
+        )
+        .await;
+        assert!(started.error.is_none(), "{:?}", started.error);
+        let unnamed = act(&service, "b2", ContainerAction::Unspecified, false).await;
+        assert_eq!(unnamed.error.unwrap().code, "INVALID_ARGUMENT");
+        assert_eq!(*calls.lock().unwrap(), ["start c3"]);
     }
 
     #[test]

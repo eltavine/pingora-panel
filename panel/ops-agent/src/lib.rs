@@ -65,6 +65,7 @@ pub async fn serve(config: AgentConfig, shutdown: impl Future<Output = ()> + Sen
                 config.engines.clone(),
                 config.state.clone(),
             )),
+            config.installation_project.clone(),
         )))
     };
     let directories = if config.directories.is_empty() {

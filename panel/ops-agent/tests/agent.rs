@@ -75,6 +75,7 @@ async fn the_agent_answers_panel_api_alone_within_its_configuration() {
             gateway_unit: None,
             engines: Vec::new(),
             state: None,
+            installation_project: "pingora-panel".into(),
         },
         async move {
             let _ = stopped.await;

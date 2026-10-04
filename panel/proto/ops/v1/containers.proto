@@ -13,6 +13,10 @@ service Containers {
   // Enables or disables an engine; the agent keeps the choice.
   rpc SetEngine(ContainersSetEngineRequest) returns (ContainersSetEngineResponse);
   rpc List(ContainersListRequest) returns (ContainersListResponse);
+  // Starts, stops, restarts, kills or removes a container. The containers
+  // of the panel's own installation are only ever started; Compose manages
+  // them otherwise.
+  rpc Act(ContainersActRequest) returns (ContainersActResponse);
 }
 
 message EngineVersion {
@@ -128,4 +132,37 @@ message ContainersListResponse {
   google.protobuf.Timestamp observed_at = 1;
   repeated Container containers = 2;
   .pingora.panel.common.v1.Error error = 3;
+}
+
+enum ContainerAction {
+  CONTAINER_ACTION_UNSPECIFIED = 0;
+  CONTAINER_ACTION_START = 1;
+  // The container's stop signal, then SIGKILL once its stop timeout passes.
+  CONTAINER_ACTION_STOP = 2;
+  CONTAINER_ACTION_RESTART = 3;
+  // SIGKILL at once.
+  CONTAINER_ACTION_KILL = 4;
+  CONTAINER_ACTION_REMOVE = 5;
+}
+
+message ContainersActRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string engine = 2;
+  // Its ID, a unique prefix of its ID, or its name.
+  string container = 3;
+  ContainerAction action = 4;
+  // For REMOVE: a running container is killed and removed rather than
+  // refused.
+  bool force = 5;
+  // For REMOVE: its anonymous volumes are removed with it.
+  bool remove_volumes = 6;
+}
+
+message ContainersActResponse {
+  // Its ID and name as they were before the action.
+  string id = 1;
+  string name = 2;
+  // The container afterwards; unset once removed.
+  Container container = 3;
+  .pingora.panel.common.v1.Error error = 4;
 }

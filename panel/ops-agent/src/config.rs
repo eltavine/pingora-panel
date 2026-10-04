@@ -29,6 +29,11 @@ pub const ENGINES_ENV: &str = "PINGORA_PANEL_OPS_ENGINES";
 pub const STATE_DIR_ENV: &str = "PINGORA_PANEL_OPS_STATE_DIR";
 /// Where systemd places a service's `StateDirectory=`.
 pub const STATE_DIRECTORY_ENV: &str = "STATE_DIRECTORY";
+/// The Compose project of the panel's own installation, whose containers
+/// the agent only ever starts.
+pub const INSTALLATION_PROJECT_ENV: &str = "PINGORA_PANEL_OPS_INSTALLATION_PROJECT";
+/// The project `compose.yaml` names.
+pub const DEFAULT_INSTALLATION_PROJECT: &str = "pingora-panel";
 /// The engines a socket may be named for.
 pub const ENGINE_IDS: [&str; 2] = ["docker", "podman"];
 
@@ -53,6 +58,7 @@ pub struct AgentConfig {
     /// The container engines' sockets, by engine.
     pub engines: Vec<(String, PathBuf)>,
     pub state: Option<PathBuf>,
+    pub installation_project: String,
 }
 
 impl AgentConfig {
@@ -154,6 +160,9 @@ impl AgentConfig {
             None => env.string(STATE_DIRECTORY_ENV)?,
         }
         .map(PathBuf::from);
+        let installation_project = env
+            .string(INSTALLATION_PROJECT_ENV)?
+            .unwrap_or_else(|| DEFAULT_INSTALLATION_PROJECT.to_owned());
         Ok(Self {
             socket,
             socket_group: Some(socket_group),
@@ -165,6 +174,7 @@ impl AgentConfig {
             gateway_unit,
             engines,
             state,
+            installation_project,
         })
     }
 }
