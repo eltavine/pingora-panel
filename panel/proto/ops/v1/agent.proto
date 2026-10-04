@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package pingora.panel.ops.v1;
+
+import "common/v1/common.proto";
+
+// The host agent and what it can do now (ADR 0030). Each capability is a
+// service of its own, served only while the agent has it.
+service Agent {
+  rpc Describe(AgentDescribeRequest) returns (AgentDescribeResponse);
+}
+
+enum Capability {
+  CAPABILITY_UNSPECIFIED = 0;
+  // `Directories`: the space the panel's directories take.
+  CAPABILITY_DIRECTORIES = 1;
+  // `Listeners`: which processes listen on TCP ports.
+  CAPABILITY_LISTENERS = 2;
+  // `GatewayUnit`: the gateway's systemd unit.
+  CAPABILITY_GATEWAY_UNIT = 3;
+  // `Containers`: the Docker or Podman engine.
+  CAPABILITY_CONTAINERS = 4;
+}
+
+enum CapabilityState {
+  CAPABILITY_STATE_UNSPECIFIED = 0;
+  CAPABILITY_STATE_AVAILABLE = 1;
+  // The operator has not enabled it.
+  CAPABILITY_STATE_NOT_ENABLED = 2;
+  // This platform cannot provide it, such as systemd on macOS.
+  CAPABILITY_STATE_UNSUPPORTED = 3;
+  // Enabled, but the agent lacks the privilege it needs.
+  CAPABILITY_STATE_DENIED = 4;
+  // Enabled, but what it relies on does not answer, such as the engine's
+  // socket.
+  CAPABILITY_STATE_UNREACHABLE = 5;
+}
+
+message AgentCapability {
+  Capability capability = 1;
+  CapabilityState state = 2;
+  // What to do about a state other than available.
+  string detail = 3;
+}
+
+message AgentDescription {
+  .pingora.panel.common.v1.Version version = 1;
+  string hostname = 2;
+  repeated AgentCapability capabilities = 3;
+}
+
+message AgentDescribeRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+}
+
+message AgentDescribeResponse {
+  AgentDescription description = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}

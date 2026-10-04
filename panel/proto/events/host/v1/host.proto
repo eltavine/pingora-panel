@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+// The data of events about operations on the host (ADR 0030). Each message
+// is the data of one event type, named in its comment; events carry it as
+// JSON in the proto3 JSON mapping, with the field names below.
+package pingora.panel.events.host.v1;
+
+// `host.gateway_unit.started`
+message GatewayUnitStarted {
+  string unit = 1;
+  // The state systemd reported once the job finished.
+  string active_state = 2;
+}
+
+// `host.gateway_unit.stopped`
+message GatewayUnitStopped {
+  string unit = 1;
+  string active_state = 2;
+}
+
+// `host.gateway_unit.restarted`
+message GatewayUnitRestarted {
+  string unit = 1;
+  string active_state = 2;
+}
+
+// `host.operation.refused`: an operation on the host that was refused or
+// failed, and changed nothing.
+message OperationRefused {
+  // Such as `gateway_unit.restart`.
+  string operation = 1;
+  string code = 2;
+  string message = 3;
+}

@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package pingora.panel.ops.v1;
+
+import "common/v1/common.proto";
+import "google/protobuf/timestamp.proto";
+
+// The gateway's systemd unit, the one unit the agent may act on. Which unit
+// that is is the agent's configuration, never the caller's.
+service GatewayUnit {
+  rpc Status(GatewayUnitStatusRequest) returns (GatewayUnitStatusResponse);
+  rpc Change(GatewayUnitChangeRequest) returns (GatewayUnitChangeResponse);
+}
+
+enum UnitAction {
+  UNIT_ACTION_UNSPECIFIED = 0;
+  UNIT_ACTION_START = 1;
+  UNIT_ACTION_STOP = 2;
+  UNIT_ACTION_RESTART = 3;
+}
+
+// The unit as systemd reports it. The states are systemd's own words, such
+// as `active`, `inactive` or `failed`, so new ones pass through unchanged.
+message UnitStatus {
+  // Such as `pingora-panel-gatewayd.service`.
+  string name = 1;
+  string description = 2;
+  // `loaded`, `not-found`, `masked` and so on.
+  string load_state = 3;
+  string active_state = 4;
+  // Such as `running`, `dead` or `exited`.
+  string sub_state = 5;
+  // Such as `enabled` or `disabled`.
+  string unit_file_state = 6;
+  // The main process; 0 when there is none.
+  uint32 main_pid = 7;
+  // When it last became active; unset when it never has.
+  google.protobuf.Timestamp active_since = 8;
+  // How often systemd restarted it automatically.
+  uint32 restarts = 9;
+  // How it last ended, such as `success` or `exit-code`.
+  string result = 10;
+}
+
+message GatewayUnitStatusRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+}
+
+message GatewayUnitStatusResponse {
+  UnitStatus status = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message GatewayUnitChangeRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  UnitAction action = 2;
+}
+
+// The unit once systemd finished the action's job.
+message GatewayUnitChangeResponse {
+  UnitStatus status = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}

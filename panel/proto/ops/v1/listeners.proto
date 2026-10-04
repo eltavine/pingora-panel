@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package pingora.panel.ops.v1;
+
+import "common/v1/common.proto";
+import "google/protobuf/timestamp.proto";
+
+// Which processes listen on TCP ports, such as whatever holds 80 and 443
+// before the gateway can.
+service Listeners {
+  rpc List(ListenersListRequest) returns (ListenersListResponse);
+}
+
+message ListeningProcess {
+  int32 pid = 1;
+  // The command's name, such as `nginx`.
+  string name = 2;
+  // The executable's path; empty when the agent may not read it.
+  string executable = 3;
+  uint32 uid = 4;
+}
+
+// One listening socket.
+message Listener {
+  // The local address, such as `0.0.0.0` or `::`.
+  string address = 1;
+  uint32 port = 2;
+  // The socket's owner.
+  uint32 uid = 3;
+  // The processes that hold it; empty when the agent may not see them.
+  repeated ListeningProcess processes = 4;
+}
+
+message ListenersListRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  // The ports to look at; 80 and 443 when empty, at most 16.
+  repeated uint32 ports = 2;
+}
+
+message ListenersListResponse {
+  google.protobuf.Timestamp observed_at = 1;
+  repeated Listener listeners = 2;
+  .pingora.panel.common.v1.Error error = 3;
+}

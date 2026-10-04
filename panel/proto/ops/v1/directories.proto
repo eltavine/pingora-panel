@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package pingora.panel.ops.v1;
+
+import "common/v1/common.proto";
+import "google/protobuf/timestamp.proto";
+
+// The space the panel's own directories take on the host. Which
+// directories they are is the agent's configuration, never the caller's.
+service Directories {
+  rpc Usage(DirectoriesUsageRequest) returns (DirectoriesUsageResponse);
+}
+
+enum DirectoryKind {
+  DIRECTORY_KIND_UNSPECIFIED = 0;
+  // The gateway's configuration and state.
+  DIRECTORY_KIND_CONFIGURATION = 1;
+  // Access and error logs.
+  DIRECTORY_KIND_LOGS = 2;
+  // Certificates and their keys.
+  DIRECTORY_KIND_CERTIFICATES = 3;
+}
+
+message DirectoryUsage {
+  DirectoryKind kind = 1;
+  // The directory on the host.
+  string path = 2;
+  // False when the directory does not exist; the counts are then zero.
+  bool present = 3;
+  // The sizes of the regular files below it, on its file system only and
+  // without following links.
+  uint64 bytes = 4;
+  uint64 files = 5;
+  // Entries that could not be read, and so are not counted.
+  uint64 unreadable = 6;
+  // True when the walk stopped at its limit and the counts are partial.
+  bool truncated = 7;
+}
+
+message DirectoriesUsageRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+}
+
+message DirectoriesUsageResponse {
+  google.protobuf.Timestamp observed_at = 1;
+  repeated DirectoryUsage directories = 2;
+  .pingora.panel.common.v1.Error error = 3;
+}

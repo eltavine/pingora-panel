@@ -26,6 +26,7 @@ packages! {
     automation => "pingora.panel.events.automation.v1",
     config => "pingora.panel.events.config.v1",
     gateway => "pingora.panel.events.gateway.v1",
+    host => "pingora.panel.events.host.v1",
     identity => "pingora.panel.events.identity.v1",
     observability => "pingora.panel.events.observability.v1",
     tls => "pingora.panel.events.tls.v1",
@@ -138,6 +139,10 @@ event_types! {
     observability::v1::AlertChannelRefused => "observability.alert_channel.refused",
     observability::v1::AlertFired => "observability.alert.fired",
     observability::v1::AlertResolved => "observability.alert.resolved",
+    host::v1::GatewayUnitStarted => "host.gateway_unit.started",
+    host::v1::GatewayUnitStopped => "host.gateway_unit.stopped",
+    host::v1::GatewayUnitRestarted => "host.gateway_unit.restarted",
+    host::v1::OperationRefused => "host.operation.refused",
 }
 
 #[cfg(test)]
