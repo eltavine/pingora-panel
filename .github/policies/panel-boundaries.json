@@ -529,6 +529,16 @@
         "panel-platform-codec"
       ]
     },
+    "panel-sqlite": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-errors",
+        "panel-event-codec",
+        "panel-events",
+        "panel-health",
+        "panel-outbox"
+      ]
+    },
     "panel-tls": {
       "catalog": true,
       "allowed_workspace_dependencies": [
