@@ -28,7 +28,10 @@ export default defineConfig(({ mode }) => ({
   server: {
     // The management API serves the console in production; in development
     // Vite forwards API calls to it.
-    proxy: { '/api': process.env.PANEL_API_URL ?? 'http://127.0.0.1:8080' },
+    proxy: {
+      // `ws` relays WebSocket upgrades, such as following logs.
+      '/api': { target: process.env.PANEL_API_URL ?? 'http://127.0.0.1:8080', ws: true },
+    },
     // The mock reads the reviewed OpenAPI contract next to the console.
     fs: {
       allow: [

@@ -12,6 +12,7 @@ import type {
   UpstreamHealthReportResponse,
   UpstreamView,
 } from '@/api/generated'
+import { logHandlers } from './logs'
 import type { Sampler } from './openapi'
 
 /** Every permission of the catalog, so every page of the console shows. */
@@ -226,6 +227,7 @@ export function handlers(sampler: Sampler): AnyHandler[] {
     http.get('*/api/v1/traffic/series', ({ request }) =>
       HttpResponse.json(series(windowOf(request))),
     ),
+    ...logHandlers(),
     http.all('*/api/*', ({ request }) => {
       const answer = sampler.respond(request.method, new URL(request.url).pathname)
       if (!answer) {

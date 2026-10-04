@@ -23,12 +23,17 @@ const datetime = {
   hour: '2-digit',
   minute: '2-digit',
 } as const
+/** Log records: to the millisecond. */
+const precise = { ...datetime, second: '2-digit', fractionalSecondDigits: 3 } as const
 
 export const i18n = createI18n({
   legacy: false,
   locale: stored.value,
   messages: {} as Record<Locale, Messages>,
-  datetimeFormats: { 'zh-CN': { time, datetime }, en: { time, datetime } },
+  datetimeFormats: {
+    'zh-CN': { time, datetime, precise },
+    en: { time, datetime, precise },
+  },
 })
 
 watch(

@@ -20,6 +20,7 @@ export const KNOWN_TYPES = [
   'gateway.endpoint.drained',
   'gateway.endpoint.restored',
   'gateway.operation.refused',
+  'gateway.logs.deleted',
   'identity.account.created',
   'identity.account.updated',
   'identity.password.changed',
@@ -127,6 +128,8 @@ export function summaryOf(event: AuditEvent, t: Translate): string {
     case 'gateway.endpoint.drained':
     case 'gateway.endpoint.restored':
       return text(data.endpoint)
+    case 'gateway.logs.deleted':
+      return text(data.site) || t('audit.summary.everySite')
     case 'identity.account.created':
       return `${text(data.username)} · ${list(data.roles)}`
     case 'identity.account.updated':
