@@ -3,13 +3,22 @@
 //! Composition of `observability-service`, the owner of alert rules,
 //! silences and saved queries, which fronts the metrics and log backends.
 
+mod logql;
+mod logs;
+mod loki;
 mod promql;
 mod traffic;
 
+pub use logql::Filter;
+pub use logs::LogsService;
+pub use loki::Loki;
 pub use promql::Scope;
 pub use traffic::TrafficService;
 
-use panel_contracts::{observability::v1::traffic_server, OBSERVABILITY_V1};
+use panel_contracts::{
+    observability::v1::{logs_server, traffic_server},
+    OBSERVABILITY_V1,
+};
 use panel_control_runtime::{ControlPlaneProcess, DefaultAddresses, ProcessSettings};
 use panel_errors::{PanelError, Result};
 use panel_platform::{Capability, ServiceName};
@@ -25,6 +34,9 @@ pub const SCHEMA: &str = "observability";
 pub const PROMETHEUS_URL_ENV: &str = "PINGORA_PANEL_PROMETHEUS_URL";
 const DEFAULT_PROMETHEUS_URL: &str = "http://127.0.0.1:9090";
 const PROMETHEUS_TIMEOUT: Duration = Duration::from_secs(10);
+/// Where Loki, which keeps the gateway's logs, answers queries.
+pub const LOKI_URL_ENV: &str = "PINGORA_PANEL_LOKI_URL";
+const DEFAULT_LOKI_URL: &str = "http://127.0.0.1:3100";
 
 pub fn default_addresses() -> DefaultAddresses {
     DefaultAddresses {
@@ -53,6 +65,12 @@ pub fn process(
         .string(PROMETHEUS_URL_ENV)?
         .unwrap_or_else(|| DEFAULT_PROMETHEUS_URL.to_owned());
     let traffic = TrafficService::new(prometheus(&url)?);
+    let loki = env
+        .string(LOKI_URL_ENV)?
+        .unwrap_or_else(|| DEFAULT_LOKI_URL.to_owned());
+    let logs = LogsService::new(Loki::new(&loki).map_err(|error| {
+        PanelError::invalid_argument(format!("invalid {LOKI_URL_ENV}: {}", error.message))
+    })?);
     Ok(ControlPlaneProcess::new(
         ServiceName::new(SERVICE)?,
         env!("CARGO_PKG_VERSION"),
@@ -61,9 +79,12 @@ pub fn process(
     )?
     .with_protocol(protocol_range(OBSERVABILITY_V1))
     .with_capability(Capability::new("observability.traffic", "1")?)
+    .with_capability(Capability::new("observability.logs", "1")?)
     .with_peer_access(
         traffic_server::SERVICE_NAME,
         [ServiceName::new("panel-api")?],
     )
-    .with_grpc_service(traffic_server::TrafficServer::new(traffic)))
+    .with_peer_access(logs_server::SERVICE_NAME, [ServiceName::new("panel-api")?])
+    .with_grpc_service(traffic_server::TrafficServer::new(traffic))
+    .with_grpc_service(logs_server::LogsServer::new(logs)))
 }

@@ -2516,6 +2516,7 @@ name = "observability-service"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "ipnet",
  "panel-contracts",
  "panel-control-runtime",
  "panel-domain",
@@ -2526,10 +2527,13 @@ dependencies = [
  "panel-service",
  "prometheus-http-query",
  "prost-types",
+ "regex",
  "reqwest",
  "rustls",
+ "serde",
  "serde_json",
  "tokio",
+ "tokio-stream",
  "tonic",
 ]
 

@@ -1,0 +1,134 @@
+syntax = "proto3";
+
+package pingora.panel.observability.v1;
+
+import "common/v1/common.proto";
+import "google/protobuf/timestamp.proto";
+
+// Reads and deletes the gateway's access and error logs (ADR 0026).
+// Clients send filters; the service writes the queries.
+service Logs {
+  // Records newest first, one page at a time.
+  rpc Search(LogsSearchRequest) returns (LogsSearchResponse);
+  // Records as they arrive, oldest first, until the client goes away.
+  rpc Tail(LogsTailRequest) returns (stream LogsTailResponse);
+  // Asks the log store to delete records; it applies the deletion after
+  // its cancel period.
+  rpc Delete(LogsDeleteRequest) returns (LogsDeleteResponse);
+  // Deletions asked for, pending or applied.
+  rpc ListDeletions(LogsListDeletionsRequest) returns (LogsListDeletionsResponse);
+}
+
+enum LogKind {
+  LOG_KIND_UNSPECIFIED = 0;
+  LOG_KIND_ACCESS = 1;
+  LOG_KIND_ERROR = 2;
+}
+
+// Which records to read; unset fields match every record.
+message LogFilter {
+  // Unspecified reads both kinds.
+  LogKind kind = 1;
+  string site = 2;
+  string route = 3;
+  // A status code such as `502`, or a class such as `5xx`.
+  string status = 4;
+  // A client address, or a CIDR block of them.
+  string client = 5;
+  // Requests whose path starts with this.
+  string path_prefix = 6;
+  string request_id = 7;
+  // Text the record contains, ignoring case.
+  string text = 8;
+}
+
+message LogRecord {
+  google.protobuf.Timestamp time = 1;
+  LogKind kind = 2;
+  // The line as the gateway wrote it.
+  string line = 3;
+  string site = 4;
+  string route = 5;
+  // Zero when the record has none.
+  uint32 status = 6;
+  string method = 7;
+  string path = 8;
+  string client = 9;
+  string request_id = 10;
+  // Every field the store keeps, by its name there.
+  map<string, string> fields = 11;
+}
+
+message LogsSearchRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  LogFilter filter = 2;
+  // Records at or after this time; an hour ago when unset.
+  google.protobuf.Timestamp since = 3;
+  // Records before this time; now when unset. A page's `next_until` goes
+  // here to read the next page.
+  google.protobuf.Timestamp until = 4;
+  // The most records to return, at most 500; 100 when zero.
+  uint32 limit = 5;
+}
+
+message LogsSearchResponse {
+  repeated LogRecord records = 1;
+  // Where the next page ends; absent after the last page.
+  google.protobuf.Timestamp next_until = 2;
+  .pingora.panel.common.v1.Error error = 3;
+}
+
+message LogsTailRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  LogFilter filter = 2;
+  // Records after this time; now when unset. A response's `cursor` goes
+  // here to resume.
+  google.protobuf.Timestamp after = 3;
+}
+
+message LogsTailResponse {
+  repeated LogRecord records = 1;
+  // Where to resume after these records.
+  google.protobuf.Timestamp cursor = 2;
+  // Ends the tail: the store failed, or the client fell behind and should
+  // resume from the last cursor it received.
+  .pingora.panel.common.v1.Error error = 3;
+}
+
+message LogsDeleteRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  // The site whose records are deleted; every site's when empty.
+  string site = 2;
+  // Records at or after this time; every older record when unset.
+  google.protobuf.Timestamp since = 3;
+}
+
+message LogsDeleteResponse {
+  LogDeletion deletion = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+enum LogDeletionState {
+  LOG_DELETION_STATE_UNSPECIFIED = 0;
+  // Asked for; the records remain until the store applies it.
+  LOG_DELETION_STATE_PENDING = 1;
+  LOG_DELETION_STATE_APPLIED = 2;
+}
+
+message LogDeletion {
+  // Empty for every site.
+  string site = 1;
+  google.protobuf.Timestamp since = 2;
+  google.protobuf.Timestamp until = 3;
+  google.protobuf.Timestamp requested_at = 4;
+  LogDeletionState state = 5;
+}
+
+message LogsListDeletionsRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+}
+
+message LogsListDeletionsResponse {
+  repeated LogDeletion deletions = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}

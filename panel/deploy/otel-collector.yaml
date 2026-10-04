@@ -48,9 +48,21 @@ receivers:
       - type: move
         from: attributes.method
         to: attributes["http.request.method"]
+      - type: regex_parser
+        parse_from: attributes.target
+        regex: '^(?P<path>[^?]*)(?:\?(?P<query>.*))?$'
       - type: move
-        from: attributes.target
-        to: attributes["url.original"]
+        from: attributes.path
+        to: attributes["url.path"]
+      - type: move
+        if: 'attributes.query != nil and attributes.query != ""'
+        from: attributes.query
+        to: attributes["url.query"]
+      - type: remove
+        field: attributes.query
+        if: "attributes.query != nil"
+      - type: remove
+        field: attributes.target
       - type: move
         from: attributes.status
         to: attributes["http.response.status_code"]
