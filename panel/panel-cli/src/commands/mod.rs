@@ -21,6 +21,13 @@ pub mod workload;
 
 use crate::client::{CliError, Result};
 use serde_json::{json, Map, Value};
+use std::path::Path;
+
+/// Reads a file the command line names, such as a secret or a CA bundle.
+pub fn read_file(path: &Path) -> Result<String> {
+    std::fs::read_to_string(path)
+        .map_err(|error| CliError::Usage(format!("cannot read {}: {error}", path.display())))
+}
 
 /// Reads a JSON document from a file, or from standard input for `-`.
 pub fn read_json(path: &str) -> Result<Value> {

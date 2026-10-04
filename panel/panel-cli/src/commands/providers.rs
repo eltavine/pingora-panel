@@ -1,13 +1,14 @@
 //! Identity providers people sign in with.
 
+use super::read_file;
 use crate::{
-    client::{Api, CliError, Result},
+    client::{Api, Result},
     output::{text, Column, Output},
 };
 use clap::{Args, Subcommand, ValueEnum};
 use reqwest::Method;
 use serde_json::{json, Map, Value};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Args)]
 pub(crate) struct SetProvider {
@@ -138,12 +139,6 @@ const PROVIDER: &[Column] = &[
     ("Updated", |provider| text(&provider["updated_at"])),
 ];
 
-fn read(path: &Path) -> Result<String> {
-    std::fs::read_to_string(path)
-        .map(|secret| secret.trim().to_owned())
-        .map_err(|error| CliError::Usage(format!("cannot read {}: {error}", path.display())))
-}
-
 fn body(provider: &SetProvider) -> Result<Value> {
     let mut body = Map::new();
     body.insert("display_name".into(), json!(provider.display_name));
@@ -152,7 +147,7 @@ fn body(provider: &SetProvider) -> Result<Value> {
     if provider.public_client {
         body.insert("client_secret".into(), Value::Null);
     } else if let Some(path) = &provider.client_secret_file {
-        body.insert("client_secret".into(), json!(read(path)?));
+        body.insert("client_secret".into(), json!(read_file(path)?.trim()));
     }
     if !provider.scopes.is_empty() {
         body.insert("scopes".into(), json!(provider.scopes));

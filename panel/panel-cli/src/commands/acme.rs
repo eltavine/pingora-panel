@@ -1,5 +1,6 @@
 //! ACME accounts and the automatic certificates they obtain and renew.
 
+use super::read_file;
 use crate::{
     client::{Api, CliError, Result},
     output::{text, Column, Output},
@@ -7,7 +8,7 @@ use crate::{
 use clap::{Subcommand, ValueEnum};
 use reqwest::Method;
 use serde_json::json;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Subcommand)]
 pub(crate) enum AcmeCommand {
@@ -299,11 +300,6 @@ const AUTOMATIC_DETAIL: &[Column] = &[
     ("VERSION", |certificate| text(&certificate["version"])),
 ];
 
-fn read(path: &Path) -> Result<String> {
-    std::fs::read_to_string(path)
-        .map_err(|error| CliError::Usage(format!("cannot read {}: {error}", path.display())))
-}
-
 /// The current entity tag, for deleting.
 async fn etag(api: &Api, path: &str) -> Result<String> {
     api.get(path, &[])
@@ -345,11 +341,11 @@ async fn accounts(api: &Api, output: &Output, command: AccountCommand) -> Result
                 "terms_of_service_agreed": true,
             });
             if let Some(path) = ca_bundle {
-                body["ca_bundle"] = json!(read(&path)?);
+                body["ca_bundle"] = json!(read_file(&path)?);
             }
             if let (Some(key_id), Some(path)) = (eab_key_id, eab_mac_key_file) {
                 body["external_account"] =
-                    json!({ "key_id": key_id, "mac_key": read(&path)?.trim() });
+                    json!({ "key_id": key_id, "mac_key": read_file(&path)?.trim() });
             }
             let account = api
                 .change(Method::POST, "/api/v1/acme-accounts", Some(&body), None)
@@ -461,7 +457,7 @@ async fn dns_providers(api: &Api, output: &Output, command: DnsProviderCommand) 
                 "id": id,
                 "kind": "rfc2136",
                 "rfc2136": rfc2136.settings(),
-                "secret": read(&secret_file)?.trim(),
+                "secret": read_file(&secret_file)?.trim(),
             });
             if let Some(seconds) = rfc2136.propagation {
                 body["propagation_seconds"] = json!(seconds);
@@ -480,7 +476,7 @@ async fn dns_providers(api: &Api, output: &Output, command: DnsProviderCommand) 
             let path = format!("/api/v1/dns-providers/{id}");
             let mut body = json!({ "rfc2136": rfc2136.settings() });
             if let Some(file) = secret_file {
-                body["secret"] = json!(read(&file)?.trim());
+                body["secret"] = json!(read_file(&file)?.trim());
             }
             if let Some(seconds) = rfc2136.propagation {
                 body["propagation_seconds"] = json!(seconds);
