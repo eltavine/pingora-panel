@@ -7,6 +7,43 @@
 //! boundary. Internal modules are private so their organization can evolve
 //! without changing the public application contract.
 
+/// Declares the operations of a port's contract as an enum, each variant
+/// serialized under the operation's name, which audit records and receipts
+/// know it by, with its parameters beside it. The caller depends on `serde`.
+#[macro_export]
+macro_rules! operations {
+    (
+        $(#[$meta:meta])*
+        pub enum $name:ident {
+            $(
+                $(#[$variant_meta:meta])*
+                $operation:literal => $variant:ident
+                $({ $($(#[$field_meta:meta])* $field:ident: $type:ty),* $(,)? })?
+            ),* $(,)?
+        }
+    ) => {
+        $(#[$meta])*
+        #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+        #[serde(tag = "operation", content = "parameters", deny_unknown_fields)]
+        pub enum $name {
+            $(
+                $(#[$variant_meta])*
+                #[serde(rename = $operation)]
+                $variant $({ $($(#[$field_meta])* $field: $type),* })?,
+            )*
+        }
+
+        impl $name {
+            /// The operation's name.
+            pub fn operation(&self) -> &'static str {
+                match self {
+                    $(Self::$variant { .. } => $operation,)*
+                }
+            }
+        }
+    };
+}
+
 mod alerts;
 mod audit;
 mod certificates;
