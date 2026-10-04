@@ -453,10 +453,10 @@ pub(crate) static ROUTES: &[(&str, &str, Access)] = &[
     ("GET", "/api/v1/host/agent", Requires(HostRead)),
     ("GET", "/api/v1/host/directories", Requires(HostRead)),
     ("GET", "/api/v1/host/listeners", Requires(HostRead)),
-    ("GET", "/api/v1/host/gateway-unit", Requires(HostRead)),
+    ("GET", "/api/v1/host/gateway-service", Requires(HostRead)),
     (
         "POST",
-        "/api/v1/host/gateway-unit/{action}",
+        "/api/v1/host/gateway-service/{action}",
         Requires(HostManage),
     ),
     ("GET", "/api/v1/container-engines", Requires(ContainersRead)),

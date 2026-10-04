@@ -1,6 +1,7 @@
 //! What the host agent does for the panel (ADR 0028, ADR 0030).
 
 use crate::{
+    containers::ContainerStateName,
     error::ApiError,
     request_context::{command_context, request_scope, MutationHeaders, QueryHeaders},
     ApiState,
@@ -13,8 +14,8 @@ use axum::{
 use chrono::{DateTime, SecondsFormat, Utc};
 use panel_application::{
     AgentCapability, AgentDescription, CapabilityState, CapabilityStatus, DirectoriesReport,
-    DirectoryKind, DirectoryUsage, GatewayUnitStatus, ListenersReport, ListeningProcess,
-    PortListener, UnitAction,
+    DirectoryKind, DirectoryUsage, GatewayServiceAction, GatewayServiceStatus, ListenersReport,
+    ListeningProcess, PortListener,
 };
 use panel_errors::{ErrorCode, PanelError};
 use serde::{Deserialize, Serialize};
@@ -46,7 +47,7 @@ pub enum AgentStatusName {
 pub enum AgentCapabilityName {
     Directories,
     Listeners,
-    GatewayUnit,
+    GatewayService,
     Containers,
 }
 
@@ -55,7 +56,7 @@ impl From<AgentCapability> for AgentCapabilityName {
         match value {
             AgentCapability::Directories => Self::Directories,
             AgentCapability::Listeners => Self::Listeners,
-            AgentCapability::GatewayUnit => Self::GatewayUnit,
+            AgentCapability::GatewayService => Self::GatewayService,
             AgentCapability::Containers => Self::Containers,
         }
     }
@@ -361,17 +362,17 @@ pub(crate) async fn host_listeners<U>(
     Ok(Json(report.into()))
 }
 
-/// What may be done to the gateway's unit.
+/// What may be done to the service that runs the gateway.
 #[derive(Clone, Copy, Debug, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum UnitActionName {
+pub enum GatewayServiceActionName {
     Start,
     Stop,
     Restart,
 }
 
-impl UnitActionName {
+impl GatewayServiceActionName {
     fn parse(value: &str) -> Result<Self, ApiError> {
         match value {
             "start" => Ok(Self::Start),
@@ -384,85 +385,112 @@ impl UnitActionName {
     }
 }
 
-impl From<UnitActionName> for UnitAction {
-    fn from(value: UnitActionName) -> Self {
+impl From<GatewayServiceActionName> for GatewayServiceAction {
+    fn from(value: GatewayServiceActionName) -> Self {
         match value {
-            UnitActionName::Start => Self::Start,
-            UnitActionName::Stop => Self::Stop,
-            UnitActionName::Restart => Self::Restart,
+            GatewayServiceActionName::Start => Self::Start,
+            GatewayServiceActionName::Stop => Self::Stop,
+            GatewayServiceActionName::Restart => Self::Restart,
         }
     }
 }
 
-/// The gateway's systemd unit, in systemd's own words.
+/// What runs the gateway.
+#[derive(Clone, Copy, Debug, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum GatewaySupervisorName {
+    /// A container of the installation's Compose project; `container`
+    /// describes it.
+    Container,
+}
+
+/// The container that runs the gateway, as its engine reports it.
 #[derive(Clone, Debug, Serialize, ToSchema)]
-pub struct GatewayUnitView {
-    /// Such as `pingora-panel-gatewayd.service`.
+pub struct GatewayContainerView {
+    /// The engine it runs on, such as `docker`.
+    pub engine: String,
+    pub id: String,
+    /// Such as `pingora-panel-gatewayd-1`.
     pub name: String,
-    pub description: String,
-    /// Such as `loaded` or `not-found`.
-    pub load_state: String,
-    /// Such as `active`, `inactive` or `failed`.
-    pub active_state: String,
-    /// Such as `running` or `dead`.
-    pub sub_state: String,
-    /// Such as `enabled` or `disabled`.
-    pub unit_file_state: String,
-    /// The main process, when there is one.
-    pub main_pid: Option<u32>,
-    /// When it last became active, RFC 3339.
-    pub active_since: Option<String>,
-    /// How often systemd restarted it on its own.
+    pub image: String,
+    pub state: ContainerStateName,
+    /// The engine's summary, such as `Up 3 hours (healthy)`.
+    pub status: String,
+    /// `healthy`, `unhealthy` or `starting`; absent without a health check.
+    pub health: Option<String>,
+    /// When it last started, RFC 3339.
+    pub started_at: Option<String>,
+    /// When it last stopped, RFC 3339; absent until it has.
+    pub finished_at: Option<String>,
+    /// How it last stopped; absent until it has.
+    pub exit_code: Option<i64>,
+    /// How often the engine restarted it under its restart policy.
     pub restarts: u32,
-    /// How it last ended, such as `success` or `exit-code`.
-    pub result: String,
 }
 
-impl From<GatewayUnitStatus> for GatewayUnitView {
-    fn from(value: GatewayUnitStatus) -> Self {
+/// The service on the host that runs the gateway.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct GatewayServiceView {
+    /// When the agent looked, RFC 3339.
+    pub observed_at: Option<String>,
+    pub supervisor: GatewaySupervisorName,
+    pub container: GatewayContainerView,
+}
+
+impl From<GatewayServiceStatus> for GatewayServiceView {
+    fn from(value: GatewayServiceStatus) -> Self {
+        let gateway = value.container;
+        let summary = gateway.container;
         Self {
-            name: value.name,
-            description: value.description,
-            load_state: value.load_state,
-            active_state: value.active_state,
-            sub_state: value.sub_state,
-            unit_file_state: value.unit_file_state,
-            main_pid: (value.main_pid != 0).then_some(value.main_pid),
-            active_since: value.active_since.map(rfc3339),
-            restarts: value.restarts,
-            result: value.result,
+            observed_at: value.observed_at.map(rfc3339),
+            supervisor: GatewaySupervisorName::Container,
+            container: GatewayContainerView {
+                engine: gateway.engine,
+                name: summary.names.first().cloned().unwrap_or_default(),
+                id: summary.id,
+                image: summary.image,
+                state: summary.state.into(),
+                status: summary.status,
+                health: (!gateway.health.is_empty()).then_some(gateway.health),
+                started_at: gateway.started_at.map(rfc3339),
+                exit_code: gateway.finished_at.map(|_| gateway.exit_code),
+                finished_at: gateway.finished_at.map(rfc3339),
+                restarts: gateway.restarts,
+            },
         }
     }
 }
 
-/// The gateway's systemd unit, when the host agent manages it.
-#[utoipa::path(get, path = "/api/v1/host/gateway-unit", params(QueryHeaders),
-    responses((status = 200, body = GatewayUnitView)), tag = "host")]
-pub(crate) async fn gateway_unit<U>(
+/// The service on the host that runs the gateway, when the host agent
+/// manages it.
+#[utoipa::path(get, path = "/api/v1/host/gateway-service", params(QueryHeaders),
+    responses((status = 200, body = GatewayServiceView)), tag = "host")]
+pub(crate) async fn gateway_service<U>(
     State(state): State<ApiState<U>>,
     headers: HeaderMap,
-) -> Result<Json<GatewayUnitView>, ApiError> {
+) -> Result<Json<GatewayServiceView>, ApiError> {
     let status = state
         .host_agent
-        .gateway_unit(request_scope(&headers)?)
+        .gateway_service(request_scope(&headers)?)
         .await?;
     Ok(Json(status.into()))
 }
 
-/// Starts, stops or restarts the gateway's unit and answers once systemd
-/// has finished; the audit trail records it, refused or not.
-#[utoipa::path(post, path = "/api/v1/host/gateway-unit/{action}",
-    params(("action" = UnitActionName, Path, description = "start, stop or restart"), MutationHeaders),
-    responses((status = 200, body = GatewayUnitView)), tag = "host")]
-pub(crate) async fn change_gateway_unit<U>(
+/// Starts, stops or restarts the service that runs the gateway and answers
+/// once its engine has finished; the audit trail records it, refused or not.
+#[utoipa::path(post, path = "/api/v1/host/gateway-service/{action}",
+    params(("action" = GatewayServiceActionName, Path, description = "start, stop or restart"), MutationHeaders),
+    responses((status = 200, body = GatewayServiceView)), tag = "host")]
+pub(crate) async fn change_gateway_service<U>(
     State(state): State<ApiState<U>>,
     Path(action): Path<String>,
     headers: HeaderMap,
-) -> Result<Json<GatewayUnitView>, ApiError> {
-    let action = UnitActionName::parse(&action)?;
+) -> Result<Json<GatewayServiceView>, ApiError> {
+    let action = GatewayServiceActionName::parse(&action)?;
     let status = state
         .host_agent
-        .change_gateway_unit(command_context(&headers)?, action.into())
+        .change_gateway_service(command_context(&headers)?, action.into())
         .await?;
     Ok(Json(status.into()))
 }

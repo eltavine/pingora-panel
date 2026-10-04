@@ -4,12 +4,12 @@ import {
   agentTone,
   capabilityTone,
   directoryNotes,
+  gatewayHealthKey,
+  gatewayTone,
   holderTone,
   levelTone,
   memoryUsed,
   portHolder,
-  unitStateKey,
-  unitTone,
   uptimeParts,
 } from '../presentation'
 
@@ -55,13 +55,16 @@ describe('host agent', () => {
     expect(capabilityTone('unsupported')).toBe('neutral')
   })
 
-  it("reads systemd's states and names the ones it knows", () => {
-    expect(unitTone('active')).toBe('positive')
-    expect(unitTone('failed')).toBe('negative')
-    expect(unitTone('activating')).toBe('pending')
-    expect(unitTone('maintenance')).toBe('neutral')
-    expect(unitStateKey('inactive')).toBe('inactive')
-    expect(unitStateKey('maintenance')).toBeNull()
+  it("reads the gateway container's state with its health check", () => {
+    expect(gatewayTone('running', null)).toBe('positive')
+    expect(gatewayTone('running', 'healthy')).toBe('positive')
+    expect(gatewayTone('running', 'unhealthy')).toBe('negative')
+    expect(gatewayTone('running', 'starting')).toBe('pending')
+    expect(gatewayTone('restarting', null)).toBe('pending')
+    expect(gatewayTone('exited', 'unhealthy')).toBe('neutral')
+    expect(gatewayHealthKey('unhealthy')).toBe('unhealthy')
+    expect(gatewayHealthKey(null)).toBeNull()
+    expect(gatewayHealthKey('none')).toBeNull()
   })
 
   it('tells the gateway holding a port from another process holding it', () => {

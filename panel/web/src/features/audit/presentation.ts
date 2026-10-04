@@ -61,9 +61,9 @@ export const KNOWN_TYPES = [
   'observability.alert_channel.refused',
   'observability.alert.fired',
   'observability.alert.resolved',
-  'host.gateway_unit.started',
-  'host.gateway_unit.stopped',
-  'host.gateway_unit.restarted',
+  'host.gateway_service.started',
+  'host.gateway_service.stopped',
+  'host.gateway_service.restarted',
   'host.operation.refused',
   'container.engine.enabled',
   'container.engine.disabled',
@@ -232,10 +232,10 @@ export function summaryOf(event: AuditEvent, t: Translate): string {
       return `${text(data.name)} · ${text(data.value)}`
     case 'observability.alert.resolved':
       return text(data.name)
-    case 'host.gateway_unit.started':
-    case 'host.gateway_unit.stopped':
-    case 'host.gateway_unit.restarted':
-      return `${text(data.unit)} · ${text(data.active_state)}`
+    case 'host.gateway_service.started':
+    case 'host.gateway_service.stopped':
+    case 'host.gateway_service.restarted':
+      return `${text(data.container)} · ${text(data.state)}`
     case 'container.engine.enabled':
     case 'container.engine.disabled':
       return text(data.engine)

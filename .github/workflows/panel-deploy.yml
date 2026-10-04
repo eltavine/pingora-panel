@@ -45,13 +45,8 @@ jobs:
 
       - name: Install the host agent
         run: |
-          # A stand-in for the gateway's unit, which the agent manages.
-          printf '[Unit]\nDescription=Stand-in for the gateway\n[Service]\nExecStart=/bin/sleep infinity\n' \
-            | sudo tee /etc/systemd/system/pingora-panel-gatewayd.service >/dev/null
-          sudo systemctl daemon-reload
-          sudo systemctl start pingora-panel-gatewayd.service
           sudo env PINGORA_PANEL_IMAGE=localhost/pingora-panel:dev \
-            panel/deploy/ops-agent/install.sh directories listeners gateway-unit containers
+            panel/deploy/ops-agent/install.sh directories listeners containers
           sudo systemd-analyze verify \
             /etc/systemd/system/pingora-panel-ops-agent.service \
             /etc/systemd/system/pingora-panel-ops-agent-credentials.service \
@@ -126,23 +121,40 @@ jobs:
           docker compose exec -T -e PPANEL_TOKEN control ppanel host listeners --port 8080
           ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
           state() {
-            ppanel -o json host unit | python3 -c "import json, sys; print(json.load(sys.stdin)['active_state'])"
+            ppanel -o json host gateway-service \
+              | python3 -c "import json, sys; print(json.load(sys.stdin)['container']['state'])"
           }
-          test "$(state)" = active
-          ppanel --timeout 120 host unit restart --yes
-          test "$(state)" = active
-          ppanel --timeout 120 host unit stop --yes
-          test "$(state)" = inactive
-          ppanel --timeout 120 host unit start
-          test "$(state)" = active
+          gateway_ready() {
+            for attempt in $(seq 1 30); do
+              if curl --fail --silent --output /dev/null http://127.0.0.1:9185/readyz; then
+                return 0
+              fi
+              sleep 2
+            done
+            return 1
+          }
+          ppanel host gateway-service
+          test "$(state)" = running
+          ppanel --timeout 120 host gateway-service restart --yes
+          test "$(state)" = running
+          gateway_ready
+          ppanel --timeout 120 host gateway-service stop --yes
+          test "$(state)" = exited
+          # The gateway itself is down, not just reported so.
+          if curl --silent --output /dev/null --max-time 2 http://127.0.0.1:9185/livez; then
+            exit 1
+          fi
+          ppanel --timeout 120 host gateway-service start
+          test "$(state)" = running
+          gateway_ready
           for attempt in $(seq 1 30); do
-            if ppanel -o json audit list --type host.gateway_unit.restarted --actor-id ci \
+            if ppanel -o json audit list --type host.gateway_service.restarted --actor-id ci \
               | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"; then
               break
             fi
             sleep 1
           done
-          ppanel -o json audit list --type host.gateway_unit.restarted --actor-id ci \
+          ppanel -o json audit list --type host.gateway_service.restarted --actor-id ci \
             | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"
 
       - name: Reach the containers through the host agent

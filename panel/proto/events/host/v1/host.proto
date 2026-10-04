@@ -5,29 +5,30 @@ syntax = "proto3";
 // JSON in the proto3 JSON mapping, with the field names below.
 package pingora.panel.events.host.v1;
 
-// `host.gateway_unit.started`
-message GatewayUnitStarted {
-  string unit = 1;
-  // The state systemd reported once the job finished.
-  string active_state = 2;
+// `host.gateway_service.started`
+message GatewayServiceStarted {
+  // The container that runs the gateway, such as `pingora-panel-gatewayd-1`.
+  string container = 1;
+  // Its state once the engine finished, such as `running`.
+  string state = 2;
 }
 
-// `host.gateway_unit.stopped`
-message GatewayUnitStopped {
-  string unit = 1;
-  string active_state = 2;
+// `host.gateway_service.stopped`
+message GatewayServiceStopped {
+  string container = 1;
+  string state = 2;
 }
 
-// `host.gateway_unit.restarted`
-message GatewayUnitRestarted {
-  string unit = 1;
-  string active_state = 2;
+// `host.gateway_service.restarted`
+message GatewayServiceRestarted {
+  string container = 1;
+  string state = 2;
 }
 
 // `host.operation.refused`: an operation on the host that was refused or
 // failed, and changed nothing.
 message OperationRefused {
-  // Such as `gateway_unit.restart`.
+  // Such as `gateway_service.restart`.
   string operation = 1;
   string code = 2;
   string message = 3;

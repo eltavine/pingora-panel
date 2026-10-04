@@ -2,8 +2,8 @@
 
 use ops_grpc_client::OpsAgentClient;
 use panel_application::{
-    AgentCapability, CommandContext, DirectoryKind, HostAgentPort, IdempotencyKey, RequestDeadline,
-    RequestId, RequestScope, UnitAction,
+    AgentCapability, CommandContext, ContainerState, DirectoryKind, GatewayServiceAction,
+    HostAgentPort, IdempotencyKey, RequestDeadline, RequestId, RequestScope,
 };
 use panel_contracts::{
     common::v1 as common,
@@ -11,7 +11,8 @@ use panel_contracts::{
         self as wire,
         agent_server::{Agent, AgentServer},
         directories_server::{Directories, DirectoriesServer},
-        gateway_unit_server::{GatewayUnit, GatewayUnitServer},
+        gateway_service_server::{GatewayService, GatewayServiceServer},
+        gateway_service_status::Supervisor,
         listeners_server::{Listeners, ListenersServer},
     },
 };
@@ -117,49 +118,61 @@ impl Listeners for FakeListeners {
     }
 }
 
-/// Refuses to stop the unit, as polkit would without the agent's rule.
-struct FakeUnit;
+/// Refuses to stop the gateway, as a disabled engine would.
+struct FakeGateway;
+
+fn gateway(state: wire::ContainerState, restarts: u32) -> wire::GatewayServiceStatus {
+    wire::GatewayServiceStatus {
+        observed_at: Some(std::time::SystemTime::now().into()),
+        supervisor: Some(Supervisor::Container(wire::GatewayContainer {
+            engine: "docker".into(),
+            container: Some(wire::Container {
+                id: "g7".into(),
+                names: vec!["pingora-panel-gatewayd-1".into()],
+                state: state.into(),
+                compose_project: "pingora-panel".into(),
+                ..wire::Container::default()
+            }),
+            restarts,
+            health: "healthy".into(),
+            ..wire::GatewayContainer::default()
+        })),
+    }
+}
 
 #[tonic::async_trait]
-impl GatewayUnit for FakeUnit {
+impl GatewayService for FakeGateway {
     async fn status(
         &self,
-        _: Request<wire::GatewayUnitStatusRequest>,
-    ) -> Result<Response<wire::GatewayUnitStatusResponse>, Status> {
-        Ok(Response::new(wire::GatewayUnitStatusResponse {
-            status: Some(wire::UnitStatus {
-                name: "pingora-panel-gatewayd.service".into(),
-                active_state: "active".into(),
-                main_pid: 4242,
-                ..wire::UnitStatus::default()
-            }),
+        _: Request<wire::GatewayServiceStatusRequest>,
+    ) -> Result<Response<wire::GatewayServiceStatusResponse>, Status> {
+        Ok(Response::new(wire::GatewayServiceStatusResponse {
+            status: Some(gateway(wire::ContainerState::Running, 0)),
             error: None,
         }))
     }
 
     async fn change(
         &self,
-        request: Request<wire::GatewayUnitChangeRequest>,
-    ) -> Result<Response<wire::GatewayUnitChangeResponse>, Status> {
+        request: Request<wire::GatewayServiceChangeRequest>,
+    ) -> Result<Response<wire::GatewayServiceChangeResponse>, Status> {
         let request = request.into_inner();
         assert_eq!(request.context.as_ref().unwrap().actor, "ops");
         Ok(Response::new(match request.action() {
-            wire::UnitAction::Stop => wire::GatewayUnitChangeResponse {
+            wire::GatewayServiceAction::Stop => wire::GatewayServiceChangeResponse {
                 status: None,
                 error: Some(common::Error {
                     code: "PRECONDITION_FAILED".into(),
-                    message: "the agent may not stop pingora-panel-gatewayd.service".into(),
+                    message: "the docker engine is disabled".into(),
                     retryable: false,
                     diagnostics: Vec::new(),
                 }),
             },
-            action => wire::GatewayUnitChangeResponse {
-                status: Some(wire::UnitStatus {
-                    name: "pingora-panel-gatewayd.service".into(),
-                    active_state: "active".into(),
-                    restarts: u32::from(action == wire::UnitAction::Restart),
-                    ..wire::UnitStatus::default()
-                }),
+            action => wire::GatewayServiceChangeResponse {
+                status: Some(gateway(
+                    wire::ContainerState::Running,
+                    u32::from(action == wire::GatewayServiceAction::Restart),
+                )),
                 error: None,
             },
         }))
@@ -174,7 +187,7 @@ async fn client(fail: bool) -> OpsAgentClient {
             .add_service(AgentServer::new(FakeAgent))
             .add_service(DirectoriesServer::new(FakeDirectories { fail }))
             .add_service(ListenersServer::new(FakeListeners))
-            .add_service(GatewayUnitServer::new(FakeUnit))
+            .add_service(GatewayServiceServer::new(FakeGateway))
             .serve_with_incoming(TcpListenerStream::new(listener)),
     );
     OpsAgentClient::from_channel(
@@ -225,13 +238,17 @@ async fn what_holds_the_web_ports_reaches_the_application() {
 }
 
 #[tokio::test]
-async fn the_gateways_unit_is_read_and_changed_through_the_agent() {
+async fn the_gateway_service_is_read_and_changed_through_the_agent() {
     let client = client(false).await;
-    let status = client.gateway_unit(scope()).await.unwrap();
+    let status = client.gateway_service(scope()).await.unwrap();
+    assert!(status.observed_at.is_some());
+    assert_eq!(status.container.engine, "docker");
+    assert_eq!(status.container.container.state, ContainerState::Running);
     assert_eq!(
-        (status.active_state.as_str(), status.main_pid),
-        ("active", 4242)
+        status.container.container.compose_project.as_deref(),
+        Some("pingora-panel")
     );
+    assert_eq!(status.container.health, "healthy");
     let context = CommandContext::new(
         RequestId::new("request-2").unwrap(),
         RequestId::new("request-2").unwrap(),
@@ -241,12 +258,12 @@ async fn the_gateways_unit_is_read_and_changed_through_the_agent() {
     )
     .unwrap();
     let restarted = client
-        .change_gateway_unit(context.clone(), UnitAction::Restart)
+        .change_gateway_service(context.clone(), GatewayServiceAction::Restart)
         .await
         .unwrap();
-    assert_eq!(restarted.restarts, 1);
+    assert_eq!(restarted.container.restarts, 1);
     let refused = client
-        .change_gateway_unit(context, UnitAction::Stop)
+        .change_gateway_service(context, GatewayServiceAction::Stop)
         .await
         .unwrap_err();
     assert_eq!(refused.code.as_str(), "PRECONDITION_FAILED");

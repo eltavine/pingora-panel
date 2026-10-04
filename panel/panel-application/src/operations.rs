@@ -3,8 +3,8 @@
 
 use crate::{
     CommandContext, ContainerAction, ContainerChange, ContainerEngine, DataPlaneState, FileChecks,
-    GatewayRuntimePort, GatewayUnitStatus, LogDeletion, RequestScope, UnitAction, UpstreamHealth,
-    UpstreamHealthReport,
+    GatewayRuntimePort, GatewayServiceAction, GatewayServiceStatus, LogDeletion, RequestScope,
+    UpstreamHealth, UpstreamHealthReport,
 };
 use async_trait::async_trait;
 use panel_errors::{PanelError, Result};
@@ -28,11 +28,11 @@ pub enum Operation<'a> {
         site: Option<&'a str>,
         result: std::result::Result<&'a LogDeletion, &'a PanelError>,
     },
-    /// The host agent was asked to start, stop or restart the gateway's
-    /// unit.
-    GatewayUnit {
-        action: UnitAction,
-        result: std::result::Result<&'a GatewayUnitStatus, &'a PanelError>,
+    /// The host agent was asked to start, stop or restart the service that
+    /// runs the gateway.
+    GatewayService {
+        action: GatewayServiceAction,
+        result: std::result::Result<&'a GatewayServiceStatus, &'a PanelError>,
     },
     /// The host agent was asked to enable or disable a container engine.
     ContainerEngine {
@@ -226,9 +226,9 @@ mod tests {
                     "delete-logs".to_owned(),
                     result.map(|_| site.unwrap_or("*").to_owned()),
                 ),
-                Operation::GatewayUnit { action, result } => (
-                    format!("unit-{}", action.as_str()),
-                    result.map(|status| status.active_state.clone()),
+                Operation::GatewayService { action, result } => (
+                    format!("gateway-service-{}", action.as_str()),
+                    result.map(|status| status.container.container.state.as_str().to_owned()),
                 ),
                 Operation::ContainerEngine {
                     engine,

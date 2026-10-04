@@ -1,7 +1,7 @@
 import { http, HttpResponse, type AnyHandler } from 'msw'
 import type {
   DirectoriesView,
-  GatewayUnitView,
+  GatewayServiceView,
   HostAgentView,
   ListenersView,
 } from '@/api/generated'
@@ -17,7 +17,7 @@ export function hostAgentHandlers(): AnyHandler[] {
     capabilities: [
       { capability: 'directories', state: 'available', detail: '' },
       { capability: 'listeners', state: 'available', detail: '' },
-      { capability: 'gateway_unit', state: 'available', detail: '' },
+      { capability: 'gateway_service', state: 'available', detail: '' },
       {
         capability: 'containers',
         state: 'denied',
@@ -74,30 +74,38 @@ export function hostAgentHandlers(): AnyHandler[] {
       },
     ],
   }
-  const unit: GatewayUnitView = {
-    name: 'pingora-panel-gatewayd.service',
-    description: 'Pingora Panel gateway',
-    load_state: 'loaded',
-    active_state: 'active',
-    sub_state: 'running',
-    unit_file_state: 'enabled',
-    main_pid: 1204,
-    active_since: new Date(Date.now() - 3 * 86_400_000).toISOString(),
-    restarts: 0,
-    result: 'success',
+  const service: GatewayServiceView = {
+    observed_at: new Date().toISOString(),
+    supervisor: 'container',
+    container: {
+      engine: 'docker',
+      id: '4f1c2b7d9e0a',
+      name: 'pingora-panel-gatewayd-1',
+      image: 'localhost/pingora-panel:dev',
+      state: 'running',
+      status: 'Up 3 days',
+      health: null,
+      started_at: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+      finished_at: null,
+      exit_code: null,
+      restarts: 0,
+    },
   }
   return [
     http.get('*/api/v1/host/agent', () => HttpResponse.json(agent)),
-    http.get('*/api/v1/host/gateway-unit', () => HttpResponse.json(unit)),
-    http.post('*/api/v1/host/gateway-unit/:action', ({ params }) => {
+    http.get('*/api/v1/host/gateway-service', () => HttpResponse.json(service)),
+    http.post('*/api/v1/host/gateway-service/:action', ({ params }) => {
       const stopped = params.action === 'stop'
-      Object.assign(unit, {
-        active_state: stopped ? 'inactive' : 'active',
-        sub_state: stopped ? 'dead' : 'running',
-        main_pid: stopped ? null : (unit.main_pid ?? 1204),
-        active_since: stopped ? unit.active_since : new Date().toISOString(),
+      const now = new Date().toISOString()
+      Object.assign(service.container, {
+        state: stopped ? 'exited' : 'running',
+        status: stopped ? 'Exited (0) 1 second ago' : 'Up 1 second',
+        started_at: stopped ? service.container.started_at : now,
+        finished_at: stopped ? now : service.container.finished_at,
+        exit_code: stopped ? 0 : service.container.exit_code,
       })
-      return HttpResponse.json(unit)
+      service.observed_at = now
+      return HttpResponse.json(service)
     }),
     http.get('*/api/v1/host/listeners', () => HttpResponse.json(listeners)),
     http.get('*/api/v1/host/directories', () => HttpResponse.json(directories)),

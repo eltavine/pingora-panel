@@ -43,8 +43,8 @@ mod tests;
         crate::host_agent::host_agent,
         crate::host_agent::host_directories,
         crate::host_agent::host_listeners,
-        crate::host_agent::gateway_unit,
-        crate::host_agent::change_gateway_unit,
+        crate::host_agent::gateway_service,
+        crate::host_agent::change_gateway_service,
         crate::containers::list_engines,
         crate::containers::enable_engine,
         crate::containers::disable_engine,
@@ -140,7 +140,7 @@ mod tests;
         panel_config_model::SiteStatus,
         panel_config_model::SiteKind,
         crate::logs::LogTailMessage,
-        crate::host_agent::UnitActionName
+        crate::host_agent::GatewayServiceActionName
     ))
 )]
 pub struct ApiDoc;

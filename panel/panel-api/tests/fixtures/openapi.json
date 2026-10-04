@@ -34095,7 +34095,7 @@
         }
       }
     },
-    "/api/v1/host/gateway-unit": {
+    "/api/v1/host/gateway-service": {
       "parameters": [
         {
           "name": "x-request-id",
@@ -34134,8 +34134,8 @@
         "tags": [
           "host"
         ],
-        "summary": "The gateway's systemd unit, when the host agent manages it.",
-        "operationId": "gateway_unit",
+        "summary": "The service on the host that runs the gateway, when the host agent\nmanages it.",
+        "operationId": "gateway_service",
         "parameters": [
           {
             "name": "x-correlation-id",
@@ -34165,7 +34165,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GatewayUnitView"
+                  "$ref": "#/components/schemas/GatewayServiceView"
                 }
               }
             }
@@ -34416,7 +34416,7 @@
         }
       }
     },
-    "/api/v1/host/gateway-unit/{action}": {
+    "/api/v1/host/gateway-service/{action}": {
       "parameters": [
         {
           "name": "x-request-id",
@@ -34455,8 +34455,8 @@
         "tags": [
           "host"
         ],
-        "summary": "Starts, stops or restarts the gateway's unit and answers once systemd\nhas finished; the audit trail records it, refused or not.",
-        "operationId": "change_gateway_unit",
+        "summary": "Starts, stops or restarts the service that runs the gateway and answers\nonce its engine has finished; the audit trail records it, refused or not.",
+        "operationId": "change_gateway_service",
         "parameters": [
           {
             "name": "action",
@@ -34464,7 +34464,7 @@
             "description": "start, stop or restart",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/UnitActionName"
+              "$ref": "#/components/schemas/GatewayServiceActionName"
             }
           },
           {
@@ -34521,7 +34521,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GatewayUnitView"
+                  "$ref": "#/components/schemas/GatewayServiceView"
                 }
               }
             }
@@ -62753,7 +62753,7 @@
         "enum": [
           "directories",
           "listeners",
-          "gateway_unit",
+          "gateway_service",
           "containers"
         ]
       },
@@ -65479,6 +65479,109 @@
           }
         }
       },
+      "GatewayContainerView": {
+        "type": "object",
+        "description": "The container that runs the gateway, as its engine reports it.",
+        "required": [
+          "engine",
+          "id",
+          "name",
+          "image",
+          "state",
+          "status",
+          "restarts"
+        ],
+        "properties": {
+          "engine": {
+            "type": "string",
+            "description": "The engine it runs on, such as `docker`."
+          },
+          "exit_code": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How it last stopped; absent until it has."
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When it last stopped, RFC 3339; absent until it has."
+          },
+          "health": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`healthy`, `unhealthy` or `starting`; absent without a health check."
+          },
+          "id": {
+            "type": "string"
+          },
+          "image": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "Such as `pingora-panel-gatewayd-1`."
+          },
+          "restarts": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How often the engine restarted it under its restart policy.",
+            "minimum": 0
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When it last started, RFC 3339."
+          },
+          "state": {
+            "$ref": "#/components/schemas/ContainerStateName"
+          },
+          "status": {
+            "type": "string",
+            "description": "The engine's summary, such as `Up 3 hours (healthy)`."
+          }
+        }
+      },
+      "GatewayServiceActionName": {
+        "type": "string",
+        "description": "What may be done to the service that runs the gateway.",
+        "enum": [
+          "start",
+          "stop",
+          "restart"
+        ]
+      },
+      "GatewayServiceView": {
+        "type": "object",
+        "description": "The service on the host that runs the gateway.",
+        "required": [
+          "supervisor",
+          "container"
+        ],
+        "properties": {
+          "container": {
+            "$ref": "#/components/schemas/GatewayContainerView"
+          },
+          "observed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When the agent looked, RFC 3339."
+          },
+          "supervisor": {
+            "$ref": "#/components/schemas/GatewaySupervisorName"
+          }
+        }
+      },
       "GatewayStatusResponse": {
         "type": "object",
         "required": [
@@ -65523,70 +65626,12 @@
           }
         }
       },
-      "GatewayUnitView": {
-        "type": "object",
-        "description": "The gateway's systemd unit, in systemd's own words.",
-        "required": [
-          "name",
-          "description",
-          "load_state",
-          "active_state",
-          "sub_state",
-          "unit_file_state",
-          "restarts",
-          "result"
-        ],
-        "properties": {
-          "active_since": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "When it last became active, RFC 3339."
-          },
-          "active_state": {
-            "type": "string",
-            "description": "Such as `active`, `inactive` or `failed`."
-          },
-          "description": {
-            "type": "string"
-          },
-          "load_state": {
-            "type": "string",
-            "description": "Such as `loaded` or `not-found`."
-          },
-          "main_pid": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int32",
-            "description": "The main process, when there is one.",
-            "minimum": 0
-          },
-          "name": {
-            "type": "string",
-            "description": "Such as `pingora-panel-gatewayd.service`."
-          },
-          "restarts": {
-            "type": "integer",
-            "format": "int32",
-            "description": "How often systemd restarted it on its own.",
-            "minimum": 0
-          },
-          "result": {
-            "type": "string",
-            "description": "How it last ended, such as `success` or `exit-code`."
-          },
-          "sub_state": {
-            "type": "string",
-            "description": "Such as `running` or `dead`."
-          },
-          "unit_file_state": {
-            "type": "string",
-            "description": "Such as `enabled` or `disabled`."
-          }
-        }
+      "GatewaySupervisorName": {
+        "type": "string",
+        "description": "What runs the gateway.",
+        "enum": [
+          "container"
+        ]
       },
       "GrantConditionsBody": {
         "type": "object",
@@ -69707,15 +69752,6 @@
         "x-extensible-enum": [
           "hmac-sha256",
           "hmac-sha512"
-        ]
-      },
-      "UnitActionName": {
-        "type": "string",
-        "description": "What may be done to the gateway's unit.",
-        "enum": [
-          "start",
-          "stop",
-          "restart"
         ]
       },
       "Upstream": {

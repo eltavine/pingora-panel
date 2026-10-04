@@ -1,8 +1,9 @@
 use super::*;
 use panel_application::{
     AgentCapability, AgentDescription, CapabilityState, CapabilityStatus, CommandContext,
-    DirectoriesReport, DirectoryKind, DirectoryUsage, GatewayUnitStatus, HostAgentPort,
-    ListenersReport, ListeningProcess, PortListener, RequestScope, UnitAction,
+    ContainerState, ContainerSummary, DirectoriesReport, DirectoryKind, DirectoryUsage,
+    GatewayContainer, GatewayServiceAction, GatewayServiceStatus, HostAgentPort, ListenersReport,
+    ListeningProcess, PortListener, RequestScope,
 };
 use serde_json::Value;
 use std::time::{Duration, UNIX_EPOCH};
@@ -53,35 +54,48 @@ impl HostAgentPort for Agent {
         })
     }
 
-    async fn gateway_unit(&self, _scope: RequestScope) -> Result<GatewayUnitStatus> {
-        Ok(GatewayUnitStatus {
-            name: "pingora-panel-gatewayd.service".into(),
-            description: "Pingora Panel gateway".into(),
-            load_state: "loaded".into(),
-            active_state: "active".into(),
-            sub_state: "running".into(),
-            unit_file_state: "enabled".into(),
-            main_pid: 4242,
-            active_since: Some(UNIX_EPOCH + Duration::from_secs(1_800_000_000)),
-            restarts: 0,
-            result: "success".into(),
+    async fn gateway_service(&self, _scope: RequestScope) -> Result<GatewayServiceStatus> {
+        Ok(GatewayServiceStatus {
+            observed_at: Some(UNIX_EPOCH + Duration::from_secs(1_800_000_060)),
+            container: GatewayContainer {
+                engine: "docker".into(),
+                container: ContainerSummary {
+                    id: "g7".into(),
+                    names: vec!["pingora-panel-gatewayd-1".into()],
+                    image: "localhost/pingora-panel:dev".into(),
+                    image_id: "sha256:cc".into(),
+                    created: None,
+                    state: ContainerState::Running,
+                    status: "Up 1 minute (healthy)".into(),
+                    ports: Vec::new(),
+                    labels: Default::default(),
+                    compose_project: Some("pingora-panel".into()),
+                },
+                started_at: Some(UNIX_EPOCH + Duration::from_secs(1_800_000_000)),
+                finished_at: None,
+                exit_code: 0,
+                restarts: 0,
+                health: "healthy".into(),
+            },
         })
     }
 
-    async fn change_gateway_unit(
+    async fn change_gateway_service(
         &self,
         context: CommandContext,
-        action: UnitAction,
-    ) -> Result<GatewayUnitStatus> {
-        if action == UnitAction::Stop && context.actor() == "careless" {
+        action: GatewayServiceAction,
+    ) -> Result<GatewayServiceStatus> {
+        if action == GatewayServiceAction::Stop && context.actor() == "careless" {
             return Err(PanelError::precondition_failed(
-                "the agent may not stop pingora-panel-gatewayd.service",
+                "the docker engine is disabled",
             ));
         }
-        let mut status = self.gateway_unit(context.scope()).await?;
-        if action == UnitAction::Stop {
-            status.active_state = "inactive".into();
-            status.main_pid = 0;
+        let mut status = self.gateway_service(context.scope()).await?;
+        if action == GatewayServiceAction::Stop {
+            status.container.container.state = ContainerState::Exited;
+            status.container.health = String::new();
+            status.container.finished_at = Some(UNIX_EPOCH + Duration::from_secs(1_800_000_120));
+            status.container.exit_code = 0;
         }
         Ok(status)
     }
@@ -219,7 +233,7 @@ async fn post(app: &axum::Router, path: &str, actor: &str) -> (StatusCode, Value
         .oneshot(
             Request::post(path)
                 .header("x-actor", actor)
-                .header("idempotency-key", "unit-1")
+                .header("idempotency-key", "gateway-1")
                 .header("x-deadline", "2099-01-01T00:00:00Z")
                 .body(Body::empty())
                 .unwrap(),
@@ -237,26 +251,35 @@ async fn post(app: &axum::Router, path: &str, actor: &str) -> (StatusCode, Value
 }
 
 #[tokio::test]
-async fn the_gateways_unit_is_read_and_changed() {
+async fn the_gateway_service_is_read_and_changed() {
     let router = app(Some(Agent { reachable: true }));
-    let (status, unit) = get(&router, "/api/v1/host/gateway-unit").await;
-    assert_eq!(status, StatusCode::OK, "{unit}");
-    assert_eq!(unit["name"], "pingora-panel-gatewayd.service");
-    assert_eq!(unit["active_state"], "active");
-    assert_eq!(unit["main_pid"], 4242);
-    assert_eq!(unit["active_since"], "2027-01-15T08:00:00Z");
+    let (status, service) = get(&router, "/api/v1/host/gateway-service").await;
+    assert_eq!(status, StatusCode::OK, "{service}");
+    assert_eq!(service["supervisor"], "container");
+    assert_eq!(service["observed_at"], "2027-01-15T08:01:00Z");
+    let gateway = &service["container"];
+    assert_eq!(gateway["engine"], "docker");
+    assert_eq!(gateway["name"], "pingora-panel-gatewayd-1");
+    assert_eq!(gateway["state"], "running");
+    assert_eq!(gateway["health"], "healthy");
+    assert_eq!(gateway["started_at"], "2027-01-15T08:00:00Z");
+    assert_eq!(gateway["finished_at"], Value::Null);
+    assert_eq!(gateway["exit_code"], Value::Null);
 
-    let (status, unit) = post(&router, "/api/v1/host/gateway-unit/stop", "ops").await;
-    assert_eq!(status, StatusCode::OK, "{unit}");
-    assert_eq!(unit["active_state"], "inactive");
-    assert_eq!(unit["main_pid"], Value::Null);
+    let (status, service) = post(&router, "/api/v1/host/gateway-service/stop", "ops").await;
+    assert_eq!(status, StatusCode::OK, "{service}");
+    let gateway = &service["container"];
+    assert_eq!(gateway["state"], "exited");
+    assert_eq!(gateway["health"], Value::Null);
+    assert_eq!(gateway["finished_at"], "2027-01-15T08:02:00Z");
+    assert_eq!(gateway["exit_code"], 0);
 
-    let (status, problem) = post(&router, "/api/v1/host/gateway-unit/stop", "careless").await;
+    let (status, problem) = post(&router, "/api/v1/host/gateway-service/stop", "careless").await;
     assert_eq!(status, StatusCode::PRECONDITION_FAILED, "{problem}");
 
-    let (status, problem) = post(&router, "/api/v1/host/gateway-unit/reboot", "ops").await;
+    let (status, problem) = post(&router, "/api/v1/host/gateway-service/reboot", "ops").await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
 
-    let (status, problem) = post(&app(None), "/api/v1/host/gateway-unit/start", "ops").await;
+    let (status, problem) = post(&app(None), "/api/v1/host/gateway-service/start", "ops").await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
 }

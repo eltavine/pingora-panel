@@ -232,8 +232,8 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
             get(host_agent::host_listeners::<U>),
         )
         .route(
-            "/api/v1/host/gateway-unit",
-            get(host_agent::gateway_unit::<U>),
+            "/api/v1/host/gateway-service",
+            get(host_agent::gateway_service::<U>),
         )
         .route(
             "/api/v1/container-engines",
@@ -252,8 +252,8 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
             get(containers::list_containers::<U>),
         )
         .route(
-            "/api/v1/host/gateway-unit/{action}",
-            post(host_agent::change_gateway_unit::<U>),
+            "/api/v1/host/gateway-service/{action}",
+            post(host_agent::change_gateway_service::<U>),
         )
         .route("/api/v1/alert-rules", get(alerts::list_alert_rules::<U>))
         .route(

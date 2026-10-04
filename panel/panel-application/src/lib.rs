@@ -51,8 +51,8 @@ pub use gateway::{
 pub use host::{HostFilesystem, HostNetworkDevice, HostPort, HostSummary};
 pub use host_agent::{
     AgentCapability, AgentDescription, CapabilityState, CapabilityStatus, DirectoriesReport,
-    DirectoryKind, DirectoryUsage, GatewayUnitStatus, HostAgentPort, ListenersReport,
-    ListeningProcess, NoHostAgent, PortListener, RecordedHostAgent, UnitAction,
+    DirectoryKind, DirectoryUsage, GatewayContainer, GatewayServiceAction, GatewayServiceStatus,
+    HostAgentPort, ListenersReport, ListeningProcess, NoHostAgent, PortListener, RecordedHostAgent,
 };
 pub use idempotency::IdempotentGatewayUseCases;
 pub use logs::{

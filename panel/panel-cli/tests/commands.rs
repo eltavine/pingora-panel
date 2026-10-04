@@ -235,18 +235,22 @@ async fn api(
             ]
         }))
         .into_response(),
-        ("GET", "/api/v1/host/gateway-unit") => Json(json!({
-            "name": "pingora-panel-gatewayd.service", "description": "Pingora Panel gateway",
-            "load_state": "loaded", "active_state": "active", "sub_state": "running",
-            "unit_file_state": "enabled", "main_pid": 4242,
-            "active_since": "2026-10-04T09:00:00Z", "restarts": 0, "result": "success"
+        ("GET", "/api/v1/host/gateway-service") => Json(json!({
+            "observed_at": "2026-10-04T10:00:00Z", "supervisor": "container",
+            "container": {"engine": "docker", "id": "g7", "name": "pingora-panel-gatewayd-1",
+                          "image": "localhost/pingora-panel:dev", "state": "running",
+                          "status": "Up 1 hour (healthy)", "health": "healthy",
+                          "started_at": "2026-10-04T09:00:00Z", "finished_at": null,
+                          "exit_code": null, "restarts": 0}
         }))
         .into_response(),
-        ("POST", "/api/v1/host/gateway-unit/restart") => Json(json!({
-            "name": "pingora-panel-gatewayd.service", "description": "Pingora Panel gateway",
-            "load_state": "loaded", "active_state": "active", "sub_state": "running",
-            "unit_file_state": "enabled", "main_pid": 4343,
-            "active_since": "2026-10-04T10:00:00Z", "restarts": 0, "result": "success"
+        ("POST", "/api/v1/host/gateway-service/restart") => Json(json!({
+            "observed_at": "2026-10-04T10:00:05Z", "supervisor": "container",
+            "container": {"engine": "docker", "id": "g7", "name": "pingora-panel-gatewayd-1",
+                          "image": "localhost/pingora-panel:dev", "state": "running",
+                          "status": "Up 1 second (health: starting)", "health": "starting",
+                          "started_at": "2026-10-04T10:00:04Z",
+                          "finished_at": "2026-10-04T10:00:03Z", "exit_code": 0, "restarts": 0}
         }))
         .into_response(),
         ("GET", "/api/v1/host/listeners") => Json(json!({
@@ -1171,27 +1175,27 @@ fn the_host_agent_and_the_panels_directories_are_shown() {
 }
 
 #[test]
-fn the_gateways_unit_is_shown_and_restarted_with_confirmation() {
+fn the_gateway_service_is_shown_and_restarted_with_confirmation() {
     let stub = Stub::start();
-    let unit = stub.ppanel(&["host", "unit"]);
-    assert!(unit.status.success(), "{}", stderr(&unit));
-    let printed = stdout(&unit);
-    for expected in ["pingora-panel-gatewayd.service", "active (running)", "4242"] {
+    let service = stub.ppanel(&["host", "gateway-service"]);
+    assert!(service.status.success(), "{}", stderr(&service));
+    let printed = stdout(&service);
+    for expected in ["pingora-panel-gatewayd-1", "running (healthy)", "docker"] {
         assert!(printed.contains(expected), "{expected} in\n{printed}");
     }
 
-    let unconfirmed = stub.ppanel(&["host", "unit", "restart"]);
+    let unconfirmed = stub.ppanel(&["host", "gateway-service", "restart"]);
     assert!(!unconfirmed.status.success());
     assert!(stderr(&unconfirmed).contains("--yes"));
     assert!(stub
-        .requests("POST", "/api/v1/host/gateway-unit/restart")
+        .requests("POST", "/api/v1/host/gateway-service/restart")
         .is_empty());
 
-    let restarted = stub.ppanel(&["host", "unit", "restart", "--yes"]);
+    let restarted = stub.ppanel(&["host", "gateway-service", "restart", "--yes"]);
     assert!(restarted.status.success(), "{}", stderr(&restarted));
-    assert!(stdout(&restarted).contains("4343"));
+    assert!(stdout(&restarted).contains("running (starting)"));
     assert_eq!(
-        stub.requests("POST", "/api/v1/host/gateway-unit/restart")
+        stub.requests("POST", "/api/v1/host/gateway-service/restart")
             .len(),
         1
     );

@@ -59,6 +59,23 @@ pub enum ContainerState {
     Unknown,
 }
 
+impl ContainerState {
+    /// The engine's word for it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Running => "running",
+            Self::Paused => "paused",
+            Self::Restarting => "restarting",
+            Self::Exited => "exited",
+            Self::Removing => "removing",
+            Self::Dead => "dead",
+            Self::Stopping => "stopping",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PortMapping {
     pub private_port: u16,

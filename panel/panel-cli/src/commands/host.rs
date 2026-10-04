@@ -28,25 +28,26 @@ enum HostCommand {
         #[arg(long = "port", value_name = "PORT")]
         ports: Vec<u16>,
     },
-    /// The gateway's systemd unit, or start, stop or restart it. A restart
-    /// waits for the gateway to drain; raise --timeout if it takes long.
-    Unit {
+    /// The service that runs the gateway, or start, stop or restart it. A
+    /// restart waits for the gateway to drain; raise --timeout if it takes
+    /// long.
+    GatewayService {
         #[command(subcommand)]
-        action: Option<UnitCommand>,
+        action: Option<GatewayServiceCommand>,
     },
 }
 
 #[derive(Subcommand)]
-enum UnitCommand {
-    /// Starts the gateway's unit.
+enum GatewayServiceCommand {
+    /// Starts the gateway's container.
     Start,
-    /// Stops the gateway's unit, and with it the gateway.
+    /// Stops the gateway's container, and with it the gateway.
     Stop {
         /// Confirms that the gateway stops serving.
         #[arg(long)]
         yes: bool,
     },
-    /// Restarts the gateway's unit.
+    /// Restarts the gateway's container.
     Restart {
         /// Confirms that the gateway stops serving while it restarts.
         #[arg(long)]
@@ -153,20 +154,30 @@ const LISTENERS: &[Column] = &[
     ("UID", |listener| text(&listener["uid"])),
 ];
 
-const UNIT: &[Column] = &[
-    ("Unit", |unit| text(&unit["name"])),
-    ("State", |unit| {
-        format!(
-            "{} ({})",
-            text(&unit["active_state"]),
-            text(&unit["sub_state"])
-        )
+const GATEWAY_SERVICE: &[Column] = &[
+    ("Container", |service| text(&service["container"]["name"])),
+    ("Engine", |service| text(&service["container"]["engine"])),
+    ("State", |service| {
+        let gateway = &service["container"];
+        match gateway["health"].as_str() {
+            Some(health) => format!("{} ({health})", text(&gateway["state"])),
+            None => text(&gateway["state"]),
+        }
     }),
-    ("Since", |unit| text(&unit["active_since"])),
-    ("PID", |unit| text(&unit["main_pid"])),
-    ("Enabled", |unit| text(&unit["unit_file_state"])),
-    ("Restarts", |unit| text(&unit["restarts"])),
-    ("Result", |unit| text(&unit["result"])),
+    ("Status", |service| text(&service["container"]["status"])),
+    ("Started", |service| {
+        text(&service["container"]["started_at"])
+    }),
+    ("Stopped", |service| {
+        text(&service["container"]["finished_at"])
+    }),
+    ("Exit code", |service| {
+        text(&service["container"]["exit_code"])
+    }),
+    ("Restarts", |service| {
+        text(&service["container"]["restarts"])
+    }),
+    ("Image", |service| text(&service["container"]["image"])),
 ];
 
 const DIRECTORIES: &[Column] = &[
@@ -196,33 +207,40 @@ pub async fn run(api: &Api, output: &Output, args: HostArgs) -> Result<()> {
         Some(HostCommand::Agent) => agent(api, output).await,
         Some(HostCommand::Directories) => directories(api, output).await,
         Some(HostCommand::Listeners { ports }) => listeners(api, output, &ports).await,
-        Some(HostCommand::Unit { action }) => unit(api, output, action).await,
+        Some(HostCommand::GatewayService { action }) => gateway_service(api, output, action).await,
     }
 }
 
-async fn unit(api: &Api, output: &Output, action: Option<UnitCommand>) -> Result<()> {
+async fn gateway_service(
+    api: &Api,
+    output: &Output,
+    action: Option<GatewayServiceCommand>,
+) -> Result<()> {
     let action = match action {
         None => None,
-        Some(UnitCommand::Start) => Some("start"),
-        Some(UnitCommand::Stop { yes: false } | UnitCommand::Restart { yes: false }) => {
+        Some(GatewayServiceCommand::Start) => Some("start"),
+        Some(
+            GatewayServiceCommand::Stop { yes: false }
+            | GatewayServiceCommand::Restart { yes: false },
+        ) => {
             return Err(CliError::Usage(
                 "the gateway stops serving; pass --yes to confirm".into(),
             ));
         }
-        Some(UnitCommand::Stop { yes: true }) => Some("stop"),
-        Some(UnitCommand::Restart { yes: true }) => Some("restart"),
+        Some(GatewayServiceCommand::Stop { yes: true }) => Some("stop"),
+        Some(GatewayServiceCommand::Restart { yes: true }) => Some("restart"),
     };
-    let unit = match action {
-        None => api.get("/api/v1/host/gateway-unit", &[]).await?.body,
+    let service = match action {
+        None => api.get("/api/v1/host/gateway-service", &[]).await?.body,
         Some(action) => {
-            let path = format!("/api/v1/host/gateway-unit/{action}");
+            let path = format!("/api/v1/host/gateway-service/{action}");
             api.change(Method::POST, &path, None, None).await?.body
         }
     };
     if output.format == Format::Json {
-        output.json(&unit);
+        output.json(&service);
     } else if !output.quiet {
-        output.item(&unit, UNIT);
+        output.item(&service, GATEWAY_SERVICE);
     }
     Ok(())
 }

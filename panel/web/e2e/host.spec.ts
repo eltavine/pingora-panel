@@ -52,22 +52,27 @@ const agent = {
   capabilities: [
     { capability: 'directories', state: 'available', detail: '' },
     { capability: 'listeners', state: 'available', detail: '' },
-    { capability: 'gateway_unit', state: 'available', detail: '' },
+    { capability: 'gateway_service', state: 'available', detail: '' },
     { capability: 'containers', state: 'denied', detail: 'add the agent to the docker group' },
   ],
 }
 
-const unit = {
-  name: 'pingora-panel-gatewayd.service',
-  description: 'Pingora Panel gateway',
-  load_state: 'loaded',
-  active_state: 'active',
-  sub_state: 'running',
-  unit_file_state: 'enabled',
-  main_pid: 1204,
-  active_since: '2026-10-01T10:00:00Z',
-  restarts: 0,
-  result: 'success',
+const gatewayService = {
+  observed_at: '2026-10-04T10:00:00Z',
+  supervisor: 'container',
+  container: {
+    engine: 'docker',
+    id: '4f1c2b7d9e0a',
+    name: 'pingora-panel-gatewayd-1',
+    image: 'localhost/pingora-panel:dev',
+    state: 'running',
+    status: 'Up 3 days (healthy)',
+    health: 'healthy',
+    started_at: '2026-10-01T10:00:00Z',
+    finished_at: null,
+    exit_code: null,
+    restarts: 0,
+  },
 }
 
 const listeners = {
@@ -143,9 +148,16 @@ async function setUp(
   await page.route('**/api/v1/host/agent', (route) => route.fulfill({ json: hostAgent }))
   await page.route('**/api/v1/host/directories', (route) => route.fulfill({ json: directories }))
   await page.route('**/api/v1/host/listeners', (route) => route.fulfill({ json: listeners }))
-  await page.route('**/api/v1/host/gateway-unit', (route) => route.fulfill({ json: unit }))
-  await page.route('**/api/v1/host/gateway-unit/*', (route) =>
-    route.fulfill({ json: { ...unit, main_pid: 1301 } }),
+  await page.route('**/api/v1/host/gateway-service', (route) =>
+    route.fulfill({ json: gatewayService }),
+  )
+  await page.route('**/api/v1/host/gateway-service/*', (route) =>
+    route.fulfill({
+      json: {
+        ...gatewayService,
+        container: { ...gatewayService.container, started_at: '2026-10-04T10:00:05Z' },
+      },
+    }),
   )
 }
 
@@ -235,11 +247,11 @@ test('the agent shows its capabilities and the space the panel takes', async ({ 
 test('administrators restart the gateway service after confirming', async ({ page }) => {
   await setUp(page, host, ALL_PERMISSIONS, agent)
   await page.goto('/host')
-  await expect(page.getByText('Active (running)')).toBeVisible()
-  await expect(page.getByText('pingora-panel-gatewayd.service')).toBeVisible()
+  await expect(page.getByText('Running · Healthy')).toBeVisible()
+  await expect(page.getByText('pingora-panel-gatewayd-1')).toBeVisible()
   const restarted = page.waitForRequest(
     (request) =>
-      request.method() === 'POST' && request.url().endsWith('/api/v1/host/gateway-unit/restart'),
+      request.method() === 'POST' && request.url().endsWith('/api/v1/host/gateway-service/restart'),
   )
   await page.getByRole('button', { name: 'Restart', exact: true }).click()
   await page.getByRole('alertdialog').getByRole('button', { name: 'Restart', exact: true }).click()
@@ -255,7 +267,7 @@ test('the gateway service is shown without its actions to readers', async ({ pag
     agent,
   )
   await page.goto('/host')
-  await expect(page.getByText('Active (running)')).toBeVisible()
+  await expect(page.getByText('Running · Healthy')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Restart', exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0)
 })
