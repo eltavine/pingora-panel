@@ -6,10 +6,10 @@
 use async_trait::async_trait;
 use panel_application::{
     AgentCapability, AgentDescription, CapabilityState, CapabilityStatus, CommandContext,
-    ContainerEngine, ContainerFilter, ContainerList, ContainerState, ContainerSummary,
-    ContainersPort, DirectoriesReport, DirectoryKind, DirectoryUsage, EngineInfo, EngineVersion,
-    GatewayUnitStatus, HostAgentPort, ListenersReport, ListeningProcess, PortListener, PortMapping,
-    RequestScope, UnitAction,
+    ContainerAction, ContainerChange, ContainerEngine, ContainerFilter, ContainerList,
+    ContainerState, ContainerSummary, ContainersPort, DirectoriesReport, DirectoryKind,
+    DirectoryUsage, EngineInfo, EngineVersion, GatewayUnitStatus, HostAgentPort, ListenersReport,
+    ListeningProcess, PortListener, PortMapping, RequestScope, UnitAction,
 };
 use panel_contracts::{
     common::v1 as common,
@@ -417,6 +417,45 @@ impl ContainersPort for OpsAgentClient {
         Ok(ContainerList {
             observed_at: time(response.observed_at),
             containers: response.containers.into_iter().map(summary).collect(),
+        })
+    }
+
+    async fn act(
+        &self,
+        context: CommandContext,
+        engine_id: String,
+        container: String,
+        action: ContainerAction,
+    ) -> Result<ContainerChange> {
+        let (wire_action, force, remove_volumes) = match action {
+            ContainerAction::Start => (wire::ContainerAction::Start, false, false),
+            ContainerAction::Stop => (wire::ContainerAction::Stop, false, false),
+            ContainerAction::Restart => (wire::ContainerAction::Restart, false, false),
+            ContainerAction::Kill => (wire::ContainerAction::Kill, false, false),
+            ContainerAction::Remove { force, volumes } => {
+                (wire::ContainerAction::Remove, force, volumes)
+            }
+        };
+        let message = wire::ContainersActRequest {
+            context: Some(command_context(&context)),
+            engine: engine_id,
+            container,
+            action: wire_action.into(),
+            force,
+            remove_volumes,
+        };
+        let mut request = self.request(message, &context.scope());
+        request.set_timeout(CHANGE_TIMEOUT);
+        let response = ContainersClient::new(self.channel.clone())
+            .act(request)
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        Ok(ContainerChange {
+            id: response.id,
+            name: response.name,
+            container: response.container.map(summary),
         })
     }
 }

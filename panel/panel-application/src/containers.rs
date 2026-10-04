@@ -98,6 +98,46 @@ pub struct ContainerList {
     pub containers: Vec<ContainerSummary>,
 }
 
+/// What the panel does to a container.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ContainerAction {
+    Start,
+    /// The container's stop signal, then SIGKILL once its stop timeout
+    /// passes.
+    Stop,
+    Restart,
+    /// SIGKILL at once.
+    Kill,
+    Remove {
+        /// A running container is killed and removed rather than refused.
+        force: bool,
+        /// Its anonymous volumes go with it.
+        volumes: bool,
+    },
+}
+
+impl ContainerAction {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Start => "start",
+            Self::Stop => "stop",
+            Self::Restart => "restart",
+            Self::Kill => "kill",
+            Self::Remove { .. } => "remove",
+        }
+    }
+}
+
+/// A container an action was taken on.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContainerChange {
+    pub id: String,
+    /// Its name before the action.
+    pub name: String,
+    /// The container afterwards; `None` once removed.
+    pub container: Option<ContainerSummary>,
+}
+
 #[async_trait]
 pub trait ContainersPort: Send + Sync {
     async fn engines(&self, scope: RequestScope) -> Result<Vec<ContainerEngine>>;
@@ -116,6 +156,16 @@ pub trait ContainersPort: Send + Sync {
         engine: String,
         filter: ContainerFilter,
     ) -> Result<ContainerList>;
+
+    /// Starts, stops, restarts, kills or removes a container, named by its
+    /// ID or name.
+    async fn act(
+        &self,
+        context: CommandContext,
+        engine: String,
+        container: String,
+        action: ContainerAction,
+    ) -> Result<ContainerChange>;
 }
 
 /// The port of an installation whose agent manages no engine.
@@ -145,9 +195,20 @@ impl ContainersPort for NoContainers {
     ) -> Result<ContainerList> {
         Err(Self::refusal())
     }
+
+    async fn act(
+        &self,
+        _: CommandContext,
+        _: String,
+        _: String,
+        _: ContainerAction,
+    ) -> Result<ContainerChange> {
+        Err(Self::refusal())
+    }
 }
 
-/// A containers port that records each change to an engine, refused or not.
+/// A containers port that records each change to an engine or a
+/// container, refused or not.
 pub struct RecordedContainers {
     inner: Arc<dyn ContainersPort>,
     log: Arc<dyn OperationLog>,
@@ -192,6 +253,27 @@ impl ContainersPort for RecordedContainers {
     ) -> Result<ContainerList> {
         self.inner.containers(scope, engine, filter).await
     }
+
+    async fn act(
+        &self,
+        context: CommandContext,
+        engine: String,
+        container: String,
+        action: ContainerAction,
+    ) -> Result<ContainerChange> {
+        let result = self
+            .inner
+            .act(context.clone(), engine.clone(), container.clone(), action)
+            .await;
+        let operation = Operation::Container {
+            engine: &engine,
+            container: &container,
+            action,
+            result: result.as_ref(),
+        };
+        self.log.record(&context, operation).await;
+        result
+    }
 }
 
 #[cfg(test)]
@@ -234,11 +316,28 @@ mod tests {
         ) -> Result<ContainerList> {
             Err(NoContainers::refusal())
         }
+
+        async fn act(
+            &self,
+            _: CommandContext,
+            _: String,
+            container: String,
+            _: ContainerAction,
+        ) -> Result<ContainerChange> {
+            if container != "shop-web-1" {
+                return Err(PanelError::not_found(format!("no container {container}")));
+            }
+            Ok(ContainerChange {
+                id: "b2".into(),
+                name: container,
+                container: None,
+            })
+        }
     }
 
-    /// A change as the test log keeps it: the engine, whether it was being
-    /// enabled, and the code it was refused with.
-    type Recorded = (String, bool, std::result::Result<(), String>);
+    /// A change as the test log keeps it: what changed, and the code it was
+    /// refused with.
+    type Recorded = (String, std::result::Result<(), String>);
 
     #[derive(Default)]
     struct Recorder(Mutex<Vec<Recorded>>);
@@ -246,20 +345,28 @@ mod tests {
     #[async_trait]
     impl OperationLog for Recorder {
         async fn record(&self, _: &CommandContext, operation: Operation<'_>) {
-            if let Operation::ContainerEngine {
-                engine,
-                enabled,
-                result,
-            } = operation
-            {
-                self.0.lock().unwrap().push((
-                    engine.to_owned(),
+            let code = |error: &PanelError| error.code.as_str().to_owned();
+            let recorded = match operation {
+                Operation::ContainerEngine {
+                    engine,
                     enabled,
-                    result
-                        .map(|_| ())
-                        .map_err(|error| error.code.as_str().to_owned()),
-                ));
-            }
+                    result,
+                } => (
+                    format!("{engine} enabled={enabled}"),
+                    result.map(|_| ()).map_err(code),
+                ),
+                Operation::Container {
+                    engine,
+                    container,
+                    action,
+                    result,
+                } => (
+                    format!("{engine}/{container} {}", action.as_str()),
+                    result.map(|_| ()).map_err(code),
+                ),
+                _ => return,
+            };
+            self.0.lock().unwrap().push(recorded);
         }
     }
 
@@ -286,10 +393,55 @@ mod tests {
         assert_eq!(
             *recorder.0.lock().unwrap(),
             vec![
-                ("docker".to_owned(), false, Ok(())),
+                ("docker enabled=false".to_owned(), Ok(())),
                 (
-                    "containerd".to_owned(),
-                    true,
+                    "containerd enabled=true".to_owned(),
+                    Err(ErrorCode::NOT_FOUND.to_owned())
+                ),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn every_action_on_a_container_is_recorded_refused_or_not() {
+        let recorder = Arc::new(Recorder::default());
+        let containers = RecordedContainers::new(Arc::new(Engines), recorder.clone());
+        let context = CommandContext::new(
+            RequestId::new("request-1").unwrap(),
+            RequestId::new("request-1").unwrap(),
+            "ops",
+            RequestDeadline::new("2099-01-01T00:00:00Z").unwrap(),
+            IdempotencyKey::new("key-1").unwrap(),
+        )
+        .unwrap();
+        let removed = containers
+            .act(
+                context.clone(),
+                "docker".into(),
+                "shop-web-1".into(),
+                ContainerAction::Remove {
+                    force: true,
+                    volumes: false,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(removed.id, "b2");
+        containers
+            .act(
+                context,
+                "docker".into(),
+                "ghost".into(),
+                ContainerAction::Restart,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            *recorder.0.lock().unwrap(),
+            vec![
+                ("docker/shop-web-1 remove".to_owned(), Ok(())),
+                (
+                    "docker/ghost restart".to_owned(),
                     Err(ErrorCode::NOT_FOUND.to_owned())
                 ),
             ]

@@ -1,7 +1,8 @@
 use super::*;
 use panel_application::{
-    CommandContext, ContainerEngine, ContainerFilter, ContainerList, ContainerState,
-    ContainerSummary, ContainersPort, EngineInfo, EngineVersion, PortMapping, RequestScope,
+    CommandContext, ContainerAction, ContainerChange, ContainerEngine, ContainerFilter,
+    ContainerList, ContainerState, ContainerSummary, ContainersPort, EngineInfo, EngineVersion,
+    PortMapping, RequestScope,
 };
 use serde_json::Value;
 use std::time::{Duration, UNIX_EPOCH};
@@ -102,6 +103,16 @@ impl ContainersPort for Engines {
                 })
                 .collect(),
         })
+    }
+
+    async fn act(
+        &self,
+        _context: CommandContext,
+        _engine: String,
+        container: String,
+        _action: ContainerAction,
+    ) -> Result<ContainerChange> {
+        Err(PanelError::not_found(format!("no container {container}")))
     }
 }
 

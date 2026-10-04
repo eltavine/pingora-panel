@@ -4,7 +4,8 @@
 use async_trait::async_trait;
 use panel_api::{AccessAudit, Refusal};
 use panel_application::{
-    CommandContext, DataPlaneState, Operation, OperationLog, RequestScope, UnitAction,
+    CommandContext, ContainerAction, DataPlaneState, Operation, OperationLog, RequestScope,
+    UnitAction,
 };
 use panel_errors::PanelError;
 use panel_event_contracts::{
@@ -163,6 +164,63 @@ impl OperationLog for OutboxOperations {
                             container: String::new(),
                         };
                         self.0.record(target, &scope, actor, &refused).await;
+                    }
+                }
+            }
+            Operation::Container {
+                engine,
+                container,
+                action,
+                result,
+            } => {
+                let (scope, actor) = (context.scope(), context.actor());
+                match result {
+                    Ok(change) => {
+                        let target_id = format!("{engine}/{}", change.name);
+                        let target = ("container", target_id.as_str());
+                        let (engine, id, name) =
+                            (engine.to_owned(), change.id.clone(), change.name.clone());
+                        match action {
+                            ContainerAction::Start => {
+                                let data = containers::ContainerStarted { engine, id, name };
+                                self.0.record(target, &scope, actor, &data).await;
+                            }
+                            ContainerAction::Stop => {
+                                let data = containers::ContainerStopped { engine, id, name };
+                                self.0.record(target, &scope, actor, &data).await;
+                            }
+                            ContainerAction::Restart => {
+                                let data = containers::ContainerRestarted { engine, id, name };
+                                self.0.record(target, &scope, actor, &data).await;
+                            }
+                            ContainerAction::Kill => {
+                                let data = containers::ContainerKilled { engine, id, name };
+                                self.0.record(target, &scope, actor, &data).await;
+                            }
+                            ContainerAction::Remove { force, volumes } => {
+                                let data = containers::ContainerRemoved {
+                                    engine,
+                                    id,
+                                    name,
+                                    force,
+                                    remove_volumes: volumes,
+                                };
+                                self.0.record(target, &scope, actor, &data).await;
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        let target_id = format!("{engine}/{container}");
+                        let refused = containers::OperationRefused {
+                            engine: engine.to_owned(),
+                            operation: format!("container.{}", action.as_str()),
+                            code: error.code.as_str().to_owned(),
+                            message: error.message.clone(),
+                            container: container.to_owned(),
+                        };
+                        self.0
+                            .record(("container", &target_id), &scope, actor, &refused)
+                            .await;
                     }
                 }
             }

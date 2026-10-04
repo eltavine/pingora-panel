@@ -2,8 +2,9 @@
 //! such as calls to the gateway, for the audit trail.
 
 use crate::{
-    CommandContext, ContainerEngine, DataPlaneState, FileChecks, GatewayRuntimePort,
-    GatewayUnitStatus, LogDeletion, RequestScope, UnitAction, UpstreamHealth, UpstreamHealthReport,
+    CommandContext, ContainerAction, ContainerChange, ContainerEngine, DataPlaneState, FileChecks,
+    GatewayRuntimePort, GatewayUnitStatus, LogDeletion, RequestScope, UnitAction, UpstreamHealth,
+    UpstreamHealthReport,
 };
 use async_trait::async_trait;
 use panel_errors::{PanelError, Result};
@@ -38,6 +39,14 @@ pub enum Operation<'a> {
         engine: &'a str,
         enabled: bool,
         result: std::result::Result<&'a ContainerEngine, &'a PanelError>,
+    },
+    /// The host agent was asked to act on a container.
+    Container {
+        engine: &'a str,
+        /// The container as the request named it.
+        container: &'a str,
+        action: ContainerAction,
+        result: std::result::Result<&'a ContainerChange, &'a PanelError>,
     },
 }
 
@@ -228,6 +237,15 @@ mod tests {
                 } => (
                     format!("engine-{engine}"),
                     result.map(|_| enabled.to_string()),
+                ),
+                Operation::Container {
+                    container,
+                    action,
+                    result,
+                    ..
+                } => (
+                    format!("container-{}", action.as_str()),
+                    result.map(|_| container.to_owned()),
                 ),
             };
             self.0
