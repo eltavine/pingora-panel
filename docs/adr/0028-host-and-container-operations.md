@@ -1,6 +1,7 @@
 # 0028: Host and container operations
 
-Status: accepted.
+Status: accepted. [ADR 0030](0030-ops-agent.md) refines how the agent is
+reached.
 
 ## Context
 
