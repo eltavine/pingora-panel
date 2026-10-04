@@ -469,9 +469,11 @@ once they exist and restarts it with each renewal. Its settings are in
 
 The directory sizes capability measures the gateway's configuration, log
 and certificate directories, which the settings name: in the Compose
-installation, the gateway's volumes. Reading them takes
-`CAP_DAC_READ_SEARCH`, which `directories.conf` grants while hiding
-everything else under `/var` and the host's credentials from the agent.
+installation, the gateway's volumes, whose place on the host `install.sh`
+asks the engine for, creating them as Compose would when the installation
+has not started yet. Reading them takes `CAP_DAC_READ_SEARCH`, which
+`directories.conf` grants while hiding everything else under `/var` and the
+host's credentials from the agent.
 
 The port diagnostics capability, on Linux, names the processes listening
 on TCP ports from `/proc`: their name, ID, executable and user, never
