@@ -51,7 +51,7 @@ jobs:
           sudo systemctl daemon-reload
           sudo systemctl start pingora-panel-gatewayd.service
           sudo env PINGORA_PANEL_IMAGE=localhost/pingora-panel:dev \
-            panel/deploy/ops-agent/install.sh directories listeners gateway-unit
+            panel/deploy/ops-agent/install.sh directories listeners gateway-unit containers
           sudo systemd-analyze verify \
             /etc/systemd/system/pingora-panel-ops-agent.service \
             /etc/systemd/system/pingora-panel-ops-agent-credentials.service \
@@ -144,6 +144,42 @@ jobs:
           done
           ppanel -o json audit list --type host.gateway_unit.restarted --actor-id ci \
             | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"
+
+      - name: Reach the containers through the host agent
+        run: |
+          ppanel() { docker compose exec -T -e PPANEL_TOKEN panel-api ppanel "$@"; }
+          engines() {
+            ppanel -o json container engines \
+              | python3 -c "import json, sys; print(' '.join(f\"{e['id']}:{e['enabled']}:{e['reachable']}\" for e in json.load(sys.stdin)['engines']))"
+          }
+          test "$(engines)" = docker:True:True
+          ppanel container engine disable docker
+          test "$(engines)" = docker:False:True
+          # The choice outlives the agent.
+          sudo systemctl restart pingora-panel-ops-agent.service
+          for attempt in $(seq 1 30); do
+            if [ "$(engines 2>/dev/null)" = docker:False:True ]; then
+              break
+            fi
+            sleep 2
+          done
+          test "$(engines)" = docker:False:True
+          ppanel container engine enable docker
+          ppanel container engines
+          ppanel -o json container list --state running \
+            | python3 -c "import json, sys; found = json.load(sys.stdin)['containers']; assert any(c['compose_project'] == 'pingora-panel' for c in found), found"
+          ppanel container list --search panel-api
+          for type in container.engine.disabled container.engine.enabled; do
+            for attempt in $(seq 1 30); do
+              if ppanel -o json audit list --type "$type" --actor-id ci \
+                | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"; then
+                break
+              fi
+              sleep 1
+            done
+            ppanel -o json audit list --type "$type" --actor-id ci \
+              | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"
+          done
 
       - name: Serve a site through the gateway with the command line
         run: |
