@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# Installs the Pingora Panel host agent (ADR 0030) as a systemd service, with
-# the directory sizes capability. Run as root on the host, after building or
-# pulling the panel's image, and start the Compose installation with
-# compose.ops-agent.yaml so the agent gets its credentials:
+# Installs the Pingora Panel host agent (ADR 0030) as a systemd service with
+# the capabilities named, directories alone by default. Run as root on the
+# host, after building or pulling the panel's image, and start the Compose
+# installation with compose.ops-agent.yaml so the agent gets its credentials:
 #
-#   sudo panel/deploy/ops-agent/install.sh
+#   sudo panel/deploy/ops-agent/install.sh directories listeners
+#
+# Each capability is a drop-in beside this script that grants its privilege:
+# directories to measure the gateway's volumes, listeners to name the
+# processes on TCP ports.
 #
 # PINGORA_PANEL_IMAGE names the image holding the agent, and
 # CONTAINER_ENGINE the engine that has it, docker or podman.
@@ -13,6 +17,19 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 image=${PINGORA_PANEL_IMAGE:-localhost/pingora-panel:dev}
 engine=${CONTAINER_ENGINE:-docker}
+capabilities=("$@")
+if [ "${#capabilities[@]}" -eq 0 ]; then
+  capabilities=(directories)
+fi
+for capability in "${capabilities[@]}"; do
+  case "$capability" in
+    directories | listeners) ;;
+    *)
+      echo "unknown capability: $capability" >&2
+      exit 1
+      ;;
+  esac
+done
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "install.sh must run as root" >&2
@@ -38,8 +55,10 @@ for unit in pingora-panel-ops-agent.service pingora-panel-ops-agent-credentials.
   pingora-panel-ops-agent-credentials.path; do
   install -m 0644 "$here/$unit" "/etc/systemd/system/$unit"
 done
-install -D -m 0644 "$here/directories.conf" \
-  /etc/systemd/system/pingora-panel-ops-agent.service.d/directories.conf
+for capability in "${capabilities[@]}"; do
+  install -D -m 0644 "$here/$capability.conf" \
+    "/etc/systemd/system/pingora-panel-ops-agent.service.d/$capability.conf"
+done
 
 systemctl daemon-reload
 systemctl enable --now pingora-panel-ops-agent-credentials.path
