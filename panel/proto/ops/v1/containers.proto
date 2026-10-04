@@ -26,6 +26,10 @@ service Containers {
   // The lines a container prints, as it prints them, until the caller
   // hangs up or the container stops.
   rpc FollowLogs(ContainersFollowLogsRequest) returns (stream ContainersFollowLogsResponse);
+  // What running containers use, read once as `docker stats --no-stream`
+  // does: CPU over about a second, memory, network, block I/O and
+  // processes.
+  rpc Stats(ContainersStatsRequest) returns (ContainersStatsResponse);
 }
 
 message EngineVersion {
@@ -291,4 +295,55 @@ message ContainersFollowLogsResponse {
   // Ends the stream, in a response without lines: the engine failed, or
   // too many logs are followed.
   .pingora.panel.common.v1.Error error = 2;
+}
+
+// Summed over a container's interfaces.
+message ContainerNetworkStats {
+  uint64 received_bytes = 1;
+  uint64 sent_bytes = 2;
+  uint64 received_packets = 3;
+  uint64 sent_packets = 4;
+  // Packets received or sent in error.
+  uint64 errors = 5;
+  // Packets dropped on the way in or out.
+  uint64 dropped = 6;
+}
+
+message ContainerStats {
+  string id = 1;
+  // Without the leading slash.
+  string name = 2;
+  // When the engine read them.
+  google.protobuf.Timestamp read_at = 3;
+  // Of one CPU, over about a second: 250 is two and a half CPUs busy.
+  double cpu_percent = 4;
+  // The CPUs the container may use.
+  uint32 online_cpus = 5;
+  // Without the page cache the kernel can reclaim, as `docker stats`
+  // counts it.
+  uint64 memory_bytes = 6;
+  // The host's memory when the container has no limit.
+  uint64 memory_limit_bytes = 7;
+  // Unset for a container without a network of its own, such as one on
+  // the host's.
+  ContainerNetworkStats network = 8;
+  uint64 block_read_bytes = 9;
+  uint64 block_written_bytes = 10;
+  // Processes and threads.
+  uint64 pids = 11;
+}
+
+message ContainersStatsRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string engine = 2;
+  // Its ID, a unique prefix of its ID, or its name; every running
+  // container when empty.
+  string container = 3;
+}
+
+message ContainersStatsResponse {
+  google.protobuf.Timestamp observed_at = 1;
+  // By name.
+  repeated ContainerStats stats = 2;
+  .pingora.panel.common.v1.Error error = 3;
 }

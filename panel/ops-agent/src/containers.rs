@@ -2,7 +2,7 @@
 //! bollard (ADR 0031). Which sockets they are is the agent's configuration;
 //! operators enable and disable them, and the agent keeps the choice.
 
-use crate::{config::ENGINES_ENV, container_logs};
+use crate::{config::ENGINES_ENV, container_logs, container_stats};
 use bollard::{
     errors::Error as EngineError,
     models::{
@@ -676,6 +676,35 @@ impl Containers for ContainerService {
         }))
     }
 
+    async fn stats(
+        &self,
+        request: Request<wire::ContainersStatsRequest>,
+    ) -> Result<Response<wire::ContainersStatsResponse>, Status> {
+        let request = request.into_inner();
+        let read = async {
+            let client = self.engines.enabled(&request.engine)?;
+            match request.container.trim() {
+                "" => container_stats::running(&client).await,
+                reference => container_stats::one(&client, reference)
+                    .await
+                    .map(|one| vec![one]),
+            }
+        };
+        let result = tokio::time::timeout(container_stats::STATS_TIMEOUT, read)
+            .await
+            .unwrap_or_else(|_| {
+                Err(PanelError::deadline_exceeded(
+                    "the engine did not report in time",
+                ))
+            });
+        let (stats, error) = answer(result);
+        Ok(Response::new(wire::ContainersStatsResponse {
+            observed_at: stats.as_ref().map(|_| SystemTime::now().into()),
+            stats: stats.unwrap_or_default(),
+            error,
+        }))
+    }
+
     async fn follow_logs(
         &self,
         request: Request<wire::ContainersFollowLogsRequest>,
@@ -792,6 +821,35 @@ mod tests {
         (status, Json(json!({ "message": message }))).into_response()
     }
 
+    /// What the engine reports a container uses: half of one of its four
+    /// CPUs, 200 MiB without the page cache, two interfaces' traffic and
+    /// some block I/O; read at the zero time when it is not running.
+    fn engine_stats(found: &Value) -> Value {
+        let running = found["State"]["Running"] == true;
+        let mib: u64 = 1024 * 1024;
+        json!({
+            "id": found["Id"], "name": found["Name"],
+            "read": if running { "2027-01-15T08:00:01.5Z" } else { "0001-01-01T00:00:00Z" },
+            "cpu_stats": {"cpu_usage": {"total_usage": 3_000_000_000_u64},
+                          "system_cpu_usage": 104_000_000_000_u64, "online_cpus": 4},
+            "precpu_stats": {"cpu_usage": {"total_usage": 2_500_000_000_u64},
+                             "system_cpu_usage": 100_000_000_000_u64, "online_cpus": 4},
+            "memory_stats": {"usage": 300 * mib, "limit": 8192 * mib,
+                             "stats": {"inactive_file": 100 * mib}},
+            "networks": {
+                "eth0": {"rx_bytes": 1_000, "tx_bytes": 2_000, "rx_packets": 10,
+                         "tx_packets": 20, "rx_errors": 1, "tx_errors": 0,
+                         "rx_dropped": 0, "tx_dropped": 2},
+                "eth1": {"rx_bytes": 500, "tx_bytes": 0, "rx_packets": 5, "tx_packets": 0}
+            },
+            "blkio_stats": {"io_service_bytes_recursive": [
+                {"major": 8, "minor": 0, "op": "read", "value": 4_096},
+                {"major": 8, "minor": 0, "op": "write", "value": 8_192}
+            ]},
+            "pids_stats": {"current": 5}
+        })
+    }
+
     /// What a container printed: its stream, when, and the text. The cache
     /// has a terminal, so its output is not multiplexed.
     fn printed(id: &str) -> Vec<(u8, u64, String)> {
@@ -880,13 +938,14 @@ mod tests {
             .route(
                 "/containers/json",
                 get(|Query(query): Query<HashMap<String, String>>| async move {
-                    let ids = query
+                    let mut filters = query
                         .get("filters")
                         .and_then(|filters| {
                             serde_json::from_str::<HashMap<String, Vec<String>>>(filters).ok()
                         })
-                        .and_then(|mut filters| filters.remove("id"))
                         .unwrap_or_default();
+                    let ids = filters.remove("id").unwrap_or_default();
+                    let statuses = filters.remove("status").unwrap_or_default();
                     let every = json!([
                         {"Id": "b2", "Names": ["/shop-web-1"], "Image": "nginx:1.27",
                          "ImageID": "sha256:aa", "Created": 1_800_000_000, "State": "running",
@@ -905,6 +964,12 @@ mod tests {
                         .filter(|container| {
                             ids.is_empty() || ids.iter().any(|id| container["Id"] == id.as_str())
                         })
+                        .filter(|container| {
+                            statuses.is_empty()
+                                || statuses
+                                    .iter()
+                                    .any(|state| container["State"] == state.as_str())
+                        })
                         .cloned()
                         .collect();
                     Json(listed)
@@ -915,6 +980,15 @@ mod tests {
                 get(|Segments(reference): Segments<String>| async move {
                     match inspected(&reference) {
                         Some(found) => Json(found).into_response(),
+                        None => refusal(StatusCode::NOT_FOUND, "No such container"),
+                    }
+                }),
+            )
+            .route(
+                "/containers/{reference}/stats",
+                get(|Segments(reference): Segments<String>| async move {
+                    match inspected(&reference) {
+                        Some(found) => Json(engine_stats(&found)).into_response(),
                         None => refusal(StatusCode::NOT_FOUND, "No such container"),
                     }
                 }),
@@ -1394,6 +1468,68 @@ mod tests {
         let missing = follow(&service, "ghost", 10, None).await;
         assert_eq!(missing.len(), 1);
         assert_eq!(missing[0].error.as_ref().unwrap().code, "NOT_FOUND");
+    }
+
+    async fn stats_of(
+        service: &ContainerService,
+        container: &str,
+    ) -> wire::ContainersStatsResponse {
+        service
+            .stats(Request::new(wire::ContainersStatsRequest {
+                context: None,
+                engine: "docker".into(),
+                container: container.into(),
+            }))
+            .await
+            .unwrap()
+            .into_inner()
+    }
+
+    #[tokio::test]
+    async fn running_containers_report_what_they_use() {
+        let directory = tempfile::tempdir().unwrap();
+        let service = ContainerService::new(
+            engines(engine(directory.path()).await, None),
+            "pingora-panel".into(),
+        );
+        let every = stats_of(&service, "").await;
+        assert!(every.error.is_none(), "{:?}", every.error);
+        assert!(every.observed_at.is_some());
+        let names: Vec<_> = every
+            .stats
+            .iter()
+            .map(|stats| stats.name.as_str())
+            .collect();
+        assert_eq!(names, ["shop-web-1"], "only running containers, by name");
+
+        let web = &every.stats[0];
+        assert!((web.cpu_percent - 50.0).abs() < 1e-9, "{}", web.cpu_percent);
+        assert_eq!(web.online_cpus, 4);
+        assert_eq!(web.memory_bytes, 200 * 1024 * 1024);
+        assert_eq!(web.memory_limit_bytes, 8192 * 1024 * 1024);
+        let network = web.network.as_ref().unwrap();
+        assert_eq!(
+            (
+                network.received_bytes,
+                network.sent_bytes,
+                network.received_packets
+            ),
+            (1_500, 2_000, 15)
+        );
+        assert_eq!((network.errors, network.dropped), (1, 2));
+        assert_eq!(
+            (web.block_read_bytes, web.block_written_bytes),
+            (4_096, 8_192)
+        );
+        assert_eq!(web.pids, 5);
+        assert!(web.read_at.is_some());
+
+        let one = stats_of(&service, "shop-web-1").await;
+        assert_eq!(one.stats[0].id, "b2");
+        let stopped = stats_of(&service, "cache").await;
+        assert_eq!(stopped.error.unwrap().code, "PRECONDITION_FAILED");
+        let missing = stats_of(&service, "ghost").await;
+        assert_eq!(missing.error.unwrap().code, "NOT_FOUND");
     }
 
     #[tokio::test]

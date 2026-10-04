@@ -280,6 +280,13 @@ impl Containers for FakeContainers {
         }))
     }
 
+    async fn stats(
+        &self,
+        _: Request<wire::ContainersStatsRequest>,
+    ) -> Result<Response<wire::ContainersStatsResponse>, Status> {
+        Err(Status::unimplemented("stats"))
+    }
+
     type FollowLogsStream =
         tokio_stream::Iter<std::vec::IntoIter<Result<wire::ContainersFollowLogsResponse, Status>>>;
 
