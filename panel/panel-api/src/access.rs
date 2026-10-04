@@ -449,6 +449,27 @@ pub(crate) static ROUTES: &[(&str, &str, Access)] = &[
     ("CONNECT", "/api/v1/logs/tail", Requires(LogsRead)),
     ("GET", "/api/v1/logs/deletions", Requires(LogsRead)),
     ("POST", "/api/v1/logs/deletions", Requires(LogsDelete)),
+    ("GET", "/api/v1/alert-rules", Requires(AlertsRead)),
+    ("PUT", "/api/v1/alert-rules/{id}", Requires(AlertsManage)),
+    ("DELETE", "/api/v1/alert-rules/{id}", Requires(AlertsManage)),
+    ("GET", "/api/v1/alert-channels", Requires(AlertsRead)),
+    ("POST", "/api/v1/alert-channels", Requires(AlertsManage)),
+    (
+        "DELETE",
+        "/api/v1/alert-channels/{id}",
+        Requires(AlertsManage),
+    ),
+    (
+        "POST",
+        "/api/v1/alert-channels/{id}/rotate",
+        Requires(AlertsManage),
+    ),
+    (
+        "POST",
+        "/api/v1/alert-channels/{id}/test",
+        Requires(AlertsManage),
+    ),
+    ("GET", "/api/v1/alert-notifications", Requires(AlertsRead)),
     ("GET", "/api/v1/audit-events", Requires(AuditRead)),
     ("GET", "/api/v1/audit-events/verify", Requires(AuditRead)),
     (

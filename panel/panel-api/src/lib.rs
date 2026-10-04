@@ -9,6 +9,7 @@
 mod access;
 mod acme;
 mod admission;
+mod alerts;
 mod approvals;
 mod audit;
 mod certificates;

@@ -1,8 +1,8 @@
 use crate::{
     access, acme,
     admission::{admit, Admission},
-    approvals, audit, certificates, configuration as config, gateway_runtime as runtime, grants,
-    identity, language, logs, middleware, routes, sign_in, tls_checks, traffic, workload,
+    alerts, approvals, audit, certificates, configuration as config, gateway_runtime as runtime,
+    grants, identity, language, logs, middleware, routes, sign_in, tls_checks, traffic, workload,
     ApiConfig, ApiState,
 };
 use axum::{
@@ -220,6 +220,31 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         .route(
             "/api/v1/logs/deletions",
             get(logs::list_log_deletions::<U>).post(logs::delete_logs::<U>),
+        )
+        .route("/api/v1/alert-rules", get(alerts::list_alert_rules::<U>))
+        .route(
+            "/api/v1/alert-rules/{id}",
+            put(alerts::put_alert_rule::<U>).delete(alerts::delete_alert_rule::<U>),
+        )
+        .route(
+            "/api/v1/alert-channels",
+            get(alerts::list_alert_channels::<U>).post(alerts::create_alert_channel::<U>),
+        )
+        .route(
+            "/api/v1/alert-channels/{id}",
+            delete(alerts::delete_alert_channel::<U>),
+        )
+        .route(
+            "/api/v1/alert-channels/{id}/rotate",
+            post(alerts::rotate_alert_channel::<U>),
+        )
+        .route(
+            "/api/v1/alert-channels/{id}/test",
+            post(alerts::test_alert_channel::<U>),
+        )
+        .route(
+            "/api/v1/alert-notifications",
+            get(alerts::list_alert_notifications::<U>),
         )
         .route("/api/v1/audit-events", get(audit::list_audit_events::<U>))
         .route(
