@@ -10,6 +10,7 @@ import StatusIndicator from '@/components/StatusIndicator.vue'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import HostDirectories from './HostDirectories.vue'
+import HostListeners from './HostListeners.vue'
 import { agentTone, capabilityTone, REFRESH_INTERVAL_MS } from './presentation'
 
 const { t } = useI18n()
@@ -23,12 +24,13 @@ const icons: Record<AgentCapabilityName, Component> = {
   containers: Container,
 }
 
-const offersDirectories = computed(
-  () =>
+function offers(name: AgentCapabilityName): boolean {
+  return (
     view.value?.capabilities.some(
-      (capability) => capability.capability === 'directories' && capability.state === 'available',
-    ) ?? false,
-)
+      (capability) => capability.capability === name && capability.state === 'available',
+    ) ?? false
+  )
+}
 </script>
 
 <template>
@@ -105,5 +107,11 @@ const offersDirectories = computed(
       </template>
     </CardContent>
   </Card>
-  <HostDirectories v-if="offersDirectories" />
+  <div
+    v-if="offers('directories') || offers('listeners')"
+    class="grid items-start gap-4 xl:grid-cols-2"
+  >
+    <HostListeners v-if="offers('listeners')" />
+    <HostDirectories v-if="offers('directories')" />
+  </div>
 </template>

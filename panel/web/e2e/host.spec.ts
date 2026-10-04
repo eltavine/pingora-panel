@@ -51,7 +51,26 @@ const agent = {
   hostname: 'web-1',
   capabilities: [
     { capability: 'directories', state: 'available', detail: '' },
-    { capability: 'listeners', state: 'denied', detail: 'grant CAP_DAC_READ_SEARCH' },
+    { capability: 'listeners', state: 'available', detail: '' },
+    { capability: 'gateway_unit', state: 'denied', detail: 'install gateway-unit.conf' },
+  ],
+}
+
+const listeners = {
+  observed_at: '2026-10-04T10:00:00Z',
+  listeners: [
+    {
+      address: '0.0.0.0',
+      port: 80,
+      uid: 0,
+      processes: [{ pid: 912, name: 'nginx', executable: '/usr/sbin/nginx', uid: 0 }],
+    },
+    {
+      address: '0.0.0.0',
+      port: 443,
+      uid: 0,
+      processes: [{ pid: 1204, name: 'gatewayd', executable: '/usr/local/bin/gatewayd', uid: 0 }],
+    },
   ],
 }
 
@@ -109,6 +128,7 @@ async function setUp(
   await page.route('**/api/v1/host', (route) => route.fulfill({ json: body }))
   await page.route('**/api/v1/host/agent', (route) => route.fulfill({ json: hostAgent }))
   await page.route('**/api/v1/host/directories', (route) => route.fulfill({ json: directories }))
+  await page.route('**/api/v1/host/listeners', (route) => route.fulfill({ json: listeners }))
 }
 
 test.afterEach(async ({ page }) => {
@@ -174,9 +194,15 @@ test('the agent shows its capabilities and the space the panel takes', async ({ 
   await expect(
     capabilities.getByRole('listitem').filter({ hasText: 'Directory sizes' }),
   ).toContainText('Available')
-  const listeners = capabilities.getByRole('listitem').filter({ hasText: 'Port diagnostics' })
-  await expect(listeners).toContainText('Missing a privilege')
-  await expect(listeners).toContainText('grant CAP_DAC_READ_SEARCH')
+  const unit = capabilities.getByRole('listitem').filter({ hasText: 'Gateway service' })
+  await expect(unit).toContainText('Missing a privilege')
+  await expect(unit).toContainText('install gateway-unit.conf')
+
+  await expect(page.getByText('Ports 80 and 443')).toBeVisible()
+  const web = page.getByRole('row').filter({ hasText: '/usr/sbin/nginx' })
+  await expect(web).toContainText('PID 912')
+  await expect(web).toContainText('Another process, the gateway cannot bind it')
+  await expect(page.getByRole('row').filter({ hasText: 'gatewayd' })).toContainText('The gateway')
 
   await expect(page.getByText('Panel directories')).toBeVisible()
   await expect(page.getByRole('row').filter({ hasText: 'Configuration' })).toContainText('3 MiB')

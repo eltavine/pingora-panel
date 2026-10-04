@@ -982,6 +982,20 @@ const en: Messages = {
         unreachable: 'Not answering',
       },
     },
+    listeners: {
+      title: 'Ports 80 and 443',
+      description: 'What listens on the web ports, which the gateway needs to bind.',
+      port: 'Port',
+      processes: 'Processes',
+      holder: 'Held by',
+      pid: 'PID {pid}',
+      holders: {
+        gateway: 'The gateway',
+        other: 'Another process, the gateway cannot bind it',
+        unknown: 'Unknown holder',
+      },
+      empty: 'Nothing listens on ports 80 and 443.',
+    },
     directories: {
       title: 'Panel directories',
       kind: 'Directory',

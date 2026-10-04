@@ -948,6 +948,20 @@ const zhCN = {
         unreachable: '无响应',
       },
     },
+    listeners: {
+      title: '80 和 443 端口',
+      description: '谁在监听网页端口；网关需要绑定它们。',
+      port: '端口',
+      processes: '进程',
+      holder: '占用者',
+      pid: 'PID {pid}',
+      holders: {
+        gateway: '网关',
+        other: '其他进程，网关无法绑定',
+        unknown: '占用者未知',
+      },
+      empty: '80 和 443 端口没有被监听。',
+    },
     directories: {
       title: '面板目录',
       kind: '目录',

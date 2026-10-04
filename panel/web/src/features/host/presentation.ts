@@ -4,6 +4,7 @@ import type {
   DirectoryUsageView,
   DiskLevel,
   HostSummaryView,
+  PortListenerView,
 } from '@/api/generated'
 import type { StatusTone } from '@/components/StatusIndicator.vue'
 
@@ -31,6 +32,32 @@ export function capabilityTone(state: CapabilityStateName): StatusTone {
       return 'warning'
     case 'unreachable':
       return 'negative'
+    default:
+      return 'neutral'
+  }
+}
+
+/** The gateway's process name, as the host agent reports it. */
+const GATEWAY_PROCESS = 'gatewayd'
+
+export type PortHolder = 'gateway' | 'other' | 'unknown'
+
+/** Whether the gateway holds a listening socket, another process does, or the agent cannot see. */
+export function portHolder(listener: PortListenerView): PortHolder {
+  if (listener.processes.length === 0) {
+    return 'unknown'
+  }
+  return listener.processes.every((process) => process.name === GATEWAY_PROCESS)
+    ? 'gateway'
+    : 'other'
+}
+
+export function holderTone(holder: PortHolder): StatusTone {
+  switch (holder) {
+    case 'gateway':
+      return 'positive'
+    case 'other':
+      return 'warning'
     default:
       return 'neutral'
   }

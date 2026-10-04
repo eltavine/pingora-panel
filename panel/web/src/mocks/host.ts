@@ -1,5 +1,5 @@
 import { http, HttpResponse, type AnyHandler } from 'msw'
-import type { DirectoriesView, HostAgentView } from '@/api/generated'
+import type { DirectoriesView, HostAgentView, ListenersView } from '@/api/generated'
 
 const MIB = 1024 * 1024
 
@@ -11,12 +11,12 @@ export function hostAgentHandlers(): AnyHandler[] {
     hostname: 'edge-1',
     capabilities: [
       { capability: 'directories', state: 'available', detail: '' },
+      { capability: 'listeners', state: 'available', detail: '' },
       {
-        capability: 'listeners',
+        capability: 'gateway_unit',
         state: 'denied',
-        detail: 'grant CAP_DAC_READ_SEARCH and CAP_SYS_PTRACE',
+        detail: 'install gateway-unit.conf, which adds the polkit rule',
       },
-      { capability: 'gateway_unit', state: 'not_enabled', detail: '' },
       { capability: 'containers', state: 'not_enabled', detail: '' },
     ],
   }
@@ -52,8 +52,26 @@ export function hostAgentHandlers(): AnyHandler[] {
       },
     ],
   }
+  const listeners: ListenersView = {
+    observed_at: new Date().toISOString(),
+    listeners: [
+      {
+        address: '0.0.0.0',
+        port: 80,
+        uid: 0,
+        processes: [{ pid: 912, name: 'nginx', executable: '/usr/sbin/nginx', uid: 0 }],
+      },
+      {
+        address: '0.0.0.0',
+        port: 443,
+        uid: 0,
+        processes: [{ pid: 1204, name: 'gatewayd', executable: '/usr/local/bin/gatewayd', uid: 0 }],
+      },
+    ],
+  }
   return [
     http.get('*/api/v1/host/agent', () => HttpResponse.json(agent)),
+    http.get('*/api/v1/host/listeners', () => HttpResponse.json(listeners)),
     http.get('*/api/v1/host/directories', () => HttpResponse.json(directories)),
   ]
 }

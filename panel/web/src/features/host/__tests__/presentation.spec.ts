@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import type { DirectoryUsageView, HostSummaryView } from '@/api/generated'
+import type { DirectoryUsageView, HostSummaryView, PortListenerView } from '@/api/generated'
 import {
   agentTone,
   capabilityTone,
   directoryNotes,
+  holderTone,
   levelTone,
   memoryUsed,
+  portHolder,
   uptimeParts,
 } from '../presentation'
 
@@ -49,6 +51,22 @@ describe('host agent', () => {
     expect(capabilityTone('unreachable')).toBe('negative')
     expect(capabilityTone('not_enabled')).toBe('neutral')
     expect(capabilityTone('unsupported')).toBe('neutral')
+  })
+
+  it('tells the gateway holding a port from another process holding it', () => {
+    const process = (name: string) => ({ pid: 1, name, executable: null, uid: 0 })
+    const listener = (names: string[]): PortListenerView => ({
+      address: '0.0.0.0',
+      port: 443,
+      uid: 0,
+      processes: names.map(process),
+    })
+    expect(portHolder(listener(['gatewayd']))).toBe('gateway')
+    expect(portHolder(listener(['gatewayd', 'nginx']))).toBe('other')
+    expect(portHolder(listener([]))).toBe('unknown')
+    expect(holderTone('gateway')).toBe('positive')
+    expect(holderTone('other')).toBe('warning')
+    expect(holderTone('unknown')).toBe('neutral')
   })
 
   it('qualifies directories that are missing, partial or partly unreadable', () => {
