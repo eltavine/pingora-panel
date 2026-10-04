@@ -34,11 +34,21 @@ use tokio::{
     sync::oneshot,
 };
 
+/// A free loopback address no other test here was given, as the system may
+/// hand out a port again once it is released.
 fn free_address() -> SocketAddr {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
+    static GIVEN: std::sync::Mutex<Vec<u16>> = std::sync::Mutex::new(Vec::new());
+    loop {
+        let address = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        let mut given = GIVEN.lock().unwrap();
+        if !given.contains(&address.port()) {
+            given.push(address.port());
+            return address;
+        }
+    }
 }
 
 /// An upstream that answers every request with its request head.

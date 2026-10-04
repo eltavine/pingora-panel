@@ -29,11 +29,12 @@ use std::{
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-fn reserve() -> SocketAddr {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
+/// Free loopback addresses, held together until all are known so that no
+/// two are the same.
+fn reserve<const N: usize>() -> [SocketAddr; N] {
+    let held: [TcpListener; N] =
+        std::array::from_fn(|_| TcpListener::bind("127.0.0.1:0").unwrap());
+    held.map(|listener| listener.local_addr().unwrap())
 }
 
 struct Gateway(Child);
@@ -157,9 +158,7 @@ async fn connect(address: SocketAddr) -> GatewayGrpcClient {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn runtime_operations_persist_and_shut_the_gateway_down() {
     let state = tempfile::tempdir().unwrap();
-    let management = reserve();
-    let listen = reserve();
-    let ops = reserve();
+    let [management, listen, ops] = reserve();
     let mut gateway = Gateway::spawn(management, ops, state.path());
     let client = connect(management).await;
 
