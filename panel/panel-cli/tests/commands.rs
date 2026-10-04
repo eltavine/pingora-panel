@@ -266,6 +266,34 @@ async fn api(
             "id": "b2", "name": "shop-web-1", "container": null
         }))
         .into_response(),
+        ("GET", "/api/v1/container-engines/docker/stats") => Json(json!({
+            "observed_at": "2027-01-15T08:00:10Z",
+            "stats": [{
+                "id": "b2", "name": "shop-web-1", "read_at": "2027-01-15T08:00:09.5Z",
+                "cpu_percent": 12.5, "online_cpus": 4, "memory_bytes": 209_715_200_u64,
+                "memory_limit_bytes": 8_589_934_592_u64,
+                "network": {"received_bytes": 1_536, "sent_bytes": 2_048, "received_packets": 15,
+                            "sent_packets": 20, "errors": 1, "dropped": 2},
+                "block_read_bytes": 4_096, "block_written_bytes": 8_192, "pids": 5
+            }, {
+                "id": "c3", "name": "host-agent", "read_at": "2027-01-15T08:00:09.5Z",
+                "cpu_percent": 0.0, "online_cpus": 4, "memory_bytes": 1_048_576,
+                "memory_limit_bytes": 0, "network": null,
+                "block_read_bytes": 0, "block_written_bytes": 0, "pids": 1
+            }]
+        }))
+        .into_response(),
+        ("GET", "/api/v1/container-engines/podman/stats") => Json(json!({
+            "observed_at": "2027-01-15T08:00:10Z", "stats": []
+        }))
+        .into_response(),
+        ("GET", "/api/v1/container-engines/docker/containers/shop-web-1/stats") => Json(json!({
+            "id": "b2", "name": "shop-web-1", "read_at": "2027-01-15T08:00:09.5Z",
+            "cpu_percent": 250.0, "online_cpus": 4, "memory_bytes": 1_024,
+            "memory_limit_bytes": 4_096, "network": null,
+            "block_read_bytes": 0, "block_written_bytes": 0, "pids": 3
+        }))
+        .into_response(),
         ("GET", "/api/v1/container-engines/docker/containers/shop-web-1/logs") => Json(json!({
             "observed_at": "2027-01-15T08:00:10Z", "truncated": true, "lines": [
                 {"time": "2027-01-15T08:00:01.000000001Z", "stream": "stdout",
@@ -2579,4 +2607,38 @@ fn container_logs_from_the_command_line() {
 
     let too_many = stub.ppanel(&["container", "logs", "shop-web-1", "-f", "-n", "1001"]);
     assert_eq!(too_many.status.code(), Some(2), "{}", stderr(&too_many));
+}
+
+#[test]
+fn what_containers_use_from_the_command_line() {
+    let stub = Stub::start();
+    let every = stub.ppanel(&["container", "stats"]);
+    assert!(every.status.success(), "{}", stderr(&every));
+    let printed = stdout(&every);
+    for expected in [
+        "12.50%",
+        "200.0 MiB / 8.0 GiB",
+        "2.44%",
+        "1.5 KiB / 2.0 KiB",
+        "4.0 KiB / 8.0 KiB",
+        "host-agent",
+    ] {
+        assert!(printed.contains(expected), "{expected} in\n{printed}");
+    }
+    let host = printed
+        .lines()
+        .find(|line| line.starts_with("host-agent"))
+        .unwrap();
+    assert!(
+        host.split_whitespace().filter(|cell| *cell == "-").count() >= 2,
+        "{host}"
+    );
+
+    let one = stub.ppanel(&["container", "stats", "shop-web-1"]);
+    assert!(stdout(&one).contains("250.00%"), "{}", stdout(&one));
+    assert!(stdout(&one).contains("25.00%"), "{}", stdout(&one));
+
+    let none = stub.ppanel(&["container", "stats", "--engine", "podman"]);
+    assert!(none.status.success());
+    assert!(stderr(&none).contains("no containers are running"));
 }

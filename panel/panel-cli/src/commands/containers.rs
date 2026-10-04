@@ -3,7 +3,7 @@
 use super::time;
 use crate::{
     client::{Api, CliError, Result},
-    output::{text, Column, Format, Output},
+    output::{bytes, text, Column, Format, Output},
 };
 use clap::Subcommand;
 use futures_util::StreamExt;
@@ -65,6 +65,18 @@ pub(crate) enum ContainerCommand {
         /// Starts each line with the time its engine recorded it.
         #[arg(long, short)]
         timestamps: bool,
+    },
+    /// What running containers use, read once as `docker stats
+    /// --no-stream` reads it: CPU as a share of one CPU, memory without
+    /// the page cache, network and block I/O, and processes.
+    Stats {
+        /// One container's ID, a unique prefix of its ID or its name; every
+        /// running container when absent.
+        #[arg(value_parser = reference)]
+        container: Option<String>,
+        /// `docker` or `podman`.
+        #[arg(long, default_value = "docker")]
+        engine: String,
     },
     /// Starts a container.
     Start {
@@ -201,6 +213,38 @@ const CONTAINERS: &[Column] = &[
     ("PROJECT", |container| text(&container["compose_project"])),
 ];
 
+/// Two sizes as `docker stats` writes them, such as `1.0 KiB / 2.0 KiB`.
+fn pair(first: &Value, second: &Value) -> String {
+    format!("{} / {}", bytes(first), bytes(second))
+}
+
+const STATS: &[Column] = &[
+    ("NAME", |stats| text(&stats["name"])),
+    ("CPU %", |stats| {
+        format!("{:.2}%", stats["cpu_percent"].as_f64().unwrap_or(0.0))
+    }),
+    ("MEM USAGE / LIMIT", |stats| {
+        pair(&stats["memory_bytes"], &stats["memory_limit_bytes"])
+    }),
+    ("MEM %", |stats| {
+        match (
+            stats["memory_bytes"].as_f64(),
+            stats["memory_limit_bytes"].as_f64(),
+        ) {
+            (Some(used), Some(limit)) if limit > 0.0 => format!("{:.2}%", used / limit * 100.0),
+            _ => "-".into(),
+        }
+    }),
+    ("NET I/O", |stats| match &stats["network"] {
+        Value::Null => "-".into(),
+        network => pair(&network["received_bytes"], &network["sent_bytes"]),
+    }),
+    ("BLOCK I/O", |stats| {
+        pair(&stats["block_read_bytes"], &stats["block_written_bytes"])
+    }),
+    ("PIDS", |stats| text(&stats["pids"])),
+];
+
 const DETAIL: &[Column] = &[
     ("Name", |detail| text(&detail["container"]["names"][0])),
     ("ID", |detail| text(&detail["container"]["id"])),
@@ -314,6 +358,26 @@ pub async fn run(api: &Api, output: &Output, command: ContainerCommand) -> Resul
             }
         }
         ContainerCommand::Inspect { target } => inspect(api, output, &target).await?,
+        ContainerCommand::Stats { container, engine } => {
+            let path = match &container {
+                Some(container) => {
+                    format!("/api/v1/container-engines/{engine}/containers/{container}/stats")
+                }
+                None => format!("/api/v1/container-engines/{engine}/stats"),
+            };
+            let stats = api.get(&path, &[]).await?.body;
+            if output.format == Format::Json {
+                output.json(&stats);
+            } else if container.is_some() {
+                output.list(&Value::Array(vec![stats]), STATS);
+            } else if stats["stats"].as_array().is_some_and(Vec::is_empty) {
+                if !output.quiet {
+                    eprintln!("no containers are running");
+                }
+            } else {
+                output.list(&stats["stats"], STATS);
+            }
+        }
         ContainerCommand::Logs {
             target,
             lines,
