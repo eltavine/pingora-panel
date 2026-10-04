@@ -120,9 +120,10 @@ impl Engines {
             .enabled
             .lock()
             .map_err(|_| PanelError::internal("the engine settings are unusable"))?;
-        flags.insert(id.to_owned(), enabled);
+        let mut changed = flags.clone();
+        changed.insert(id.to_owned(), enabled);
         if let Some(directory) = &self.state {
-            let text: String = flags
+            let text: String = changed
                 .iter()
                 .map(|(id, on)| format!("{id}={}\n", if *on { "on" } else { "off" }))
                 .collect();
@@ -137,6 +138,7 @@ impl Engines {
                     ))
                 })?;
         }
+        *flags = changed;
         Ok(())
     }
 
@@ -547,6 +549,18 @@ mod tests {
             .unwrap()
             .into_inner();
         assert_eq!(unknown.error.unwrap().code, "NOT_FOUND");
+    }
+
+    #[test]
+    fn a_choice_that_cannot_be_kept_changes_nothing() {
+        let directory = tempfile::tempdir().unwrap();
+        let engines = Engines::load(
+            vec![("docker".into(), directory.path().join("docker.sock"))],
+            Some(directory.path().join("missing")),
+        );
+        let refused = engines.set("docker", false).unwrap_err();
+        assert_eq!(refused.code.as_str(), "STORAGE_UNAVAILABLE");
+        assert!(engines.is_enabled("docker"));
     }
 
     #[test]
