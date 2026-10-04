@@ -508,7 +508,8 @@ flowchart TD
 - Content type：`application/json`
 - 契约：OpenAPI 3.1
 - 错误：RFC 9457 Problem Details，并扩展 `code`、`request_id`、`field_errors`、`retryable`
-- 幂等：所有可重试 mutation 接受 `Idempotency-Key`
+- 幂等：所有可重试 mutation 接受 `Idempotency-Key`，同一键的重试返回首次结果；缺省时每个请求都是新的变更
+- 截止时间：mutation 可带 RFC 3339 格式的 `x-deadline`，缺省为收到请求后 150 秒
 - 并发：资源更新使用 ETag/`If-Match` 或显式 expected revision
 - 长任务：返回 `202 Accepted` 与 Job resource
 - 分页：cursor based，不使用不稳定 offset 作为唯一方式

@@ -18,7 +18,7 @@ fn mutation_headers_describe_the_actual_request_requirements() {
         for name in ["x-deadline", "Idempotency-Key"] {
             let parameter = params.iter().find(|p| p["name"] == name).unwrap();
             assert_eq!(parameter["in"], "header");
-            assert_eq!(parameter["required"], true);
+            assert_eq!(parameter["required"], false);
         }
         // The actor is the authenticated caller, never a header.
         assert!(!params.iter().any(|p| p["name"] == "x-actor"));

@@ -221,8 +221,10 @@ Operators edit one draft configuration and apply it as a whole
 ([decision](../docs/adr/0011-configuration-model-and-apply.md)). Under
 `/api/v1`, `sites` (with `domains` and `routes`), `upstreams` (with
 `nodes`), `listeners` and `tls-profiles` are resources with entity tags:
-replacing or deleting one requires `If-Match`, and every change requires an
-`Idempotency-Key`. A change that would introduce a validation error is
+replacing or deleting one requires `If-Match`. A change may carry an
+`Idempotency-Key`, so a retry returns the first outcome instead of acting
+twice, and an `x-deadline`, which is 150 seconds after the request when
+absent. A change that would introduce a validation error is
 refused with its diagnostics. `GET /api/v1/config/draft` reports the draft
 version and whether the gateway runs it, `GET /api/v1/config/validation`
 checks the draft or chosen sites, and `POST /api/v1/config/apply` compiles

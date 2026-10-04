@@ -156,16 +156,18 @@ fn completed_receipt() -> IdempotencyRecord {
     )
 }
 
-#[tokio::test]
-async fn mutation_without_idempotency_key_is_problem_details() {
+fn prepare(deadline: Option<&str>) -> Request<Body> {
     let snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
-    let request = Request::builder()
+    let mut request = Request::builder()
         .method("POST")
         .uri("/api/v1/gateway/prepare")
         .header("content-type", "application/json")
         .header("x-request-id", "request-1")
-        .header("x-actor", "test")
-        .header("x-deadline", "2099-01-01T00:00:00Z")
+        .header("x-actor", "test");
+    if let Some(deadline) = deadline {
+        request = request.header("x-deadline", deadline);
+    }
+    request
         .body(Body::from(
             serde_json::to_vec(&SnapshotEnvelope {
                 schema_version: panel_ir::IR_SCHEMA_VERSION.into(),
@@ -173,35 +175,23 @@ async fn mutation_without_idempotency_key_is_problem_details() {
             })
             .unwrap(),
         ))
-        .unwrap();
-    let response = app().oneshot(request).await.unwrap();
+        .unwrap()
+}
+
+#[tokio::test]
+async fn mutations_need_neither_a_deadline_nor_an_idempotency_key() {
+    let response = app().oneshot(prepare(None)).await.unwrap();
+    assert!(response.status().is_success(), "{}", response.status());
+}
+
+#[tokio::test]
+async fn a_malformed_deadline_is_problem_details() {
+    let response = app().oneshot(prepare(Some("tomorrow"))).await.unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     assert_eq!(
         response.headers()[header::CONTENT_TYPE],
         "application/problem+json"
     );
-}
-
-#[tokio::test]
-async fn mutation_without_deadline_is_problem_details() {
-    let snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
-    let request = Request::builder()
-        .method("POST")
-        .uri("/api/v1/gateway/prepare")
-        .header("content-type", "application/json")
-        .header("x-request-id", "request-1")
-        .header("x-actor", "test")
-        .header("idempotency-key", "idem-1")
-        .body(Body::from(
-            serde_json::to_vec(&SnapshotEnvelope {
-                schema_version: panel_ir::IR_SCHEMA_VERSION.into(),
-                snapshot: serde_json::to_value(snapshot).unwrap(),
-            })
-            .unwrap(),
-        ))
-        .unwrap();
-    let response = app().oneshot(request).await.unwrap();
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

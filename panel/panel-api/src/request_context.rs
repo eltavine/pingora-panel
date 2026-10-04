@@ -1,16 +1,22 @@
 use crate::access::SITE_SCOPE_HEADER;
 use crate::error::ApiError;
 use axum::http::HeaderMap;
+use chrono::{SecondsFormat, Utc};
 use panel_application::SiteScope;
 use panel_application::{
     CommandContext, IdempotencyKey, RequestDeadline, RequestId, RequestScope, TraceContext,
 };
 use panel_errors::PanelError;
+use std::time::Duration;
+use uuid::Uuid;
 
 pub(crate) const REQUEST_ID_HEADER: &str = "x-request-id";
 pub(crate) const CORRELATION_ID_HEADER: &str = "x-correlation-id";
 pub(crate) const TRACEPARENT_HEADER: &str = "traceparent";
 pub(crate) const TRACESTATE_HEADER: &str = "tracestate";
+/// The deadline of a command that names none: the slowest commands wait for
+/// a systemd job or a container to stop.
+const DEFAULT_DEADLINE: Duration = Duration::from_secs(150);
 
 /// Metadata accepted by query endpoints, defining their OpenAPI headers and
 /// carrying the parsed values like `MutationHeaders`.
@@ -79,12 +85,15 @@ fn site_scope(headers: &HeaderMap) -> Option<SiteScope> {
 pub(crate) struct MutationHeaders {
     #[param(ignore)]
     actor: String,
-    /// Absolute request deadline in RFC 3339 format.
+    /// Absolute request deadline in RFC 3339 format; 150 seconds after the
+    /// request arrives when absent.
     #[param(rename = "x-deadline")]
-    deadline: String,
-    /// Idempotency identity, containing 1..=256 visible ASCII bytes.
+    deadline: Option<String>,
+    /// Idempotency identity, containing 1..=256 visible ASCII bytes. A retry
+    /// with the same key returns the first outcome; without a key, every
+    /// request is a new command.
     #[param(rename = "Idempotency-Key", min_length = 1, max_length = 256)]
-    idempotency_key: String,
+    idempotency_key: Option<String>,
     /// Optional correlation identity; defaults to the request identifier.
     #[param(rename = "x-correlation-id", min_length = 1, max_length = 256)]
     correlation_id: Option<String>,
@@ -94,8 +103,8 @@ impl MutationHeaders {
     fn parse(headers: &HeaderMap) -> Result<Self, ApiError> {
         Ok(Self {
             actor: required_header(headers, "x-actor")?.into(),
-            deadline: required_header(headers, "x-deadline")?.into(),
-            idempotency_key: required_header(headers, "idempotency-key")?.into(),
+            deadline: optional_header(headers, "x-deadline")?.map(str::to_owned),
+            idempotency_key: optional_header(headers, "idempotency-key")?.map(str::to_owned),
             correlation_id: optional_header(headers, CORRELATION_ID_HEADER)?.map(str::to_owned),
         })
     }
@@ -109,8 +118,14 @@ pub(crate) fn command_context(headers: &HeaderMap) -> Result<CommandContext, Api
             .correlation_id
             .unwrap_or_else(|| request_id.as_str().into()),
     )?;
-    let deadline = RequestDeadline::new(metadata.deadline)?;
-    let idempotency_key = IdempotencyKey::new(metadata.idempotency_key)?;
+    let deadline = RequestDeadline::new(metadata.deadline.unwrap_or_else(|| {
+        (Utc::now() + DEFAULT_DEADLINE).to_rfc3339_opts(SecondsFormat::Millis, true)
+    }))?;
+    let idempotency_key = IdempotencyKey::new(
+        metadata
+            .idempotency_key
+            .unwrap_or_else(|| Uuid::now_v7().to_string()),
+    )?;
     CommandContext::new(
         request_id,
         correlation_id,

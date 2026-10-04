@@ -7050,19 +7050,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -7705,19 +7711,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -8345,19 +8357,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -9000,19 +9018,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -9352,19 +9376,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -9990,19 +10020,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -10346,19 +10382,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -10697,19 +10739,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -11070,19 +11118,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -12096,19 +12150,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -12458,19 +12518,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -13427,19 +13493,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -13768,19 +13840,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -14784,19 +14862,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -15135,19 +15219,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -15496,19 +15586,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -15847,19 +15943,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -19171,19 +19273,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -19826,19 +19934,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -20164,19 +20278,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -20855,19 +20975,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -22206,19 +22332,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -24803,19 +24935,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -26180,19 +26318,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -26530,19 +26674,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -27159,19 +27309,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -27814,19 +27970,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -28152,19 +28314,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -29179,19 +29347,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -29529,19 +29703,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -30539,19 +30719,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -31256,19 +31442,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -31597,19 +31789,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -32622,19 +32820,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -34266,19 +34470,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -36764,19 +36974,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -37099,19 +37315,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -38164,19 +38386,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -41063,19 +41291,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -41425,19 +41659,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -43268,19 +43508,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -43602,19 +43848,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -44577,19 +44829,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -44912,19 +45170,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -47660,19 +47924,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -48016,19 +48286,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -48700,19 +48976,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -49672,19 +49954,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -50006,19 +50294,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -50375,19 +50669,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -50736,19 +51036,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -51099,19 +51405,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -51463,19 +51775,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -51805,19 +52123,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -52173,19 +52497,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -52536,19 +52866,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -52899,19 +53235,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -53560,19 +53902,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -53921,19 +54269,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -54285,19 +54639,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -55585,19 +55945,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -55920,19 +56286,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -57271,19 +57643,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -58243,19 +58621,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -58577,19 +58961,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -58930,19 +59320,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -59291,19 +59687,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -59633,19 +60035,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -60001,19 +60409,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
@@ -60325,19 +60739,25 @@
           {
             "name": "x-deadline",
             "in": "header",
-            "description": "Absolute request deadline in RFC 3339 format.",
-            "required": true,
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
             "schema": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
-            "required": true,
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
             "schema": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "maxLength": 256,
               "minLength": 1
             }
