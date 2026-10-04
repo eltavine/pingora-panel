@@ -13,8 +13,9 @@ use axum::{
 };
 use chrono::{DateTime, SecondsFormat, Utc};
 use panel_application::{
-    ContainerAction, ContainerChange, ContainerEngine, ContainerFilter, ContainerList,
-    ContainerState, ContainerSummary, EngineInfo, EngineVersion, PortMapping,
+    ContainerAction, ContainerChange, ContainerDetail, ContainerEngine, ContainerFilter,
+    ContainerList, ContainerMount, ContainerNetwork, ContainerState, ContainerSummary, EngineInfo,
+    EngineVersion, PortMapping,
 };
 use panel_errors::PanelError;
 use serde::{Deserialize, Serialize};
@@ -496,4 +497,135 @@ pub(crate) async fn remove_container<U>(
         )
         .await?;
     Ok(Json(change.into()))
+}
+
+/// Where a container's storage comes from.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct ContainerMountView {
+    /// `volume`, `bind`, `tmpfs` and so on.
+    pub kind: String,
+    /// The volume's name, for a volume.
+    pub name: Option<String>,
+    /// Where it comes from on the host.
+    pub source: String,
+    /// Where it appears in the container.
+    pub destination: String,
+    pub read_write: bool,
+}
+
+impl From<ContainerMount> for ContainerMountView {
+    fn from(value: ContainerMount) -> Self {
+        Self {
+            kind: value.kind,
+            name: value.name,
+            source: value.source,
+            destination: value.destination,
+            read_write: value.read_write,
+        }
+    }
+}
+
+/// A network a container is attached to.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct ContainerNetworkView {
+    pub name: String,
+    pub ip_address: Option<String>,
+    pub ipv6_address: Option<String>,
+    pub gateway: Option<String>,
+    pub mac_address: Option<String>,
+    pub aliases: Vec<String>,
+}
+
+impl From<ContainerNetwork> for ContainerNetworkView {
+    fn from(value: ContainerNetwork) -> Self {
+        Self {
+            name: value.name,
+            ip_address: value.ip_address,
+            ipv6_address: value.ipv6_address,
+            gateway: value.gateway,
+            mac_address: value.mac_address,
+            aliases: value.aliases,
+        }
+    }
+}
+
+/// What inspecting a container shows, without its environment or command
+/// line, which carry secrets.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct ContainerDetailView {
+    pub container: ContainerView,
+    /// When it last started, RFC 3339.
+    pub started_at: Option<String>,
+    /// When it last stopped, RFC 3339; absent until it has.
+    pub finished_at: Option<String>,
+    /// How it last stopped; absent until it has.
+    pub exit_code: Option<i64>,
+    /// Why it last failed, in the engine's words.
+    pub error: Option<String>,
+    /// Whether the kernel killed it for running out of memory.
+    pub oom_killed: bool,
+    /// How often the engine restarted it under its restart policy.
+    pub restarts: u32,
+    /// `healthy`, `unhealthy` or `starting`; absent without a health check.
+    pub health: Option<String>,
+    /// `no`, `always`, `unless-stopped` or `on-failure`.
+    pub restart_policy: Option<String>,
+    /// How often `on-failure` restarts it; 0 for no limit.
+    pub restart_retries: u32,
+    pub hostname: Option<String>,
+    pub user: Option<String>,
+    pub working_directory: Option<String>,
+    /// Such as `linux`.
+    pub platform: Option<String>,
+    pub mounts: Vec<ContainerMountView>,
+    /// By name.
+    pub networks: Vec<ContainerNetworkView>,
+}
+
+impl From<ContainerDetail> for ContainerDetailView {
+    fn from(value: ContainerDetail) -> Self {
+        Self {
+            container: value.container.into(),
+            started_at: value.started_at.map(rfc3339),
+            exit_code: value.finished_at.map(|_| value.exit_code),
+            finished_at: value.finished_at.map(rfc3339),
+            error: value.error,
+            oom_killed: value.oom_killed,
+            restarts: value.restarts,
+            health: value.health,
+            restart_policy: value.restart_policy,
+            restart_retries: value.restart_retries,
+            hostname: value.hostname,
+            user: value.user,
+            working_directory: value.working_directory,
+            platform: value.platform,
+            mounts: value.mounts.into_iter().map(Into::into).collect(),
+            networks: value.networks.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// A container's configuration and state, without its environment or
+/// command line.
+#[utoipa::path(get, path = "/api/v1/container-engines/{engine}/containers/{container}",
+    params(
+        ("engine" = String, Path, description = "docker or podman"),
+        ("container" = String, Path, description = "Its ID, a unique prefix of its ID or its name"),
+        QueryHeaders,
+    ),
+    responses((status = 200, body = ContainerDetailView)), tag = "containers")]
+pub(crate) async fn inspect_container<U>(
+    State(state): State<ApiState<U>>,
+    Path((name, reference)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<ContainerDetailView>, ApiError> {
+    let detail = state
+        .containers
+        .inspect(
+            request_scope(&headers)?,
+            engine(name)?,
+            container(reference)?,
+        )
+        .await?;
+    Ok(Json(detail.into()))
 }

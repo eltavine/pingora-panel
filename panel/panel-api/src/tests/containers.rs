@@ -1,8 +1,8 @@
 use super::*;
 use panel_application::{
-    CommandContext, ContainerAction, ContainerChange, ContainerEngine, ContainerFilter,
-    ContainerList, ContainerState, ContainerSummary, ContainersPort, EngineInfo, EngineVersion,
-    PortMapping, RequestScope,
+    CommandContext, ContainerAction, ContainerChange, ContainerDetail, ContainerEngine,
+    ContainerFilter, ContainerList, ContainerMount, ContainerNetwork, ContainerState,
+    ContainerSummary, ContainersPort, EngineInfo, EngineVersion, PortMapping, RequestScope,
 };
 use serde_json::Value;
 use std::time::{Duration, UNIX_EPOCH};
@@ -102,6 +102,48 @@ impl ContainersPort for Engines {
                     item.image.contains(&filter.search) || item.names[0].contains(&filter.search)
                 })
                 .collect(),
+        })
+    }
+
+    async fn inspect(
+        &self,
+        _scope: RequestScope,
+        _engine: String,
+        reference: String,
+    ) -> Result<ContainerDetail> {
+        if reference != "shop-web-1" {
+            return Err(PanelError::not_found(format!("no container {reference}")));
+        }
+        Ok(ContainerDetail {
+            container: container(&reference, "nginx:1.27", ContainerState::Running),
+            started_at: Some(UNIX_EPOCH + Duration::from_secs(1_800_000_000)),
+            finished_at: None,
+            exit_code: 0,
+            error: None,
+            oom_killed: false,
+            restarts: 1,
+            health: Some("healthy".into()),
+            restart_policy: Some("unless-stopped".into()),
+            restart_retries: 0,
+            hostname: Some("web".into()),
+            user: None,
+            working_directory: Some("/srv".into()),
+            platform: Some("linux".into()),
+            mounts: vec![ContainerMount {
+                kind: "volume".into(),
+                name: Some("shop_html".into()),
+                source: "/var/lib/docker/volumes/shop_html/_data".into(),
+                destination: "/usr/share/nginx/html".into(),
+                read_write: false,
+            }],
+            networks: vec![ContainerNetwork {
+                name: "shop_default".into(),
+                ip_address: Some("172.18.0.2".into()),
+                ipv6_address: None,
+                gateway: Some("172.18.0.1".into()),
+                mac_address: None,
+                aliases: vec!["web".into()],
+            }],
         })
     }
 
@@ -312,4 +354,34 @@ async fn the_installation_and_unknown_actions_are_refused() {
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+}
+
+#[tokio::test]
+async fn a_container_is_inspected_with_its_labels_mounts_and_networks() {
+    let engines = app(true);
+    let (status, detail) = get(
+        &engines,
+        "/api/v1/container-engines/docker/containers/shop-web-1",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["container"]["names"][0], "shop-web-1");
+    assert_eq!(
+        detail["container"]["labels"]["com.docker.compose.project"],
+        "shop"
+    );
+    assert_eq!(detail["started_at"], "2027-01-15T08:00:00Z");
+    assert_eq!(detail["exit_code"], Value::Null);
+    assert_eq!(detail["restart_policy"], "unless-stopped");
+    assert_eq!(detail["user"], Value::Null);
+    assert_eq!(detail["mounts"][0]["kind"], "volume");
+    assert_eq!(detail["mounts"][0]["read_write"], false);
+    assert_eq!(detail["networks"][0]["ip_address"], "172.18.0.2");
+
+    let (status, problem) = get(
+        &engines,
+        "/api/v1/container-engines/docker/containers/nothing",
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{problem}");
 }

@@ -6,11 +6,11 @@
 use async_trait::async_trait;
 use panel_application::{
     AgentCapability, AgentDescription, CapabilityState, CapabilityStatus, CommandContext,
-    ContainerAction, ContainerChange, ContainerEngine, ContainerFilter, ContainerList,
-    ContainerState, ContainerSummary, ContainersPort, DirectoriesReport, DirectoryKind,
-    DirectoryUsage, EngineInfo, EngineVersion, GatewayContainer, GatewayServiceAction,
-    GatewayServiceStatus, HostAgentPort, ListenersReport, ListeningProcess, PortListener,
-    PortMapping, RequestScope,
+    ContainerAction, ContainerChange, ContainerDetail, ContainerEngine, ContainerFilter,
+    ContainerList, ContainerMount, ContainerNetwork, ContainerState, ContainerSummary,
+    ContainersPort, DirectoriesReport, DirectoryKind, DirectoryUsage, EngineInfo, EngineVersion,
+    GatewayContainer, GatewayServiceAction, GatewayServiceStatus, HostAgentPort, ListenersReport,
+    ListeningProcess, PortListener, PortMapping, RequestScope,
 };
 use panel_contracts::{
     common::v1 as common,
@@ -464,6 +464,73 @@ impl ContainersPort for OpsAgentClient {
             name: response.name,
             container: response.container.map(summary),
         })
+    }
+
+    async fn inspect(
+        &self,
+        scope: RequestScope,
+        engine_id: String,
+        container: String,
+    ) -> Result<ContainerDetail> {
+        let message = wire::ContainersInspectRequest {
+            context: Some(request_context(&scope)),
+            engine: engine_id,
+            container,
+        };
+        let response = ContainersClient::new(self.channel.clone())
+            .inspect(self.request(message, &scope))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        Ok(detail(response.detail.unwrap_or_default()))
+    }
+}
+
+/// An empty value the agent sends for one it does not know.
+fn known(value: String) -> Option<String> {
+    (!value.is_empty()).then_some(value)
+}
+
+fn detail(value: wire::ContainerDetail) -> ContainerDetail {
+    ContainerDetail {
+        container: summary(value.container.unwrap_or_default()),
+        started_at: time(value.started_at),
+        finished_at: time(value.finished_at),
+        exit_code: value.exit_code,
+        error: known(value.error),
+        oom_killed: value.oom_killed,
+        restarts: value.restarts,
+        health: known(value.health),
+        restart_policy: known(value.restart_policy),
+        restart_retries: value.restart_retries,
+        hostname: known(value.hostname),
+        user: known(value.user),
+        working_directory: known(value.working_directory),
+        platform: known(value.platform),
+        mounts: value
+            .mounts
+            .into_iter()
+            .map(|mount| ContainerMount {
+                kind: mount.r#type,
+                name: known(mount.name),
+                source: mount.source,
+                destination: mount.destination,
+                read_write: mount.read_write,
+            })
+            .collect(),
+        networks: value
+            .networks
+            .into_iter()
+            .map(|network| ContainerNetwork {
+                name: network.name,
+                ip_address: known(network.ip_address),
+                ipv6_address: known(network.ipv6_address),
+                gateway: known(network.gateway),
+                mac_address: known(network.mac_address),
+                aliases: network.aliases,
+            })
+            .collect(),
     }
 }
 

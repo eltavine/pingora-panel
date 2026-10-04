@@ -253,7 +253,7 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         )
         .route(
             "/api/v1/container-engines/{engine}/containers/{container}",
-            delete(containers::remove_container::<U>),
+            get(containers::inspect_container::<U>).delete(containers::remove_container::<U>),
         )
         .route(
             "/api/v1/container-engines/{engine}/containers/{container}/{action}",

@@ -145,6 +145,57 @@ impl ContainerAction {
     }
 }
 
+/// Where a container's storage comes from.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContainerMount {
+    /// `volume`, `bind`, `tmpfs` and so on.
+    pub kind: String,
+    /// The volume's name, for a volume.
+    pub name: Option<String>,
+    pub source: String,
+    pub destination: String,
+    pub read_write: bool,
+}
+
+/// A network a container is attached to.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContainerNetwork {
+    pub name: String,
+    pub ip_address: Option<String>,
+    pub ipv6_address: Option<String>,
+    pub gateway: Option<String>,
+    pub mac_address: Option<String>,
+    pub aliases: Vec<String>,
+}
+
+/// What inspecting a container shows, without its environment or command
+/// line, which carry secrets.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContainerDetail {
+    pub container: ContainerSummary,
+    pub started_at: Option<SystemTime>,
+    pub finished_at: Option<SystemTime>,
+    /// How it last stopped; 0 until it has.
+    pub exit_code: i64,
+    /// Why it last failed, in the engine's words.
+    pub error: Option<String>,
+    pub oom_killed: bool,
+    /// How often the engine restarted it under its restart policy.
+    pub restarts: u32,
+    /// `healthy`, `unhealthy` or `starting`.
+    pub health: Option<String>,
+    /// `no`, `always`, `unless-stopped` or `on-failure`.
+    pub restart_policy: Option<String>,
+    /// How often `on-failure` restarts it; 0 for no limit.
+    pub restart_retries: u32,
+    pub hostname: Option<String>,
+    pub user: Option<String>,
+    pub working_directory: Option<String>,
+    pub platform: Option<String>,
+    pub mounts: Vec<ContainerMount>,
+    pub networks: Vec<ContainerNetwork>,
+}
+
 /// A container an action was taken on.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContainerChange {
@@ -173,6 +224,14 @@ pub trait ContainersPort: Send + Sync {
         engine: String,
         filter: ContainerFilter,
     ) -> Result<ContainerList>;
+
+    /// A container's configuration and state, named by its ID or name.
+    async fn inspect(
+        &self,
+        scope: RequestScope,
+        engine: String,
+        container: String,
+    ) -> Result<ContainerDetail>;
 
     /// Starts, stops, restarts, kills or removes a container, named by its
     /// ID or name.
@@ -210,6 +269,10 @@ impl ContainersPort for NoContainers {
         _: String,
         _: ContainerFilter,
     ) -> Result<ContainerList> {
+        Err(Self::refusal())
+    }
+
+    async fn inspect(&self, _: RequestScope, _: String, _: String) -> Result<ContainerDetail> {
         Err(Self::refusal())
     }
 
@@ -269,6 +332,15 @@ impl ContainersPort for RecordedContainers {
         filter: ContainerFilter,
     ) -> Result<ContainerList> {
         self.inner.containers(scope, engine, filter).await
+    }
+
+    async fn inspect(
+        &self,
+        scope: RequestScope,
+        engine: String,
+        container: String,
+    ) -> Result<ContainerDetail> {
+        self.inner.inspect(scope, engine, container).await
     }
 
     async fn act(
@@ -331,6 +403,10 @@ mod tests {
             _: String,
             _: ContainerFilter,
         ) -> Result<ContainerList> {
+            Err(NoContainers::refusal())
+        }
+
+        async fn inspect(&self, _: RequestScope, _: String, _: String) -> Result<ContainerDetail> {
             Err(NoContainers::refusal())
         }
 

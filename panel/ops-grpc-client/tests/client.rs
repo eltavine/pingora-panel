@@ -2,14 +2,16 @@
 
 use ops_grpc_client::OpsAgentClient;
 use panel_application::{
-    AgentCapability, CommandContext, ContainerState, DirectoryKind, GatewayServiceAction,
-    HostAgentPort, IdempotencyKey, RequestDeadline, RequestId, RequestScope,
+    AgentCapability, CommandContext, ContainerAction, ContainerState, ContainersPort,
+    DirectoryKind, GatewayServiceAction, HostAgentPort, IdempotencyKey, RequestDeadline, RequestId,
+    RequestScope,
 };
 use panel_contracts::{
     common::v1 as common,
     ops::v1::{
         self as wire,
         agent_server::{Agent, AgentServer},
+        containers_server::{Containers, ContainersServer},
         directories_server::{Directories, DirectoriesServer},
         gateway_service_server::{GatewayService, GatewayServiceServer},
         gateway_service_status::Supervisor,
@@ -179,6 +181,85 @@ impl GatewayService for FakeGateway {
     }
 }
 
+/// One container to inspect; every action on it is refused.
+struct FakeContainers;
+
+#[tonic::async_trait]
+impl Containers for FakeContainers {
+    async fn engines(
+        &self,
+        _: Request<wire::ContainersEnginesRequest>,
+    ) -> Result<Response<wire::ContainersEnginesResponse>, Status> {
+        Ok(Response::new(wire::ContainersEnginesResponse::default()))
+    }
+
+    async fn set_engine(
+        &self,
+        _: Request<wire::ContainersSetEngineRequest>,
+    ) -> Result<Response<wire::ContainersSetEngineResponse>, Status> {
+        Ok(Response::new(wire::ContainersSetEngineResponse::default()))
+    }
+
+    async fn list(
+        &self,
+        _: Request<wire::ContainersListRequest>,
+    ) -> Result<Response<wire::ContainersListResponse>, Status> {
+        Ok(Response::new(wire::ContainersListResponse::default()))
+    }
+
+    async fn act(
+        &self,
+        _: Request<wire::ContainersActRequest>,
+    ) -> Result<Response<wire::ContainersActResponse>, Status> {
+        Ok(Response::new(wire::ContainersActResponse {
+            error: Some(common::Error {
+                code: "PRECONDITION_FAILED".into(),
+                message: "pingora-panel-control-1 belongs to the panel's installation".into(),
+                retryable: false,
+                diagnostics: Vec::new(),
+            }),
+            ..wire::ContainersActResponse::default()
+        }))
+    }
+
+    async fn inspect(
+        &self,
+        request: Request<wire::ContainersInspectRequest>,
+    ) -> Result<Response<wire::ContainersInspectResponse>, Status> {
+        let request = request.into_inner();
+        assert_eq!(
+            (request.engine.as_str(), request.container.as_str()),
+            ("docker", "shop-web-1")
+        );
+        Ok(Response::new(wire::ContainersInspectResponse {
+            detail: Some(wire::ContainerDetail {
+                container: Some(wire::Container {
+                    id: "b2".into(),
+                    names: vec!["shop-web-1".into()],
+                    state: wire::ContainerState::Running.into(),
+                    ..wire::Container::default()
+                }),
+                restart_policy: "unless-stopped".into(),
+                hostname: "web".into(),
+                mounts: vec![wire::ContainerMount {
+                    r#type: "bind".into(),
+                    source: "/srv/shop".into(),
+                    destination: "/usr/share/nginx/html".into(),
+                    read_write: true,
+                    ..wire::ContainerMount::default()
+                }],
+                networks: vec![wire::ContainerNetwork {
+                    name: "shop_default".into(),
+                    ip_address: "172.18.0.2".into(),
+                    ..wire::ContainerNetwork::default()
+                }],
+                ..wire::ContainerDetail::default()
+            }),
+            error: None,
+        }))
+    }
+}
+
 async fn client(fail: bool) -> OpsAgentClient {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -188,6 +269,7 @@ async fn client(fail: bool) -> OpsAgentClient {
             .add_service(DirectoriesServer::new(FakeDirectories { fail }))
             .add_service(ListenersServer::new(FakeListeners))
             .add_service(GatewayServiceServer::new(FakeGateway))
+            .add_service(ContainersServer::new(FakeContainers))
             .serve_with_incoming(TcpListenerStream::new(listener)),
     );
     OpsAgentClient::from_channel(
@@ -274,4 +356,40 @@ async fn the_agents_errors_keep_their_codes() {
     let refused = client(true).await.directories(scope()).await.unwrap_err();
     assert_eq!(refused.code.as_str(), "STORAGE_UNAVAILABLE");
     assert!(refused.retryable);
+}
+
+#[tokio::test]
+async fn containers_are_inspected_and_refusals_keep_their_codes() {
+    let client = client(false).await;
+    let detail = client
+        .inspect(scope(), "docker".into(), "shop-web-1".into())
+        .await
+        .unwrap();
+    assert_eq!(detail.container.names, vec!["shop-web-1".to_owned()]);
+    assert_eq!(detail.container.state, ContainerState::Running);
+    assert_eq!(detail.restart_policy.as_deref(), Some("unless-stopped"));
+    assert_eq!(detail.user, None, "an empty value is unknown");
+    assert_eq!(detail.mounts[0].name, None);
+    assert!(detail.mounts[0].read_write);
+    assert_eq!(detail.networks[0].ip_address.as_deref(), Some("172.18.0.2"));
+    assert_eq!(detail.networks[0].gateway, None);
+
+    let context = CommandContext::new(
+        RequestId::new("request-3").unwrap(),
+        RequestId::new("request-3").unwrap(),
+        "ops",
+        RequestDeadline::new("2099-01-01T00:00:00Z").unwrap(),
+        IdempotencyKey::new("key-3").unwrap(),
+    )
+    .unwrap();
+    let refused = client
+        .act(
+            context,
+            "docker".into(),
+            "pingora-panel-control-1".into(),
+            ContainerAction::Stop,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code.as_str(), "PRECONDITION_FAILED");
 }

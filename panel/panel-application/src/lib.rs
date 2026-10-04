@@ -36,9 +36,9 @@ pub use configuration::{
     ConfigurationPort, ConfigurationRead, DraftInfo,
 };
 pub use containers::{
-    ContainerAction, ContainerChange, ContainerEngine, ContainerFilter, ContainerList,
-    ContainerState, ContainerSummary, ContainersPort, EngineInfo, EngineVersion, NoContainers,
-    PortMapping, RecordedContainers,
+    ContainerAction, ContainerChange, ContainerDetail, ContainerEngine, ContainerFilter,
+    ContainerList, ContainerMount, ContainerNetwork, ContainerState, ContainerSummary,
+    ContainersPort, EngineInfo, EngineVersion, NoContainers, PortMapping, RecordedContainers,
 };
 pub use context::{
     Actor, CommandContext, IdempotencyKey, RequestDeadline, RequestId, RequestScope, SiteAccess,

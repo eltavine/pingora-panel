@@ -476,6 +476,11 @@ pub(crate) static ROUTES: &[(&str, &str, Access)] = &[
         Requires(ContainersRead),
     ),
     (
+        "GET",
+        "/api/v1/container-engines/{engine}/containers/{container}",
+        Requires(ContainersInspect),
+    ),
+    (
         "DELETE",
         "/api/v1/container-engines/{engine}/containers/{container}",
         Requires(ContainersManage),

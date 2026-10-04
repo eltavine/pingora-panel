@@ -26299,6 +26299,309 @@
           }
         }
       ],
+      "get": {
+        "tags": [
+          "containers"
+        ],
+        "summary": "A container's configuration and state, without its environment or\ncommand line.",
+        "operationId": "inspect_container",
+        "parameters": [
+          {
+            "name": "engine",
+            "in": "path",
+            "description": "docker or podman",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "container",
+            "in": "path",
+            "description": "Its ID, a unique prefix of its ID or its name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContainerDetailView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
       "delete": {
         "tags": [
           "containers"
@@ -64989,6 +65292,120 @@
           }
         }
       },
+      "ContainerDetailView": {
+        "type": "object",
+        "description": "What inspecting a container shows, without its environment or command\nline, which carry secrets.",
+        "required": [
+          "container",
+          "oom_killed",
+          "restarts",
+          "restart_retries",
+          "mounts",
+          "networks"
+        ],
+        "properties": {
+          "container": {
+            "$ref": "#/components/schemas/ContainerView"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it last failed, in the engine's words."
+          },
+          "exit_code": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How it last stopped; absent until it has."
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When it last stopped, RFC 3339; absent until it has."
+          },
+          "health": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`healthy`, `unhealthy` or `starting`; absent without a health check."
+          },
+          "hostname": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContainerMountView"
+            }
+          },
+          "networks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContainerNetworkView"
+            },
+            "description": "By name."
+          },
+          "oom_killed": {
+            "type": "boolean",
+            "description": "Whether the kernel killed it for running out of memory."
+          },
+          "platform": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Such as `linux`."
+          },
+          "restart_policy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`no`, `always`, `unless-stopped` or `on-failure`."
+          },
+          "restart_retries": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How often `on-failure` restarts it; 0 for no limit.",
+            "minimum": 0
+          },
+          "restarts": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How often the engine restarted it under its restart policy.",
+            "minimum": 0
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When it last started, RFC 3339."
+          },
+          "user": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "working_directory": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "ContainerEngineList": {
         "type": "object",
         "required": [
@@ -65075,6 +65492,83 @@
               "null"
             ],
             "description": "When the agent read them, RFC 3339."
+          }
+        }
+      },
+      "ContainerMountView": {
+        "type": "object",
+        "description": "Where a container's storage comes from.",
+        "required": [
+          "kind",
+          "source",
+          "destination",
+          "read_write"
+        ],
+        "properties": {
+          "destination": {
+            "type": "string",
+            "description": "Where it appears in the container."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`volume`, `bind`, `tmpfs` and so on."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The volume's name, for a volume."
+          },
+          "read_write": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string",
+            "description": "Where it comes from on the host."
+          }
+        }
+      },
+      "ContainerNetworkView": {
+        "type": "object",
+        "description": "A network a container is attached to.",
+        "required": [
+          "name",
+          "aliases"
+        ],
+        "properties": {
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "gateway": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ip_address": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ipv6_address": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mac_address": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
           }
         }
       },

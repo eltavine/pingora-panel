@@ -49,6 +49,7 @@ mod tests;
         crate::containers::enable_engine,
         crate::containers::disable_engine,
         crate::containers::list_containers,
+        crate::containers::inspect_container,
         crate::containers::act_on_container,
         crate::containers::remove_container,
         crate::alerts::list_alert_rules, crate::alerts::put_alert_rule,
