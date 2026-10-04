@@ -26,7 +26,7 @@ use identity_postgres::PgIdentityStore;
 use observability_grpc_client::ObservabilityClient;
 use ops_grpc_client::OpsAgentClient;
 use panel_api::{router_with_config, AccessSettings, ApiConfig, ApiState};
-use panel_application::{RecordedLogs, RecordedRuntime};
+use panel_application::{RecordedHostAgent, RecordedLogs, RecordedRuntime};
 use panel_control_runtime::{ControlPlaneProcess, DefaultAddresses, ProcessSettings};
 use panel_errors::{PanelError, Result};
 use panel_health::Impact;
@@ -204,6 +204,9 @@ pub fn process(
     let operations = Arc::new(operations::OutboxOperations(events.clone()));
     let runtime = RecordedRuntime::new(Arc::new(gateway), operations.clone());
     let logs = RecordedLogs::new(Arc::new(observability.clone()), operations.clone());
+    let recorded_agent = agent
+        .clone()
+        .map(|agent| RecordedHostAgent::new(Arc::new(agent), operations.clone()));
     let store = Arc::new(PgIdentityStore::new(process.database(), events));
     let roles = roles::BuiltInRoles::new(Arc::clone(&store), bootstrap.is_some());
     let oidc = Arc::new(OidcClient::new(PROVIDER_TIMEOUT)?);
@@ -260,7 +263,7 @@ pub fn process(
                 running.spawn(recheck_sessions(sign_ins, running.shutdown_token()));
             }
             let state = state.with_workload_identity(workloads);
-            let state = match agent {
+            let state = match recorded_agent {
                 Some(agent) => state.with_host_agent(Arc::new(agent)),
                 None => state,
             };
