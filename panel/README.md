@@ -436,6 +436,48 @@ ppanel host
 
 The console's Host page shows the same figures and warnings.
 
+### Host agent
+
+What no container may do on the host, `ops-agent` does
+([decision](../docs/adr/0030-ops-agent.md)). It runs on the host as a
+systemd service, as a dynamic user in a sandbox, and serves gRPC over
+mutual TLS on a Unix socket that only `panel-api` mounts; it admits the
+containers' user only, and among their identities `panel-api` only. Each
+capability is enabled on its own with the privilege it needs, and the
+agent reports which ones it has.
+
+For the Compose installation, build the image, install the agent, then
+start the installation with the agent's override:
+
+```sh
+docker compose -f panel/deploy/compose.yaml build
+sudo panel/deploy/ops-agent/install.sh
+docker compose -f panel/deploy/compose.yaml \
+  -f panel/deploy/compose.ops-agent.yaml up -d
+```
+
+The installation's authority issues the agent's credentials into
+`/var/lib/pingora-panel/ops-agent/credentials`; systemd starts the agent
+once they exist and restarts it with each renewal. Its settings are in
+`/etc/pingora-panel/ops-agent.env`.
+
+The directory sizes capability measures the gateway's configuration, log
+and certificate directories, which the settings name: in the Compose
+installation, the gateway's volumes. Reading them takes
+`CAP_DAC_READ_SEARCH`, which `directories.conf` grants while hiding
+everything else under `/var` and the host's credentials from the agent.
+
+```sh
+ppanel host agent
+ppanel host directories
+```
+
+`GET /api/v1/host/agent` says whether an agent is configured and answers
+and which capabilities it has; `GET /api/v1/host/directories` reports each
+directory's size and file count, and whether the count is partial. Both
+need `host.read`. The console's Host page shows the agent and, when it
+can measure them, the directories.
+
 ## Alerts
 
 `observability-service` evaluates alert rules
