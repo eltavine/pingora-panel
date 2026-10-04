@@ -41,6 +41,34 @@
       "fingerprints": [
         "331b184bdecc5f1a41fce0e9ea9406bc6bc0a47b:.github/scripts/test-gitleaks-secret-scan.sh:generic-api-key:28"
       ]
+    },
+    {
+      "owner": "pingora-panel-security",
+      "reason": "Private keys generated only for panel-certificates' intake tests; they sign nothing and nothing outside the tests reads them.",
+      "expires_on": "2027-03-01",
+      "fingerprints": [
+        "284a3e72811ddc36fc621497317c363f99143c60:panel/panel-certificates/tests/fixtures/ec-p256.key:private-key:4",
+        "284a3e72811ddc36fc621497317c363f99143c60:panel/panel-certificates/tests/fixtures/rsa-2048.key:private-key:1"
+      ]
+    },
+    {
+      "owner": "pingora-panel-security",
+      "reason": "Public test vectors: the JSON Web Signature examples of RFC 7515 Appendix A that identity-oidc's tests verify.",
+      "expires_on": "2027-03-01",
+      "fingerprints": [
+        "a53c42936636ba570bf5233f774d08ae00d7001d:panel/identity-oidc/tests/fixtures/jws-examples.json:jwt:8",
+        "a53c42936636ba570bf5233f774d08ae00d7001d:panel/identity-oidc/tests/fixtures/jws-examples.json:jwt:17"
+      ]
+    },
+    {
+      "owner": "pingora-panel-platform",
+      "reason": "False positives: a PEM header in a certificate intake assertion, the sample WebSocket nonce of RFC 6455 in an access test, and a token's identifier, not its secret, in an audit presentation test.",
+      "expires_on": "2027-03-01",
+      "fingerprints": [
+        "284a3e72811ddc36fc621497317c363f99143c60:panel/panel-certificates/tests/intake.rs:private-key:107",
+        "838db320ba00e90ec1932c00e6ba0ab7a808f620:panel/panel-api/src/tests/access.rs:generic-api-key:394",
+        "2fad085ca00c6a708fc0cfe0e4be247b62472743:panel/web/src/features/audit/__tests__/presentation.spec.ts:generic-api-key:115"
+      ]
     }
   ]
 }

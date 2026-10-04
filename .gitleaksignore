@@ -26,3 +26,17 @@ f69219d7bade726326ca29dab9ffb9234a596551:pingora-proxy/tests/utils/conf/keys/lea
 # Synthetic entropy used to prove that the Gitleaks CI self-test rejects and
 # redacts a finding. It is generated test material, not a credential.
 331b184bdecc5f1a41fce0e9ea9406bc6bc0a47b:.github/scripts/test-gitleaks-secret-scan.sh:generic-api-key:28
+
+# Private keys generated for the panel's certificate intake tests.
+284a3e72811ddc36fc621497317c363f99143c60:panel/panel-certificates/tests/fixtures/ec-p256.key:private-key:4
+284a3e72811ddc36fc621497317c363f99143c60:panel/panel-certificates/tests/fixtures/rsa-2048.key:private-key:1
+
+# The JSON Web Signature examples of RFC 7515 Appendix A.
+a53c42936636ba570bf5233f774d08ae00d7001d:panel/identity-oidc/tests/fixtures/jws-examples.json:jwt:8
+a53c42936636ba570bf5233f774d08ae00d7001d:panel/identity-oidc/tests/fixtures/jws-examples.json:jwt:17
+
+# False positives: a PEM header in an assertion, RFC 6455's sample WebSocket
+# nonce and a token identifier in panel tests.
+284a3e72811ddc36fc621497317c363f99143c60:panel/panel-certificates/tests/intake.rs:private-key:107
+838db320ba00e90ec1932c00e6ba0ab7a808f620:panel/panel-api/src/tests/access.rs:generic-api-key:394
+2fad085ca00c6a708fc0cfe0e4be247b62472743:panel/web/src/features/audit/__tests__/presentation.spec.ts:generic-api-key:115
