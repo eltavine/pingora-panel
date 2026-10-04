@@ -565,7 +565,7 @@ impl ContainerService {
     }
 }
 
-fn answer<T>(
+pub(crate) fn answer<T>(
     result: Result<T, PanelError>,
 ) -> (Option<T>, Option<panel_contracts::common::v1::Error>) {
     match result {

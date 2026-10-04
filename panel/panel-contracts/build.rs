@@ -28,6 +28,7 @@ fn main() {
                 "../proto/ops/v1/containers.proto",
                 "../proto/ops/v1/directories.proto",
                 "../proto/ops/v1/gateway_service.proto",
+                "../proto/ops/v1/images.proto",
                 "../proto/ops/v1/listeners.proto",
                 "../proto/gateway/v1/gateway.proto",
                 "../proto/gateway/v1/runtime.proto",

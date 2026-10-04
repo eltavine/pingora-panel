@@ -1,0 +1,101 @@
+syntax = "proto3";
+
+package pingora.panel.ops.v1;
+
+import "common/v1/common.proto";
+import "google/protobuf/timestamp.proto";
+
+// The images on the container engines the agent reaches (ADR 0031). An
+// image is named by its ID, such as `sha256:4f1c…`, a unique prefix of its
+// ID, or a reference such as `nginx:1.27` or `ghcr.io/example/app@sha256:…`.
+service Images {
+  rpc List(ImagesListRequest) returns (ImagesListResponse);
+  // An image's configuration, without its environment or command line,
+  // which can carry secrets.
+  rpc Inspect(ImagesInspectRequest) returns (ImagesInspectResponse);
+  // Removes a reference to an image, and the image once nothing names it.
+  // An image the panel's own installation uses is never removed.
+  rpc Remove(ImagesRemoveRequest) returns (ImagesRemoveResponse);
+}
+
+message Image {
+  // Such as `sha256:4f1c…`.
+  string id = 1;
+  // Such as `nginx:1.27`; none for an image nothing names any more.
+  repeated string tags = 2;
+  // Such as `nginx@sha256:…`.
+  repeated string digests = 3;
+  google.protobuf.Timestamp created = 4;
+  // Its layers' size, layers it shares with other images included.
+  uint64 size_bytes = 5;
+  // The containers, running or not, created from it.
+  uint32 containers = 6;
+  map<string, string> labels = 7;
+}
+
+message ImagesListRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string engine = 2;
+  // Matched against tags and IDs, ignoring case; empty for every image.
+  string search = 3;
+}
+
+message ImagesListResponse {
+  google.protobuf.Timestamp observed_at = 1;
+  // By tag; images nothing names last.
+  repeated Image images = 2;
+  .pingora.panel.common.v1.Error error = 3;
+}
+
+message ImageDetail {
+  Image image = 1;
+  // Such as `amd64`, `arm64`.
+  string architecture = 2;
+  // Such as `v8`, for ARM.
+  string variant = 3;
+  // Such as `linux`.
+  string os = 4;
+  string author = 5;
+  string comment = 6;
+  // Who runs its processes, unless a container says otherwise.
+  string user = 7;
+  string working_directory = 8;
+  // Such as `80/tcp`.
+  repeated string exposed_ports = 9;
+  // Where it expects volumes.
+  repeated string volumes = 10;
+  string stop_signal = 11;
+  // How many layers it has.
+  uint32 layers = 12;
+}
+
+message ImagesInspectRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string engine = 2;
+  string image = 3;
+}
+
+message ImagesInspectResponse {
+  ImageDetail detail = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message ImagesRemoveRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string engine = 2;
+  string image = 3;
+  // Removes an image stopped containers use, and every reference to an
+  // image named by its ID. An image a running container uses is refused
+  // anyway.
+  bool force = 4;
+}
+
+message ImagesRemoveResponse {
+  // The image's ID before it was removed.
+  string id = 1;
+  // The references removed.
+  repeated string untagged = 2;
+  // The images and layers deleted; none when other references remain.
+  repeated string deleted = 3;
+  .pingora.panel.common.v1.Error error = 4;
+}

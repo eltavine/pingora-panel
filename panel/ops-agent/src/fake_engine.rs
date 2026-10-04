@@ -16,6 +16,75 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+/// An image the fake engine has: nginx, which the running shop-web-1
+/// uses; redis, which the stopped cache uses; and one nothing names.
+fn image(reference: &str) -> Option<Value> {
+    let (id, tags, digests, created) = match reference {
+        "sha256:aa" | "nginx:1.27" => (
+            "sha256:aa",
+            json!(["nginx:1.27"]),
+            json!(["nginx@sha256:d1"]),
+            1_800_000_000,
+        ),
+        "sha256:bb" | "redis:7" => ("sha256:bb", json!(["redis:7"]), json!([]), 1_799_000_000),
+        "sha256:cc" => (
+            "sha256:cc",
+            json!(["<none>:<none>"]),
+            json!(["<none>@<none>"]),
+            1_798_000_000,
+        ),
+        _ => return None,
+    };
+    Some(json!({
+        "Id": id, "ParentId": "", "RepoTags": tags, "RepoDigests": digests,
+        "Created": created, "Size": 50_000_000, "SharedSize": -1, "Containers": -1,
+        "Labels": {"maintainer": "NGINX"}
+    }))
+}
+
+/// What inspecting an image answers, with an environment and command line
+/// the agent must not pass on.
+fn inspected_image(found: &Value) -> Value {
+    json!({
+        "Id": found["Id"], "RepoTags": found["RepoTags"], "RepoDigests": found["RepoDigests"],
+        "Created": "2027-01-15T08:00:00Z", "Author": "NGINX Docker Maintainers",
+        "Architecture": "amd64", "Os": "linux", "Size": found["Size"],
+        "Config": {"User": "nginx", "WorkingDir": "/",
+                   "ExposedPorts": {"80/tcp": {}, "443/tcp": {}},
+                   "Volumes": {"/var/cache/nginx": {}},
+                   "Env": ["NGINX_TOKEN=hunter2"], "Cmd": ["nginx", "--token", "hunter2"],
+                   "StopSignal": "SIGQUIT", "Labels": {"maintainer": "NGINX"}},
+        "RootFS": {"Type": "layers", "Layers": ["sha256:l1", "sha256:l2"]}
+    })
+}
+
+/// Removing an image as the engine does: refused while a running container
+/// uses it, and while a stopped one does unless forced.
+fn removed_image(found: &Value, force: bool) -> Answer {
+    match (found["Id"].as_str(), force) {
+        (Some("sha256:aa"), _) => refusal(
+            StatusCode::CONFLICT,
+            "unable to delete sha256:aa (cannot be forced) - image is being used by running container b2",
+        ),
+        (Some("sha256:bb"), false) => refusal(
+            StatusCode::CONFLICT,
+            "unable to delete sha256:bb (must be forced) - image is being used by stopped container a1",
+        ),
+        (Some(id), _) => {
+            let mut items: Vec<Value> = found["RepoTags"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|tag| tag.as_str().is_some_and(|tag| !tag.starts_with("<none>")))
+                .map(|tag| json!({"Untagged": tag}))
+                .collect();
+            items.push(json!({"Deleted": id}));
+            Json(items).into_response()
+        }
+        (None, _) => refusal(StatusCode::NOT_FOUND, "No such image"),
+    }
+}
+
 /// What the fake engine was asked to do, such as `stop b2`.
 pub(crate) type Calls = Arc<Mutex<Vec<String>>>;
 
@@ -250,6 +319,37 @@ pub(crate) async fn engine_with(directory: &Path, calls: Calls) -> PathBuf {
                 },
             ),
         );
+    let removing = calls.clone();
+    let router = router.route(
+        "/images/{*rest}",
+        get(|Segments(rest): Segments<String>| async move {
+            if rest == "json" {
+                let every: Vec<Value> = ["sha256:aa", "sha256:bb", "sha256:cc"]
+                    .into_iter()
+                    .filter_map(image)
+                    .collect();
+                return Json(every).into_response();
+            }
+            match rest.strip_suffix("/json").and_then(image) {
+                Some(found) => Json(inspected_image(&found)).into_response(),
+                None => refusal(StatusCode::NOT_FOUND, "No such image"),
+            }
+        })
+        .delete(
+            move |Segments(name): Segments<String>,
+                  Query(query): Query<HashMap<String, String>>| async move {
+                let Some(found) = image(&name) else {
+                    return refusal(StatusCode::NOT_FOUND, "No such image");
+                };
+                let force = query.get("force").is_some_and(|value| value == "true");
+                removing
+                    .lock()
+                    .unwrap()
+                    .push(format!("remove-image {name} force={force}"));
+                removed_image(&found, force)
+            },
+        ),
+    );
     let acted = calls.clone();
     let router = router
         .route(
