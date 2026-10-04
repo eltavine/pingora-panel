@@ -32,8 +32,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 /// Free loopback addresses, held together until all are known so that no
 /// two are the same.
 fn reserve<const N: usize>() -> [SocketAddr; N] {
-    let held: [TcpListener; N] =
-        std::array::from_fn(|_| TcpListener::bind("127.0.0.1:0").unwrap());
+    let held: [TcpListener; N] = std::array::from_fn(|_| TcpListener::bind("127.0.0.1:0").unwrap());
     held.map(|listener| listener.local_addr().unwrap())
 }
 
