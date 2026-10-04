@@ -499,6 +499,39 @@ agent and, when it has those capabilities, the gateway service with its
 actions, the directories and what holds ports 80 and 443, saying whether
 the gateway or another process does.
 
+## Containers
+
+The host agent's containers capability reaches Docker and Podman through
+their sockets ([decision](../docs/adr/0031-containers.md)).
+`containers.conf` points the agent at Docker's socket and makes it a
+member of the group that owns it, which makes the agent root on the host
+through the engine; the file says how to add Podman's socket. Install it
+with the other capabilities:
+
+```sh
+sudo panel/deploy/ops-agent/install.sh directories listeners gateway-unit containers
+```
+
+Every engine the agent is pointed at starts enabled. An operator can
+disable one, and the panel then leaves what runs on it alone; the agent
+keeps that choice in its state directory.
+
+```sh
+ppanel container engines
+ppanel container engine disable podman
+ppanel container list --search nginx --state running
+```
+
+`GET /api/v1/container-engines` reports each engine: whether it is enabled
+and answers, its version, and how many containers and images it has.
+`GET /api/v1/container-engines/{engine}/containers` lists an engine's
+containers, searched by name or image and filtered by state, with their
+published ports and Compose project. Both need `containers.read`.
+`POST /api/v1/container-engines/{engine}/{enable,disable}` needs
+`containers.manage`, and the audit trail records each change, refused or
+not. The console's Containers page shows the engines and their
+containers.
+
 ## Alerts
 
 `observability-service` evaluates alert rules
