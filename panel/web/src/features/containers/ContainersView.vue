@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { watchDebounced } from '@vueuse/core'
-import { Boxes, Container, RefreshCw, Search } from '@lucide/vue'
+import { Boxes, Container, RefreshCw, ScrollText, Search } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { listContainersOptions, listEnginesOptions } from '@/api/generated/@tanstack/vue-query.gen'
@@ -36,6 +36,7 @@ import type { ContainerView } from '@/api/generated'
 import ContainerActions from './ContainerActions.vue'
 import ContainerDetailSheet from './ContainerDetailSheet.vue'
 import ContainerEngines from './ContainerEngines.vue'
+import ContainerLogsSheet from './ContainerLogsSheet.vue'
 import {
   CONTAINER_STATES,
   chosenEngine,
@@ -132,6 +133,15 @@ function inspect(container: ContainerView) {
   inspecting.value = container
   detailOpen.value = true
 }
+
+const reading = ref<ContainerView>()
+const logsOpen = ref(false)
+function readLogs(container: ContainerView) {
+  detailOpen.value = false
+  reading.value = container
+  logsOpen.value = true
+}
+const actionable = computed(() => can('containers.inspect') || can('containers.manage'))
 
 const updatedAt = computed(() =>
   engines.dataUpdatedAt.value > 0 ? d(new Date(engines.dataUpdatedAt.value), 'time') : null,
@@ -271,7 +281,7 @@ function refresh() {
                   <TableHead>{{ t('containers.list.state') }}</TableHead>
                   <TableHead>{{ t('containers.list.ports') }}</TableHead>
                   <TableHead>{{ t('containers.list.created') }}</TableHead>
-                  <TableHead v-if="can('containers.manage')">
+                  <TableHead v-if="actionable">
                     <span class="sr-only">{{ t('common.actions') }}</span>
                   </TableHead>
                 </TableRow>
@@ -326,8 +336,25 @@ function refresh() {
                   <TableCell class="text-muted-foreground text-sm whitespace-nowrap">
                     {{ container.created ? d(new Date(container.created), 'datetime') : '—' }}
                   </TableCell>
-                  <TableCell v-if="can('containers.manage') && engineId" class="text-right">
-                    <ContainerActions :engine="engineId" :container="container" />
+                  <TableCell v-if="actionable && engineId">
+                    <div class="flex items-center justify-end gap-1">
+                      <Button
+                        v-if="can('containers.inspect')"
+                        variant="ghost"
+                        size="icon-sm"
+                        :aria-label="
+                          t('containers.logs.open', { name: container.names[0] ?? container.id })
+                        "
+                        @click="readLogs(container)"
+                      >
+                        <ScrollText aria-hidden="true" />
+                      </Button>
+                      <ContainerActions
+                        v-if="can('containers.manage')"
+                        :engine="engineId"
+                        :container="container"
+                      />
+                    </div>
                   </TableCell>
                 </TableRow>
               </TableBody>
@@ -351,6 +378,13 @@ function refresh() {
         v-model:open="detailOpen"
         :engine="engineId"
         :container="inspecting"
+        @logs="readLogs(inspecting)"
+      />
+      <ContainerLogsSheet
+        v-if="reading && engineId"
+        v-model:open="logsOpen"
+        :engine="engineId"
+        :container="reading"
       />
     </template>
   </div>

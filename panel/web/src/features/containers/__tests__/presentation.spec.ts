@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import type { ContainerEngineView, ProblemDetails } from '@/api/generated'
+import type { ContainerEngineView, ContainerLogLineView, ProblemDetails } from '@/api/generated'
 import {
   chosenEngine,
   conditionTone,
   engineCondition,
+  logFile,
+  logTailUrl,
+  matchesLine,
+  plainText,
   portLabel,
   sortedLabels,
   stoppable,
@@ -88,5 +92,52 @@ describe('containers', () => {
     expect(stoppable('restarting')).toBe(true)
     expect(stoppable('exited')).toBe(false)
     expect(stoppable('created')).toBe(false)
+  })
+})
+
+describe('container logs', () => {
+  const escape = String.fromCharCode(27)
+  const line = (text: string, stream: 'stdout' | 'stderr' = 'stdout'): ContainerLogLineView => ({
+    time: '2027-01-15T08:00:01.000000001Z',
+    stream,
+    text,
+  })
+
+  it('reads lines without their terminal control sequences', () => {
+    expect(plainText(`${escape}[1;32mGET${escape}[0m / 200`)).toBe('GET / 200')
+    expect(plainText(`${escape}]0;title${String.fromCharCode(7)}ready`)).toBe('ready')
+    expect(plainText(`${escape}]8;;https://example.com${escape}\\link`)).toBe('link')
+    expect(plainText('plain [brackets] stay')).toBe('plain [brackets] stay')
+  })
+
+  it('filters lines by stream and by text, ignoring case and colours', () => {
+    const coloured = line(`${escape}[31mUpstream${escape}[0m timed out`, 'stderr')
+    expect(matchesLine(coloured, 'all', 'upstream TIMED')).toBe(true)
+    expect(matchesLine(coloured, 'stdout', '')).toBe(false)
+    expect(matchesLine(coloured, 'stderr', '  ')).toBe(true)
+    expect(matchesLine(line('GET /'), 'all', 'post')).toBe(false)
+  })
+
+  it('saves lines as printed, each after its time', () => {
+    expect(logFile([line('one'), line('two', 'stderr')])).toBe(
+      '2027-01-15T08:00:01.000000001Z one\n2027-01-15T08:00:01.000000001Z two\n',
+    )
+  })
+
+  it('follows a container over a WebSocket where the API answers', () => {
+    const page = 'https://panel.example/containers'
+    expect(logTailUrl('docker', 'shop-web-1', { lines: '0' }, { baseUrl: '', page })).toBe(
+      'wss://panel.example/api/v1/container-engines/docker/containers/shop-web-1/logs/tail?lines=0',
+    )
+    expect(
+      logTailUrl(
+        'podman',
+        'b2',
+        { after: '2027-01-15T08:00:01Z' },
+        { baseUrl: 'http://127.0.0.1:8080', page },
+      ),
+    ).toBe(
+      'ws://127.0.0.1:8080/api/v1/container-engines/podman/containers/b2/logs/tail?after=2027-01-15T08%3A00%3A01Z',
+    )
   })
 })

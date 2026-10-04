@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
-import { Box, HardDrive, Network, Tags } from '@lucide/vue'
+import { Box, HardDrive, Network, ScrollText, Tags } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import type { ContainerView } from '@/api/generated'
 import { inspectContainerOptions } from '@/api/generated/@tanstack/vue-query.gen'
 import ApiFailureAlert from '@/components/ApiFailureAlert.vue'
 import StatusIndicator from '@/components/StatusIndicator.vue'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import {
   Sheet,
   SheetContent,
@@ -21,6 +22,7 @@ import { sortedLabels } from './presentation'
 
 const open = defineModel<boolean>('open', { required: true })
 const props = defineProps<{ engine: string; container: ContainerView }>()
+const emit = defineEmits<{ logs: [] }>()
 
 const { t, d } = useI18n()
 const detail = useQuery(
@@ -115,7 +117,16 @@ const labels = computed(() => sortedLabels(view.value?.container.labels ?? {}))
           :aria-label="t('state.loading')"
         />
         <template v-else-if="view">
-          <StatusIndicator :tone="gatewayTone(view.container.state, view.health)" :label="state" />
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <StatusIndicator
+              :tone="gatewayTone(view.container.state, view.health)"
+              :label="state"
+            />
+            <Button variant="outline" size="sm" @click="emit('logs')">
+              <ScrollText data-icon="inline-start" aria-hidden="true" />
+              {{ t('containers.logs.action') }}
+            </Button>
+          </div>
           <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
             <template v-for="fact in facts" :key="fact.label">
               <dt class="text-muted-foreground">{{ fact.label }}</dt>

@@ -1,7 +1,34 @@
-import { http, HttpResponse, type AnyHandler } from 'msw'
-import type { ContainerEngineView, ContainerView } from '@/api/generated'
+import { http, HttpResponse, ws, type AnyHandler } from 'msw'
+import type {
+  ContainerEngineView,
+  ContainerLogLineView,
+  ContainerLogsView,
+  ContainerLogTailMessage,
+  ContainerView,
+} from '@/api/generated'
 
 const GIB = 1024 ** 3
+/** How far apart the lines a container prints are. */
+const PRINT_INTERVAL_MS = 2_000
+const PATHS = ['/', '/cart', '/api/orders', '/static/app.js', '/healthz']
+
+/** The `index`th line a web container prints, coloured as a terminal shows it. */
+function printed(at: number, index: number): ContainerLogLineView {
+  const time = new Date(at).toISOString()
+  if (index % 7 === 0) {
+    return {
+      time,
+      stream: 'stderr',
+      text: `[warn] upstream answered in ${120 + (index % 50)} ms, over its budget`,
+    }
+  }
+  const path = PATHS[index % PATHS.length]
+  return {
+    time,
+    stream: 'stdout',
+    text: `\u001b[32m200\u001b[0m GET ${path} ${3 + (index % 40)} ms`,
+  }
+}
 
 function hoursAgo(hours: number): string {
   return new Date(Date.now() - hours * 3_600_000).toISOString()
@@ -102,6 +129,8 @@ export function containerHandlers(): AnyHandler[] {
     },
   ]
 
+  const tail = ws.link(/\/api\/v1\/container-engines\/[^/]+\/containers\/[^/]+\/logs\/tail/)
+
   function missing(container: string) {
     return HttpResponse.json(
       {
@@ -178,6 +207,41 @@ export function containerHandlers(): AnyHandler[] {
         })
       },
     ),
+    http.get<{ engine: string; container: string }>(
+      '*/api/v1/container-engines/:engine/containers/:container/logs',
+      ({ params, request }) => {
+        if (!containers.some((container) => container.id === params.container)) {
+          return missing(params.container)
+        }
+        const count = Number(new URL(request.url).searchParams.get('lines')) || 200
+        const now = Date.now()
+        const lines = Array.from({ length: Math.min(count, 300) }, (_, index) =>
+          printed(now - (300 - index) * PRINT_INTERVAL_MS, index),
+        )
+        return HttpResponse.json({
+          observed_at: new Date(now).toISOString(),
+          lines,
+          truncated: false,
+        } satisfies ContainerLogsView)
+      },
+    ),
+    tail.addEventListener('connection', ({ client }) => {
+      const id = new URL(client.url).pathname.split('/').at(-3)
+      const found = containers.find((container) => container.id === id)
+      if (found?.state !== 'running') {
+        client.close(1000, 'the container stopped')
+        return
+      }
+      let index = 0
+      const timer = setInterval(() => {
+        const message: ContainerLogTailMessage = {
+          lines: [printed(Date.now(), (index += 1))],
+          cursor: new Date().toISOString(),
+        }
+        client.send(JSON.stringify(message))
+      }, PRINT_INTERVAL_MS)
+      client.addEventListener('close', () => clearInterval(timer))
+    }),
     http.post<{ engine: string; container: string; action: string }>(
       '*/api/v1/container-engines/:engine/containers/:container/:action',
       ({ params }) => {

@@ -333,3 +333,94 @@ test('the containers page is offered only to accounts that read them', async ({ 
     page.locator('[data-slot="sidebar"]').getByRole('link', { name: 'Containers' }),
   ).toHaveCount(0)
 })
+
+const printed = [
+  {
+    time: '2026-10-04T10:00:01.000000001Z',
+    stream: 'stdout',
+    text: `${String.fromCharCode(27)}[32mGET${String.fromCharCode(27)}[0m / 200`,
+  },
+  { time: '2026-10-04T10:00:02Z', stream: 'stderr', text: 'upstream timed out' },
+]
+
+test("a container's logs are read, filtered and followed until it stops", async ({ page }) => {
+  await setUp(page)
+  const reads: URLSearchParams[] = []
+  await page.route(/\/containers\/[\w.-]+\/logs(\?.*)?$/, (route) => {
+    reads.push(new URL(route.request().url()).searchParams)
+    route.fulfill({
+      json: { observed_at: '2026-10-04T10:00:05Z', truncated: false, lines: printed },
+    })
+  })
+  const tails: URL[] = []
+  await page.routeWebSocket(/\/logs\/tail/, (socket) => {
+    tails.push(new URL(socket.url()))
+    socket.send(
+      JSON.stringify({
+        lines: [{ time: '2026-10-04T10:00:03Z', stream: 'stdout', text: 'GET /cart 200' }],
+        cursor: '2026-10-04T10:00:03Z',
+        error: null,
+      }),
+    )
+    void socket.close({ code: 1000, reason: 'the container stopped' })
+  })
+
+  await page.goto('/containers')
+  await page.getByRole('button', { name: 'Logs of shop-web-1' }).click()
+  const sheet = page.getByRole('dialog', { name: 'shop-web-1 logs' })
+  const log = sheet.getByRole('log')
+  await expect(log).toContainText('GET / 200')
+  await expect(log).toContainText('upstream timed out')
+  await expect(sheet).toContainText('2 of 2 lines')
+  expect(reads[0]?.get('lines')).toBe('200')
+  expect(tails).toHaveLength(0)
+
+  const filter = sheet.getByRole('searchbox', { name: 'Filter lines' })
+  await filter.fill('TIMED')
+  await expect(log).not.toContainText('GET / 200')
+  await expect(sheet).toContainText('1 of 2 lines')
+  await filter.fill('')
+
+  await sheet.getByRole('button', { name: 'Follow live' }).click()
+  await expect(log).toContainText('GET /cart 200')
+  await expect(sheet).toContainText(
+    'The container stopped; nothing more comes until it runs again.',
+  )
+  await expect(sheet.getByRole('button', { name: 'Follow live' })).toBeVisible()
+  expect(tails[0]?.searchParams.get('after')).toBe('2026-10-04T10:00:02Z')
+
+  const download = page.waitForEvent('download')
+  await sheet.getByRole('button', { name: 'Download' }).click()
+  expect((await download).suggestedFilename()).toMatch(/^shop-web-1-.+\.log$/)
+
+  await sheet.getByRole('combobox', { name: 'Lines to read' }).click()
+  await page.getByRole('option', { name: 'Last 1000 lines' }).click()
+  await expect.poll(() => reads.at(-1)?.get('lines')).toBe('1000')
+  await expect(log).not.toContainText('GET /cart 200')
+})
+
+test('logs are offered from a container and only to accounts that may read them', async ({
+  page,
+}) => {
+  await setUp(page)
+  await page.route(/\/containers\/[\w.-]+\/logs(\?.*)?$/, (route) =>
+    route.fulfill({ json: { observed_at: null, truncated: false, lines: [] } }),
+  )
+  await page.goto('/containers')
+  await page.getByRole('button', { name: 'shop-web-1', exact: true }).click()
+  await page
+    .getByRole('dialog', { name: 'shop-web-1' })
+    .getByRole('button', { name: 'Logs' })
+    .click()
+  const sheet = page.getByRole('dialog', { name: 'shop-web-1 logs' })
+  await expect(sheet.getByRole('log')).toContainText('It has printed nothing')
+
+  await setUp(
+    page,
+    undefined,
+    ALL_PERMISSIONS.filter((permission) => permission !== 'containers.inspect'),
+  )
+  await page.goto('/containers')
+  await expect(page.getByRole('row').filter({ hasText: 'shop-web-1' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Logs of shop-web-1' })).toHaveCount(0)
+})
