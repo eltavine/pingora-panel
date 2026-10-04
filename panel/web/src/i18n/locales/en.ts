@@ -1537,7 +1537,9 @@ const en: Messages = {
     logs_delete: "Delete the gateway's logs of a site or of every site",
     alerts_read: 'Read alert rules, where they stand, their channels and the notifications sent',
     alerts_manage: 'Change alert rules and channels and send test notifications',
-    host_read: "Read the host's CPU, memory, disks, load, network and system",
+    host_read:
+      "Read the host's figures and what its agent reports: the panel's directories, what holds ports and the gateway service",
+    host_manage: 'Start, stop and restart the gateway service on the host',
     platform_read: 'Read the services of the control plane',
     identity_read: 'Read accounts, roles and sessions',
     identity_manage: 'Create, change, disable and unlock accounts, grant roles and end sessions',

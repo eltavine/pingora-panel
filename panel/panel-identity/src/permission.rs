@@ -26,6 +26,7 @@ pub enum Permission {
     AlertsRead,
     AlertsManage,
     HostRead,
+    HostManage,
     PlatformRead,
     IdentityRead,
     IdentityManage,
@@ -116,7 +117,12 @@ const CATALOG: &[(Permission, &str, &str)] = &[
     (
         Permission::HostRead,
         "host.read",
-        "Read the host's CPU, memory, disks, load, network and system.",
+        "Read the host's figures and what its agent reports: the panel's directories, what holds ports and the gateway's service.",
+    ),
+    (
+        Permission::HostManage,
+        "host.manage",
+        "Start, stop and restart the gateway's service on the host.",
     ),
     (
         Permission::PlatformRead,

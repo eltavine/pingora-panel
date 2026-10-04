@@ -19,6 +19,7 @@ export const ALL_PERMISSIONS = [
   'alerts.read',
   'alerts.manage',
   'host.read',
+  'host.manage',
   'platform.read',
   'identity.read',
   'identity.manage',
