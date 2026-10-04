@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { LogTailMessage } from '@/api/generated'
-import { TAIL_LIMIT, useLogTail, type TailSocket } from '../tail'
+import type { LogRecordItem, LogTailMessage } from '@/api/generated'
+import { useTail, type TailSocket } from '../tail'
 
 class FakeSocket implements TailSocket {
   closed = false
@@ -18,16 +18,27 @@ class FakeSocket implements TailSocket {
     this.onopen?.call(this as unknown as WebSocket, new Event('open'))
   }
 
-  send(message: LogTailMessage) {
+  send(message: object) {
     this.onmessage?.call(
       this as unknown as WebSocket,
       new MessageEvent('message', { data: JSON.stringify(message) }),
     )
   }
 
-  drop() {
-    this.onclose?.call(this as unknown as WebSocket, new CloseEvent('close', { code: 1006 }))
+  drop(code = 1006) {
+    this.onclose?.call(this as unknown as WebSocket, new CloseEvent('close', { code }))
   }
+}
+
+const TAIL_LIMIT = 1_000
+
+function useLogTail(connect: (after?: string) => TailSocket) {
+  const tail = useTail<LogRecordItem, LogTailMessage>(connect, {
+    items: (message) => message.records,
+    limit: TAIL_LIMIT,
+    newestFirst: true,
+  })
+  return { ...tail, records: tail.items }
 }
 
 function lines(...texts: string[]) {
@@ -39,7 +50,7 @@ function lines(...texts: string[]) {
   }))
 }
 
-describe('following logs', () => {
+describe('following what the API sends', () => {
   let sockets: FakeSocket[]
   const connect = (after?: string) => {
     const socket = new FakeSocket(after)
@@ -118,6 +129,26 @@ describe('following logs', () => {
     sockets[0]!.send({ records: lines('late') })
     sockets[0]!.drop()
     expect(tail.records.value).toEqual([])
+    expect(sockets).toHaveLength(1)
+  })
+
+  it('keeps the oldest first when asked and ends when the API closes normally', () => {
+    const tail = useTail<{ text: string }, { lines: { text: string }[]; cursor?: string }>(
+      connect,
+      {
+        items: (message) => message.lines,
+        limit: 2,
+      },
+    )
+    tail.start()
+    sockets[0]!.open()
+    sockets[0]!.send({ lines: [{ text: 'one' }, { text: 'two' }] })
+    sockets[0]!.send({ lines: [{ text: 'three' }] })
+    expect(tail.items.value.map((line) => line.text)).toEqual(['two', 'three'])
+
+    sockets[0]!.drop(1000)
+    expect(tail.state.value).toBe('ended')
+    vi.runOnlyPendingTimers()
     expect(sockets).toHaveLength(1)
   })
 })

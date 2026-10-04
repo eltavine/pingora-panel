@@ -9,6 +9,37 @@ export function configureApi(baseUrl: string = import.meta.env.VITE_PANEL_API_BA
   client.setConfig({ baseUrl })
 }
 
+/** Where the API answers a path, as the generated client joins them. */
+export interface ApiLocation {
+  /** The client's base URL; empty when the API shares the console's origin. */
+  baseUrl: string
+  /** The console page the base URL is relative to. */
+  page: string
+}
+
+/** Where the API answers this page. */
+export function apiLocation(): ApiLocation {
+  return { baseUrl: client.getConfig().baseUrl ?? '', page: window.location.href }
+}
+
+/** `path` with the parameters of `query` that are set, where the API answers. */
+export function apiUrl(path: string, query: Record<string, string>, at: ApiLocation): URL {
+  const url = new URL(`${at.baseUrl}${path}`, at.page)
+  for (const [name, value] of Object.entries(query)) {
+    if (value) {
+      url.searchParams.set(name, value)
+    }
+  }
+  return url
+}
+
+/** `apiUrl` with the WebSocket scheme. */
+export function websocketUrl(path: string, query: Record<string, string>, at: ApiLocation): string {
+  const url = apiUrl(path, query, at)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  return url.toString()
+}
+
 /** A failed API call, normalized for presentation. */
 export type ApiFailure =
   | { kind: 'unreachable' }

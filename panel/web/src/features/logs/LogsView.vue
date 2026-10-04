@@ -22,8 +22,8 @@ import {
   type LogKindName,
   type LogPageResponse,
   type LogRecordItem,
+  type LogTailMessage,
 } from '@/api/generated'
-import { client } from '@/api/generated/client.gen'
 import {
   deleteLogsMutation,
   listLogDeletionsQueryKey,
@@ -55,14 +55,15 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { apiLocation } from '@/lib/api'
 import { notifyFailure, plainHeaders } from '@/lib/configuration'
 import { useSession } from '@/lib/session'
+import { useTail } from '@/lib/tail'
 import LogDeletionsSheet from './LogDeletionsSheet.vue'
 import LogRecordSheet from './LogRecordSheet.vue'
 import LogStatus from './LogStatus.vue'
-import { downloadUrl, FILTERS, queryOf, tailUrl, type ApiLocation } from './presentation'
+import { downloadUrl, FILTERS, queryOf, TAIL_LIMIT, tailUrl } from './presentation'
 import { summaryOf } from '@/lib/logs'
-import { useLogTail } from './tail'
 
 const PAGE_SIZE = 100
 const ALL = 'all'
@@ -155,13 +156,10 @@ const pages = useInfiniteQuery(
 )
 const items = computed(() => pages.data.value?.pages.flatMap((page) => page.records) ?? [])
 
-function apiLocation(): ApiLocation {
-  return { baseUrl: client.getConfig().baseUrl ?? '', page: window.location.href }
-}
-
-const tail = useLogTail(
+const tail = useTail<LogRecordItem, LogTailMessage>(
   (after) =>
     new WebSocket(tailUrl({ ...filters.value, ...(after ? { after } : {}) }, apiLocation())),
+  { items: (message) => message.records, limit: TAIL_LIMIT, newestFirst: true },
 )
 const following = computed(() => tail.state.value !== 'idle')
 const tailFailed = computed(() => tail.state.value === 'failed')
@@ -176,7 +174,7 @@ watch(filters, () => {
   }
 })
 
-const rows = computed(() => [...tail.records.value, ...items.value])
+const rows = computed(() => [...tail.items.value, ...items.value])
 const keys = new WeakMap<LogRecordItem, number>()
 let nextKey = 0
 function keyOf(record: LogRecordItem): number {
@@ -381,7 +379,7 @@ function confirmDelete() {
         :label="tail.state.value === 'live' ? t('logs.live') : t('logs.connecting')"
       />
       <span class="text-muted-foreground text-sm">{{
-        t('logs.followed', { count: tail.records.value.length }, tail.records.value.length)
+        t('logs.followed', { count: tail.items.value.length }, tail.items.value.length)
       }}</span>
     </div>
     <Alert v-if="tailFailed" variant="destructive">
