@@ -3,8 +3,8 @@ use crate::{
     sign_in::ProviderAccess,
 };
 use panel_application::{
-    AlertsPort, AuditPort, CertificatePort, ConfigurationPort, GatewayRuntimePort, HostAgentPort,
-    HostPort, LogsPort, NoHostAgent, TlsProbe, TrafficPort,
+    AlertsPort, AuditPort, CertificatePort, ConfigurationPort, ContainersPort, GatewayRuntimePort,
+    HostAgentPort, HostPort, LogsPort, NoContainers, NoHostAgent, TlsProbe, TrafficPort,
 };
 use panel_health::HealthWatch;
 use panel_identity::{Identity, ProviderDirectory, ProviderSignIns, WorkloadIdentity};
@@ -25,6 +25,7 @@ pub struct ApiState<U> {
     pub(crate) alerts: Option<Arc<dyn AlertsPort>>,
     pub(crate) host: Option<Arc<dyn HostPort>>,
     pub(crate) host_agent: Arc<dyn HostAgentPort>,
+    pub(crate) containers: Arc<dyn ContainersPort>,
     pub(crate) identity: Option<Arc<Gate>>,
     pub(crate) providers: Option<Arc<ProviderAccess>>,
     pub(crate) workloads: Option<Arc<WorkloadIdentity>>,
@@ -47,6 +48,7 @@ impl<U> Clone for ApiState<U> {
             alerts: self.alerts.clone(),
             host: self.host.clone(),
             host_agent: Arc::clone(&self.host_agent),
+            containers: Arc::clone(&self.containers),
             identity: self.identity.clone(),
             providers: self.providers.clone(),
             workloads: self.workloads.clone(),
@@ -71,6 +73,7 @@ impl<U> ApiState<U> {
             alerts: None,
             host: None,
             host_agent: Arc::new(NoHostAgent),
+            containers: Arc::new(NoContainers),
             identity: None,
             providers: None,
             workloads: None,
@@ -148,6 +151,13 @@ impl<U> ApiState<U> {
     /// paths beside it; without one they say no agent is configured.
     pub fn with_host_agent(mut self, agent: Arc<dyn HostAgentPort>) -> Self {
         self.host_agent = agent;
+        self
+    }
+
+    /// Serves the container engines the host agent reaches under
+    /// `/api/v1/container-engines`; without them those paths say so.
+    pub fn with_containers(mut self, containers: Arc<dyn ContainersPort>) -> Self {
+        self.containers = containers;
         self
     }
 

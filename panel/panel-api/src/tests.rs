@@ -21,6 +21,7 @@ mod admission;
 mod alerts;
 mod certificates;
 mod conditional;
+mod containers;
 mod host;
 mod host_agent;
 mod logs;
