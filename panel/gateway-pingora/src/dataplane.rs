@@ -139,6 +139,9 @@ struct Generation {
     runtime: Option<Runtime>,
     shutdown: watch::Sender<bool>,
     in_flight: Arc<AtomicUsize>,
+    /// Each listener's connections, held by the generation and by what
+    /// serves them.
+    connections: Vec<Arc<Connections>>,
     started_at: SystemTime,
 }
 
@@ -395,16 +398,17 @@ impl Generation {
         });
         let (shutdown, watch) = watch::channel(false);
         let in_flight = Arc::new(AtomicUsize::new(0));
+        let mut listening = Vec::with_capacity(plans.len());
         for plan in &plans {
             let socket = sockets.get(&plan.socket).ok_or_else(|| {
                 PanelError::internal(format!("listener {} has no socket", plan.id))
             })?;
             let label: Arc<str> = Arc::from(plan.id.as_str());
             let metrics = options.metrics.clone();
-            let connections = Arc::new(Connections::counted(
+            let connections = Arc::new(Connections::new(
                 metrics.as_ref().map(|metrics| metrics.connections(&label)),
-                Arc::clone(&in_flight),
             ));
+            listening.push(Arc::clone(&connections));
             let handshakes = HandshakeRecorder(metrics.clone().map(|metrics| (metrics, label)));
             let proxy = PanelProxy::new(
                 ListenerContext {
@@ -459,17 +463,21 @@ impl Generation {
             runtime: Some(runtime),
             shutdown,
             in_flight,
+            connections: listening,
             started_at: SystemTime::now(),
         })
     }
 
-    /// Stops accepting, lets in-flight requests and the first requests of
-    /// connections it accepted finish within `drain`, then closes what
-    /// remains, such as idle keep-alive connections.
+    /// Stops accepting and closes the connections idle between requests,
+    /// lets every other connection it accepted finish its request within
+    /// `drain`, the first one included, then closes what remains.
     async fn retire(mut self, drain: Duration) {
         let _ = self.shutdown.send(true);
+        for connections in &self.connections {
+            connections.retire();
+        }
         let deadline = Instant::now() + drain;
-        while self.in_flight.load(Relaxed) > 0 && Instant::now() < deadline {
+        while !self.drained() && Instant::now() < deadline {
             tokio::time::sleep(DRAIN_POLL).await;
         }
         tracing::info!(
@@ -483,6 +491,14 @@ impl Generation {
             let _ = tokio::task::spawn_blocking(move || runtime.shutdown_timeout(RUNTIME_SHUTDOWN))
                 .await;
         }
+    }
+
+    /// Whether every listener stopped and every connection it accepted
+    /// closed, including those accepted but not yet handed to the proxy.
+    fn drained(&self) -> bool {
+        self.connections
+            .iter()
+            .all(|connections| Arc::strong_count(connections) == 1)
     }
 }
 

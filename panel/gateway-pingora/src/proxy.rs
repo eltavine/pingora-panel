@@ -181,20 +181,6 @@ impl ProxyHttp for PanelProxy {
         }
     }
 
-    async fn early_request_filter(
-        &self,
-        session: &mut Session,
-        _ctx: &mut RequestContext,
-    ) -> pingora_core::Result<()> {
-        if let Some(socket) = session
-            .digest()
-            .and_then(|digest| digest.socket_digest.as_ref())
-        {
-            self.listener.connections.request_started(socket);
-        }
-        Ok(())
-    }
-
     async fn request_filter(
         &self,
         session: &mut Session,

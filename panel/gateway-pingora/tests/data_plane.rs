@@ -519,6 +519,45 @@ async fn a_connection_accepted_before_a_reload_is_answered() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_connection_idle_between_requests_closes_when_replaced() {
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    snapshot.sites.push(site(&["example.com"]));
+    snapshot.routes.push(route(
+        "hello",
+        1,
+        prefix("/"),
+        RouteAction::respond(200, Some("hello".into())),
+    ));
+    let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
+    wait_for(listen).await;
+
+    let mut kept = TcpStream::connect(listen).await.unwrap();
+    kept.write_all(b"GET / HTTP/1.1\r\nhost: example.com\r\n\r\n")
+        .await
+        .unwrap();
+    let mut answered = Vec::new();
+    while !answered.ends_with(b"hello") {
+        let mut chunk = [0; 512];
+        let read = kept.read(&mut chunk).await.unwrap();
+        assert!(read > 0, "the connection closed before its answer");
+        answered.extend_from_slice(&chunk[..read]);
+    }
+    gateway.plane.reload().await.unwrap();
+    // Well before the two seconds the replaced generation may drain for.
+    let read = tokio::time::timeout(Duration::from_secs(1), kept.read(&mut [0; 64]))
+        .await
+        .expect("the idle connection is closed")
+        .unwrap();
+    assert_eq!(read, 0);
+    assert_eq!(get(listen, Some("example.com"), "/", "").await.status, 200);
+    gateway.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn default_site_failover_reload_and_h2c() {
     let upstream = echo_upstream().await;
     let dead = free_address();

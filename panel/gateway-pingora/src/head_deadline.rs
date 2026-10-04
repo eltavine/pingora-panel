@@ -27,10 +27,13 @@ use std::{
     io,
     pin::Pin,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed},
+        atomic::{
+            AtomicBool,
+            Ordering::{Acquire, Relaxed, Release},
+        },
         Arc, Mutex, PoisonError,
     },
-    task::{ready, Context, Poll},
+    task::{ready, Context, Poll, Waker},
     time::Duration,
 };
 use tokio::{
@@ -49,22 +52,24 @@ const TIMED_OUT: &[u8] =
 const SHARDS: usize = 32;
 
 /// The watched connections of a listener, by their socket, so the proxy can
-/// tell one that a request on it started or is done.
+/// tell one that a request on it is done.
+///
+/// Only the listener's application and its connections may hold it: its
+/// generation waits for them to let go before it stops its workers.
 #[derive(Default)]
 pub(crate) struct Connections {
     shards: [Mutex<HashMap<usize, Arc<Watch>>>; SHARDS],
     /// Counts the open connections, when the gateway is measured.
     open: Option<Gauge>,
-    /// What the listener's generation owes before it may close: a count each
-    /// connection holds until its first request starts.
-    owed: Arc<AtomicUsize>,
+    /// Set once the listener retires: a connection idle between requests
+    /// closes instead of waiting for another.
+    retiring: AtomicBool,
 }
 
 impl Connections {
-    pub(crate) fn counted(open: Option<Gauge>, owed: Arc<AtomicUsize>) -> Self {
+    pub(crate) fn new(open: Option<Gauge>) -> Self {
         Self {
             open,
-            owed,
             ..Self::default()
         }
     }
@@ -104,19 +109,27 @@ impl Connections {
             .cloned()
     }
 
-    /// Releases what the connection of `socket` owed its generation: from
-    /// here on its request counts as in flight itself.
-    pub(crate) fn request_started(&self, socket: &Arc<SocketDigest>) {
-        if let Some(watch) = self.find(socket) {
-            watch.settle();
-        }
-    }
-
     /// Starts the deadline for the next request head on the connection of
     /// `socket`.
     pub(crate) fn request_done(&self, socket: &Arc<SocketDigest>) {
         if let Some(watch) = self.find(socket) {
             watch.due.store(true, Relaxed);
+        }
+    }
+
+    /// Closes the connections idle between requests, now and whenever one
+    /// becomes idle later. A connection's first request is still awaited, as
+    /// its client has had no answer yet.
+    pub(crate) fn retire(&self) {
+        self.retiring.store(true, Release);
+        for shard in &self.shards {
+            for watch in shard
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .values()
+            {
+                watch.wake();
+            }
         }
     }
 }
@@ -125,26 +138,26 @@ impl Connections {
 pub(crate) struct Watch {
     /// Set when a request is done and the next head is due.
     due: AtomicBool,
-    /// Whether the connection still holds its generation open, which it
-    /// does from its acceptance until its first request starts, so that a
-    /// generation being replaced serves what it accepted.
-    owing: AtomicBool,
-    owed: Arc<AtomicUsize>,
+    /// The task waiting for a later head, which retiring wakes.
+    idle: Mutex<Option<Waker>>,
 }
 
 impl Watch {
-    fn new(owed: &Arc<AtomicUsize>) -> Self {
-        owed.fetch_add(1, Relaxed);
-        Self {
-            due: AtomicBool::new(false),
-            owing: AtomicBool::new(true),
-            owed: Arc::clone(owed),
+    fn park(&self, waker: &Waker) {
+        let mut idle = self.idle.lock().unwrap_or_else(PoisonError::into_inner);
+        if !idle.as_ref().is_some_and(|parked| parked.will_wake(waker)) {
+            *idle = Some(waker.clone());
         }
     }
 
-    fn settle(&self) {
-        if self.owing.swap(false, Relaxed) {
-            self.owed.fetch_sub(1, Relaxed);
+    fn wake(&self) {
+        let parked = self
+            .idle
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(waker) = parked {
+            waker.wake();
         }
     }
 }
@@ -178,7 +191,7 @@ impl<A: ServerApp + Send + Sync + 'static> ServerApp for HeadDeadline<A> {
                 .into_any()
                 .downcast::<Watched>()
                 .expect("the stream was checked to be watched");
-            watched.await_next_head();
+            watched.await_later_head();
             watched
         } else {
             Box::new(Watched::new(
@@ -190,9 +203,10 @@ impl<A: ServerApp + Send + Sync + 'static> ServerApp for HeadDeadline<A> {
         self.app.process_new(watched, shutdown).await
     }
 
-    async fn cleanup(&self) {
-        self.app.cleanup().await;
-    }
+    /// Leaves out the proxy's cleanup, which drops every connection waiting
+    /// for a head, those just accepted included; retiring the listener's
+    /// connections closes only the idle ones.
+    async fn cleanup(&self) {}
 }
 
 enum State {
@@ -224,7 +238,10 @@ pub(crate) struct Watched {
 
 impl Watched {
     fn new(inner: Stream, timeout: Duration, connections: Arc<Connections>) -> Self {
-        let watch = Arc::new(Watch::new(&connections.owed));
+        let watch = Arc::new(Watch {
+            due: AtomicBool::new(false),
+            idle: Mutex::new(None),
+        });
         let registration = inner.get_socket_digest().map(|socket| {
             let key = Arc::as_ptr(&socket) as usize;
             connections.watch(key, Arc::clone(&watch));
@@ -249,6 +266,23 @@ impl Watched {
         self.state = State::Reading(Box::pin(tokio::time::sleep(self.timeout)));
         self.tail = 0;
         self.started = false;
+    }
+
+    /// Waits for the head of a request after the first, which a kept-alive
+    /// connection may never send.
+    fn await_later_head(&mut self) {
+        self.answer = false;
+        self.await_next_head();
+    }
+
+    /// Whether the listener retired, which ends a connection idle between
+    /// requests as if its client had closed it.
+    fn retired(&self, cx: &Context<'_>) -> bool {
+        let Some((connections, _)) = &self.registration else {
+            return false;
+        };
+        self.watch.park(cx.waker());
+        connections.retiring.load(Acquire)
     }
 
     /// Follows the bytes of a head until the empty line that ends it.
@@ -277,8 +311,7 @@ impl Watched {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
         if matches!(self.state, State::Arrived) && self.watch.due.swap(false, Relaxed) {
-            self.answer = false;
-            self.await_next_head();
+            self.await_later_head();
         }
         loop {
             match &mut self.state {
@@ -299,6 +332,9 @@ impl Watched {
                         self.state = State::Refusing { written: 0 };
                         continue;
                     }
+                    if !self.answer && !self.started && self.retired(cx) {
+                        return Poll::Ready(Ok(()));
+                    }
                     let before = buf.filled().len();
                     let read = ready!(Pin::new(&mut self.inner).poll_read(cx, buf));
                     if read.is_ok() {
@@ -314,7 +350,6 @@ impl Watched {
 
 impl Drop for Watched {
     fn drop(&mut self) {
-        self.watch.settle();
         if let Some((connections, key)) = self.registration.take() {
             connections.forget(key);
         }
