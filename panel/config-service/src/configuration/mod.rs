@@ -5,10 +5,12 @@ use crate::{
         EventRecorder, NewRevision, RevisionStore, DRAFT,
     },
 };
-use chrono::{DateTime, Utc};
-use config_proto_codec as codec;
+use async_trait::async_trait;
+use chrono::Utc;
 use panel_application::{
-    ActivatedDeployment, CommandContext, ConfigDocument, ContentHash, GatewayUseCases,
+    ActivatedDeployment, ApplyOutcome, ApplyRequest, CommandContext, ConfigDocument,
+    ConfigurationChange, ConfigurationOutput, ConfigurationPort, ConfigurationRead, ContentHash,
+    DraftInfo, GatewayUseCases, RequestScope,
 };
 use panel_config_dsl::{
     explain, format_files, import_nginx, plan::changes, schema::DIRECTIVES, syntax_tree, Sources,
@@ -17,29 +19,23 @@ use panel_config_dsl::{
 use panel_config_model::{
     compile, ApprovalRequest, ConfigModel, Revision, RevisionDetail, RevisionList,
 };
-use panel_contracts::config::v1::{self as wire, configuration_server::Configuration};
 use panel_domain::RevisionId;
 use panel_engine::{validate_engine_ir, EngineCapability};
 use panel_errors::{Diagnostic, DiagnosticSeverity, PanelError, Result, ValidationReport};
 use panel_event_contracts::config::v1 as event;
 use panel_ir::{RuntimeSnapshot, IR_SCHEMA_VERSION};
-use panel_service::trace_context;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{collections::BTreeMap, sync::Arc};
-use tonic::{Request, Response, Status};
 
 mod approval_operations;
 
 const DEFAULT_REVISION_PAGE: u32 = 50;
 const MAX_REVISION_PAGE: u32 = 500;
 
-/// Serves the configuration API: reads and changes of the draft, its files
-/// and revisions, and applying it to the gateway through the publication
-/// use cases.
-///
-/// Application failures travel in each response's `error` field; transport
-/// status codes are left to the transport.
+/// The configuration use cases behind the configuration port: reads and
+/// changes of the draft, its files and revisions, approvals, and applying the
+/// draft to the gateway through the publication use cases.
 pub struct ConfigurationService {
     drafts: Arc<dyn DraftStore>,
     revisions: Arc<dyn RevisionStore>,
@@ -187,7 +183,7 @@ impl ConfigurationService {
     async fn record_apply(
         &self,
         context: &CommandContext,
-        request: &wire::ApplyRequest,
+        request: &ApplyRequest,
         result: &Result<(DraftState, Applied)>,
     ) {
         let codes = |report: &ValidationReport| {
@@ -449,8 +445,8 @@ impl ConfigurationService {
 
     async fn apply_draft(
         &self,
-        context: CommandContext,
-        request: wire::ApplyRequest,
+        context: &CommandContext,
+        request: &ApplyRequest,
     ) -> Result<(DraftState, Applied)> {
         let draft = self.drafts.load().await?;
         let expected_version = request.expected_version;
@@ -473,7 +469,11 @@ impl ConfigurationService {
         self.revisions
             .settle(status.active_hash().map(ContentHash::as_str))
             .await?;
-        let note = Some(request.note.trim()).filter(|note| !note.is_empty());
+        let note = request
+            .note
+            .as_deref()
+            .map(str::trim)
+            .filter(|note| !note.is_empty());
         let content_hash = language::content_hash(&draft.sources);
         let record = NewRevision {
             draft_version: draft.version,
@@ -543,7 +543,7 @@ impl ConfigurationService {
         }
 
         let approved = match self
-            .approval_gate(&context, &request, &draft, content_hash.as_str(), note)
+            .approval_gate(context, request, &draft, content_hash.as_str(), note)
             .await?
         {
             Ok(approved) => approved,
@@ -607,30 +607,32 @@ impl ConfigurationService {
     }
 }
 
-fn timestamp(value: DateTime<Utc>) -> prost_types::Timestamp {
-    prost_types::Timestamp {
-        seconds: value.timestamp(),
-        nanos: i32::try_from(value.timestamp_subsec_nanos()).unwrap_or(0),
+/// The draft's version and application state, as the port reports it.
+fn draft_info(draft: &DraftState) -> DraftInfo {
+    DraftInfo {
+        version: draft.version,
+        updated_at: Some(draft.updated_at.into()),
+        applied_version: draft.applied_version,
+        applied_at: draft.applied_at.map(Into::into),
     }
 }
 
-fn encode_draft(draft: &DraftState) -> wire::Draft {
-    wire::Draft {
-        version: draft.version,
-        updated_at: Some(timestamp(draft.updated_at)),
-        applied_version: draft.applied_version,
-        applied_at: draft.applied_at.map(timestamp),
+fn answer(draft: &DraftState, content: Vec<u8>, etag: String) -> ConfigurationOutput {
+    ConfigurationOutput {
+        content,
+        etag: (!etag.is_empty()).then_some(etag),
+        draft: draft_info(draft),
     }
 }
 
 /// Binds an idempotency key to the exact change it was first used for.
-fn request_hash(request: &wire::ChangeRequest) -> ContentHash {
-    let mut bytes = Vec::with_capacity(request.content.len() + 128);
+fn request_hash(change: &ConfigurationChange) -> ContentHash {
+    let mut bytes = Vec::with_capacity(change.content.len() + 128);
     for part in [
-        request.operation.as_bytes(),
-        request.resource.as_bytes(),
-        request.if_match.as_bytes(),
-        &request.content,
+        change.operation.as_bytes(),
+        change.resource.as_bytes(),
+        change.if_match.as_deref().unwrap_or_default().as_bytes(),
+        &change.content,
     ] {
         bytes.extend_from_slice(&(part.len() as u64).to_be_bytes());
         bytes.extend_from_slice(part);
@@ -638,190 +640,176 @@ fn request_hash(request: &wire::ChangeRequest) -> ContentHash {
     ContentHash::from_bytes(&bytes)
 }
 
-#[tonic::async_trait]
-impl Configuration for ConfigurationService {
+impl ConfigurationService {
+    async fn change_draft(
+        &self,
+        context: &CommandContext,
+        request: &ConfigurationChange,
+    ) -> Result<(DraftState, ChangeOutput)> {
+        if let Some(output) = self.change_approvals(context, request).await? {
+            let draft = self.drafts.load().await?;
+            return Ok((draft, output));
+        }
+        if matches!(
+            request.operation.as_str(),
+            "revisions.note" | "revisions.restore" | "config.source.replace"
+        ) {
+            scope::require_everywhere(
+                context.site_scope(),
+                scope::WRITE,
+                "changing the configuration files or revisions",
+            )?;
+        }
+        if request.operation == "revisions.note" {
+            let body: NoteBody = decode(&request.content)?;
+            let note = body
+                .note
+                .as_deref()
+                .map(str::trim)
+                .filter(|note| !note.is_empty());
+            let id = revision_id(&request.resource)?;
+            let revision = self.revisions.set_note(id, note).await?;
+            store::record(
+                &*self.events,
+                ("revision", &id.to_string()),
+                &context.scope(),
+                context.actor(),
+                &event::RevisionNoted {
+                    revision: id,
+                    note: note.map(str::to_owned),
+                },
+            )
+            .await;
+            let draft = self.drafts.load().await?;
+            return Ok((
+                draft,
+                ChangeOutput {
+                    content: serde_json::to_vec(&revision).expect("API values serialize"),
+                    etag: String::new(),
+                },
+            ));
+        }
+        let restored = if request.operation == "revisions.restore" {
+            Some(self.revisions.get(revision_id(&request.resource)?).await?.1)
+        } else {
+            None
+        };
+        let if_match = request.if_match.as_deref().unwrap_or_default();
+        let scope = context.scope();
+        self.drafts
+            .change(
+                ChangeRequest {
+                    idempotency_key: context.idempotency_key(),
+                    operation: &request.operation,
+                    resource: &request.resource,
+                    request_hash: request_hash(request),
+                    scope: &scope,
+                    actor: context.actor(),
+                },
+                Box::new(|draft| {
+                    let next_etag = draft_etag(draft.version + 1);
+                    let text = match (request.operation.as_str(), request.resource.as_str()) {
+                        ("config.source.replace", "config/source") => {
+                            if !if_match.is_empty()
+                                && if_match != "*"
+                                && if_match != draft_etag(draft.version)
+                            {
+                                return Err(PanelError::precondition_failed(
+                                    "the draft changed since it was read; reload it and try again",
+                                ));
+                            }
+                            let body: FilesBody = decode(&request.content)?;
+                            Some(language::sources(body.files)?)
+                        }
+                        ("revisions.restore", _) => restored,
+                        _ => None,
+                    };
+                    if let Some(sources) = text {
+                        let (model, written, warnings) = language::replace(&sources, &draft.model)?;
+                        let content = serde_json::to_vec(&json!({
+                            "language_version": LANGUAGE_VERSION,
+                            "version": draft.version + 1,
+                            "etag": next_etag,
+                            "files": written,
+                            "diagnostics": warnings,
+                        }))
+                        .expect("API values serialize");
+                        return Ok(DraftChange {
+                            model,
+                            sources: written,
+                            output: ChangeOutput {
+                                content,
+                                etag: next_etag,
+                            },
+                        });
+                    }
+                    let (model, output) = operations::change(
+                        &draft.model,
+                        &request.operation,
+                        &request.resource,
+                        if_match,
+                        &request.content,
+                        Utc::now(),
+                    )?;
+                    scope::check_changes(&draft.model, &model, context.site_scope(), scope::WRITE)?;
+                    Ok(DraftChange {
+                        sources: language::follow(&draft.sources, &draft.model, &model),
+                        model,
+                        output: ChangeOutput {
+                            content: output.content,
+                            etag: output.etag,
+                        },
+                    })
+                }),
+            )
+            .await
+    }
+}
+
+#[async_trait]
+impl ConfigurationPort for ConfigurationService {
     async fn read(
         &self,
-        request: Request<wire::ReadRequest>,
-    ) -> std::result::Result<Response<wire::ReadResponse>, Status> {
-        let trace = trace_context(request.metadata());
-        let request = request.into_inner();
-        let result: Result<_> = async {
-            let request_scope = codec::decode_scope(request.context, trace)?;
-            let site_scope = request_scope.site_scope();
-            if WHOLE_READS.contains(&request.operation.as_str())
-                || request.operation.starts_with("approval")
-            {
-                scope::require_everywhere(
-                    site_scope,
-                    scope::READ,
-                    "this view of the whole configuration",
-                )?;
-            }
-            let draft = self.drafts.load().await?;
-            if let Some(output) = self
-                .read_approvals(
-                    &draft,
-                    &request.operation,
-                    &request.resource,
-                    &request.parameters,
-                )
-                .await?
-            {
-                return Ok((draft, output));
-            }
-            let output = match self
-                .read_language(
-                    &draft,
-                    &request.operation,
-                    &request.resource,
-                    &request.parameters,
-                )
+        scope: RequestScope,
+        read: ConfigurationRead,
+    ) -> Result<ConfigurationOutput> {
+        let site_scope = scope.site_scope();
+        if WHOLE_READS.contains(&read.operation.as_str()) || read.operation.starts_with("approval")
+        {
+            scope::require_everywhere(
+                site_scope,
+                scope::READ,
+                "this view of the whole configuration",
+            )?;
+        }
+        let draft = self.drafts.load().await?;
+        let output = match self
+            .read_approvals(&draft, &read.operation, &read.resource, &read.parameters)
+            .await?
+        {
+            Some(output) => output,
+            None => match self
+                .read_language(&draft, &read.operation, &read.resource, &read.parameters)
                 .await?
             {
                 Some(output) => output,
                 None => operations::read(
                     &scope::readable(&draft.model, site_scope),
-                    &request.operation,
-                    &request.resource,
-                    &request.parameters,
+                    &read.operation,
+                    &read.resource,
+                    &read.parameters,
                 )?,
-            };
-            Ok((draft, output))
-        }
-        .await;
-        Ok(Response::new(match result {
-            Ok((draft, output)) => wire::ReadResponse {
-                content: output.content,
-                etag: output.etag,
-                draft: Some(encode_draft(&draft)),
-                error: None,
             },
-            Err(error) => wire::ReadResponse {
-                error: Some((&error).into()),
-                ..wire::ReadResponse::default()
-            },
-        }))
+        };
+        Ok(answer(&draft, output.content, output.etag))
     }
 
     async fn change(
         &self,
-        request: Request<wire::ChangeRequest>,
-    ) -> std::result::Result<Response<wire::ChangeResponse>, Status> {
-        let trace = trace_context(request.metadata());
-        let request = request.into_inner();
-        let hash = request_hash(&request);
-        let context = match codec::decode_command(request.context.clone(), trace) {
-            Ok(context) => context,
-            Err(error) => {
-                return Ok(Response::new(wire::ChangeResponse {
-                    error: Some((&error).into()),
-                    ..wire::ChangeResponse::default()
-                }))
-            }
-        };
-        let result: Result<_> = async {
-            if let Some(output) = self.change_approvals(&context, &request).await? {
-                let draft = self.drafts.load().await?;
-                return Ok((draft, output));
-            }
-            if matches!(
-                request.operation.as_str(),
-                "revisions.note" | "revisions.restore" | "config.source.replace"
-            ) {
-                scope::require_everywhere(
-                    context.site_scope(),
-                    scope::WRITE,
-                    "changing the configuration files or revisions",
-                )?;
-            }
-            if request.operation == "revisions.note" {
-                let body: NoteBody = decode(&request.content)?;
-                let note = body.note.as_deref().map(str::trim).filter(|note| !note.is_empty());
-                let id = revision_id(&request.resource)?;
-                let revision = self.revisions.set_note(id, note).await?;
-                store::record(&*self.events,
-                        ("revision", &id.to_string()),
-                        &context.scope(),
-                        context.actor(),
-                        &event::RevisionNoted {
-                            revision: id,
-                            note: note.map(str::to_owned),
-                        },
-                    )
-                    .await;
-                let draft = self.drafts.load().await?;
-                return Ok((draft, ChangeOutput { content: serde_json::to_vec(&revision).expect("API values serialize"), etag: String::new() }));
-            }
-            let restored = if request.operation == "revisions.restore" {
-                Some(self.revisions.get(revision_id(&request.resource)?).await?.1)
-            } else {
-                None
-            };
-            let scope = context.scope();
-            self.drafts
-                .change(
-                    ChangeRequest {
-                        idempotency_key: context.idempotency_key(),
-                        operation: &request.operation,
-                        resource: &request.resource,
-                        request_hash: hash,
-                        scope: &scope,
-                        actor: context.actor(),
-                    },
-                    Box::new(|draft| {
-                        let next_etag = draft_etag(draft.version + 1);
-                        let text = match (request.operation.as_str(), request.resource.as_str()) {
-                            ("config.source.replace", "config/source") => {
-                                if !request.if_match.is_empty() && request.if_match != "*" && request.if_match != draft_etag(draft.version) {
-                                    return Err(PanelError::precondition_failed(
-                                        "the draft changed since it was read; reload it and try again",
-                                    ));
-                                }
-                                let body: FilesBody = decode(&request.content)?;
-                                Some(language::sources(body.files)?)
-                            }
-                            ("revisions.restore", _) => restored.clone(),
-                            _ => None,
-                        };
-                        if let Some(sources) = text {
-                            let (model, written, warnings) = language::replace(&sources, &draft.model)?;
-                            let content = serde_json::to_vec(&json!({
-                                "language_version": LANGUAGE_VERSION,
-                                "version": draft.version + 1,
-                                "etag": next_etag,
-                                "files": written,
-                                "diagnostics": warnings,
-                            }))
-                            .expect("API values serialize");
-                            return Ok(DraftChange {
-                                model,
-                                sources: written,
-                                output: ChangeOutput { content, etag: next_etag },
-                            });
-                        }
-                        let (model, output) = operations::change(
-                            &draft.model,
-                            &request.operation,
-                            &request.resource,
-                            &request.if_match,
-                            &request.content,
-                            Utc::now(),
-                        )?;
-                        scope::check_changes(&draft.model, &model, context.site_scope(), scope::WRITE)?;
-                        Ok(DraftChange {
-                            sources: language::follow(&draft.sources, &draft.model, &model),
-                            model,
-                            output: ChangeOutput {
-                                content: output.content,
-                                etag: output.etag,
-                            },
-                        })
-                    }),
-                )
-                .await
-        }
-        .await;
+        context: CommandContext,
+        change: ConfigurationChange,
+    ) -> Result<ConfigurationOutput> {
+        let result = self.change_draft(&context, &change).await;
         if let Err(error) = &result {
             store::record(
                 &*self.events,
@@ -829,72 +817,33 @@ impl Configuration for ConfigurationService {
                 &context.scope(),
                 context.actor(),
                 &event::ChangeRefused {
-                    operation: request.operation.clone(),
-                    resource: request.resource.clone(),
+                    operation: change.operation.clone(),
+                    resource: change.resource.clone(),
                     code: error.code.as_str().to_owned(),
                     message: error.message.clone(),
                 },
             )
             .await;
         }
-        Ok(Response::new(match result {
-            Ok((draft, output)) => wire::ChangeResponse {
-                content: output.content,
-                etag: output.etag,
-                draft: Some(encode_draft(&draft)),
-                error: None,
-            },
-            Err(error) => wire::ChangeResponse {
-                error: Some((&error).into()),
-                ..wire::ChangeResponse::default()
-            },
-        }))
+        let (draft, output) = result?;
+        Ok(answer(&draft, output.content, output.etag))
     }
 
-    async fn apply(
-        &self,
-        request: Request<wire::ApplyRequest>,
-    ) -> std::result::Result<Response<wire::ApplyResponse>, Status> {
-        let trace = trace_context(request.metadata());
-        let request = request.into_inner();
-        let context = match codec::decode_command(request.context.clone(), trace) {
-            Ok(context) => context,
-            Err(error) => {
-                return Ok(Response::new(wire::ApplyResponse {
-                    error: Some((&error).into()),
-                    ..wire::ApplyResponse::default()
-                }))
-            }
-        };
-        let result = self.apply_draft(context.clone(), request.clone()).await;
+    async fn apply(&self, context: CommandContext, request: ApplyRequest) -> Result<ApplyOutcome> {
+        let result = self.apply_draft(&context, &request).await;
         self.record_apply(&context, &request, &result).await;
-        Ok(Response::new(match result {
-            Ok((draft, Applied::Activated(deployment, revision))) => wire::ApplyResponse {
-                draft: Some(encode_draft(&draft)),
-                deployment: Some(codec::encode_activated(&deployment)),
-                revision,
-                ..wire::ApplyResponse::default()
-            },
-            Ok((draft, Applied::Rejected(report, revision))) => wire::ApplyResponse {
-                draft: Some(encode_draft(&draft)),
-                report: Some(codec::encode_report(&report)),
-                revision: revision.unwrap_or_default(),
-                ..wire::ApplyResponse::default()
-            },
-            Ok((draft, Applied::Checked(report))) => wire::ApplyResponse {
-                draft: Some(encode_draft(&draft)),
-                report: Some(codec::encode_report(&report)),
-                ..wire::ApplyResponse::default()
-            },
-            Ok((draft, Applied::AwaitingApproval(waiting))) => wire::ApplyResponse {
-                draft: Some(encode_draft(&draft)),
-                approval: serde_json::to_vec(&waiting).expect("API values serialize"),
-                ..wire::ApplyResponse::default()
-            },
-            Err(error) => wire::ApplyResponse {
-                error: Some((&error).into()),
-                ..wire::ApplyResponse::default()
-            },
-        }))
+        let (draft, applied) = result?;
+        let draft = draft_info(&draft);
+        Ok(match applied {
+            Applied::Activated(deployment, revision) => {
+                ApplyOutcome::applied(draft, deployment, revision)
+            }
+            Applied::Rejected(report, revision) => ApplyOutcome::rejected(draft, report, revision),
+            Applied::Checked(report) => ApplyOutcome::checked(draft, report),
+            Applied::AwaitingApproval(waiting) => ApplyOutcome::awaiting_approval(
+                draft,
+                serde_json::to_vec(&waiting).expect("API values serialize"),
+            ),
+        })
     }
 }

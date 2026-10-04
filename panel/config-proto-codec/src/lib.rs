@@ -5,9 +5,10 @@
 
 use gateway_proto_codec::{decode_hash, encode_hash};
 use panel_application::{
-    AbortOutcome, ActivatedDeployment, CommandContext, ConfigDocument, DeploymentOutcome,
-    GatewayStatus, IdempotencyKey, IdempotencyLookup, IdempotencyRecord, PreparedDeployment,
-    RequestDeadline, RequestId, RequestScope, SiteAccess, SiteScope, TraceContext,
+    AbortOutcome, ActivatedDeployment, ApplyOutcome, CommandContext, ConfigDocument,
+    DeploymentOutcome, DraftInfo, GatewayStatus, IdempotencyKey, IdempotencyLookup,
+    IdempotencyRecord, PreparedDeployment, RequestDeadline, RequestId, RequestScope, SiteAccess,
+    SiteScope, TraceContext,
 };
 use panel_contracts::{
     common::v1 as common,
@@ -16,6 +17,7 @@ use panel_contracts::{
 };
 use panel_domain::RevisionId;
 use panel_errors::{PanelError, Result, ValidationReport};
+use std::time::SystemTime;
 
 /// Requests issued without a human actor name the calling service instead.
 pub const SERVICE_ACTOR: &str = "service";
@@ -140,6 +142,101 @@ pub fn decode_report(value: Option<wire::ValidationReport>) -> Result<Validation
     Ok(ValidationReport {
         valid: value.valid,
         diagnostics: value.diagnostics.into_iter().map(Into::into).collect(),
+    })
+}
+
+pub fn encode_draft(draft: &DraftInfo) -> wire::Draft {
+    wire::Draft {
+        version: draft.version,
+        updated_at: draft.updated_at.map(Into::into),
+        applied_version: draft.applied_version,
+        applied_at: draft.applied_at.map(Into::into),
+    }
+}
+
+pub fn decode_draft(value: Option<wire::Draft>) -> Result<DraftInfo> {
+    let value =
+        value.ok_or_else(|| PanelError::internal("the configuration service sent no draft"))?;
+    let time = |value: Option<prost_types::Timestamp>| {
+        value.and_then(|value| SystemTime::try_from(value).ok())
+    };
+    Ok(DraftInfo {
+        version: value.version,
+        updated_at: time(value.updated_at),
+        applied_version: value.applied_version,
+        applied_at: time(value.applied_at),
+    })
+}
+
+/// How an apply ended, as the response to it.
+pub fn encode_apply_outcome(outcome: &ApplyOutcome) -> wire::ApplyResponse {
+    match outcome {
+        ApplyOutcome::Applied {
+            draft,
+            deployment,
+            revision,
+            ..
+        } => wire::ApplyResponse {
+            draft: Some(encode_draft(draft)),
+            deployment: Some(encode_activated(deployment)),
+            revision: *revision,
+            ..wire::ApplyResponse::default()
+        },
+        ApplyOutcome::Rejected {
+            draft,
+            report,
+            revision,
+            ..
+        } => wire::ApplyResponse {
+            draft: Some(encode_draft(draft)),
+            report: Some(encode_report(report)),
+            revision: revision.unwrap_or_default(),
+            ..wire::ApplyResponse::default()
+        },
+        ApplyOutcome::Checked { draft, report, .. } => wire::ApplyResponse {
+            draft: Some(encode_draft(draft)),
+            report: Some(encode_report(report)),
+            ..wire::ApplyResponse::default()
+        },
+        ApplyOutcome::AwaitingApproval { draft, request, .. } => wire::ApplyResponse {
+            draft: Some(encode_draft(draft)),
+            approval: request.clone(),
+            ..wire::ApplyResponse::default()
+        },
+        _ => wire::ApplyResponse {
+            error: Some(
+                (&PanelError::internal("the apply ended in a way this protocol cannot carry"))
+                    .into(),
+            ),
+            ..wire::ApplyResponse::default()
+        },
+    }
+}
+
+pub fn decode_apply_outcome(response: wire::ApplyResponse) -> Result<ApplyOutcome> {
+    decode_error(response.error)?;
+    let draft = decode_draft(response.draft)?;
+    if !response.approval.is_empty() {
+        return Ok(ApplyOutcome::awaiting_approval(draft, response.approval));
+    }
+    let revision = (response.revision != 0).then_some(response.revision);
+    Ok(match (response.deployment, revision) {
+        (Some(deployment), Some(revision)) => {
+            ApplyOutcome::applied(draft, decode_activated(Some(deployment))?, revision)
+        }
+        (Some(_), None) => {
+            return Err(PanelError::internal(
+                "the configuration service applied a draft without recording a revision",
+            ))
+        }
+        (None, _) => {
+            let report = decode_report(response.report)?;
+            if report.valid {
+                ApplyOutcome::checked(draft, report)
+            } else {
+                ApplyOutcome::rejected(draft, report, revision)
+            }
+        }
     })
 }
 

@@ -3,31 +3,12 @@ use async_trait::async_trait;
 use config_proto_codec as codec;
 use panel_application::{
     ApplyOutcome, ApplyRequest, CommandContext, ConfigurationChange, ConfigurationOutput,
-    ConfigurationPort, ConfigurationRead, DraftInfo, RequestScope,
+    ConfigurationPort, ConfigurationRead, RequestScope,
 };
 use panel_contracts::config::v1::{self as wire, configuration_client::ConfigurationClient};
-use panel_errors::{PanelError, Result};
+use panel_errors::Result;
 use panel_service::status_error;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tonic::transport::Channel;
-
-fn time(value: Option<prost_types::Timestamp>) -> Option<SystemTime> {
-    let value = value?;
-    let seconds = u64::try_from(value.seconds).ok()?;
-    let nanos = u32::try_from(value.nanos).ok()?;
-    UNIX_EPOCH.checked_add(Duration::new(seconds, nanos))
-}
-
-fn draft(value: Option<wire::Draft>) -> Result<DraftInfo> {
-    let value =
-        value.ok_or_else(|| PanelError::internal("the configuration service sent no draft"))?;
-    Ok(DraftInfo {
-        version: value.version,
-        updated_at: time(value.updated_at),
-        applied_version: value.applied_version,
-        applied_at: time(value.applied_at),
-    })
-}
 
 fn output(
     content: Vec<u8>,
@@ -37,7 +18,7 @@ fn output(
     Ok(ConfigurationOutput {
         content,
         etag: (!etag.is_empty()).then_some(etag),
-        draft: draft(state)?,
+        draft: codec::decode_draft(state)?,
     })
 }
 
@@ -110,29 +91,6 @@ impl ConfigurationPort for ConfigPublicationClient {
             .await
             .map_err(status_error)?
             .into_inner();
-        codec::decode_error(response.error)?;
-        let draft = draft(response.draft)?;
-        if !response.approval.is_empty() {
-            return Ok(ApplyOutcome::awaiting_approval(draft, response.approval));
-        }
-        let revision = (response.revision != 0).then_some(response.revision);
-        Ok(match (response.deployment, revision) {
-            (Some(deployment), Some(revision)) => {
-                ApplyOutcome::applied(draft, codec::decode_activated(Some(deployment))?, revision)
-            }
-            (Some(_), None) => {
-                return Err(PanelError::internal(
-                    "the configuration service applied a draft without recording a revision",
-                ))
-            }
-            (None, _) => {
-                let report = codec::decode_report(response.report)?;
-                if report.valid {
-                    ApplyOutcome::checked(draft, report)
-                } else {
-                    ApplyOutcome::rejected(draft, report, revision)
-                }
-            }
-        })
+        codec::decode_apply_outcome(response)
     }
 }

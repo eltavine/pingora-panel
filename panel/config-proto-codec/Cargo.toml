@@ -13,3 +13,4 @@ panel-application.workspace = true
 panel-contracts.workspace = true
 panel-domain.workspace = true
 panel-errors.workspace = true
+prost-types.workspace = true

@@ -8,11 +8,10 @@ use crate::{
     store::{ChangeOutput, DraftState},
 };
 use chrono::{DateTime, Utc};
-use panel_application::CommandContext;
+use panel_application::{ApplyRequest, CommandContext, ConfigurationChange};
 use panel_config_model::{
     ApprovalPolicy, ApprovalPolicyInput, ApprovalRequest, ApprovalRequestList,
 };
-use panel_contracts::config::v1 as wire;
 use panel_errors::{PanelError, Result};
 use serde::Deserialize;
 use serde_json::json;
@@ -100,7 +99,7 @@ impl ConfigurationService {
     pub(super) async fn change_approvals(
         &self,
         context: &CommandContext,
-        request: &wire::ChangeRequest,
+        request: &ConfigurationChange,
     ) -> Result<Option<ChangeOutput>> {
         let scope = context.scope();
         let actor = context.actor();
@@ -163,7 +162,7 @@ impl ConfigurationService {
     pub(super) async fn approval_gate(
         &self,
         context: &CommandContext,
-        request: &wire::ApplyRequest,
+        request: &ApplyRequest,
         draft: &DraftState,
         content_hash: &str,
         note: Option<&str>,
@@ -183,10 +182,10 @@ impl ConfigurationService {
             return Ok(Ok(None));
         }
         let scope = context.scope();
-        if !request.bypass_reason.is_empty() || !request.bypass_incident.is_empty() {
+        if let Some(bypass) = &request.bypass {
             let bypass = Bypass {
-                reason: request.bypass_reason.clone(),
-                incident: request.bypass_incident.clone(),
+                reason: bypass.reason.clone(),
+                incident: bypass.incident.clone(),
             };
             self.approvals
                 .bypassed(&bypass, content_hash, &covering, &scope, context.actor())

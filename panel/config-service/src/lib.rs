@@ -24,6 +24,7 @@ mod recording;
 mod revisions;
 mod scope;
 pub mod store;
+mod transport;
 
 pub use approvals::SqliteApprovals;
 pub use configuration::ConfigurationService;
@@ -35,6 +36,7 @@ pub use reconcile::{Reconciler, Reconciliation, ReconciliationCheck, Reconciliat
 pub use recording::RecordingUseCases;
 pub use revisions::SqliteRevisions;
 pub use store::DraftState;
+pub use transport::ConfigurationTransport;
 
 use gateway_grpc_client::{GatewayGrpcClient, GatewayGrpcClientConfig};
 use panel_application::{GatewayService, GatewayUseCases, IdempotentGatewayUseCases};
@@ -170,13 +172,15 @@ pub fn process(
             Ok(())
         })
         .with_grpc_service(
-            ConfigurationServer::new(ConfigurationService::new(
-                drafts,
-                revisions,
-                approvals,
-                Arc::clone(&use_cases),
-                Arc::new(events),
-            ))
+            ConfigurationServer::new(ConfigurationTransport::new(Arc::new(
+                ConfigurationService::new(
+                    drafts,
+                    revisions,
+                    approvals,
+                    Arc::clone(&use_cases),
+                    Arc::new(events),
+                ),
+            )))
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES),
         )

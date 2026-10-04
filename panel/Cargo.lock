@@ -826,7 +826,6 @@ dependencies = [
  "panel-contracts",
  "panel-errors",
  "panel-service",
- "prost-types",
  "tokio",
  "tonic",
  "uuid",
@@ -841,6 +840,7 @@ dependencies = [
  "panel-contracts",
  "panel-domain",
  "panel-errors",
+ "prost-types",
 ]
 
 [[package]]
