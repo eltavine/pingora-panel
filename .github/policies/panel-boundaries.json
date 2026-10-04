@@ -187,9 +187,12 @@
         "panel-control-runtime",
         "panel-domain",
         "panel-errors",
+        "panel-event-contracts",
+        "panel-events",
         "panel-platform",
         "panel-platform-codec",
         "panel-postgres",
+        "panel-secrets",
         "panel-service"
       ]
     },

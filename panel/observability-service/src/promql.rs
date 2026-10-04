@@ -68,7 +68,7 @@ impl Scope {
 }
 
 /// A PromQL string literal.
-fn quoted(value: &str) -> String {
+pub(crate) fn quoted(value: &str) -> String {
     let mut quoted = String::with_capacity(value.len() + 2);
     quoted.push('"');
     for character in value.chars() {

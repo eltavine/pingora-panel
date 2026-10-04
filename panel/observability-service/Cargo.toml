@@ -8,14 +8,20 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+base64.workspace = true
+chrono.workspace = true
+getrandom.workspace = true
 ipnet.workspace = true
 panel-contracts.workspace = true
 panel-control-runtime.workspace = true
 panel-domain.workspace = true
 panel-errors.workspace = true
+panel-event-contracts.workspace = true
+panel-events.workspace = true
 panel-platform.workspace = true
 panel-platform-codec.workspace = true
 panel-postgres.workspace = true
+panel-secrets.workspace = true
 panel-service.workspace = true
 prometheus-http-query.workspace = true
 prost-types.workspace = true
@@ -24,10 +30,18 @@ reqwest = { workspace = true, features = ["rustls-no-provider"] }
 rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sqlx.workspace = true
+standardwebhooks.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
+tokio-util.workspace = true
 tonic.workspace = true
+tracing.workspace = true
+url.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 axum.workspace = true
+panel-postgres = { workspace = true, features = ["test-support"] }
 serde_json.workspace = true
