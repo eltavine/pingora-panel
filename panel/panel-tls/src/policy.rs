@@ -156,6 +156,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::PeerAddress;
     use chrono::Utc;
     use panel_pki::{CertificateAuthority, DEFAULT_AUTHORITY_VALIDITY};
     use rustls_pki_types::{pem::PemObject, CertificateDer};
@@ -188,7 +189,7 @@ mod tests {
 
     fn peer(service: &str) -> PeerIdentity {
         PeerIdentity {
-            remote: "127.0.0.1:1".parse().unwrap(),
+            remote: PeerAddress::Tcp("127.0.0.1:1".parse().unwrap()),
             certificate: Some(certificate(service)),
         }
     }
@@ -225,7 +226,7 @@ mod tests {
             tonic::Code::PermissionDenied
         );
         let anonymous = PeerIdentity {
-            remote: "127.0.0.1:1".parse().unwrap(),
+            remote: PeerAddress::Tcp("127.0.0.1:1".parse().unwrap()),
             certificate: None,
         };
         assert_eq!(

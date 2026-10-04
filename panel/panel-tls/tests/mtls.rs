@@ -174,6 +174,79 @@ async fn services_authenticate_each_other_by_identity() {
     assert!(refused, "a client without a certificate is refused");
 }
 
+#[cfg(unix)]
+async fn serve_unix(path: &std::path::Path, users: Vec<u32>, credentials: Arc<TlsCredentials>) {
+    let listener = tokio::net::UnixListener::bind(path).unwrap();
+    let (reporter, health) = tonic_health::server::health_reporter();
+    reporter
+        .set_service_status("", tonic_health::ServingStatus::Serving)
+        .await;
+    tokio::spawn(
+        Server::builder()
+            .layer(PeerPolicy::new(TrustDomain::default()))
+            .add_service(health)
+            .serve_with_incoming(panel_tls::incoming_unix(
+                listener,
+                users,
+                credentials,
+                Duration::from_secs(5),
+            )),
+    );
+}
+
+#[cfg(unix)]
+async fn check_unix(
+    path: &std::path::Path,
+    peer: &str,
+    client: Arc<TlsCredentials>,
+) -> Result<(), String> {
+    let channel = panel_tls::unix_channel(
+        path,
+        &identity(peer),
+        client,
+        Duration::from_secs(2),
+        Duration::from_secs(2),
+    )
+    .unwrap();
+    HealthClient::new(channel)
+        .check(HealthCheckRequest {
+            service: String::new(),
+        })
+        .await
+        .map(drop)
+        .map_err(|status| format!("{status:?}"))
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn unix_sockets_admit_listed_users_then_authenticate_identities() {
+    use std::os::unix::fs::MetadataExt;
+
+    let installation = Installation::new("unix");
+    let server = installation.credentials("ops-agent");
+    let client = installation.credentials("panel-api");
+    let me = std::fs::metadata(&installation.root).unwrap().uid();
+
+    let admitted = installation.root.join("a.sock");
+    serve_unix(&admitted, vec![me], Arc::clone(&server)).await;
+    check_unix(&admitted, "ops-agent", Arc::clone(&client))
+        .await
+        .unwrap();
+    assert!(
+        check_unix(&admitted, "gatewayd", Arc::clone(&client))
+            .await
+            .is_err(),
+        "the server is not the gateway"
+    );
+
+    let refused = installation.root.join("r.sock");
+    serve_unix(&refused, vec![me.wrapping_add(1)], server).await;
+    assert!(
+        check_unix(&refused, "ops-agent", client).await.is_err(),
+        "a user off the list is refused before its handshake"
+    );
+}
+
 #[tokio::test]
 async fn rotated_credentials_reach_new_connections_without_a_restart() {
     let installation = Installation::new("rotation");

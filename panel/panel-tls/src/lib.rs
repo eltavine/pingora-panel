@@ -17,6 +17,10 @@ mod policy;
 mod server;
 
 pub use client::{address_of, channel, MtlsConnector};
+#[cfg(unix)]
+pub use client::{unix_channel, UnixMtlsConnector};
 pub use credentials::TlsCredentials;
 pub use policy::{PeerPolicy, PeerPolicyService};
-pub use server::{incoming, PeerIdentity, TlsConnection};
+#[cfg(unix)]
+pub use server::incoming_unix;
+pub use server::{incoming, PeerAddress, PeerIdentity, TlsConnection};
