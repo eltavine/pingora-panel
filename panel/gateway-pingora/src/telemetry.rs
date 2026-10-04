@@ -35,11 +35,18 @@ pub struct GatewayMetrics {
     pub(crate) client: HttpClientMetrics,
     connections: Family<ListenerLabels, Gauge>,
     handshakes: Family<HandshakeLabels, Counter>,
+    domains: Family<DomainLabels, Counter>,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, EncodeLabelSet)]
 struct ListenerLabels {
     listener: Arc<str>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, EncodeLabelSet)]
+struct DomainLabels {
+    site: Arc<str>,
+    domain: Arc<str>,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, EncodeLabelSet)]
@@ -56,6 +63,7 @@ impl GatewayMetrics {
             client: HttpClientMetrics::register(registry),
             connections: Family::default(),
             handshakes: Family::default(),
+            domains: Family::default(),
         };
         registry.register(
             "pingora_panel_gateway_open_connections",
@@ -67,6 +75,11 @@ impl GatewayMetrics {
             "Number of completed TLS handshakes",
             gateway.handshakes.clone(),
         );
+        registry.register(
+            "pingora_panel_gateway_domain_requests",
+            "Number of requests by the configured domain that took them",
+            gateway.domains.clone(),
+        );
         gateway
     }
 
@@ -77,6 +90,13 @@ impl GatewayMetrics {
                 listener: Arc::clone(listener),
             })
             .clone()
+    }
+
+    /// Counts a request that `site` took by its configured `domain`.
+    pub(crate) fn domain_request(&self, site: Arc<str>, domain: Arc<str>) {
+        self.domains
+            .get_or_create(&DomainLabels { site, domain })
+            .inc();
     }
 
     /// Counts a handshake completed on `listener`.
@@ -141,6 +161,7 @@ impl Collector for Configuration {
 #[derive(Debug, Default)]
 pub(crate) struct SnapshotLabels {
     sites: Vec<SiteLabels>,
+    domains: Vec<Arc<str>>,
     pools: Vec<PoolLabels>,
 }
 
@@ -179,6 +200,11 @@ impl SnapshotLabels {
                         .collect(),
                 })
                 .collect(),
+            domains: routing
+                .domains()
+                .iter()
+                .map(|domain| Arc::from(domain.as_str()))
+                .collect(),
             pools: pools
                 .iter()
                 .map(|pool| PoolLabels {
@@ -200,6 +226,10 @@ impl SnapshotLabels {
 
     pub(crate) fn site(&self, site: usize) -> Option<Arc<str>> {
         self.sites.get(site).map(|labels| Arc::clone(&labels.id))
+    }
+
+    pub(crate) fn domain(&self, domain: usize) -> Option<Arc<str>> {
+        self.domains.get(domain).cloned()
     }
 
     pub(crate) fn route(&self, site: usize, route: usize) -> Option<Arc<str>> {

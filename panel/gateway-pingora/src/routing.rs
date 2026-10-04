@@ -22,6 +22,8 @@ pub(crate) struct RoutingTable {
     exact: HashMap<String, HostEntry>,
     /// Keyed by the parent of `*.parent`, so a lookup strips one label.
     wildcard: HashMap<String, HostEntry>,
+    /// Every enabled domain as configured, such as `*.shop.example`.
+    domains: Vec<String>,
     sites: Vec<SiteRoutes>,
     default_sites: HashMap<String, usize>,
 }
@@ -29,6 +31,8 @@ pub(crate) struct RoutingTable {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct HostEntry {
     pub site: usize,
+    /// The configured domain that matched, among the table's `domains`.
+    pub domain: usize,
     pub redirect_to_primary: bool,
 }
 
@@ -111,6 +115,7 @@ impl RoutingTable {
             access: AccessPlan::resolve(&[&snapshot.logging.access])?,
             exact: HashMap::new(),
             wildcard: HashMap::new(),
+            domains: Vec::new(),
             sites: Vec::new(),
             default_sites: HashMap::new(),
         };
@@ -161,8 +166,10 @@ impl RoutingTable {
             for domain in &domains {
                 let entry = HostEntry {
                     site: index,
+                    domain: table.domains.len(),
                     redirect_to_primary: domain.redirect_to_primary,
                 };
+                table.domains.push(domain.host.as_str().to_owned());
                 match domain.host.as_str().strip_prefix("*.") {
                     Some(parent) => table.wildcard.insert(parent.to_owned(), entry),
                     None => table.exact.insert(domain.host.as_str().to_owned(), entry),
@@ -271,6 +278,10 @@ impl RoutingTable {
             host.split_once('.')
                 .and_then(|(_, parent)| self.wildcard.get(parent).copied())
         })
+    }
+
+    pub(crate) fn domains(&self) -> &[String] {
+        &self.domains
     }
 
     pub(crate) fn site(&self, index: usize) -> &SiteRoutes {

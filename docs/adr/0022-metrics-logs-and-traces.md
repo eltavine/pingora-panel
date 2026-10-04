@@ -40,7 +40,11 @@ dots become underscores, the unit becomes a suffix and counters end in
   `http_server_response_body_size_bytes`, whose sums are the traffic in and
   out;
 - `http_client_request_duration_seconds` for upstream requests, by
-  `upstream` and `error_type`.
+  `upstream` and `error_type`;
+- `pingora_panel_gateway_domain_requests_total`, the requests a site took
+  by one of its domains, by `site` and the `domain` as configured, such as
+  `*.shop.example`; requests a listener's default site takes for a host
+  no domain names are not counted.
 
 A method outside the known set is recorded as `_OTHER`, as the conventions
 require. Sites, routes and upstreams are identifiers from the active

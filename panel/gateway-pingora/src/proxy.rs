@@ -121,6 +121,8 @@ pub(crate) struct RequestContext {
     _in_flight: InFlight,
     snapshot: Option<Arc<PreparedPingoraSnapshot>>,
     site: Option<usize>,
+    /// The configured domain the site was found by, if it was.
+    domain: Option<usize>,
     route: Option<usize>,
     pool: Option<usize>,
     tried: Vec<usize>,
@@ -162,6 +164,7 @@ impl ProxyHttp for PanelProxy {
             _in_flight: InFlight(Arc::clone(&self.in_flight)),
             snapshot: None,
             site: None,
+            domain: None,
             route: None,
             pool: None,
             tried: Vec::new(),
@@ -247,6 +250,7 @@ impl ProxyHttp for PanelProxy {
         let entry = routing
             .lookup(host_name)
             .filter(|entry| routing.site(entry.site).serves(&self.listener.id));
+        ctx.domain = entry.map(|entry| entry.domain);
         let (site_index, alias) = match entry {
             Some(entry) => (entry.site, entry.redirect_to_primary),
             None => match routing.default_site(&self.listener.id) {
@@ -735,6 +739,12 @@ impl PanelProxy {
             u64::try_from(session.body_bytes_read()).unwrap_or(u64::MAX),
             u64::try_from(session.body_bytes_sent()).unwrap_or(u64::MAX),
         );
+        let domain = labels
+            .zip(ctx.domain)
+            .and_then(|(labels, domain)| labels.domain(domain));
+        if let Some((site, domain)) = measured.site.zip(domain) {
+            metrics.domain_request(site, domain);
+        }
         drop(active);
     }
 
