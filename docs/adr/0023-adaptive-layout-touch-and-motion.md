@@ -62,10 +62,17 @@ themselves by their container rather than by the window.
 reduced motion, animations and transitions are cut to a single frame and
 spinners stop, so a state still changes but nothing moves.
 
-**Performance.** The first page loads at most 200 KiB of compressed scripts
-and styles: features load with their routes, the configuration editor loads
+**Performance.** The first page loads at most 200 KiB of scripts and styles
+as served: features load with their routes, the configuration editor loads
 only where it is used, and only the messages of the chosen language load at
-startup; the other language loads when someone switches to it.
+startup; the other language loads when someone switches to it. The build
+compresses the console with Brotli and gzip, and the management API sends
+the encoding a browser accepts
+([RFC 9110](https://www.rfc-editor.org/rfc/rfc9110#name-content-negotiation))
+without compressing per request. Assets named by their content hash are
+cached for a year as
+[immutable](https://www.rfc-editor.org/rfc/rfc8246); the page and other files
+are revalidated, and a missing asset is a 404 rather than the page.
 
 ## Consequences
 
@@ -76,4 +83,5 @@ startup; the other language loads when someone switches to it.
 - Control sizes depend on the pointer, so tests check them on touch devices
   as well as on the desktop.
 - Tests render every page with the sample data of the preview mode at 320,
-  700 and 1024 px and fail when one scrolls sideways.
+  700 and 1024 px and fail when one scrolls sideways, and add up what the
+  first page loads against the budget.

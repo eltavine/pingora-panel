@@ -1,15 +1,30 @@
 import { fileURLToPath, URL } from 'node:url'
+import { constants } from 'node:zlib'
 import securityHeaders from './security-headers.json' with { type: 'json' }
 
 import { defineConfig, searchForWorkspaceRoot } from 'vite'
 import tailwindcss from '@tailwindcss/vite'
 import vue from '@vitejs/plugin-vue'
 import { msw } from 'msw/vite'
+import { compression, defineAlgorithm } from 'vite-plugin-compression2'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => ({
   // `vite --mode mock` answers API calls in the browser instead (src/mocks).
-  plugins: [vue(), tailwindcss(), ...(mode === 'mock' ? [msw()] : [])],
+  plugins: [
+    vue(),
+    tailwindcss(),
+    ...(mode === 'mock' ? [msw()] : []),
+    // The management API serves these instead of compressing per request.
+    compression({
+      algorithms: [
+        defineAlgorithm('brotliCompress', {
+          params: { [constants.BROTLI_PARAM_QUALITY]: constants.BROTLI_MAX_QUALITY },
+        }),
+        defineAlgorithm('gzip', { level: constants.Z_BEST_COMPRESSION }),
+      ],
+    }),
+  ],
   server: {
     // The management API serves the console in production; in development
     // Vite forwards API calls to it.
