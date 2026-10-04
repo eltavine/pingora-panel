@@ -1,0 +1,13 @@
+// Lets the Pingora Panel host agent start, stop and restart the gateway's
+// systemd unit, and no other unit. Installed as
+// /etc/polkit-1/rules.d/50-pingora-panel-ops-agent.rules.
+polkit.addRule(function (action, subject) {
+  if (
+    action.id === "org.freedesktop.systemd1.manage-units" &&
+    subject.user === "pingora-panel-ops" &&
+    action.lookup("unit") === "pingora-panel-gatewayd.service" &&
+    ["start", "stop", "restart"].indexOf(action.lookup("verb")) !== -1
+  ) {
+    return polkit.Result.YES;
+  }
+});
