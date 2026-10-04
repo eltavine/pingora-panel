@@ -24,6 +24,7 @@ use gateway_grpc_client::{GatewayGrpcClient, GatewayGrpcClientConfig};
 use identity_oidc::OidcClient;
 use identity_postgres::PgIdentityStore;
 use observability_grpc_client::ObservabilityClient;
+use ops_grpc_client::OpsAgentClient;
 use panel_api::{router_with_config, AccessSettings, ApiConfig, ApiState};
 use panel_application::{RecordedLogs, RecordedRuntime};
 use panel_control_runtime::{ControlPlaneProcess, DefaultAddresses, ProcessSettings};
@@ -57,6 +58,8 @@ pub const OBSERVABILITY_URL_ENV: &str = "PINGORA_PANEL_OBSERVABILITY_URL";
 pub const AUTOMATION_URL_ENV: &str = "PINGORA_PANEL_AUTOMATION_URL";
 /// The gateway's runtime API, for data plane operations and upstream health.
 pub const GATEWAY_URL_ENV: &str = "PINGORA_PANEL_GATEWAY_URL";
+/// The host agent's Unix socket; without it host actions are not offered.
+pub const OPS_AGENT_SOCKET_ENV: &str = "PINGORA_PANEL_OPS_AGENT_SOCKET";
 /// Directory holding the built web console; the API is served without it.
 pub const WEB_ROOT_ENV: &str = "PINGORA_PANEL_WEB_ROOT";
 /// The one-time token that creates the first account; `_FILE` names a file
@@ -120,6 +123,7 @@ pub fn process(
     let observability_url = env
         .string(OBSERVABILITY_URL_ENV)?
         .unwrap_or_else(|| DEFAULT_OBSERVABILITY_URL.into());
+    let agent_socket = env.string(OPS_AGENT_SOCKET_ENV)?.map(PathBuf::from);
     let web_root = PathBuf::from(
         env.string(WEB_ROOT_ENV)?
             .unwrap_or_else(|| DEFAULT_WEB_ROOT.into()),
@@ -189,6 +193,9 @@ pub fn process(
         Some(channel) => ObservabilityClient::from_channel(channel),
         None => ObservabilityClient::connect_lazy(observability_url)?,
     };
+    let agent = agent_socket
+        .map(|socket| host_agent(&process, &socket))
+        .transpose()?;
     let audit_health = audit.health_check();
     let observability_health = observability.health_check();
     let automation_health = automation.health_check();
@@ -214,6 +221,10 @@ pub fn process(
     let access = AccessSettings {
         origins,
         ..AccessSettings::default()
+    };
+    let process = match &agent {
+        Some(agent) => process.with_check(Arc::new(agent.health_check()), Impact::Informational),
+        None => process,
     };
     Ok(process
         .with_migrations(identity_postgres::MIGRATIONS)
@@ -249,6 +260,10 @@ pub fn process(
                 running.spawn(recheck_sessions(sign_ins, running.shutdown_token()));
             }
             let state = state.with_workload_identity(workloads);
+            let state = match agent {
+                Some(agent) => state.with_host_agent(Arc::new(agent)),
+                None => state,
+            };
             let state = match providers {
                 Some((directory, sign_ins)) => state.with_identity_providers(directory, sign_ins),
                 None => state,
@@ -263,6 +278,20 @@ pub fn process(
             });
             Ok(())
         }))
+}
+
+/// The host agent on its socket, over mutual TLS.
+#[cfg(unix)]
+fn host_agent(process: &ControlPlaneProcess, socket: &std::path::Path) -> Result<OpsAgentClient> {
+    let channel = process.peer_unix_channel(socket, ServiceName::new("ops-agent")?)?;
+    Ok(OpsAgentClient::from_channel(channel))
+}
+
+#[cfg(not(unix))]
+fn host_agent(_: &ControlPlaneProcess, _: &std::path::Path) -> Result<OpsAgentClient> {
+    Err(PanelError::invalid_argument(format!(
+        "{OPS_AGENT_SOCKET_ENV} names a Unix socket, which this platform lacks"
+    )))
 }
 
 /// Identity providers need master keys to seal their secrets, and sign-ins

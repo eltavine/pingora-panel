@@ -23,6 +23,7 @@ gateway-grpc-client.workspace = true
 identity-oidc.workspace = true
 identity-postgres.workspace = true
 observability-grpc-client.workspace = true
+ops-grpc-client.workspace = true
 panel-api.workspace = true
 panel-application.workspace = true
 panel-control-runtime.workspace = true
