@@ -71,6 +71,7 @@ async fn the_agent_answers_panel_api_alone_within_its_configuration() {
             credentials: agent.directory().to_path_buf(),
             trust_domain: TrustDomain::default(),
             directories: vec![(DirectoryKind::Logs, logs.clone())],
+            listeners: false,
         },
         async move {
             let _ = stopped.await;
@@ -95,15 +96,21 @@ async fn the_agent_answers_panel_api_alone_within_its_configuration() {
     assert_eq!(version.component, "ops-agent");
     assert_eq!(version.protocol, "pingora.panel.ops.v1@1..=1");
     assert_eq!(version.capability_set, "directories@1");
-    assert_eq!(description.capabilities.len(), 1);
+    let state = |capability| {
+        description
+            .capabilities
+            .iter()
+            .find(|status| status.capability() == capability)
+            .map(|status| status.state())
+    };
     assert_eq!(
-        description.capabilities[0].capability(),
-        Capability::Directories
+        state(Capability::Directories),
+        Some(CapabilityState::Available)
     );
-    assert_eq!(
-        description.capabilities[0].state(),
-        CapabilityState::Available
-    );
+    assert!(matches!(
+        state(Capability::Listeners),
+        Some(CapabilityState::NotEnabled | CapabilityState::Unsupported)
+    ));
 
     let usage = DirectoriesClient::new(channel(&socket, panel_api, "panel-api"))
         .usage(DirectoriesUsageRequest::default())

@@ -18,6 +18,8 @@ pub const CREDENTIALS_DIRECTORY_ENV: &str = "CREDENTIALS_DIRECTORY";
 pub const CONFIGURATION_DIR_ENV: &str = "PINGORA_PANEL_OPS_CONFIGURATION_DIR";
 pub const LOGS_DIR_ENV: &str = "PINGORA_PANEL_OPS_LOGS_DIR";
 pub const CERTIFICATES_DIR_ENV: &str = "PINGORA_PANEL_OPS_CERTIFICATES_DIR";
+/// `on` to name the processes listening on TCP ports.
+pub const LISTENERS_ENV: &str = "PINGORA_PANEL_OPS_LISTENERS";
 
 pub const DEFAULT_SOCKET: &str = "/run/pingora-panel-ops/agent.sock";
 /// The user and group every Panel container runs as.
@@ -35,6 +37,7 @@ pub struct AgentConfig {
     pub trust_domain: TrustDomain,
     /// The directories whose sizes the agent reports, by what they hold.
     pub directories: Vec<(DirectoryKind, PathBuf)>,
+    pub listeners: bool,
 }
 
 impl AgentConfig {
@@ -89,6 +92,15 @@ impl AgentConfig {
                 directories.push((kind, path));
             }
         }
+        let listeners = match env.string(LISTENERS_ENV)?.as_deref() {
+            None | Some("off" | "false" | "0" | "no") => false,
+            Some("on" | "true" | "1" | "yes") => true,
+            Some(_) => {
+                return Err(PanelError::invalid_argument(format!(
+                    "{LISTENERS_ENV} is on or off"
+                )))
+            }
+        };
         Ok(Self {
             socket,
             socket_group: Some(socket_group),
@@ -96,6 +108,7 @@ impl AgentConfig {
             credentials: PathBuf::from(credentials),
             trust_domain,
             directories,
+            listeners,
         })
     }
 }
@@ -130,6 +143,7 @@ mod tests {
         assert_eq!(config.peer_users, vec![PANEL_USER]);
         assert_eq!(config.credentials, PathBuf::from("/run/credentials/agent"));
         assert!(config.directories.is_empty());
+        assert!(!config.listeners);
     }
 
     #[test]
@@ -139,8 +153,10 @@ mod tests {
             (SOCKET_GROUP_ENV, "1000"),
             (PEER_USERS_ENV, "1000, 65532"),
             (LOGS_DIR_ENV, "/var/log/pingora-panel"),
+            (LISTENERS_ENV, "on"),
         ])
         .unwrap();
+        assert!(config.listeners);
         assert_eq!(config.socket_group, Some(1000));
         assert_eq!(config.peer_users, vec![1000, 65532]);
         assert_eq!(config.credentials, PathBuf::from("/etc/agent/tls"));
@@ -158,6 +174,7 @@ mod tests {
             [(PEER_USERS_ENV, " , ")],
             [(SOCKET_GROUP_ENV, "-1")],
             [(LOGS_DIR_ENV, "logs")],
+            [(LISTENERS_ENV, "sometimes")],
         ] {
             let mut pairs = pairs.to_vec();
             pairs.push((TLS_DIR_ENV, "/etc/agent/tls"));

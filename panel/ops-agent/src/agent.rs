@@ -15,8 +15,7 @@ pub(crate) struct AgentService {
 }
 
 impl AgentService {
-    pub(crate) fn new(config: &AgentConfig) -> Self {
-        let capabilities = capabilities(config);
+    pub(crate) fn new(capabilities: Vec<AgentCapability>) -> Self {
         let capability_set = capabilities
             .iter()
             .filter(|capability| capability.state() == CapabilityState::Available)
@@ -57,8 +56,9 @@ impl Agent for AgentService {
     }
 }
 
-fn capabilities(config: &AgentConfig) -> Vec<AgentCapability> {
-    let directories = if config.directories.is_empty() {
+/// Whether directory sizes are enabled.
+pub(crate) fn directories(config: &AgentConfig) -> AgentCapability {
+    if config.directories.is_empty() {
         AgentCapability {
             capability: Capability::Directories.into(),
             state: CapabilityState::NotEnabled.into(),
@@ -71,8 +71,7 @@ fn capabilities(config: &AgentConfig) -> Vec<AgentCapability> {
         }
     } else {
         available(Capability::Directories)
-    };
-    vec![directories]
+    }
 }
 
 fn available(capability: Capability) -> AgentCapability {

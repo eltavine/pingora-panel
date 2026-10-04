@@ -8,6 +8,7 @@
 mod agent;
 pub mod config;
 mod directories;
+mod listeners;
 mod socket;
 
 pub use config::AgentConfig;
@@ -16,6 +17,7 @@ use panel_context::ServiceName;
 use panel_contracts::ops::v1::{
     agent_server::{self, AgentServer},
     directories_server::{self, DirectoriesServer},
+    CapabilityState,
 };
 use panel_errors::{PanelError, Result};
 use panel_pki::{CredentialFiles, WorkloadIdentity};
@@ -41,7 +43,9 @@ pub async fn serve(config: AgentConfig, shutdown: impl Future<Output = ()> + Sen
     let mut policy = PeerPolicy::new(config.trust_domain.clone())
         .allow(agent_server::SERVICE_NAME, panel_api.clone());
 
-    let agent = agent::AgentService::new(&config);
+    let listeners = listeners::capability(config.listeners);
+    let serves_listeners = listeners.state() == CapabilityState::Available;
+    let agent = agent::AgentService::new(vec![agent::directories(&config), listeners]);
     let directories = if config.directories.is_empty() {
         None
     } else {
@@ -50,6 +54,22 @@ pub async fn serve(config: AgentConfig, shutdown: impl Future<Output = ()> + Sen
             config.directories.clone(),
         )))
     };
+    #[cfg(target_os = "linux")]
+    let listener_service = if serves_listeners {
+        policy = policy.allow(
+            panel_contracts::ops::v1::listeners_server::SERVICE_NAME,
+            panel_api.clone(),
+        );
+        Some(
+            panel_contracts::ops::v1::listeners_server::ListenersServer::new(
+                listeners::ListenerService,
+            ),
+        )
+    } else {
+        None
+    };
+    #[cfg(not(target_os = "linux"))]
+    let _ = serves_listeners;
     let (reporter, health) = tonic_health::server::health_reporter();
     reporter
         .set_service_status("", tonic_health::ServingStatus::Serving)
@@ -63,11 +83,14 @@ pub async fn serve(config: AgentConfig, shutdown: impl Future<Output = ()> + Sen
     let reload = CancellationToken::new();
     let watcher =
         tokio::spawn(Arc::clone(&credentials).watch(CREDENTIAL_RELOAD_INTERVAL, reload.clone()));
-    let served = Server::builder()
+    let router = Server::builder()
         .layer(policy)
         .add_service(health)
         .add_service(AgentServer::new(agent))
-        .add_optional_service(directories)
+        .add_optional_service(directories);
+    #[cfg(target_os = "linux")]
+    let router = router.add_optional_service(listener_service);
+    let served = router
         .serve_with_incoming_shutdown(
             panel_tls::incoming_unix(
                 listener,

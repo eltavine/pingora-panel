@@ -132,6 +132,7 @@ prometheus-http-query = { version = "=0.9.0", default-features = false }
 prost = "=0.14.4"
 prost-build = "=0.14.4"
 prost-types = "=0.14.4"
+procfs = { version = "=0.18.0", default-features = false }
 panel-context = { version = "=0.1.0", path = "panel-context" }
 panel-control-runtime = { version = "=0.1.0", path = "panel-control-runtime" }
 panel-contracts = { version = "=0.1.0", path = "panel-contracts" }
