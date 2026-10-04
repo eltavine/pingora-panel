@@ -70,6 +70,27 @@ const containers = [
   },
 ]
 
+const usage = {
+  id: '4f1c2a9be03d71aa',
+  name: 'shop-web-1',
+  read_at: '2026-10-04T10:00:00.5Z',
+  cpu_percent: 12.5,
+  online_cpus: 4,
+  memory_bytes: 200 * 1024 ** 2,
+  memory_limit_bytes: 8 * 1024 ** 3,
+  network: {
+    received_bytes: 1_536,
+    sent_bytes: 2_048,
+    received_packets: 15,
+    sent_packets: 20,
+    errors: 1,
+    dropped: 2,
+  },
+  block_read_bytes: 4_096,
+  block_written_bytes: 8_192,
+  pids: 5,
+}
+
 interface Seen {
   queries: URLSearchParams[]
   changes: string[]
@@ -182,6 +203,12 @@ async function setUp(
       })
     },
   )
+  await page.route(/\/api\/v1\/container-engines\/docker\/stats$/, (route) =>
+    route.fulfill({ json: { observed_at: '2026-10-04T10:00:00Z', stats: [usage] } }),
+  )
+  await page.route(/\/api\/v1\/container-engines\/docker\/containers\/[\w.-]+\/stats$/, (route) =>
+    route.fulfill({ json: usage }),
+  )
   await page.route(/\/api\/v1\/container-engines\/\w+\/(enable|disable)$/, (route) => {
     const path = new URL(route.request().url()).pathname
     seen.changes.push(path)
@@ -211,6 +238,9 @@ test('engines show how they are and containers what they publish', async ({ page
   await expect(web).toContainText('443/tcp')
   await expect(web).toContainText('Compose: shop')
   await expect(web.getByRole('status')).toHaveText('Running')
+  await expect(web).toContainText('12.5%')
+  await expect(web).toContainText('200 MiB')
+  await expect(web).toContainText('2.4%')
   await expect(page.getByRole('row').filter({ hasText: 'nightly-report' })).toContainText(
     'Exited (0) 7 hours ago',
   )
@@ -302,6 +332,10 @@ test('a container shows its labels, mounts and networks', async ({ page }) => {
   await expect(sheet).toContainText('/usr/share/nginx/html')
   await expect(sheet).toContainText('Read-only')
   await expect(sheet).toContainText('172.18.0.2')
+  await expect(sheet).toContainText('12.5% · of 4 CPUs')
+  await expect(sheet).toContainText('200 MiB / 8 GiB · 2.4%')
+  await expect(sheet).toContainText('Errors 1 · dropped 2')
+  await expect(sheet).toContainText('4 KiB read, 8 KiB written')
 })
 
 test('a stopped container starts without asking', async ({ page }) => {

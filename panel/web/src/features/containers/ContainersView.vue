@@ -5,7 +5,11 @@ import { watchDebounced } from '@vueuse/core'
 import { Boxes, Container, RefreshCw, ScrollText, Search } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { listContainersOptions, listEnginesOptions } from '@/api/generated/@tanstack/vue-query.gen'
+import {
+  listContainerStatsOptions,
+  listContainersOptions,
+  listEnginesOptions,
+} from '@/api/generated/@tanstack/vue-query.gen'
 import ApiFailureAlert from '@/components/ApiFailureAlert.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import StatusIndicator from '@/components/StatusIndicator.vue'
@@ -31,6 +35,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { toApiFailure } from '@/lib/api'
+import { formatters } from '@/lib/format'
 import { useSession } from '@/lib/session'
 import type { ContainerView } from '@/api/generated'
 import ContainerActions from './ContainerActions.vue'
@@ -40,6 +45,7 @@ import ContainerLogsSheet from './ContainerLogsSheet.vue'
 import {
   CONTAINER_STATES,
   chosenEngine,
+  memoryShare,
   portLabel,
   REFRESH_INTERVAL_MS,
   withoutAgent,
@@ -50,7 +56,8 @@ const ALL = 'all'
 const FIELDS = ['engine', 'search', 'state'] as const
 type Field = (typeof FIELDS)[number]
 
-const { t, d } = useI18n()
+const { t, d, locale } = useI18n()
+const format = computed(() => formatters(locale.value))
 const { can } = useSession()
 const route = useRoute()
 const router = useRouter()
@@ -126,6 +133,30 @@ const containers = useQuery(
   })),
 )
 const rows = computed(() => containers.data.value?.containers ?? [])
+
+const usage = useQuery(
+  computed(() => ({
+    ...listContainerStatsOptions({ path: { engine: engineId.value ?? '' } }),
+    enabled: Boolean(engine.value?.enabled && engine.value.reachable),
+    refetchInterval: REFRESH_INTERVAL_MS,
+  })),
+)
+/** Each container with what it uses, when it runs. */
+const listed = computed(() => {
+  const byId = new Map((usage.data.value?.stats ?? []).map((stats) => [stats.id, stats]))
+  return rows.value.map((container) => {
+    const stats = byId.get(container.id)
+    const share = stats && memoryShare(stats)
+    return {
+      container,
+      usage: stats && {
+        cpu: format.value.percent(stats.cpu_percent / 100),
+        memory: format.value.bytes(stats.memory_bytes),
+        share: share === undefined ? undefined : format.value.percent(share),
+      },
+    }
+  })
+})
 
 const inspecting = ref<ContainerView>()
 const detailOpen = ref(false)
@@ -279,15 +310,19 @@ function refresh() {
                   <TableHead>{{ t('containers.list.name') }}</TableHead>
                   <TableHead>{{ t('containers.list.image') }}</TableHead>
                   <TableHead>{{ t('containers.list.state') }}</TableHead>
+                  <TableHead>{{ t('containers.list.cpu') }}</TableHead>
+                  <TableHead>{{ t('containers.list.memory') }}</TableHead>
                   <TableHead>{{ t('containers.list.ports') }}</TableHead>
-                  <TableHead>{{ t('containers.list.created') }}</TableHead>
+                  <TableHead class="hidden 2xl:table-cell">
+                    {{ t('containers.list.created') }}
+                  </TableHead>
                   <TableHead v-if="actionable">
                     <span class="sr-only">{{ t('common.actions') }}</span>
                   </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                <TableRow v-for="container in rows" :key="container.id">
+                <TableRow v-for="{ container, usage: used } in listed" :key="container.id">
                   <TableCell>
                     <div class="flex flex-col gap-1">
                       <Button
@@ -321,6 +356,19 @@ function refresh() {
                       <span class="text-muted-foreground text-xs">{{ container.status }}</span>
                     </div>
                   </TableCell>
+                  <TableCell class="text-sm whitespace-nowrap tabular-nums">
+                    <span v-if="used">{{ used.cpu }}</span>
+                    <span v-else class="text-muted-foreground">—</span>
+                  </TableCell>
+                  <TableCell class="text-sm whitespace-nowrap tabular-nums">
+                    <div v-if="used" class="flex flex-col">
+                      <span>{{ used.memory }}</span>
+                      <span v-if="used.share" class="text-muted-foreground text-xs">
+                        {{ used.share }}
+                      </span>
+                    </div>
+                    <span v-else class="text-muted-foreground">—</span>
+                  </TableCell>
                   <TableCell>
                     <ul v-if="container.ports.length" class="flex flex-col gap-0.5">
                       <li
@@ -333,7 +381,9 @@ function refresh() {
                     </ul>
                     <span v-else class="text-muted-foreground text-sm">—</span>
                   </TableCell>
-                  <TableCell class="text-muted-foreground text-sm whitespace-nowrap">
+                  <TableCell
+                    class="text-muted-foreground hidden text-sm whitespace-nowrap 2xl:table-cell"
+                  >
                     {{ container.created ? d(new Date(container.created), 'datetime') : '—' }}
                   </TableCell>
                   <TableCell v-if="actionable && engineId">

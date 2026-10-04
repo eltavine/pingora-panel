@@ -3,6 +3,7 @@ import type {
   ContainerLogLineView,
   ContainerLogStreamName,
   ContainerStateName,
+  ContainerStatsView,
   PortMappingView,
 } from '@/api/generated'
 import type { StatusTone } from '@/components/StatusIndicator.vue'
@@ -125,4 +126,9 @@ export function logTailUrl(
 ): string {
   const path = `/api/v1/container-engines/${encodeURIComponent(engine)}/containers/${encodeURIComponent(container)}/logs/tail`
   return websocketUrl(path, query, at)
+}
+
+/** The share of its memory limit a container uses; none without a limit. */
+export function memoryShare(stats: ContainerStatsView): number | undefined {
+  return stats.memory_limit_bytes > 0 ? stats.memory_bytes / stats.memory_limit_bytes : undefined
 }

@@ -4,6 +4,8 @@ import type {
   ContainerLogLineView,
   ContainerLogsView,
   ContainerLogTailMessage,
+  ContainerStatsListView,
+  ContainerStatsView,
   ContainerView,
 } from '@/api/generated'
 
@@ -129,6 +131,32 @@ export function containerHandlers(): AnyHandler[] {
     },
   ]
 
+  /** What a running container uses, varying a little with the time. */
+  function usage(container: ContainerView): ContainerStatsView {
+    const wave = (Math.sin(Date.now() / 60_000 + container.id.length) + 1) / 2
+    const memory = (64 + container.id.length * 12) * 1024 ** 2
+    return {
+      id: container.id,
+      name: container.names[0] ?? container.id,
+      read_at: new Date().toISOString(),
+      cpu_percent: 2 + wave * 40,
+      online_cpus: 4,
+      memory_bytes: Math.round(memory * (0.8 + wave * 0.2)),
+      memory_limit_bytes: 8 * GIB,
+      network: {
+        received_bytes: 48 * 1024 ** 2,
+        sent_bytes: 12 * 1024 ** 2,
+        received_packets: 52_000,
+        sent_packets: 31_000,
+        errors: 0,
+        dropped: 3,
+      },
+      block_read_bytes: 210 * 1024 ** 2,
+      block_written_bytes: 36 * 1024 ** 2,
+      pids: 4 + (container.id.length % 9),
+    }
+  }
+
   const tail = ws.link(/\/api\/v1\/container-engines\/[^/]+\/containers\/[^/]+\/logs\/tail/)
 
   function missing(container: string) {
@@ -205,6 +233,33 @@ export function containerHandlers(): AnyHandler[] {
             },
           ],
         })
+      },
+    ),
+    http.get('*/api/v1/container-engines/:engine/stats', () =>
+      HttpResponse.json({
+        observed_at: new Date().toISOString(),
+        stats: containers.filter((container) => container.state === 'running').map(usage),
+      } satisfies ContainerStatsListView),
+    ),
+    http.get<{ engine: string; container: string }>(
+      '*/api/v1/container-engines/:engine/containers/:container/stats',
+      ({ params }) => {
+        const found = containers.find((container) => container.id === params.container)
+        if (!found) {
+          return missing(params.container)
+        }
+        return found.state === 'running'
+          ? HttpResponse.json(usage(found))
+          : HttpResponse.json(
+              {
+                type: 'about:blank',
+                title: 'Precondition failed',
+                status: 412,
+                code: 'PRECONDITION_FAILED',
+                detail: `${found.names[0]} is not running`,
+              },
+              { status: 412, headers: { 'content-type': 'application/problem+json' } },
+            )
       },
     ),
     http.get<{ engine: string; container: string }>(

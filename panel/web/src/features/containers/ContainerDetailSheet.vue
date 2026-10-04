@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
-import { Box, HardDrive, Network, ScrollText, Tags } from '@lucide/vue'
+import { ArrowDown, ArrowUp, Box, Gauge, HardDrive, Network, ScrollText, Tags } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import type { ContainerView } from '@/api/generated'
-import { inspectContainerOptions } from '@/api/generated/@tanstack/vue-query.gen'
+import {
+  containerStatsOptions,
+  inspectContainerOptions,
+} from '@/api/generated/@tanstack/vue-query.gen'
 import ApiFailureAlert from '@/components/ApiFailureAlert.vue'
 import StatusIndicator from '@/components/StatusIndicator.vue'
 import { Badge } from '@/components/ui/badge'
@@ -18,13 +21,15 @@ import {
 } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
 import { gatewayHealthKey, gatewayTone, engineName } from '@/lib/containers'
-import { sortedLabels } from './presentation'
+import { formatters } from '@/lib/format'
+import { memoryShare, REFRESH_INTERVAL_MS, sortedLabels } from './presentation'
 
 const open = defineModel<boolean>('open', { required: true })
 const props = defineProps<{ engine: string; container: ContainerView }>()
 const emit = defineEmits<{ logs: [] }>()
 
-const { t, d } = useI18n()
+const { t, d, locale } = useI18n()
+const format = computed(() => formatters(locale.value))
 const detail = useQuery(
   computed(() => ({
     ...inspectContainerOptions({
@@ -34,6 +39,35 @@ const detail = useQuery(
   })),
 )
 const view = computed(() => detail.data.value)
+
+const usage = useQuery(
+  computed(() => ({
+    ...containerStatsOptions({
+      path: { engine: props.engine, container: props.container.id },
+    }),
+    enabled: open.value && props.container.state === 'running',
+    refetchInterval: REFRESH_INTERVAL_MS,
+    retry: false,
+  })),
+)
+const used = computed(() => {
+  const stats = usage.data.value
+  if (!stats) {
+    return undefined
+  }
+  const share = memoryShare(stats)
+  return {
+    cpu: `${format.value.percent(stats.cpu_percent / 100)} · ${t('containers.detail.cpus', { n: stats.online_cpus }, stats.online_cpus)}`,
+    memory: `${format.value.bytes(stats.memory_bytes)} / ${format.value.bytes(stats.memory_limit_bytes)}${share === undefined ? '' : ` · ${format.value.percent(share)}`}`,
+    network: stats.network,
+    disk: t('containers.detail.diskIo', {
+      read: format.value.bytes(stats.block_read_bytes),
+      written: format.value.bytes(stats.block_written_bytes),
+    }),
+    processes: format.value.count(stats.pids),
+    readAt: stats.read_at ? d(new Date(stats.read_at), 'precise') : undefined,
+  }
+})
 const name = computed(() => props.container.names[0] ?? props.container.id.slice(0, 12))
 
 const state = computed(() => {
@@ -135,6 +169,49 @@ const labels = computed(() => sortedLabels(view.value?.container.labels ?? {}))
               </dd>
             </template>
           </dl>
+
+          <section v-if="used" class="flex flex-col gap-2">
+            <h3 class="flex items-center gap-2 text-sm font-medium">
+              <Gauge class="size-4" aria-hidden="true" />{{ t('containers.detail.usage') }}
+            </h3>
+            <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm tabular-nums">
+              <dt class="text-muted-foreground">{{ t('containers.list.cpu') }}</dt>
+              <dd>{{ used.cpu }}</dd>
+              <dt class="text-muted-foreground">{{ t('containers.list.memory') }}</dt>
+              <dd>{{ used.memory }}</dd>
+              <dt class="text-muted-foreground">{{ t('containers.detail.network') }}</dt>
+              <dd v-if="used.network" class="flex flex-col gap-0.5">
+                <span class="flex flex-wrap items-center gap-x-3">
+                  <span class="flex items-center gap-1">
+                    <ArrowDown class="size-3.5" aria-hidden="true" />
+                    <span class="sr-only">{{ t('containers.detail.received') }}</span>
+                    {{ format.bytes(used.network.received_bytes) }}
+                  </span>
+                  <span class="flex items-center gap-1">
+                    <ArrowUp class="size-3.5" aria-hidden="true" />
+                    <span class="sr-only">{{ t('containers.detail.sent') }}</span>
+                    {{ format.bytes(used.network.sent_bytes) }}
+                  </span>
+                </span>
+                <span class="text-muted-foreground text-xs">
+                  {{
+                    t('containers.detail.faults', {
+                      errors: format.count(used.network.errors),
+                      dropped: format.count(used.network.dropped),
+                    })
+                  }}
+                </span>
+              </dd>
+              <dd v-else class="text-muted-foreground">{{ t('containers.detail.noNetwork') }}</dd>
+              <dt class="text-muted-foreground">{{ t('containers.detail.disk') }}</dt>
+              <dd>{{ used.disk }}</dd>
+              <dt class="text-muted-foreground">{{ t('containers.detail.processes') }}</dt>
+              <dd>{{ used.processes }}</dd>
+            </dl>
+            <p v-if="used.readAt" class="text-muted-foreground text-xs">
+              {{ t('containers.detail.readAt', { time: used.readAt }) }}
+            </p>
+          </section>
 
           <section class="flex flex-col gap-2">
             <h3 class="flex items-center gap-2 text-sm font-medium">

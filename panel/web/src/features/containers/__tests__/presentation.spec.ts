@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { ContainerEngineView, ContainerLogLineView, ProblemDetails } from '@/api/generated'
+import type {
+  ContainerEngineView,
+  ContainerLogLineView,
+  ContainerStatsView,
+  ProblemDetails,
+} from '@/api/generated'
 import {
   chosenEngine,
   conditionTone,
@@ -7,6 +12,7 @@ import {
   logFile,
   logTailUrl,
   matchesLine,
+  memoryShare,
   plainText,
   portLabel,
   sortedLabels,
@@ -139,5 +145,13 @@ describe('container logs', () => {
     ).toBe(
       'ws://127.0.0.1:8080/api/v1/container-engines/podman/containers/b2/logs/tail?after=2027-01-15T08%3A00%3A01Z',
     )
+  })
+})
+
+describe('container usage', () => {
+  it('shares memory out of its limit, and none without one', () => {
+    const stats = { memory_bytes: 256, memory_limit_bytes: 1_024 } as ContainerStatsView
+    expect(memoryShare(stats)).toBe(0.25)
+    expect(memoryShare({ ...stats, memory_limit_bytes: 0 })).toBeUndefined()
   })
 })
