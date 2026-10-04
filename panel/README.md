@@ -540,6 +540,7 @@ ppanel container list --search nginx --state running
 ppanel container inspect shop-web-1
 ppanel container logs shop-web-1 --lines 500 --since 1h --timestamps
 ppanel container logs shop-web-1 --follow
+ppanel container stats
 ppanel container restart shop-web-1 --yes
 ppanel container remove nightly-report --volumes --yes
 ```
@@ -568,6 +569,15 @@ line a client last received (`after`, a message's `cursor`), and closes
 normally once the container stops. The agent follows at most 64 logs at
 once. `ppanel container logs` writes standard error to standard error,
 as the container did.
+`GET /api/v1/container-engines/{engine}/stats` reports what every running
+container uses, and `.../containers/{container}/stats` what one does;
+both need `containers.read`, since statistics hold no secrets. They are
+read as `docker stats --no-stream` reads them: CPU as a share of one CPU
+between the engine's two samples a second apart, memory without the page
+cache the kernel can reclaim against its limit, network traffic summed
+over the container's interfaces with errors and drops, block I/O and
+processes, each with the time the engine read them. The agent reads at
+most 16 containers at once, and leaves out one that stops meanwhile.
 `POST /api/v1/container-engines/{engine}/{enable,disable}` needs
 `containers.manage`, as do
 `POST /api/v1/container-engines/{engine}/containers/{container}/{start,stop,restart,kill}`
@@ -580,7 +590,9 @@ not. The console's Containers page shows the engines and their
 containers, opens a container's details from its name and its logs from
 the details or its row, and has a menu on each container that asks
 before anything but a start. Its logs can be filtered by output and
-text, followed from the last line read and saved as a file.
+text, followed from the last line read and saved as a file. The table
+shows each running container's CPU and memory, and the details show
+everything it uses.
 
 ## Alerts
 
