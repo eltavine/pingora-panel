@@ -8,6 +8,7 @@ pub mod certificates;
 pub mod config;
 pub mod domains;
 pub mod gateway;
+pub mod host;
 pub mod identity;
 pub mod logs;
 pub mod providers;

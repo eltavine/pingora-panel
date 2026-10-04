@@ -2,7 +2,7 @@
 
 use crate::{
     client::{Api, Result},
-    output::{text, Column, Format, Output},
+    output::{bytes, percent, text, Column, Format, Output},
 };
 use clap::{Args, Subcommand};
 use serde_json::Value;
@@ -72,19 +72,6 @@ fn seconds(value: &Value) -> String {
     }
 }
 
-fn bytes(value: &Value) -> String {
-    let Some(mut size) = value.as_f64() else {
-        return text(value);
-    };
-    for unit in ["B", "KiB", "MiB", "GiB"] {
-        if size < 1024.0 {
-            return format!("{size:.1} {unit}");
-        }
-        size /= 1024.0;
-    }
-    format!("{size:.1} TiB")
-}
-
 /// An address and port as a socket address, with brackets around IPv6.
 fn node(address: &Value, port: &Value) -> String {
     let address = text(address);
@@ -93,12 +80,6 @@ fn node(address: &Value, port: &Value) -> String {
     } else {
         format!("{address}:{}", text(port))
     }
-}
-
-fn percent(value: &Value) -> String {
-    value
-        .as_f64()
-        .map_or_else(|| text(value), |ratio| format!("{:.1}%", ratio * 100.0))
 }
 
 const SUMMARY: &[Column] = &[

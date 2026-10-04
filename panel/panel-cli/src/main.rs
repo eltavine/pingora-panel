@@ -153,6 +153,9 @@ enum Command {
     /// and the notifications sent.
     #[command(subcommand)]
     Alert(commands::alerts::AlertCommand),
+    /// The host the gateway runs on: CPU, memory, filesystems, load, network
+    /// and system.
+    Host,
     /// The running gateway.
     #[command(subcommand)]
     Gateway(commands::gateway::GatewayCommand),
@@ -250,6 +253,7 @@ async fn main() -> ExitCode {
             Command::Traffic(command) => commands::traffic::run(&api, &output, command).await,
             Command::Logs(command) => commands::logs::run(&api, &output, command).await,
             Command::Alert(command) => commands::alerts::run(&api, &output, command).await,
+            Command::Host => commands::host::run(&api, &output).await,
             Command::Gateway(command) => commands::gateway::gateway(&api, &output, command).await,
             Command::Completion { .. } => Ok(()),
         }

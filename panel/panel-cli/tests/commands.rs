@@ -185,6 +185,19 @@ async fn api(
             })),
         )
             .into_response(),
+        ("GET", "/api/v1/host") => Json(json!({
+            "reporting": true, "hostname": "web-1", "operating_system": "Ubuntu 24.04.2 LTS",
+            "kernel_release": "6.8.0", "architecture": "x86_64",
+            "host_time": "2026-10-04T10:00:00Z", "time_zone": "UTC", "uptime_seconds": 90_000,
+            "cpu_count": 4, "cpu_usage": 0.25, "load1": 0.5, "load5": 0.75, "load15": 1.0,
+            "memory_total_bytes": 8_589_934_592_u64, "memory_available_bytes": 2_147_483_648_u64,
+            "filesystems": [{"mountpoint": "/var", "device": "/dev/sdb1", "fstype": "ext4",
+                             "size_bytes": 1_073_741_824, "available_bytes": 53_687_091,
+                             "used_ratio": 0.95, "level": "critical"}],
+            "network_devices": [{"device": "eth0", "receive_bytes_per_second": 2048,
+                                 "transmit_bytes_per_second": 512}]
+        }))
+        .into_response(),
         ("GET", "/api/v1/alert-rules") => Json(json!([{
             "id": "shop-errors", "version": 3, "etag": "\"3\"", "state": "firing",
             "since": "2026-10-04T09:58:00Z", "value": 0.12,
@@ -1018,6 +1031,26 @@ fn logs_are_searched_followed_downloaded_and_deleted() {
     let printed = stdout(&stub.ppanel(&["logs", "deletions"]));
     assert!(printed.contains("every site"), "{printed}");
     assert!(printed.contains("applied"), "{printed}");
+}
+
+#[test]
+fn the_host_is_summarized_with_its_fullest_filesystems() {
+    let stub = Stub::start();
+    let host = stub.ppanel(&["host"]);
+    assert!(host.status.success(), "{}", stderr(&host));
+    let printed = stdout(&host);
+    for expected in [
+        "web-1",
+        "Ubuntu 24.04.2 LTS · 6.8.0 · x86_64",
+        "25.0% of 4 cores",
+        "6.0 GiB of 8.0 GiB used",
+        "1day 1h",
+        "/var",
+        "critical",
+        "2.0 KiB",
+    ] {
+        assert!(printed.contains(expected), "{expected} in\n{printed}");
+    }
 }
 
 #[test]

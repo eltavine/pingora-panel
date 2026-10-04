@@ -29,6 +29,27 @@ pub fn text(value: &Value) -> String {
     }
 }
 
+/// A size in binary units, such as `1.5 MiB`.
+pub fn bytes(value: &Value) -> String {
+    let Some(mut size) = value.as_f64() else {
+        return text(value);
+    };
+    for unit in ["B", "KiB", "MiB", "GiB"] {
+        if size < 1024.0 {
+            return format!("{size:.1} {unit}");
+        }
+        size /= 1024.0;
+    }
+    format!("{size:.1} TiB")
+}
+
+/// A share from 0 to 1 as a percentage, such as `12.5%`.
+pub fn percent(value: &Value) -> String {
+    value
+        .as_f64()
+        .map_or_else(|| text(value), |ratio| format!("{:.1}%", ratio * 100.0))
+}
+
 impl Output {
     /// A list of items as rows.
     pub fn list(&self, items: &Value, columns: &[Column]) {
