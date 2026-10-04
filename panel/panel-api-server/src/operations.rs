@@ -20,6 +20,9 @@ use panel_sqlite::EventLog;
 const DATA_PLANE: (&str, &str) = ("gateway", "data-plane");
 /// The service on the host that runs the gateway.
 const GATEWAY_SERVICE: (&str, &str) = ("host", "gateway-service");
+/// The aggregate types of container events, by engine and by container.
+const ENGINE: &str = "container_engine";
+const CONTAINER: &str = "container";
 
 pub struct OutboxOperations(pub EventLog);
 
@@ -142,7 +145,7 @@ impl OperationLog for OutboxOperations {
                 result,
             } => {
                 let (scope, actor) = (context.scope(), context.actor());
-                let target = ("container-engine", engine);
+                let target = (ENGINE, engine);
                 let engine = engine.to_owned();
                 match (result, enabled) {
                     (Ok(_), true) => {
@@ -180,7 +183,7 @@ impl OperationLog for OutboxOperations {
                 match result {
                     Ok(change) => {
                         let target_id = format!("{engine}/{}", change.name);
-                        let target = ("container", target_id.as_str());
+                        let target = (CONTAINER, target_id.as_str());
                         let (engine, id, name) =
                             (engine.to_owned(), change.id.clone(), change.name.clone());
                         match action {
@@ -222,7 +225,7 @@ impl OperationLog for OutboxOperations {
                             container: container.to_owned(),
                         };
                         self.0
-                            .record(("container", &target_id), &scope, actor, &refused)
+                            .record((CONTAINER, &target_id), &scope, actor, &refused)
                             .await;
                     }
                 }
@@ -248,5 +251,26 @@ impl AccessAudit for OutboxOperations {
                 &data,
             )
             .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use panel_events::AggregateType;
+
+    #[test]
+    fn every_aggregate_type_is_valid() {
+        for kind in [
+            DATA_PLANE.0,
+            GATEWAY_SERVICE.0,
+            ENGINE,
+            CONTAINER,
+            "upstream",
+            "gateway",
+            "site",
+        ] {
+            assert!(AggregateType::new(kind).is_ok(), "{kind}");
+        }
     }
 }
