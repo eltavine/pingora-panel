@@ -30,9 +30,10 @@ use tonic::{Request, Response, Status};
 const ENGINE_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long an action may take; stopping waits out the container's stop
 /// timeout before it kills.
-const ACTION_TIMEOUT: Duration = Duration::from_secs(120);
-/// The label Compose puts on the containers it creates.
-const COMPOSE_PROJECT: &str = "com.docker.compose.project";
+pub(crate) const ACTION_TIMEOUT: Duration = Duration::from_secs(120);
+/// The labels Compose puts on the containers it creates.
+pub(crate) const COMPOSE_PROJECT: &str = "com.docker.compose.project";
+pub(crate) const COMPOSE_SERVICE: &str = "com.docker.compose.service";
 /// Where the agent keeps which engines are enabled, in its state directory.
 const STATE_FILE: &str = "engines";
 
@@ -199,13 +200,13 @@ impl Engines {
         Ok(engine)
     }
 
-    fn ids(&self) -> impl Iterator<Item = &str> {
+    pub(crate) fn ids(&self) -> impl Iterator<Item = &str> {
         self.sockets.iter().map(|(id, _)| id.as_str())
     }
 }
 
 /// An engine's error as the panel's, with the engine's own words.
-fn failure(error: &EngineError) -> PanelError {
+pub(crate) fn failure(error: &EngineError) -> PanelError {
     match error {
         EngineError::DockerResponseServerError {
             status_code: 404,
@@ -249,7 +250,7 @@ fn port(value: PortSummary) -> wire::PortMapping {
     }
 }
 
-fn container(value: ContainerSummary) -> wire::Container {
+pub(crate) fn container(value: ContainerSummary) -> wire::Container {
     let labels = value.labels.unwrap_or_default();
     wire::Container {
         id: value.id.unwrap_or_default(),

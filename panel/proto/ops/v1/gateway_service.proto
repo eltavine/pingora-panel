@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+package pingora.panel.ops.v1;
+
+import "common/v1/common.proto";
+import "google/protobuf/timestamp.proto";
+import "ops/v1/containers.proto";
+
+// What runs the gateway, the one service the agent may start, stop and
+// restart for the panel. Which service that is is the agent's
+// configuration, never the caller's.
+service GatewayService {
+  rpc Status(GatewayServiceStatusRequest) returns (GatewayServiceStatusResponse);
+  rpc Change(GatewayServiceChangeRequest) returns (GatewayServiceChangeResponse);
+}
+
+enum GatewayServiceAction {
+  GATEWAY_SERVICE_ACTION_UNSPECIFIED = 0;
+  GATEWAY_SERVICE_ACTION_START = 1;
+  // The container's stop signal, then SIGKILL once its stop timeout passes.
+  GATEWAY_SERVICE_ACTION_STOP = 2;
+  GATEWAY_SERVICE_ACTION_RESTART = 3;
+}
+
+// The gateway's container in the installation's Compose project.
+message GatewayContainer {
+  // The engine it runs on, such as `docker`.
+  string engine = 1;
+  Container container = 2;
+  // When it last started and last stopped; unset when it never has.
+  google.protobuf.Timestamp started_at = 3;
+  google.protobuf.Timestamp finished_at = 4;
+  // How it last stopped; 0 until it has.
+  int64 exit_code = 5;
+  // How often the engine restarted it under its restart policy.
+  uint32 restarts = 6;
+  // `healthy`, `unhealthy` or `starting`; empty without a health check.
+  string health = 7;
+}
+
+message GatewayServiceStatus {
+  google.protobuf.Timestamp observed_at = 1;
+  // What supervises the gateway.
+  oneof supervisor {
+    GatewayContainer container = 2;
+  }
+}
+
+message GatewayServiceStatusRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+}
+
+message GatewayServiceStatusResponse {
+  GatewayServiceStatus status = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message GatewayServiceChangeRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  GatewayServiceAction action = 2;
+}
+
+// The gateway once its supervisor finished the action.
+message GatewayServiceChangeResponse {
+  GatewayServiceStatus status = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}

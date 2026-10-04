@@ -20,6 +20,8 @@ enum Capability {
   CAPABILITY_GATEWAY_UNIT = 3;
   // `Containers`: the Docker or Podman engine.
   CAPABILITY_CONTAINERS = 4;
+  // `GatewayService`: what runs the gateway.
+  CAPABILITY_GATEWAY_SERVICE = 5;
 }
 
 enum CapabilityState {

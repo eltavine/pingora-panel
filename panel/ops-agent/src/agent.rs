@@ -90,6 +90,7 @@ fn name(capability: Capability) -> &'static str {
         Capability::Listeners => "listeners",
         Capability::GatewayUnit => "gateway-unit",
         Capability::Containers => "containers",
+        Capability::GatewayService => "gateway-service",
     }
 }
 

@@ -76,6 +76,7 @@ async fn the_agent_answers_panel_api_alone_within_its_configuration() {
             engines: Vec::new(),
             state: None,
             installation_project: "pingora-panel".into(),
+            gateway_service: "gatewayd".into(),
         },
         async move {
             let _ = stopped.await;
@@ -115,6 +116,11 @@ async fn the_agent_answers_panel_api_alone_within_its_configuration() {
         state(Capability::Listeners),
         Some(CapabilityState::NotEnabled | CapabilityState::Unsupported)
     ));
+    assert_eq!(
+        state(Capability::GatewayService),
+        Some(CapabilityState::NotEnabled),
+        "the gateway's container is reached through an engine"
+    );
 
     let usage = DirectoriesClient::new(channel(&socket, panel_api, "panel-api"))
         .usage(DirectoriesUsageRequest::default())

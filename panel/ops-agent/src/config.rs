@@ -34,6 +34,11 @@ pub const STATE_DIRECTORY_ENV: &str = "STATE_DIRECTORY";
 pub const INSTALLATION_PROJECT_ENV: &str = "PINGORA_PANEL_OPS_INSTALLATION_PROJECT";
 /// The project `compose.yaml` names.
 pub const DEFAULT_INSTALLATION_PROJECT: &str = "pingora-panel";
+/// The installation's Compose service that runs the gateway, the one
+/// container of the installation the agent may stop and restart.
+pub const GATEWAY_SERVICE_ENV: &str = "PINGORA_PANEL_OPS_GATEWAY_SERVICE";
+/// The service `compose.yaml` names.
+pub const DEFAULT_GATEWAY_SERVICE: &str = "gatewayd";
 /// The engines a socket may be named for.
 pub const ENGINE_IDS: [&str; 2] = ["docker", "podman"];
 
@@ -59,6 +64,7 @@ pub struct AgentConfig {
     pub engines: Vec<(String, PathBuf)>,
     pub state: Option<PathBuf>,
     pub installation_project: String,
+    pub gateway_service: String,
 }
 
 impl AgentConfig {
@@ -163,6 +169,14 @@ impl AgentConfig {
         let installation_project = env
             .string(INSTALLATION_PROJECT_ENV)?
             .unwrap_or_else(|| DEFAULT_INSTALLATION_PROJECT.to_owned());
+        let gateway_service = env
+            .string(GATEWAY_SERVICE_ENV)?
+            .unwrap_or_else(|| DEFAULT_GATEWAY_SERVICE.to_owned());
+        if !compose_service(&gateway_service) {
+            return Err(PanelError::invalid_argument(format!(
+                "{GATEWAY_SERVICE_ENV} names a Compose service, such as {DEFAULT_GATEWAY_SERVICE}"
+            )));
+        }
         Ok(Self {
             socket,
             socket_group: Some(socket_group),
@@ -175,8 +189,18 @@ impl AgentConfig {
             engines,
             state,
             installation_project,
+            gateway_service,
         })
     }
+}
+
+/// A Compose service's name, by the characters Compose allows.
+fn compose_service(name: &str) -> bool {
+    name.len() <= 63
+        && name.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
 }
 
 /// A systemd service unit's name, by the characters systemd allows.
@@ -224,6 +248,7 @@ mod tests {
         assert!(config.gateway_unit.is_none());
         assert!(config.engines.is_empty());
         assert!(config.state.is_none());
+        assert_eq!(config.gateway_service, DEFAULT_GATEWAY_SERVICE);
     }
 
     #[test]
@@ -285,6 +310,8 @@ mod tests {
             [(ENGINES_ENV, "containerd=/run/containerd.sock")],
             [(ENGINES_ENV, "docker=docker.sock")],
             [(ENGINES_ENV, "docker=/a.sock,docker=/b.sock")],
+            [(GATEWAY_SERVICE_ENV, "-gateway")],
+            [(GATEWAY_SERVICE_ENV, "gateway/1")],
         ] {
             let mut pairs = pairs.to_vec();
             pairs.push((TLS_DIR_ENV, "/etc/agent/tls"));

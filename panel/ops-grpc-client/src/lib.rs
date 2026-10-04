@@ -74,7 +74,7 @@ fn capability(value: i32) -> Option<AgentCapability> {
         wire::Capability::Listeners => Some(AgentCapability::Listeners),
         wire::Capability::GatewayUnit => Some(AgentCapability::GatewayUnit),
         wire::Capability::Containers => Some(AgentCapability::Containers),
-        wire::Capability::Unspecified => None,
+        wire::Capability::GatewayService | wire::Capability::Unspecified => None,
     }
 }
 

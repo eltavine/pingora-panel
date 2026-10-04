@@ -9,6 +9,7 @@ mod agent;
 pub mod config;
 mod containers;
 mod directories;
+mod gateway_service;
 mod gateway_unit;
 mod listeners;
 mod socket;
@@ -20,6 +21,7 @@ use panel_contracts::ops::v1::{
     agent_server::{self, AgentServer},
     containers_server::{self, ContainersServer},
     directories_server::{self, DirectoriesServer},
+    gateway_service_server::{self, GatewayServiceServer},
     gateway_unit_server::{self, GatewayUnitServer},
     CapabilityState,
 };
@@ -55,18 +57,31 @@ pub async fn serve(config: AgentConfig, shutdown: impl Future<Output = ()> + Sen
         listeners,
         unit_capability,
         containers::capability(&config.engines),
+        gateway_service::capability(&config.engines),
     ]);
-    let container_service = if config.engines.is_empty() {
-        None
+    let (container_service, gateway_service) = if config.engines.is_empty() {
+        (None, None)
     } else {
-        policy = policy.allow(containers_server::SERVICE_NAME, panel_api.clone());
-        Some(ContainersServer::new(containers::ContainerService::new(
-            std::sync::Arc::new(containers::Engines::load(
-                config.engines.clone(),
-                config.state.clone(),
+        policy = policy
+            .allow(containers_server::SERVICE_NAME, panel_api.clone())
+            .allow(gateway_service_server::SERVICE_NAME, panel_api.clone());
+        let engines = Arc::new(containers::Engines::load(
+            config.engines.clone(),
+            config.state.clone(),
+        ));
+        (
+            Some(ContainersServer::new(containers::ContainerService::new(
+                Arc::clone(&engines),
+                config.installation_project.clone(),
+            ))),
+            Some(GatewayServiceServer::new(
+                gateway_service::GatewayService::new(
+                    engines,
+                    config.installation_project.clone(),
+                    config.gateway_service.clone(),
+                ),
             )),
-            config.installation_project.clone(),
-        )))
+        )
     };
     let directories = if config.directories.is_empty() {
         None
@@ -120,7 +135,8 @@ pub async fn serve(config: AgentConfig, shutdown: impl Future<Output = ()> + Sen
         .add_service(AgentServer::new(agent))
         .add_optional_service(directories)
         .add_optional_service(unit_service)
-        .add_optional_service(container_service);
+        .add_optional_service(container_service)
+        .add_optional_service(gateway_service);
     #[cfg(target_os = "linux")]
     let router = router.add_optional_service(listener_service);
     let served = router
