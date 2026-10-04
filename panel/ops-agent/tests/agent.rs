@@ -72,6 +72,7 @@ async fn the_agent_answers_panel_api_alone_within_its_configuration() {
             trust_domain: TrustDomain::default(),
             directories: vec![(DirectoryKind::Logs, logs.clone())],
             listeners: false,
+            gateway_unit: None,
         },
         async move {
             let _ = stopped.await;
