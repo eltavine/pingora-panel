@@ -30400,7 +30400,7 @@
       ],
       "post": {
         "tags": [
-          "crate::routes"
+          "gateway"
         ],
         "operationId": "abort",
         "parameters": [
@@ -30756,7 +30756,7 @@
       ],
       "post": {
         "tags": [
-          "crate::routes"
+          "gateway"
         ],
         "operationId": "activate",
         "parameters": [
@@ -31772,7 +31772,7 @@
       ],
       "post": {
         "tags": [
-          "crate::routes"
+          "gateway"
         ],
         "operationId": "prepare",
         "parameters": [
@@ -32128,7 +32128,7 @@
       ],
       "get": {
         "tags": [
-          "crate::routes"
+          "gateway"
         ],
         "operationId": "receipt",
         "parameters": [
@@ -33188,7 +33188,7 @@
       ],
       "get": {
         "tags": [
-          "crate::routes"
+          "gateway"
         ],
         "operationId": "status",
         "parameters": [
@@ -33542,7 +33542,7 @@
       ],
       "post": {
         "tags": [
-          "crate::routes"
+          "gateway"
         ],
         "operationId": "validate",
         "parameters": [
@@ -40644,7 +40644,7 @@
       ],
       "get": {
         "tags": [
-          "crate::routes"
+          "platform"
         ],
         "operationId": "openapi",
         "responses": {
@@ -41006,7 +41006,7 @@
       ],
       "get": {
         "tags": [
-          "crate::routes"
+          "platform"
         ],
         "summary": "Live service instances, their protocol revisions and capabilities.",
         "operationId": "services",

@@ -20,6 +20,7 @@ use utoipa::OpenApi;
 #[utoipa::path(
     get,
     path = "/api/v1/gateway/status",
+    tag = "gateway",
     params(
         crate::request_context::QueryHeaders,
         ("If-None-Match" = Option<String>, Header, description = "Entity tags of status representations the client holds; a current one answers 304.")
@@ -46,6 +47,7 @@ where
 #[utoipa::path(
     get,
     path = "/api/v1/gateway/receipts/{key}",
+    tag = "gateway",
     params(
         ("key" = String, Path, description = "Idempotency key"),
         ("If-None-Match" = Option<String>, Header, description = "Entity tags of receipt representations the client holds; a current one answers 304.")
@@ -102,6 +104,7 @@ fn project_receipt(headers: &HeaderMap, lookup: IdempotencyLookup) -> Result<Res
 #[utoipa::path(
     post,
     path = "/api/v1/gateway/validate",
+    tag = "gateway",
     request_body = SnapshotEnvelope,
     params(crate::request_context::QueryHeaders),
     responses(
@@ -131,6 +134,7 @@ where
 #[utoipa::path(
     post,
     path = "/api/v1/gateway/prepare",
+    tag = "gateway",
     request_body = SnapshotEnvelope,
     params(crate::request_context::MutationHeaders),
     responses(
@@ -160,6 +164,7 @@ where
 #[utoipa::path(
     post,
     path = "/api/v1/gateway/activate",
+    tag = "gateway",
     request_body = ActivateRequest,
     params(
         crate::request_context::MutationHeaders,
@@ -224,6 +229,7 @@ where
 #[utoipa::path(
     post,
     path = "/api/v1/gateway/abort",
+    tag = "gateway",
     request_body = AbortRequest,
     params(crate::request_context::MutationHeaders),
     responses((status = 200, body = AbortResponse))
@@ -250,6 +256,7 @@ where
 #[utoipa::path(
     get,
     path = "/api/v1/openapi.json",
+    tag = "platform",
     responses((status = 200, description = "OpenAPI 3.1 document"))
 )]
 pub(crate) async fn openapi() -> Json<utoipa::openapi::OpenApi> {
@@ -260,6 +267,7 @@ pub(crate) async fn openapi() -> Json<utoipa::openapi::OpenApi> {
 #[utoipa::path(
     get,
     path = "/api/v1/platform/services",
+    tag = "platform",
     params(crate::request_context::QueryHeaders),
     responses(
         (status = 200, body = ServiceListingResponse)
