@@ -11,6 +11,8 @@ mod container_logs;
 mod container_stats;
 mod containers;
 mod directories;
+#[cfg(test)]
+mod fake_engine;
 mod gateway_service;
 mod listeners;
 mod socket;
