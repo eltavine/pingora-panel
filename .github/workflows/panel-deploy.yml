@@ -191,6 +191,10 @@ jobs:
           test "$(status)" = running
           ppanel container restart panel-ci-throwaway --yes
           test "$(status)" = running
+          ppanel -o json container inspect panel-ci-throwaway \
+            | python3 -c "import json, sys; d = json.load(sys.stdin); assert d['container']['names'] == ['panel-ci-throwaway'] and d['started_at'], d"
+          ppanel -o json container inspect pingora-panel-control-1 \
+            | python3 -c "import json, sys; d = json.load(sys.stdin); assert d['container']['labels']['com.docker.compose.service'] == 'control', d"
           ppanel container kill panel-ci-throwaway --yes
           test "$(status)" = exited
           ppanel container remove panel-ci-throwaway --yes
