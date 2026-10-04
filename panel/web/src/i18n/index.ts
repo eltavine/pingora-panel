@@ -1,7 +1,7 @@
 import { useStorage } from '@vueuse/core'
 import { watch } from 'vue'
 import { createI18n } from 'vue-i18n'
-import { LOCALES, messages, type Locale } from './messages'
+import { LOCALES, loadMessages, type Locale, type Messages } from './locales'
 
 export { LOCALES, type Locale }
 
@@ -27,8 +27,7 @@ const datetime = {
 export const i18n = createI18n({
   legacy: false,
   locale: stored.value,
-  fallbackLocale: 'en',
-  messages,
+  messages: {} as Record<Locale, Messages>,
   datetimeFormats: { 'zh-CN': { time, datetime }, en: { time, datetime } },
 })
 
@@ -40,3 +39,11 @@ watch(
   },
   { immediate: true },
 )
+
+/** Switches the console to `locale`, fetching its messages the first time. */
+export async function setLocale(locale: Locale): Promise<void> {
+  if (!i18n.global.availableLocales.includes(locale)) {
+    i18n.global.setLocaleMessage(locale, await loadMessages[locale]())
+  }
+  i18n.global.locale.value = locale
+}

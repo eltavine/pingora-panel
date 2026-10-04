@@ -1,8 +1,8 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { Trash2 } from '@lucide/vue'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { computed, defineComponent, h, ref } from 'vue'
-import { i18n } from '@/i18n'
+import { i18n, setLocale } from '@/i18n'
 import ConfirmDialog from '../ConfirmDialog.vue'
 
 function host(confirmed: (string | null)[]) {
@@ -49,6 +49,8 @@ afterEach(() => {
 })
 
 describe('ConfirmDialog', () => {
+  beforeAll(() => setLocale('en'))
+
   it('confirms what it shows before it closes', async () => {
     const confirmed: (string | null)[] = []
     const wrapper = mount(host(confirmed), { attachTo: document.body, global: { plugins: [i18n] } })

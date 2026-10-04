@@ -11,7 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { LOCALES, type Locale } from '@/i18n'
+import { LOCALES, setLocale, type Locale } from '@/i18n'
 
 const { t, locale } = useI18n()
 // Transition suppression injects an inline stylesheet, which the console's
@@ -60,7 +60,12 @@ const localeNames: Record<Locale, string> = { 'zh-CN': '简体中文', en: 'Engl
       <DropdownMenuContent align="end">
         <DropdownMenuLabel>{{ t('shell.language') }}</DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem v-for="code in LOCALES" :key="code" :lang="code" @select="locale = code">
+        <DropdownMenuItem
+          v-for="code in LOCALES"
+          :key="code"
+          :lang="code"
+          @select="setLocale(code)"
+        >
           {{ localeNames[code] }}
           <Check v-if="locale === code" class="ml-auto" aria-hidden="true" />
         </DropdownMenuItem>
