@@ -1,53 +1,16 @@
-use crate::language;
+use crate::{
+    language,
+    store::{ChangeOutput, ChangeRequest, DraftChange, DraftEdit, DraftState, DraftStore, DRAFT},
+};
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use panel_application::{ContentHash, IdempotencyKey, RequestScope};
+use panel_application::RequestScope;
 use panel_config_dsl::Sources;
 use panel_config_model::{ConfigModel, MODEL_VERSION};
 use panel_errors::{PanelError, Result};
 use panel_event_contracts::config::v1 as event;
 use panel_sqlite::{storage_error, EventLog, ServiceDatabase, SqliteOutbox};
 use sqlx::SqliteConnection;
-
-/// The aggregate of draft events.
-pub const DRAFT: (&str, &str) = ("configuration", "draft");
-
-/// The draft and its application state.
-#[derive(Clone, Debug)]
-pub struct DraftState {
-    pub version: u64,
-    pub model: ConfigModel,
-    /// The draft in the configuration language.
-    pub sources: Sources,
-    pub updated_at: DateTime<Utc>,
-    pub applied_version: Option<u64>,
-    pub applied_at: Option<DateTime<Utc>>,
-}
-
-/// What one change produced; replayed for a repeated idempotency key.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ChangeOutput {
-    pub content: Vec<u8>,
-    pub etag: String,
-}
-
-/// A change's new draft. Files left out follow the model: only the blocks of
-/// what changed are rewritten.
-pub struct DraftChange {
-    pub model: ConfigModel,
-    pub sources: Option<Sources>,
-    pub output: ChangeOutput,
-}
-
-/// Identifies one change for idempotency and events.
-pub struct ChangeRequest<'a> {
-    pub idempotency_key: &'a IdempotencyKey,
-    pub operation: &'a str,
-    pub resource: &'a str,
-    /// Hash of the operation, resource, precondition and body.
-    pub request_hash: ContentHash,
-    pub scope: &'a RequestScope,
-    pub actor: &'a str,
-}
 
 /// The draft document in the module's database.
 #[derive(Clone)]
@@ -81,8 +44,11 @@ impl SqliteDrafts {
             events,
         }
     }
+}
 
-    pub async fn load(&self) -> Result<DraftState> {
+#[async_trait]
+impl DraftStore for SqliteDrafts {
+    async fn load(&self) -> Result<DraftState> {
         let mut connection = self
             .database
             .pool()
@@ -92,13 +58,10 @@ impl SqliteDrafts {
         read(&mut connection).await
     }
 
-    /// Applies `change` to the current draft under the file's write lock. A
-    /// repeated idempotency key returns the recorded output when the request
-    /// is the same and is refused when it differs.
-    pub async fn change(
+    async fn change(
         &self,
         request: ChangeRequest<'_>,
-        change: impl FnOnce(&DraftState) -> Result<DraftChange>,
+        edit: DraftEdit<'_>,
     ) -> Result<(DraftState, ChangeOutput)> {
         let mut transaction = self.database.begin().await?;
         let current = read(&mut transaction).await?;
@@ -121,9 +84,7 @@ impl SqliteDrafts {
             model,
             sources,
             output,
-        } = change(&current)?;
-        let sources =
-            sources.unwrap_or_else(|| language::follow(&current.sources, &current.model, &model));
+        } = edit(&current)?;
         let next = current.version + 1;
         let document = serde_json::to_string(&model)
             .map_err(|error| PanelError::internal(format!("draft cannot be encoded: {error}")))?;
@@ -180,8 +141,7 @@ impl SqliteDrafts {
         ))
     }
 
-    /// Records that `version`, as `revision`, now runs on the gateway.
-    pub async fn mark_applied(
+    async fn mark_applied(
         &self,
         version: u64,
         revision: u64,

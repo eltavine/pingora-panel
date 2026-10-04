@@ -10,6 +10,7 @@
 //! restores the desired configuration to a gateway that lost it, and
 //! suspends publication while the gateway runs an unknown configuration.
 
+pub mod approval_rules;
 mod approvals;
 mod configuration;
 mod deployments;
@@ -22,14 +23,18 @@ mod reconcile;
 mod recording;
 mod revisions;
 mod scope;
+pub mod store;
 
+pub use approvals::SqliteApprovals;
 pub use configuration::ConfigurationService;
 pub use deployments::{PendingActivation, PreparedRecord, SqliteDeployments};
-pub use draft::{DraftState, SqliteDrafts};
+pub use draft::SqliteDrafts;
 pub use publication::PublicationService;
 pub use receipts::SqliteActivationReceipts;
 pub use reconcile::{Reconciler, Reconciliation, ReconciliationCheck, ReconciliationWatch};
 pub use recording::RecordingUseCases;
+pub use revisions::SqliteRevisions;
+pub use store::DraftState;
 
 use gateway_grpc_client::{GatewayGrpcClient, GatewayGrpcClientConfig};
 use panel_application::{GatewayService, GatewayUseCases, IdempotentGatewayUseCases};
@@ -139,9 +144,9 @@ pub fn process(
         reconciliation.clone(),
         events.clone(),
     ));
-    let drafts = SqliteDrafts::new(process.database(), events.clone());
-    let revisions = revisions::SqliteRevisions::new(process.database());
-    let approvals = approvals::SqliteApprovals::new(process.database(), events.clone());
+    let drafts = Arc::new(SqliteDrafts::new(process.database(), events.clone()));
+    let revisions = Arc::new(SqliteRevisions::new(process.database()));
+    let approvals = Arc::new(SqliteApprovals::new(process.database(), events.clone()));
     Ok(process
         .with_migrations(MIGRATIONS)
         .with_protocol(protocol_range(CONFIG_V1))
@@ -170,7 +175,7 @@ pub fn process(
                 revisions,
                 approvals,
                 Arc::clone(&use_cases),
-                events,
+                Arc::new(events),
             ))
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES),
@@ -180,4 +185,16 @@ pub fn process(
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
         ))
+}
+
+#[async_trait::async_trait]
+impl store::EventRecorder for EventLog {
+    async fn record(
+        &self,
+        event: panel_events::EventDraft,
+        scope: &panel_events::RequestScope,
+        actor: &str,
+    ) {
+        self.record_draft(event, scope, actor).await;
+    }
 }

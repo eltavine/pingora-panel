@@ -1,9 +1,9 @@
 use crate::{
-    approvals::SqliteApprovals,
-    draft::{ChangeOutput, ChangeRequest, DraftChange, DraftState, SqliteDrafts, DRAFT},
-    language, operations,
-    revisions::{NewRevision, SqliteRevisions},
-    scope,
+    language, operations, scope,
+    store::{
+        self, ApprovalStore, ChangeOutput, ChangeRequest, DraftChange, DraftState, DraftStore,
+        EventRecorder, NewRevision, RevisionStore, DRAFT,
+    },
 };
 use chrono::{DateTime, Utc};
 use config_proto_codec as codec;
@@ -24,7 +24,6 @@ use panel_errors::{Diagnostic, DiagnosticSeverity, PanelError, Result, Validatio
 use panel_event_contracts::config::v1 as event;
 use panel_ir::{RuntimeSnapshot, IR_SCHEMA_VERSION};
 use panel_service::trace_context;
-use panel_sqlite::EventLog;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{collections::BTreeMap, sync::Arc};
@@ -42,11 +41,11 @@ const MAX_REVISION_PAGE: u32 = 500;
 /// Application failures travel in each response's `error` field; transport
 /// status codes are left to the transport.
 pub struct ConfigurationService {
-    drafts: SqliteDrafts,
-    revisions: SqliteRevisions,
-    approvals: SqliteApprovals,
+    drafts: Arc<dyn DraftStore>,
+    revisions: Arc<dyn RevisionStore>,
+    approvals: Arc<dyn ApprovalStore>,
     publication: Arc<dyn GatewayUseCases>,
-    events: EventLog,
+    events: Arc<dyn EventRecorder>,
 }
 
 /// How an apply ended.
@@ -168,11 +167,11 @@ fn report_of(error: &PanelError) -> ValidationReport {
 
 impl ConfigurationService {
     pub fn new(
-        drafts: SqliteDrafts,
-        revisions: SqliteRevisions,
-        approvals: SqliteApprovals,
+        drafts: Arc<dyn DraftStore>,
+        revisions: Arc<dyn RevisionStore>,
+        approvals: Arc<dyn ApprovalStore>,
         publication: Arc<dyn GatewayUseCases>,
-        events: EventLog,
+        events: Arc<dyn EventRecorder>,
     ) -> Self {
         Self {
             drafts,
@@ -202,63 +201,63 @@ impl ConfigurationService {
         match result {
             Ok((_, Applied::Activated(..) | Applied::AwaitingApproval(_))) => {}
             Ok((draft, Applied::Checked(_))) => {
-                self.events
-                    .record(
-                        DRAFT,
-                        &scope,
-                        actor,
-                        &event::ApplyChecked {
-                            version: draft.version,
-                            valid: true,
-                            revision: None,
-                            codes: Vec::new(),
-                        },
-                    )
-                    .await;
+                store::record(
+                    &*self.events,
+                    DRAFT,
+                    &scope,
+                    actor,
+                    &event::ApplyChecked {
+                        version: draft.version,
+                        valid: true,
+                        revision: None,
+                        codes: Vec::new(),
+                    },
+                )
+                .await;
             }
             Ok((draft, Applied::Rejected(report, revision))) if request.dry_run => {
-                self.events
-                    .record(
-                        DRAFT,
-                        &scope,
-                        actor,
-                        &event::ApplyChecked {
-                            version: draft.version,
-                            valid: false,
-                            revision: *revision,
-                            codes: codes(report),
-                        },
-                    )
-                    .await;
+                store::record(
+                    &*self.events,
+                    DRAFT,
+                    &scope,
+                    actor,
+                    &event::ApplyChecked {
+                        version: draft.version,
+                        valid: false,
+                        revision: *revision,
+                        codes: codes(report),
+                    },
+                )
+                .await;
             }
             Ok((draft, Applied::Rejected(report, revision))) => {
-                self.events
-                    .record(
-                        DRAFT,
-                        &scope,
-                        actor,
-                        &event::ApplyRejected {
-                            version: draft.version,
-                            revision: *revision,
-                            codes: codes(report),
-                        },
-                    )
-                    .await;
+                store::record(
+                    &*self.events,
+                    DRAFT,
+                    &scope,
+                    actor,
+                    &event::ApplyRejected {
+                        version: draft.version,
+                        revision: *revision,
+                        codes: codes(report),
+                    },
+                )
+                .await;
             }
             Err(error) => {
-                self.events
-                    .record(
-                        DRAFT,
-                        &scope,
-                        actor,
-                        &event::ApplyFailed {
-                            expected_version: request.expected_version,
-                            dry_run: request.dry_run,
-                            code: error.code.as_str().to_owned(),
-                            message: error.message.clone(),
-                        },
-                    )
-                    .await;
+                store::record(
+                    &*self.events,
+                    DRAFT,
+                    &scope,
+                    actor,
+                    &event::ApplyFailed {
+                        expected_version: request.expected_version,
+                        dry_run: request.dry_run,
+                        code: error.code.as_str().to_owned(),
+                        message: error.message.clone(),
+                    },
+                )
+                .await;
             }
         }
     }
@@ -741,8 +740,7 @@ impl Configuration for ConfigurationService {
                 let note = body.note.as_deref().map(str::trim).filter(|note| !note.is_empty());
                 let id = revision_id(&request.resource)?;
                 let revision = self.revisions.set_note(id, note).await?;
-                self.events
-                    .record(
+                store::record(&*self.events,
                         ("revision", &id.to_string()),
                         &context.scope(),
                         context.actor(),
@@ -771,7 +769,7 @@ impl Configuration for ConfigurationService {
                         scope: &scope,
                         actor: context.actor(),
                     },
-                    |draft| {
+                    Box::new(|draft| {
                         let next_etag = draft_etag(draft.version + 1);
                         let text = match (request.operation.as_str(), request.resource.as_str()) {
                             ("config.source.replace", "config/source") => {
@@ -798,7 +796,7 @@ impl Configuration for ConfigurationService {
                             .expect("API values serialize");
                             return Ok(DraftChange {
                                 model,
-                                sources: Some(written),
+                                sources: written,
                                 output: ChangeOutput { content, etag: next_etag },
                             });
                         }
@@ -812,32 +810,32 @@ impl Configuration for ConfigurationService {
                         )?;
                         scope::check_changes(&draft.model, &model, context.site_scope(), scope::WRITE)?;
                         Ok(DraftChange {
+                            sources: language::follow(&draft.sources, &draft.model, &model),
                             model,
-                            sources: None,
                             output: ChangeOutput {
                                 content: output.content,
                                 etag: output.etag,
                             },
                         })
-                    },
+                    }),
                 )
                 .await
         }
         .await;
         if let Err(error) = &result {
-            self.events
-                .record(
-                    DRAFT,
-                    &context.scope(),
-                    context.actor(),
-                    &event::ChangeRefused {
-                        operation: request.operation.clone(),
-                        resource: request.resource.clone(),
-                        code: error.code.as_str().to_owned(),
-                        message: error.message.clone(),
-                    },
-                )
-                .await;
+            store::record(
+                &*self.events,
+                DRAFT,
+                &context.scope(),
+                context.actor(),
+                &event::ChangeRefused {
+                    operation: request.operation.clone(),
+                    resource: request.resource.clone(),
+                    code: error.code.as_str().to_owned(),
+                    message: error.message.clone(),
+                },
+            )
+            .await;
         }
         Ok(Response::new(match result {
             Ok((draft, output)) => wire::ChangeResponse {

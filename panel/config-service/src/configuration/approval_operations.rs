@@ -3,9 +3,9 @@
 
 use super::{decode, json_output, ConfigurationService};
 use crate::{
-    approvals::{assess, Bypass, Gate, Opening},
-    draft::{ChangeOutput, DraftState},
+    approval_rules::{assess, Bypass, Gate, Opening},
     language, operations,
+    store::{ChangeOutput, DraftState},
 };
 use chrono::{DateTime, Utc};
 use panel_application::CommandContext;

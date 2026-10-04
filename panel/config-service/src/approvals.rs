@@ -1,20 +1,21 @@
 //! Approvals of configuration changes (ADR 0019): the policies, the requests
 //! applying covered changes opens, and the approvals that let them through.
 
-use chrono::{DateTime, Duration, Utc};
-use panel_config_dsl::plan::plan;
+use crate::{
+    approval_rules::{self as rules, Bypass, Gate, Opening},
+    store::ApprovalStore,
+};
+use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use panel_config_model::{
-    ApprovalDecision, ApprovalPolicy, ApprovalPolicyInput, ApprovalRequest, ApprovalState,
-    Assessment, ConfigModel, PlannedChange, PolicyVersion, Risk, REQUEST_LIFETIME,
+    ApprovalDecision, ApprovalPolicy, ApprovalPolicyInput, ApprovalRequest, ApprovalState, Risk,
 };
 use panel_errors::{PanelError, Result};
 use panel_event_contracts::config::v1 as event;
 use panel_events::EventData;
 use panel_events::RequestScope;
 use panel_sqlite::{storage_error, EventLog, ServiceDatabase, SqliteOutbox};
-use serde::Serialize;
 use sqlx::{sqlite::SqliteRow, types::Json, Row, Sqlite, Transaction};
-use std::collections::BTreeSet;
 use uuid::Uuid;
 
 macro_rules! select_requests {
@@ -27,57 +28,6 @@ macro_rules! select_requests {
             $rest
         )
     };
-}
-
-/// What a change touches, from the plan people review.
-pub(crate) fn assess(current: &ConfigModel, next: &ConfigModel) -> Assessment {
-    let changes: Vec<PlannedChange> = plan(current, next)
-        .into_iter()
-        .map(|change| PlannedChange {
-            resource: change.resource,
-            change: serde_json::to_value(change.change)
-                .ok()
-                .and_then(|value| value.as_str().map(str::to_owned))
-                .unwrap_or_default(),
-        })
-        .collect();
-    let touched: BTreeSet<&str> = changes
-        .iter()
-        .filter_map(|change| change.resource.strip_prefix("sites/"))
-        .collect();
-    let site_tags = [current, next]
-        .iter()
-        .flat_map(|model| model.sites.iter())
-        .filter(|site| touched.contains(site.id.to_string().as_str()))
-        .flat_map(|site| site.tags.iter().cloned())
-        .collect();
-    Assessment::new(changes, site_tags)
-}
-
-/// What the approvals say about applying a change.
-pub(crate) enum Gate {
-    /// No policy covers it.
-    Clear,
-    /// Enough people approved exactly this content under these policies.
-    Approved(Uuid),
-    /// It waits for approvals.
-    Awaiting(Box<ApprovalRequest>),
-}
-
-/// A change to open a request for.
-pub(crate) struct Opening<'a> {
-    pub draft_version: u64,
-    pub content_hash: &'a str,
-    pub note: Option<&'a str>,
-    pub assessment: Assessment,
-    pub covering: Vec<&'a ApprovalPolicy>,
-}
-
-/// Why an Administrator applied without the approvals.
-#[derive(Clone, Debug, Serialize)]
-pub(crate) struct Bypass {
-    pub reason: String,
-    pub incident: String,
 }
 
 fn corrupt(what: &str) -> impl Fn(sqlx::Error) -> PanelError + '_ {
@@ -255,110 +205,6 @@ impl SqliteApprovals {
         SqliteOutbox::append(transaction, &event).await
     }
 
-    pub async fn policies(&self) -> Result<Vec<ApprovalPolicy>> {
-        sqlx::query(
-            "SELECT id, policy, version, created_at, updated_at \
-             FROM approval_policies ORDER BY id",
-        )
-        .fetch_all(self.database.pool())
-        .await
-        .map_err(storage_error)?
-        .iter()
-        .map(policy)
-        .collect()
-    }
-
-    pub async fn policy(&self, id: &str) -> Result<ApprovalPolicy> {
-        sqlx::query(
-            "SELECT id, policy, version, created_at, updated_at \
-             FROM approval_policies WHERE id = ?1",
-        )
-        .bind(id)
-        .fetch_optional(self.database.pool())
-        .await
-        .map_err(storage_error)?
-        .map(|row| policy(&row))
-        .transpose()?
-        .ok_or_else(|| PanelError::not_found(format!("there is no approval policy {id}")))
-    }
-
-    /// Creates or replaces a policy; true when it is new.
-    pub async fn put_policy(
-        &self,
-        id: &str,
-        input: ApprovalPolicyInput,
-        scope: &RequestScope,
-        actor: &str,
-    ) -> Result<(ApprovalPolicy, bool)> {
-        let problems = input.problems(id);
-        if !problems.is_empty() {
-            return Err(PanelError::validation_failed(problems.join("; ")));
-        }
-        let body = serde_json::to_string(&input).expect("policies serialize");
-        let mut transaction = self.database.begin().await?;
-        let row = sqlx::query(
-            "INSERT INTO approval_policies (id, policy, version, created_at, updated_at) \
-             VALUES (?1, ?2, 1, strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now'), strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now')) \
-             ON CONFLICT (id) DO UPDATE SET policy = EXCLUDED.policy, \
-             version = approval_policies.version + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now') \
-             RETURNING id, policy, version, created_at, updated_at, \
-             (version = 1) AS created",
-        )
-        .bind(id)
-        .bind(&body)
-        .fetch_one(&mut *transaction)
-        .await
-        .map_err(storage_error)?;
-        let created: bool = row.try_get("created").map_err(storage_error)?;
-        let stored = policy(&row)?;
-        if created {
-            self.emit(
-                &mut transaction,
-                ("approval_policy", id),
-                scope,
-                actor,
-                &policy_event!(event::ApprovalPolicyCreated, &stored),
-            )
-            .await?;
-        } else {
-            self.emit(
-                &mut transaction,
-                ("approval_policy", id),
-                scope,
-                actor,
-                &policy_event!(event::ApprovalPolicyUpdated, &stored),
-            )
-            .await?;
-        }
-        transaction.commit().await.map_err(storage_error)?;
-        Ok((stored, created))
-    }
-
-    pub async fn delete_policy(&self, id: &str, scope: &RequestScope, actor: &str) -> Result<()> {
-        let mut transaction = self.database.begin().await?;
-        let deleted = sqlx::query("DELETE FROM approval_policies WHERE id = ?1")
-            .bind(id)
-            .execute(&mut *transaction)
-            .await
-            .map_err(storage_error)?;
-        if deleted.rows_affected() == 0 {
-            return Err(PanelError::not_found(format!(
-                "there is no approval policy {id}"
-            )));
-        }
-        self.emit(
-            &mut transaction,
-            ("approval_policy", id),
-            scope,
-            actor,
-            &event::ApprovalPolicyDeleted {
-                policy: id.to_owned(),
-            },
-        )
-        .await?;
-        transaction.commit().await.map_err(storage_error)
-    }
-
     async fn approvals_of(&self, ids: &[Uuid]) -> Result<Vec<(Uuid, ApprovalDecision)>> {
         sqlx::query(
             "SELECT request_id, approver, approved_at, valid_until, revoked_at FROM approvals \
@@ -402,162 +248,6 @@ impl SqliteApprovals {
             .collect()
     }
 
-    /// Requests newest first, as stored.
-    pub async fn requests(
-        &self,
-        before: Option<DateTime<Utc>>,
-        limit: u32,
-    ) -> Result<Vec<ApprovalRequest>> {
-        let rows = sqlx::query(select_requests!(
-            "WHERE (?1 IS NULL OR requested_at < ?1) \
-             ORDER BY requested_at DESC LIMIT ?2"
-        ))
-        .bind(before)
-        .bind(i64::from(limit))
-        .fetch_all(self.database.pool())
-        .await
-        .map_err(storage_error)?;
-        self.with_approvals(rows).await
-    }
-
-    pub async fn request(&self, id: Uuid) -> Result<ApprovalRequest> {
-        let row = sqlx::query(select_requests!("WHERE id = ?1"))
-            .bind(id)
-            .fetch_optional(self.database.pool())
-            .await
-            .map_err(storage_error)?
-            .ok_or_else(|| PanelError::not_found(format!("there is no approval request {id}")))?;
-        Ok(self.with_approvals(vec![row]).await?.remove(0))
-    }
-
-    /// Decides what applying `content_hash` needs, opening a request when
-    /// covering policies have no valid one.
-    pub(crate) async fn gate(
-        &self,
-        opening: Opening<'_>,
-        now: DateTime<Utc>,
-        scope: &RequestScope,
-        actor: &str,
-    ) -> Result<Gate> {
-        if opening.covering.is_empty() {
-            return Ok(Gate::Clear);
-        }
-        let mut versions: Vec<PolicyVersion> = opening
-            .covering
-            .iter()
-            .map(|policy| PolicyVersion {
-                id: policy.id.clone(),
-                version: policy.version,
-            })
-            .collect();
-        versions.sort();
-        let open = sqlx::query(select_requests!(
-            "WHERE content_hash = ?1 AND state IN ('pending', 'approved') \
-             ORDER BY requested_at DESC"
-        ))
-        .bind(opening.content_hash)
-        .fetch_all(self.database.pool())
-        .await
-        .map_err(storage_error)?;
-        for existing in self.with_approvals(open).await? {
-            let current = existing.policies == versions;
-            match existing.state_at(now, opening.content_hash) {
-                ApprovalState::Approved if current => return Ok(Gate::Approved(existing.id)),
-                ApprovalState::Pending if current => return Ok(Gate::Awaiting(Box::new(existing))),
-                _ => {
-                    self.close(existing.id, Closing::Outdated, actor, None, scope, now)
-                        .await?;
-                }
-            }
-        }
-        let required = opening
-            .covering
-            .iter()
-            .map(|policy| policy.policy.approvals)
-            .max()
-            .unwrap_or(1);
-        let valid_minutes = opening
-            .covering
-            .iter()
-            .map(|policy| policy.policy.valid_minutes)
-            .min()
-            .unwrap_or(60);
-        let created = ApprovalRequest {
-            id: Uuid::now_v7(),
-            state: ApprovalState::Pending,
-            draft_version: opening.draft_version,
-            content_hash: opening.content_hash.to_owned(),
-            requested_by: actor.to_owned(),
-            requested_at: now,
-            expires_at: now + REQUEST_LIFETIME,
-            note: opening.note.map(str::to_owned),
-            risk: opening.assessment.risk,
-            policies: versions,
-            required,
-            valid_minutes,
-            changes: opening.assessment.changes,
-            approvals: Vec::new(),
-            closed_by: None,
-            closed_at: None,
-            reason: None,
-            revision: None,
-        };
-        let mut transaction = self.database.begin().await?;
-        sqlx::query(
-            "INSERT INTO approval_requests (id, state, draft_version, content_hash, \
-             requested_by, requested_at, expires_at, note, risk, policies, required, \
-             valid_minutes, changes) \
-             VALUES (?1, 'pending', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-        )
-        .bind(created.id)
-        .bind(i64::try_from(created.draft_version).unwrap_or(i64::MAX))
-        .bind(&created.content_hash)
-        .bind(&created.requested_by)
-        .bind(created.requested_at)
-        .bind(created.expires_at)
-        .bind(&created.note)
-        .bind(risk_text(created.risk))
-        .bind(serde_json::to_string(&created.policies).expect("policies serialize"))
-        .bind(i32::try_from(created.required).unwrap_or(i32::MAX))
-        .bind(i32::try_from(created.valid_minutes).unwrap_or(i32::MAX))
-        .bind(serde_json::to_string(&created.changes).expect("changes serialize"))
-        .execute(&mut *transaction)
-        .await
-        .map_err(storage_error)?;
-        self.emit(
-            &mut transaction,
-            ("approval_request", &created.id.to_string()),
-            scope,
-            actor,
-            &event::ApprovalRequested {
-                request: created.id.to_string(),
-                draft_version: created.draft_version,
-                content_hash: created.content_hash.clone(),
-                risk: created.risk.as_str().into(),
-                policies: created
-                    .policies
-                    .iter()
-                    .map(|policy| event::PolicyVersion {
-                        id: policy.id.clone(),
-                        version: policy.version,
-                    })
-                    .collect(),
-                required: created.required,
-                changes: created
-                    .changes
-                    .iter()
-                    .map(|change| event::PlannedChange {
-                        resource: change.resource.clone(),
-                        change: change.change.clone(),
-                    })
-                    .collect(),
-            },
-        )
-        .await?;
-        transaction.commit().await.map_err(storage_error)?;
-        Ok(Gate::Awaiting(Box::new(created)))
-    }
-
     /// Locks an open request for a decision, with its state at `now`.
     async fn locked(
         &self,
@@ -582,265 +272,6 @@ impl SqliteApprovals {
         .map(decision)
         .collect::<Result<_>>()?;
         request(&row, approvals)
-    }
-
-    fn open_at(request: &ApprovalRequest, now: DateTime<Utc>, draft_hash: &str) -> Result<()> {
-        match request.state_at(now, draft_hash) {
-            ApprovalState::Pending | ApprovalState::Approved => Ok(()),
-            state => Err(PanelError::precondition_failed(format!(
-                "the request is {}, so it can no longer be decided",
-                serde_json::to_value(state)
-                    .ok()
-                    .and_then(|value| value.as_str().map(str::to_owned))
-                    .unwrap_or_default()
-            ))),
-        }
-    }
-
-    /// Records `approver`'s approval of content the draft still has.
-    pub async fn approve(
-        &self,
-        id: Uuid,
-        approver: &str,
-        draft_hash: &str,
-        now: DateTime<Utc>,
-        scope: &RequestScope,
-    ) -> Result<ApprovalRequest> {
-        let mut transaction = self.database.begin().await?;
-        let request = self.locked(&mut transaction, id).await?;
-        Self::open_at(&request, now, draft_hash)?;
-        if request.requested_by == approver {
-            return Err(PanelError::permission_denied(
-                "nobody may approve their own request",
-            ));
-        }
-        if request
-            .approvals
-            .iter()
-            .any(|approval| approval.approver == approver && approval.is_valid(now))
-        {
-            return Err(PanelError::conflict("you already approved this request"));
-        }
-        let valid_until = now + Duration::minutes(i64::from(request.valid_minutes));
-        sqlx::query(
-            "INSERT INTO approvals (request_id, approver, approved_at, valid_until) \
-             VALUES (?1, ?2, ?3, ?4) ON CONFLICT (request_id, approver) DO UPDATE SET \
-             approved_at = EXCLUDED.approved_at, valid_until = EXCLUDED.valid_until, \
-             revoked_at = NULL",
-        )
-        .bind(id)
-        .bind(approver)
-        .bind(now)
-        .bind(valid_until)
-        .execute(&mut *transaction)
-        .await
-        .map_err(storage_error)?;
-        let approved = request.valid_approvals(now) + 1 >= request.required as usize;
-        if approved {
-            sqlx::query("UPDATE approval_requests SET state = 'approved' WHERE id = ?1")
-                .bind(id)
-                .execute(&mut *transaction)
-                .await
-                .map_err(storage_error)?;
-        }
-        self.emit(
-            &mut transaction,
-            ("approval_request", &id.to_string()),
-            scope,
-            approver,
-            &event::ApprovalApproved {
-                request: id.to_string(),
-                valid_until: Some(valid_until.into()),
-                approved,
-            },
-        )
-        .await?;
-        transaction.commit().await.map_err(storage_error)?;
-        self.request(id).await
-    }
-
-    /// Rejects an open request someone else asked for.
-    pub async fn reject(
-        &self,
-        id: Uuid,
-        approver: &str,
-        reason: Option<&str>,
-        draft_hash: &str,
-        now: DateTime<Utc>,
-        scope: &RequestScope,
-    ) -> Result<ApprovalRequest> {
-        let mut transaction = self.database.begin().await?;
-        let request = self.locked(&mut transaction, id).await?;
-        Self::open_at(&request, now, draft_hash)?;
-        if request.requested_by == approver {
-            return Err(PanelError::permission_denied(
-                "withdraw your own request instead of rejecting it",
-            ));
-        }
-        drop(transaction);
-        self.close(id, Closing::Rejected, approver, reason, scope, now)
-            .await?;
-        self.request(id).await
-    }
-
-    /// Withdraws a request its requester no longer wants.
-    pub async fn withdraw(
-        &self,
-        id: Uuid,
-        actor: &str,
-        now: DateTime<Utc>,
-        scope: &RequestScope,
-    ) -> Result<ApprovalRequest> {
-        let request = self.request(id).await?;
-        if request.requested_by != actor {
-            return Err(PanelError::permission_denied(
-                "only the person who asked can withdraw a request",
-            ));
-        }
-        if !matches!(
-            request.state,
-            ApprovalState::Pending | ApprovalState::Approved
-        ) {
-            return Err(PanelError::precondition_failed(
-                "the request is already closed",
-            ));
-        }
-        self.close(id, Closing::Withdrawn, actor, None, scope, now)
-            .await?;
-        self.request(id).await
-    }
-
-    /// Takes back `approver`'s approval of a request not yet applied.
-    pub async fn revoke(
-        &self,
-        id: Uuid,
-        approver: &str,
-        now: DateTime<Utc>,
-        scope: &RequestScope,
-    ) -> Result<ApprovalRequest> {
-        let mut transaction = self.database.begin().await?;
-        let request = self.locked(&mut transaction, id).await?;
-        if !matches!(
-            request.state,
-            ApprovalState::Pending | ApprovalState::Approved
-        ) {
-            return Err(PanelError::precondition_failed(
-                "the request is already closed",
-            ));
-        }
-        let revoked = sqlx::query(
-            "UPDATE approvals SET revoked_at = ?3 \
-             WHERE request_id = ?1 AND approver = ?2 AND revoked_at IS NULL",
-        )
-        .bind(id)
-        .bind(approver)
-        .bind(now)
-        .execute(&mut *transaction)
-        .await
-        .map_err(storage_error)?;
-        if revoked.rows_affected() == 0 {
-            return Err(PanelError::not_found("you have not approved this request"));
-        }
-        let remaining = request
-            .approvals
-            .iter()
-            .filter(|approval| approval.approver != approver && approval.is_valid(now))
-            .count();
-        if remaining < request.required as usize {
-            sqlx::query("UPDATE approval_requests SET state = 'pending' WHERE id = ?1")
-                .bind(id)
-                .execute(&mut *transaction)
-                .await
-                .map_err(storage_error)?;
-        }
-        self.emit(
-            &mut transaction,
-            ("approval_request", &id.to_string()),
-            scope,
-            approver,
-            &event::ApprovalRevoked {
-                request: id.to_string(),
-            },
-        )
-        .await?;
-        transaction.commit().await.map_err(storage_error)?;
-        self.request(id).await
-    }
-
-    /// Records that the approved request was applied as `revision`.
-    pub async fn applied(
-        &self,
-        id: Uuid,
-        revision: u64,
-        actor: &str,
-        scope: &RequestScope,
-    ) -> Result<()> {
-        let mut transaction = self.database.begin().await?;
-        sqlx::query(
-            "UPDATE approval_requests SET state = 'applied', revision = ?2, closed_by = ?3, \
-             closed_at = strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now') WHERE id = ?1",
-        )
-        .bind(id)
-        .bind(i64::try_from(revision).unwrap_or(i64::MAX))
-        .bind(actor)
-        .execute(&mut *transaction)
-        .await
-        .map_err(storage_error)?;
-        self.emit(
-            &mut transaction,
-            ("approval_request", &id.to_string()),
-            scope,
-            actor,
-            &event::ApprovalApplied {
-                request: id.to_string(),
-                revision,
-            },
-        )
-        .await?;
-        transaction.commit().await.map_err(storage_error)
-    }
-
-    /// Records an emergency bypass before anything is published, closing
-    /// open requests for the same content; nothing may be applied unless
-    /// this is recorded.
-    pub(crate) async fn bypassed(
-        &self,
-        bypass: &Bypass,
-        content_hash: &str,
-        covering: &[&ApprovalPolicy],
-        scope: &RequestScope,
-        actor: &str,
-    ) -> Result<()> {
-        if bypass.reason.trim().chars().count() < 10 || bypass.incident.trim().is_empty() {
-            return Err(PanelError::invalid_argument(
-                "an emergency bypass needs a reason of at least 10 characters and an incident",
-            ));
-        }
-        let mut transaction = self.database.begin().await?;
-        sqlx::query(
-            "UPDATE approval_requests SET state = 'applied', closed_by = ?2, closed_at = strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now'), \
-             reason = ?3 WHERE content_hash = ?1 AND state IN ('pending', 'approved')",
-        )
-        .bind(content_hash)
-        .bind(actor)
-        .bind(format!("bypassed: {}", bypass.reason.trim()))
-        .execute(&mut *transaction)
-        .await
-        .map_err(storage_error)?;
-        self.emit(
-            &mut transaction,
-            ("configuration", "draft"),
-            scope,
-            actor,
-            &event::ApprovalBypassed {
-                reason: bypass.reason.trim().to_owned(),
-                incident: bypass.incident.trim().to_owned(),
-                content_hash: content_hash.to_owned(),
-                policies: covering.iter().map(|policy| policy.id.clone()).collect(),
-            },
-        )
-        .await?;
-        transaction.commit().await.map_err(storage_error)
     }
 
     async fn close(
@@ -905,6 +336,409 @@ impl SqliteApprovals {
                 .await?;
             }
         }
+        transaction.commit().await.map_err(storage_error)
+    }
+}
+
+#[async_trait]
+impl ApprovalStore for SqliteApprovals {
+    async fn policies(&self) -> Result<Vec<ApprovalPolicy>> {
+        sqlx::query(
+            "SELECT id, policy, version, created_at, updated_at \
+             FROM approval_policies ORDER BY id",
+        )
+        .fetch_all(self.database.pool())
+        .await
+        .map_err(storage_error)?
+        .iter()
+        .map(policy)
+        .collect()
+    }
+
+    async fn policy(&self, id: &str) -> Result<ApprovalPolicy> {
+        sqlx::query(
+            "SELECT id, policy, version, created_at, updated_at \
+             FROM approval_policies WHERE id = ?1",
+        )
+        .bind(id)
+        .fetch_optional(self.database.pool())
+        .await
+        .map_err(storage_error)?
+        .map(|row| policy(&row))
+        .transpose()?
+        .ok_or_else(|| PanelError::not_found(format!("there is no approval policy {id}")))
+    }
+
+    async fn put_policy(
+        &self,
+        id: &str,
+        input: ApprovalPolicyInput,
+        scope: &RequestScope,
+        actor: &str,
+    ) -> Result<(ApprovalPolicy, bool)> {
+        let problems = input.problems(id);
+        if !problems.is_empty() {
+            return Err(PanelError::validation_failed(problems.join("; ")));
+        }
+        let body = serde_json::to_string(&input).expect("policies serialize");
+        let mut transaction = self.database.begin().await?;
+        let row = sqlx::query(
+            "INSERT INTO approval_policies (id, policy, version, created_at, updated_at) \
+             VALUES (?1, ?2, 1, strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now'), strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now')) \
+             ON CONFLICT (id) DO UPDATE SET policy = EXCLUDED.policy, \
+             version = approval_policies.version + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now') \
+             RETURNING id, policy, version, created_at, updated_at, \
+             (version = 1) AS created",
+        )
+        .bind(id)
+        .bind(&body)
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(storage_error)?;
+        let created: bool = row.try_get("created").map_err(storage_error)?;
+        let stored = policy(&row)?;
+        if created {
+            self.emit(
+                &mut transaction,
+                ("approval_policy", id),
+                scope,
+                actor,
+                &policy_event!(event::ApprovalPolicyCreated, &stored),
+            )
+            .await?;
+        } else {
+            self.emit(
+                &mut transaction,
+                ("approval_policy", id),
+                scope,
+                actor,
+                &policy_event!(event::ApprovalPolicyUpdated, &stored),
+            )
+            .await?;
+        }
+        transaction.commit().await.map_err(storage_error)?;
+        Ok((stored, created))
+    }
+
+    async fn delete_policy(&self, id: &str, scope: &RequestScope, actor: &str) -> Result<()> {
+        let mut transaction = self.database.begin().await?;
+        let deleted = sqlx::query("DELETE FROM approval_policies WHERE id = ?1")
+            .bind(id)
+            .execute(&mut *transaction)
+            .await
+            .map_err(storage_error)?;
+        if deleted.rows_affected() == 0 {
+            return Err(PanelError::not_found(format!(
+                "there is no approval policy {id}"
+            )));
+        }
+        self.emit(
+            &mut transaction,
+            ("approval_policy", id),
+            scope,
+            actor,
+            &event::ApprovalPolicyDeleted {
+                policy: id.to_owned(),
+            },
+        )
+        .await?;
+        transaction.commit().await.map_err(storage_error)
+    }
+
+    async fn requests(
+        &self,
+        before: Option<DateTime<Utc>>,
+        limit: u32,
+    ) -> Result<Vec<ApprovalRequest>> {
+        let rows = sqlx::query(select_requests!(
+            "WHERE (?1 IS NULL OR requested_at < ?1) \
+             ORDER BY requested_at DESC LIMIT ?2"
+        ))
+        .bind(before)
+        .bind(i64::from(limit))
+        .fetch_all(self.database.pool())
+        .await
+        .map_err(storage_error)?;
+        self.with_approvals(rows).await
+    }
+
+    async fn request(&self, id: Uuid) -> Result<ApprovalRequest> {
+        let row = sqlx::query(select_requests!("WHERE id = ?1"))
+            .bind(id)
+            .fetch_optional(self.database.pool())
+            .await
+            .map_err(storage_error)?
+            .ok_or_else(|| PanelError::not_found(format!("there is no approval request {id}")))?;
+        Ok(self.with_approvals(vec![row]).await?.remove(0))
+    }
+
+    async fn gate(
+        &self,
+        opening: Opening<'_>,
+        now: DateTime<Utc>,
+        scope: &RequestScope,
+        actor: &str,
+    ) -> Result<Gate> {
+        if opening.covering.is_empty() {
+            return Ok(Gate::Clear);
+        }
+        let open = sqlx::query(select_requests!(
+            "WHERE content_hash = ?1 AND state IN ('pending', 'approved') \
+             ORDER BY requested_at DESC"
+        ))
+        .bind(opening.content_hash)
+        .fetch_all(self.database.pool())
+        .await
+        .map_err(storage_error)?;
+        let screening = rules::screen(&opening, self.with_approvals(open).await?, now);
+        for id in screening.outdated {
+            self.close(id, Closing::Outdated, actor, None, scope, now)
+                .await?;
+        }
+        if let Some(gate) = screening.gate {
+            return Ok(gate);
+        }
+        let created = rules::open_request(opening, actor, now);
+        let mut transaction = self.database.begin().await?;
+        sqlx::query(
+            "INSERT INTO approval_requests (id, state, draft_version, content_hash, \
+             requested_by, requested_at, expires_at, note, risk, policies, required, \
+             valid_minutes, changes) \
+             VALUES (?1, 'pending', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        )
+        .bind(created.id)
+        .bind(i64::try_from(created.draft_version).unwrap_or(i64::MAX))
+        .bind(&created.content_hash)
+        .bind(&created.requested_by)
+        .bind(created.requested_at)
+        .bind(created.expires_at)
+        .bind(&created.note)
+        .bind(risk_text(created.risk))
+        .bind(serde_json::to_string(&created.policies).expect("policies serialize"))
+        .bind(i32::try_from(created.required).unwrap_or(i32::MAX))
+        .bind(i32::try_from(created.valid_minutes).unwrap_or(i32::MAX))
+        .bind(serde_json::to_string(&created.changes).expect("changes serialize"))
+        .execute(&mut *transaction)
+        .await
+        .map_err(storage_error)?;
+        self.emit(
+            &mut transaction,
+            ("approval_request", &created.id.to_string()),
+            scope,
+            actor,
+            &event::ApprovalRequested {
+                request: created.id.to_string(),
+                draft_version: created.draft_version,
+                content_hash: created.content_hash.clone(),
+                risk: created.risk.as_str().into(),
+                policies: created
+                    .policies
+                    .iter()
+                    .map(|policy| event::PolicyVersion {
+                        id: policy.id.clone(),
+                        version: policy.version,
+                    })
+                    .collect(),
+                required: created.required,
+                changes: created
+                    .changes
+                    .iter()
+                    .map(|change| event::PlannedChange {
+                        resource: change.resource.clone(),
+                        change: change.change.clone(),
+                    })
+                    .collect(),
+            },
+        )
+        .await?;
+        transaction.commit().await.map_err(storage_error)?;
+        Ok(Gate::Awaiting(Box::new(created)))
+    }
+
+    async fn approve(
+        &self,
+        id: Uuid,
+        approver: &str,
+        draft_hash: &str,
+        now: DateTime<Utc>,
+        scope: &RequestScope,
+    ) -> Result<ApprovalRequest> {
+        let mut transaction = self.database.begin().await?;
+        let request = self.locked(&mut transaction, id).await?;
+        let approval = rules::approval(&request, approver, draft_hash, now)?;
+        sqlx::query(
+            "INSERT INTO approvals (request_id, approver, approved_at, valid_until) \
+             VALUES (?1, ?2, ?3, ?4) ON CONFLICT (request_id, approver) DO UPDATE SET \
+             approved_at = EXCLUDED.approved_at, valid_until = EXCLUDED.valid_until, \
+             revoked_at = NULL",
+        )
+        .bind(id)
+        .bind(approver)
+        .bind(now)
+        .bind(approval.valid_until)
+        .execute(&mut *transaction)
+        .await
+        .map_err(storage_error)?;
+        if approval.completes {
+            sqlx::query("UPDATE approval_requests SET state = 'approved' WHERE id = ?1")
+                .bind(id)
+                .execute(&mut *transaction)
+                .await
+                .map_err(storage_error)?;
+        }
+        self.emit(
+            &mut transaction,
+            ("approval_request", &id.to_string()),
+            scope,
+            approver,
+            &event::ApprovalApproved {
+                request: id.to_string(),
+                valid_until: Some(approval.valid_until.into()),
+                approved: approval.completes,
+            },
+        )
+        .await?;
+        transaction.commit().await.map_err(storage_error)?;
+        self.request(id).await
+    }
+
+    async fn reject(
+        &self,
+        id: Uuid,
+        approver: &str,
+        reason: Option<&str>,
+        draft_hash: &str,
+        now: DateTime<Utc>,
+        scope: &RequestScope,
+    ) -> Result<ApprovalRequest> {
+        let mut transaction = self.database.begin().await?;
+        let request = self.locked(&mut transaction, id).await?;
+        rules::check_rejection(&request, approver, draft_hash, now)?;
+        drop(transaction);
+        self.close(id, Closing::Rejected, approver, reason, scope, now)
+            .await?;
+        self.request(id).await
+    }
+
+    async fn withdraw(
+        &self,
+        id: Uuid,
+        actor: &str,
+        now: DateTime<Utc>,
+        scope: &RequestScope,
+    ) -> Result<ApprovalRequest> {
+        rules::check_withdrawal(&self.request(id).await?, actor)?;
+        self.close(id, Closing::Withdrawn, actor, None, scope, now)
+            .await?;
+        self.request(id).await
+    }
+
+    async fn revoke(
+        &self,
+        id: Uuid,
+        approver: &str,
+        now: DateTime<Utc>,
+        scope: &RequestScope,
+    ) -> Result<ApprovalRequest> {
+        let mut transaction = self.database.begin().await?;
+        let request = self.locked(&mut transaction, id).await?;
+        let reopens = rules::revocation(&request, approver, now)?;
+        sqlx::query(
+            "UPDATE approvals SET revoked_at = ?3 \
+             WHERE request_id = ?1 AND approver = ?2 AND revoked_at IS NULL",
+        )
+        .bind(id)
+        .bind(approver)
+        .bind(now)
+        .execute(&mut *transaction)
+        .await
+        .map_err(storage_error)?;
+        if reopens {
+            sqlx::query("UPDATE approval_requests SET state = 'pending' WHERE id = ?1")
+                .bind(id)
+                .execute(&mut *transaction)
+                .await
+                .map_err(storage_error)?;
+        }
+        self.emit(
+            &mut transaction,
+            ("approval_request", &id.to_string()),
+            scope,
+            approver,
+            &event::ApprovalRevoked {
+                request: id.to_string(),
+            },
+        )
+        .await?;
+        transaction.commit().await.map_err(storage_error)?;
+        self.request(id).await
+    }
+
+    async fn applied(
+        &self,
+        id: Uuid,
+        revision: u64,
+        actor: &str,
+        scope: &RequestScope,
+    ) -> Result<()> {
+        let mut transaction = self.database.begin().await?;
+        sqlx::query(
+            "UPDATE approval_requests SET state = 'applied', revision = ?2, closed_by = ?3, \
+             closed_at = strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now') WHERE id = ?1",
+        )
+        .bind(id)
+        .bind(i64::try_from(revision).unwrap_or(i64::MAX))
+        .bind(actor)
+        .execute(&mut *transaction)
+        .await
+        .map_err(storage_error)?;
+        self.emit(
+            &mut transaction,
+            ("approval_request", &id.to_string()),
+            scope,
+            actor,
+            &event::ApprovalApplied {
+                request: id.to_string(),
+                revision,
+            },
+        )
+        .await?;
+        transaction.commit().await.map_err(storage_error)
+    }
+
+    async fn bypassed(
+        &self,
+        bypass: &Bypass,
+        content_hash: &str,
+        covering: &[&ApprovalPolicy],
+        scope: &RequestScope,
+        actor: &str,
+    ) -> Result<()> {
+        bypass.check()?;
+        let mut transaction = self.database.begin().await?;
+        sqlx::query(
+            "UPDATE approval_requests SET state = 'applied', closed_by = ?2, closed_at = strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now'), \
+             reason = ?3 WHERE content_hash = ?1 AND state IN ('pending', 'approved')",
+        )
+        .bind(content_hash)
+        .bind(actor)
+        .bind(format!("bypassed: {}", bypass.reason.trim()))
+        .execute(&mut *transaction)
+        .await
+        .map_err(storage_error)?;
+        self.emit(
+            &mut transaction,
+            ("configuration", "draft"),
+            scope,
+            actor,
+            &event::ApprovalBypassed {
+                reason: bypass.reason.trim().to_owned(),
+                incident: bypass.incident.trim().to_owned(),
+                content_hash: content_hash.to_owned(),
+                policies: covering.iter().map(|policy| policy.id.clone()).collect(),
+            },
+        )
+        .await?;
         transaction.commit().await.map_err(storage_error)
     }
 }

@@ -168,6 +168,10 @@ impl EventDraft {
             EventPayload::of(data)?,
         ))
     }
+
+    pub fn event_type(&self) -> &EventType {
+        &self.event_type
+    }
 }
 
 /// Who produced an event and why.

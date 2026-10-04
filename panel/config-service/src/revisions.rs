@@ -1,6 +1,8 @@
 //! Every configuration applied or attempted: its files, author, note and
 //! outcome. Files never change once recorded.
 
+use crate::store::{NewRevision, RevisionStore};
+use async_trait::async_trait;
 use panel_config_dsl::{Sources, LANGUAGE_VERSION};
 use panel_config_model::{Revision, RevisionOutcome};
 use panel_errors::{Diagnostic, PanelError, Result};
@@ -8,16 +10,6 @@ use panel_sqlite::{storage_error, ServiceDatabase};
 use serde::Serialize;
 use sqlx::{sqlite::SqliteRow, Row, SqliteConnection};
 use std::collections::BTreeMap;
-
-/// A revision to record.
-pub struct NewRevision<'a> {
-    pub draft_version: u64,
-    pub sources: &'a Sources,
-    pub content_hash: &'a str,
-    pub author: &'a str,
-    pub note: Option<&'a str>,
-    pub snapshot_hash: Option<&'a str>,
-}
 
 macro_rules! columns {
     () => {
@@ -124,34 +116,25 @@ impl SqliteRevisions {
         .map_err(storage_error)?;
         unsigned(id, "revision id")
     }
+}
 
-    /// Records an attempt about to reach the gateway.
-    pub async fn begin(&self, revision: &NewRevision<'_>) -> Result<u64> {
+#[async_trait]
+impl RevisionStore for SqliteRevisions {
+    async fn begin(&self, revision: &NewRevision<'_>) -> Result<u64> {
         self.insert(revision, "applying", None).await
     }
 
-    /// Records an attempt that failed validation.
-    pub async fn reject(
-        &self,
-        revision: &NewRevision<'_>,
-        diagnostics: &[Diagnostic],
-    ) -> Result<u64> {
+    async fn reject(&self, revision: &NewRevision<'_>, diagnostics: &[Diagnostic]) -> Result<u64> {
         self.insert(revision, "rejected", Some(diagnostics)).await
     }
 
-    /// Marks `id` as what the gateway runs; the previous one is superseded.
-    pub async fn activate(
-        &self,
-        id: u64,
-        snapshot_hash: &str,
-        gateway_revision: u64,
-    ) -> Result<()> {
+    async fn activate(&self, id: u64, snapshot_hash: &str, gateway_revision: u64) -> Result<()> {
         let mut transaction = self.database.begin().await?;
         activate(&mut transaction, id, snapshot_hash, Some(gateway_revision)).await?;
         transaction.commit().await.map_err(storage_error)
     }
 
-    pub async fn fail(&self, id: u64, diagnostics: &[Diagnostic]) -> Result<()> {
+    async fn fail(&self, id: u64, diagnostics: &[Diagnostic]) -> Result<()> {
         sqlx::query(
             "UPDATE configuration_revisions SET outcome = 'failed', outcome_at = strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now'), \
              diagnostics = ?2 WHERE id = ?1 AND outcome = 'applying'",
@@ -164,9 +147,7 @@ impl SqliteRevisions {
         Ok(())
     }
 
-    /// Settles attempts a crash left open: the one whose snapshot the gateway
-    /// runs becomes active, the others failed.
-    pub async fn settle(&self, active_hash: Option<&str>) -> Result<()> {
+    async fn settle(&self, active_hash: Option<&str>) -> Result<()> {
         let mut transaction = self.database.begin().await?;
         let open: Vec<(i64, Option<String>)> = sqlx::query_as(
             "SELECT id, snapshot_hash FROM configuration_revisions WHERE outcome = 'applying' \
@@ -201,7 +182,7 @@ impl SqliteRevisions {
         transaction.commit().await.map_err(storage_error)
     }
 
-    pub async fn get(&self, id: u64) -> Result<(Revision, Sources)> {
+    async fn get(&self, id: u64) -> Result<(Revision, Sources)> {
         let row = sqlx::query(concat!(
             "SELECT ",
             columns!(),
@@ -218,8 +199,7 @@ impl SqliteRevisions {
         Ok((revision(&row)?, files(&sources)?))
     }
 
-    /// The revision the gateway runs, if any.
-    pub async fn active(&self) -> Result<Option<(Revision, Sources)>> {
+    async fn active(&self) -> Result<Option<(Revision, Sources)>> {
         let id: Option<(i64,)> =
             sqlx::query_as("SELECT id FROM configuration_revisions WHERE outcome = 'active'")
                 .fetch_optional(self.database.pool())
@@ -231,8 +211,7 @@ impl SqliteRevisions {
         }
     }
 
-    /// Revisions newest first, older than `before` when given.
-    pub async fn list(&self, before: Option<u64>, limit: u32) -> Result<Vec<Revision>> {
+    async fn list(&self, before: Option<u64>, limit: u32) -> Result<Vec<Revision>> {
         let rows = sqlx::query(concat!(
             "SELECT ",
             columns!(),
@@ -247,7 +226,7 @@ impl SqliteRevisions {
         rows.iter().map(revision).collect()
     }
 
-    pub async fn set_note(&self, id: u64, note: Option<&str>) -> Result<Revision> {
+    async fn set_note(&self, id: u64, note: Option<&str>) -> Result<Revision> {
         let updated = sqlx::query("UPDATE configuration_revisions SET note = ?2 WHERE id = ?1")
             .bind(signed(id, "revision id")?)
             .bind(note)

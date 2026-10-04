@@ -82,6 +82,14 @@ impl EventLog {
         self.append_alone(E::TYPE, event).await;
     }
 
+    /// Records an event whose data was drafted elsewhere on its own; see
+    /// [`record`](Self::record).
+    pub async fn record_draft(&self, draft: EventDraft, scope: &RequestScope, actor: &str) {
+        let event_type = draft.event_type().as_str().to_owned();
+        let event = self.envelope(draft, scope, &Self::user(actor));
+        self.append_alone(&event_type, Ok(event)).await;
+    }
+
     fn envelope(
         &self,
         draft: EventDraft,
