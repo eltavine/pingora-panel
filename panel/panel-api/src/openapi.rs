@@ -37,6 +37,8 @@ mod tests;
         crate::language::format, crate::language::schema,
         crate::traffic::traffic_summary,
         crate::traffic::traffic_series,
+        crate::logs::search_logs, crate::logs::download_logs, crate::logs::tail_logs,
+        crate::logs::delete_logs, crate::logs::list_log_deletions,
         crate::audit::list_audit_events,
         crate::audit::get_audit_event,
         crate::audit::verify_audit_events,
@@ -93,6 +95,7 @@ mod tests;
         (name = "approvals", description = "Policies that ask other people to approve covered changes before they are applied, and the requests they open"),
         (name = "gateway", description = "The running gateway: data plane, workers, shutdown and upstream health"),
         (name = "traffic", description = "What the gateway served, from its metrics: requests, status classes, latency, traffic, connections, upstreams and routes"),
+        (name = "logs", description = "The gateway's access and error logs: searched, followed as they arrive, downloaded and deleted"),
         (name = "audit", description = "Every change and every refused or failed attempt, in a tamper-evident hash chain"),
         (name = "certificates", description = "Server certificates whose private keys stay sealed with the panel and are delivered to the gateway, and the ACME accounts and automatic certificates that keep some of them issued and renewed"),
         (name = "identity", description = "Setup, login sessions, API tokens, accounts, roles and permissions")
@@ -117,7 +120,8 @@ mod tests;
         ProblemDetails,
         panel_config_model::SiteSort,
         panel_config_model::SiteStatus,
-        panel_config_model::SiteKind
+        panel_config_model::SiteKind,
+        crate::logs::LogTailMessage
     ))
 )]
 pub struct ApiDoc;

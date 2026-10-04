@@ -22,6 +22,7 @@ mod gateway_runtime;
 mod grants;
 mod identity;
 mod language;
+mod logs;
 mod middleware;
 mod openapi;
 mod request_context;

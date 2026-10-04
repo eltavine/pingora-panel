@@ -25,7 +25,7 @@ use identity_oidc::OidcClient;
 use identity_postgres::PgIdentityStore;
 use observability_grpc_client::ObservabilityClient;
 use panel_api::{router_with_config, AccessSettings, ApiConfig, ApiState};
-use panel_application::RecordedRuntime;
+use panel_application::{RecordedLogs, RecordedRuntime};
 use panel_control_runtime::{ControlPlaneProcess, DefaultAddresses, ProcessSettings};
 use panel_errors::{PanelError, Result};
 use panel_health::Impact;
@@ -196,6 +196,7 @@ pub fn process(
     let events = EventLog::new(process.database(), ServiceName::new(SERVICE)?);
     let operations = Arc::new(operations::OutboxOperations(events.clone()));
     let runtime = RecordedRuntime::new(Arc::new(gateway), operations.clone());
+    let logs = RecordedLogs::new(Arc::new(observability.clone()), operations.clone());
     let store = Arc::new(PgIdentityStore::new(process.database(), events));
     let roles = roles::BuiltInRoles::new(Arc::clone(&store), bootstrap.is_some());
     let oidc = Arc::new(OidcClient::new(PROVIDER_TIMEOUT)?);
@@ -230,6 +231,7 @@ pub fn process(
                 .with_audit(Arc::new(audit))
                 .with_certificates(Arc::new(automation))
                 .with_traffic(Arc::new(observability))
+                .with_logs(Arc::new(logs))
                 .with_tls_probe(Arc::new(RustlsProbe::default()))
                 .with_identity(identity, access)
                 .with_access_audit(operations)

@@ -443,6 +443,12 @@ pub(crate) static ROUTES: &[(&str, &str, Access)] = &[
     ("POST", "/api/v1/tls-checks", Requires(GatewayRead)),
     ("GET", "/api/v1/traffic", Requires(GatewayRead)),
     ("GET", "/api/v1/traffic/series", Requires(GatewayRead)),
+    ("GET", "/api/v1/logs", Requires(LogsRead)),
+    ("GET", "/api/v1/logs/download", Requires(LogsRead)),
+    ("GET", "/api/v1/logs/tail", Requires(LogsRead)),
+    ("CONNECT", "/api/v1/logs/tail", Requires(LogsRead)),
+    ("GET", "/api/v1/logs/deletions", Requires(LogsRead)),
+    ("POST", "/api/v1/logs/deletions", Requires(LogsDelete)),
     ("GET", "/api/v1/audit-events", Requires(AuditRead)),
     ("GET", "/api/v1/audit-events/verify", Requires(AuditRead)),
     (
@@ -665,6 +671,14 @@ fn unsafe_method(method: &Method) -> bool {
     !matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS)
 }
 
+/// Whether a request opens a WebSocket, over HTTP/1.1 (RFC 6455) or
+/// HTTP/2 (RFC 8441).
+fn websocket(method: &Method, headers: &HeaderMap) -> bool {
+    *method == Method::CONNECT
+        || header(headers, header::UPGRADE)
+            .is_some_and(|value| value.eq_ignore_ascii_case("websocket"))
+}
+
 /// The guard every route passes when the API authenticates its callers.
 pub(crate) async fn guard<U: Send + Sync + 'static>(
     State(state): State<ApiState<U>>,
@@ -730,11 +744,14 @@ pub(crate) async fn guard<U: Send + Sync + 'static>(
             error.into_response()
         }
     };
-    if unsafe_request && principal.csrf_token().is_some() {
+    // Browsers send cookies with WebSocket handshakes but cannot add the
+    // CSRF header to them, so their origin is what keeps other sites out.
+    let websocket = websocket(request.method(), request.headers());
+    if (unsafe_request || websocket) && principal.csrf_token().is_some() {
         if let Err(error) = same_origin(request.headers(), &gate.settings) {
             return refused("cross_site", None, error).await;
         }
-        if !principal.csrf_matches(header(request.headers(), CSRF_HEADER)) {
+        if !websocket && !principal.csrf_matches(header(request.headers(), CSRF_HEADER)) {
             let error = ApiError::new(PanelError::permission_denied(
                 "the request lacks the session's CSRF token",
             ));

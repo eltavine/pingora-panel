@@ -152,11 +152,22 @@ fn every_documented_route_has_exactly_one_access_rule() {
             }
         }
     }
-    let ruled: BTreeSet<_> = ROUTES
+    // OpenAPI has no CONNECT operations; HTTP/2 WebSockets (RFC 8441) open
+    // with one and need what the HTTP/1.1 handshake on the same path needs.
+    let (connects, rules): (Vec<_>, Vec<_>) = ROUTES
+        .iter()
+        .partition(|(method, _, _)| *method == "CONNECT");
+    for (_, path, access) in connects {
+        assert!(
+            ROUTES.contains(&("GET", path, access)),
+            "CONNECT {path} needs what GET does"
+        );
+    }
+    let ruled: BTreeSet<_> = rules
         .iter()
         .map(|(method, path, _)| ((*method).to_owned(), (*path).to_owned()))
         .collect();
-    assert_eq!(ruled.len(), ROUTES.len(), "a route has two rules");
+    assert_eq!(ruled.len(), rules.len(), "a route has two rules");
     assert_eq!(documented, ruled);
 }
 
@@ -371,6 +382,29 @@ async fn cookie_sessions_need_their_csrf_token_and_the_same_site() {
         .await;
         assert_eq!(granted.status, StatusCode::CREATED, "{}", granted.body);
     }
+
+    // WebSocket handshakes carry the cookie but cannot carry the CSRF
+    // header, so only their origin decides.
+    let handshake = |site: &str| {
+        build(
+            with_cookie("GET", "/api/v1/logs/tail", None)
+                .header(header::CONNECTION, "upgrade")
+                .header(header::UPGRADE, "websocket")
+                .header(header::SEC_WEBSOCKET_VERSION, "13")
+                .header(header::SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
+                .header("sec-fetch-site", site),
+            None,
+        )
+    };
+    assert_eq!(
+        send(&app, handshake("cross-site")).await.status,
+        StatusCode::FORBIDDEN
+    );
+    // Past the guard; a test request cannot be upgraded.
+    assert_eq!(
+        send(&app, handshake("same-origin")).await.status,
+        StatusCode::UPGRADE_REQUIRED
+    );
 
     // Logging in from another site is refused too.
     let body = Some(json!({"username": "root", "password": PASSWORD}));

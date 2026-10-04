@@ -13,7 +13,8 @@ chrono.workspace = true
 cookie.workspace = true
 governor.workspace = true
 httpdate.workspace = true
-axum.workspace = true
+axum = { workspace = true, features = ["ws"] }
+futures-util.workspace = true
 panel-application.workspace = true
 panel-certificates = { workspace = true, features = ["openapi"] }
 panel-config-dsl = { workspace = true, features = ["openapi"] }
@@ -27,6 +28,7 @@ panel-ir = { workspace = true, features = ["openapi"] }
 panel-platform.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tokio.workspace = true
 tower-http.workspace = true
 tower.workspace = true
 tracing.workspace = true
@@ -37,4 +39,4 @@ zeroize = { workspace = true, features = ["serde"] }
 [dev-dependencies]
 panel-domain.workspace = true
 rustls-pki-types.workspace = true
-tokio.workspace = true
+tokio-tungstenite.workspace = true

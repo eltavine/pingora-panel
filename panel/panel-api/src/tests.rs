@@ -20,6 +20,7 @@ mod acme;
 mod admission;
 mod certificates;
 mod conditional;
+mod logs;
 mod platform;
 mod request_identity;
 mod runtime;

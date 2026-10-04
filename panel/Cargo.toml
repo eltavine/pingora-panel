@@ -191,6 +191,7 @@ tempfile = "=3.27.0"
 tokio = { version = "=1.48.0", features = ["fs", "macros", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring"] }
 tokio-stream = { version = "=0.1.19", features = ["net"] }
+tokio-tungstenite = { version = "=0.29.0", default-features = false, features = ["connect"] }
 tokio-util = { version = "=0.7.19", features = ["rt"] }
 tower = { version = "=0.5.3", features = ["util"] }
 ring = "=0.17.14"
