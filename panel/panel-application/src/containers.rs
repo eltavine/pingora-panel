@@ -265,6 +265,48 @@ pub enum ContainerLogStart {
 /// error ends it.
 pub type ContainerLogTail = Pin<Box<dyn Stream<Item = Result<Vec<ContainerLogLine>>> + Send>>;
 
+/// A container's traffic, summed over its interfaces.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ContainerNetworkStats {
+    pub received_bytes: u64,
+    pub sent_bytes: u64,
+    pub received_packets: u64,
+    pub sent_packets: u64,
+    /// Packets received or sent in error.
+    pub errors: u64,
+    /// Packets dropped on the way in or out.
+    pub dropped: u64,
+}
+
+/// What a running container uses, as its engine read it once.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContainerStats {
+    pub id: String,
+    pub name: String,
+    pub read_at: Option<SystemTime>,
+    /// Of one CPU, over about a second: 250 is two and a half CPUs busy.
+    pub cpu_percent: f64,
+    /// The CPUs the container may use.
+    pub online_cpus: u32,
+    /// Without the page cache the kernel can reclaim.
+    pub memory_bytes: u64,
+    /// The host's memory when the container has no limit.
+    pub memory_limit_bytes: u64,
+    /// `None` for a container without a network of its own.
+    pub network: Option<ContainerNetworkStats>,
+    pub block_read_bytes: u64,
+    pub block_written_bytes: u64,
+    /// Processes and threads.
+    pub pids: u64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContainerStatsList {
+    pub observed_at: Option<SystemTime>,
+    /// By name.
+    pub stats: Vec<ContainerStats>,
+}
+
 #[async_trait]
 pub trait ContainersPort: Send + Sync {
     async fn engines(&self, scope: RequestScope) -> Result<Vec<ContainerEngine>>;
@@ -319,6 +361,15 @@ pub trait ContainersPort: Send + Sync {
         container: String,
         start: ContainerLogStart,
     ) -> Result<ContainerLogTail>;
+
+    /// What a running container uses, named by its ID or name, or what
+    /// every running container uses.
+    async fn stats(
+        &self,
+        scope: RequestScope,
+        engine: String,
+        container: Option<String>,
+    ) -> Result<ContainerStatsList>;
 }
 
 /// The port of an installation whose agent manages no engine.
@@ -380,6 +431,15 @@ impl ContainersPort for NoContainers {
         _: String,
         _: ContainerLogStart,
     ) -> Result<ContainerLogTail> {
+        Err(Self::refusal())
+    }
+
+    async fn stats(
+        &self,
+        _: RequestScope,
+        _: String,
+        _: Option<String>,
+    ) -> Result<ContainerStatsList> {
         Err(Self::refusal())
     }
 }
@@ -482,6 +542,15 @@ impl ContainersPort for RecordedContainers {
             .follow_logs(scope, engine, container, start)
             .await
     }
+
+    async fn stats(
+        &self,
+        scope: RequestScope,
+        engine: String,
+        container: Option<String>,
+    ) -> Result<ContainerStatsList> {
+        self.inner.stats(scope, engine, container).await
+    }
 }
 
 #[cfg(test)]
@@ -563,6 +632,15 @@ mod tests {
             _: String,
             _: ContainerLogStart,
         ) -> Result<ContainerLogTail> {
+            Err(NoContainers::refusal())
+        }
+
+        async fn stats(
+            &self,
+            _: RequestScope,
+            _: String,
+            _: Option<String>,
+        ) -> Result<ContainerStatsList> {
             Err(NoContainers::refusal())
         }
     }

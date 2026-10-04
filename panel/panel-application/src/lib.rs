@@ -68,9 +68,9 @@ pub use audit::{AuditFilter, AuditPage, AuditPort, AuditRecord, AuditVerificatio
 pub use containers::{
     ContainerAction, ContainerChange, ContainerDetail, ContainerEngine, ContainerFilter,
     ContainerList, ContainerLogLine, ContainerLogQuery, ContainerLogStart, ContainerLogStream,
-    ContainerLogTail, ContainerLogs, ContainerMount, ContainerNetwork, ContainerState,
-    ContainerSummary, ContainersPort, EngineInfo, EngineVersion, NoContainers, PortMapping,
-    RecordedContainers,
+    ContainerLogTail, ContainerLogs, ContainerMount, ContainerNetwork, ContainerNetworkStats,
+    ContainerState, ContainerStats, ContainerStatsList, ContainerSummary, ContainersPort,
+    EngineInfo, EngineVersion, NoContainers, PortMapping, RecordedContainers,
 };
 pub use context::{
     Actor, CommandContext, IdempotencyKey, RequestDeadline, RequestId, RequestScope, SiteAccess,

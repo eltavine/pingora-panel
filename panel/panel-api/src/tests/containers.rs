@@ -3,8 +3,8 @@ use panel_application::{
     CommandContext, ContainerAction, ContainerChange, ContainerDetail, ContainerEngine,
     ContainerFilter, ContainerList, ContainerLogLine, ContainerLogQuery, ContainerLogStart,
     ContainerLogStream, ContainerLogTail, ContainerLogs, ContainerMount, ContainerNetwork,
-    ContainerState, ContainerSummary, ContainersPort, EngineInfo, EngineVersion, PortMapping,
-    RequestScope,
+    ContainerNetworkStats, ContainerState, ContainerStats, ContainerStatsList, ContainerSummary,
+    ContainersPort, EngineInfo, EngineVersion, PortMapping, RequestScope,
 };
 use serde_json::Value;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -231,6 +231,43 @@ impl ContainersPort for Engines {
             _ => return Err(PanelError::not_found(format!("no container {reference}"))),
         };
         Ok(Box::pin(futures_util::stream::iter(batches)))
+    }
+
+    async fn stats(
+        &self,
+        _scope: RequestScope,
+        _engine: String,
+        reference: Option<String>,
+    ) -> Result<ContainerStatsList> {
+        match reference.as_deref() {
+            None | Some("shop-web-1") => Ok(ContainerStatsList {
+                observed_at: Some(second(10)),
+                stats: vec![ContainerStats {
+                    id: "shop-web-1-id".into(),
+                    name: "shop-web-1".into(),
+                    read_at: Some(second(9) + Duration::from_millis(500)),
+                    cpu_percent: 12.5,
+                    online_cpus: 4,
+                    memory_bytes: 200 * 1024 * 1024,
+                    memory_limit_bytes: 8 * 1024 * 1024 * 1024,
+                    network: Some(ContainerNetworkStats {
+                        received_bytes: 1_500,
+                        sent_bytes: 2_000,
+                        received_packets: 15,
+                        sent_packets: 20,
+                        errors: 1,
+                        dropped: 2,
+                    }),
+                    block_read_bytes: 4_096,
+                    block_written_bytes: 8_192,
+                    pids: 5,
+                }],
+            }),
+            Some("nightly-report") => Err(PanelError::precondition_failed(
+                "nightly-report is not running",
+            )),
+            Some(other) => Err(PanelError::not_found(format!("no container {other}"))),
+        }
     }
 }
 

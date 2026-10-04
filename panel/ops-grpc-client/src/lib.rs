@@ -8,10 +8,11 @@ use panel_application::{
     AgentCapability, AgentDescription, CapabilityState, CapabilityStatus, CommandContext,
     ContainerAction, ContainerChange, ContainerDetail, ContainerEngine, ContainerFilter,
     ContainerList, ContainerLogLine, ContainerLogQuery, ContainerLogStart, ContainerLogStream,
-    ContainerLogTail, ContainerLogs, ContainerMount, ContainerNetwork, ContainerState,
-    ContainerSummary, ContainersPort, DirectoriesReport, DirectoryKind, DirectoryUsage, EngineInfo,
-    EngineVersion, GatewayContainer, GatewayServiceAction, GatewayServiceStatus, HostAgentPort,
-    ListenersReport, ListeningProcess, PortListener, PortMapping, RequestScope,
+    ContainerLogTail, ContainerLogs, ContainerMount, ContainerNetwork, ContainerNetworkStats,
+    ContainerState, ContainerStats, ContainerStatsList, ContainerSummary, ContainersPort,
+    DirectoriesReport, DirectoryKind, DirectoryUsage, EngineInfo, EngineVersion, GatewayContainer,
+    GatewayServiceAction, GatewayServiceStatus, HostAgentPort, ListenersReport, ListeningProcess,
+    PortListener, PortMapping, RequestScope,
 };
 use panel_contracts::ops::v1::{
     self as wire, agent_client::AgentClient, containers_client::ContainersClient,
@@ -531,6 +532,52 @@ impl ContainersPort for OpsAgentClient {
             response_error(message.error)?;
             Ok(message.lines.into_iter().map(log_line).collect())
         })))
+    }
+
+    async fn stats(
+        &self,
+        scope: RequestScope,
+        engine_id: String,
+        container: Option<String>,
+    ) -> Result<ContainerStatsList> {
+        let message = wire::ContainersStatsRequest {
+            context: Some(request_context(&scope)),
+            engine: engine_id,
+            container: container.unwrap_or_default(),
+        };
+        let response = ContainersClient::new(self.channel.clone())
+            .stats(self.request(message, &scope))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        Ok(ContainerStatsList {
+            observed_at: time(response.observed_at),
+            stats: response.stats.into_iter().map(stats).collect(),
+        })
+    }
+}
+
+fn stats(value: wire::ContainerStats) -> ContainerStats {
+    ContainerStats {
+        id: value.id,
+        name: value.name,
+        read_at: time(value.read_at),
+        cpu_percent: value.cpu_percent,
+        online_cpus: value.online_cpus,
+        memory_bytes: value.memory_bytes,
+        memory_limit_bytes: value.memory_limit_bytes,
+        network: value.network.map(|network| ContainerNetworkStats {
+            received_bytes: network.received_bytes,
+            sent_bytes: network.sent_bytes,
+            received_packets: network.received_packets,
+            sent_packets: network.sent_packets,
+            errors: network.errors,
+            dropped: network.dropped,
+        }),
+        block_read_bytes: value.block_read_bytes,
+        block_written_bytes: value.block_written_bytes,
+        pids: value.pids,
     }
 }
 

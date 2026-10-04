@@ -3,8 +3,8 @@
 use ops_grpc_client::OpsAgentClient;
 use panel_application::{
     AgentCapability, CommandContext, ContainerAction, ContainerLogQuery, ContainerLogStart,
-    ContainerLogStream, ContainerState, ContainersPort, DirectoryKind, GatewayServiceAction,
-    HostAgentPort, IdempotencyKey, RequestDeadline, RequestId, RequestScope,
+    ContainerLogStream, ContainerNetworkStats, ContainerState, ContainersPort, DirectoryKind,
+    GatewayServiceAction, HostAgentPort, IdempotencyKey, RequestDeadline, RequestId, RequestScope,
 };
 use panel_contracts::{
     common::v1 as common,
@@ -282,9 +282,34 @@ impl Containers for FakeContainers {
 
     async fn stats(
         &self,
-        _: Request<wire::ContainersStatsRequest>,
+        request: Request<wire::ContainersStatsRequest>,
     ) -> Result<Response<wire::ContainersStatsResponse>, Status> {
-        Err(Status::unimplemented("stats"))
+        assert_eq!(
+            request.into_inner().container,
+            "",
+            "every running container"
+        );
+        Ok(Response::new(wire::ContainersStatsResponse {
+            observed_at: Some(at(10).into()),
+            stats: vec![wire::ContainerStats {
+                id: "b2".into(),
+                name: "shop-web-1".into(),
+                read_at: Some(at(9).into()),
+                cpu_percent: 12.5,
+                online_cpus: 4,
+                memory_bytes: 200,
+                memory_limit_bytes: 1_000,
+                network: Some(wire::ContainerNetworkStats {
+                    received_bytes: 1_500,
+                    errors: 1,
+                    ..wire::ContainerNetworkStats::default()
+                }),
+                block_read_bytes: 4_096,
+                block_written_bytes: 8_192,
+                pids: 5,
+            }],
+            error: None,
+        }))
     }
 
     type FollowLogsStream =
@@ -507,5 +532,34 @@ async fn container_logs_are_read_and_followed() {
     assert_eq!(
         followed[1].as_ref().unwrap_err().code.as_str(),
         "UNAVAILABLE"
+    );
+}
+
+#[tokio::test]
+async fn running_containers_report_what_they_use() {
+    let client = client(false).await;
+    let list = client.stats(scope(), "docker".into(), None).await.unwrap();
+    assert_eq!(list.observed_at, Some(at(10)));
+    let web = &list.stats[0];
+    assert_eq!(
+        (web.name.as_str(), web.read_at),
+        ("shop-web-1", Some(at(9)))
+    );
+    assert_eq!((web.cpu_percent, web.online_cpus), (12.5, 4));
+    assert_eq!(
+        (web.memory_bytes, web.memory_limit_bytes, web.pids),
+        (200, 1_000, 5)
+    );
+    assert_eq!(
+        web.network,
+        Some(ContainerNetworkStats {
+            received_bytes: 1_500,
+            errors: 1,
+            ..ContainerNetworkStats::default()
+        })
+    );
+    assert_eq!(
+        (web.block_read_bytes, web.block_written_bytes),
+        (4_096, 8_192)
     );
 }
