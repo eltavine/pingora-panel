@@ -20,6 +20,12 @@ service Containers {
   // A container's configuration and state, without its environment or
   // command line, which carry secrets.
   rpc Inspect(ContainersInspectRequest) returns (ContainersInspectResponse);
+  // The last lines a container printed, as its engine's log driver kept
+  // them. What a container prints can hold secrets.
+  rpc Logs(ContainersLogsRequest) returns (ContainersLogsResponse);
+  // The lines a container prints, as it prints them, until the caller
+  // hangs up or the container stops.
+  rpc FollowLogs(ContainersFollowLogsRequest) returns (stream ContainersFollowLogsResponse);
 }
 
 message EngineVersion {
@@ -229,5 +235,59 @@ message ContainersInspectRequest {
 
 message ContainersInspectResponse {
   ContainerDetail detail = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+enum ContainerLogStream {
+  CONTAINER_LOG_STREAM_UNSPECIFIED = 0;
+  // Standard output, and everything a container with a terminal prints.
+  CONTAINER_LOG_STREAM_STDOUT = 1;
+  CONTAINER_LOG_STREAM_STDERR = 2;
+}
+
+message ContainerLogLine {
+  // When the engine recorded it.
+  google.protobuf.Timestamp time = 1;
+  ContainerLogStream stream = 2;
+  // Without its line break, with invalid UTF-8 replaced, and cut at 16 KiB.
+  string text = 3;
+}
+
+message ContainersLogsRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string engine = 2;
+  // Its ID, a unique prefix of its ID, or its name.
+  string container = 3;
+  // The last this many lines, at most 5000; 200 when 0.
+  uint32 lines = 4;
+  // Only lines at or after this time; every line when unset.
+  google.protobuf.Timestamp since = 5;
+}
+
+message ContainersLogsResponse {
+  google.protobuf.Timestamp observed_at = 1;
+  // Oldest first.
+  repeated ContainerLogLine lines = 2;
+  // Older lines were left out to keep the answer within 2 MiB.
+  bool truncated = 3;
+  .pingora.panel.common.v1.Error error = 4;
+}
+
+message ContainersFollowLogsRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string engine = 2;
+  // Its ID, a unique prefix of its ID, or its name.
+  string container = 3;
+  // How many of the lines printed before to send first, at most 1000.
+  uint32 lines = 4;
+  // Resumes after the line printed at this time, the last one received,
+  // instead.
+  google.protobuf.Timestamp after = 5;
+}
+
+message ContainersFollowLogsResponse {
+  // Oldest first.
+  repeated ContainerLogLine lines = 1;
+  // Ends the stream: the engine failed, or too many logs are followed.
   .pingora.panel.common.v1.Error error = 2;
 }

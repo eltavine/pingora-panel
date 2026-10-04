@@ -7,6 +7,7 @@
 
 mod agent;
 pub mod config;
+mod container_logs;
 mod containers;
 mod directories;
 mod gateway_service;

@@ -258,6 +258,22 @@ impl Containers for FakeContainers {
             error: None,
         }))
     }
+
+    async fn logs(
+        &self,
+        _: Request<wire::ContainersLogsRequest>,
+    ) -> Result<Response<wire::ContainersLogsResponse>, Status> {
+        Err(Status::unimplemented("logs"))
+    }
+
+    type FollowLogsStream = tokio_stream::Empty<Result<wire::ContainersFollowLogsResponse, Status>>;
+
+    async fn follow_logs(
+        &self,
+        _: Request<wire::ContainersFollowLogsRequest>,
+    ) -> Result<Response<Self::FollowLogsStream>, Status> {
+        Err(Status::unimplemented("logs"))
+    }
 }
 
 async fn client(fail: bool) -> OpsAgentClient {

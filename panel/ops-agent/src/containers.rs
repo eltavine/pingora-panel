@@ -2,7 +2,7 @@
 //! bollard (ADR 0031). Which sockets they are is the agent's configuration;
 //! operators enable and disable them, and the agent keeps the choice.
 
-use crate::config::ENGINES_ENV;
+use crate::{config::ENGINES_ENV, container_logs};
 use bollard::{
     errors::Error as EngineError,
     models::{
@@ -16,6 +16,7 @@ use bollard::{
     },
     Docker, API_DEFAULT_VERSION,
 };
+use futures_util::{future::ready, stream::BoxStream, StreamExt};
 use panel_contracts::ops::v1::{
     self as wire, containers_server::Containers, AgentCapability, Capability, CapabilityState,
     ContainerAction, ContainerState, Engine, EngineInfo, EngineVersion,
@@ -27,6 +28,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+use tokio::sync::Semaphore;
 use tonic::{Request, Response, Status};
 
 /// How long an engine has to answer before it counts as unreachable.
@@ -39,6 +41,9 @@ pub(crate) const COMPOSE_PROJECT: &str = "com.docker.compose.project";
 pub(crate) const COMPOSE_SERVICE: &str = "com.docker.compose.service";
 /// Where the agent keeps which engines are enabled, in its state directory.
 const STATE_FILE: &str = "engines";
+/// How many containers' logs may be followed at once; each holds a
+/// connection to its engine.
+const FOLLOWERS: usize = 64;
 
 /// Whether the capability is enabled.
 pub(crate) fn capability(engines: &[(String, PathBuf)]) -> AgentCapability {
@@ -223,6 +228,11 @@ pub(crate) fn failure(error: &EngineError) -> PanelError {
             status_code: 400,
             message,
         } => PanelError::invalid_argument(message.clone()),
+        // Such as a log driver that keeps nothing to read back.
+        EngineError::DockerResponseServerError {
+            status_code: 501,
+            message,
+        } => PanelError::precondition_failed(message.clone()),
         error => PanelError::unavailable(format!("the engine: {error}")),
     }
 }
@@ -376,6 +386,7 @@ pub(crate) struct ContainerService {
     engines: Arc<Engines>,
     /// The Compose project of the panel's own installation.
     installation: String,
+    followers: Arc<Semaphore>,
 }
 
 impl ContainerService {
@@ -383,7 +394,50 @@ impl ContainerService {
         Self {
             engines,
             installation,
+            followers: Arc::new(Semaphore::new(FOLLOWERS)),
         }
+    }
+
+    async fn read_logs(
+        &self,
+        request: &wire::ContainersLogsRequest,
+    ) -> Result<(Vec<wire::ContainerLogLine>, bool), PanelError> {
+        let reference = request.container.trim();
+        if reference.is_empty() {
+            return Err(PanelError::invalid_argument("name the container"));
+        }
+        let client = self.engines.enabled(&request.engine)?;
+        let since = request
+            .since
+            .and_then(|since| SystemTime::try_from(since).ok());
+        container_logs::read(&client, reference, request.lines, since).await
+    }
+
+    fn follow(
+        &self,
+        request: &wire::ContainersFollowLogsRequest,
+    ) -> Result<BoxStream<'static, wire::ContainersFollowLogsResponse>, PanelError> {
+        let reference = request.container.trim();
+        if reference.is_empty() {
+            return Err(PanelError::invalid_argument("name the container"));
+        }
+        let client = self.engines.enabled(&request.engine)?;
+        let follower = Arc::clone(&self.followers)
+            .try_acquire_owned()
+            .map_err(|_| {
+                PanelError::unavailable("too many logs are being followed; try again later")
+            })?;
+        let after = request
+            .after
+            .and_then(|after| SystemTime::try_from(after).ok());
+        Ok(
+            container_logs::follow(&client, reference, request.lines, after)
+                .map(move |response| {
+                    let _following = &follower;
+                    response
+                })
+                .boxed(),
+        )
     }
 
     /// A container as listing and inspecting it show.
@@ -522,6 +576,7 @@ fn answer<T>(
 
 #[tonic::async_trait]
 impl Containers for ContainerService {
+    type FollowLogsStream = BoxStream<'static, Result<wire::ContainersFollowLogsResponse, Status>>;
     async fn engines(
         &self,
         _: Request<wire::ContainersEnginesRequest>,
@@ -596,6 +651,44 @@ impl Containers for ContainerService {
             detail,
             error,
         }))
+    }
+
+    async fn logs(
+        &self,
+        request: Request<wire::ContainersLogsRequest>,
+    ) -> Result<Response<wire::ContainersLogsResponse>, Status> {
+        let request = request.into_inner();
+        let result = tokio::time::timeout(container_logs::READ_TIMEOUT, self.read_logs(&request))
+            .await
+            .unwrap_or_else(|_| {
+                Err(PanelError::deadline_exceeded(
+                    "the engine did not send the logs in time",
+                ))
+            });
+        let (read, error) = answer(result);
+        let observed_at = read.as_ref().map(|_| SystemTime::now().into());
+        let (lines, truncated) = read.unwrap_or_default();
+        Ok(Response::new(wire::ContainersLogsResponse {
+            observed_at,
+            lines,
+            truncated,
+            error,
+        }))
+    }
+
+    async fn follow_logs(
+        &self,
+        request: Request<wire::ContainersFollowLogsRequest>,
+    ) -> Result<Response<Self::FollowLogsStream>, Status> {
+        let responses = match self.follow(request.get_ref()) {
+            Ok(responses) => responses,
+            Err(error) => futures_util::stream::once(ready(wire::ContainersFollowLogsResponse {
+                lines: Vec::new(),
+                error: Some((&error).into()),
+            }))
+            .boxed(),
+        };
+        Ok(Response::new(responses.map(Ok).boxed()))
     }
 
     async fn act(
@@ -699,6 +792,60 @@ mod tests {
         (status, Json(json!({ "message": message }))).into_response()
     }
 
+    /// What a container printed: its stream, when, and the text. The cache
+    /// has a terminal, so its output is not multiplexed.
+    fn printed(id: &str) -> Vec<(u8, u64, String)> {
+        let at = |second: u64, text: &str| {
+            let time = chrono::DateTime::from_timestamp(1_800_000_000 + second as i64, 1).unwrap();
+            format!(
+                "{} {text}",
+                time.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
+            )
+        };
+        match id {
+            "b2" => vec![
+                (1, 0, at(0, "GET / 200")),
+                (2, 1, at(1, "upstream timed out")),
+                (1, 2, at(2, "GET /cart 200")),
+            ],
+            "a1" => vec![(0, 0, at(0, "Ready to accept connections"))],
+            _ => (0..200)
+                .map(|second| (1, second, at(second, &"x".repeat(16 * 1024))))
+                .collect(),
+        }
+    }
+
+    /// The Engine API's logs: the last `tail` entries, then those from
+    /// `since`, as frames or, for a terminal, as lines; following adds one.
+    fn logs(id: &str, query: &HashMap<String, String>) -> Vec<u8> {
+        let number = |name: &str| query.get(name).and_then(|value| value.parse::<u64>().ok());
+        let printed = printed(id);
+        let tail = number("tail").map_or(printed.len(), |tail| tail as usize);
+        let since = number("since").unwrap_or(0);
+        let mut sent = printed[printed.len().saturating_sub(tail)..].to_vec();
+        if query.get("follow").is_some_and(|follow| follow == "true") {
+            let stream = if id == "a1" { 0 } else { 1 };
+            sent.push((
+                stream,
+                3,
+                "2027-01-15T08:00:03.000000001Z GET /new 200".into(),
+            ));
+        }
+        let mut body = Vec::new();
+        for (stream, second, text) in &sent {
+            if since > 0 && 1_800_000_000 + second < since {
+                continue;
+            }
+            let payload = format!("{text}\n");
+            if *stream > 0 {
+                body.extend([*stream, 0, 0, 0]);
+                body.extend(u32::try_from(payload.len()).unwrap().to_be_bytes());
+            }
+            body.extend(payload.into_bytes());
+        }
+        body
+    }
+
     /// Enough of the Engine API to answer what the agent asks.
     async fn engine(directory: &Path) -> PathBuf {
         engine_with(directory, Calls::default()).await
@@ -771,6 +918,19 @@ mod tests {
                         None => refusal(StatusCode::NOT_FOUND, "No such container"),
                     }
                 }),
+            )
+            .route(
+                "/containers/{reference}/logs",
+                get(
+                    |Segments(reference): Segments<String>,
+                     Query(query): Query<HashMap<String, String>>| async move {
+                        match inspected(&reference) {
+                            Some(found) => logs(found["Id"].as_str().unwrap_or_default(), &query)
+                                .into_response(),
+                            None => refusal(StatusCode::NOT_FOUND, "No such container"),
+                        }
+                    },
+                ),
             );
         let acted = calls.clone();
         let router = router
@@ -1089,6 +1249,163 @@ mod tests {
         let unnamed = act(&service, "b2", ContainerAction::Unspecified, false).await;
         assert_eq!(unnamed.error.unwrap().code, "INVALID_ARGUMENT");
         assert_eq!(*calls.lock().unwrap(), ["start c3"]);
+    }
+
+    async fn read_logs(
+        service: &ContainerService,
+        container: &str,
+        lines: u32,
+        since: Option<SystemTime>,
+    ) -> wire::ContainersLogsResponse {
+        service
+            .logs(Request::new(wire::ContainersLogsRequest {
+                context: None,
+                engine: "docker".into(),
+                container: container.into(),
+                lines,
+                since: since.map(Into::into),
+            }))
+            .await
+            .unwrap()
+            .into_inner()
+    }
+
+    fn texts(lines: &[wire::ContainerLogLine]) -> Vec<&str> {
+        lines.iter().map(|line| line.text.as_str()).collect()
+    }
+
+    fn second(offset: u64) -> SystemTime {
+        UNIX_EPOCH + Duration::from_secs(1_800_000_000 + offset)
+    }
+
+    #[tokio::test]
+    async fn logs_are_read_with_their_streams_and_times() {
+        let directory = tempfile::tempdir().unwrap();
+        let service = ContainerService::new(
+            engines(engine(directory.path()).await, None),
+            "pingora-panel".into(),
+        );
+
+        let every = read_logs(&service, "shop-web-1", 0, None).await;
+        assert!(every.error.is_none(), "{:?}", every.error);
+        assert!(every.observed_at.is_some() && !every.truncated);
+        assert_eq!(
+            texts(&every.lines),
+            ["GET / 200", "upstream timed out", "GET /cart 200"]
+        );
+        assert_eq!(
+            every.lines[1].stream(),
+            wire::ContainerLogStream::Stderr,
+            "standard error stays apart"
+        );
+        assert_eq!(
+            every.lines[0].time.unwrap(),
+            (second(0) + Duration::from_nanos(1)).into()
+        );
+
+        let last = read_logs(&service, "b2", 2, None).await;
+        assert_eq!(texts(&last.lines), ["upstream timed out", "GET /cart 200"]);
+        let since = read_logs(
+            &service,
+            "b2",
+            0,
+            Some(second(1) + Duration::from_millis(500)),
+        )
+        .await;
+        assert_eq!(texts(&since.lines), ["GET /cart 200"]);
+
+        let terminal = read_logs(&service, "cache", 0, None).await;
+        assert_eq!(texts(&terminal.lines), ["Ready to accept connections"]);
+        assert_eq!(terminal.lines[0].stream(), wire::ContainerLogStream::Stdout);
+
+        let missing = read_logs(&service, "ghost", 0, None).await;
+        assert_eq!(missing.error.unwrap().code, "NOT_FOUND");
+        assert!(missing.observed_at.is_none());
+    }
+
+    #[tokio::test]
+    async fn reading_logs_keeps_to_the_newest_two_mebibytes() {
+        let directory = tempfile::tempdir().unwrap();
+        let service = ContainerService::new(
+            engines(engine(directory.path()).await, None),
+            "pingora-panel".into(),
+        );
+        let noisy = read_logs(&service, "pingora-panel-panel-api-1", 0, None).await;
+        assert!(noisy.truncated);
+        let kept: usize = noisy.lines.iter().map(|line| line.text.len()).sum();
+        assert!(kept <= 2 * 1024 * 1024, "{kept}");
+        assert_eq!(
+            noisy.lines.last().unwrap().time.unwrap(),
+            (second(199) + Duration::from_nanos(1)).into(),
+            "the newest lines are the ones kept"
+        );
+    }
+
+    async fn follow(
+        service: &ContainerService,
+        container: &str,
+        lines: u32,
+        after: Option<SystemTime>,
+    ) -> Vec<wire::ContainersFollowLogsResponse> {
+        service
+            .follow_logs(Request::new(wire::ContainersFollowLogsRequest {
+                context: None,
+                engine: "docker".into(),
+                container: container.into(),
+                lines,
+                after: after.map(Into::into),
+            }))
+            .await
+            .unwrap()
+            .into_inner()
+            .map(Result::unwrap)
+            .collect()
+            .await
+    }
+
+    #[tokio::test]
+    async fn logs_are_followed_from_the_last_lines_or_after_a_line() {
+        let directory = tempfile::tempdir().unwrap();
+        let service = ContainerService::new(
+            engines(engine(directory.path()).await, None),
+            "pingora-panel".into(),
+        );
+        let lines = |responses: &[wire::ContainersFollowLogsResponse]| {
+            assert!(responses.iter().all(|response| response.error.is_none()));
+            responses
+                .iter()
+                .flat_map(|response| texts(&response.lines))
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+
+        let last = follow(&service, "shop-web-1", 1, None).await;
+        assert_eq!(lines(&last), ["GET /cart 200", "GET /new 200"]);
+        let none_before = follow(&service, "b2", 0, None).await;
+        assert_eq!(lines(&none_before), ["GET /new 200"]);
+        let after = second(1) + Duration::from_nanos(1);
+        let resumed = follow(&service, "b2", 0, Some(after)).await;
+        assert_eq!(
+            lines(&resumed),
+            ["GET /cart 200", "GET /new 200"],
+            "a resumed follow starts after the line it left off at"
+        );
+
+        let missing = follow(&service, "ghost", 10, None).await;
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].error.as_ref().unwrap().code, "NOT_FOUND");
+    }
+
+    #[tokio::test]
+    async fn followers_are_limited() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut service = ContainerService::new(
+            engines(engine(directory.path()).await, None),
+            "pingora-panel".into(),
+        );
+        service.followers = Arc::new(Semaphore::new(0));
+        let refused = follow(&service, "b2", 0, None).await;
+        assert_eq!(refused[0].error.as_ref().unwrap().code, "UNAVAILABLE");
     }
 
     #[test]
