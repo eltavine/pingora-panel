@@ -3,6 +3,8 @@
 //! `TrafficPort` over `observability-service`, so the public API reads what
 //! the gateway served without querying Prometheus itself.
 
+mod logs;
+
 use async_trait::async_trait;
 use panel_application::{
     Latency, RequestScope, RouteTraffic, StatusClasses, TrafficPoint, TrafficPort, TrafficQuery,

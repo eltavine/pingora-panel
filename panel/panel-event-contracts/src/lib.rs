@@ -85,6 +85,7 @@ event_types! {
     gateway::v1::ShutdownRequested => "gateway.shutdown.requested",
     gateway::v1::EndpointDrained => "gateway.endpoint.drained",
     gateway::v1::EndpointRestored => "gateway.endpoint.restored",
+    gateway::v1::LogsDeleted => "gateway.logs.deleted",
     gateway::v1::OperationRefused => "gateway.operation.refused",
     identity::v1::AccountCreated => "identity.account.created",
     identity::v1::AccountUpdated => "identity.account.updated",

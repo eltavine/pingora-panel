@@ -85,6 +85,15 @@ impl OperationLog for OutboxOperations {
                     self.outcome(context, target, outcome).await;
                 }
             }
+            Operation::DeleteLogs { site, result } => {
+                let target = site.map_or(("gateway", "logs"), |site| ("site", site));
+                let outcome = result.map(|deletion| gateway::LogsDeleted {
+                    site: site.unwrap_or_default().to_owned(),
+                    since: Some(chrono::DateTime::<chrono::Utc>::from(deletion.since).into()),
+                    until: Some(chrono::DateTime::<chrono::Utc>::from(deletion.until).into()),
+                });
+                self.outcome(context, target, outcome).await;
+            }
         }
     }
 }

@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 async-trait.workspace = true
+futures-core.workspace = true
 panel-context.workspace = true
 panel-domain.workspace = true
 panel-errors.workspace = true

@@ -2,15 +2,15 @@
 //! such as calls to the gateway, for the audit trail.
 
 use crate::{
-    CommandContext, DataPlaneState, FileChecks, GatewayRuntimePort, RequestScope, UpstreamHealth,
-    UpstreamHealthReport,
+    CommandContext, DataPlaneState, FileChecks, GatewayRuntimePort, LogDeletion, RequestScope,
+    UpstreamHealth, UpstreamHealthReport,
 };
 use async_trait::async_trait;
 use panel_errors::{PanelError, Result};
 use std::sync::Arc;
 
-/// An operation that changes the data plane, with its outcome: the data
-/// plane after it, or why it was refused.
+/// An operation whose effect lives outside the recording service, with its
+/// outcome: what it changed, or why it was refused.
 #[derive(Clone, Copy, Debug)]
 pub enum Operation<'a> {
     Reload(std::result::Result<&'a DataPlaneState, &'a PanelError>),
@@ -21,6 +21,11 @@ pub enum Operation<'a> {
         endpoint: &'a str,
         drained: bool,
         result: std::result::Result<(), &'a PanelError>,
+    },
+    /// The log source was asked to delete records of `site`, or of every site.
+    DeleteLogs {
+        site: Option<&'a str>,
+        result: std::result::Result<&'a LogDeletion, &'a PanelError>,
     },
 }
 
@@ -195,6 +200,10 @@ mod tests {
                 } => (
                     format!("drained={drained}"),
                     result.map(|()| format!("{upstream}/{endpoint}")),
+                ),
+                Operation::DeleteLogs { site, result } => (
+                    "delete-logs".to_owned(),
+                    result.map(|_| site.unwrap_or("*").to_owned()),
                 ),
             };
             self.0
