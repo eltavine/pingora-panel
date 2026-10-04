@@ -149,6 +149,8 @@ Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交
 
 0.5 告警（`OBS-051`～`OBS-053`）按 ADR 0027 实现：`observability-service` 每 30 秒由持有告警咨询锁的实例评估规则；规则以固定 PromQL 读取最近五分钟的 5xx 占比、P95 延迟、请求速率、上游失败占比或打开的连接数，可限定网站、路由或上游，条件持续满足到设定时长后触发，首次不满足即恢复，读取失败时保持原状态并说明原因。触发与恢复在状态变更的同一事务中为每个渠道排队通知，由发送方以 `FOR UPDATE SKIP LOCKED` 领取，按 Alertmanager Webhook（version 4）格式、依 Standard Webhooks 规范以 HMAC-SHA256 签名发送，失败时退避重试一天。渠道的地址与签名密钥以主密钥加密保存，只显示地址的来源，密钥仅在创建或轮换时显示一次；邮件渠道作为预留接口在合约中命名，创建时返回不支持。规则与渠道的变更及告警的触发与恢复都写入审计。查看需要 `alerts.read`，修改需要 `alerts.manage`；REST API、`ppanel alert` 与控制台告警页提供同样的能力，网关概览首先列出正在触发的告警。
 
+0.5 主机概览（`HOST-001`～`HOST-011`）按 ADR 0028 实现：Compose 安装运行只监听回环地址、只读挂载主机根目录且不带任何能力的 node exporter，Prometheus 抓取它；`observability-service` 以固定 PromQL 回答主机名、操作系统、内核、架构、系统时间与时区、运行时长、CPU 使用率与核数、负载、内存、按设备去重并按占用率排序的真实文件系统，以及物理网卡的收发流量，没有 node exporter 时说明主机未上报。`GET /api/v1/host`（需要 `host.read`）为每个文件系统给出已用比例与级别（85% 起为警告、95% 起为严重），`ppanel host` 与控制台主机页展示同样的数据与预警。端口占用诊断、systemd 管理与目录容量（`HOST-012`～`HOST-018`）由 `ops-agent` 提供，尚未实现。
+
 ### 3.2 目标仓库边界
 
 Pingora 上游 crates 继续保留在根 workspace，以便固定版本、审计源码、紧急打补丁和进行兼容测试。产品代码统一进入 `panel/` 边界。只有 `panel/gateway-pingora` 可以在 `Cargo.toml` 中依赖 `pingora-*`；其他产品 crate 只能依赖稳定的 `GatewayEngine` port 与 Engine-neutral IR。
@@ -1229,17 +1231,17 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | CTR-036 | 488 | Docker Prune 预览 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“Docker Prune 预览”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
 | CTR-037 | 489 | Docker Prune 二次确认 | 0.5 | A/C/G/I | Operator | ops-agent | 执行“Docker Prune 二次确认”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | CTR-038 | 490 | Docker 与站点关联展示 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“Docker 与站点关联展示”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| HOST-001 | 491 | 主机 CPU 概览 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“主机 CPU 概览”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| HOST-002 | 492 | 主机内存概览 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“主机内存概览”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| HOST-003 | 493 | 主机磁盘概览 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“主机磁盘概览”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| HOST-004 | 494 | Load Average | 0.5 | A/C/G/I | Operator | ops-agent | 执行“Load Average”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HOST-005 | 495 | 网络流量概览 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“网络流量概览”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| HOST-006 | 496 | 系统版本展示 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“系统版本展示”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| HOST-007 | 497 | Kernel 版本 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“Kernel 版本”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| HOST-008 | 498 | 主机名展示 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“主机名展示”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| HOST-009 | 499 | 系统时间 | 0.5 | A/C/G/I | Operator | ops-agent | 执行“系统时间”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HOST-010 | 500 | 时区展示 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“时区展示”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| HOST-011 | 501 | 磁盘使用预警 | 0.5 | A/C/G/I | Operator | ops-agent | 执行“磁盘使用预警”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| HOST-001 | 491 | 主机 CPU 概览 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“主机 CPU 概览”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| HOST-002 | 492 | 主机内存概览 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“主机内存概览”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| HOST-003 | 493 | 主机磁盘概览 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“主机磁盘概览”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| HOST-004 | 494 | Load Average | 0.5 | A/C/G/I | Operator | ops-agent | 执行“Load Average”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HOST-005 | 495 | 网络流量概览 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“网络流量概览”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| HOST-006 | 496 | 系统版本展示 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“系统版本展示”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| HOST-007 | 497 | Kernel 版本 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“Kernel 版本”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| HOST-008 | 498 | 主机名展示 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“主机名展示”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| HOST-009 | 499 | 系统时间 | 0.5 | A/C/G/I | Operator | ops-agent | 执行“系统时间”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HOST-010 | 500 | 时区展示 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“时区展示”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| HOST-011 | 501 | 磁盘使用预警 | 0.5 | A/C/G/I | Operator | ops-agent | 执行“磁盘使用预警”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | HOST-012 | 502 | 80/443 端口占用诊断 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“80/443 端口占用诊断”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
 | HOST-013 | 503 | Pingora systemd 状态 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“Pingora systemd 状态”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
 | HOST-014 | 504 | Pingora systemd 启停 | 0.5 | A/C/G/I | Administrator | ops-agent | 执行“Pingora systemd 启停”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
@@ -1433,7 +1435,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | 新增团队/平台需求 | 105 |
 | 总 Feature ID | 685 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
-| 当前 `Implemented` | 372（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-005`；身份：`IAM-001`～`IAM-038`；证书：`TLS-001`～`TLS-033`；安全：`SEC-001`～`SEC-035`；可观测：`OBS-001`～`OBS-037`、`OBS-039`～`OBS-044`、`OBS-047`～`OBS-053`） |
+| 当前 `Implemented` | 383（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-005`；身份：`IAM-001`～`IAM-038`；证书：`TLS-001`～`TLS-033`；安全：`SEC-001`～`SEC-035`；可观测：`OBS-001`～`OBS-037`、`OBS-039`～`OBS-044`、`OBS-047`～`OBS-053`；主机：`HOST-001`～`HOST-011`） |
 | 1.0 要求 `Verified` | 685 |
 
 分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 47、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。
