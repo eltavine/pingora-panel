@@ -36,11 +36,19 @@ pub struct GatewayMetrics {
     connections: Family<ListenerLabels, Gauge>,
     handshakes: Family<HandshakeLabels, Counter>,
     domains: Family<DomainLabels, Counter>,
+    upstream_connections: Family<ConnectionLabels, Counter>,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, EncodeLabelSet)]
 struct ListenerLabels {
     listener: Arc<str>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, EncodeLabelSet)]
+struct ConnectionLabels {
+    upstream: Arc<str>,
+    /// `true` when the connection came from the pool.
+    reused: &'static str,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, EncodeLabelSet)]
@@ -64,6 +72,7 @@ impl GatewayMetrics {
             connections: Family::default(),
             handshakes: Family::default(),
             domains: Family::default(),
+            upstream_connections: Family::default(),
         };
         registry.register(
             "pingora_panel_gateway_open_connections",
@@ -74,6 +83,11 @@ impl GatewayMetrics {
             "pingora_panel_gateway_tls_handshakes",
             "Number of completed TLS handshakes",
             gateway.handshakes.clone(),
+        );
+        registry.register(
+            "pingora_panel_gateway_upstream_connections",
+            "Number of connections used to reach upstreams, by whether they came from the pool",
+            gateway.upstream_connections.clone(),
         );
         registry.register(
             "pingora_panel_gateway_domain_requests",
@@ -90,6 +104,16 @@ impl GatewayMetrics {
                 listener: Arc::clone(listener),
             })
             .clone()
+    }
+
+    /// Counts a connection to `upstream`, new or `reused` from the pool.
+    pub(crate) fn upstream_connection(&self, upstream: Arc<str>, reused: bool) {
+        self.upstream_connections
+            .get_or_create(&ConnectionLabels {
+                upstream,
+                reused: if reused { "true" } else { "false" },
+            })
+            .inc();
     }
 
     /// Counts a request that `site` took by its configured `domain`.

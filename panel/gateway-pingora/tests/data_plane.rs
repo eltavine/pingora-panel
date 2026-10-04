@@ -450,6 +450,11 @@ async fn requests_and_upstream_attempts_are_measured() {
     .await;
     measured(
         &metrics,
+        "pingora_panel_gateway_upstream_connections_total{upstream=\"app\",reused=\"false\"} 1",
+    )
+    .await;
+    measured(
+        &metrics,
         &format!(
             "http_client_request_duration_seconds_count{{http_request_method=\"GET\",\
              server_address=\"127.0.0.1\",server_port=\"{}\",http_response_status_code=\"200\",\

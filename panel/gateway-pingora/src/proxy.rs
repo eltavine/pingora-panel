@@ -486,6 +486,27 @@ impl ProxyHttp for PanelProxy {
         Ok(())
     }
 
+    async fn connected_to_upstream(
+        &self,
+        _session: &mut Session,
+        reused: bool,
+        _peer: &HttpPeer,
+        #[cfg(unix)] _fd: std::os::unix::io::RawFd,
+        #[cfg(windows)] _sock: std::os::windows::io::RawSocket,
+        _digest: Option<&pingora_core::protocols::Digest>,
+        ctx: &mut RequestContext,
+    ) -> pingora_core::Result<()> {
+        let upstream = ctx
+            .snapshot
+            .as_ref()
+            .zip(ctx.pool.zip(ctx.endpoint))
+            .and_then(|(snapshot, (pool, endpoint))| snapshot.labels.endpoint(pool, endpoint));
+        if let (Some(metrics), Some(endpoint)) = (&self.listener.metrics, upstream) {
+            metrics.upstream_connection(endpoint.upstream, reused);
+        }
+        Ok(())
+    }
+
     fn fail_to_connect(
         &self,
         session: &mut Session,

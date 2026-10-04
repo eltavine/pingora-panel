@@ -44,7 +44,10 @@ dots become underscores, the unit becomes a suffix and counters end in
 - `pingora_panel_gateway_domain_requests_total`, the requests a site took
   by one of its domains, by `site` and the `domain` as configured, such as
   `*.shop.example`; requests a listener's default site takes for a host
-  no domain names are not counted.
+  no domain names are not counted;
+- `pingora_panel_gateway_upstream_connections_total`, the connections used
+  to reach each `upstream`, by whether they were `reused` from the pool, so
+  the share reused shows how well the pool keeps connections.
 
 A method outside the known set is recorded as `_OTHER`, as the conventions
 require. Sites, routes and upstreams are identifiers from the active
