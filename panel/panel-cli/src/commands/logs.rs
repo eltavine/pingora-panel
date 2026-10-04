@@ -1,10 +1,10 @@
 //! The gateway's access and error logs.
 
+use super::time;
 use crate::{
     client::{Api, CliError, Result},
     output::{text, Column, Format, Output},
 };
-use chrono::{DateTime, SecondsFormat, Utc};
 use clap::{Args, Subcommand};
 use futures_util::StreamExt;
 use reqwest::Method;
@@ -20,19 +20,6 @@ use tokio_tungstenite::tungstenite::Message;
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 /// The pause before following again after falling behind.
 const RESUME_DELAY: Duration = Duration::from_millis(250);
-
-/// A time given in RFC 3339 or as how long ago, such as `30m` or `2d`.
-fn time(value: &str) -> std::result::Result<String, String> {
-    let time = match humantime::parse_duration(value) {
-        Ok(ago) => {
-            Utc::now() - chrono::Duration::from_std(ago).map_err(|error| error.to_string())?
-        }
-        Err(_) => DateTime::parse_from_rfc3339(value)
-            .map_err(|_| format!("`{value}` is neither an RFC 3339 time nor a duration like `1h`"))?
-            .to_utc(),
-    };
-    Ok(time.to_rfc3339_opts(SecondsFormat::AutoSi, true))
-}
 
 #[derive(Args)]
 pub(crate) struct Filter {
@@ -353,21 +340,4 @@ pub async fn run(api: &Api, output: &Output, command: LogsCommand) -> Result<()>
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn times_are_rfc_3339_or_how_long_ago() {
-        assert_eq!(
-            time("2027-01-15T09:00:00+01:00").unwrap(),
-            "2027-01-15T08:00:00Z"
-        );
-        let ago = DateTime::parse_from_rfc3339(&time("1h").unwrap()).unwrap();
-        let expected = Utc::now() - chrono::Duration::hours(1);
-        assert!((ago.to_utc() - expected).num_seconds().abs() < 5);
-        assert!(time("yesterday").is_err());
-    }
 }

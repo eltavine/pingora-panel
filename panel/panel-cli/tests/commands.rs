@@ -266,6 +266,15 @@ async fn api(
             "id": "b2", "name": "shop-web-1", "container": null
         }))
         .into_response(),
+        ("GET", "/api/v1/container-engines/docker/containers/shop-web-1/logs") => Json(json!({
+            "observed_at": "2027-01-15T08:00:10Z", "truncated": true, "lines": [
+                {"time": "2027-01-15T08:00:01.000000001Z", "stream": "stdout",
+                 "text": "GET / 200"},
+                {"time": "2027-01-15T08:00:02Z", "stream": "stderr",
+                 "text": "upstream timed out"}
+            ]
+        }))
+        .into_response(),
         ("GET", "/api/v1/host/gateway-service") => Json(json!({
             "observed_at": "2026-10-04T10:00:00Z", "supervisor": "container",
             "container": {"engine": "docker", "id": "g7", "name": "pingora-panel-gatewayd-1",
@@ -717,6 +726,46 @@ async fn tail(State(log): State<Log>, uri: Uri, upgrade: WebSocketUpgrade) -> Re
     })
 }
 
+/// Follows a container: `shop-web-1` prints a line and stops, and
+/// `crashing` loses its engine.
+async fn container_tail(State(log): State<Log>, uri: Uri, upgrade: WebSocketUpgrade) -> Response {
+    log.lock().unwrap().push(Request {
+        method: Method::GET,
+        path: uri.path().to_owned(),
+        query: uri.query().unwrap_or_default().to_owned(),
+        if_match: None,
+        authorization: None,
+        body: Value::Null,
+    });
+    let crashing = uri.path().contains("/crashing/");
+    upgrade.on_upgrade(move |mut socket| async move {
+        let line = json!({"time": "2027-01-15T08:00:03Z", "stream": "stdout",
+                          "text": "GET /new 200"});
+        let mut messages =
+            vec![json!({"lines": [line], "cursor": "2027-01-15T08:00:03Z", "error": null})];
+        let close = if crashing {
+            messages.push(json!({"lines": [], "cursor": "2027-01-15T08:00:03Z",
+                                 "error": {"code": "UNAVAILABLE",
+                                           "message": "the engine went away"}}));
+            ws::CloseFrame {
+                code: 1013,
+                reason: "the tail ended".into(),
+            }
+        } else {
+            ws::CloseFrame {
+                code: 1000,
+                reason: "the container stopped".into(),
+            }
+        };
+        for message in messages {
+            let _ = socket
+                .send(ws::Message::Text(message.to_string().into()))
+                .await;
+        }
+        let _ = socket.send(ws::Message::Close(Some(close))).await;
+    })
+}
+
 struct Stub {
     base: String,
     log: Log,
@@ -729,6 +778,10 @@ impl Stub {
         let log = Log::default();
         let router = Router::new()
             .route("/api/v1/logs/tail", get(tail))
+            .route(
+                "/api/v1/container-engines/{engine}/containers/{container}/logs/tail",
+                get(container_tail),
+            )
             .route("/{*path}", any(api))
             .with_state(log.clone());
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -2465,4 +2518,65 @@ fn accounts_are_granted_roles_for_site_groups_under_conditions() {
         "s-1",
     ]);
     assert_eq!(both.status.code(), Some(2));
+}
+
+#[test]
+fn container_logs_from_the_command_line() {
+    let stub = Stub::start();
+    let logs = "/api/v1/container-engines/docker/containers/shop-web-1/logs";
+    let read = stub.ppanel(&[
+        "container",
+        "logs",
+        "shop-web-1",
+        "-n",
+        "2",
+        "--since",
+        "2027-01-15T08:00:00Z",
+    ]);
+    assert!(read.status.success(), "{}", stderr(&read));
+    assert_eq!(stdout(&read), "GET / 200\n", "standard error goes apart");
+    let complaint = stderr(&read);
+    assert!(complaint.contains("upstream timed out"), "{complaint}");
+    assert!(
+        complaint.contains("older lines were left out"),
+        "{complaint}"
+    );
+    assert_eq!(
+        stub.requests("GET", logs)[0].query,
+        "lines=2&since=2027-01-15T08%3A00%3A00Z"
+    );
+
+    let stamped = stub.ppanel(&["container", "logs", "shop-web-1", "--timestamps"]);
+    assert_eq!(
+        stdout(&stamped),
+        "2027-01-15T08:00:01.000000001Z GET / 200\n"
+    );
+    assert_eq!(stub.requests("GET", logs)[1].query, "lines=200");
+
+    let followed = stub.ppanel(&["container", "logs", "shop-web-1", "-f", "-n", "5"]);
+    assert!(followed.status.success(), "{}", stderr(&followed));
+    assert_eq!(stdout(&followed), "GET /new 200\n");
+    let resumed = stub.ppanel(&[
+        "-o",
+        "json",
+        "container",
+        "logs",
+        "shop-web-1",
+        "--follow",
+        "--since",
+        "2027-01-15T08:00:02Z",
+    ]);
+    let line: Value = serde_json::from_str(stdout(&resumed).trim()).unwrap();
+    assert_eq!(line["text"], "GET /new 200");
+    let tails = stub.requests("GET", &format!("{logs}/tail"));
+    assert_eq!(tails[0].query, "lines=5");
+    assert_eq!(tails[1].query, "after=2027-01-15T08%3A00%3A02Z");
+
+    let crashed = stub.ppanel(&["container", "logs", "crashing", "--follow"]);
+    assert_eq!(stdout(&crashed), "GET /new 200\n");
+    assert_eq!(crashed.status.code(), Some(6), "{}", stderr(&crashed));
+    assert!(stderr(&crashed).contains("the engine went away"));
+
+    let too_many = stub.ppanel(&["container", "logs", "shop-web-1", "-f", "-n", "1001"]);
+    assert_eq!(too_many.status.code(), Some(2), "{}", stderr(&too_many));
 }

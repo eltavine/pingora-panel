@@ -1,12 +1,19 @@
 //! The container engines the host agent reaches and what runs on them.
 
+use super::time;
 use crate::{
     client::{Api, CliError, Result},
     output::{text, Column, Format, Output},
 };
 use clap::Subcommand;
+use futures_util::StreamExt;
 use reqwest::Method;
 use serde_json::Value;
+use std::io::{ErrorKind, Write};
+use tokio_tungstenite::tungstenite::Message;
+
+/// The most earlier lines sent before following.
+const MOST_BACKLOG: u32 = 1_000;
 
 #[derive(Subcommand)]
 pub(crate) enum ContainerCommand {
@@ -35,6 +42,29 @@ pub(crate) enum ContainerCommand {
     Inspect {
         #[command(flatten)]
         target: Target,
+    },
+    /// What a container printed: its last lines, or, with `--follow`, the
+    /// lines it prints as it prints them. Its standard error goes to
+    /// standard error.
+    Logs {
+        #[command(flatten)]
+        target: Target,
+        /// How many of its last lines to show, at most 5000; at most 1000
+        /// before following.
+        #[arg(long, short = 'n', default_value_t = 200,
+              value_parser = clap::value_parser!(u32).range(1..=5000))]
+        lines: u32,
+        /// Only lines printed since this, in RFC 3339 or as how long ago such
+        /// as `1h`.
+        #[arg(long, value_parser = time)]
+        since: Option<String>,
+        /// Keeps printing lines as the container prints them, until it stops
+        /// or you interrupt.
+        #[arg(long, short)]
+        follow: bool,
+        /// Starts each line with the time its engine recorded it.
+        #[arg(long, short)]
+        timestamps: bool,
     },
     /// Starts a container.
     Start {
@@ -284,6 +314,33 @@ pub async fn run(api: &Api, output: &Output, command: ContainerCommand) -> Resul
             }
         }
         ContainerCommand::Inspect { target } => inspect(api, output, &target).await?,
+        ContainerCommand::Logs {
+            target,
+            lines,
+            since,
+            follow,
+            timestamps,
+        } => {
+            let path = format!(
+                "/api/v1/container-engines/{}/containers/{}/logs",
+                target.engine, target.container
+            );
+            if follow {
+                tail(api, output, &path, lines, since, timestamps).await?;
+            } else {
+                let mut query = vec![("lines", lines.to_string())];
+                query.extend(since.map(|since| ("since", since)));
+                let logs = api.get(&path, &query).await?.body;
+                if output.format == Format::Json {
+                    output.json(&logs);
+                } else {
+                    print(output, &logs["lines"], timestamps)?;
+                    if logs["truncated"] == true && !output.quiet {
+                        eprintln!("older lines were left out; ask for fewer or use --since");
+                    }
+                }
+            }
+        }
         ContainerCommand::Start { target } => act(api, output, &target, "start").await?,
         ContainerCommand::Stop { target, yes } => {
             confirmed(yes)?;
@@ -374,4 +431,88 @@ async fn act(api: &Api, output: &Output, target: &Target, action: &str) -> Resul
         output.item(&change["container"], CONTAINERS);
     }
     Ok(())
+}
+
+/// Prints lines as the container printed them, its standard error to
+/// standard error, or as JSON lines; false once the output is closed.
+fn print(output: &Output, lines: &Value, timestamps: bool) -> Result<bool> {
+    if output.quiet {
+        return Ok(true);
+    }
+    let (mut stdout, mut stderr) = (std::io::stdout().lock(), std::io::stderr().lock());
+    for line in lines.as_array().into_iter().flatten() {
+        let sink: &mut dyn Write = if line["stream"] == "stderr" && output.format == Format::Table {
+            &mut stderr
+        } else {
+            &mut stdout
+        };
+        let text = line["text"].as_str().unwrap_or_default();
+        let written = match (output.format, timestamps) {
+            (Format::Json, _) => writeln!(sink, "{line}"),
+            (Format::Table, true) => {
+                writeln!(sink, "{} {text}", line["time"].as_str().unwrap_or_default())
+            }
+            (Format::Table, false) => writeln!(sink, "{text}"),
+        };
+        match written {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::BrokenPipe => return Ok(false),
+            Err(error) => return Err(CliError::Failed(format!("cannot print: {error}"))),
+        }
+    }
+    match stdout.flush().and_then(|()| stderr.flush()) {
+        Err(error) if error.kind() == ErrorKind::BrokenPipe => Ok(false),
+        _ => Ok(true),
+    }
+}
+
+/// Prints the lines a container prints until it stops, the API ends the
+/// tail, standard output closes or the user interrupts.
+async fn tail(
+    api: &Api,
+    output: &Output,
+    path: &str,
+    lines: u32,
+    since: Option<String>,
+    timestamps: bool,
+) -> Result<()> {
+    if lines > MOST_BACKLOG {
+        return Err(CliError::Usage(format!(
+            "--follow shows at most {MOST_BACKLOG} earlier lines"
+        )));
+    }
+    let query = match since {
+        Some(since) => vec![("after", since)],
+        None => vec![("lines", lines.to_string())],
+    };
+    let mut socket = api.websocket(&format!("{path}/tail"), &query).await?;
+    loop {
+        let message = tokio::select! {
+            message = socket.next() => message,
+            _ = tokio::signal::ctrl_c() => {
+                let _ = socket.close(None).await;
+                return Ok(());
+            }
+        };
+        let message: Value = match message {
+            None | Some(Ok(Message::Close(_))) => return Ok(()),
+            Some(Err(error)) => return Err(CliError::transport(error)),
+            Some(Ok(Message::Text(message))) => {
+                serde_json::from_str(&message).map_err(|error| {
+                    CliError::Transport(format!("the API sent an unreadable line: {error}"))
+                })?
+            }
+            Some(Ok(_)) => continue,
+        };
+        if !print(output, &message["lines"], timestamps)? {
+            let _ = socket.close(None).await;
+            return Ok(());
+        }
+        if !message["error"].is_null() {
+            return Err(CliError::Ended {
+                code: text(&message["error"]["code"]),
+                message: text(&message["error"]["message"]),
+            });
+        }
+    }
 }

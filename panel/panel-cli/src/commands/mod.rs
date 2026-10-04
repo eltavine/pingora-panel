@@ -23,8 +23,22 @@ pub mod windows;
 pub mod workload;
 
 use crate::client::{CliError, Result};
+use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{json, Map, Value};
 use std::path::Path;
+
+/// A time given in RFC 3339 or as how long ago, such as `30m` or `2d`.
+pub fn time(value: &str) -> std::result::Result<String, String> {
+    let time = match humantime::parse_duration(value) {
+        Ok(ago) => {
+            Utc::now() - chrono::Duration::from_std(ago).map_err(|error| error.to_string())?
+        }
+        Err(_) => DateTime::parse_from_rfc3339(value)
+            .map_err(|_| format!("`{value}` is neither an RFC 3339 time nor a duration like `1h`"))?
+            .to_utc(),
+    };
+    Ok(time.to_rfc3339_opts(SecondsFormat::AutoSi, true))
+}
 
 /// Reads a file the command line names, such as a secret or a CA bundle.
 pub fn read_file(path: &Path) -> Result<String> {
@@ -165,5 +179,17 @@ mod tests {
         assert_eq!(route_match("prefix:/api", None).unwrap()["kind"], "prefix");
         assert!(route_match("starts:/api", None).is_err());
         assert!(route_match("/api", None).is_err());
+    }
+
+    #[test]
+    fn times_are_rfc_3339_or_how_long_ago() {
+        assert_eq!(
+            time("2027-01-15T09:00:00+01:00").unwrap(),
+            "2027-01-15T08:00:00Z"
+        );
+        let ago = DateTime::parse_from_rfc3339(&time("1h").unwrap()).unwrap();
+        let expected = Utc::now() - chrono::Duration::hours(1);
+        assert!((ago.to_utc() - expected).num_seconds().abs() < 5);
+        assert!(time("yesterday").is_err());
     }
 }
