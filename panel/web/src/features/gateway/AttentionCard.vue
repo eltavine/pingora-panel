@@ -6,12 +6,14 @@ import {
   ChevronRight,
   CircleCheck,
   ShieldAlert,
+  Siren,
   TriangleAlert,
   Unplug,
 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import {
+  listAlertRulesOptions,
   listAutomaticCertificatesOptions,
   listCertificatesOptions,
   searchLogsOptions,
@@ -19,6 +21,7 @@ import {
 } from '@/api/generated/@tanstack/vue-query.gen'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { formatMeasure } from '@/features/alerts/presentation'
 import { summaryOf } from '@/features/logs/presentation'
 import { nodeOf } from '@/features/traffic/presentation'
 import { useSession } from '@/lib/session'
@@ -28,9 +31,16 @@ const REFRESH_INTERVAL_MS = 30_000
 const SHOWN = 5
 const UPSTREAM_WINDOW_SECONDS = 900
 
-const { t, d } = useI18n()
+const { t, d, locale } = useI18n()
 const { can } = useSession()
 
+const alerts = useQuery(
+  computed(() => ({
+    ...listAlertRulesOptions(),
+    enabled: can('alerts.read'),
+    refetchInterval: REFRESH_INTERVAL_MS,
+  })),
+)
 const failed = useQuery(
   computed(() => ({
     ...searchLogsOptions({ query: { status: '5xx', limit: SHOWN } }),
@@ -71,6 +81,22 @@ interface Section {
   more: string
   to: string
 }
+
+const firingItems = computed<Item[]>(() =>
+  (alerts.data.value ?? [])
+    .filter((rule) => rule.spec.enabled && rule.state === 'firing')
+    .slice(0, SHOWN)
+    .map((rule) => ({
+      key: rule.id,
+      title: rule.spec.name,
+      detail: `${t(`alerts.measures.${rule.spec.measure}`)}: ${formatMeasure(
+        rule.spec.measure,
+        rule.value,
+        locale.value,
+      )}`,
+      at: rule.since ?? undefined,
+    })),
+)
 
 const failedItems = computed<Item[]>(() =>
   (failed.data.value?.records ?? []).map((record, index) => ({
@@ -120,6 +146,18 @@ const certificateItems = computed<Item[]>(() => {
 
 const sections = computed(() => {
   const shown: Section[] = []
+  if (can('alerts.read')) {
+    shown.push({
+      id: 'alerts',
+      icon: Siren,
+      title: t('gateway.attention.firingAlerts'),
+      items: firingItems.value,
+      ready: alerts.isSuccess.value,
+      calm: t('gateway.attention.noFiringAlerts'),
+      more: t('gateway.attention.showAlerts'),
+      to: '/alerts',
+    })
+  }
   if (can('logs.read')) {
     shown.push({
       id: 'failed',
@@ -168,7 +206,7 @@ const sections = computed(() => {
       </CardTitle>
       <CardDescription>{{ t('gateway.attention.description') }}</CardDescription>
     </CardHeader>
-    <CardContent class="grid gap-6 lg:grid-cols-3">
+    <CardContent class="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
       <section
         v-for="section in sections"
         :key="section.id"

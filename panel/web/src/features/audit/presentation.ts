@@ -51,6 +51,16 @@ export const KNOWN_TYPES = [
   'tls.acme.dns_provider.updated',
   'tls.acme.dns_provider.deleted',
   'tls.acme.dns_provider.refused',
+  'observability.alert_rule.created',
+  'observability.alert_rule.updated',
+  'observability.alert_rule.deleted',
+  'observability.alert_rule.refused',
+  'observability.alert_channel.created',
+  'observability.alert_channel.rotated',
+  'observability.alert_channel.deleted',
+  'observability.alert_channel.refused',
+  'observability.alert.fired',
+  'observability.alert.resolved',
 ] as const
 
 export type KnownType = (typeof KNOWN_TYPES)[number]
@@ -70,7 +80,7 @@ export function toneOf(type: string): StatusTone {
   if (/\.(refused|failed|rejected|denied)$/.test(type)) {
     return 'negative'
   }
-  return type.endsWith('.expiring') ? 'warning' : 'positive'
+  return /\.(expiring|fired)$/.test(type) ? 'warning' : 'positive'
 }
 
 type Translate = (key: string, values?: Record<string, unknown>, plural?: number) => string
@@ -177,6 +187,8 @@ export function summaryOf(event: AuditEvent, t: Translate): string {
     case 'tls.acme.account.refused':
     case 'tls.acme.certificate.refused':
     case 'tls.acme.dns_provider.refused':
+    case 'observability.alert_rule.refused':
+    case 'observability.alert_channel.refused':
       return [`${text(data.operation)} ${text(data.id)}`, data.code, data.message]
         .map(text)
         .filter(Boolean)
@@ -197,6 +209,21 @@ export function summaryOf(event: AuditEvent, t: Translate): string {
       return `${text(data.id)} · ${list(data.names)} · ${text(data.challenge)}`
     case 'tls.acme.certificate.failed':
       return [data.id, data.code, data.message].map(text).filter(Boolean).join(' · ')
+    case 'observability.alert_rule.created':
+    case 'observability.alert_rule.updated': {
+      const settings = (data.settings ?? {}) as Record<string, unknown>
+      return `${text(data.id)} · ${text(settings.measure)} ${text(settings.comparison)} ${text(settings.threshold)}`
+    }
+    case 'observability.alert_channel.created':
+    case 'observability.alert_channel.rotated':
+      return `${text(data.id)} · ${text(data.target)}`
+    case 'observability.alert_rule.deleted':
+    case 'observability.alert_channel.deleted':
+      return text(data.id)
+    case 'observability.alert.fired':
+      return `${text(data.name)} · ${text(data.value)}`
+    case 'observability.alert.resolved':
+      return text(data.name)
     case 'identity.access.denied':
       return [`${text(data.method)} ${text(data.route)}`, data.permission ?? data.reason]
         .map(text)

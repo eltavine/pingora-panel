@@ -12,6 +12,7 @@ import type {
   UpstreamHealthReportResponse,
   UpstreamView,
 } from '@/api/generated'
+import { alertHandlers } from './alerts'
 import { logHandlers } from './logs'
 import type { Sampler } from './openapi'
 
@@ -245,6 +246,7 @@ export function handlers(sampler: Sampler): AnyHandler[] {
       HttpResponse.json(series(windowOf(request))),
     ),
     ...logHandlers(),
+    ...alertHandlers(),
     http.all('*/api/*', ({ request }) => {
       const answer = sampler.respond(request.method, new URL(request.url).pathname)
       if (!answer) {

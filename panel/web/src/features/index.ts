@@ -1,3 +1,4 @@
+import { alertsFeature } from './alerts'
 import { approvalsFeature } from './approvals'
 import { auditFeature } from './audit'
 import { certificatesFeature } from './certificates'
@@ -20,6 +21,7 @@ export const features: readonly FeatureModule[] = [
   gatewayFeature,
   trafficFeature,
   logsFeature,
+  alertsFeature,
   revisionsFeature,
   publishingFeature,
   approvalsFeature,
