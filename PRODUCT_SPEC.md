@@ -405,23 +405,6 @@ flowchart LR
 
 DSL 文件声明 `language_version`，IR 声明 `schema_version`。读取旧版本时必须通过显式迁移器升级；写出始终使用当前规范格式。迁移必须幂等，并保留原文、迁移后文和 Diff。
 
-### 7.5 JSON 与 Python 职责边界
-
-保持一个原则：
-
-> JSON：声明事实和例外  
-> Python：承载逻辑
-
-JSON 只能描述事实、配置值和明确的例外；Python 负责承载条件判断、策略编排和其他业务逻辑。不得让 JSON 开始承载以下内容：
-
-- 条件表达式
-- 控制流
-- 正则逻辑
-- 继承
-- 动态计算
-
-需要表达上述行为时，必须在 Python 中实现，并通过经过校验的 JSON 字段、枚举、引用或结果传递给配置层。JSON Schema 只负责结构和类型校验，不负责执行逻辑或解释可执行内容。
-
 ---
 
 ## 8. Revision、审批与原子发布
@@ -1482,9 +1465,9 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 - Rust：`fmt`、`clippy -D warnings`、unit/integration/doc tests、Miri/loom 针对关键并发结构。
 - Web：typecheck、lint、unit、component、Playwright 桌面与移动端关键流程。
 - Contract：OpenAPI breaking check、Protobuf breaking check 及其负向自测试、event schema compatibility、DSL golden tests。
-- Data：migration forward/backward compatibility、schema ownership 和备份恢复。
+- Data：migration forward/backward compatibility、模块数据库归属和备份恢复。
 - Security：dependency/license/secret/SAST/container scan、ZAP、raw HTTP framing regression。
-- Architecture：禁止非适配器依赖 `pingora-*`，禁止跨服务 schema write。
+- Architecture：禁止非适配器依赖 `pingora-*`，禁止模块写其他模块的数据库文件。
 - Product：Feature ID 唯一、Legacy 1..580 无缺失、目录数不少于 650、每项含阶段和验收条件。
 
 ### 17.2 强制场景
@@ -1507,6 +1490,15 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 ### 17.3 性能方法
 
 性能比较固定硬件、CPU、worker、TLS、upstream、logging、响应体、预热和运行顺序，每组至少重复 10 次，报告中位数、p95/p99 与置信区间。必须记录 throughput、latency、CPU/百万成功请求、RSS、错误率和 upstream 新连接/请求。结果可以证明优势、相当或劣势，不允许选择性报告最佳一次。
+
+### 17.4 策略与守卫的职责边界
+
+门禁的配置与实现保持一个原则：
+
+> JSON：声明事实和例外  
+> Python：承载逻辑
+
+`.github/policies` 中的 JSON 只描述事实、配置值和明确的例外，例如依赖边界、保持穷尽的枚举及其理由、依赖租约与安全公告豁免；`.github/scripts` 中的 Python 守卫负责条件判断、策略编排和其他检查逻辑。JSON 不得承载条件表达式、控制流、正则逻辑、继承或动态计算；需要这些行为时在守卫中实现，并通过经过校验的 JSON 字段、枚举或引用传递。产品运行时不使用 Python，配置的逻辑由 DSL 与编译器承载（§7）。
 
 ---
 
