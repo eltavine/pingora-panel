@@ -149,6 +149,10 @@ enum Command {
     /// and deleted.
     #[command(subcommand)]
     Logs(commands::logs::LogsCommand),
+    /// Rules that fire on the gateway's metrics, the webhooks they notify
+    /// and the notifications sent.
+    #[command(subcommand)]
+    Alert(commands::alerts::AlertCommand),
     /// The running gateway.
     #[command(subcommand)]
     Gateway(commands::gateway::GatewayCommand),
@@ -245,6 +249,7 @@ async fn main() -> ExitCode {
             Command::Audit(command) => commands::audit::run(&api, &output, command).await,
             Command::Traffic(command) => commands::traffic::run(&api, &output, command).await,
             Command::Logs(command) => commands::logs::run(&api, &output, command).await,
+            Command::Alert(command) => commands::alerts::run(&api, &output, command).await,
             Command::Gateway(command) => commands::gateway::gateway(&api, &output, command).await,
             Command::Completion { .. } => Ok(()),
         }

@@ -185,6 +185,50 @@ async fn api(
             })),
         )
             .into_response(),
+        ("GET", "/api/v1/alert-rules") => Json(json!([{
+            "id": "shop-errors", "version": 3, "etag": "\"3\"", "state": "firing",
+            "since": "2026-10-04T09:58:00Z", "value": 0.12,
+            "spec": {"name": "Shop errors", "measure": "server_error_ratio",
+                     "comparison": "above", "threshold": 0.05, "pending_seconds": 300,
+                     "site": "shop", "route": null, "upstream": null, "severity": "critical",
+                     "enabled": true, "channels": ["ops"]}
+        }]))
+        .into_response(),
+        ("PUT", path) if path.starts_with("/api/v1/alert-rules/") => (
+            StatusCode::OK,
+            Json(json!({"id": path.trim_start_matches("/api/v1/alert-rules/"), "spec": body})),
+        )
+            .into_response(),
+        ("DELETE", "/api/v1/alert-rules/shop-errors")
+        | ("DELETE", "/api/v1/alert-channels/ops") => StatusCode::NO_CONTENT.into_response(),
+        ("GET", "/api/v1/alert-channels") => Json(json!([{
+            "id": "ops", "kind": "webhook", "target": "https://hooks.example", "version": 1,
+            "etag": "\"1\""
+        }]))
+        .into_response(),
+        ("POST", "/api/v1/alert-channels") => (
+            StatusCode::CREATED,
+            Json(json!({
+                "channel": {"id": "ops", "kind": "webhook", "target": "https://hooks.example"},
+                "secret": "whsec_c2VjcmV0"
+            })),
+        )
+            .into_response(),
+        ("POST", "/api/v1/alert-channels/ops/rotate") => Json(json!({
+            "channel": {"id": "ops", "kind": "webhook", "target": "https://other.example"},
+            "secret": "whsec_bmV3"
+        }))
+        .into_response(),
+        ("POST", "/api/v1/alert-channels/ops/test") => Json(json!({
+            "delivered": false, "status": 503, "failure": "the receiver answered 503"
+        }))
+        .into_response(),
+        ("GET", "/api/v1/alert-notifications") => Json(json!([{
+            "id": "0192", "rule": "shop-errors", "channel": "ops", "kind": "firing",
+            "state": "abandoned", "attempts": 2, "created_at": "2026-10-04T09:58:00Z",
+            "last_failure": "the receiver answered 410"
+        }]))
+        .into_response(),
         ("GET", "/api/v1/logs/deletions") => Json(json!({
             "deletions": [{
                 "site": null, "since": "1970-01-01T00:00:00Z", "until": "2026-10-03T10:00:00Z",
@@ -974,6 +1018,109 @@ fn logs_are_searched_followed_downloaded_and_deleted() {
     let printed = stdout(&stub.ppanel(&["logs", "deletions"]));
     assert!(printed.contains("every site"), "{printed}");
     assert!(printed.contains("applied"), "{printed}");
+}
+
+#[test]
+fn alert_rules_and_channels_are_set_from_the_command_line() {
+    let stub = Stub::start();
+    let url_file = stub.config.path().join("hook-url");
+    std::fs::write(&url_file, "https://hooks.example/T0/secret\n").unwrap();
+    let created = stub.ppanel(&[
+        "alert",
+        "channel",
+        "create",
+        "ops",
+        "--url-file",
+        url_file.to_str().unwrap(),
+    ]);
+    assert!(created.status.success(), "{}", stderr(&created));
+    let printed = stdout(&created);
+    assert!(printed.contains("https://hooks.example"), "{printed}");
+    assert!(printed.contains("whsec_c2VjcmV0"), "{printed}");
+    assert_eq!(
+        stub.requests("POST", "/api/v1/alert-channels")[0].body,
+        json!({"id": "ops", "kind": "webhook", "url": "https://hooks.example/T0/secret"})
+    );
+    let rotated = stub.ppanel_with_input(
+        &["alert", "channel", "rotate", "ops", "--url-file", "-"],
+        "https://other.example/x\n",
+    );
+    assert!(rotated.status.success(), "{}", stderr(&rotated));
+    let rotation = &stub.requests("POST", "/api/v1/alert-channels/ops/rotate")[0];
+    assert_eq!(rotation.if_match.as_deref(), Some("\"1\""));
+    assert_eq!(rotation.body, json!({"url": "https://other.example/x"}));
+
+    let replaced = stub.ppanel(&[
+        "alert",
+        "rule",
+        "set",
+        "shop-errors",
+        "--measure",
+        "server-error-ratio",
+        "--above",
+        "0.05",
+        "--pending",
+        "5m",
+        "--site",
+        "shop",
+        "--severity",
+        "critical",
+        "--channel",
+        "ops",
+    ]);
+    assert!(replaced.status.success(), "{}", stderr(&replaced));
+    assert!(stdout(&replaced).contains("Replaced alert rule shop-errors"));
+    let replacing = &stub.requests("PUT", "/api/v1/alert-rules/shop-errors")[0];
+    assert_eq!(replacing.if_match.as_deref(), Some("\"3\""));
+    assert_eq!(
+        replacing.body,
+        json!({
+            "name": "shop-errors", "description": "", "measure": "server_error_ratio",
+            "comparison": "above", "threshold": 0.05, "pending_seconds": 300, "site": "shop",
+            "route": null, "upstream": null, "severity": "critical", "enabled": true,
+            "channels": ["ops"]
+        })
+    );
+    let created = stub.ppanel(&[
+        "alert",
+        "rule",
+        "set",
+        "slow",
+        "--measure",
+        "latency-p95",
+        "--above",
+        "1.5",
+    ]);
+    assert!(created.status.success(), "{}", stderr(&created));
+    assert_eq!(
+        stub.requests("PUT", "/api/v1/alert-rules/slow")[0].if_match,
+        None
+    );
+    let undirected = stub.ppanel(&["alert", "rule", "set", "x", "--measure", "request-rate"]);
+    assert_eq!(undirected.status.code(), Some(2));
+
+    let listed = stdout(&stub.ppanel(&["alert", "rule", "list"]));
+    for expected in ["firing", "server_error_ratio > 0.05", "shop", "ops"] {
+        assert!(listed.contains(expected), "{expected} in\n{listed}");
+    }
+    let deleted = stub.ppanel(&["alert", "rule", "delete", "shop-errors"]);
+    assert!(deleted.status.success(), "{}", stderr(&deleted));
+    assert_eq!(
+        stub.requests("DELETE", "/api/v1/alert-rules/shop-errors")[0]
+            .if_match
+            .as_deref(),
+        Some("\"3\"")
+    );
+
+    let tested = stub.ppanel(&["alert", "channel", "test", "ops"]);
+    assert_eq!(tested.status.code(), Some(1));
+    assert!(stderr(&tested).contains("the receiver answered 503"));
+    let notifications = stub.ppanel(&["alert", "notifications", "--rule", "shop-errors"]);
+    assert!(stdout(&notifications).contains("abandoned"));
+    assert_eq!(
+        stub.requests("GET", "/api/v1/alert-notifications")[0].query,
+        "limit=50&rule=shop-errors"
+    );
 }
 
 #[test]
