@@ -30,6 +30,12 @@ pub(crate) enum ContainerCommand {
         #[arg(long = "state", value_name = "STATE")]
         states: Vec<String>,
     },
+    /// A container's configuration and state, with its labels, mounts and
+    /// networks; never its environment or command line.
+    Inspect {
+        #[command(flatten)]
+        target: Target,
+    },
     /// Starts a container.
     Start {
         #[command(flatten)]
@@ -165,6 +171,68 @@ const CONTAINERS: &[Column] = &[
     ("PROJECT", |container| text(&container["compose_project"])),
 ];
 
+const DETAIL: &[Column] = &[
+    ("Name", |detail| text(&detail["container"]["names"][0])),
+    ("ID", |detail| text(&detail["container"]["id"])),
+    ("Image", |detail| text(&detail["container"]["image"])),
+    ("State", |detail| {
+        let state = text(&detail["container"]["state"]);
+        match detail["health"].as_str() {
+            Some(health) => format!("{state} ({health})"),
+            None => state,
+        }
+    }),
+    ("Status", |detail| text(&detail["container"]["status"])),
+    ("Started", |detail| text(&detail["started_at"])),
+    ("Stopped", |detail| text(&detail["finished_at"])),
+    ("Exit code", |detail| text(&detail["exit_code"])),
+    ("Error", |detail| text(&detail["error"])),
+    ("Restarts", |detail| text(&detail["restarts"])),
+    ("Restart policy", |detail| text(&detail["restart_policy"])),
+    ("Host name", |detail| text(&detail["hostname"])),
+    ("User", |detail| text(&detail["user"])),
+    ("Working directory", |detail| {
+        text(&detail["working_directory"])
+    }),
+    ("Platform", |detail| text(&detail["platform"])),
+    ("Project", |detail| {
+        text(&detail["container"]["compose_project"])
+    }),
+];
+
+const LABELS: &[Column] = &[
+    ("LABEL", |label| text(&label["name"])),
+    ("VALUE", |label| text(&label["value"])),
+];
+
+const MOUNTS: &[Column] = &[
+    ("TYPE", |mount| text(&mount["kind"])),
+    ("SOURCE", |mount| text(&mount["source"])),
+    ("DESTINATION", |mount| text(&mount["destination"])),
+    ("ACCESS", |mount| {
+        if mount["read_write"] == true {
+            "read-write".into()
+        } else {
+            "read-only".into()
+        }
+    }),
+];
+
+const NETWORKS: &[Column] = &[
+    ("NETWORK", |network| text(&network["name"])),
+    ("ADDRESS", |network| text(&network["ip_address"])),
+    ("GATEWAY", |network| text(&network["gateway"])),
+    ("ALIASES", |network| {
+        let aliases: Vec<String> = network["aliases"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(text)
+            .collect();
+        aliases.join(", ")
+    }),
+];
+
 pub async fn run(api: &Api, output: &Output, command: ContainerCommand) -> Result<()> {
     match command {
         ContainerCommand::Engines => {
@@ -215,6 +283,7 @@ pub async fn run(api: &Api, output: &Output, command: ContainerCommand) -> Resul
                 }
             }
         }
+        ContainerCommand::Inspect { target } => inspect(api, output, &target).await?,
         ContainerCommand::Start { target } => act(api, output, &target, "start").await?,
         ContainerCommand::Stop { target, yes } => {
             confirmed(yes)?;
@@ -245,6 +314,39 @@ pub async fn run(api: &Api, output: &Output, command: ContainerCommand) -> Resul
             } else if !output.quiet {
                 println!("removed {}", text(&change["name"]));
             }
+        }
+    }
+    Ok(())
+}
+
+async fn inspect(api: &Api, output: &Output, target: &Target) -> Result<()> {
+    let path = format!(
+        "/api/v1/container-engines/{}/containers/{}",
+        target.engine, target.container
+    );
+    let detail = api.get(&path, &[]).await?.body;
+    if output.format == Format::Json {
+        output.json(&detail);
+        return Ok(());
+    }
+    if output.quiet {
+        return Ok(());
+    }
+    output.item(&detail, DETAIL);
+    let labels: Vec<Value> = detail["container"]["labels"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(name, value)| serde_json::json!({ "name": name, "value": value }))
+        .collect();
+    for (items, columns) in [
+        (Value::Array(labels), LABELS),
+        (detail["mounts"].clone(), MOUNTS),
+        (detail["networks"].clone(), NETWORKS),
+    ] {
+        if items.as_array().is_some_and(|items| !items.is_empty()) {
+            println!();
+            output.list(&items, columns);
         }
     }
     Ok(())

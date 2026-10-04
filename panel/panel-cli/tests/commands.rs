@@ -243,6 +243,25 @@ async fn api(
                           "labels": {}, "compose_project": "shop"}
         }))
         .into_response(),
+        ("GET", "/api/v1/container-engines/docker/containers/shop-web-1") => Json(json!({
+            "container": {"id": "b2", "names": ["shop-web-1"], "image": "nginx:1.27",
+                          "image_id": "sha256:aa", "created": "2026-10-04T07:00:00Z",
+                          "state": "running", "status": "Up 3 hours (healthy)", "ports": [],
+                          "labels": {"com.docker.compose.project": "shop",
+                                     "org.opencontainers.image.version": "1.27.4"},
+                          "compose_project": "shop"},
+            "started_at": "2026-10-04T07:00:01Z", "finished_at": null, "exit_code": null,
+            "error": null, "oom_killed": false, "restarts": 0, "health": "healthy",
+            "restart_policy": "unless-stopped", "restart_retries": 0, "hostname": "web",
+            "user": null, "working_directory": "/srv", "platform": "linux",
+            "mounts": [{"kind": "volume", "name": "shop_html",
+                        "source": "/var/lib/docker/volumes/shop_html/_data",
+                        "destination": "/usr/share/nginx/html", "read_write": false}],
+            "networks": [{"name": "shop_default", "ip_address": "172.18.0.2",
+                          "ipv6_address": null, "gateway": "172.18.0.1", "mac_address": null,
+                          "aliases": ["web", "shop-web-1"]}]
+        }))
+        .into_response(),
         ("DELETE", "/api/v1/container-engines/docker/containers/shop-web-1") => Json(json!({
             "id": "b2", "name": "shop-web-1", "container": null
         }))
@@ -1282,6 +1301,22 @@ fn containers_are_stopped_and_removed_with_confirmation() {
         "/api/v1/container-engines/docker/containers/shop-web-1",
     );
     assert_eq!(asked[0].query, "force=true&volumes=false");
+
+    let inspected = stub.ppanel(&["container", "inspect", "shop-web-1"]);
+    assert!(inspected.status.success(), "{}", stderr(&inspected));
+    let printed = stdout(&inspected);
+    for expected in [
+        "running (healthy)",
+        "unless-stopped",
+        "org.opencontainers.image.version",
+        "1.27.4",
+        "/usr/share/nginx/html",
+        "read-only",
+        "172.18.0.2",
+        "web, shop-web-1",
+    ] {
+        assert!(printed.contains(expected), "{expected} in\n{printed}");
+    }
 
     let refused = stub.ppanel(&["container", "start", "../enable"]);
     assert!(!refused.status.success());
