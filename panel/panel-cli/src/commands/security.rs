@@ -69,7 +69,7 @@ pub(crate) struct PolicyArgs {
     body_timeout: Option<u64>,
     /// A token bucket such as "10r/s", "300r/m burst=50" or
     /// "5r/m key=header:X-Api-Key"; repeatable. Keys are client (the
-    /// default), host, route and header:<name>. More requests get 429.
+    /// default), host, route and `header:<name>`. More requests get 429.
     #[arg(long = "rate-limit", value_name = "RATE", value_parser = rate_limit)]
     rate_limits: Vec<Value>,
     /// Requests one client address may have in progress.

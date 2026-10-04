@@ -458,7 +458,7 @@ pub enum RouteAction {
         policy_id: String,
     },
     Redirect {
-        /// A [template](template), evaluated per request.
+        /// A [template], evaluated per request.
         location: String,
         status: u16,
         /// Appends the request path and query to `location`.
@@ -467,7 +467,7 @@ pub enum RouteAction {
     },
     Respond {
         status: u16,
-        /// A [template](template), evaluated per request.
+        /// A [template], evaluated per request.
         body: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         content_type: Option<String>,

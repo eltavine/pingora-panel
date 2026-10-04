@@ -158,7 +158,7 @@ pub(crate) struct GrantArgs {
     /// Only for requests from this network, such as 10.0.0.0/8.
     #[arg(long = "network")]
     networks: Vec<String>,
-    /// Only within this window, as "[DAYS ]HH:MM-HH:MM[ ZONE]" with an IANA
+    /// Only within this window, as `[DAYS ]HH:MM-HH:MM[ ZONE]` with an IANA
     /// time zone, UTC without one.
     #[arg(long = "window", value_parser = crate::commands::windows::window)]
     windows: Vec<Value>,

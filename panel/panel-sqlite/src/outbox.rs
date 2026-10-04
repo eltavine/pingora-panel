@@ -165,7 +165,7 @@ impl OutboxSource for SqliteOutbox {
 }
 
 /// Wakes the relay when the module reports a commit, and otherwise every
-/// [`POLL_INTERVAL`].
+/// 250 milliseconds.
 pub struct SqliteOutboxWakeup {
     commits: Arc<Notify>,
 }

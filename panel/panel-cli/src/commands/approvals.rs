@@ -54,7 +54,7 @@ pub(crate) struct SetPolicy {
     #[arg(long, value_enum, default_value_t = Risk::Low)]
     min_risk: Risk,
     /// Covers changes applied in this window, as
-    /// "[DAYS ]HH:MM-HH:MM[ ZONE]" with an IANA time zone, UTC without one;
+    /// `[DAYS ]HH:MM-HH:MM[ ZONE]` with an IANA time zone, UTC without one;
     /// always without it.
     #[arg(long = "window", value_parser = windows::window)]
     windows: Vec<Value>,

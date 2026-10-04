@@ -25,7 +25,7 @@ pub(crate) enum UpstreamCommand {
         /// round_robin, random, or hash with --hash-key.
         #[arg(long, default_value = "round_robin")]
         balancing: String,
-        /// client_ip, uri, header:<name> or cookie:<name>.
+        /// `client_ip`, `uri`, `header:<name>` or `cookie:<name>`.
         #[arg(long)]
         hash_key: Option<String>,
         /// Replaces the client's Host when forwarding.

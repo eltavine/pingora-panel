@@ -15,7 +15,7 @@ pub(crate) enum ListenerCommand {
     /// Creates or replaces a listener.
     Set {
         id: String,
-        /// IP:PORT, for example 0.0.0.0:80 or [::]:443.
+        /// IP:PORT, for example `0.0.0.0:80` or `[::]:443`.
         #[arg(long)]
         address: String,
         /// Serve HTTPS with this profile's certificate by default.
