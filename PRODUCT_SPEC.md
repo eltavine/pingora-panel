@@ -147,6 +147,8 @@ Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交
 
 0.5 日志（`OBS-001`～`OBS-019`、`SEC-028`）按 ADR 0025 与 ADR 0026 实现：设置了日志目录的网关把网站接收的请求写入各自的 `sites/<网站>.access.log`，其余请求写入 `access.log`，失败的请求另写 `error.log`。访问记录是以 OpenTelemetry 属性名为键的 JSON 行或 Combined Log Format，带请求 ID（合法的 `X-Request-Id` 原样保留，否则写入新的 UUIDv7 并一并转发给上游）、trace ID、网站、路由、修订与上游节点；敏感查询参数（OpenTelemetry 的默认列表或自定义列表）、凭据类请求头与全部 Cookie 记为 `REDACTED`。文件按大小与 UTC 日期轮转，按保留天数与文件数清理；写入队列满时丢弃记录并计数，不阻塞请求。配置语言在 `http`、`server` 与 `route` 中设置开关、格式与自定义字段，在 `http` 中设置脱敏列表与轮转保留；Compose 安装由 OpenTelemetry Collector 把日志送入 Loki。`observability-service` 按类型化的过滤条件（类型、网站、路由、状态码或状态类、客户端地址或 CIDR、路径前缀、请求 ID 与文本）自行生成 LogQL，调用方不写 LogQL：检索按时间倒序分页，每页至多 500 条；Tail 每秒读取 Loki，由 `panel-api` 经 WebSocket（RFC 6455，HTTP/2 下按 RFC 8441）推送，只接受控制台来源的会话握手，跟不上的客户端收到可续读的游标；下载以纯文本流式返回至多 100,000 条原始行；清空向 Loki 提交删除请求，撤销期过后执行，审计记为 `gateway.logs.deleted`。查看需要 `logs.read`，清空需要 `logs.delete`。`ppanel logs` 与控制台的日志页提供同样的检索、实时跟踪、下载与清空，网站与路由表单设置日志开关、格式与自定义字段。
 
+0.5 告警（`OBS-051`～`OBS-053`）按 ADR 0027 实现：`observability-service` 每 30 秒由持有告警咨询锁的实例评估规则；规则以固定 PromQL 读取最近五分钟的 5xx 占比、P95 延迟、请求速率、上游失败占比或打开的连接数，可限定网站、路由或上游，条件持续满足到设定时长后触发，首次不满足即恢复，读取失败时保持原状态并说明原因。触发与恢复在状态变更的同一事务中为每个渠道排队通知，由发送方以 `FOR UPDATE SKIP LOCKED` 领取，按 Alertmanager Webhook（version 4）格式、依 Standard Webhooks 规范以 HMAC-SHA256 签名发送，失败时退避重试一天。渠道的地址与签名密钥以主密钥加密保存，只显示地址的来源，密钥仅在创建或轮换时显示一次；邮件渠道作为预留接口在合约中命名，创建时返回不支持。规则与渠道的变更及告警的触发与恢复都写入审计。查看需要 `alerts.read`，修改需要 `alerts.manage`；REST API、`ppanel alert` 与控制台告警页提供同样的能力，网关概览首先列出正在触发的告警。
+
 ### 3.2 目标仓库边界
 
 Pingora 上游 crates 继续保留在根 workspace，以便固定版本、审计源码、紧急打补丁和进行兼容测试。产品代码统一进入 `panel/` 边界。只有 `panel/gateway-pingora` 可以在 `Cargo.toml` 中依赖 `pingora-*`；其他产品 crate 只能依赖稳定的 `GatewayEngine` port 与 Engine-neutral IR。
@@ -1186,9 +1188,9 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | OBS-048 | 447 | 最近异常请求 | 0.5 | A/C/G | Viewer | observability-service | 查询“最近异常请求”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
 | OBS-049 | 448 | 最近上游故障 | 0.5 | A/C/G | Viewer | observability-service | 查询“最近上游故障”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
 | OBS-050 | 449 | 最近证书错误 | 0.5 | A/C/G | Viewer | observability-service | 查询“最近证书错误”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
-| OBS-051 | 450 | 简单告警阈值 | 0.5 | A/C/G | Operator | observability-service | 执行“简单告警阈值”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| OBS-052 | 451 | Webhook 告警 | 0.5 | A/C/G | Operator | observability-service | 执行“Webhook 告警”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| OBS-053 | 452 | 邮件告警接口预留 | 0.5 | A/C/G | Operator | observability-service | 执行“邮件告警接口预留”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| OBS-051 | 450 | 简单告警阈值 | 0.5 | A/C/G | Operator | observability-service | 执行“简单告警阈值”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| OBS-052 | 451 | Webhook 告警 | 0.5 | A/C/G | Operator | observability-service | 执行“Webhook 告警”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| OBS-053 | 452 | 邮件告警接口预留 | 0.5 | A/C/G | Operator | observability-service | 执行“邮件告警接口预留”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | CTR-001 | 453 | Docker 状态展示 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“Docker 状态展示”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
 | CTR-002 | 454 | Docker 版本展示 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“Docker 版本展示”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
 | CTR-003 | 455 | Docker Socket 配置 | 0.5 | A/C/G/I | Operator | ops-agent | 执行“Docker Socket 配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
@@ -1431,7 +1433,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | 新增团队/平台需求 | 105 |
 | 总 Feature ID | 685 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
-| 当前 `Implemented` | 369（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-005`；身份：`IAM-001`～`IAM-038`；证书：`TLS-001`～`TLS-033`；安全：`SEC-001`～`SEC-035`；可观测：`OBS-001`～`OBS-037`、`OBS-039`～`OBS-044`、`OBS-047`～`OBS-050`） |
+| 当前 `Implemented` | 372（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-005`；身份：`IAM-001`～`IAM-038`；证书：`TLS-001`～`TLS-033`；安全：`SEC-001`～`SEC-035`；可观测：`OBS-001`～`OBS-037`、`OBS-039`～`OBS-044`、`OBS-047`～`OBS-053`） |
 | 1.0 要求 `Verified` | 685 |
 
 分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 47、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。
