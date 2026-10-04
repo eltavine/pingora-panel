@@ -4,6 +4,7 @@ import type {
   DataPlaneResponse,
   DraftResponse,
   GatewayStatusResponse,
+  HostSummaryView,
   SiteList,
   SiteSummary,
   SiteView,
@@ -226,6 +227,47 @@ export function handlers(sampler: Sampler): AnyHandler[] {
       })),
     })),
   }
+  const host: HostSummaryView = {
+    observed_at: new Date().toISOString(),
+    reporting: true,
+    hostname: 'edge-1',
+    operating_system: 'Ubuntu 24.04.2 LTS',
+    kernel_release: '6.8.0-41-generic',
+    architecture: 'x86_64',
+    host_time: new Date().toISOString(),
+    time_zone: 'UTC',
+    uptime_seconds: 19 * 86_400 + 4 * 3_600,
+    cpu_count: 8,
+    cpu_usage: 0.27,
+    load1: 1.42,
+    load5: 1.18,
+    load15: 0.96,
+    memory_total_bytes: 16 * 1024 ** 3,
+    memory_available_bytes: 9.4 * 1024 ** 3,
+    filesystems: [
+      {
+        mountpoint: '/var',
+        device: '/dev/nvme1n1p1',
+        fstype: 'xfs',
+        size_bytes: 200 * 1024 ** 3,
+        available_bytes: 22 * 1024 ** 3,
+        used_ratio: 0.89,
+        level: 'warning',
+      },
+      {
+        mountpoint: '/',
+        device: '/dev/nvme0n1p2',
+        fstype: 'ext4',
+        size_bytes: 100 * 1024 ** 3,
+        available_bytes: 61 * 1024 ** 3,
+        used_ratio: 0.39,
+        level: 'ok',
+      },
+    ],
+    network_devices: [
+      { device: 'eth0', receive_bytes_per_second: 2.4e6, transmit_bytes_per_second: 9.1e6 },
+    ],
+  }
   const siteList = sites(sampler)
   return [
     http.get('*/api/v1/session', () => HttpResponse.json(session(sampler))),
@@ -246,6 +288,7 @@ export function handlers(sampler: Sampler): AnyHandler[] {
     http.get('*/api/v1/traffic/series', ({ request }) =>
       HttpResponse.json(series(windowOf(request))),
     ),
+    http.get('*/api/v1/host', () => HttpResponse.json(host)),
     ...logHandlers(),
     ...alertHandlers(),
     http.all('*/api/*', ({ request }) => {
