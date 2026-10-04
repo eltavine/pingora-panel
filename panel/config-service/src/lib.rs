@@ -16,6 +16,8 @@ mod configuration;
 mod deployments;
 mod draft;
 mod language;
+#[cfg(test)]
+mod memory;
 mod operations;
 mod publication;
 mod receipts;

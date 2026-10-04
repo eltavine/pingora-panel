@@ -32,6 +32,8 @@ use serde_json::json;
 use std::sync::Arc;
 
 mod approval_operations;
+#[cfg(test)]
+mod tests;
 
 const DEFAULT_REVISION_PAGE: u32 = 50;
 const MAX_REVISION_PAGE: u32 = 500;
