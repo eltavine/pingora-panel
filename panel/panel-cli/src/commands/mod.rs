@@ -11,6 +11,7 @@ pub mod domains;
 pub mod gateway;
 pub mod host;
 pub mod identity;
+pub mod images;
 pub mod logs;
 pub mod providers;
 pub mod revisions;

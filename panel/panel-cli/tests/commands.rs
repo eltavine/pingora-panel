@@ -266,6 +266,33 @@ async fn api(
             "id": "b2", "name": "shop-web-1", "container": null
         }))
         .into_response(),
+        ("GET", "/api/v1/container-engines/docker/images") => Json(json!({
+            "observed_at": "2027-01-15T08:00:10Z",
+            "images": [
+                {"id": "sha256:4f1c2a9be03d71aa", "tags": ["nginx:1.27"],
+                 "digests": ["nginx@sha256:d1"], "created": "2027-01-15T08:00:00Z",
+                 "size_bytes": 52_428_800, "containers": 1, "labels": {}},
+                {"id": "sha256:e5d8b3a2f6c19d07", "tags": [], "digests": [],
+                 "created": "2027-01-14T08:00:00Z", "size_bytes": 1_024, "containers": 0,
+                 "labels": {}}
+            ]
+        }))
+        .into_response(),
+        ("GET", "/api/v1/container-engines/docker/images/ghcr.io%2Fexample%2Fapp:2.3") => {
+            Json(json!({
+                "image": {"id": "sha256:aa", "tags": ["ghcr.io/example/app:2.3"], "digests": [],
+                          "created": "2027-01-15T08:00:00Z", "size_bytes": 1_048_576,
+                          "containers": 0, "labels": {}},
+                "architecture": "arm64", "variant": "v8", "os": "linux", "author": null,
+                "comment": null, "user": "app", "working_directory": "/srv",
+                "exposed_ports": ["8080/tcp"], "volumes": [], "stop_signal": null, "layers": 4
+            }))
+            .into_response()
+        }
+        ("DELETE", "/api/v1/container-engines/docker/images/redis:7") => Json(json!({
+            "id": "sha256:bb", "untagged": ["redis:7"], "deleted": ["sha256:bb"]
+        }))
+        .into_response(),
         ("GET", "/api/v1/container-engines/docker/stats") => Json(json!({
             "observed_at": "2027-01-15T08:00:10Z",
             "stats": [{
@@ -2641,4 +2668,36 @@ fn what_containers_use_from_the_command_line() {
     let none = stub.ppanel(&["container", "stats", "--engine", "podman"]);
     assert!(none.status.success());
     assert!(stderr(&none).contains("no containers are running"));
+}
+
+#[test]
+fn images_from_the_command_line() {
+    let stub = Stub::start();
+    let list = stub.ppanel(&["image", "list"]);
+    assert!(list.status.success(), "{}", stderr(&list));
+    let printed = stdout(&list);
+    for expected in ["nginx:1.27", "4f1c2a9be03d", "50.0 MiB", "<none>"] {
+        assert!(printed.contains(expected), "{expected} in\n{printed}");
+    }
+
+    let detail = stub.ppanel(&["image", "inspect", "ghcr.io/example/app:2.3"]);
+    assert!(detail.status.success(), "{}", stderr(&detail));
+    assert!(
+        stdout(&detail).contains("linux/arm64/v8"),
+        "{}",
+        stdout(&detail)
+    );
+    assert!(stdout(&detail).contains("8080/tcp"));
+
+    let unconfirmed = stub.ppanel(&["image", "remove", "redis:7"]);
+    assert_eq!(unconfirmed.status.code(), Some(2));
+    let removed = stub.ppanel(&["image", "remove", "redis:7", "--force", "--yes"]);
+    assert!(removed.status.success(), "{}", stderr(&removed));
+    assert_eq!(stdout(&removed), "untagged redis:7\ndeleted sha256:bb\n");
+    assert_eq!(
+        stub.requests("DELETE", "/api/v1/container-engines/docker/images/redis:7")[0].query,
+        "force=true"
+    );
+    let escaping = stub.ppanel(&["image", "inspect", "../containers/b2"]);
+    assert_eq!(escaping.status.code(), Some(2));
 }
