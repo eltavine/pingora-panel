@@ -31558,6 +31558,327 @@
         }
       }
     },
+    "/api/v1/host": {
+      "parameters": [
+        {
+          "name": "x-request-id",
+          "in": "header",
+          "description": "Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1
+          }
+        },
+        {
+          "name": "traceparent",
+          "in": "header",
+          "description": "W3C Trace Context parent of the caller's trace. Invalid values are ignored.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 55
+          }
+        },
+        {
+          "name": "tracestate",
+          "in": "header",
+          "description": "W3C Trace Context vendor state, propagated with a valid traceparent.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "host"
+        ],
+        "summary": "The host's CPU, memory, filesystems, load, network and system.",
+        "operationId": "host_summary",
+        "parameters": [
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostSummaryView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/identity-providers": {
       "parameters": [
         {
@@ -60720,6 +61041,15 @@
           }
         }
       },
+      "DiskLevel": {
+        "type": "string",
+        "description": "How full a filesystem is.",
+        "enum": [
+          "ok",
+          "warning",
+          "critical"
+        ]
+      },
       "DnsProvider": {
         "type": "object",
         "description": "A DNS provider that publishes DNS-01 records. Its secret is never\nreturned.",
@@ -61522,6 +61852,177 @@
           "host": {
             "type": "string",
             "description": "The host in its ASCII form."
+          }
+        }
+      },
+      "HostFilesystemView": {
+        "type": "object",
+        "required": [
+          "mountpoint",
+          "device",
+          "fstype",
+          "size_bytes",
+          "available_bytes",
+          "used_ratio",
+          "level"
+        ],
+        "properties": {
+          "available_bytes": {
+            "type": "number",
+            "format": "double"
+          },
+          "device": {
+            "type": "string"
+          },
+          "fstype": {
+            "type": "string"
+          },
+          "level": {
+            "$ref": "#/components/schemas/DiskLevel"
+          },
+          "mountpoint": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "type": "number",
+            "format": "double"
+          },
+          "used_ratio": {
+            "type": "number",
+            "format": "double",
+            "description": "The share used, from 0 to 1."
+          }
+        }
+      },
+      "HostNetworkDeviceView": {
+        "type": "object",
+        "description": "A physical network device's traffic over five minutes.",
+        "required": [
+          "device",
+          "receive_bytes_per_second",
+          "transmit_bytes_per_second"
+        ],
+        "properties": {
+          "device": {
+            "type": "string"
+          },
+          "receive_bytes_per_second": {
+            "type": "number",
+            "format": "double"
+          },
+          "transmit_bytes_per_second": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "HostSummaryView": {
+        "type": "object",
+        "description": "The host's figures, from the node exporter.",
+        "required": [
+          "reporting",
+          "hostname",
+          "operating_system",
+          "kernel_release",
+          "architecture",
+          "time_zone",
+          "cpu_count",
+          "load1",
+          "load5",
+          "load15",
+          "memory_total_bytes",
+          "memory_available_bytes",
+          "filesystems",
+          "network_devices"
+        ],
+        "properties": {
+          "architecture": {
+            "type": "string"
+          },
+          "cpu_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "cpu_usage": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The share of CPU time not idle over five minutes, from 0 to 1."
+          },
+          "filesystems": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HostFilesystemView"
+            },
+            "description": "Fullest first."
+          },
+          "host_time": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The host's clock, RFC 3339."
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "kernel_release": {
+            "type": "string"
+          },
+          "load1": {
+            "type": "number",
+            "format": "double"
+          },
+          "load15": {
+            "type": "number",
+            "format": "double"
+          },
+          "load5": {
+            "type": "number",
+            "format": "double"
+          },
+          "memory_available_bytes": {
+            "type": "number",
+            "format": "double"
+          },
+          "memory_total_bytes": {
+            "type": "number",
+            "format": "double"
+          },
+          "network_devices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HostNetworkDeviceView"
+            },
+            "description": "Busiest first."
+          },
+          "observed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When the figures were read, RFC 3339."
+          },
+          "operating_system": {
+            "type": "string"
+          },
+          "reporting": {
+            "type": "boolean",
+            "description": "False when the node exporter has no figures; the rest is then empty."
+          },
+          "time_zone": {
+            "type": "string"
+          },
+          "uptime_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
@@ -65849,6 +66350,10 @@
     {
       "name": "logs",
       "description": "The gateway's access and error logs: searched, followed as they arrive, downloaded and deleted"
+    },
+    {
+      "name": "host",
+      "description": "The host the gateway runs on: CPU, memory, filesystems, load, network and system"
     },
     {
       "name": "alerts",

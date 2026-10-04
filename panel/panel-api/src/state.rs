@@ -3,8 +3,8 @@ use crate::{
     sign_in::ProviderAccess,
 };
 use panel_application::{
-    AlertsPort, AuditPort, CertificatePort, ConfigurationPort, GatewayRuntimePort, LogsPort,
-    TlsProbe, TrafficPort,
+    AlertsPort, AuditPort, CertificatePort, ConfigurationPort, GatewayRuntimePort, HostPort,
+    LogsPort, TlsProbe, TrafficPort,
 };
 use panel_health::HealthWatch;
 use panel_identity::{Identity, ProviderDirectory, ProviderSignIns, WorkloadIdentity};
@@ -23,6 +23,7 @@ pub struct ApiState<U> {
     pub(crate) traffic: Option<Arc<dyn TrafficPort>>,
     pub(crate) logs: Option<Arc<dyn LogsPort>>,
     pub(crate) alerts: Option<Arc<dyn AlertsPort>>,
+    pub(crate) host: Option<Arc<dyn HostPort>>,
     pub(crate) identity: Option<Arc<Gate>>,
     pub(crate) providers: Option<Arc<ProviderAccess>>,
     pub(crate) workloads: Option<Arc<WorkloadIdentity>>,
@@ -43,6 +44,7 @@ impl<U> Clone for ApiState<U> {
             traffic: self.traffic.clone(),
             logs: self.logs.clone(),
             alerts: self.alerts.clone(),
+            host: self.host.clone(),
             identity: self.identity.clone(),
             providers: self.providers.clone(),
             workloads: self.workloads.clone(),
@@ -65,6 +67,7 @@ impl<U> ApiState<U> {
             traffic: None,
             logs: None,
             alerts: None,
+            host: None,
             identity: None,
             providers: None,
             workloads: None,
@@ -129,6 +132,12 @@ impl<U> ApiState<U> {
     /// Serves the gateway's logs under `/api/v1/logs`.
     pub fn with_logs(mut self, logs: Arc<dyn LogsPort>) -> Self {
         self.logs = Some(logs);
+        self
+    }
+
+    /// Serves the host's figures under `/api/v1/host`.
+    pub fn with_host(mut self, host: Arc<dyn HostPort>) -> Self {
+        self.host = Some(host);
         self
     }
 

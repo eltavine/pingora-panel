@@ -21,6 +21,7 @@ mod admission;
 mod alerts;
 mod certificates;
 mod conditional;
+mod host;
 mod logs;
 mod platform;
 mod request_identity;

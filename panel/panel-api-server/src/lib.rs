@@ -232,6 +232,7 @@ pub fn process(
                 .with_certificates(Arc::new(automation))
                 .with_traffic(Arc::new(observability.clone()))
                 .with_logs(Arc::new(logs))
+                .with_host(Arc::new(observability.clone()))
                 .with_alerts(Arc::new(observability))
                 .with_tls_probe(Arc::new(RustlsProbe::default()))
                 .with_identity(identity, access)
