@@ -18,6 +18,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { notifyFailure } from '@/lib/configuration'
+import { downloadFile } from '@/lib/download'
 import { KEY_ALGORITHMS, fingerprint, parseNames } from './presentation'
 import { STATUS_TONES } from '@/lib/certificates'
 
@@ -81,12 +82,7 @@ function download() {
   if (!certificate) {
     return
   }
-  const url = URL.createObjectURL(new Blob([certificate.chain], { type: 'application/x-pem-file' }))
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `${certificate.id}.pem`
-  link.click()
-  URL.revokeObjectURL(url)
+  downloadFile(`${certificate.id}.pem`, certificate.chain, 'application/x-pem-file')
 }
 </script>
 
