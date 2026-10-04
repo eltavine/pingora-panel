@@ -375,8 +375,9 @@ OpenTelemetry semantic conventions
 scrapes them, and `observability-service` answers for them with fixed
 queries, so callers never write PromQL. `GET /api/v1/traffic` summarizes a
 window — requests, rate, status classes, latency percentiles, traffic in
-and out, open connections, handshakes, upstream error ratios, failed
-upstream attempts by node and why, the busiest routes and the busiest
+and out, open connections, handshakes, upstream error ratios and the share
+of their connections reused from the gateway's pool, failed upstream
+attempts by node and why, the busiest routes and the busiest
 domains as configured, such as `*.shop.example` — for every site, one
 `site` or one `route`, and
 `/api/v1/traffic/series` charts the request rate, server errors and 95th
