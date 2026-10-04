@@ -16,6 +16,7 @@ panel-service.workspace = true
 prost-types.workspace = true
 tokio-stream.workspace = true
 tonic.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true

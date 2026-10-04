@@ -3,14 +3,19 @@
 //! `TrafficPort` over `observability-service`, so the public API reads what
 //! the gateway served without querying Prometheus itself.
 
+mod alerts;
 mod logs;
 
 use async_trait::async_trait;
 use panel_application::{
-    DomainTraffic, Latency, RequestScope, RouteTraffic, StatusClasses, TrafficPoint, TrafficPort,
-    TrafficQuery, TrafficSummary, UpstreamFailure, UpstreamTraffic,
+    CommandContext, DomainTraffic, Latency, RequestScope, RouteTraffic, StatusClasses,
+    TrafficPoint, TrafficPort, TrafficQuery, TrafficSummary, UpstreamFailure, UpstreamTraffic,
 };
-use panel_contracts::observability::v1::{self as wire, traffic_client::TrafficClient};
+use panel_contracts::{
+    common::v1 as common,
+    observability::v1::{self as wire, traffic_client::TrafficClient},
+    PROTOCOL_VERSION,
+};
 use panel_errors::Result;
 use panel_service::{
     loopback_channel, propagate_trace, request_context, response_error, status_error,
@@ -80,6 +85,19 @@ fn wire_scope(query: &TrafficQuery) -> wire::Scope {
 
 fn duration(value: Duration) -> Option<prost_types::Duration> {
     prost_types::Duration::try_from(value).ok()
+}
+
+/// A command's request context, as services receive it.
+fn command_context(context: &CommandContext) -> common::RequestContext {
+    common::RequestContext {
+        request_id: context.request_id().as_str().into(),
+        correlation_id: context.correlation_id().as_str().into(),
+        actor: context.actor().into(),
+        deadline: context.deadline().as_str().into(),
+        idempotency_key: context.idempotency_key().as_str().into(),
+        schema_version: PROTOCOL_VERSION.into(),
+        site_scope: None,
+    }
 }
 
 fn time(value: Option<prost_types::Timestamp>) -> Option<SystemTime> {

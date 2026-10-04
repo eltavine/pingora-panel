@@ -78,6 +78,30 @@
       "name": "HealthCheckProtocol",
       "owner": "pingora-panel-platform",
       "reason": "gateway-proto-codec encodes every probe protocol onto the wire, and gateway-pingora builds a probe for each. A new protocol must fail to compile in both rather than probe the wrong way."
+    },
+    {
+      "package": "panel-application",
+      "name": "AlertChannelKind",
+      "owner": "pingora-panel-platform",
+      "reason": "A channel's kind decides where notifications go; a new kind must fail to compile until every adapter sends it, rather than being sent as a webhook."
+    },
+    {
+      "package": "panel-application",
+      "name": "AlertComparison",
+      "owner": "pingora-panel-platform",
+      "reason": "A rule's comparison decides when it fires; an adapter must never map an unknown comparison to another one, so a new comparison must fail to compile until every adapter handles it."
+    },
+    {
+      "package": "panel-application",
+      "name": "AlertMeasure",
+      "owner": "pingora-panel-platform",
+      "reason": "Each measure is a fixed query in observability-service and a field of the alerts contract; a new measure must fail to compile in every adapter until it maps the measure, rather than reading as another one."
+    },
+    {
+      "package": "panel-application",
+      "name": "AlertSeverity",
+      "owner": "pingora-panel-platform",
+      "reason": "Severity travels to receivers as a notification label; a new severity must fail to compile until every adapter carries it, rather than reaching receivers as another severity."
     }
   ]
 }

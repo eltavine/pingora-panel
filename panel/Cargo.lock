@@ -2525,6 +2525,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tonic",
+ "zeroize",
 ]
 
 [[package]]
@@ -2770,6 +2771,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "zeroize",
 ]
 
 [[package]]

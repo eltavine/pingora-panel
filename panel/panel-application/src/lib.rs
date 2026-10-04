@@ -7,6 +7,7 @@
 //! boundary. Internal modules are private so their organization can evolve
 //! without changing the public application contract.
 
+mod alerts;
 mod audit;
 mod certificates;
 mod configuration;
@@ -20,6 +21,11 @@ mod runtime;
 mod tls_probe;
 mod traffic;
 
+pub use alerts::{
+    AlertChannel, AlertChannelKind, AlertChannelSecret, AlertComparison, AlertMeasure,
+    AlertNotification, AlertNotificationKind, AlertNotificationQuery, AlertNotificationState,
+    AlertRule, AlertRuleSpec, AlertSeverity, AlertState, AlertTest, AlertsPort, NewAlertChannel,
+};
 pub use audit::{AuditFilter, AuditPage, AuditPort, AuditRecord, AuditVerification};
 pub use certificates::{CertificateChange, CertificateOutput, CertificatePort, CertificateRead};
 pub use configuration::{
@@ -40,7 +46,7 @@ pub use logs::{
     LogTail, LogsPort, RecordedLogs,
 };
 pub use operations::{Operation, OperationLog, RecordedRuntime};
-pub use panel_domain::{ContentHash, SiteId};
+pub use panel_domain::{ContentHash, RouteId, SiteId, UpstreamPoolId};
 pub use persistence::{
     AuditEventStore, AuditFact, IdempotencyClaim, IdempotencyLookup, IdempotencyRecord,
     IdempotencyRepository, RevisionRepository,

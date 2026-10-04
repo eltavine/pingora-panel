@@ -1,16 +1,12 @@
 //! `LogsPort` over `observability-service` (ADR 0026).
 
-use crate::{time, ObservabilityClient};
+use crate::{command_context, time, ObservabilityClient};
 use async_trait::async_trait;
 use panel_application::{
     CommandContext, LogBatch, LogDeletion, LogDeletionState, LogFilter, LogKind, LogPage,
     LogRecord, LogSearch, LogTail, LogsPort, RequestScope, SiteId,
 };
-use panel_contracts::{
-    common::v1 as common,
-    observability::v1::{self as wire, logs_client::LogsClient},
-    PROTOCOL_VERSION,
-};
+use panel_contracts::observability::v1::{self as wire, logs_client::LogsClient};
 use panel_errors::Result;
 use panel_service::{propagate_trace, request_context, response_error, status_error};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -146,15 +142,7 @@ impl LogsPort for ObservabilityClient {
     ) -> Result<LogDeletion> {
         let scope = context.scope();
         let message = wire::LogsDeleteRequest {
-            context: Some(common::RequestContext {
-                request_id: context.request_id().as_str().into(),
-                correlation_id: context.correlation_id().as_str().into(),
-                actor: context.actor().into(),
-                deadline: context.deadline().as_str().into(),
-                idempotency_key: context.idempotency_key().as_str().into(),
-                schema_version: PROTOCOL_VERSION.into(),
-                site_scope: None,
-            }),
+            context: Some(command_context(&context)),
             site: site
                 .map(|site| site.as_str().to_owned())
                 .unwrap_or_default(),
