@@ -468,8 +468,7 @@ impl AcmeClient {
                     start: time(info.suggested_window.start.unix_timestamp_nanos()),
                     end: time(info.suggested_window.end.unix_timestamp_nanos()),
                     explanation_url: info.explanation_url,
-                    next_check: Utc::now()
-                        + chrono::Duration::from_std(wait).unwrap_or(chrono::Duration::hours(6)),
+                    next_check: Utc::now() + check_interval(wait),
                 })),
                 Err(AcmeError::Unsupported(_)) => Ok(None),
                 Err(error) => Err(acme_error(error)),
@@ -477,6 +476,13 @@ impl AcmeClient {
         })
         .await
     }
+}
+
+/// When to read renewal information again: the server's `Retry-After`,
+/// held between a minute and a day as RFC 9773 §4.3.2 asks of clients.
+fn check_interval(retry_after: Duration) -> chrono::Duration {
+    let held = retry_after.clamp(Duration::from_secs(60), Duration::from_secs(24 * 60 * 60));
+    chrono::Duration::from_std(held).unwrap_or(chrono::Duration::hours(6))
 }
 
 fn base64_url(value: &str) -> Option<Vec<u8>> {
@@ -495,6 +501,19 @@ mod tests {
         DateTime::parse_from_rfc3339(value)
             .unwrap()
             .with_timezone(&Utc)
+    }
+
+    #[test]
+    fn renewal_checks_wait_between_a_minute_and_a_day() {
+        assert_eq!(
+            check_interval(Duration::from_secs(1)),
+            chrono::Duration::minutes(1)
+        );
+        assert_eq!(
+            check_interval(Duration::from_secs(21_600)),
+            chrono::Duration::hours(6)
+        );
+        assert_eq!(check_interval(Duration::MAX), chrono::Duration::days(1));
     }
 
     #[test]
