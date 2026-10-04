@@ -417,6 +417,37 @@ ppanel logs download --request-id 01J9Z8 --file request.log
 ppanel logs delete --site shop --yes
 ```
 
+## Alerts
+
+`observability-service` evaluates alert rules
+([decision](../docs/adr/0027-alerts.md)) every 30 seconds on the instance
+that holds its alert lock. A rule compares one measure over the last five
+minutes — the share of 5xx responses, P95 latency, the request rate, the
+share of failed upstream attempts or open connections — with a threshold,
+for every site, one site, one route or one upstream, and fires once the
+condition has held for its pending period. Firing and resolving queue a
+notification for each of the rule's channels, which a sender posts in
+Alertmanager's webhook payload, signed as Standard Webhooks specify, and
+retries for a day. A channel's URL and signing secret are sealed with the
+master keys; only the URL's origin is shown, and the secret only when the
+channel is created or rotated. Set `PINGORA_PANEL_PUBLIC_ORIGINS` on
+`observability-service` so notifications link to the console. Email
+channels are reserved and refused as unsupported.
+
+`/api/v1/alert-rules`, `/api/v1/alert-channels` and
+`/api/v1/alert-notifications` serve them; reading needs `alerts.read` and
+changing `alerts.manage`. The console's Alerts page manages rules and
+channels and lists notifications, and the overview leads with firing
+alerts.
+
+```sh
+ppanel alert channel create ops --url-file hook-url
+ppanel alert rule set shop-errors --measure server-error-ratio --above 0.05 \
+  --pending 5m --site shop --severity critical --channel ops
+ppanel alert rule list
+ppanel alert notifications --rule shop-errors
+```
+
 ## Accounts and access
 
 Every request to `panel-api` is authenticated and authorized
