@@ -636,6 +636,8 @@ DSL 和事件中禁止出现私钥、密码、Session 或长期 Token。默认 S
 
 Lua 仅允许具有受信脚本权限的 Administrator 创建或发布。默认关闭 `os`、任意 `io`、动态库、FFI、任意网络和进程执行，只暴露版本化 `req`、`resp`、`ctx`、`upstream`、`log`、`crypto` capability。每次执行限制指令数、墙钟时间和 VM 内存；超限使用明确 fallback，并记录指标。沙箱是纵深防御，不是多租户隔离承诺。
 
+实现 Lua 之前，须以 ADR 比较嵌入式 Lua 与 WebAssembly 运行时：两者如何满足上述指令数、墙钟时间与内存限制（例如 Wasm 运行时的燃料计量、epoch 中断与内存上限），各自的沙箱边界，是否有成熟的代理扩展 ABI（如 proxy-wasm），以及与 OpenResty 脚本的兼容价值。
+
 ### 11.4 供应链
 
 - Rust、Node、容器和系统依赖生成 SBOM。
