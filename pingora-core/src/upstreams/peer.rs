@@ -992,6 +992,18 @@ mod tests {
     }
 
     #[test]
+    fn debug_output_leaves_out_the_hooks() {
+        let mut options = PeerOptions::new();
+        options.upstream_tcp_sock_tweak_hook = Some(Arc::new(|_: &TcpSocket| Ok(())));
+        let printed = format!("{options:?}");
+        assert!(printed.starts_with("PeerOptions {"), "{printed}");
+        assert!(printed.contains("connection_timeout: None"), "{printed}");
+        assert!(printed.contains("custom_l4: None"), "{printed}");
+        assert!(!printed.contains("hook"), "{printed}");
+        assert!(printed.ends_with(".. }"), "{printed}");
+    }
+
+    #[test]
     fn preserve_http_upstream_request_policy_is_a_legacy_preset() {
         let policy = HttpUpstreamRequestPolicy::preserve();
         assert!(!policy.strip_hop_by_hop);
