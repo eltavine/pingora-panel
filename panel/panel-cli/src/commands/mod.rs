@@ -6,6 +6,7 @@ pub mod approvals;
 pub mod audit;
 pub mod certificates;
 pub mod config;
+pub mod containers;
 pub mod domains;
 pub mod gateway;
 pub mod host;

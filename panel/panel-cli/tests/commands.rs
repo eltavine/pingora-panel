@@ -208,6 +208,33 @@ async fn api(
             ]
         }))
         .into_response(),
+        ("GET", "/api/v1/container-engines") => Json(json!({"engines": [
+            {"id": "docker", "socket": "/run/docker.sock", "enabled": true, "reachable": true,
+             "detail": null, "version": {"version": "28.3.3"},
+             "info": {"containers": 2, "running": 1}},
+            {"id": "podman", "socket": "/run/podman/podman.sock", "enabled": true,
+             "reachable": false, "detail": "the engine did not answer in time",
+             "version": null, "info": null}
+        ]}))
+        .into_response(),
+        ("POST", "/api/v1/container-engines/podman/disable") => Json(json!({
+            "id": "podman", "socket": "/run/podman/podman.sock", "enabled": false,
+            "reachable": false, "detail": null, "version": null, "info": null
+        }))
+        .into_response(),
+        ("GET", "/api/v1/container-engines/docker/containers") => Json(json!({
+            "observed_at": "2026-10-04T10:00:00Z",
+            "containers": [
+                {"id": "b2", "names": ["shop-web-1"], "image": "nginx:1.27", "image_id": "sha256:aa",
+                 "created": "2026-10-04T07:00:00Z", "state": "running", "status": "Up 3 hours",
+                 "ports": [{"private_port": 80, "public_port": 8081, "host_ip": "0.0.0.0",
+                            "protocol": "tcp"},
+                           {"private_port": 443, "public_port": null, "host_ip": "",
+                            "protocol": "tcp"}],
+                 "labels": {}, "compose_project": "shop"}
+            ]
+        }))
+        .into_response(),
         ("GET", "/api/v1/host/gateway-unit") => Json(json!({
             "name": "pingora-panel-gatewayd.service", "description": "Pingora Panel gateway",
             "load_state": "loaded", "active_state": "active", "sub_state": "running",
@@ -1168,6 +1195,53 @@ fn the_gateways_unit_is_shown_and_restarted_with_confirmation() {
             .len(),
         1
     );
+}
+
+#[test]
+fn container_engines_and_their_containers_from_the_command_line() {
+    let stub = Stub::start();
+    let engines = stub.ppanel(&["container", "engines"]);
+    assert!(engines.status.success(), "{}", stderr(&engines));
+    let printed = stdout(&engines);
+    for expected in [
+        "docker",
+        "28.3.3",
+        "1 of 2 running",
+        "unreachable: the engine did not answer in time",
+    ] {
+        assert!(printed.contains(expected), "{expected} in\n{printed}");
+    }
+
+    let disabled = stub.ppanel(&["container", "engine", "disable", "podman"]);
+    assert!(disabled.status.success(), "{}", stderr(&disabled));
+    assert_eq!(
+        stub.requests("POST", "/api/v1/container-engines/podman/disable")
+            .len(),
+        1
+    );
+
+    let listed = stub.ppanel(&[
+        "container",
+        "list",
+        "--search",
+        "nginx",
+        "--state",
+        "running",
+        "--state",
+        "paused",
+    ]);
+    assert!(listed.status.success(), "{}", stderr(&listed));
+    let printed = stdout(&listed);
+    for expected in [
+        "shop-web-1",
+        "nginx:1.27",
+        "0.0.0.0:8081->80/tcp, 443/tcp",
+        "shop",
+    ] {
+        assert!(printed.contains(expected), "{expected} in\n{printed}");
+    }
+    let asked = stub.requests("GET", "/api/v1/container-engines/docker/containers");
+    assert_eq!(asked[0].query, "search=nginx&state=running%2Cpaused");
 }
 
 #[test]

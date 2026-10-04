@@ -156,6 +156,10 @@ enum Command {
     /// The host the gateway runs on: CPU, memory, filesystems, load, network
     /// and system, and what the host agent does there.
     Host(commands::host::HostArgs),
+    /// The Docker and Podman engines the host agent reaches and their
+    /// containers.
+    #[command(subcommand)]
+    Container(commands::containers::ContainerCommand),
     /// The running gateway.
     #[command(subcommand)]
     Gateway(commands::gateway::GatewayCommand),
@@ -254,6 +258,7 @@ async fn main() -> ExitCode {
             Command::Logs(command) => commands::logs::run(&api, &output, command).await,
             Command::Alert(command) => commands::alerts::run(&api, &output, command).await,
             Command::Host(args) => commands::host::run(&api, &output, args).await,
+            Command::Container(command) => commands::containers::run(&api, &output, command).await,
             Command::Gateway(command) => commands::gateway::gateway(&api, &output, command).await,
             Command::Completion { .. } => Ok(()),
         }
