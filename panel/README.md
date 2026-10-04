@@ -446,12 +446,12 @@ containers' user only, and among their identities `panel-api` only. Each
 capability is enabled on its own with the privilege it needs, and the
 agent reports which ones it has.
 
-For the Compose installation, build the image, install the agent, then
-start the installation with the agent's override:
+For the Compose installation, build the image, install the agent with the
+capabilities wanted, then start the installation with the agent's override:
 
 ```sh
 docker compose -f panel/deploy/compose.yaml build
-sudo panel/deploy/ops-agent/install.sh
+sudo panel/deploy/ops-agent/install.sh directories listeners
 docker compose -f panel/deploy/compose.yaml \
   -f panel/deploy/compose.ops-agent.yaml up -d
 ```
@@ -467,16 +467,25 @@ installation, the gateway's volumes. Reading them takes
 `CAP_DAC_READ_SEARCH`, which `directories.conf` grants while hiding
 everything else under `/var` and the host's credentials from the agent.
 
+The port diagnostics capability, on Linux, names the processes listening
+on TCP ports from `/proc`: their name, ID, executable and user, never
+their command line. Reading other processes' descriptors takes
+`CAP_DAC_READ_SEARCH` and `CAP_SYS_PTRACE`, which `listeners.conf` grants;
+the agent still cannot call `ptrace`.
+
 ```sh
 ppanel host agent
 ppanel host directories
+ppanel host listeners --port 80 --port 443
 ```
 
 `GET /api/v1/host/agent` says whether an agent is configured and answers
 and which capabilities it has; `GET /api/v1/host/directories` reports each
-directory's size and file count, and whether the count is partial. Both
-need `host.read`. The console's Host page shows the agent and, when it
-can measure them, the directories.
+directory's size and file count, and whether the count is partial;
+`GET /api/v1/host/listeners?ports=80,443` lists what listens on those
+ports. They need `host.read`. The console's Host page shows the agent and,
+when it has those capabilities, the directories and what holds ports 80
+and 443, saying whether the gateway or another process does.
 
 ## Alerts
 
