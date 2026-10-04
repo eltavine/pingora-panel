@@ -4,6 +4,7 @@
 //! silences and saved queries, which fronts the metrics and log backends.
 
 mod alerts;
+mod host;
 mod logql;
 mod logs;
 mod loki;
@@ -15,6 +16,7 @@ pub use alerts::{
     Evaluator, Measure, Notices, NotificationRecord, Notifier, RuleRecord, RuleSpec, Severity,
     State, TestOutcome,
 };
+pub use host::HostService;
 pub use logql::Filter;
 pub use logs::LogsService;
 pub use loki::Loki;
@@ -22,7 +24,7 @@ pub use promql::Scope;
 pub use traffic::TrafficService;
 
 use panel_contracts::{
-    observability::v1::{alerts_server, logs_server, traffic_server},
+    observability::v1::{alerts_server, host_server, logs_server, traffic_server},
     OBSERVABILITY_V1,
 };
 use panel_control_runtime::{ControlPlaneProcess, DefaultAddresses, ProcessSettings};
@@ -82,6 +84,7 @@ pub fn process(
         .string(PROMETHEUS_URL_ENV)?
         .unwrap_or_else(|| DEFAULT_PROMETHEUS_URL.to_owned());
     let traffic = TrafficService::new(prometheus(&url)?);
+    let host = HostService::new(prometheus(&url)?);
     let loki = env
         .string(LOKI_URL_ENV)?
         .unwrap_or_else(|| DEFAULT_LOKI_URL.to_owned());
@@ -123,6 +126,8 @@ pub fn process(
         .with_capability(Capability::new("observability.traffic", "1")?)
         .with_capability(Capability::new("observability.logs", "1")?)
         .with_capability(Capability::new("observability.alerts", "1")?)
+        .with_capability(Capability::new("observability.host", "1")?)
+        .with_peer_access(host_server::SERVICE_NAME, [ServiceName::new("panel-api")?])
         .with_peer_access(
             traffic_server::SERVICE_NAME,
             [ServiceName::new("panel-api")?],
@@ -135,6 +140,7 @@ pub fn process(
         .with_grpc_service(traffic_server::TrafficServer::new(traffic))
         .with_grpc_service(logs_server::LogsServer::new(logs))
         .with_grpc_service(alerts_server::AlertsServer::new(alerts))
+        .with_grpc_service(host_server::HostServer::new(host))
         .on_start(move |running| {
             running.spawn(evaluator.run(running.migrated(), running.shutdown_token()));
             running.spawn(notifier.run(running.migrated(), running.shutdown_token()));

@@ -1,11 +1,13 @@
 //! `pingora.panel.observability.v1.Traffic` over Prometheus (ADR 0022).
 
-use crate::promql::{Queries, Scope, ACTIVATED_AT, OPEN_CONNECTIONS, REVISION};
+use crate::promql::{
+    self, unavailable, Queries, Scope, Values, ACTIVATED_AT, OPEN_CONNECTIONS, REVISION,
+};
 use panel_contracts::observability::v1::{self as wire, traffic_server::Traffic};
 use panel_errors::{PanelError, Result};
 use prometheus_http_query::{response::Data, Client};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::BTreeMap,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tonic::{Request, Response, Status};
@@ -26,29 +28,13 @@ pub struct TrafficService {
     prometheus: Client,
 }
 
-/// Prometheus's answers: a value, or values by one label.
-type Values = Vec<(HashMap<String, String>, f64)>;
-
 impl TrafficService {
     pub fn new(prometheus: Client) -> Self {
         Self { prometheus }
     }
 
     async fn instant(&self, query: String) -> Result<Values> {
-        let result = self
-            .prometheus
-            .query(&query)
-            .get()
-            .await
-            .map_err(unavailable)?;
-        Ok(match result.data() {
-            Data::Vector(vector) => vector
-                .iter()
-                .map(|sample| (sample.metric().clone(), sample.sample().value()))
-                .collect(),
-            Data::Scalar(sample) => vec![(HashMap::new(), sample.value())],
-            Data::Matrix(_) => Vec::new(),
-        })
+        promql::instant(&self.prometheus, &query).await
     }
 
     async fn value(&self, query: String) -> Result<Option<f64>> {
@@ -290,10 +276,6 @@ impl TrafficService {
             })
             .collect())
     }
-}
-
-fn unavailable(error: prometheus_http_query::Error) -> PanelError {
-    PanelError::unavailable(format!("Prometheus did not answer: {error}"))
 }
 
 fn seconds_since_epoch(seconds: f64) -> prost_types::Timestamp {

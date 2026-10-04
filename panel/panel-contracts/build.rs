@@ -21,6 +21,7 @@ fn main() {
                 "../proto/config/v1/configuration.proto",
                 "../proto/io/cloudevents/v1/cloudevents.proto",
                 "../proto/observability/v1/alerts.proto",
+                "../proto/observability/v1/host.proto",
                 "../proto/observability/v1/logs.proto",
                 "../proto/observability/v1/traffic.proto",
                 "../proto/gateway/v1/gateway.proto",

@@ -5,7 +5,28 @@
 
 use panel_domain::{RouteId, SiteId};
 use panel_errors::{PanelError, Result};
-use std::time::Duration;
+use prometheus_http_query::{response::Data, Client};
+use std::{collections::HashMap, time::Duration};
+
+/// Prometheus's answers: a value, or values by labels.
+pub(crate) type Values = Vec<(HashMap<String, String>, f64)>;
+
+pub(crate) fn unavailable(error: prometheus_http_query::Error) -> PanelError {
+    PanelError::unavailable(format!("Prometheus did not answer: {error}"))
+}
+
+/// The samples an instant query answers with.
+pub(crate) async fn instant(prometheus: &Client, query: &str) -> Result<Values> {
+    let result = prometheus.query(query).get().await.map_err(unavailable)?;
+    Ok(match result.data() {
+        Data::Vector(vector) => vector
+            .iter()
+            .map(|sample| (sample.metric().clone(), sample.sample().value()))
+            .collect(),
+        Data::Scalar(sample) => vec![(HashMap::new(), sample.value())],
+        Data::Matrix(_) => Vec::new(),
+    })
+}
 
 const REQUESTS: &str = "http_server_request_duration_seconds_count";
 const REQUEST_BUCKETS: &str = "http_server_request_duration_seconds_bucket";

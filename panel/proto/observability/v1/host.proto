@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package pingora.panel.observability.v1;
+
+import "common/v1/common.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// The host's figures, from Prometheus's node exporter (ADR 0028).
+service Host {
+  rpc Summary(HostSummaryRequest) returns (HostSummaryResponse);
+}
+
+message HostSummaryRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+}
+
+// One mounted filesystem that holds data, not a virtual one.
+message HostFilesystem {
+  string mountpoint = 1;
+  string device = 2;
+  // Such as `ext4` or `xfs`.
+  string fstype = 3;
+  double size_bytes = 4;
+  double available_bytes = 5;
+}
+
+// One physical network device's traffic, averaged over five minutes.
+message HostNetworkDevice {
+  string device = 1;
+  double receive_bytes_per_second = 2;
+  double transmit_bytes_per_second = 3;
+}
+
+message HostSummary {
+  // When the figures were read.
+  google.protobuf.Timestamp observed_at = 1;
+  // False when the node exporter has no figures; the rest is then unset.
+  bool reporting = 2;
+  string hostname = 3;
+  // Such as `Ubuntu 24.04.2 LTS`.
+  string operating_system = 4;
+  string kernel_release = 5;
+  // Such as `x86_64`.
+  string architecture = 6;
+  // The host's clock.
+  google.protobuf.Timestamp host_time = 7;
+  // Such as `UTC` or `CST`.
+  string time_zone = 8;
+  google.protobuf.Duration uptime = 9;
+  uint32 cpu_count = 10;
+  // The share of CPU time not idle over five minutes, from 0 to 1.
+  optional double cpu_usage = 11;
+  double load1 = 12;
+  double load5 = 13;
+  double load15 = 14;
+  double memory_total_bytes = 15;
+  double memory_available_bytes = 16;
+  // Fullest first.
+  repeated HostFilesystem filesystems = 17;
+  // Busiest first.
+  repeated HostNetworkDevice network_devices = 18;
+}
+
+message HostSummaryResponse {
+  HostSummary summary = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
