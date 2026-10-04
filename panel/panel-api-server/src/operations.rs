@@ -3,15 +3,19 @@
 
 use async_trait::async_trait;
 use panel_api::{AccessAudit, Refusal};
-use panel_application::{CommandContext, DataPlaneState, Operation, OperationLog, RequestScope};
+use panel_application::{
+    CommandContext, DataPlaneState, Operation, OperationLog, RequestScope, UnitAction,
+};
 use panel_errors::PanelError;
-use panel_event_contracts::{gateway::v1 as gateway, identity::v1 as identity};
+use panel_event_contracts::{gateway::v1 as gateway, host::v1 as host, identity::v1 as identity};
 use panel_events::EventData;
 use panel_identity::Principal;
 use panel_postgres::EventLog;
 
 /// The data plane as a whole, the target of its operations.
 const DATA_PLANE: (&str, &str) = ("gateway", "data-plane");
+/// The gateway's systemd unit on the host.
+const GATEWAY_UNIT: (&str, &str) = ("host", "gateway-unit");
 
 pub struct OutboxOperations(pub EventLog);
 
@@ -93,6 +97,37 @@ impl OperationLog for OutboxOperations {
                     until: Some(chrono::DateTime::<chrono::Utc>::from(deletion.until).into()),
                 });
                 self.outcome(context, target, outcome).await;
+            }
+            Operation::GatewayUnit { action, result } => {
+                let (scope, actor) = (context.scope(), context.actor());
+                match result {
+                    Ok(status) => {
+                        let (unit, active_state) =
+                            (status.name.clone(), status.active_state.clone());
+                        match action {
+                            UnitAction::Start => {
+                                let data = host::GatewayUnitStarted { unit, active_state };
+                                self.0.record(GATEWAY_UNIT, &scope, actor, &data).await;
+                            }
+                            UnitAction::Stop => {
+                                let data = host::GatewayUnitStopped { unit, active_state };
+                                self.0.record(GATEWAY_UNIT, &scope, actor, &data).await;
+                            }
+                            UnitAction::Restart => {
+                                let data = host::GatewayUnitRestarted { unit, active_state };
+                                self.0.record(GATEWAY_UNIT, &scope, actor, &data).await;
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        let refused = host::OperationRefused {
+                            operation: format!("gateway_unit.{}", action.as_str()),
+                            code: error.code.as_str().to_owned(),
+                            message: error.message.clone(),
+                        };
+                        self.0.record(GATEWAY_UNIT, &scope, actor, &refused).await;
+                    }
+                }
             }
         }
     }

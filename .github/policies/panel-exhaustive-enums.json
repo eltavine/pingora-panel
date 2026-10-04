@@ -120,6 +120,12 @@
       "name": "DirectoryKind",
       "owner": "pingora-panel-platform",
       "reason": "Each kind is a directory the agent's configuration names; a new kind must fail to compile until every adapter labels it, rather than being reported as another directory."
+    },
+    {
+      "package": "panel-application",
+      "name": "UnitAction",
+      "owner": "pingora-panel-platform",
+      "reason": "Each action is a job systemd runs on the gateway's unit and an audit event of its own; a new action must fail to compile in every adapter until it maps it, rather than running another job."
     }
   ]
 }

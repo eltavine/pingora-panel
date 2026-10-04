@@ -1,13 +1,17 @@
 #![forbid(unsafe_code)]
 
 use ops_grpc_client::OpsAgentClient;
-use panel_application::{AgentCapability, DirectoryKind, HostAgentPort, RequestId, RequestScope};
+use panel_application::{
+    AgentCapability, CommandContext, DirectoryKind, HostAgentPort, IdempotencyKey, RequestDeadline,
+    RequestId, RequestScope, UnitAction,
+};
 use panel_contracts::{
     common::v1 as common,
     ops::v1::{
         self as wire,
         agent_server::{Agent, AgentServer},
         directories_server::{Directories, DirectoriesServer},
+        gateway_unit_server::{GatewayUnit, GatewayUnitServer},
         listeners_server::{Listeners, ListenersServer},
     },
 };
@@ -113,6 +117,55 @@ impl Listeners for FakeListeners {
     }
 }
 
+/// Refuses to stop the unit, as polkit would without the agent's rule.
+struct FakeUnit;
+
+#[tonic::async_trait]
+impl GatewayUnit for FakeUnit {
+    async fn status(
+        &self,
+        _: Request<wire::GatewayUnitStatusRequest>,
+    ) -> Result<Response<wire::GatewayUnitStatusResponse>, Status> {
+        Ok(Response::new(wire::GatewayUnitStatusResponse {
+            status: Some(wire::UnitStatus {
+                name: "pingora-panel-gatewayd.service".into(),
+                active_state: "active".into(),
+                main_pid: 4242,
+                ..wire::UnitStatus::default()
+            }),
+            error: None,
+        }))
+    }
+
+    async fn change(
+        &self,
+        request: Request<wire::GatewayUnitChangeRequest>,
+    ) -> Result<Response<wire::GatewayUnitChangeResponse>, Status> {
+        let request = request.into_inner();
+        assert_eq!(request.context.as_ref().unwrap().actor, "ops");
+        Ok(Response::new(match request.action() {
+            wire::UnitAction::Stop => wire::GatewayUnitChangeResponse {
+                status: None,
+                error: Some(common::Error {
+                    code: "PRECONDITION_FAILED".into(),
+                    message: "the agent may not stop pingora-panel-gatewayd.service".into(),
+                    retryable: false,
+                    diagnostics: Vec::new(),
+                }),
+            },
+            action => wire::GatewayUnitChangeResponse {
+                status: Some(wire::UnitStatus {
+                    name: "pingora-panel-gatewayd.service".into(),
+                    active_state: "active".into(),
+                    restarts: u32::from(action == wire::UnitAction::Restart),
+                    ..wire::UnitStatus::default()
+                }),
+                error: None,
+            },
+        }))
+    }
+}
+
 async fn client(fail: bool) -> OpsAgentClient {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -121,6 +174,7 @@ async fn client(fail: bool) -> OpsAgentClient {
             .add_service(AgentServer::new(FakeAgent))
             .add_service(DirectoriesServer::new(FakeDirectories { fail }))
             .add_service(ListenersServer::new(FakeListeners))
+            .add_service(GatewayUnitServer::new(FakeUnit))
             .serve_with_incoming(TcpListenerStream::new(listener)),
     );
     OpsAgentClient::from_channel(
@@ -168,6 +222,34 @@ async fn what_holds_the_web_ports_reaches_the_application() {
     assert_eq!((listener.address.as_str(), listener.port), ("0.0.0.0", 443));
     assert_eq!(listener.processes[0].name, "nginx");
     assert_eq!(listener.processes[0].pid, 812);
+}
+
+#[tokio::test]
+async fn the_gateways_unit_is_read_and_changed_through_the_agent() {
+    let client = client(false).await;
+    let status = client.gateway_unit(scope()).await.unwrap();
+    assert_eq!(
+        (status.active_state.as_str(), status.main_pid),
+        ("active", 4242)
+    );
+    let context = CommandContext::new(
+        RequestId::new("request-2").unwrap(),
+        RequestId::new("request-2").unwrap(),
+        "ops",
+        RequestDeadline::new("2099-01-01T00:00:00Z").unwrap(),
+        IdempotencyKey::new("key-2").unwrap(),
+    )
+    .unwrap();
+    let restarted = client
+        .change_gateway_unit(context.clone(), UnitAction::Restart)
+        .await
+        .unwrap();
+    assert_eq!(restarted.restarts, 1);
+    let refused = client
+        .change_gateway_unit(context, UnitAction::Stop)
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code.as_str(), "PRECONDITION_FAILED");
 }
 
 #[tokio::test]

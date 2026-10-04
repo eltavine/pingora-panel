@@ -1,8 +1,8 @@
 use super::*;
 use panel_application::{
-    AgentCapability, AgentDescription, CapabilityState, CapabilityStatus, DirectoriesReport,
-    DirectoryKind, DirectoryUsage, HostAgentPort, ListenersReport, ListeningProcess, PortListener,
-    RequestScope,
+    AgentCapability, AgentDescription, CapabilityState, CapabilityStatus, CommandContext,
+    DirectoriesReport, DirectoryKind, DirectoryUsage, GatewayUnitStatus, HostAgentPort,
+    ListenersReport, ListeningProcess, PortListener, RequestScope, UnitAction,
 };
 use serde_json::Value;
 use std::time::{Duration, UNIX_EPOCH};
@@ -51,6 +51,39 @@ impl HostAgentPort for Agent {
                 truncated: false,
             }],
         })
+    }
+
+    async fn gateway_unit(&self, _scope: RequestScope) -> Result<GatewayUnitStatus> {
+        Ok(GatewayUnitStatus {
+            name: "pingora-panel-gatewayd.service".into(),
+            description: "Pingora Panel gateway".into(),
+            load_state: "loaded".into(),
+            active_state: "active".into(),
+            sub_state: "running".into(),
+            unit_file_state: "enabled".into(),
+            main_pid: 4242,
+            active_since: Some(UNIX_EPOCH + Duration::from_secs(1_800_000_000)),
+            restarts: 0,
+            result: "success".into(),
+        })
+    }
+
+    async fn change_gateway_unit(
+        &self,
+        context: CommandContext,
+        action: UnitAction,
+    ) -> Result<GatewayUnitStatus> {
+        if action == UnitAction::Stop && context.actor() == "careless" {
+            return Err(PanelError::precondition_failed(
+                "the agent may not stop pingora-panel-gatewayd.service",
+            ));
+        }
+        let mut status = self.gateway_unit(context.scope()).await?;
+        if action == UnitAction::Stop {
+            status.active_state = "inactive".into();
+            status.main_pid = 0;
+        }
+        Ok(status)
     }
 
     async fn listeners(&self, _scope: RequestScope, ports: Vec<u16>) -> Result<ListenersReport> {

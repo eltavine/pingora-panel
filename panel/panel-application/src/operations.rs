@@ -2,8 +2,8 @@
 //! such as calls to the gateway, for the audit trail.
 
 use crate::{
-    CommandContext, DataPlaneState, FileChecks, GatewayRuntimePort, LogDeletion, RequestScope,
-    UpstreamHealth, UpstreamHealthReport,
+    CommandContext, DataPlaneState, FileChecks, GatewayRuntimePort, GatewayUnitStatus, LogDeletion,
+    RequestScope, UnitAction, UpstreamHealth, UpstreamHealthReport,
 };
 use async_trait::async_trait;
 use panel_errors::{PanelError, Result};
@@ -26,6 +26,12 @@ pub enum Operation<'a> {
     DeleteLogs {
         site: Option<&'a str>,
         result: std::result::Result<&'a LogDeletion, &'a PanelError>,
+    },
+    /// The host agent was asked to start, stop or restart the gateway's
+    /// unit.
+    GatewayUnit {
+        action: UnitAction,
+        result: std::result::Result<&'a GatewayUnitStatus, &'a PanelError>,
     },
 }
 
@@ -204,6 +210,10 @@ mod tests {
                 Operation::DeleteLogs { site, result } => (
                     "delete-logs".to_owned(),
                     result.map(|_| site.unwrap_or("*").to_owned()),
+                ),
+                Operation::GatewayUnit { action, result } => (
+                    format!("unit-{}", action.as_str()),
+                    result.map(|status| status.active_state.clone()),
                 ),
             };
             self.0

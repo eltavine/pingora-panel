@@ -5,13 +5,17 @@
 
 use async_trait::async_trait;
 use panel_application::{
-    AgentCapability, AgentDescription, CapabilityState, CapabilityStatus, DirectoriesReport,
-    DirectoryKind, DirectoryUsage, HostAgentPort, ListenersReport, ListeningProcess, PortListener,
-    RequestScope,
+    AgentCapability, AgentDescription, CapabilityState, CapabilityStatus, CommandContext,
+    DirectoriesReport, DirectoryKind, DirectoryUsage, GatewayUnitStatus, HostAgentPort,
+    ListenersReport, ListeningProcess, PortListener, RequestScope, UnitAction,
 };
-use panel_contracts::ops::v1::{
-    self as wire, agent_client::AgentClient, directories_client::DirectoriesClient,
-    listeners_client::ListenersClient,
+use panel_contracts::{
+    common::v1 as common,
+    ops::v1::{
+        self as wire, agent_client::AgentClient, directories_client::DirectoriesClient,
+        gateway_unit_client::GatewayUnitClient, listeners_client::ListenersClient,
+    },
+    PROTOCOL_VERSION,
 };
 use panel_errors::Result;
 use panel_service::{
@@ -22,6 +26,8 @@ use tonic::transport::Channel;
 
 /// Longer than the agent's own limit on a directory walk.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// Longer than systemd may take over a job on the gateway's unit.
+const CHANGE_TIMEOUT: Duration = Duration::from_secs(150);
 
 #[derive(Clone)]
 pub struct OpsAgentClient {
@@ -120,6 +126,33 @@ fn directory(value: wire::DirectoryUsage) -> Option<DirectoryUsage> {
     })
 }
 
+fn command_context(context: &CommandContext) -> common::RequestContext {
+    common::RequestContext {
+        request_id: context.request_id().as_str().into(),
+        correlation_id: context.correlation_id().as_str().into(),
+        actor: context.actor().into(),
+        deadline: context.deadline().as_str().into(),
+        idempotency_key: context.idempotency_key().as_str().into(),
+        schema_version: PROTOCOL_VERSION.into(),
+        site_scope: None,
+    }
+}
+
+fn unit_status(value: wire::UnitStatus) -> GatewayUnitStatus {
+    GatewayUnitStatus {
+        name: value.name,
+        description: value.description,
+        load_state: value.load_state,
+        active_state: value.active_state,
+        sub_state: value.sub_state,
+        unit_file_state: value.unit_file_state,
+        main_pid: value.main_pid,
+        active_since: time(value.active_since),
+        restarts: value.restarts,
+        result: value.result,
+    }
+}
+
 fn listener(value: wire::Listener) -> Option<PortListener> {
     Some(PortListener {
         address: value.address,
@@ -192,6 +225,44 @@ impl HostAgentPort for OpsAgentClient {
                 .filter_map(listener)
                 .collect(),
         })
+    }
+
+    async fn gateway_unit(&self, scope: RequestScope) -> Result<GatewayUnitStatus> {
+        let message = wire::GatewayUnitStatusRequest {
+            context: Some(request_context(&scope)),
+        };
+        let response = GatewayUnitClient::new(self.channel.clone())
+            .status(self.request(message, &scope))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        Ok(unit_status(response.status.unwrap_or_default()))
+    }
+
+    async fn change_gateway_unit(
+        &self,
+        context: CommandContext,
+        action: UnitAction,
+    ) -> Result<GatewayUnitStatus> {
+        let action = match action {
+            UnitAction::Start => wire::UnitAction::Start,
+            UnitAction::Stop => wire::UnitAction::Stop,
+            UnitAction::Restart => wire::UnitAction::Restart,
+        };
+        let message = wire::GatewayUnitChangeRequest {
+            context: Some(command_context(&context)),
+            action: action.into(),
+        };
+        let mut request = self.request(message, &context.scope());
+        request.set_timeout(CHANGE_TIMEOUT);
+        let response = GatewayUnitClient::new(self.channel.clone())
+            .change(request)
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        Ok(unit_status(response.status.unwrap_or_default()))
     }
 }
 
