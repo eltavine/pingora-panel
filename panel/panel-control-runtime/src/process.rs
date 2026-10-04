@@ -501,9 +501,15 @@ impl RunningProcess {
         self.cancel.child_token()
     }
 
-    /// Spawns a service-specific task that `stop` waits for.
+    /// Spawns a service-specific task that `stop` waits for. It starts once
+    /// the service's schema is migrated, as such tasks use its database.
     pub fn spawn(&self, task: impl Future<Output = ()> + Send + 'static) {
-        self.tasks.spawn(task);
+        let migrated = self.migrated();
+        self.tasks.spawn(async move {
+            if migrated.await {
+                task.await;
+            }
+        });
     }
 
     pub async fn run_until(self, shutdown: impl Future<Output = ()>) {
