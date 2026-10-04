@@ -22,8 +22,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --manifest-path panel/Cargo.toml --release --locked \
         --bin gatewayd --bin panel-api --bin config-service --bin automation-service \
         --bin observability-service --bin audit-service --bin panel-bootstrap --bin ppanel \
+        --bin ops-agent \
  && mkdir -p /out/bin \
- && for binary in gatewayd panel-api config-service automation-service observability-service audit-service panel-bootstrap ppanel; do \
+ && for binary in gatewayd panel-api config-service automation-service observability-service audit-service panel-bootstrap ppanel ops-agent; do \
         cp "panel/target/release/$binary" /out/bin/; \
     done
 # Directories that named volumes mount over; volumes inherit their owner.

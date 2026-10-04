@@ -1,0 +1,34 @@
+# Connects the Compose installation to the host agent (ADR 0030), which runs
+# on the host as a systemd service; install it with ops-agent/install.sh
+# first, then:
+#
+#   docker compose -f panel/deploy/compose.yaml \
+#     -f panel/deploy/compose.ops-agent.yaml up -d
+#
+# The authority issues the agent's credentials into a host directory, and
+# only panel-api mounts the agent's socket.
+
+x-pki-credentials: &pki-credentials >-
+  panel-api=/var/lib/pingora-panel/credentials/panel-api,config-service=/var/lib/pingora-panel/credentials/config-service,automation-service=/var/lib/pingora-panel/credentials/automation-service,observability-service=/var/lib/pingora-panel/credentials/observability-service,audit-service=/var/lib/pingora-panel/credentials/audit-service,gatewayd=/var/lib/pingora-panel/credentials/gatewayd,ops-agent=/var/lib/pingora-panel/credentials/ops-agent
+
+x-ops-agent-credentials: &ops-agent-credentials
+  /var/lib/pingora-panel/ops-agent/credentials:/var/lib/pingora-panel/credentials/ops-agent
+
+services:
+  pki-init:
+    environment:
+      PINGORA_PANEL_PKI_CREDENTIALS: *pki-credentials
+    volumes:
+      - *ops-agent-credentials
+
+  pki:
+    environment:
+      PINGORA_PANEL_PKI_CREDENTIALS: *pki-credentials
+    volumes:
+      - *ops-agent-credentials
+
+  panel-api:
+    environment:
+      PINGORA_PANEL_OPS_AGENT_SOCKET: /run/pingora-panel-ops/agent.sock
+    volumes:
+      - /run/pingora-panel-ops:/run/pingora-panel-ops:ro

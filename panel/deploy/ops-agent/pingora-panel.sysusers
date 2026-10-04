@@ -1,0 +1,3 @@
+# The group of the Panel's containers, so the host agent can give it its
+# socket. Installed as /etc/sysusers.d/pingora-panel.conf.
+g pingora-panel 65532

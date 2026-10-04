@@ -1,0 +1,8 @@
+# Where the installation's authority, running as the containers' user,
+# writes the host agent's credentials, and where the agent's socket appears
+# before the containers mount it. Installed as
+# /etc/tmpfiles.d/pingora-panel-ops-agent.conf.
+d /var/lib/pingora-panel 0755 root root -
+d /var/lib/pingora-panel/ops-agent 0755 root root -
+d /var/lib/pingora-panel/ops-agent/credentials 0700 65532 65532 -
+d /run/pingora-panel-ops 0755 root root -
