@@ -13,6 +13,7 @@ mod certificates;
 mod configuration;
 mod context;
 mod gateway;
+mod host;
 mod idempotency;
 mod logs;
 mod operations;
@@ -40,6 +41,7 @@ pub use gateway::{
     AbortOutcome, ActivatedDeployment, ConfigCompiler, ConfigDocument, DeploymentOutcome,
     GatewayPort, GatewayService, GatewayStatus, GatewayUseCases, PreparedDeployment,
 };
+pub use host::{HostFilesystem, HostNetworkDevice, HostPort, HostSummary};
 pub use idempotency::IdempotentGatewayUseCases;
 pub use logs::{
     LogBatch, LogDeletion, LogDeletionState, LogFilter, LogKind, LogPage, LogRecord, LogSearch,

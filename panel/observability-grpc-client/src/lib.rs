@@ -4,6 +4,7 @@
 //! the gateway served without querying Prometheus itself.
 
 mod alerts;
+mod host;
 mod logs;
 
 use async_trait::async_trait;
