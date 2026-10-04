@@ -7,6 +7,7 @@
 
 mod agent;
 pub mod config;
+mod containers;
 mod directories;
 mod gateway_unit;
 mod listeners;
@@ -17,6 +18,7 @@ pub use config::AgentConfig;
 use panel_context::ServiceName;
 use panel_contracts::ops::v1::{
     agent_server::{self, AgentServer},
+    containers_server::{self, ContainersServer},
     directories_server::{self, DirectoriesServer},
     gateway_unit_server::{self, GatewayUnitServer},
     CapabilityState,
@@ -52,7 +54,19 @@ pub async fn serve(config: AgentConfig, shutdown: impl Future<Output = ()> + Sen
         agent::directories(&config),
         listeners,
         unit_capability,
+        containers::capability(&config.engines),
     ]);
+    let container_service = if config.engines.is_empty() {
+        None
+    } else {
+        policy = policy.allow(containers_server::SERVICE_NAME, panel_api.clone());
+        Some(ContainersServer::new(containers::ContainerService::new(
+            std::sync::Arc::new(containers::Engines::load(
+                config.engines.clone(),
+                config.state.clone(),
+            )),
+        )))
+    };
     let directories = if config.directories.is_empty() {
         None
     } else {
@@ -104,7 +118,8 @@ pub async fn serve(config: AgentConfig, shutdown: impl Future<Output = ()> + Sen
         .add_service(health)
         .add_service(AgentServer::new(agent))
         .add_optional_service(directories)
-        .add_optional_service(unit_service);
+        .add_optional_service(unit_service)
+        .add_optional_service(container_service);
     #[cfg(target_os = "linux")]
     let router = router.add_optional_service(listener_service);
     let served = router

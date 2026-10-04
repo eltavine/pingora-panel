@@ -73,6 +73,8 @@ async fn the_agent_answers_panel_api_alone_within_its_configuration() {
             directories: vec![(DirectoryKind::Logs, logs.clone())],
             listeners: false,
             gateway_unit: None,
+            engines: Vec::new(),
+            state: None,
         },
         async move {
             let _ = stopped.await;

@@ -22,6 +22,15 @@ pub const CERTIFICATES_DIR_ENV: &str = "PINGORA_PANEL_OPS_CERTIFICATES_DIR";
 pub const LISTENERS_ENV: &str = "PINGORA_PANEL_OPS_LISTENERS";
 /// The gateway's systemd service, the one unit the agent may act on.
 pub const GATEWAY_UNIT_ENV: &str = "PINGORA_PANEL_OPS_GATEWAY_UNIT";
+/// Comma-separated `engine=socket` pairs, the engine `docker` or `podman`.
+pub const ENGINES_ENV: &str = "PINGORA_PANEL_OPS_ENGINES";
+/// Where the agent keeps what operators chose; systemd's state directory
+/// when unset.
+pub const STATE_DIR_ENV: &str = "PINGORA_PANEL_OPS_STATE_DIR";
+/// Where systemd places a service's `StateDirectory=`.
+pub const STATE_DIRECTORY_ENV: &str = "STATE_DIRECTORY";
+/// The engines a socket may be named for.
+pub const ENGINE_IDS: [&str; 2] = ["docker", "podman"];
 
 pub const DEFAULT_SOCKET: &str = "/run/pingora-panel-ops/agent.sock";
 /// The user and group every Panel container runs as.
@@ -41,6 +50,9 @@ pub struct AgentConfig {
     pub directories: Vec<(DirectoryKind, PathBuf)>,
     pub listeners: bool,
     pub gateway_unit: Option<String>,
+    /// The container engines' sockets, by engine.
+    pub engines: Vec<(String, PathBuf)>,
+    pub state: Option<PathBuf>,
 }
 
 impl AgentConfig {
@@ -114,6 +126,34 @@ impl AgentConfig {
                 })
             })
             .transpose()?;
+        let mut engines: Vec<(String, PathBuf)> = Vec::new();
+        for entry in env
+            .string(ENGINES_ENV)?
+            .unwrap_or_default()
+            .split(',')
+            .filter(|entry| !entry.trim().is_empty())
+        {
+            let (engine, socket) = entry.trim().split_once('=').ok_or_else(|| {
+                PanelError::invalid_argument(format!("{ENGINES_ENV} entries are engine=socket"))
+            })?;
+            let socket = PathBuf::from(socket);
+            if !ENGINE_IDS.contains(&engine) || !socket.is_absolute() {
+                return Err(PanelError::invalid_argument(format!(
+                    "{ENGINES_ENV} names docker or podman with an absolute socket path"
+                )));
+            }
+            if engines.iter().any(|(known, _)| known == engine) {
+                return Err(PanelError::invalid_argument(format!(
+                    "{ENGINES_ENV} names {engine} twice"
+                )));
+            }
+            engines.push((engine.to_owned(), socket));
+        }
+        let state = match env.string(STATE_DIR_ENV)? {
+            Some(directory) => Some(directory),
+            None => env.string(STATE_DIRECTORY_ENV)?,
+        }
+        .map(PathBuf::from);
         Ok(Self {
             socket,
             socket_group: Some(socket_group),
@@ -123,6 +163,8 @@ impl AgentConfig {
             directories,
             listeners,
             gateway_unit,
+            engines,
+            state,
         })
     }
 }
@@ -170,6 +212,8 @@ mod tests {
         assert!(config.directories.is_empty());
         assert!(!config.listeners);
         assert!(config.gateway_unit.is_none());
+        assert!(config.engines.is_empty());
+        assert!(config.state.is_none());
     }
 
     #[test]
@@ -181,8 +225,27 @@ mod tests {
             (LOGS_DIR_ENV, "/var/log/pingora-panel"),
             (LISTENERS_ENV, "on"),
             (GATEWAY_UNIT_ENV, "pingora-panel-gatewayd.service"),
+            (
+                ENGINES_ENV,
+                "docker=/run/docker.sock, podman=/run/podman/podman.sock",
+            ),
+            (STATE_DIRECTORY_ENV, "/var/lib/pingora-panel-ops"),
         ])
         .unwrap();
+        assert_eq!(
+            config.engines,
+            vec![
+                ("docker".to_owned(), PathBuf::from("/run/docker.sock")),
+                (
+                    "podman".to_owned(),
+                    PathBuf::from("/run/podman/podman.sock")
+                ),
+            ]
+        );
+        assert_eq!(
+            config.state,
+            Some(PathBuf::from("/var/lib/pingora-panel-ops"))
+        );
         assert!(config.listeners);
         assert_eq!(
             config.gateway_unit.as_deref(),
@@ -209,6 +272,9 @@ mod tests {
             [(GATEWAY_UNIT_ENV, "gatewayd")],
             [(GATEWAY_UNIT_ENV, "../sshd.service")],
             [(GATEWAY_UNIT_ENV, ".service")],
+            [(ENGINES_ENV, "containerd=/run/containerd.sock")],
+            [(ENGINES_ENV, "docker=docker.sock")],
+            [(ENGINES_ENV, "docker=/a.sock,docker=/b.sock")],
         ] {
             let mut pairs = pairs.to_vec();
             pairs.push((TLS_DIR_ENV, "/etc/agent/tls"));
