@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+// The data of events about container engines and what runs on them
+// (ADR 0031). Each message is the data of one event type, named in its
+// comment; events carry it as JSON in the proto3 JSON mapping, with the
+// field names below.
+package pingora.panel.events.containers.v1;
+
+// `container.engine.enabled`
+message EngineEnabled {
+  // `docker` or `podman`.
+  string engine = 1;
+}
+
+// `container.engine.disabled`
+message EngineDisabled {
+  string engine = 1;
+}
+
+// `container.operation.refused`: an operation on an engine that was refused
+// or failed, and changed nothing.
+message OperationRefused {
+  string engine = 1;
+  // Such as `engine.disable` or `container.restart`.
+  string operation = 2;
+  string code = 3;
+  string message = 4;
+}

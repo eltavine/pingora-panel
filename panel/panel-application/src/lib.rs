@@ -11,6 +11,7 @@ mod alerts;
 mod audit;
 mod certificates;
 mod configuration;
+mod containers;
 mod context;
 mod gateway;
 mod host;
@@ -33,6 +34,10 @@ pub use certificates::{CertificateChange, CertificateOutput, CertificatePort, Ce
 pub use configuration::{
     ApplyOutcome, ApplyRequest, ApprovalBypass, ConfigurationChange, ConfigurationOutput,
     ConfigurationPort, ConfigurationRead, DraftInfo,
+};
+pub use containers::{
+    ContainerEngine, ContainerFilter, ContainerList, ContainerState, ContainerSummary,
+    ContainersPort, EngineInfo, EngineVersion, NoContainers, PortMapping, RecordedContainers,
 };
 pub use context::{
     Actor, CommandContext, IdempotencyKey, RequestDeadline, RequestId, RequestScope, SiteAccess,

@@ -25,6 +25,7 @@ macro_rules! packages {
 packages! {
     automation => "pingora.panel.events.automation.v1",
     config => "pingora.panel.events.config.v1",
+    containers => "pingora.panel.events.containers.v1",
     gateway => "pingora.panel.events.gateway.v1",
     host => "pingora.panel.events.host.v1",
     identity => "pingora.panel.events.identity.v1",
@@ -143,6 +144,9 @@ event_types! {
     host::v1::GatewayUnitStopped => "host.gateway_unit.stopped",
     host::v1::GatewayUnitRestarted => "host.gateway_unit.restarted",
     host::v1::OperationRefused => "host.operation.refused",
+    containers::v1::EngineEnabled => "container.engine.enabled",
+    containers::v1::EngineDisabled => "container.engine.disabled",
+    containers::v1::OperationRefused => "container.operation.refused",
 }
 
 #[cfg(test)]

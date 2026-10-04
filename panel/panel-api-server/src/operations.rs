@@ -7,7 +7,10 @@ use panel_application::{
     CommandContext, DataPlaneState, Operation, OperationLog, RequestScope, UnitAction,
 };
 use panel_errors::PanelError;
-use panel_event_contracts::{gateway::v1 as gateway, host::v1 as host, identity::v1 as identity};
+use panel_event_contracts::{
+    containers::v1 as containers, gateway::v1 as gateway, host::v1 as host,
+    identity::v1 as identity,
+};
 use panel_events::EventData;
 use panel_identity::Principal;
 use panel_postgres::EventLog;
@@ -126,6 +129,39 @@ impl OperationLog for OutboxOperations {
                             message: error.message.clone(),
                         };
                         self.0.record(GATEWAY_UNIT, &scope, actor, &refused).await;
+                    }
+                }
+            }
+            Operation::ContainerEngine {
+                engine,
+                enabled,
+                result,
+            } => {
+                let (scope, actor) = (context.scope(), context.actor());
+                let target = ("container-engine", engine);
+                let engine = engine.to_owned();
+                match (result, enabled) {
+                    (Ok(_), true) => {
+                        let data = containers::EngineEnabled { engine };
+                        self.0.record(target, &scope, actor, &data).await;
+                    }
+                    (Ok(_), false) => {
+                        let data = containers::EngineDisabled { engine };
+                        self.0.record(target, &scope, actor, &data).await;
+                    }
+                    (Err(error), _) => {
+                        let refused = containers::OperationRefused {
+                            engine,
+                            operation: if enabled {
+                                "engine.enable"
+                            } else {
+                                "engine.disable"
+                            }
+                            .to_owned(),
+                            code: error.code.as_str().to_owned(),
+                            message: error.message.clone(),
+                        };
+                        self.0.record(target, &scope, actor, &refused).await;
                     }
                 }
             }

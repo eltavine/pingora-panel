@@ -126,6 +126,12 @@
       "name": "UnitAction",
       "owner": "pingora-panel-platform",
       "reason": "Each action is a job systemd runs on the gateway's unit and an audit event of its own; a new action must fail to compile in every adapter until it maps it, rather than running another job."
+    },
+    {
+      "package": "panel-application",
+      "name": "ContainerState",
+      "owner": "pingora-panel-platform",
+      "reason": "A container's state decides which actions the console offers and how a filter matches; a new state must fail to compile in every adapter until it is mapped, and states this build does not know arrive as Unknown."
     }
   ]
 }

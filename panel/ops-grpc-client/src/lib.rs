@@ -6,14 +6,17 @@
 use async_trait::async_trait;
 use panel_application::{
     AgentCapability, AgentDescription, CapabilityState, CapabilityStatus, CommandContext,
-    DirectoriesReport, DirectoryKind, DirectoryUsage, GatewayUnitStatus, HostAgentPort,
-    ListenersReport, ListeningProcess, PortListener, RequestScope, UnitAction,
+    ContainerEngine, ContainerFilter, ContainerList, ContainerState, ContainerSummary,
+    ContainersPort, DirectoriesReport, DirectoryKind, DirectoryUsage, EngineInfo, EngineVersion,
+    GatewayUnitStatus, HostAgentPort, ListenersReport, ListeningProcess, PortListener, PortMapping,
+    RequestScope, UnitAction,
 };
 use panel_contracts::{
     common::v1 as common,
     ops::v1::{
-        self as wire, agent_client::AgentClient, directories_client::DirectoriesClient,
-        gateway_unit_client::GatewayUnitClient, listeners_client::ListenersClient,
+        self as wire, agent_client::AgentClient, containers_client::ContainersClient,
+        directories_client::DirectoriesClient, gateway_unit_client::GatewayUnitClient,
+        listeners_client::ListenersClient,
     },
     PROTOCOL_VERSION,
 };
@@ -263,6 +266,158 @@ impl HostAgentPort for OpsAgentClient {
             .into_inner();
         response_error(response.error)?;
         Ok(unit_status(response.status.unwrap_or_default()))
+    }
+}
+
+fn engine(value: wire::Engine) -> ContainerEngine {
+    ContainerEngine {
+        id: value.id,
+        socket: value.socket,
+        enabled: value.enabled,
+        reachable: value.reachable,
+        detail: value.detail,
+        version: value.version.map(|version| EngineVersion {
+            version: version.version,
+            api_version: version.api_version,
+            os: version.os,
+            architecture: version.architecture,
+            kernel_version: version.kernel_version,
+            go_version: version.go_version,
+        }),
+        info: value.info.map(|info| EngineInfo {
+            containers: info.containers,
+            running: info.running,
+            paused: info.paused,
+            stopped: info.stopped,
+            images: info.images,
+            storage_driver: info.storage_driver,
+            cgroup_driver: info.cgroup_driver,
+            operating_system: info.operating_system,
+            cpus: info.cpus,
+            memory_bytes: info.memory_bytes,
+            name: info.name,
+        }),
+    }
+}
+
+fn container_state(value: i32) -> ContainerState {
+    match wire::ContainerState::try_from(value) {
+        Ok(wire::ContainerState::Created) => ContainerState::Created,
+        Ok(wire::ContainerState::Running) => ContainerState::Running,
+        Ok(wire::ContainerState::Paused) => ContainerState::Paused,
+        Ok(wire::ContainerState::Restarting) => ContainerState::Restarting,
+        Ok(wire::ContainerState::Exited) => ContainerState::Exited,
+        Ok(wire::ContainerState::Removing) => ContainerState::Removing,
+        Ok(wire::ContainerState::Dead) => ContainerState::Dead,
+        Ok(wire::ContainerState::Stopping) => ContainerState::Stopping,
+        Ok(wire::ContainerState::Unspecified) | Err(_) => ContainerState::Unknown,
+    }
+}
+
+/// The state as the agent names it; a state this build does not know
+/// matches nothing.
+fn wire_state(value: ContainerState) -> Option<wire::ContainerState> {
+    Some(match value {
+        ContainerState::Created => wire::ContainerState::Created,
+        ContainerState::Running => wire::ContainerState::Running,
+        ContainerState::Paused => wire::ContainerState::Paused,
+        ContainerState::Restarting => wire::ContainerState::Restarting,
+        ContainerState::Exited => wire::ContainerState::Exited,
+        ContainerState::Removing => wire::ContainerState::Removing,
+        ContainerState::Dead => wire::ContainerState::Dead,
+        ContainerState::Stopping => wire::ContainerState::Stopping,
+        ContainerState::Unknown => return None,
+    })
+}
+
+fn summary(value: wire::Container) -> ContainerSummary {
+    ContainerSummary {
+        id: value.id,
+        names: value.names,
+        image: value.image,
+        image_id: value.image_id,
+        created: time(value.created),
+        state: container_state(value.state),
+        status: value.status,
+        ports: value
+            .ports
+            .into_iter()
+            .map(|port| PortMapping {
+                private_port: u16::try_from(port.private_port).unwrap_or(0),
+                public_port: u16::try_from(port.public_port)
+                    .ok()
+                    .filter(|port| *port != 0),
+                host_ip: port.host_ip,
+                protocol: port.protocol,
+            })
+            .collect(),
+        labels: value.labels.into_iter().collect(),
+        compose_project: (!value.compose_project.is_empty()).then_some(value.compose_project),
+    }
+}
+
+#[async_trait]
+impl ContainersPort for OpsAgentClient {
+    async fn engines(&self, scope: RequestScope) -> Result<Vec<ContainerEngine>> {
+        let message = wire::ContainersEnginesRequest {
+            context: Some(request_context(&scope)),
+        };
+        let response = ContainersClient::new(self.channel.clone())
+            .engines(self.request(message, &scope))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        Ok(response.engines.into_iter().map(engine).collect())
+    }
+
+    async fn set_engine(
+        &self,
+        context: CommandContext,
+        engine_id: String,
+        enabled: bool,
+    ) -> Result<ContainerEngine> {
+        let message = wire::ContainersSetEngineRequest {
+            context: Some(command_context(&context)),
+            engine: engine_id,
+            enabled,
+        };
+        let response = ContainersClient::new(self.channel.clone())
+            .set_engine(self.request(message, &context.scope()))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        Ok(engine(response.engine.unwrap_or_default()))
+    }
+
+    async fn containers(
+        &self,
+        scope: RequestScope,
+        engine_id: String,
+        filter: ContainerFilter,
+    ) -> Result<ContainerList> {
+        let message = wire::ContainersListRequest {
+            context: Some(request_context(&scope)),
+            engine: engine_id,
+            search: filter.search,
+            states: filter
+                .states
+                .into_iter()
+                .filter_map(wire_state)
+                .map(Into::into)
+                .collect(),
+        };
+        let response = ContainersClient::new(self.channel.clone())
+            .list(self.request(message, &scope))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        Ok(ContainerList {
+            observed_at: time(response.observed_at),
+            containers: response.containers.into_iter().map(summary).collect(),
+        })
     }
 }
 
