@@ -12,10 +12,10 @@ use panel_certificates::{
 use panel_errors::{PanelError, Result};
 use panel_event_contracts::tls::v1 as event;
 use panel_events::{EventData, Principal, RequestScope};
-use panel_postgres::{storage_error, EventLog, PgOutbox, ServiceDatabase};
 use panel_secrets::{Sealed, SecretVault};
+use panel_sqlite::{storage_error, EventLog, ServiceDatabase, SqliteOutbox};
 use serde_json::Value;
-use sqlx::{postgres::PgRow, PgConnection, PgPool, Row};
+use sqlx::{sqlite::SqliteRow, Row, SqliteConnection};
 use std::sync::Arc;
 use zeroize::Zeroizing;
 
@@ -24,7 +24,7 @@ const AGGREGATE: &str = "certificate";
 /// The columns read into a [`Certificate`], as a literal so queries stay static.
 macro_rules! columns {
     () => {
-        "certificate_id, source, details::text AS details, chain, version, created_at, updated_at"
+        "certificate_id, source, details, chain, version, created_at, updated_at"
     };
 }
 
@@ -51,14 +51,14 @@ fn reminder(left: Duration) -> Option<i64> {
         .find(|days| left <= Duration::days(*days))
 }
 
-/// Certificates with their chains and sealed keys in the service schema.
+/// Certificates with their chains and sealed keys in the module's database.
 ///
 /// Every change writes its `tls.certificate.*` event in the same
 /// transaction and is then delivered to the gateway's secret directory;
 /// refused changes are recorded as `tls.certificate.refused`.
 #[derive(Clone)]
 pub struct CertificateInventory {
-    pool: PgPool,
+    database: ServiceDatabase,
     events: EventLog,
     vault: Option<Arc<dyn SecretVault>>,
     directory: Option<SecretDirectory>,
@@ -69,13 +69,13 @@ fn owner(id: &CertificateId) -> String {
     format!("certificate/{id}/key")
 }
 
-fn stored_id(row: &PgRow) -> Result<CertificateId> {
+fn stored_id(row: &SqliteRow) -> Result<CertificateId> {
     let id: String = row.try_get("certificate_id").map_err(storage_error)?;
     CertificateId::new(id)
         .map_err(|_| PanelError::corrupt_state("a stored certificate has an invalid id"))
 }
 
-fn certificate(row: &PgRow) -> Result<Certificate> {
+fn certificate(row: &SqliteRow) -> Result<Certificate> {
     let source: String = row.try_get("source").map_err(storage_error)?;
     let details: String = row.try_get("details").map_err(storage_error)?;
     let version: i64 = row.try_get("version").map_err(storage_error)?;
@@ -135,7 +135,7 @@ impl CertificateInventory {
         directory: Option<SecretDirectory>,
     ) -> Self {
         Self {
-            pool: database.pool().clone(),
+            database: database.clone(),
             events,
             vault,
             directory,
@@ -156,7 +156,7 @@ impl CertificateInventory {
             columns!(),
             " FROM certificates ORDER BY certificate_id"
         ))
-        .fetch_all(&self.pool)
+        .fetch_all(self.database.pool())
         .await
         .map_err(storage_error)?
         .iter()
@@ -168,10 +168,10 @@ impl CertificateInventory {
         sqlx::query(concat!(
             "SELECT ",
             columns!(),
-            " FROM certificates WHERE certificate_id = $1"
+            " FROM certificates WHERE certificate_id = ?1"
         ))
         .bind(id.as_str())
-        .fetch_optional(&self.pool)
+        .fetch_optional(self.database.pool())
         .await
         .map_err(storage_error)?
         .map(|row| certificate(&row))
@@ -277,10 +277,10 @@ impl CertificateInventory {
         let horizon = now + Duration::days(REMINDERS[0]);
         let rows = sqlx::query(
             "SELECT certificate_id, source, not_after, reminded_days FROM certificates \
-             WHERE not_after <= $1 ORDER BY certificate_id",
+             WHERE not_after <= ?1 ORDER BY certificate_id",
         )
         .bind(horizon)
-        .fetch_all(&self.pool)
+        .fetch_all(self.database.pool())
         .await
         .map_err(storage_error)?;
         let mut announced = 0;
@@ -295,10 +295,10 @@ impl CertificateInventory {
             if reminded.is_some_and(|reminded| i64::from(reminded) <= days) {
                 continue;
             }
-            let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+            let mut transaction = self.database.begin().await?;
             let claimed = sqlx::query(
-                "UPDATE certificates SET reminded_days = $2 WHERE certificate_id = $1 \
-                 AND not_after = $3 AND (reminded_days IS NULL OR reminded_days > $2)",
+                "UPDATE certificates SET reminded_days = ?2 WHERE certificate_id = ?1 \
+                 AND not_after = ?3 AND (reminded_days IS NULL OR reminded_days > ?2)",
             )
             .bind(id.as_str())
             .bind(i32::try_from(days).unwrap_or(0))
@@ -336,10 +336,10 @@ impl CertificateInventory {
         expected: Option<u64>,
     ) -> Result<()> {
         let result = async {
-            let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+            let mut transaction = self.database.begin().await?;
             let current = self.lock(&mut transaction, &id).await?;
             check_version(&id, current.version, expected)?;
-            sqlx::query("DELETE FROM certificates WHERE certificate_id = $1")
+            sqlx::query("DELETE FROM certificates WHERE certificate_id = ?1")
                 .bind(id.as_str())
                 .execute(&mut *transaction)
                 .await
@@ -386,11 +386,11 @@ impl CertificateInventory {
             created_at: now,
             updated_at: now,
         };
-        let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+        let mut transaction = self.database.begin().await?;
         let inserted = sqlx::query(
             "INSERT INTO certificates (certificate_id, source, details, chain, sealed_key, \
              not_after, version, created_at, updated_at) \
-             VALUES ($1, $2, $3::jsonb, $4, $5, $6, 1, $7, $7) ON CONFLICT (certificate_id) DO NOTHING",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?7) ON CONFLICT (certificate_id) DO NOTHING",
         )
         .bind(certificate.id.as_str())
         .bind(source_name(source)?)
@@ -433,7 +433,7 @@ impl CertificateInventory {
             .vault()?
             .seal(&owner(id), accepted.key.as_bytes())
             .await?;
-        let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+        let mut transaction = self.database.begin().await?;
         let current = self.lock(&mut transaction, id).await?;
         check_version(id, current.version, expected)?;
         let certificate = Certificate {
@@ -446,9 +446,9 @@ impl CertificateInventory {
             updated_at: Utc::now(),
         };
         sqlx::query(
-            "UPDATE certificates SET source = $2, details = $3::jsonb, chain = $4, sealed_key = $5, \
-             not_after = $6, version = $7, updated_at = $8, reminded_days = NULL \
-             WHERE certificate_id = $1",
+            "UPDATE certificates SET source = ?2, details = ?3, chain = ?4, sealed_key = ?5, \
+             not_after = ?6, version = ?7, updated_at = ?8, reminded_days = NULL \
+             WHERE certificate_id = ?1",
         )
         .bind(id.as_str())
         .bind(source_name(source)?)
@@ -480,11 +480,15 @@ impl CertificateInventory {
         Ok(certificate)
     }
 
-    async fn lock(&self, connection: &mut PgConnection, id: &CertificateId) -> Result<Certificate> {
+    async fn lock(
+        &self,
+        connection: &mut SqliteConnection,
+        id: &CertificateId,
+    ) -> Result<Certificate> {
         sqlx::query(concat!(
             "SELECT ",
             columns!(),
-            " FROM certificates WHERE certificate_id = $1 FOR UPDATE"
+            " FROM certificates WHERE certificate_id = ?1"
         ))
         .bind(id.as_str())
         .fetch_optional(&mut *connection)
@@ -497,7 +501,7 @@ impl CertificateInventory {
 
     async fn publish<E: EventData>(
         &self,
-        connection: &mut PgConnection,
+        connection: &mut SqliteConnection,
         cause: Cause<'_>,
         id: &CertificateId,
         data: &E,
@@ -505,7 +509,7 @@ impl CertificateInventory {
         let event =
             self.events
                 .event_by((AGGREGATE, id.as_str()), cause.scope, cause.principal, data)?;
-        PgOutbox::append(connection, &event).await
+        SqliteOutbox::append(connection, &event).await
     }
 
     async fn refused<T>(
@@ -543,7 +547,7 @@ impl CertificateInventory {
 
     async fn sealed(&self) -> Result<Vec<(CertificateId, String, Sealed)>> {
         sqlx::query("SELECT certificate_id, chain, sealed_key FROM certificates")
-            .fetch_all(&self.pool)
+            .fetch_all(self.database.pool())
             .await
             .map_err(storage_error)?
             .iter()
@@ -572,12 +576,12 @@ impl CertificateInventory {
             let key = vault.open(&owner(&id), &sealed).await?;
             let resealed = vault.seal(&owner(&id), &key).await?;
             let updated = sqlx::query(
-                "UPDATE certificates SET sealed_key = $3 WHERE certificate_id = $1 AND sealed_key = $2",
+                "UPDATE certificates SET sealed_key = ?3 WHERE certificate_id = ?1 AND sealed_key = ?2",
             )
             .bind(id.as_str())
             .bind(sealed.as_str())
             .bind(resealed.as_str())
-            .execute(&self.pool)
+            .execute(self.database.pool())
             .await
             .map_err(storage_error)?;
             changed += usize::try_from(updated.rows_affected()).unwrap_or(0);

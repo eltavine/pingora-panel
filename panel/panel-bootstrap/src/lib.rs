@@ -29,7 +29,6 @@ const DEFAULT_NATS_URL: &str = "nats://127.0.0.1:4222";
 pub const SERVICE_SCHEMAS: &[(&str, &str)] = &[
     ("identity", "PINGORA_PANEL_IDENTITY_DATABASE_PASSWORD"),
     ("config", "PINGORA_PANEL_CONFIG_DATABASE_PASSWORD"),
-    ("automation", "PINGORA_PANEL_AUTOMATION_DATABASE_PASSWORD"),
 ];
 
 /// Prefix of the login role that owns each schema, as in `panel_config`.

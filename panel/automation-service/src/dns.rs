@@ -9,11 +9,11 @@ use panel_acme::{Dns01, DnsProvider};
 use panel_errors::{PanelError, Result};
 use panel_event_contracts::tls::v1 as event;
 use panel_events::EventData;
-use panel_postgres::{storage_error, EventLog, PgOutbox, ServiceDatabase};
 use panel_secrets::{Sealed, SecretVault};
+use panel_sqlite::{storage_error, EventLog, ServiceDatabase, SqliteOutbox};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::{postgres::PgRow, PgConnection, PgPool, Row};
+use sqlx::{sqlite::SqliteRow, Row, SqliteConnection};
 use std::{sync::Arc, time::Duration};
 use zeroize::Zeroizing;
 
@@ -140,7 +140,7 @@ impl DnsProviderFactory for StandardDnsProviders {
 
 macro_rules! columns {
     () => {
-        "provider_id, kind, settings::text AS settings, propagation_seconds, version, created_at, \
+        "provider_id, kind, settings, propagation_seconds, version, created_at, \
          updated_at"
     };
 }
@@ -149,7 +149,7 @@ fn corrupt(what: &str) -> PanelError {
     PanelError::corrupt_state(format!("a stored DNS provider has an invalid {what}"))
 }
 
-fn record(row: &PgRow) -> Result<DnsProviderRecord> {
+fn record(row: &SqliteRow) -> Result<DnsProviderRecord> {
     let settings: String = row.try_get("settings").map_err(storage_error)?;
     let propagation: i32 = row.try_get("propagation_seconds").map_err(storage_error)?;
     let version: i64 = row.try_get("version").map_err(storage_error)?;
@@ -177,11 +177,11 @@ fn check_propagation(seconds: u32) -> Result<()> {
     Ok(())
 }
 
-/// DNS providers in the service schema. Changes write their
+/// DNS providers in the module's database. Changes write their
 /// `tls.acme.dns_provider.*` events in the same transaction.
 #[derive(Clone)]
 pub struct DnsProviders {
-    pool: PgPool,
+    database: ServiceDatabase,
     events: EventLog,
     vault: Option<Arc<dyn SecretVault>>,
     factory: Arc<dyn DnsProviderFactory>,
@@ -195,7 +195,7 @@ impl DnsProviders {
         factory: Arc<dyn DnsProviderFactory>,
     ) -> Self {
         Self {
-            pool: database.pool().clone(),
+            database: database.clone(),
             events,
             vault,
             factory,
@@ -214,7 +214,7 @@ impl DnsProviders {
             columns!(),
             " FROM dns_providers ORDER BY provider_id"
         ))
-        .fetch_all(&self.pool)
+        .fetch_all(self.database.pool())
         .await
         .map_err(storage_error)?
         .iter()
@@ -226,10 +226,10 @@ impl DnsProviders {
         sqlx::query(concat!(
             "SELECT ",
             columns!(),
-            " FROM dns_providers WHERE provider_id = $1"
+            " FROM dns_providers WHERE provider_id = ?1"
         ))
         .bind(id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(self.database.pool())
         .await
         .map_err(storage_error)?
         .map(|row| record(&row))
@@ -249,13 +249,16 @@ impl DnsProviders {
             let settings = serde_json::to_value(&body.rfc2136)
                 .map_err(|_| PanelError::internal("DNS provider settings do not serialize"))?;
             self.factory.build(&body.kind, &settings, &body.secret)?;
-            let sealed = self.vault()?.seal(&owner(&id), body.secret.as_bytes()).await?;
+            let sealed = self
+                .vault()?
+                .seal(&owner(&id), body.secret.as_bytes())
+                .await?;
             let now = Utc::now();
-            let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+            let mut transaction = self.database.begin().await?;
             let inserted = sqlx::query(
                 "INSERT INTO dns_providers (provider_id, kind, settings, sealed_secret, \
                  propagation_seconds, version, created_at, updated_at) \
-                 VALUES ($1, $2, $3::jsonb, $4, $5, 1, $6, $6) ON CONFLICT (provider_id) DO NOTHING",
+                 VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?6) ON CONFLICT (provider_id) DO NOTHING",
             )
             .bind(&id)
             .bind(&body.kind)
@@ -268,7 +271,9 @@ impl DnsProviders {
             .map_err(storage_error)?
             .rows_affected();
             if inserted == 0 {
-                return Err(PanelError::conflict(format!("DNS provider {id} already exists")));
+                return Err(PanelError::conflict(format!(
+                    "DNS provider {id} already exists"
+                )));
             }
             let created = DnsProviderRecord {
                 id: id.clone(),
@@ -279,8 +284,13 @@ impl DnsProviders {
                 created_at: now,
                 updated_at: now,
             };
-            self.publish(&mut transaction, cause, &created.id, &provider_created(&created))
-                .await?;
+            self.publish(
+                &mut transaction,
+                cause,
+                &created.id,
+                &provider_created(&created),
+            )
+            .await?;
             transaction.commit().await.map_err(storage_error)?;
             Ok(created)
         }
@@ -297,11 +307,11 @@ impl DnsProviders {
     ) -> Result<DnsProviderRecord> {
         let result = async {
             check_propagation(body.propagation_seconds)?;
-            let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+            let mut transaction = self.database.begin().await?;
             let row = sqlx::query(concat!(
                 "SELECT ",
                 columns!(),
-                ", sealed_secret FROM dns_providers WHERE provider_id = $1 FOR UPDATE"
+                ", sealed_secret FROM dns_providers WHERE provider_id = ?1"
             ))
             .bind(id)
             .fetch_optional(&mut *transaction)
@@ -341,8 +351,8 @@ impl DnsProviders {
                 ..current
             };
             sqlx::query(
-                "UPDATE dns_providers SET settings = $2::jsonb, sealed_secret = $3, \
-                 propagation_seconds = $4, version = $5, updated_at = $6 WHERE provider_id = $1",
+                "UPDATE dns_providers SET settings = ?2, sealed_secret = ?3, \
+                 propagation_seconds = ?4, version = ?5, updated_at = ?6 WHERE provider_id = ?1",
             )
             .bind(id)
             .bind(settings.to_string())
@@ -370,14 +380,13 @@ impl DnsProviders {
     /// Forgets a provider no automatic certificate uses.
     pub async fn delete(&self, cause: Cause<'_>, id: &str, expected: Option<u64>) -> Result<()> {
         let result = async {
-            let mut transaction = self.pool.begin().await.map_err(storage_error)?;
-            let version: Option<i64> = sqlx::query_scalar(
-                "SELECT version FROM dns_providers WHERE provider_id = $1 FOR UPDATE",
-            )
-            .bind(id)
-            .fetch_optional(&mut *transaction)
-            .await
-            .map_err(storage_error)?;
+            let mut transaction = self.database.begin().await?;
+            let version: Option<i64> =
+                sqlx::query_scalar("SELECT version FROM dns_providers WHERE provider_id = ?1")
+                    .bind(id)
+                    .fetch_optional(&mut *transaction)
+                    .await
+                    .map_err(storage_error)?;
             let version = version
                 .and_then(|version| u64::try_from(version).ok())
                 .ok_or_else(|| PanelError::not_found(format!("there is no DNS provider {id}")))?;
@@ -387,7 +396,7 @@ impl DnsProviders {
                 )));
             }
             let users: Vec<String> = sqlx::query_scalar(
-                "SELECT certificate_id FROM acme_certificates WHERE dns_provider_id = $1 \
+                "SELECT certificate_id FROM acme_certificates WHERE dns_provider_id = ?1 \
                  ORDER BY certificate_id",
             )
             .bind(id)
@@ -400,7 +409,7 @@ impl DnsProviders {
                     users.join(", ")
                 )));
             }
-            sqlx::query("DELETE FROM dns_providers WHERE provider_id = $1")
+            sqlx::query("DELETE FROM dns_providers WHERE provider_id = ?1")
                 .bind(id)
                 .execute(&mut *transaction)
                 .await
@@ -423,10 +432,10 @@ impl DnsProviders {
         let row = sqlx::query(concat!(
             "SELECT ",
             columns!(),
-            ", sealed_secret FROM dns_providers WHERE provider_id = $1"
+            ", sealed_secret FROM dns_providers WHERE provider_id = ?1"
         ))
         .bind(id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(self.database.pool())
         .await
         .map_err(storage_error)?
         .ok_or_else(|| PanelError::not_found(format!("there is no DNS provider {id}")))?;
@@ -449,7 +458,7 @@ impl DnsProviders {
 
     async fn publish<E: EventData>(
         &self,
-        connection: &mut PgConnection,
+        connection: &mut SqliteConnection,
         cause: Cause<'_>,
         id: &str,
         data: &E,
@@ -457,7 +466,7 @@ impl DnsProviders {
         let event = self
             .events
             .event_by((AGGREGATE, id), cause.scope, cause.principal, data)?;
-        PgOutbox::append(connection, &event).await
+        SqliteOutbox::append(connection, &event).await
     }
 
     async fn refused<T>(

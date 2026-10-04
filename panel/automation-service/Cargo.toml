@@ -21,7 +21,7 @@ panel-events.workspace = true
 panel-jobs.workspace = true
 panel-platform.workspace = true
 panel-platform-codec.workspace = true
-panel-postgres.workspace = true
+panel-sqlite.workspace = true
 panel-secrets.workspace = true
 panel-service.workspace = true
 serde.workspace = true
@@ -39,4 +39,4 @@ zeroize = { workspace = true, features = ["serde"] }
 async-trait.workspace = true
 panel-acme = { workspace = true, features = ["test-support"] }
 panel-context.workspace = true
-panel-postgres = { workspace = true, features = ["test-support"] }
+panel-sqlite = { workspace = true, features = ["test-support"] }

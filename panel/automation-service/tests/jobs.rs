@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use automation_service::{PgJobStore, MIGRATIONS};
+use automation_service::{SqliteJobStore, MIGRATIONS};
 use chrono::{Duration as Span, Utc};
 use panel_context::{IdempotencyKey, RequestId};
 use panel_errors::{PanelError, Result};
@@ -10,7 +10,7 @@ use panel_jobs::{
     Schedule, ScheduleName, ScheduleStore, Worker, WorkerOptions,
 };
 use panel_platform::ServiceName;
-use panel_postgres::{testing::TestDatabase, ServiceDatabase};
+use panel_sqlite::{testing::TestDatabase, ServiceDatabase};
 use std::{collections::BTreeSet, sync::Arc, time::Duration};
 use tokio_util::sync::CancellationToken;
 
@@ -32,18 +32,14 @@ fn spec(key: &str) -> JobSpec {
     .unwrap()
 }
 
-async fn store() -> Option<(TestDatabase, ServiceDatabase, Arc<PgJobStore>)> {
-    let mut database = TestDatabase::create().await?;
-    let secrets = database.bootstrap(&[("automation", "automation")]).await;
-    let service = database
-        .connect_service("automation", "automation", &secrets[0])
-        .await;
-    service.migrate(MIGRATIONS).await.unwrap();
-    let store = Arc::new(PgJobStore::new(
+async fn store() -> (TestDatabase, ServiceDatabase, Arc<SqliteJobStore>) {
+    let database = TestDatabase::migrated(MIGRATIONS).await;
+    let service = database.database().clone();
+    let store = Arc::new(SqliteJobStore::new(
         &service,
         ServiceName::new("automation-service").unwrap(),
     ));
-    Some((database, service, store))
+    (database, service, store)
 }
 
 async fn events(service: &ServiceDatabase) -> Vec<String> {
@@ -73,9 +69,7 @@ fn claim<'a>(owner: &'a str, kinds: &'a [JobKind], lease: Duration) -> ClaimRequ
 
 #[tokio::test]
 async fn leases_progress_and_outcomes_are_fenced_and_published() {
-    let Some((database, service, store)) = store().await else {
-        return;
-    };
+    let (_database, service, store) = store().await;
     let enqueued = store.enqueue(&spec("a")).await.unwrap();
     assert!(!store.enqueue(&spec("a")).await.unwrap().created);
     let kinds = [kind()];
@@ -116,14 +110,11 @@ async fn leases_progress_and_outcomes_are_fenced_and_published() {
     );
 
     service.close().await;
-    database.drop().await;
 }
 
 #[tokio::test]
 async fn expired_leases_are_retried_cancelled_or_failed() {
-    let Some((database, service, store)) = store().await else {
-        return;
-    };
+    let (_database, service, store) = store().await;
     let kinds = [kind()];
     let short = Duration::from_millis(50);
     let retried = store.enqueue(&spec("retried")).await.unwrap();
@@ -207,14 +198,11 @@ async fn expired_leases_are_retried_cancelled_or_failed() {
     );
 
     service.close().await;
-    database.drop().await;
 }
 
 #[tokio::test]
 async fn concurrent_claims_never_share_a_job() {
-    let Some((database, service, store)) = store().await else {
-        return;
-    };
+    let (_database, service, store) = store().await;
     for index in 0..40 {
         store.enqueue(&spec(&format!("job-{index}"))).await.unwrap();
     }
@@ -249,14 +237,11 @@ async fn concurrent_claims_never_share_a_job() {
     assert_eq!(distinct.len(), 40);
 
     service.close().await;
-    database.drop().await;
 }
 
 #[tokio::test]
 async fn schedules_fire_once_per_occurrence_and_windows_gate_claims() {
-    let Some((database, service, store)) = store().await else {
-        return;
-    };
+    let (_database, service, store) = store().await;
     let start = Utc::now() - Span::minutes(5);
     let schedule = Schedule {
         name: ScheduleName::new("every-minute").unwrap(),
@@ -335,7 +320,6 @@ async fn schedules_fire_once_per_occurrence_and_windows_gate_claims() {
         .starts_with("schedule:every-minute:"));
 
     service.close().await;
-    database.drop().await;
 }
 
 struct Reporting;
@@ -352,10 +336,8 @@ impl JobHandler for Reporting {
 }
 
 #[tokio::test]
-async fn a_worker_runs_jobs_from_postgresql() {
-    let Some((database, service, store)) = store().await else {
-        return;
-    };
+async fn a_worker_runs_jobs_from_its_database() {
+    let (_database, service, store) = store().await;
     let job = store.enqueue(&spec("worked")).await.unwrap();
     let shutdown = CancellationToken::new();
     let worker = Worker::new(
@@ -396,5 +378,4 @@ async fn a_worker_runs_jobs_from_postgresql() {
     assert_eq!(published.last().map(String::as_str), Some("succeeded"));
 
     service.close().await;
-    database.drop().await;
 }

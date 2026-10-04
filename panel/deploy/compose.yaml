@@ -178,12 +178,10 @@ services:
       PINGORA_PANEL_ADMIN_DATABASE_PASSWORD_FILE: /run/secrets/postgres-admin-password
       PINGORA_PANEL_IDENTITY_DATABASE_PASSWORD_FILE: /run/secrets/identity-database-password
       PINGORA_PANEL_CONFIG_DATABASE_PASSWORD_FILE: /run/secrets/config-database-password
-      PINGORA_PANEL_AUTOMATION_DATABASE_PASSWORD_FILE: /run/secrets/automation-database-password
     secrets:
       - postgres-admin-password
       - identity-database-password
       - config-database-password
-      - automation-database-password
     depends_on:
       postgres:
         condition: service_healthy
@@ -241,14 +239,13 @@ services:
     command: ["/usr/local/bin/automation-service"]
     environment:
       <<: *database
-      PINGORA_PANEL_DATABASE_URL: postgres://panel_automation@127.0.0.1:5432/pingora_panel
-      PINGORA_PANEL_DATABASE_PASSWORD_FILE: /run/secrets/automation-database-password
       PINGORA_PANEL_TLS_DIR: /var/lib/pingora-panel/credentials/automation-service
       # Seal certificate keys; losing them loses every stored key.
       PINGORA_PANEL_MASTER_KEYS_FILE: /run/secrets/master-keys
       PINGORA_PANEL_GATEWAY_SECRET_DIR: /var/lib/pingora-panel/gateway-secrets
-    secrets: [automation-database-password, master-keys]
+    secrets: [master-keys]
     volumes:
+      - control-data:/var/lib/pingora-panel/control
       - credentials-automation-service:/var/lib/pingora-panel/credentials/automation-service:ro
       - gateway-secrets:/var/lib/pingora-panel/gateway-secrets
     healthcheck:
@@ -332,8 +329,6 @@ secrets:
     file: ./secrets/identity-database-password
   config-database-password:
     file: ./secrets/config-database-password
-  automation-database-password:
-    file: ./secrets/automation-database-password
   bootstrap-token:
     file: ./secrets/bootstrap-token
   password-pepper:

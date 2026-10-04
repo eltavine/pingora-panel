@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use panel_errors::{PanelError, Result};
 use panel_event_contracts::automation::v1 as event;
 use panel_events::{
@@ -11,8 +11,8 @@ use panel_jobs::{
     JobSpec, JobState, JobStore, JobTemplate, Lease, MaintenanceWindow, Progress, Recurrence,
     Renewal, Schedule, ScheduleName, ScheduleStore,
 };
-use panel_postgres::{storage_error, PgOutbox, ServiceDatabase};
-use sqlx::{postgres::PgRow, PgConnection, PgPool, Row};
+use panel_sqlite::{storage_error, ServiceDatabase, SqliteOutbox};
+use sqlx::{sqlite::SqliteRow, types::Json, Row, SqliteConnection};
 use std::{str::FromStr, time::Duration};
 
 /// The columns read into a [`Job`], as a literal so queries stay static.
@@ -25,27 +25,32 @@ macro_rules! columns {
     };
 }
 
-/// Matches a job only while `$1` is leased to owner `$2` for attempt `$3`.
+/// Matches a job only while `?1` is leased to owner `?2` for attempt `?3`
+/// at `?4`, the time now.
 macro_rules! lease_fence {
     () => {
-        "job_id = $1 AND state = 'running' AND lease_owner = $2 AND attempts = $3 \
-         AND lease_expires_at >= now()"
+        "job_id = ?1 AND state = 'running' AND lease_owner = ?2 AND attempts = ?3 \
+         AND lease_expires_at >= ?4"
     };
 }
 
-/// Jobs, schedules and maintenance windows in the service schema.
+/// Jobs, schedules and maintenance windows in the module's database.
 ///
 /// Every state change and progress report appends a CloudEvent
 /// (`automation.job.<change>.v1`) to the outbox in the same transaction, so
 /// subscribers see each change exactly when it commits.
 #[derive(Clone)]
-pub struct PgJobStore {
-    pool: PgPool,
+pub struct SqliteJobStore {
+    database: ServiceDatabase,
     producer: ServiceName,
 }
 
-fn seconds(value: Duration) -> f64 {
-    value.as_secs_f64()
+/// The time `by` after `now`, or the latest time there is.
+fn after(now: DateTime<Utc>, by: Duration) -> DateTime<Utc> {
+    TimeDelta::from_std(by)
+        .ok()
+        .and_then(|by| now.checked_add_signed(by))
+        .unwrap_or(DateTime::<Utc>::MAX_UTC)
 }
 
 /// What changed about a job; each change is an event type.
@@ -83,7 +88,7 @@ fn count(value: u32) -> Result<i32> {
     i32::try_from(value).map_err(|_| PanelError::invalid_argument("count is too large"))
 }
 
-fn job(row: &PgRow) -> Result<Job> {
+fn job(row: &SqliteRow) -> Result<Job> {
     let get = |error: sqlx::Error| storage_error(error);
     let percent: Option<i16> = row.try_get("progress_percent").map_err(get)?;
     let message: Option<String> = row.try_get("progress_message").map_err(get)?;
@@ -132,10 +137,10 @@ fn job(row: &PgRow) -> Result<Job> {
     })
 }
 
-impl PgJobStore {
+impl SqliteJobStore {
     pub fn new(database: &ServiceDatabase, producer: ServiceName) -> Self {
         Self {
-            pool: database.pool().clone(),
+            database: database.clone(),
             producer,
         }
     }
@@ -172,20 +177,22 @@ impl PgJobStore {
 
     async fn publish(
         &self,
-        connection: &mut PgConnection,
+        connection: &mut SqliteConnection,
         job: &Job,
         change: Change,
     ) -> Result<()> {
-        PgOutbox::append(connection, &self.event(job, change)?).await
+        SqliteOutbox::append(connection, &self.event(job, change)?).await
     }
 
-    async fn insert(&self, connection: &mut PgConnection, spec: &JobSpec) -> Result<Enqueued> {
+    async fn insert(&self, connection: &mut SqliteConnection, spec: &JobSpec) -> Result<Enqueued> {
         spec.validate()?;
+        let now = Utc::now();
         let inserted = sqlx::query(concat!(
             "INSERT INTO jobs (job_id, kind, idempotency_key, state, max_attempts, media_type, \
-             payload, priority, run_after, maintenance_window, correlation_id, causation_id) \
-             VALUES ($1, $2, $3, 'queued', $4, $5, $6, $7, greatest(coalesce($8, now()), now()), \
-             $9, $10, $11) ON CONFLICT (kind, idempotency_key) DO NOTHING RETURNING ",
+             payload, priority, run_after, maintenance_window, correlation_id, causation_id, \
+             created_at, updated_at) \
+             VALUES (?1, ?2, ?3, 'queued', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12) \
+             ON CONFLICT (kind, idempotency_key) DO NOTHING RETURNING ",
             columns!()
         ))
         .bind(JobId::generate().as_uuid())
@@ -195,10 +202,11 @@ impl PgJobStore {
         .bind(&spec.media_type)
         .bind(&spec.payload)
         .bind(spec.priority)
-        .bind(spec.not_before)
+        .bind(spec.not_before.map_or(now, |at| at.max(now)))
         .bind(spec.maintenance_window.as_ref().map(ScheduleName::as_str))
         .bind(spec.origin.correlation_id.as_str())
         .bind(spec.origin.causation_id.as_str())
+        .bind(now)
         .fetch_optional(&mut *connection)
         .await
         .map_err(storage_error)?;
@@ -211,7 +219,7 @@ impl PgJobStore {
             });
         }
         let existing: uuid::Uuid =
-            sqlx::query_scalar("SELECT job_id FROM jobs WHERE kind = $1 AND idempotency_key = $2")
+            sqlx::query_scalar("SELECT job_id FROM jobs WHERE kind = ?1 AND idempotency_key = ?2")
                 .bind(spec.kind.as_str())
                 .bind(spec.idempotency_key.as_str())
                 .fetch_one(&mut *connection)
@@ -225,9 +233,9 @@ impl PgJobStore {
 }
 
 #[async_trait]
-impl JobStore for PgJobStore {
+impl JobStore for SqliteJobStore {
     async fn enqueue(&self, spec: &JobSpec) -> Result<Enqueued> {
-        let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+        let mut transaction = self.database.begin().await?;
         let enqueued = self.insert(&mut transaction, spec).await?;
         transaction.commit().await.map_err(storage_error)?;
         Ok(enqueued)
@@ -240,7 +248,8 @@ impl JobStore for PgJobStore {
             .iter()
             .map(ScheduleName::as_str)
             .collect();
-        let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+        let now = Utc::now();
+        let mut transaction = self.database.begin().await?;
         let settled = sqlx::query(concat!(
             "UPDATE jobs SET \
                  state = CASE WHEN cancel_requested THEN 'cancelled' ELSE 'failed' END, \
@@ -249,13 +258,15 @@ impl JobStore for PgJobStore {
                  last_error_message = CASE WHEN cancel_requested THEN last_error_message \
                                            ELSE 'the lease expired on the final attempt' END, \
                  lease_owner = NULL, lease_expires_at = NULL, \
-                 finished_at = now(), updated_at = now() \
-             WHERE state = 'running' AND lease_expires_at < now() \
-               AND kind = ANY($1) AND (cancel_requested OR attempts >= max_attempts) \
+                 finished_at = ?2, updated_at = ?2 \
+             WHERE state = 'running' AND lease_expires_at < ?2 \
+               AND kind IN (SELECT value FROM json_each(?1)) \
+               AND (cancel_requested OR attempts >= max_attempts) \
              RETURNING ",
             columns!()
         ))
-        .bind(&kinds)
+        .bind(Json(&kinds))
+        .bind(now)
         .fetch_all(&mut *transaction)
         .await
         .map_err(storage_error)?;
@@ -269,24 +280,26 @@ impl JobStore for PgJobStore {
             self.publish(&mut transaction, &job, change).await?;
         }
         let claimed = sqlx::query(concat!(
-            "UPDATE jobs SET state = 'running', attempts = attempts + 1, lease_owner = $1, \
-                 lease_expires_at = now() + make_interval(secs => $2), updated_at = now() \
+            "UPDATE jobs SET state = 'running', attempts = attempts + 1, lease_owner = ?1, \
+                 lease_expires_at = ?2, updated_at = ?3 \
              WHERE job_id IN ( \
                  SELECT job_id FROM jobs \
-                 WHERE kind = ANY($3) \
-                   AND (maintenance_window IS NULL OR maintenance_window = ANY($4)) \
-                   AND ((state IN ('queued', 'retrying') AND run_after <= now() \
+                 WHERE kind IN (SELECT value FROM json_each(?4)) \
+                   AND (maintenance_window IS NULL \
+                        OR maintenance_window IN (SELECT value FROM json_each(?5))) \
+                   AND ((state IN ('queued', 'retrying') AND run_after <= ?3 \
                          AND NOT cancel_requested) \
-                        OR (state = 'running' AND lease_expires_at < now())) \
+                        OR (state = 'running' AND lease_expires_at < ?3)) \
                  ORDER BY priority DESC, run_after, job_id \
-                 LIMIT $5 FOR UPDATE SKIP LOCKED) \
+                 LIMIT ?6) \
              RETURNING ",
             columns!()
         ))
         .bind(request.owner)
-        .bind(seconds(request.lease))
-        .bind(&kinds)
-        .bind(&windows)
+        .bind(after(now, request.lease))
+        .bind(now)
+        .bind(Json(&kinds))
+        .bind(Json(&windows))
         .bind(i64::try_from(request.limit).unwrap_or(i64::MAX))
         .fetch_all(&mut *transaction)
         .await
@@ -310,17 +323,18 @@ impl JobStore for PgJobStore {
     }
 
     async fn renew(&self, lease: &Lease, extend_by: Duration) -> Result<Renewal> {
+        let now = Utc::now();
         let renewed: Option<bool> = sqlx::query_scalar(concat!(
-            "UPDATE jobs SET lease_expires_at = now() + make_interval(secs => $4), \
-                 updated_at = now() WHERE ",
+            "UPDATE jobs SET lease_expires_at = ?5, updated_at = ?4 WHERE ",
             lease_fence!(),
             " RETURNING cancel_requested"
         ))
         .bind(lease.job.id.as_uuid())
         .bind(&lease.owner)
         .bind(count(lease.attempt)?)
-        .bind(seconds(extend_by))
-        .fetch_optional(&self.pool)
+        .bind(now)
+        .bind(after(now, extend_by))
+        .fetch_optional(self.database.pool())
         .await
         .map_err(storage_error)?;
         Ok(match renewed {
@@ -330,9 +344,9 @@ impl JobStore for PgJobStore {
     }
 
     async fn report_progress(&self, lease: &Lease, progress: &Progress) -> Result<bool> {
-        let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+        let mut transaction = self.database.begin().await?;
         let updated = sqlx::query(concat!(
-            "UPDATE jobs SET progress_percent = $4, progress_message = $5, updated_at = now() \
+            "UPDATE jobs SET progress_percent = ?5, progress_message = ?6, updated_at = ?4 \
              WHERE ",
             lease_fence!(),
             " RETURNING ",
@@ -341,6 +355,7 @@ impl JobStore for PgJobStore {
         .bind(lease.job.id.as_uuid())
         .bind(&lease.owner)
         .bind(count(lease.attempt)?)
+        .bind(Utc::now())
         .bind(i16::from(progress.percent()))
         .bind(progress.message())
         .fetch_optional(&mut *transaction)
@@ -363,15 +378,15 @@ impl JobStore for PgJobStore {
             Finish::Failed { error } => ("failed", Change::Failed, None, Some(error)),
             _ => return Err(PanelError::unsupported_capability("unknown job outcome")),
         };
-        let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+        let mut transaction = self.database.begin().await?;
         let updated = sqlx::query(concat!(
-            "UPDATE jobs SET state = $4, lease_owner = NULL, lease_expires_at = NULL, \
-                 run_after = coalesce($5, run_after), \
-                 last_error_code = coalesce($6, last_error_code), \
-                 last_error_message = coalesce($7, last_error_message), \
-                 finished_at = CASE WHEN $4 IN ('succeeded', 'failed', 'cancelled') \
-                                    THEN now() END, \
-                 updated_at = now() \
+            "UPDATE jobs SET state = ?5, lease_owner = NULL, lease_expires_at = NULL, \
+                 run_after = coalesce(?6, run_after), \
+                 last_error_code = coalesce(?7, last_error_code), \
+                 last_error_message = coalesce(?8, last_error_message), \
+                 finished_at = CASE WHEN ?5 IN ('succeeded', 'failed', 'cancelled') \
+                                    THEN ?4 END, \
+                 updated_at = ?4 \
              WHERE ",
             lease_fence!(),
             " RETURNING ",
@@ -380,6 +395,7 @@ impl JobStore for PgJobStore {
         .bind(lease.job.id.as_uuid())
         .bind(&lease.owner)
         .bind(count(lease.attempt)?)
+        .bind(Utc::now())
         .bind(state)
         .bind(run_after)
         .bind(error.map(|error| error.code.as_str()))
@@ -396,25 +412,25 @@ impl JobStore for PgJobStore {
     }
 
     async fn cancel(&self, job_id: JobId) -> Result<CancelOutcome> {
-        let mut transaction = self.pool.begin().await.map_err(storage_error)?;
-        let state: Option<String> =
-            sqlx::query_scalar("SELECT state FROM jobs WHERE job_id = $1 FOR UPDATE")
-                .bind(job_id.as_uuid())
-                .fetch_optional(&mut *transaction)
-                .await
-                .map_err(storage_error)?;
+        let mut transaction = self.database.begin().await?;
+        let state: Option<String> = sqlx::query_scalar("SELECT state FROM jobs WHERE job_id = ?1")
+            .bind(job_id.as_uuid())
+            .fetch_optional(&mut *transaction)
+            .await
+            .map_err(storage_error)?;
         let state = JobState::from_str(
             &state.ok_or_else(|| PanelError::not_found(format!("job {job_id} does not exist")))?,
         )?;
         let outcome = match state {
             JobState::Queued | JobState::Retrying => {
                 let row = sqlx::query(concat!(
-                    "UPDATE jobs SET state = 'cancelled', cancel_requested = true, \
-                         finished_at = now(), updated_at = now() \
-                     WHERE job_id = $1 RETURNING ",
+                    "UPDATE jobs SET state = 'cancelled', cancel_requested = 1, \
+                         finished_at = ?2, updated_at = ?2 \
+                     WHERE job_id = ?1 RETURNING ",
                     columns!()
                 ))
                 .bind(job_id.as_uuid())
+                .bind(Utc::now())
                 .fetch_one(&mut *transaction)
                 .await
                 .map_err(storage_error)?;
@@ -424,9 +440,10 @@ impl JobStore for PgJobStore {
             }
             JobState::Running => {
                 sqlx::query(
-                    "UPDATE jobs SET cancel_requested = true, updated_at = now() WHERE job_id = $1",
+                    "UPDATE jobs SET cancel_requested = 1, updated_at = ?2 WHERE job_id = ?1",
                 )
                 .bind(job_id.as_uuid())
+                .bind(Utc::now())
                 .execute(&mut *transaction)
                 .await
                 .map_err(storage_error)?;
@@ -442,10 +459,10 @@ impl JobStore for PgJobStore {
         sqlx::query(concat!(
             "SELECT ",
             columns!(),
-            " FROM jobs WHERE job_id = $1"
+            " FROM jobs WHERE job_id = ?1"
         ))
         .bind(job_id.as_uuid())
-        .fetch_optional(&self.pool)
+        .fetch_optional(self.database.pool())
         .await
         .map_err(storage_error)?
         .as_ref()
@@ -454,7 +471,7 @@ impl JobStore for PgJobStore {
     }
 }
 
-fn schedule(row: &PgRow) -> Result<Schedule> {
+fn schedule(row: &SqliteRow) -> Result<Schedule> {
     let get = |error: sqlx::Error| storage_error(error);
     let window: Option<String> = row.try_get("maintenance_window").map_err(get)?;
     let attempts: i32 = row.try_get("max_attempts").map_err(get)?;
@@ -475,18 +492,18 @@ fn schedule(row: &PgRow) -> Result<Schedule> {
 }
 
 #[async_trait]
-impl ScheduleStore for PgJobStore {
+impl ScheduleStore for SqliteJobStore {
     async fn save_schedule(&self, schedule: &Schedule, now: DateTime<Utc>) -> Result<()> {
         sqlx::query(
             "INSERT INTO schedules (name, recurrence, kind, media_type, payload, max_attempts, \
-                 priority, maintenance_window, enabled, next_run_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) \
-             ON CONFLICT (name) DO UPDATE SET recurrence = EXCLUDED.recurrence, \
-                 kind = EXCLUDED.kind, media_type = EXCLUDED.media_type, \
-                 payload = EXCLUDED.payload, max_attempts = EXCLUDED.max_attempts, \
-                 priority = EXCLUDED.priority, maintenance_window = EXCLUDED.maintenance_window, \
-                 enabled = EXCLUDED.enabled, next_run_at = EXCLUDED.next_run_at, \
-                 updated_at = now()",
+                 priority, maintenance_window, enabled, next_run_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
+             ON CONFLICT (name) DO UPDATE SET recurrence = excluded.recurrence, \
+                 kind = excluded.kind, media_type = excluded.media_type, \
+                 payload = excluded.payload, max_attempts = excluded.max_attempts, \
+                 priority = excluded.priority, maintenance_window = excluded.maintenance_window, \
+                 enabled = excluded.enabled, next_run_at = excluded.next_run_at, \
+                 updated_at = excluded.updated_at",
         )
         .bind(schedule.name.as_str())
         .bind(schedule.recurrence.as_str())
@@ -504,7 +521,8 @@ impl ScheduleStore for PgJobStore {
         )
         .bind(schedule.enabled)
         .bind(schedule.recurrence.next_after(now))
-        .execute(&self.pool)
+        .bind(now)
+        .execute(self.database.pool())
         .await
         .map_err(storage_error)?;
         Ok(())
@@ -512,15 +530,16 @@ impl ScheduleStore for PgJobStore {
 
     async fn save_window(&self, window: &MaintenanceWindow) -> Result<()> {
         sqlx::query(
-            "INSERT INTO maintenance_windows (name, recurrence, duration_seconds) \
-             VALUES ($1, $2, $3) ON CONFLICT (name) DO UPDATE \
-             SET recurrence = EXCLUDED.recurrence, duration_seconds = EXCLUDED.duration_seconds, \
-                 updated_at = now()",
+            "INSERT INTO maintenance_windows (name, recurrence, duration_seconds, updated_at) \
+             VALUES (?1, ?2, ?3, ?4) ON CONFLICT (name) DO UPDATE \
+             SET recurrence = excluded.recurrence, duration_seconds = excluded.duration_seconds, \
+                 updated_at = excluded.updated_at",
         )
         .bind(window.name().as_str())
         .bind(window.recurrence().as_str())
         .bind(i32::try_from(window.duration().as_secs()).unwrap_or(i32::MAX))
-        .execute(&self.pool)
+        .bind(Utc::now())
+        .execute(self.database.pool())
         .await
         .map_err(storage_error)?;
         Ok(())
@@ -530,7 +549,7 @@ impl ScheduleStore for PgJobStore {
         let rows: Vec<(String, String, i32)> = sqlx::query_as(
             "SELECT name, recurrence, duration_seconds FROM maintenance_windows ORDER BY name",
         )
-        .fetch_all(&self.pool)
+        .fetch_all(self.database.pool())
         .await
         .map_err(storage_error)?;
         rows.into_iter()
@@ -545,12 +564,12 @@ impl ScheduleStore for PgJobStore {
     }
 
     async fn fire_due(&self, now: DateTime<Utc>) -> Result<usize> {
-        let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+        let mut transaction = self.database.begin().await?;
         let due = sqlx::query(
             "SELECT name, recurrence, kind, media_type, payload, max_attempts, priority, \
                     maintenance_window, enabled, next_run_at \
-             FROM schedules WHERE enabled AND next_run_at <= $1 \
-             ORDER BY next_run_at FOR UPDATE SKIP LOCKED",
+             FROM schedules WHERE enabled AND next_run_at <= ?1 \
+             ORDER BY next_run_at",
         )
         .bind(now)
         .fetch_all(&mut *transaction)
@@ -567,14 +586,13 @@ impl ScheduleStore for PgJobStore {
             {
                 created += 1;
             }
-            sqlx::query(
-                "UPDATE schedules SET next_run_at = $2, updated_at = now() WHERE name = $1",
-            )
-            .bind(schedule.name.as_str())
-            .bind(schedule.recurrence.next_after(now))
-            .execute(&mut *transaction)
-            .await
-            .map_err(storage_error)?;
+            sqlx::query("UPDATE schedules SET next_run_at = ?2, updated_at = ?3 WHERE name = ?1")
+                .bind(schedule.name.as_str())
+                .bind(schedule.recurrence.next_after(now))
+                .bind(now)
+                .execute(&mut *transaction)
+                .await
+                .map_err(storage_error)?;
         }
         transaction.commit().await.map_err(storage_error)?;
         Ok(created)

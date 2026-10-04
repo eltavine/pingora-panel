@@ -6,7 +6,7 @@ use panel_event_contracts::tls::v1::{
     AcmeAccountRefused, AcmeCertificateRefused, CertificateRefused, DnsProviderRefused,
 };
 use panel_events::EventData;
-use panel_postgres::EventLog;
+use panel_sqlite::EventLog;
 
 /// The data of a `*.refused` event: which change of what was refused, and
 /// why.

@@ -15,8 +15,8 @@ use panel_errors::ErrorCode;
 use panel_events::{Principal, RequestId, RequestScope};
 use panel_jobs::MemoryJobStore;
 use panel_platform::ServiceName;
-use panel_postgres::{testing::TestDatabase, EventLog, ServiceDatabase};
 use panel_secrets::{EnvelopeVault, SecretVault};
+use panel_sqlite::{testing::TestDatabase, EventLog, ServiceDatabase};
 use serde_json::json;
 use std::{
     fs,
@@ -37,14 +37,10 @@ fn vault(keys: &[&str]) -> Arc<dyn SecretVault> {
     Arc::new(EnvelopeVault::from_keys(&keys.join("\n")).unwrap())
 }
 
-async fn database() -> Option<(TestDatabase, ServiceDatabase)> {
-    let mut database = TestDatabase::create().await?;
-    let secrets = database.bootstrap(&[("automation", "automation")]).await;
-    let service = database
-        .connect_service("automation", "automation", &secrets[0])
-        .await;
-    service.migrate(MIGRATIONS).await.unwrap();
-    Some((database, service))
+async fn database() -> (TestDatabase, ServiceDatabase) {
+    let database = TestDatabase::migrated(MIGRATIONS).await;
+    let service = database.database().clone();
+    (database, service)
 }
 
 fn inventory(
@@ -94,7 +90,7 @@ async fn events(service: &ServiceDatabase) -> Vec<String> {
 }
 
 async fn sealed_key(service: &ServiceDatabase, id: &str) -> String {
-    sqlx::query_scalar("SELECT sealed_key FROM certificates WHERE certificate_id = $1")
+    sqlx::query_scalar("SELECT sealed_key FROM certificates WHERE certificate_id = ?1")
         .bind(id)
         .fetch_one(service.pool())
         .await
@@ -116,9 +112,7 @@ fn cause(scope: &RequestScope) -> Cause<'_> {
 
 #[tokio::test]
 async fn certificates_are_sealed_delivered_and_published() {
-    let Some((_database, service)) = database().await else {
-        return;
-    };
+    let (_database, service) = database().await;
     let directory = tempfile::tempdir().unwrap();
     let inventory = inventory(
         &service,
@@ -229,9 +223,7 @@ async fn certificates_are_sealed_delivered_and_published() {
 
 #[tokio::test]
 async fn the_secret_directory_follows_the_inventory() {
-    let Some((_database, service)) = database().await else {
-        return;
-    };
+    let (_database, service) = database().await;
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path();
     let inventory = inventory(
@@ -266,9 +258,7 @@ async fn the_secret_directory_follows_the_inventory() {
 
 #[tokio::test]
 async fn keys_are_sealed_again_when_master_keys_rotate() {
-    let Some((_database, service)) = database().await else {
-        return;
-    };
+    let (_database, service) = database().await;
     let old = EnvelopeVault::generate_key().unwrap();
     let new = EnvelopeVault::generate_key().unwrap();
     let directory = tempfile::tempdir().unwrap();
@@ -303,9 +293,7 @@ async fn keys_are_sealed_again_when_master_keys_rotate() {
 
 #[tokio::test]
 async fn without_master_keys_certificates_are_not_stored() {
-    let Some((_database, service)) = database().await else {
-        return;
-    };
+    let (_database, service) = database().await;
     let inventory = inventory(&service, None, None);
     let material = material("example.com");
     let scope = scope();
@@ -365,9 +353,7 @@ async fn read(service: &CertificateService, operation: &str, resource: &str) -> 
 
 #[tokio::test]
 async fn operations_map_to_the_inventory_over_grpc() {
-    let Some((_database, database)) = database().await else {
-        return;
-    };
+    let (_database, database) = database().await;
     let vault = vault(&[&EnvelopeVault::generate_key().unwrap()]);
     let inventory = inventory(&database, Some(Arc::clone(&vault)), None);
     let acme = automation(&database, Arc::clone(&vault), inventory.clone());
@@ -471,7 +457,7 @@ async fn operations_map_to_the_inventory_over_grpc() {
 }
 
 async fn reminded(service: &ServiceDatabase, id: &str) -> Option<i32> {
-    sqlx::query_scalar("SELECT reminded_days FROM certificates WHERE certificate_id = $1")
+    sqlx::query_scalar("SELECT reminded_days FROM certificates WHERE certificate_id = ?1")
         .bind(id)
         .fetch_one(service.pool())
         .await
@@ -480,9 +466,7 @@ async fn reminded(service: &ServiceDatabase, id: &str) -> Option<i32> {
 
 #[tokio::test]
 async fn expiring_certificates_are_announced_once_per_threshold() {
-    let Some((_database, service)) = database().await else {
-        return;
-    };
+    let (_database, service) = database().await;
     let inventory = inventory(
         &service,
         Some(vault(&[&EnvelopeVault::generate_key().unwrap()])),

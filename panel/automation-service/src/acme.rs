@@ -23,11 +23,11 @@ use panel_jobs::{
     Job, JobContext, JobHandler, JobKind, JobOrigin, JobSpec, JobStore, JobTemplate, Recurrence,
     Schedule, ScheduleName,
 };
-use panel_postgres::{storage_error, EventLog, PgOutbox, ServiceDatabase};
 use panel_secrets::{Sealed, SecretVault};
+use panel_sqlite::{storage_error, EventLog, ServiceDatabase, SqliteOutbox};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::{postgres::PgRow, PgConnection, PgPool, Row};
+use sqlx::{sqlite::SqliteRow, types::Json, Row, SqliteConnection};
 use std::{
     fmt,
     path::{Path, PathBuf},
@@ -251,13 +251,13 @@ fn corrupt(what: &str) -> PanelError {
     PanelError::corrupt_state(format!("a stored ACME record has an invalid {what}"))
 }
 
-fn version(row: &PgRow) -> Result<u64> {
+fn version(row: &SqliteRow) -> Result<u64> {
     let version: i64 = row.try_get("version").map_err(storage_error)?;
     u64::try_from(version).map_err(|_| corrupt("version"))
 }
 
-fn account(row: &PgRow) -> Result<AcmeAccount> {
-    let contact: Vec<String> = row.try_get("contact").map_err(storage_error)?;
+fn account(row: &SqliteRow) -> Result<AcmeAccount> {
+    let Json(contact): Json<Vec<String>> = row.try_get("contact").map_err(storage_error)?;
     Ok(AcmeAccount {
         id: AccountId::new(
             row.try_get::<String, _>("account_id")
@@ -284,7 +284,7 @@ fn challenge_kind(name: &str) -> Result<ChallengeKind> {
     serde_json::from_value(json!(name)).map_err(|_| corrupt("challenge"))
 }
 
-fn automatic(row: &PgRow) -> Result<AutomaticCertificate> {
+fn automatic(row: &SqliteRow) -> Result<AutomaticCertificate> {
     let failures: i32 = row.try_get("failures").map_err(storage_error)?;
     let issued: Option<bool> = row.try_get("issued").map_err(storage_error)?;
     let code: Option<String> = row.try_get("last_error_code").map_err(storage_error)?;
@@ -302,7 +302,10 @@ fn automatic(row: &PgRow) -> Result<AutomaticCertificate> {
                 .map_err(storage_error)?,
         )
         .map_err(|_| corrupt("account ID"))?,
-        names: row.try_get("names").map_err(storage_error)?,
+        names: row
+            .try_get::<Json<Vec<String>>, _>("names")
+            .map_err(storage_error)?
+            .0,
         challenge: challenge_kind(
             &row.try_get::<String, _>("challenge")
                 .map_err(storage_error)?,
@@ -399,14 +402,14 @@ fn check_version(what: &str, current: u64, expected: Option<u64>) -> Result<()> 
     }
 }
 
-/// ACME accounts and automatic certificates in the service schema.
+/// ACME accounts and automatic certificates in the module's database.
 ///
 /// Changes write their `tls.acme.*` events in the same transaction;
 /// issuances store their certificates in the inventory, which publishes
 /// `tls.certificate.*` events.
 #[derive(Clone)]
 pub struct AcmeAutomation {
-    pool: PgPool,
+    database: ServiceDatabase,
     events: EventLog,
     vault: Option<Arc<dyn SecretVault>>,
     inventory: CertificateInventory,
@@ -429,7 +432,7 @@ impl AcmeAutomation {
         secret_directory: Option<&Path>,
     ) -> Self {
         Self {
-            pool: database.pool().clone(),
+            database: database.clone(),
             events,
             vault,
             inventory,
@@ -452,7 +455,7 @@ impl AcmeAutomation {
             account_columns!(),
             " FROM acme_accounts ORDER BY account_id"
         ))
-        .fetch_all(&self.pool)
+        .fetch_all(self.database.pool())
         .await
         .map_err(storage_error)?
         .iter()
@@ -464,10 +467,10 @@ impl AcmeAutomation {
         sqlx::query(concat!(
             "SELECT ",
             account_columns!(),
-            " FROM acme_accounts WHERE account_id = $1"
+            " FROM acme_accounts WHERE account_id = ?1"
         ))
         .bind(id.as_str())
-        .fetch_optional(&self.pool)
+        .fetch_optional(self.database.pool())
         .await
         .map_err(storage_error)?
         .map(|row| account(&row))
@@ -516,17 +519,17 @@ impl AcmeAutomation {
                 .seal(&owner(&id), registered.credentials.as_bytes())
                 .await?;
             let now = Utc::now();
-            let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+            let mut transaction = self.database.begin().await?;
             let inserted = sqlx::query(
                 "INSERT INTO acme_accounts (account_id, directory_url, ca_bundle, contact, \
                  external_account_key_id, account_url, sealed_credentials, version, created_at, \
-                 updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $8) \
+                 updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?8) \
                  ON CONFLICT (account_id) DO NOTHING",
             )
             .bind(id.as_str())
             .bind(&directory.url)
             .bind(&directory.ca_bundle)
-            .bind(&contact)
+            .bind(Json(&contact))
             .bind(&external_account_key_id)
             .bind(&registered.url)
             .bind(sealed.as_str())
@@ -589,11 +592,11 @@ impl AcmeAutomation {
         expected: Option<u64>,
     ) -> Result<()> {
         let result = async {
-            let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+            let mut transaction = self.database.begin().await?;
             let current = sqlx::query(concat!(
                 "SELECT ",
                 account_columns!(),
-                " FROM acme_accounts WHERE account_id = $1 FOR UPDATE"
+                " FROM acme_accounts WHERE account_id = ?1"
             ))
             .bind(id.as_str())
             .fetch_optional(&mut *transaction)
@@ -604,7 +607,7 @@ impl AcmeAutomation {
             .ok_or_else(|| PanelError::not_found(format!("there is no ACME account {id}")))?;
             check_version(&format!("ACME account {id}"), current.version, expected)?;
             let users: Vec<String> = sqlx::query_scalar(
-                "SELECT certificate_id FROM acme_certificates WHERE account_id = $1 \
+                "SELECT certificate_id FROM acme_certificates WHERE account_id = ?1 \
                  ORDER BY certificate_id",
             )
             .bind(id.as_str())
@@ -617,7 +620,7 @@ impl AcmeAutomation {
                     users.join(", ")
                 )));
             }
-            sqlx::query("DELETE FROM acme_accounts WHERE account_id = $1")
+            sqlx::query("DELETE FROM acme_accounts WHERE account_id = ?1")
                 .bind(id.as_str())
                 .execute(&mut *transaction)
                 .await
@@ -652,7 +655,7 @@ impl AcmeAutomation {
             automatic_from!(),
             " ORDER BY a.certificate_id"
         ))
-        .fetch_all(&self.pool)
+        .fetch_all(self.database.pool())
         .await
         .map_err(storage_error)?
         .iter()
@@ -665,10 +668,10 @@ impl AcmeAutomation {
             "SELECT ",
             automatic_columns!(),
             automatic_from!(),
-            " WHERE a.certificate_id = $1"
+            " WHERE a.certificate_id = ?1"
         ))
         .bind(id.as_str())
-        .fetch_optional(&self.pool)
+        .fetch_optional(self.database.pool())
         .await
         .map_err(storage_error)?
         .map(|row| automatic(&row))
@@ -711,15 +714,15 @@ impl AcmeAutomation {
             }
             self.account(&body.account).await?;
             let now = Utc::now();
-            let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+            let mut transaction = self.database.begin().await?;
             let inserted = sqlx::query(
                 "INSERT INTO acme_certificates (certificate_id, account_id, names, challenge, \
                  dns_provider_id, renew_after, version, created_at, updated_at) \
-                 VALUES ($1, $2, $3, $4, $5, $6, 1, $6, $6) ON CONFLICT (certificate_id) DO NOTHING",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?6, ?6) ON CONFLICT (certificate_id) DO NOTHING",
             )
             .bind(id.as_str())
             .bind(body.account.as_str())
-            .bind(&names)
+            .bind(Json(&names))
             .bind(body.challenge.as_str())
             .bind(&body.dns_provider)
             .bind(now)
@@ -765,9 +768,9 @@ impl AcmeAutomation {
     pub async fn renew(&self, cause: Cause<'_>, id: CertificateId) -> Result<AutomaticCertificate> {
         let result = async {
             let now = Utc::now();
-            let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+            let mut transaction = self.database.begin().await?;
             let updated = sqlx::query(
-                "UPDATE acme_certificates SET renew_after = $2 WHERE certificate_id = $1",
+                "UPDATE acme_certificates SET renew_after = ?2 WHERE certificate_id = ?1",
             )
             .bind(id.as_str())
             .bind(now)
@@ -810,9 +813,9 @@ impl AcmeAutomation {
         expected: Option<u64>,
     ) -> Result<()> {
         let result = async {
-            let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+            let mut transaction = self.database.begin().await?;
             let current: Option<i64> = sqlx::query_scalar(
-                "SELECT version FROM acme_certificates WHERE certificate_id = $1 FOR UPDATE",
+                "SELECT version FROM acme_certificates WHERE certificate_id = ?1",
             )
             .bind(id.as_str())
             .fetch_optional(&mut *transaction)
@@ -824,7 +827,7 @@ impl AcmeAutomation {
                     PanelError::not_found(format!("{id} is not an automatic certificate"))
                 })?;
             check_version(&format!("automatic certificate {id}"), current, expected)?;
-            sqlx::query("DELETE FROM acme_certificates WHERE certificate_id = $1")
+            sqlx::query("DELETE FROM acme_certificates WHERE certificate_id = ?1")
                 .bind(id.as_str())
                 .execute(&mut *transaction)
                 .await
@@ -874,14 +877,14 @@ impl AcmeAutomation {
     pub async fn issue(&self, scope: &RequestScope, id: &CertificateId) -> Result<()> {
         let now = Utc::now();
         let Some(row) = sqlx::query(
-            "UPDATE acme_certificates SET issuing_until = $2 WHERE certificate_id = $1 \
-             AND renew_after <= $3 AND (issuing_until IS NULL OR issuing_until < $3) \
+            "UPDATE acme_certificates SET issuing_until = ?2 WHERE certificate_id = ?1 \
+             AND renew_after <= ?3 AND (issuing_until IS NULL OR issuing_until < ?3) \
              RETURNING account_id, names, challenge, dns_provider_id, failures",
         )
         .bind(id.as_str())
         .bind(now + ISSUING_LEASE)
         .bind(now)
-        .fetch_optional(&self.pool)
+        .fetch_optional(self.database.pool())
         .await
         .map_err(storage_error)?
         else {
@@ -892,7 +895,7 @@ impl AcmeAutomation {
                 .map_err(storage_error)?,
         )
         .map_err(|_| corrupt("account ID"))?;
-        let names: Vec<String> = row.try_get("names").map_err(storage_error)?;
+        let Json(names): Json<Vec<String>> = row.try_get("names").map_err(storage_error)?;
         let challenge = challenge_kind(
             &row.try_get::<String, _>("challenge")
                 .map_err(storage_error)?,
@@ -909,15 +912,15 @@ impl AcmeAutomation {
         {
             Ok(renew_after) => {
                 sqlx::query(
-                    "UPDATE acme_certificates SET renew_after = $2, window_checked_after = $3, \
+                    "UPDATE acme_certificates SET renew_after = ?2, window_checked_after = ?3, \
                      window_explanation_url = NULL, issuing_until = NULL, failures = 0, \
-                     last_error_code = NULL, last_error_message = NULL, last_attempt_at = $3 \
-                     WHERE certificate_id = $1",
+                     last_error_code = NULL, last_error_message = NULL, last_attempt_at = ?3 \
+                     WHERE certificate_id = ?1",
                 )
                 .bind(id.as_str())
                 .bind(renew_after)
                 .bind(Utc::now())
-                .execute(&self.pool)
+                .execute(self.database.pool())
                 .await
                 .map_err(storage_error)?;
                 Ok(())
@@ -926,11 +929,11 @@ impl AcmeAutomation {
                 let failures = u32::try_from(failures).unwrap_or(0).saturating_add(1);
                 let attempted = Utc::now();
                 let next = attempted + backoff(failures);
-                let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+                let mut transaction = self.database.begin().await?;
                 sqlx::query(
-                    "UPDATE acme_certificates SET renew_after = $2, issuing_until = NULL, \
-                     failures = $3, last_error_code = $4, last_error_message = $5, \
-                     last_attempt_at = $6 WHERE certificate_id = $1",
+                    "UPDATE acme_certificates SET renew_after = ?2, issuing_until = NULL, \
+                     failures = ?3, last_error_code = ?4, last_error_message = ?5, \
+                     last_attempt_at = ?6 WHERE certificate_id = ?1",
                 )
                 .bind(id.as_str())
                 .bind(next)
@@ -1016,10 +1019,10 @@ impl AcmeAutomation {
     async fn credentials(&self, id: &AccountId) -> Result<(Directory, Zeroizing<String>)> {
         let row = sqlx::query(
             "SELECT directory_url, ca_bundle, sealed_credentials FROM acme_accounts \
-             WHERE account_id = $1",
+             WHERE account_id = ?1",
         )
         .bind(id.as_str())
-        .fetch_optional(&self.pool)
+        .fetch_optional(self.database.pool())
         .await
         .map_err(storage_error)?
         .ok_or_else(|| PanelError::not_found(format!("there is no ACME account {id}")))?;
@@ -1053,10 +1056,10 @@ impl AcmeAutomation {
             "SELECT a.certificate_id, a.account_id, a.renew_after, c.chain \
              FROM acme_certificates a JOIN certificates c ON c.certificate_id = a.certificate_id \
              WHERE c.source = 'acme' AND a.failures = 0 \
-             AND (a.window_checked_after IS NULL OR a.window_checked_after <= $1)",
+             AND (a.window_checked_after IS NULL OR a.window_checked_after <= ?1)",
         )
         .bind(now)
-        .fetch_all(&self.pool)
+        .fetch_all(self.database.pool())
         .await
         .map_err(storage_error)?;
         for (id, account, renew_after, chain) in windows {
@@ -1068,11 +1071,11 @@ impl AcmeAutomation {
             }
         }
         let due: Vec<(String, DateTime<Utc>)> = sqlx::query_as(
-            "SELECT certificate_id, renew_after FROM acme_certificates WHERE renew_after <= $1 \
-             AND (issuing_until IS NULL OR issuing_until < $1) ORDER BY renew_after",
+            "SELECT certificate_id, renew_after FROM acme_certificates WHERE renew_after <= ?1 \
+             AND (issuing_until IS NULL OR issuing_until < ?1) ORDER BY renew_after",
         )
         .bind(now)
-        .fetch_all(&self.pool)
+        .fetch_all(self.database.pool())
         .await
         .map_err(storage_error)?;
         for (id, renew_after) in due {
@@ -1135,14 +1138,14 @@ impl AcmeAutomation {
         next_check: DateTime<Utc>,
     ) -> Result<()> {
         sqlx::query(
-            "UPDATE acme_certificates SET renew_after = $2, window_explanation_url = $3, \
-             window_checked_after = $4 WHERE certificate_id = $1",
+            "UPDATE acme_certificates SET renew_after = ?2, window_explanation_url = ?3, \
+             window_checked_after = ?4 WHERE certificate_id = ?1",
         )
         .bind(id)
         .bind(renew_after)
         .bind(explanation)
         .bind(next_check)
-        .execute(&self.pool)
+        .execute(self.database.pool())
         .await
         .map_err(storage_error)?;
         Ok(())
@@ -1150,7 +1153,7 @@ impl AcmeAutomation {
 
     async fn publish<E: EventData>(
         &self,
-        connection: &mut PgConnection,
+        connection: &mut SqliteConnection,
         cause: Cause<'_>,
         aggregate: (&str, &str),
         data: &E,
@@ -1158,7 +1161,7 @@ impl AcmeAutomation {
         let event = self
             .events
             .event_by(aggregate, cause.scope, cause.principal, data)?;
-        PgOutbox::append(connection, &event).await
+        SqliteOutbox::append(connection, &event).await
     }
 }
 

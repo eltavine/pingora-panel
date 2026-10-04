@@ -13,8 +13,8 @@ use panel_contracts::{
 };
 use panel_errors::{PanelError, Result};
 use panel_events::{RequestId, RequestScope};
-use panel_postgres::EventLog;
 use panel_service::trace_context;
+use panel_sqlite::EventLog;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tonic::{Request, Response, Status};
 use zeroize::Zeroizing;

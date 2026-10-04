@@ -7,7 +7,8 @@
 use automation_service::{
     handlers, AccountId, AcmeAutomation, Cause, CertificateInventory, DnsProviderChange,
     DnsProviderFactory, DnsProviders, IssuanceState, NewAccount, NewAutomaticCertificate,
-    NewDnsProvider, PgJobStore, Rfc2136Config, SecretDirectory, StandardDnsProviders, MIGRATIONS,
+    NewDnsProvider, Rfc2136Config, SecretDirectory, SqliteJobStore, StandardDnsProviders,
+    MIGRATIONS,
 };
 use chrono::Utc;
 use panel_acme::{
@@ -19,8 +20,8 @@ use panel_errors::ErrorCode;
 use panel_events::{Principal, RequestId, RequestScope};
 use panel_jobs::{JobStore, Worker, WorkerOptions};
 use panel_platform::ServiceName;
-use panel_postgres::{testing::TestDatabase, EventLog, ServiceDatabase};
 use panel_secrets::{EnvelopeVault, SecretVault};
+use panel_sqlite::{testing::TestDatabase, EventLog, ServiceDatabase};
 use serde_json::Value;
 use std::{
     sync::{Arc, LazyLock},
@@ -42,14 +43,10 @@ fn cause(scope: &RequestScope) -> Cause<'_> {
     }
 }
 
-async fn database() -> Option<(TestDatabase, ServiceDatabase)> {
-    let mut database = TestDatabase::create().await?;
-    let secrets = database.bootstrap(&[("automation", "automation")]).await;
-    let service = database
-        .connect_service("automation", "automation", &secrets[0])
-        .await;
-    service.migrate(MIGRATIONS).await.unwrap();
-    Some((database, service))
+async fn database() -> (TestDatabase, ServiceDatabase) {
+    let database = TestDatabase::migrated(MIGRATIONS).await;
+    let service = database.database().clone();
+    (database, service)
 }
 
 async fn events(service: &ServiceDatabase) -> Vec<String> {
@@ -107,7 +104,7 @@ struct Fixture {
     acme: AcmeAutomation,
     dns: DnsProviders,
     inventory: CertificateInventory,
-    jobs: Arc<PgJobStore>,
+    jobs: Arc<SqliteJobStore>,
 }
 
 fn fixture(service: &ServiceDatabase, pebble: &Pebble, secrets: &std::path::Path) -> Fixture {
@@ -120,7 +117,7 @@ fn fixture(service: &ServiceDatabase, pebble: &Pebble, secrets: &std::path::Path
         Some(Arc::clone(&vault)),
         Some(SecretDirectory::new(secrets)),
     );
-    let jobs = Arc::new(PgJobStore::new(
+    let jobs = Arc::new(SqliteJobStore::new(
         service,
         ServiceName::new("automation-service").unwrap(),
     ));
@@ -169,9 +166,7 @@ async fn automatic_certificates_are_issued_renewed_and_their_failures_kept() {
     let Some(pebble) = Pebble::from_env() else {
         return;
     };
-    let Some((_database, service)) = database().await else {
-        return;
-    };
+    let (_database, service) = database().await;
     let secrets = tempfile::tempdir().unwrap();
     let Fixture {
         acme,
@@ -333,9 +328,7 @@ async fn wildcard_certificates_are_issued_through_a_dns_provider() {
     let Some(pebble) = Pebble::from_env() else {
         return;
     };
-    let Some((_database, service)) = database().await else {
-        return;
-    };
+    let (_database, service) = database().await;
     let secrets = tempfile::tempdir().unwrap();
     let Fixture {
         acme,

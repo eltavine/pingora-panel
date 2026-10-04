@@ -4,7 +4,7 @@
 //! leases and of the certificate inventory, which runs long tasks and calls
 //! host operations through `ops-agent`.
 //!
-//! Jobs live in the service schema and are run by a worker that leases them;
+//! Jobs live in the module's database and are run by a worker that leases them;
 //! a scheduler enqueues the jobs of due schedules. Certificates keep their
 //! private keys sealed with the deployment's master keys and are delivered
 //! to the gateway's secret directory; automatic certificates are issued and
@@ -31,7 +31,7 @@ pub use dns::{
     DnsProviderChange, DnsProviderFactory, DnsProviderRecord, DnsProviders, NewDnsProvider,
     Rfc2136Config, StandardDnsProviders,
 };
-pub use jobs::PgJobStore;
+pub use jobs::SqliteJobStore;
 
 use chrono::Utc;
 use panel_acme::AcmeClient;
@@ -43,14 +43,15 @@ use panel_jobs::{
 };
 use panel_platform::{Capability, ServiceName};
 use panel_platform_codec::protocol_range;
-use panel_postgres::{EventLog, SchemaMigration, SqlIdentifier};
 use panel_secrets::{EnvelopeVault, SecretVault};
 use panel_service::Environment;
+use panel_sqlite::{EventLog, SchemaMigration};
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Duration};
 use tokio_util::sync::CancellationToken;
 
 pub const SERVICE: &str = "automation-service";
-pub const SCHEMA: &str = "automation";
+/// The module's SQLite file in the data directory, `automation.db`.
+pub const MODULE: &str = "automation";
 /// Master keys that seal private keys, one base64-encoded 256-bit key per
 /// line; the first seals new values. Usually given as `_FILE`.
 pub const MASTER_KEYS_ENV: &str = "PINGORA_PANEL_MASTER_KEYS";
@@ -73,13 +74,8 @@ pub const MIGRATIONS: &[SchemaMigration] = &[
     ),
     SchemaMigration::new(
         10_200,
-        "ACME accounts, automatic certificates and expiry reminders",
+        "DNS providers, ACME accounts and automatic certificates",
         include_str!("../migrations/10200_acme.sql"),
-    ),
-    SchemaMigration::new(
-        10_300,
-        "DNS providers for DNS-01",
-        include_str!("../migrations/10300_dns_providers.sql"),
     ),
 ];
 
@@ -120,27 +116,27 @@ pub fn process(
         .string(GATEWAY_SECRET_DIR_ENV)?
         .map(SecretDirectory::new);
     let service = ServiceName::new(SERVICE)?;
-    let process = ControlPlaneProcess::new(
+    let process = ControlPlaneProcess::on_sqlite(
         service.clone(),
         env!("CARGO_PKG_VERSION"),
         settings,
-        SqlIdentifier::new(SCHEMA)?,
+        MODULE,
     )?;
-    let store = Arc::new(PgJobStore::new(process.database(), service.clone()));
+    let store = Arc::new(SqliteJobStore::new(process.sqlite(), service.clone()));
     let secret_directory = directory
         .as_ref()
         .map(|directory| directory.path().to_owned());
-    let events = EventLog::new(process.database(), service);
+    let events = EventLog::new(process.sqlite(), service);
     let inventory =
-        CertificateInventory::new(process.database(), events.clone(), vault.clone(), directory);
+        CertificateInventory::new(process.sqlite(), events.clone(), vault.clone(), directory);
     let dns = DnsProviders::new(
-        process.database(),
+        process.sqlite(),
         events.clone(),
         vault.clone(),
         Arc::new(StandardDnsProviders),
     );
     let acme = AcmeAutomation::new(
-        process.database(),
+        process.sqlite(),
         events,
         vault,
         inventory.clone(),
@@ -151,7 +147,7 @@ pub fn process(
     );
     let handlers = handlers(&acme)?;
     Ok(process
-        .with_migrations(MIGRATIONS)
+        .with_sqlite_migrations(MIGRATIONS)
         .with_protocol(protocol_range(AUTOMATION_V1))
         .with_capability(Capability::new("certificates", "1")?)
         .with_peer_access(

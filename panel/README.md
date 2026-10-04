@@ -142,7 +142,7 @@ with `healthcheck` to probe its own readiness, as container health checks do.
 |---|---|---|---|---|
 | `panel-api` | `identity` | `127.0.0.1:9180` | `127.0.0.1:50060` | public HTTP `127.0.0.1:8080` |
 | `config-service` | `config` | `127.0.0.1:9181` | `127.0.0.1:50061` | calls `gatewayd` at `127.0.0.1:50051` |
-| `automation-service` | `automation` | `127.0.0.1:9182` | `127.0.0.1:50062` | |
+| `automation-service` | `automation.db` | `127.0.0.1:9182` | `127.0.0.1:50062` | |
 | `observability-service` | `observability.db` | `127.0.0.1:9183` | `127.0.0.1:50063` | queries Prometheus at `127.0.0.1:9090` |
 | `audit-service` | `audit.db` | `127.0.0.1:9184` | `127.0.0.1:50064` | consumes every event |
 
