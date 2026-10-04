@@ -53,6 +53,13 @@ export function chosenEngine(
   return (engines.find((engine) => engine.enabled && engine.reachable) ?? engines[0])?.id ?? null
 }
 
+/** A container's labels by name. */
+export function sortedLabels(labels: Record<string, string>): { name: string; value: string }[] {
+  return Object.entries(labels)
+    .map(([name, value]) => ({ name, value }))
+    .sort((left, right) => left.name.localeCompare(right.name))
+}
+
 /** Whether a container has something running to stop, restart or kill. */
 export function stoppable(state: ContainerStateName): boolean {
   return state === 'running' || state === 'restarting' || state === 'paused'

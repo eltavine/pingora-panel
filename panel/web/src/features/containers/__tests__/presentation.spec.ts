@@ -6,6 +6,7 @@ import {
   engineCondition,
   engineName,
   portLabel,
+  sortedLabels,
   stateTone,
   stoppable,
   withoutAgent,
@@ -68,6 +69,18 @@ describe('containers', () => {
     expect(stateTone('dead')).toBe('negative')
     expect(stateTone('exited')).toBe('neutral')
     expect(stateTone('unknown')).toBe('neutral')
+  })
+
+  it('list labels by name', () => {
+    expect(
+      sortedLabels({
+        'org.opencontainers.image.version': '1.27',
+        'com.docker.compose.project': 'shop',
+      }),
+    ).toEqual([
+      { name: 'com.docker.compose.project', value: 'shop' },
+      { name: 'org.opencontainers.image.version', value: '1.27' },
+    ])
   })
 
   it('offer stopping only what has something running', () => {

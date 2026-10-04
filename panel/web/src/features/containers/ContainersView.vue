@@ -32,7 +32,9 @@ import {
 } from '@/components/ui/table'
 import { toApiFailure } from '@/lib/api'
 import { useSession } from '@/lib/session'
+import type { ContainerView } from '@/api/generated'
 import ContainerActions from './ContainerActions.vue'
+import ContainerDetailSheet from './ContainerDetailSheet.vue'
 import ContainerEngines from './ContainerEngines.vue'
 import {
   CONTAINER_STATES,
@@ -124,6 +126,13 @@ const containers = useQuery(
   })),
 )
 const rows = computed(() => containers.data.value?.containers ?? [])
+
+const inspecting = ref<ContainerView>()
+const detailOpen = ref(false)
+function inspect(container: ContainerView) {
+  inspecting.value = container
+  detailOpen.value = true
+}
 
 const updatedAt = computed(() =>
   engines.dataUpdatedAt.value > 0 ? d(new Date(engines.dataUpdatedAt.value), 'time') : null,
@@ -272,7 +281,15 @@ function refresh() {
                 <TableRow v-for="container in rows" :key="container.id">
                   <TableCell>
                     <div class="flex flex-col gap-1">
-                      <span class="font-medium break-all">{{
+                      <Button
+                        v-if="can('containers.inspect')"
+                        variant="link"
+                        class="h-auto justify-start p-0 text-left font-medium break-all whitespace-normal"
+                        @click="inspect(container)"
+                      >
+                        {{ container.names[0] ?? container.id }}
+                      </Button>
+                      <span v-else class="font-medium break-all">{{
                         container.names[0] ?? container.id
                       }}</span>
                       <span class="flex flex-wrap items-center gap-1">
@@ -330,6 +347,12 @@ function refresh() {
           </Empty>
         </CardContent>
       </Card>
+      <ContainerDetailSheet
+        v-if="inspecting && engineId"
+        v-model:open="detailOpen"
+        :engine="engineId"
+        :container="inspecting"
+      />
     </template>
   </div>
 </template>

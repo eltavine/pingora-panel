@@ -131,6 +131,53 @@ export function containerHandlers(): AnyHandler[] {
         return HttpResponse.json(engine)
       },
     ),
+    http.get<{ engine: string; container: string }>(
+      '*/api/v1/container-engines/:engine/containers/:container',
+      ({ params }) => {
+        const found = containers.find((container) => container.id === params.container)
+        if (!found) {
+          return missing(params.container)
+        }
+        const running = found.state === 'running' || found.state === 'paused'
+        return HttpResponse.json({
+          container: found,
+          started_at: found.created,
+          finished_at: running ? null : hoursAgo(7),
+          exit_code: running ? null : 0,
+          error: null,
+          oom_killed: false,
+          restarts: 0,
+          health: found.status.includes('(healthy)') ? 'healthy' : null,
+          restart_policy: found.compose_project ? 'unless-stopped' : 'no',
+          restart_retries: 0,
+          hostname: found.id.slice(0, 12),
+          user: null,
+          working_directory: '/',
+          platform: 'linux',
+          mounts: found.compose_project
+            ? [
+                {
+                  kind: 'volume',
+                  name: `${found.compose_project}_data`,
+                  source: `/var/lib/docker/volumes/${found.compose_project}_data/_data`,
+                  destination: '/data',
+                  read_write: true,
+                },
+              ]
+            : [],
+          networks: [
+            {
+              name: found.compose_project ? `${found.compose_project}_default` : 'bridge',
+              ip_address: '172.18.0.2',
+              ipv6_address: null,
+              gateway: '172.18.0.1',
+              mac_address: null,
+              aliases: found.names,
+            },
+          ],
+        })
+      },
+    ),
     http.post<{ engine: string; container: string; action: string }>(
       '*/api/v1/container-engines/:engine/containers/:container/:action',
       ({ params }) => {

@@ -128,6 +128,46 @@ async function setUp(
     /\/api\/v1\/container-engines\/docker\/containers\/[\w.-]+(\/\w+)?(\?.*)?$/,
     (route) => {
       const request = route.request()
+      if (request.method() === 'GET') {
+        const found = containers[0]!
+        return route.fulfill({
+          json: {
+            container: found,
+            started_at: '2026-10-03T08:00:01Z',
+            finished_at: null,
+            exit_code: null,
+            error: null,
+            oom_killed: false,
+            restarts: 2,
+            health: 'healthy',
+            restart_policy: 'unless-stopped',
+            restart_retries: 0,
+            hostname: 'web',
+            user: null,
+            working_directory: '/srv',
+            platform: 'linux',
+            mounts: [
+              {
+                kind: 'volume',
+                name: 'shop_html',
+                source: '/var/lib/docker/volumes/shop_html/_data',
+                destination: '/usr/share/nginx/html',
+                read_write: false,
+              },
+            ],
+            networks: [
+              {
+                name: 'shop_default',
+                ip_address: '172.18.0.2',
+                ipv6_address: null,
+                gateway: '172.18.0.1',
+                mac_address: null,
+                aliases: ['web'],
+              },
+            ],
+          },
+        })
+      }
       const url = new URL(request.url())
       seen.changes.push(`${request.method()} ${url.pathname}${url.search}`)
       const [, , , , , , id, action] = url.pathname.split('/')
@@ -249,6 +289,19 @@ test('running containers are stopped after confirming and removed by force', asy
     'POST /api/v1/container-engines/docker/containers/4f1c2a9be03d71aa/stop',
     'DELETE /api/v1/container-engines/docker/containers/4f1c2a9be03d71aa?force=true&volumes=false',
   ])
+})
+
+test('a container shows its labels, mounts and networks', async ({ page }) => {
+  await setUp(page)
+  await page.goto('/containers')
+  await page.getByRole('button', { name: 'shop-web-1', exact: true }).click()
+  const sheet = page.getByRole('dialog', { name: 'shop-web-1' })
+  await expect(sheet).toContainText('Running · Healthy')
+  await expect(sheet).toContainText('unless-stopped')
+  await expect(sheet).toContainText('com.docker.compose.project')
+  await expect(sheet).toContainText('/usr/share/nginx/html')
+  await expect(sheet).toContainText('Read-only')
+  await expect(sheet).toContainText('172.18.0.2')
 })
 
 test('a stopped container starts without asking', async ({ page }) => {
