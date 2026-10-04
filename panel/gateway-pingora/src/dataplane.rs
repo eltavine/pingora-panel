@@ -45,6 +45,8 @@ const DRAIN_POLL: Duration = Duration::from_millis(50);
 const HEALTH_TICK: Duration = Duration::from_millis(100);
 const RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const DEFAULT_DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a retired generation's workers have to stop once drained.
+const RUNTIME_SHUTDOWN: Duration = Duration::from_secs(5);
 const DEFAULT_UPSTREAM_POOL_SIZE: usize = 128;
 
 #[derive(Clone, Debug)]
@@ -401,6 +403,7 @@ impl Generation {
             let metrics = options.metrics.clone();
             let connections = Arc::new(Connections::counted(
                 metrics.as_ref().map(|metrics| metrics.connections(&label)),
+                Arc::clone(&in_flight),
             ));
             let handshakes = HandshakeRecorder(metrics.clone().map(|metrics| (metrics, label)));
             let proxy = PanelProxy::new(
@@ -460,8 +463,9 @@ impl Generation {
         })
     }
 
-    /// Stops accepting, lets in-flight requests finish within `drain`, then
-    /// closes what remains, such as idle keep-alive connections.
+    /// Stops accepting, lets in-flight requests and the first requests of
+    /// connections it accepted finish within `drain`, then closes what
+    /// remains, such as idle keep-alive connections.
     async fn retire(mut self, drain: Duration) {
         let _ = self.shutdown.send(true);
         let deadline = Instant::now() + drain;
@@ -474,7 +478,10 @@ impl Generation {
             abandoned_requests = self.in_flight.load(Relaxed)
         );
         if let Some(runtime) = self.runtime.take() {
-            runtime.shutdown_background();
+            // Dropping the generation's tasks closes its listeners; waiting
+            // for that means a retired generation refuses connections.
+            let _ = tokio::task::spawn_blocking(move || runtime.shutdown_timeout(RUNTIME_SHUTDOWN))
+                .await;
         }
     }
 }

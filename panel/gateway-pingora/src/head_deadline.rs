@@ -27,7 +27,7 @@ use std::{
     io,
     pin::Pin,
     sync::{
-        atomic::{AtomicBool, Ordering::Relaxed},
+        atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed},
         Arc, Mutex, PoisonError,
     },
     task::{ready, Context, Poll},
@@ -49,32 +49,36 @@ const TIMED_OUT: &[u8] =
 const SHARDS: usize = 32;
 
 /// The watched connections of a listener, by their socket, so the proxy can
-/// tell one that a request on it is done and the next head is due.
+/// tell one that a request on it started or is done.
 #[derive(Default)]
 pub(crate) struct Connections {
-    shards: [Mutex<HashMap<usize, Arc<AtomicBool>>>; SHARDS],
+    shards: [Mutex<HashMap<usize, Arc<Watch>>>; SHARDS],
     /// Counts the open connections, when the gateway is measured.
     open: Option<Gauge>,
+    /// What the listener's generation owes before it may close: a count each
+    /// connection holds until its first request starts.
+    owed: Arc<AtomicUsize>,
 }
 
 impl Connections {
-    pub(crate) fn counted(open: Option<Gauge>) -> Self {
+    pub(crate) fn counted(open: Option<Gauge>, owed: Arc<AtomicUsize>) -> Self {
         Self {
             open,
+            owed,
             ..Self::default()
         }
     }
 
-    fn shard(&self, key: usize) -> &Mutex<HashMap<usize, Arc<AtomicBool>>> {
+    fn shard(&self, key: usize) -> &Mutex<HashMap<usize, Arc<Watch>>> {
         &self.shards[(key >> 4) % SHARDS]
     }
 
-    fn watch(&self, key: usize, due: Arc<AtomicBool>) {
+    fn watch(&self, key: usize, watch: Arc<Watch>) {
         let replaced = self
             .shard(key)
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(key, due);
+            .insert(key, watch);
         if let (None, Some(open)) = (replaced, &self.open) {
             open.inc();
         }
@@ -91,17 +95,56 @@ impl Connections {
         }
     }
 
-    /// Starts the deadline for the next request head on the connection of
-    /// `socket`.
-    pub(crate) fn request_done(&self, socket: &Arc<SocketDigest>) {
+    fn find(&self, socket: &Arc<SocketDigest>) -> Option<Arc<Watch>> {
         let key = Arc::as_ptr(socket) as usize;
-        if let Some(due) = self
-            .shard(key)
+        self.shard(key)
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(&key)
-        {
-            due.store(true, Relaxed);
+            .cloned()
+    }
+
+    /// Releases what the connection of `socket` owed its generation: from
+    /// here on its request counts as in flight itself.
+    pub(crate) fn request_started(&self, socket: &Arc<SocketDigest>) {
+        if let Some(watch) = self.find(socket) {
+            watch.settle();
+        }
+    }
+
+    /// Starts the deadline for the next request head on the connection of
+    /// `socket`.
+    pub(crate) fn request_done(&self, socket: &Arc<SocketDigest>) {
+        if let Some(watch) = self.find(socket) {
+            watch.due.store(true, Relaxed);
+        }
+    }
+}
+
+/// What a listener knows of one of its connections.
+pub(crate) struct Watch {
+    /// Set when a request is done and the next head is due.
+    due: AtomicBool,
+    /// Whether the connection still holds its generation open, which it
+    /// does from its acceptance until its first request starts, so that a
+    /// generation being replaced serves what it accepted.
+    owing: AtomicBool,
+    owed: Arc<AtomicUsize>,
+}
+
+impl Watch {
+    fn new(owed: &Arc<AtomicUsize>) -> Self {
+        owed.fetch_add(1, Relaxed);
+        Self {
+            due: AtomicBool::new(false),
+            owing: AtomicBool::new(true),
+            owed: Arc::clone(owed),
+        }
+    }
+
+    fn settle(&self) {
+        if self.owing.swap(false, Relaxed) {
+            self.owed.fetch_sub(1, Relaxed);
         }
     }
 }
@@ -174,18 +217,17 @@ pub(crate) struct Watched {
     peeked: Vec<u8>,
     /// Whether a late head is answered, which only the first one is.
     answer: bool,
-    /// Set when a request is done and the next head is due.
-    due: Arc<AtomicBool>,
+    watch: Arc<Watch>,
     /// Where the connection is registered, by its socket.
     registration: Option<(Arc<Connections>, usize)>,
 }
 
 impl Watched {
     fn new(inner: Stream, timeout: Duration, connections: Arc<Connections>) -> Self {
-        let due = Arc::new(AtomicBool::new(false));
+        let watch = Arc::new(Watch::new(&connections.owed));
         let registration = inner.get_socket_digest().map(|socket| {
             let key = Arc::as_ptr(&socket) as usize;
-            connections.watch(key, Arc::clone(&due));
+            connections.watch(key, Arc::clone(&watch));
             (connections, key)
         });
         let mut watched = Self {
@@ -196,7 +238,7 @@ impl Watched {
             started: false,
             peeked: Vec::new(),
             answer: true,
-            due,
+            watch,
             registration,
         };
         watched.await_next_head();
@@ -234,7 +276,7 @@ impl Watched {
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        if matches!(self.state, State::Arrived) && self.due.swap(false, Relaxed) {
+        if matches!(self.state, State::Arrived) && self.watch.due.swap(false, Relaxed) {
             self.answer = false;
             self.await_next_head();
         }
@@ -272,6 +314,7 @@ impl Watched {
 
 impl Drop for Watched {
     fn drop(&mut self) {
+        self.watch.settle();
         if let Some((connections, key)) = self.registration.take() {
             connections.forget(key);
         }

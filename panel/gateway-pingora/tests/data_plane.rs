@@ -487,6 +487,38 @@ async fn requests_and_upstream_attempts_are_measured() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_connection_accepted_before_a_reload_is_answered() {
+    let upstream = echo_upstream().await;
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    snapshot.sites.push(site(&["example.com"]));
+    snapshot.upstream_pools.push(pool("app", &[upstream]));
+    snapshot
+        .routes
+        .push(route("app", 1, prefix("/"), proxy("app")));
+    let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
+    wait_for(listen).await;
+
+    let mut early = TcpStream::connect(listen).await.unwrap();
+    // The serving generation accepts it, and its request comes only after
+    // the generation has been replaced.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    gateway.plane.reload().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let response = exchange(
+        &mut early,
+        "GET / HTTP/1.1\r\nhost: example.com\r\nconnection: close\r\n\r\n",
+    )
+    .await;
+    assert_eq!(response.status, 200);
+    gateway.stop().await;
+    assert!(TcpStream::connect(listen).await.is_err());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn default_site_failover_reload_and_h2c() {
     let upstream = echo_upstream().await;
     let dead = free_address();
