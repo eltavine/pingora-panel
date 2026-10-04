@@ -12,18 +12,15 @@ use panel_application::{
     GatewayContainer, GatewayServiceAction, GatewayServiceStatus, HostAgentPort, ListenersReport,
     ListeningProcess, PortListener, PortMapping, RequestScope,
 };
-use panel_contracts::{
-    common::v1 as common,
-    ops::v1::{
-        self as wire, agent_client::AgentClient, containers_client::ContainersClient,
-        directories_client::DirectoriesClient, gateway_service_client::GatewayServiceClient,
-        gateway_service_status::Supervisor, listeners_client::ListenersClient,
-    },
-    PROTOCOL_VERSION,
+use panel_contracts::ops::v1::{
+    self as wire, agent_client::AgentClient, containers_client::ContainersClient,
+    directories_client::DirectoriesClient, gateway_service_client::GatewayServiceClient,
+    gateway_service_status::Supervisor, listeners_client::ListenersClient,
 };
 use panel_errors::{PanelError, Result};
 use panel_service::{
-    propagate_trace, request_context, response_error, status_error, GrpcHealthCheck,
+    command_context, propagate_trace, request_context, response_error, status_error,
+    GrpcHealthCheck,
 };
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tonic::transport::Channel;
@@ -128,18 +125,6 @@ fn directory(value: wire::DirectoryUsage) -> Option<DirectoryUsage> {
         unreadable: value.unreadable,
         truncated: value.truncated,
     })
-}
-
-fn command_context(context: &CommandContext) -> common::RequestContext {
-    common::RequestContext {
-        request_id: context.request_id().as_str().into(),
-        correlation_id: context.correlation_id().as_str().into(),
-        actor: context.actor().into(),
-        deadline: context.deadline().as_str().into(),
-        idempotency_key: context.idempotency_key().as_str().into(),
-        schema_version: PROTOCOL_VERSION.into(),
-        site_scope: None,
-    }
 }
 
 fn gateway_service(value: Option<wire::GatewayServiceStatus>) -> Result<GatewayServiceStatus> {

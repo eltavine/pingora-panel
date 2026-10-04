@@ -1,6 +1,6 @@
 //! `LogsPort` over `observability-service` (ADR 0026).
 
-use crate::{command_context, time, ObservabilityClient};
+use crate::{time, ObservabilityClient};
 use async_trait::async_trait;
 use panel_application::{
     CommandContext, LogBatch, LogDeletion, LogDeletionState, LogFilter, LogKind, LogPage,
@@ -8,6 +8,7 @@ use panel_application::{
 };
 use panel_contracts::observability::v1::{self as wire, logs_client::LogsClient};
 use panel_errors::Result;
+use panel_service::command_context;
 use panel_service::{propagate_trace, request_context, response_error, status_error};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio_stream::StreamExt;

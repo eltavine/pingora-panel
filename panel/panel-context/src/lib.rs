@@ -6,8 +6,10 @@
 //! Commands, events and audit records carry the same identifiers, so the
 //! validation rules live here once instead of being repeated per adapter.
 
+mod command;
 mod trace;
 
+pub use command::CommandContext;
 pub use trace::{TraceContext, TRACESTATE_PROPAGATION_LIMIT};
 
 use chrono::DateTime;

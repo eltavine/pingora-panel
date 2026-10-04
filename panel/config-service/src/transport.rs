@@ -11,7 +11,7 @@ use panel_config_api::{
 };
 use panel_contracts::config::v1::{self as wire, configuration_server::Configuration};
 use panel_errors::Result;
-use panel_service::trace_context;
+use panel_service::{decode_command, decode_scope, trace_context};
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
@@ -43,7 +43,7 @@ impl Configuration for ConfigurationTransport {
         let trace = trace_context(request.metadata());
         let request = request.into_inner();
         let result: Result<_> = async {
-            let scope = codec::decode_scope(request.context, trace)?;
+            let scope = decode_scope(request.context, trace)?;
             let query = codec::decode_query(&request.query)?;
             self.port.read(scope, query).await
         }
@@ -69,7 +69,7 @@ impl Configuration for ConfigurationTransport {
         let trace = trace_context(request.metadata());
         let request = request.into_inner();
         let result: Result<_> = async {
-            let context = codec::decode_command(request.context, trace)?;
+            let context = decode_command(request.context, trace)?;
             let change = ConfigurationChange {
                 command: codec::decode_change(&request.command)?,
                 if_match: Some(request.if_match).filter(|tag| !tag.is_empty()),
@@ -98,7 +98,7 @@ impl Configuration for ConfigurationTransport {
         let trace = trace_context(request.metadata());
         let request = request.into_inner();
         let result: Result<_> = async {
-            let context = codec::decode_command(request.context, trace)?;
+            let context = decode_command(request.context, trace)?;
             let mut apply = ApplyRequest::new(request.expected_version);
             if !request.note.is_empty() {
                 apply = apply.with_note(request.note);

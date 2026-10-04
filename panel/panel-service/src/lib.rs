@@ -7,6 +7,7 @@
 //! Each block is independent, so a composition root uses only what its
 //! process exposes and keeps its own configuration and wiring.
 
+mod context;
 mod grpc;
 mod grpc_client;
 mod metrics;
@@ -15,10 +16,9 @@ mod probe;
 mod process;
 mod trace;
 
+pub use context::{command_context, decode_command, decode_scope, request_context};
 pub use grpc::{describe_peer, negotiate_with_peer, publish_grpc_health, ServiceInfoService};
-pub use grpc_client::{
-    loopback_channel, request_context, response_error, status_error, GrpcHealthCheck,
-};
+pub use grpc_client::{loopback_channel, response_error, status_error, GrpcHealthCheck};
 pub use metrics::{measured, register_readiness};
 pub use ops::{health_response, ops_router, LIVENESS_PATH, READINESS_PATH};
 pub use panel_environment::{require_loopback, Environment};

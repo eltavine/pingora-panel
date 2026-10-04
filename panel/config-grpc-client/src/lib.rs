@@ -15,7 +15,9 @@ use panel_application::{
 };
 use panel_contracts::config::v1::{self as wire, publication_client::PublicationClient};
 use panel_errors::{PanelError, Result, ValidationReport};
-use panel_service::{propagate_trace, status_error, GrpcHealthCheck};
+use panel_service::{
+    command_context, propagate_trace, request_context, status_error, GrpcHealthCheck,
+};
 use std::{net::IpAddr, time::Duration};
 use tonic::transport::{Channel, Endpoint};
 use uuid::Uuid;
@@ -136,7 +138,7 @@ impl GatewayUseCases for ConfigPublicationClient {
         document: ConfigDocument,
     ) -> Result<ValidationReport> {
         let request = wire::ValidateRequest {
-            context: Some(codec::encode_scope(&scope)),
+            context: Some(request_context(&scope)),
             document: Some(codec::encode_document(&document)),
         };
         let response = self
@@ -155,7 +157,7 @@ impl GatewayUseCases for ConfigPublicationClient {
         document: ConfigDocument,
     ) -> Result<PreparedDeployment> {
         let request = wire::PrepareRequest {
-            context: Some(codec::encode_command(&context)),
+            context: Some(command_context(&context)),
             document: Some(codec::encode_document(&document)),
         };
         let response = self
@@ -175,7 +177,7 @@ impl GatewayUseCases for ConfigPublicationClient {
         expected_active_hash: Option<ContentHash>,
     ) -> Result<ActivatedDeployment> {
         let request = wire::ActivateRequest {
-            context: Some(codec::encode_command(&context)),
+            context: Some(command_context(&context)),
             prepare_token,
             expected_active_hash: expected_active_hash.as_ref().map(encode_hash),
         };
@@ -191,7 +193,7 @@ impl GatewayUseCases for ConfigPublicationClient {
 
     async fn abort(&self, context: CommandContext, prepare_token: String) -> Result<AbortOutcome> {
         let request = wire::AbortRequest {
-            context: Some(codec::encode_command(&context)),
+            context: Some(command_context(&context)),
             prepare_token,
         };
         let response = self
@@ -210,7 +212,7 @@ impl GatewayUseCases for ConfigPublicationClient {
 
     async fn status_with_scope(&self, scope: RequestScope) -> Result<GatewayStatus> {
         let request = wire::GetGatewayStatusRequest {
-            context: Some(codec::encode_scope(&scope)),
+            context: Some(request_context(&scope)),
         };
         let response = self
             .client()
@@ -225,7 +227,7 @@ impl GatewayUseCases for ConfigPublicationClient {
     async fn activation_receipt(&self, key: &IdempotencyKey) -> Result<IdempotencyLookup> {
         let scope = standalone_scope("receipt")?;
         let request = wire::GetActivationReceiptRequest {
-            context: Some(codec::encode_scope(&scope)),
+            context: Some(request_context(&scope)),
             idempotency_key: key.as_str().into(),
         };
         let response = self

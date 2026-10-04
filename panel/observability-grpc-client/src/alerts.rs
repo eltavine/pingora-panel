@@ -1,6 +1,6 @@
 //! `AlertsPort` over `observability-service` (ADR 0027).
 
-use crate::{command_context, time, ObservabilityClient};
+use crate::{time, ObservabilityClient};
 use async_trait::async_trait;
 use panel_application::{
     AlertChannel, AlertChannelKind, AlertChannelSecret, AlertComparison, AlertMeasure,
@@ -10,6 +10,7 @@ use panel_application::{
 };
 use panel_contracts::observability::v1::{self as wire, alerts_client::AlertsClient};
 use panel_errors::{PanelError, Result};
+use panel_service::command_context;
 use panel_service::{request_context, response_error, status_error};
 use std::time::{Duration, UNIX_EPOCH};
 use zeroize::Zeroizing;

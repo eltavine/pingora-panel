@@ -1,6 +1,5 @@
 use async_trait::async_trait;
-use panel_context::RequestScope;
-use panel_contracts::{common::v1 as common, PROTOCOL_VERSION};
+use panel_contracts::common::v1 as common;
 use panel_errors::{ErrorCode, PanelError};
 use panel_health::{CheckOutcome, ComponentType, HealthCheck};
 use std::{net::IpAddr, time::Duration};
@@ -38,16 +37,6 @@ pub fn loopback_channel(
         .connect_timeout(connect_timeout)
         .timeout(timeout)
         .connect_lazy())
-}
-
-/// The context an internal request carries for `scope`.
-pub fn request_context(scope: &RequestScope) -> common::RequestContext {
-    common::RequestContext {
-        request_id: scope.request_id().as_str().into(),
-        correlation_id: scope.correlation_id().as_str().into(),
-        schema_version: PROTOCOL_VERSION.into(),
-        ..common::RequestContext::default()
-    }
 }
 
 /// The error a response reports, if it reports one.

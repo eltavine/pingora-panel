@@ -6,7 +6,7 @@ use panel_contracts::{
     config::v1::{self as wire, publication_server::Publication},
 };
 use panel_errors::{PanelError, Result};
-use panel_service::trace_context;
+use panel_service::{decode_command, decode_scope, trace_context};
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
@@ -42,7 +42,7 @@ where
         let trace = trace_context(request.metadata());
         let request = request.into_inner();
         let result: Result<_> = async {
-            let scope = codec::decode_scope(request.context, trace)?;
+            let scope = decode_scope(request.context, trace)?;
             let document = codec::decode_document(request.document)?;
             self.use_cases.validate_with_scope(scope, document).await
         }
@@ -66,7 +66,7 @@ where
         let trace = trace_context(request.metadata());
         let request = request.into_inner();
         let result: Result<_> = async {
-            let context = codec::decode_command(request.context, trace)?;
+            let context = decode_command(request.context, trace)?;
             let document = codec::decode_document(request.document)?;
             self.use_cases.prepare(context, document).await
         }
@@ -91,7 +91,7 @@ where
         let request = request.into_inner();
         let use_cases = Arc::clone(&self.use_cases);
         let result: Result<_> = async move {
-            let context = codec::decode_command(request.context, trace)?;
+            let context = decode_command(request.context, trace)?;
             let expected = request
                 .expected_active_hash
                 .map(|hash| decode_hash(Some(hash)))
@@ -129,7 +129,7 @@ where
         let trace = trace_context(request.metadata());
         let request = request.into_inner();
         let result: Result<_> = async {
-            let context = codec::decode_command(request.context, trace)?;
+            let context = decode_command(request.context, trace)?;
             self.use_cases.abort(context, request.prepare_token).await
         }
         .await;
@@ -152,7 +152,7 @@ where
         let trace = trace_context(request.metadata());
         let request = request.into_inner();
         let result: Result<_> = async {
-            let scope = codec::decode_scope(request.context, trace)?;
+            let scope = decode_scope(request.context, trace)?;
             self.use_cases.status_with_scope(scope).await
         }
         .await;
@@ -175,7 +175,7 @@ where
         let trace = trace_context(request.metadata());
         let request = request.into_inner();
         let result: Result<_> = async {
-            codec::decode_scope(request.context, trace)?;
+            decode_scope(request.context, trace)?;
             let key = IdempotencyKey::new(request.idempotency_key)?;
             codec::encode_lookup(&self.use_cases.activation_receipt(&key).await?)
         }

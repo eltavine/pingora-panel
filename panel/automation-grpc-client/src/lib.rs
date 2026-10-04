@@ -8,15 +8,11 @@ use panel_application::{CommandContext, RequestScope};
 use panel_certificate_api::{
     CertificateChange, CertificateOutput, CertificatePort, CertificateQuery,
 };
-use panel_contracts::{
-    automation::v1::{self as wire, certificates_client::CertificatesClient},
-    common::v1 as common,
-    PROTOCOL_VERSION,
-};
+use panel_contracts::automation::v1::{self as wire, certificates_client::CertificatesClient};
 use panel_errors::Result;
 use panel_service::{
-    loopback_channel, propagate_trace, request_context, response_error, status_error,
-    GrpcHealthCheck,
+    command_context, loopback_channel, propagate_trace, request_context, response_error,
+    status_error, GrpcHealthCheck,
 };
 use std::time::Duration;
 use tonic::transport::Channel;
@@ -104,15 +100,7 @@ impl CertificatePort for AutomationClient {
             serde_json::to_vec(&change.command).expect("certificate commands serialize"),
         );
         let message = wire::ChangeRequest {
-            context: Some(common::RequestContext {
-                request_id: context.request_id().as_str().into(),
-                correlation_id: context.correlation_id().as_str().into(),
-                actor: context.actor().into(),
-                deadline: context.deadline().as_str().into(),
-                idempotency_key: context.idempotency_key().as_str().into(),
-                schema_version: PROTOCOL_VERSION.into(),
-                site_scope: None,
-            }),
+            context: Some(command_context(&context)),
             if_match: change.if_match.unwrap_or_default(),
             command: command.to_vec(),
             ..wire::ChangeRequest::default()

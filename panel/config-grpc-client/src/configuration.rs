@@ -8,7 +8,7 @@ use panel_config_api::{
 };
 use panel_contracts::config::v1::{self as wire, configuration_client::ConfigurationClient};
 use panel_errors::Result;
-use panel_service::status_error;
+use panel_service::{command_context, request_context, status_error};
 use tonic::transport::Channel;
 
 fn output(
@@ -39,7 +39,7 @@ impl ConfigurationPort for ConfigPublicationClient {
         query: ConfigurationQuery,
     ) -> Result<ConfigurationOutput> {
         let request = wire::ReadRequest {
-            context: Some(codec::encode_scope(&scope)),
+            context: Some(request_context(&scope)),
             query: codec::encode_query(&query),
             ..wire::ReadRequest::default()
         };
@@ -59,7 +59,7 @@ impl ConfigurationPort for ConfigPublicationClient {
         change: ConfigurationChange,
     ) -> Result<ConfigurationOutput> {
         let request = wire::ChangeRequest {
-            context: Some(codec::encode_command(&context)),
+            context: Some(command_context(&context)),
             if_match: change.if_match.unwrap_or_default(),
             command: codec::encode_change(&change.command),
             ..wire::ChangeRequest::default()
@@ -77,7 +77,7 @@ impl ConfigurationPort for ConfigPublicationClient {
     async fn apply(&self, context: CommandContext, request: ApplyRequest) -> Result<ApplyOutcome> {
         let bypass = request.bypass.unwrap_or_default();
         let wire_request = wire::ApplyRequest {
-            context: Some(codec::encode_command(&context)),
+            context: Some(command_context(&context)),
             expected_version: request.expected_version,
             note: request.note.unwrap_or_default(),
             dry_run: request.dry_run,

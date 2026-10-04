@@ -5,22 +5,17 @@
 
 use gateway_proto_codec::{decode_hash, encode_hash};
 use panel_application::{
-    AbortOutcome, ActivatedDeployment, CommandContext, ConfigDocument, DeploymentOutcome,
-    GatewayStatus, IdempotencyKey, IdempotencyLookup, IdempotencyRecord, PreparedDeployment,
-    RequestDeadline, RequestId, RequestScope, SiteAccess, SiteScope, TraceContext,
+    AbortOutcome, ActivatedDeployment, ConfigDocument, DeploymentOutcome, GatewayStatus,
+    IdempotencyLookup, IdempotencyRecord, PreparedDeployment,
 };
 use panel_config_api::{ApplyOutcome, ConfigurationCommand, ConfigurationQuery, DraftInfo};
 use panel_contracts::{
     common::v1 as common,
     config::v1::{self as wire, activation_receipt::Outcome},
-    PROTOCOL_VERSION,
 };
 use panel_domain::RevisionId;
 use panel_errors::{PanelError, Result, ValidationReport};
 use std::time::SystemTime;
-
-/// Requests issued without a human actor name the calling service instead.
-pub const SERVICE_ACTOR: &str = "service";
 
 pub fn encode_document(document: &ConfigDocument) -> wire::ConfigDocument {
     wire::ConfigDocument {
@@ -34,99 +29,6 @@ pub fn decode_document(value: Option<wire::ConfigDocument>) -> Result<ConfigDocu
     let value =
         value.ok_or_else(|| PanelError::invalid_argument("configuration document is required"))?;
     ConfigDocument::new(value.schema_version, value.media_type, value.content)
-}
-
-pub fn encode_command(context: &CommandContext) -> common::RequestContext {
-    common::RequestContext {
-        request_id: context.request_id().as_str().into(),
-        correlation_id: context.correlation_id().as_str().into(),
-        actor: context.actor().into(),
-        deadline: context.deadline().as_str().into(),
-        idempotency_key: context.idempotency_key().as_str().into(),
-        schema_version: PROTOCOL_VERSION.into(),
-        site_scope: context.site_scope().map(encode_site_scope),
-    }
-}
-
-fn encode_site_scope(scope: &SiteScope) -> common::SiteScope {
-    common::SiteScope {
-        unrestricted: scope.unrestricted.clone(),
-        limited: scope
-            .limited
-            .iter()
-            .map(|access| common::SiteAccess {
-                permission: access.permission.clone(),
-                groups: access.groups.clone(),
-                sites: access.sites.clone(),
-            })
-            .collect(),
-    }
-}
-
-fn decode_site_scope(scope: common::SiteScope) -> SiteScope {
-    SiteScope {
-        unrestricted: scope.unrestricted,
-        limited: scope
-            .limited
-            .into_iter()
-            .map(|access| SiteAccess {
-                permission: access.permission,
-                groups: access.groups,
-                sites: access.sites,
-            })
-            .collect(),
-    }
-}
-
-/// A command's context; `trace` comes from transport metadata.
-pub fn decode_command(
-    value: Option<common::RequestContext>,
-    trace: Option<TraceContext>,
-) -> Result<CommandContext> {
-    let value = value.ok_or_else(|| PanelError::invalid_argument("request context is required"))?;
-    let request_id = RequestId::new(value.request_id)?;
-    let correlation_id = if value.correlation_id.is_empty() {
-        request_id.clone()
-    } else {
-        RequestId::new(value.correlation_id)?
-    };
-    Ok(CommandContext::new(
-        request_id,
-        correlation_id,
-        value.actor,
-        RequestDeadline::new(value.deadline)?,
-        IdempotencyKey::new(value.idempotency_key)?,
-    )?
-    .with_trace_context(trace)
-    .with_site_scope(value.site_scope.map(decode_site_scope)))
-}
-
-pub fn encode_scope(scope: &RequestScope) -> common::RequestContext {
-    common::RequestContext {
-        request_id: scope.request_id().as_str().into(),
-        correlation_id: scope.correlation_id().as_str().into(),
-        actor: SERVICE_ACTOR.into(),
-        deadline: String::new(),
-        idempotency_key: String::new(),
-        schema_version: PROTOCOL_VERSION.into(),
-        site_scope: scope.site_scope().map(encode_site_scope),
-    }
-}
-
-/// A query's scope; `trace` comes from transport metadata.
-pub fn decode_scope(
-    value: Option<common::RequestContext>,
-    trace: Option<TraceContext>,
-) -> Result<RequestScope> {
-    let value = value.ok_or_else(|| PanelError::invalid_argument("request context is required"))?;
-    let scope = RequestScope::new(RequestId::new(value.request_id)?)
-        .with_trace_context(trace)
-        .with_site_scope(value.site_scope.map(decode_site_scope));
-    Ok(if value.correlation_id.is_empty() {
-        scope
-    } else {
-        scope.with_correlation_id(RequestId::new(value.correlation_id)?)
-    })
 }
 
 pub fn encode_report(report: &ValidationReport) -> wire::ValidationReport {
@@ -423,41 +325,6 @@ pub fn decode_error(value: Option<common::Error>) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-
-    #[test]
-    fn site_scopes_travel_with_commands_and_queries() {
-        let scope = SiteScope {
-            unrestricted: vec!["config.read".into()],
-            limited: vec![SiteAccess {
-                permission: "config.write".into(),
-                groups: vec!["shop".into()],
-                sites: Vec::new(),
-            }],
-        };
-        let command = CommandContext::new(
-            RequestId::new("request-1").unwrap(),
-            RequestId::new("flow-1").unwrap(),
-            "keeper",
-            RequestDeadline::new("2099-01-01T00:00:00Z").unwrap(),
-            IdempotencyKey::new("key-1").unwrap(),
-        )
-        .unwrap()
-        .with_site_scope(Some(scope.clone()));
-        let decoded = decode_command(Some(encode_command(&command)), None).unwrap();
-        assert_eq!(decoded.site_scope(), Some(&scope));
-        assert_eq!(decoded.scope().site_scope(), Some(&scope));
-        let query = RequestScope::new(RequestId::new("request-2").unwrap())
-            .with_site_scope(Some(scope.clone()));
-        let decoded = decode_scope(Some(encode_scope(&query)), None).unwrap();
-        assert_eq!(decoded.site_scope(), Some(&scope));
-        let everywhere = RequestScope::new(RequestId::new("request-3").unwrap());
-        assert_eq!(
-            decode_scope(Some(encode_scope(&everywhere)), None)
-                .unwrap()
-                .site_scope(),
-            None
-        );
-    }
     use super::*;
     use panel_application::ContentHash;
     use panel_errors::Diagnostic;
@@ -472,29 +339,6 @@ mod tests {
         assert_eq!(
             decode_document(Some(encode_document(&document))).unwrap(),
             document
-        );
-
-        let trace = TraceContext::parse(
-            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
-            None,
-        );
-        let command = CommandContext::new(
-            RequestId::new("req-1").unwrap(),
-            RequestId::new("flow-1").unwrap(),
-            "operator",
-            RequestDeadline::new("2099-01-01T00:00:00Z").unwrap(),
-            IdempotencyKey::new("key-1").unwrap(),
-        )
-        .unwrap()
-        .with_trace_context(trace.clone());
-        assert_eq!(
-            decode_command(Some(encode_command(&command)), trace.clone()).unwrap(),
-            command
-        );
-        let scope = command.scope();
-        assert_eq!(
-            decode_scope(Some(encode_scope(&scope)), trace).unwrap(),
-            scope
         );
 
         let report = ValidationReport::from_diagnostics(vec![Diagnostic::error("BAD", "bad")]);
@@ -554,9 +398,6 @@ mod tests {
     #[test]
     fn incomplete_messages_are_rejected() {
         assert!(decode_document(None).is_err());
-        assert!(decode_command(None, None).is_err());
-        assert!(decode_command(Some(common::RequestContext::default()), None).is_err());
-        assert!(decode_scope(None, None).is_err());
         assert!(decode_prepared(None).is_err());
         assert!(decode_lookup(0, None).is_err());
         assert!(decode_lookup(3, None).is_err());
