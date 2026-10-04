@@ -7,10 +7,10 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use chrono::{DateTime, Utc};
 use panel_errors::{PanelError, Result};
 use panel_event_contracts::observability::v1 as event;
-use panel_postgres::{storage_error, EventLog, ServiceDatabase};
 use panel_secrets::{Sealed, SecretVault};
+use panel_sqlite::{storage_error, EventLog, ServiceDatabase};
 use serde::{Deserialize, Serialize};
-use sqlx::{postgres::PgRow, PgPool, Row};
+use sqlx::{sqlite::SqliteRow, Row};
 use std::sync::Arc;
 use url::Url;
 use zeroize::Zeroizing;
@@ -95,7 +95,7 @@ fn corrupt(what: &str) -> PanelError {
     PanelError::corrupt_state(format!("a stored alert channel has an invalid {what}"))
 }
 
-fn record(row: &PgRow) -> Result<ChannelRecord> {
+fn record(row: &SqliteRow) -> Result<ChannelRecord> {
     let kind: String = row.try_get("kind").map_err(storage_error)?;
     let version: i64 = row.try_get("version").map_err(storage_error)?;
     Ok(ChannelRecord {
@@ -117,11 +117,11 @@ macro_rules! columns {
     };
 }
 
-/// Alert channels in the service schema. Changes write their
+/// Alert channels in the module's database. Changes write their
 /// `observability.alert_channel.*` events in the same transaction.
 #[derive(Clone)]
 pub struct AlertChannels {
-    pool: PgPool,
+    database: ServiceDatabase,
     events: EventLog,
     vault: Option<Arc<dyn SecretVault>>,
 }
@@ -133,7 +133,7 @@ impl AlertChannels {
         vault: Option<Arc<dyn SecretVault>>,
     ) -> Self {
         Self {
-            pool: database.pool().clone(),
+            database: database.clone(),
             events,
             vault,
         }
@@ -164,7 +164,7 @@ impl AlertChannels {
             columns!(),
             " FROM alert_channels ORDER BY channel_id"
         ))
-        .fetch_all(&self.pool)
+        .fetch_all(self.database.pool())
         .await
         .map_err(storage_error)?
         .iter()
@@ -192,10 +192,10 @@ impl AlertChannels {
             let sealed = self.seal(&id, &url, &secret).await?;
             let now = Utc::now();
             let target = origin(&url);
-            let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+            let mut transaction = self.database.begin().await?;
             let inserted = sqlx::query(
                 "INSERT INTO alert_channels (channel_id, kind, target, sealed, version, \
-                 created_at, updated_at) VALUES ($1, 'webhook', $2, $3, 1, $4, $4) \
+                 created_at, updated_at) VALUES (?1, 'webhook', ?2, ?3, 1, ?4, ?4) \
                  ON CONFLICT (channel_id) DO NOTHING",
             )
             .bind(&id)
@@ -255,11 +255,11 @@ impl AlertChannels {
         version: u64,
     ) -> Result<(ChannelRecord, Zeroizing<String>)> {
         let result = async {
-            let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+            let mut transaction = self.database.begin().await?;
             let row = sqlx::query(concat!(
                 "SELECT ",
                 columns!(),
-                ", sealed FROM alert_channels WHERE channel_id = $1 FOR UPDATE"
+                ", sealed FROM alert_channels WHERE channel_id = ?1"
             ))
             .bind(id)
             .fetch_optional(&mut *transaction)
@@ -291,8 +291,8 @@ impl AlertChannels {
                 ..current
             };
             sqlx::query(
-                "UPDATE alert_channels SET target = $2, sealed = $3, version = $4, \
-                 updated_at = $5 WHERE channel_id = $1",
+                "UPDATE alert_channels SET target = ?2, sealed = ?3, version = ?4, \
+                 updated_at = ?5 WHERE channel_id = ?1",
             )
             .bind(id)
             .bind(&rotated.target)
@@ -331,14 +331,13 @@ impl AlertChannels {
     /// Deletes a channel no rule names, with its notifications.
     pub async fn delete(&self, cause: Cause<'_>, id: &str, version: u64) -> Result<()> {
         let result = async {
-            let mut transaction = self.pool.begin().await.map_err(storage_error)?;
-            let current: Option<i64> = sqlx::query_scalar(
-                "SELECT version FROM alert_channels WHERE channel_id = $1 FOR UPDATE",
-            )
-            .bind(id)
-            .fetch_optional(&mut *transaction)
-            .await
-            .map_err(storage_error)?;
+            let mut transaction = self.database.begin().await?;
+            let current: Option<i64> =
+                sqlx::query_scalar("SELECT version FROM alert_channels WHERE channel_id = ?1")
+                    .bind(id)
+                    .fetch_optional(&mut *transaction)
+                    .await
+                    .map_err(storage_error)?;
             let current = current
                 .and_then(|version| u64::try_from(version).ok())
                 .ok_or_else(|| PanelError::not_found(format!("there is no alert channel {id}")))?;
@@ -348,7 +347,7 @@ impl AlertChannels {
                 )));
             }
             let rules: Vec<String> = sqlx::query_scalar(
-                "SELECT rule_id FROM alert_rule_channels WHERE channel_id = $1 ORDER BY rule_id",
+                "SELECT rule_id FROM alert_rule_channels WHERE channel_id = ?1 ORDER BY rule_id",
             )
             .bind(id)
             .fetch_all(&mut *transaction)
@@ -360,7 +359,7 @@ impl AlertChannels {
                     rules.join(", ")
                 )));
             }
-            sqlx::query("DELETE FROM alert_channels WHERE channel_id = $1")
+            sqlx::query("DELETE FROM alert_channels WHERE channel_id = ?1")
                 .bind(id)
                 .execute(&mut *transaction)
                 .await
@@ -400,9 +399,9 @@ impl AlertChannels {
     /// Where channel `id` posts and the secret it signs with.
     pub(crate) async fn destination(&self, id: &str) -> Result<Destination> {
         let sealed: Option<String> =
-            sqlx::query_scalar("SELECT sealed FROM alert_channels WHERE channel_id = $1")
+            sqlx::query_scalar("SELECT sealed FROM alert_channels WHERE channel_id = ?1")
                 .bind(id)
-                .fetch_optional(&self.pool)
+                .fetch_optional(self.database.pool())
                 .await
                 .map_err(storage_error)?;
         let sealed = sealed

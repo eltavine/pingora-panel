@@ -20,8 +20,8 @@ pub use service::AlertsService;
 
 use panel_errors::{PanelError, Result};
 use panel_events::{EventData, Principal, RequestScope};
-use panel_postgres::{EventLog, PgOutbox};
-use sqlx::PgConnection;
+use panel_sqlite::{EventLog, SqliteOutbox};
+use sqlx::SqliteConnection;
 
 /// Who changed something, and within which request.
 #[derive(Clone, Copy)]
@@ -33,13 +33,13 @@ pub struct Cause<'a> {
 /// Appends an event about `aggregate` in the transaction of the change.
 async fn publish<E: EventData>(
     events: &EventLog,
-    connection: &mut PgConnection,
+    connection: &mut SqliteConnection,
     cause: Cause<'_>,
     aggregate: (&str, &str),
     data: &E,
 ) -> Result<()> {
     let event = events.event_by(aggregate, cause.scope, cause.principal, data)?;
-    PgOutbox::append(connection, &event).await
+    SqliteOutbox::append(connection, &event).await
 }
 
 /// The data of a `*.refused` event.

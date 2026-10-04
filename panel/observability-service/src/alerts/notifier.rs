@@ -7,9 +7,9 @@ use super::{
 };
 use chrono::{DateTime, TimeDelta, Utc};
 use panel_errors::{PanelError, Result};
-use panel_postgres::{storage_error, ServiceDatabase};
+use panel_sqlite::{storage_error, ServiceDatabase};
 use reqwest::{header, redirect::Policy, StatusCode};
-use sqlx::{PgPool, Row};
+use sqlx::Row;
 use standardwebhooks::Webhook;
 use std::{future::Future, sync::Arc, time::Duration};
 use tokio_util::sync::CancellationToken;
@@ -68,7 +68,7 @@ pub struct NotificationRecord {
 /// Sends notifications.
 #[derive(Clone)]
 pub struct Notifier {
-    pool: PgPool,
+    database: ServiceDatabase,
     channels: AlertChannels,
     notices: Arc<Notices>,
     http: reqwest::Client,
@@ -90,7 +90,7 @@ impl Notifier {
                 PanelError::internal(format!("cannot build an HTTP client: {error}"))
             })?;
         Ok(Self {
-            pool: database.pool().clone(),
+            database: database.clone(),
             channels,
             notices,
             http,
@@ -137,16 +137,18 @@ impl Notifier {
         }
     }
 
-    /// Claims one due notification and attempts it; `false` when none is
-    /// due.
+    /// Attempts the notification due first; `false` when none is due. One
+    /// task delivers, and no transaction waits on the receiver: a delivery
+    /// cut short before its outcome is recorded is attempted again, and
+    /// receivers recognize it by its `webhook-id`.
     pub async fn deliver_next(&self) -> Result<bool> {
-        let mut transaction = self.pool.begin().await.map_err(storage_error)?;
         let Some(row) = sqlx::query(
-            "SELECT notification_id, channel_id, payload::text AS payload, attempts, created_at \
-             FROM alert_notifications WHERE state = 'queued' AND next_attempt_at <= now() \
-             ORDER BY next_attempt_at LIMIT 1 FOR UPDATE SKIP LOCKED",
+            "SELECT notification_id, channel_id, payload, attempts, created_at \
+             FROM alert_notifications WHERE state = 'queued' AND next_attempt_at <= ?1 \
+             ORDER BY next_attempt_at LIMIT 1",
         )
-        .fetch_optional(&mut *transaction)
+        .bind(Utc::now())
+        .fetch_optional(self.database.pool())
         .await
         .map_err(storage_error)?
         else {
@@ -177,8 +179,8 @@ impl Notifier {
             }
         };
         sqlx::query(
-            "UPDATE alert_notifications SET state = $2, attempts = $3, next_attempt_at = $4, \
-             delivered_at = $5, last_failure = $6 WHERE notification_id = $1",
+            "UPDATE alert_notifications SET state = ?2, attempts = ?3, next_attempt_at = ?4, \
+             delivered_at = ?5, last_failure = ?6 WHERE notification_id = ?1 AND state = 'queued'",
         )
         .bind(id)
         .bind(state)
@@ -186,10 +188,9 @@ impl Notifier {
         .bind(next_attempt_at)
         .bind(delivered_at)
         .bind(failure)
-        .execute(&mut *transaction)
+        .execute(self.database.pool())
         .await
         .map_err(storage_error)?;
-        transaction.commit().await.map_err(storage_error)?;
         Ok(true)
     }
 
@@ -229,13 +230,13 @@ impl Notifier {
         sqlx::query(
             "SELECT notification_id, rule_id, channel_id, kind, state, attempts, created_at, \
              next_attempt_at, delivered_at, last_failure FROM alert_notifications \
-             WHERE ($1::text IS NULL OR rule_id = $1) AND ($2::text IS NULL OR channel_id = $2) \
-             ORDER BY created_at DESC, notification_id DESC LIMIT $3",
+             WHERE (?1 IS NULL OR rule_id = ?1) AND (?2 IS NULL OR channel_id = ?2) \
+             ORDER BY created_at DESC, notification_id DESC LIMIT ?3",
         )
         .bind(rule)
         .bind(channel)
         .bind(i64::from(limit))
-        .fetch_all(&self.pool)
+        .fetch_all(self.database.pool())
         .await
         .map_err(storage_error)?
         .iter()
@@ -261,10 +262,10 @@ impl Notifier {
     pub async fn purge(&self, now: DateTime<Utc>) -> Result<u64> {
         Ok(sqlx::query(
             "DELETE FROM alert_notifications WHERE state <> 'queued' \
-             AND COALESCE(delivered_at, created_at) < $1",
+             AND COALESCE(delivered_at, created_at) < ?1",
         )
         .bind(now - KEEP)
-        .execute(&self.pool)
+        .execute(self.database.pool())
         .await
         .map_err(storage_error)?
         .rows_affected())

@@ -15,7 +15,7 @@ use panel_contracts::{
 use panel_domain::{RouteId, SiteId, UpstreamPoolId};
 use panel_errors::{PanelError, Result};
 use panel_events::{RequestId, RequestScope};
-use panel_postgres::EventLog;
+use panel_sqlite::EventLog;
 use std::time::{Duration, SystemTime};
 use tonic::{Request, Response, Status};
 

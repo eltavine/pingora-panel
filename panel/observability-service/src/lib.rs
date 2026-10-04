@@ -31,13 +31,14 @@ use panel_control_runtime::{ControlPlaneProcess, DefaultAddresses, ProcessSettin
 use panel_errors::{PanelError, Result};
 use panel_platform::{Capability, ServiceName};
 use panel_platform_codec::protocol_range;
-use panel_postgres::{EventLog, SchemaMigration, SqlIdentifier};
 use panel_secrets::{EnvelopeVault, SecretVault};
 use panel_service::Environment;
+use panel_sqlite::{EventLog, SchemaMigration};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 pub const SERVICE: &str = "observability-service";
-pub const SCHEMA: &str = "observability";
+/// The module's SQLite file in the data directory, `observability.db`.
+pub const MODULE: &str = "observability";
 
 /// Where Prometheus, which keeps the gateway's metrics, answers queries.
 pub const PROMETHEUS_URL_ENV: &str = "PINGORA_PANEL_PROMETHEUS_URL";
@@ -107,21 +108,21 @@ pub fn process(
             .map(str::to_owned)
     });
     let service = ServiceName::new(SERVICE)?;
-    let process = ControlPlaneProcess::new(
+    let process = ControlPlaneProcess::on_sqlite(
         service.clone(),
         env!("CARGO_PKG_VERSION"),
         settings,
-        SqlIdentifier::new(SCHEMA)?,
+        MODULE,
     )?;
-    let events = EventLog::new(process.database(), service);
+    let events = EventLog::new(process.sqlite(), service);
     let notices = Arc::new(Notices::new(console));
-    let rules = AlertRules::new(process.database(), events.clone(), Arc::clone(&notices));
-    let channels = AlertChannels::new(process.database(), events, vault);
-    let notifier = Notifier::new(process.database(), channels.clone(), notices)?;
+    let rules = AlertRules::new(process.sqlite(), events.clone(), Arc::clone(&notices));
+    let channels = AlertChannels::new(process.sqlite(), events, vault);
+    let notifier = Notifier::new(process.sqlite(), channels.clone(), notices)?;
     let evaluator = Evaluator::new(rules.clone(), prometheus(&url)?, SERVICE)?;
     let alerts = AlertsService::new(rules, channels, notifier.clone());
     Ok(process
-        .with_migrations(MIGRATIONS)
+        .with_sqlite_migrations(MIGRATIONS)
         .with_protocol(protocol_range(OBSERVABILITY_V1))
         .with_capability(Capability::new("observability.traffic", "1")?)
         .with_capability(Capability::new("observability.logs", "1")?)

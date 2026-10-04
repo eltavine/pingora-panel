@@ -1,4 +1,4 @@
-//! Alert rules in the service schema, with where each stands.
+//! Alert rules in the module's database, with where each stands.
 
 use super::{
     expected,
@@ -10,8 +10,8 @@ use chrono::{DateTime, Utc};
 use panel_domain::{RouteId, SiteId, UpstreamPoolId};
 use panel_errors::{PanelError, Result};
 use panel_event_contracts::observability::v1 as event;
-use panel_postgres::{storage_error, EventLog, ServiceDatabase};
-use sqlx::{postgres::PgRow, PgConnection, PgPool, Row};
+use panel_sqlite::{storage_error, EventLog, ServiceDatabase};
+use sqlx::{sqlite::SqliteRow, Row, SqliteConnection};
 use std::{sync::Arc, time::Duration};
 
 const AGGREGATE: &str = "alert_rule";
@@ -75,11 +75,16 @@ macro_rules! select {
         "SELECT r.rule_id, r.name, r.description, r.measure, r.comparison, r.threshold, \
          r.pending_seconds, r.site_id, r.route_id, r.upstream_id, r.severity, r.enabled, \
          r.version, r.created_at, r.updated_at, \
-         ARRAY(SELECT c.channel_id FROM alert_rule_channels c WHERE c.rule_id = r.rule_id \
-         ORDER BY c.channel_id) AS channels, \
+         (SELECT json_group_array(c.channel_id ORDER BY c.channel_id) \
+          FROM alert_rule_channels c WHERE c.rule_id = r.rule_id) AS channels, \
          s.state, s.active_since, s.fired_at, s.value, s.evaluated_at, s.evaluation_error \
          FROM alert_rules r LEFT JOIN alert_states s ON s.rule_id = r.rule_id"
     };
+}
+
+/// A list bound as the JSON array `json_each` reads.
+fn json_list(values: &[String]) -> Result<String> {
+    serde_json::to_string(values).map_err(|_| PanelError::internal("a list does not serialize"))
 }
 
 fn corrupt(what: &str) -> PanelError {
@@ -93,7 +98,7 @@ fn id<T, E>(
     value.map(parse).transpose().map_err(|_| corrupt("scope"))
 }
 
-fn record(row: &PgRow) -> Result<RuleRecord> {
+fn record(row: &SqliteRow) -> Result<RuleRecord> {
     let text = |column: &str| row.try_get::<String, _>(column).map_err(storage_error);
     let pending: i32 = row.try_get("pending_seconds").map_err(storage_error)?;
     let version: i64 = row.try_get("version").map_err(storage_error)?;
@@ -121,7 +126,11 @@ fn record(row: &PgRow) -> Result<RuleRecord> {
             )?,
             severity: Severity::parse(&text("severity")?).ok_or_else(|| corrupt("severity"))?,
             enabled: row.try_get("enabled").map_err(storage_error)?,
-            channels: row.try_get("channels").map_err(storage_error)?,
+            channels: serde_json::from_str(
+                &row.try_get::<String, _>("channels")
+                    .map_err(storage_error)?,
+            )
+            .map_err(|_| corrupt("channel list"))?,
         },
         version: u64::try_from(version).map_err(|_| corrupt("version"))?,
         created_at: row.try_get("created_at").map_err(storage_error)?,
@@ -141,11 +150,11 @@ fn record(row: &PgRow) -> Result<RuleRecord> {
     })
 }
 
-/// Alert rules in the service schema. Changes write their
+/// Alert rules in the module's database. Changes write their
 /// `observability.alert_rule.*` events in the same transaction.
 #[derive(Clone)]
 pub struct AlertRules {
-    pool: PgPool,
+    database: ServiceDatabase,
     events: EventLog,
     notices: Arc<Notices>,
 }
@@ -153,7 +162,7 @@ pub struct AlertRules {
 impl AlertRules {
     pub fn new(database: &ServiceDatabase, events: EventLog, notices: Arc<Notices>) -> Self {
         Self {
-            pool: database.pool().clone(),
+            database: database.clone(),
             events,
             notices,
         }
@@ -161,7 +170,7 @@ impl AlertRules {
 
     pub async fn list(&self) -> Result<Vec<RuleRecord>> {
         sqlx::query(concat!(select!(), " ORDER BY r.rule_id"))
-            .fetch_all(&self.pool)
+            .fetch_all(self.database.pool())
             .await
             .map_err(storage_error)?
             .iter()
@@ -170,9 +179,9 @@ impl AlertRules {
     }
 
     pub async fn get(&self, id: &str) -> Result<RuleRecord> {
-        sqlx::query(concat!(select!(), " WHERE r.rule_id = $1"))
+        sqlx::query(concat!(select!(), " WHERE r.rule_id = ?1"))
             .bind(id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(self.database.pool())
             .await
             .map_err(storage_error)?
             .map(|row| record(&row))
@@ -192,9 +201,9 @@ impl AlertRules {
             let id = identifier(id, "a rule ID")?;
             spec.validate()?;
             let now = Utc::now();
-            let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+            let mut transaction = self.database.begin().await?;
             let current: Option<i64> =
-                sqlx::query_scalar("SELECT version FROM alert_rules WHERE rule_id = $1 FOR UPDATE")
+                sqlx::query_scalar("SELECT version FROM alert_rules WHERE rule_id = ?1")
                     .bind(&id)
                     .fetch_optional(&mut *transaction)
                     .await
@@ -220,9 +229,10 @@ impl AlertRules {
                 (Some(current), Some(_)) => current + 1,
             };
             let known: Vec<String> = sqlx::query_scalar(
-                "SELECT channel_id FROM alert_channels WHERE channel_id = ANY($1)",
+                "SELECT channel_id FROM alert_channels \
+                 WHERE channel_id IN (SELECT value FROM json_each(?1))",
             )
-            .bind(&spec.channels)
+            .bind(json_list(&spec.channels)?)
             .fetch_all(&mut *transaction)
             .await
             .map_err(storage_error)?;
@@ -239,11 +249,11 @@ impl AlertRules {
                 "INSERT INTO alert_rules (rule_id, name, description, measure, comparison, \
                  threshold, pending_seconds, site_id, route_id, upstream_id, severity, enabled, \
                  version, created_at, updated_at) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14) \
-                 ON CONFLICT (rule_id) DO UPDATE SET name = $2, description = $3, measure = $4, \
-                 comparison = $5, threshold = $6, pending_seconds = $7, site_id = $8, \
-                 route_id = $9, upstream_id = $10, severity = $11, enabled = $12, version = $13, \
-                 updated_at = $14",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14) \
+                 ON CONFLICT (rule_id) DO UPDATE SET name = ?2, description = ?3, measure = ?4, \
+                 comparison = ?5, threshold = ?6, pending_seconds = ?7, site_id = ?8, \
+                 route_id = ?9, upstream_id = ?10, severity = ?11, enabled = ?12, version = ?13, \
+                 updated_at = ?14",
             )
             .bind(&id)
             .bind(&spec.name)
@@ -262,17 +272,17 @@ impl AlertRules {
             .execute(&mut *transaction)
             .await
             .map_err(storage_error)?;
-            sqlx::query("DELETE FROM alert_rule_channels WHERE rule_id = $1")
+            sqlx::query("DELETE FROM alert_rule_channels WHERE rule_id = ?1")
                 .bind(&id)
                 .execute(&mut *transaction)
                 .await
                 .map_err(storage_error)?;
             sqlx::query(
                 "INSERT INTO alert_rule_channels (rule_id, channel_id) \
-                 SELECT $1, channel FROM unnest($2::text[]) AS channel",
+                 SELECT ?1, value FROM json_each(?2)",
             )
             .bind(&id)
-            .bind(&spec.channels)
+            .bind(json_list(&spec.channels)?)
             .execute(&mut *transaction)
             .await
             .map_err(storage_error)?;
@@ -325,8 +335,8 @@ impl AlertRules {
     /// keep it open.
     pub async fn delete(&self, cause: Cause<'_>, id: &str, version: u64) -> Result<()> {
         let result = async {
-            let mut transaction = self.pool.begin().await.map_err(storage_error)?;
-            let rule = sqlx::query(concat!(select!(), " WHERE r.rule_id = $1 FOR UPDATE OF r"))
+            let mut transaction = self.database.begin().await?;
+            let rule = sqlx::query(concat!(select!(), " WHERE r.rule_id = ?1"))
                 .bind(id)
                 .fetch_optional(&mut *transaction)
                 .await
@@ -344,7 +354,7 @@ impl AlertRules {
                 self.resolve(&mut transaction, cause, &rule, fired_at, Utc::now())
                     .await?;
             }
-            sqlx::query("DELETE FROM alert_rules WHERE rule_id = $1")
+            sqlx::query("DELETE FROM alert_rules WHERE rule_id = ?1")
                 .bind(id)
                 .execute(&mut *transaction)
                 .await
@@ -374,7 +384,7 @@ impl AlertRules {
     /// records it.
     pub(crate) async fn resolve(
         &self,
-        connection: &mut PgConnection,
+        connection: &mut SqliteConnection,
         cause: Cause<'_>,
         rule: &RuleRecord,
         fired_at: DateTime<Utc>,
@@ -406,7 +416,7 @@ impl AlertRules {
     /// Queues the notifications of `rule`'s alert firing and records it.
     pub(crate) async fn fire(
         &self,
-        connection: &mut PgConnection,
+        connection: &mut SqliteConnection,
         cause: Cause<'_>,
         rule: &RuleRecord,
         since: DateTime<Utc>,
@@ -442,15 +452,15 @@ impl AlertRules {
     /// Records where `rule` stands after an evaluation at `now`.
     pub(crate) async fn store_state(
         &self,
-        connection: &mut PgConnection,
+        connection: &mut SqliteConnection,
         rule: &RuleRecord,
         now: DateTime<Utc>,
     ) -> Result<()> {
         sqlx::query(
             "INSERT INTO alert_states (rule_id, state, active_since, fired_at, value, \
-             evaluated_at, evaluation_error) VALUES ($1, $2, $3, $4, $5, $6, $7) \
-             ON CONFLICT (rule_id) DO UPDATE SET state = $2, active_since = $3, fired_at = $4, \
-             value = $5, evaluated_at = $6, evaluation_error = $7",
+             evaluated_at, evaluation_error) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+             ON CONFLICT (rule_id) DO UPDATE SET state = ?2, active_since = ?3, fired_at = ?4, \
+             value = ?5, evaluated_at = ?6, evaluation_error = ?7",
         )
         .bind(&rule.id)
         .bind(rule.state.name())
@@ -465,7 +475,7 @@ impl AlertRules {
         Ok(())
     }
 
-    pub(crate) fn pool(&self) -> &PgPool {
-        &self.pool
+    pub(crate) fn database(&self) -> &ServiceDatabase {
+        &self.database
     }
 }

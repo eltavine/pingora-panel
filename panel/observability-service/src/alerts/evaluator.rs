@@ -1,5 +1,4 @@
-//! Evaluates alert rules every 30 seconds on the instance that holds the
-//! schema's alert lock (ADR 0027).
+//! Evaluates alert rules every 30 seconds (ADR 0027).
 
 use super::{
     measures,
@@ -10,20 +9,14 @@ use super::{
 use chrono::{DateTime, TimeDelta, Utc};
 use panel_errors::{PanelError, Result};
 use panel_events::{Actor, Principal, RequestId, RequestScope};
-use panel_postgres::storage_error;
+use panel_sqlite::storage_error;
 use prometheus_http_query::Client;
-use sqlx::{
-    pool::PoolConnection,
-    postgres::{PgAdvisoryLock, PgAdvisoryLockGuard},
-    Either, Postgres,
-};
 use std::{sync::Arc, time::Duration};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 /// How often rules are evaluated.
 pub const INTERVAL: Duration = Duration::from_secs(30);
-const LOCK: &str = "pingora-panel observability alert evaluation";
 
 /// What an evaluation decided for one rule.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -93,22 +86,8 @@ impl Evaluator {
         })
     }
 
-    async fn try_lead(&self) -> Result<Option<PgAdvisoryLockGuard<PoolConnection<Postgres>>>> {
-        let connection = self.rules.pool().acquire().await.map_err(storage_error)?;
-        Ok(
-            match PgAdvisoryLock::new(LOCK)
-                .try_acquire(connection)
-                .await
-                .map_err(storage_error)?
-            {
-                Either::Left(guard) => Some(guard),
-                Either::Right(_) => None,
-            },
-        )
-    }
-
-    /// Evaluates rules every 30 seconds while this instance leads, until
-    /// `shutdown`; `migrated` resolves once the schema is ready.
+    /// Evaluates rules every 30 seconds until `shutdown`; `migrated`
+    /// resolves once the schema is ready.
     pub async fn run(
         self,
         migrated: impl std::future::Future<Output = bool>,
@@ -118,44 +97,16 @@ impl Evaluator {
             () = shutdown.cancelled() => return,
             ready = migrated => if !ready { return },
         }
-        let mut leadership = None;
         let mut ticker = tokio::time::interval(INTERVAL);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
-                () = shutdown.cancelled() => break,
+                () = shutdown.cancelled() => return,
                 _ = ticker.tick() => {}
-            }
-            if let Some(guard) = leadership.as_mut() {
-                let guard: &mut PgAdvisoryLockGuard<PoolConnection<Postgres>> = guard;
-                if sqlx::query("SELECT 1")
-                    .execute(guard.as_mut())
-                    .await
-                    .is_err()
-                {
-                    tracing::warn!("alert evaluation lost its lock; standing by");
-                    leadership = None;
-                }
-            }
-            if leadership.is_none() {
-                match self.try_lead().await {
-                    Ok(Some(guard)) => {
-                        tracing::info!("evaluating alert rules");
-                        leadership = Some(guard);
-                    }
-                    Ok(None) => continue,
-                    Err(error) => {
-                        tracing::warn!(error = %error.message, "cannot take the alert lock");
-                        continue;
-                    }
-                }
             }
             if let Err(error) = self.evaluate(Utc::now()).await {
                 tracing::warn!(error = %error.message, "alert evaluation failed");
             }
-        }
-        if let Some(guard) = leadership {
-            let _ = guard.release_now().await;
         }
     }
 
@@ -187,7 +138,7 @@ impl Evaluator {
             if rule.state == State::Inactive {
                 return Ok(());
             }
-            let mut transaction = self.rules.pool().begin().await.map_err(storage_error)?;
+            let mut transaction = self.rules.database().begin().await?;
             if let (State::Firing, Some(fired_at)) = (rule.state, rule.fired_at) {
                 self.rules
                     .resolve(&mut transaction, cause, rule, fired_at, now)
@@ -208,7 +159,7 @@ impl Evaluator {
                 (kept, Transition::Unchanged)
             }
         };
-        let mut transaction = self.rules.pool().begin().await.map_err(storage_error)?;
+        let mut transaction = self.rules.database().begin().await?;
         match transition {
             Transition::Fired => {
                 let since = next.active_since.unwrap_or(now);

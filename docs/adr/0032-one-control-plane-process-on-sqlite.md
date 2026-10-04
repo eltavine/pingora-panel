@@ -66,8 +66,9 @@ and mutual TLS still protect the calls to `gatewayd` and `ops-agent`
 exporter stay the telemetry backends (ADRs 0022, 0025 and 0028).
 
 **Removed.** The PostgreSQL server; service roles, schemas and their
-secrets; relay leadership; the database provisioning in
-`panel-bootstrap`.
+secrets; relay leadership and the alert evaluation lock; the database
+provisioning in `panel-bootstrap`. Webhook notifications are attempted
+outside any transaction, so no write waits on a receiver.
 
 ## Alternatives
 

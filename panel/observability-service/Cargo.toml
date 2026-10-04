@@ -20,7 +20,7 @@ panel-event-contracts.workspace = true
 panel-events.workspace = true
 panel-platform.workspace = true
 panel-platform-codec.workspace = true
-panel-postgres.workspace = true
+panel-sqlite.workspace = true
 panel-secrets.workspace = true
 panel-service.workspace = true
 prometheus-http-query.workspace = true
@@ -43,5 +43,5 @@ zeroize.workspace = true
 
 [dev-dependencies]
 axum.workspace = true
-panel-postgres = { workspace = true, features = ["test-support"] }
+panel-sqlite = { workspace = true, features = ["test-support"] }
 serde_json.workspace = true

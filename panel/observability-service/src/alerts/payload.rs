@@ -4,9 +4,9 @@
 use super::rules::RuleRecord;
 use chrono::{DateTime, SecondsFormat, Utc};
 use panel_errors::Result;
-use panel_postgres::storage_error;
+use panel_sqlite::storage_error;
 use serde_json::{json, Map, Value};
-use sqlx::PgConnection;
+use sqlx::SqliteConnection;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
@@ -180,7 +180,7 @@ impl Notices {
     /// channels, due now.
     pub(crate) async fn queue(
         &self,
-        connection: &mut PgConnection,
+        connection: &mut SqliteConnection,
         rule: &RuleRecord,
         occurrence: &Occurrence,
         now: DateTime<Utc>,
@@ -189,7 +189,7 @@ impl Notices {
             sqlx::query(
                 "INSERT INTO alert_notifications (notification_id, rule_id, channel_id, kind, \
                  payload, state, created_at, next_attempt_at) \
-                 VALUES ($1, $2, $3, $4, $5::jsonb, 'queued', $6, $6)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'queued', ?6, ?6)",
             )
             .bind(Uuid::now_v7())
             .bind(&rule.id)

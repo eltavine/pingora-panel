@@ -179,13 +179,11 @@ services:
       PINGORA_PANEL_IDENTITY_DATABASE_PASSWORD_FILE: /run/secrets/identity-database-password
       PINGORA_PANEL_CONFIG_DATABASE_PASSWORD_FILE: /run/secrets/config-database-password
       PINGORA_PANEL_AUTOMATION_DATABASE_PASSWORD_FILE: /run/secrets/automation-database-password
-      PINGORA_PANEL_OBSERVABILITY_DATABASE_PASSWORD_FILE: /run/secrets/observability-database-password
     secrets:
       - postgres-admin-password
       - identity-database-password
       - config-database-password
       - automation-database-password
-      - observability-database-password
     depends_on:
       postgres:
         condition: service_healthy
@@ -265,15 +263,14 @@ services:
     command: ["/usr/local/bin/observability-service"]
     environment:
       <<: *database
-      PINGORA_PANEL_DATABASE_URL: postgres://panel_observability@127.0.0.1:5432/pingora_panel
-      PINGORA_PANEL_DATABASE_PASSWORD_FILE: /run/secrets/observability-database-password
       PINGORA_PANEL_TLS_DIR: /var/lib/pingora-panel/credentials/observability-service
       PINGORA_PANEL_PROMETHEUS_URL: http://127.0.0.1:9090
       PINGORA_PANEL_LOKI_URL: http://127.0.0.1:3100
       # Seals where alert channels send and the secrets they sign with.
       PINGORA_PANEL_MASTER_KEYS_FILE: /run/secrets/master-keys
-    secrets: [observability-database-password, master-keys]
+    secrets: [master-keys]
     volumes:
+      - control-data:/var/lib/pingora-panel/control
       - credentials-observability-service:/var/lib/pingora-panel/credentials/observability-service:ro
     healthcheck:
       test: ["CMD", "/usr/local/bin/observability-service", "healthcheck"]
@@ -337,8 +334,6 @@ secrets:
     file: ./secrets/config-database-password
   automation-database-password:
     file: ./secrets/automation-database-password
-  observability-database-password:
-    file: ./secrets/observability-database-password
   bootstrap-token:
     file: ./secrets/bootstrap-token
   password-pepper:

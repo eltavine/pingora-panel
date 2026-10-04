@@ -1,6 +1,7 @@
 # 0027: Alerts
 
-Status: accepted.
+Status: accepted. [ADR 0032](0032-one-control-plane-process-on-sqlite.md)
+evaluates rules in the one control-plane process, which needs no alert lock.
 
 ## Context
 

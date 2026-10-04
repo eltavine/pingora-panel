@@ -212,9 +212,9 @@
         "panel-events",
         "panel-platform",
         "panel-platform-codec",
-        "panel-postgres",
         "panel-secrets",
-        "panel-service"
+        "panel-service",
+        "panel-sqlite"
       ]
     },
     "panel-api": {

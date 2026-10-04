@@ -19,8 +19,8 @@ use panel_domain::SiteId;
 use panel_errors::ErrorCode;
 use panel_events::{Principal, RequestId, RequestScope};
 use panel_platform::ServiceName;
-use panel_postgres::{testing::TestDatabase, EventLog, ServiceDatabase};
 use panel_secrets::{EnvelopeVault, SecretVault};
+use panel_sqlite::{testing::TestDatabase, EventLog, ServiceDatabase};
 use serde_json::{json, Value};
 use standardwebhooks::Webhook;
 use std::{
@@ -29,16 +29,10 @@ use std::{
     time::Duration,
 };
 
-async fn database() -> Option<(TestDatabase, ServiceDatabase)> {
-    let mut database = TestDatabase::create().await?;
-    let secrets = database
-        .bootstrap(&[("observability", "observability")])
-        .await;
-    let service = database
-        .connect_service("observability", "observability", &secrets[0])
-        .await;
-    service.migrate(MIGRATIONS).await.unwrap();
-    Some((database, service))
+async fn database() -> (TestDatabase, ServiceDatabase) {
+    let database = TestDatabase::migrated(MIGRATIONS).await;
+    let service = database.database().clone();
+    (database, service)
 }
 
 async fn serve(router: Router) -> String {
@@ -165,9 +159,7 @@ fn caller() -> (RequestScope, Principal) {
 
 #[tokio::test]
 async fn firing_and_resolving_alerts_notify_signed_webhooks() {
-    let Some((_database, service)) = database().await else {
-        return;
-    };
+    let (_database, service) = database().await;
     let reading = Reading::default();
     let alerts = alerts(service, &prometheus_stand_in(Arc::clone(&reading)).await);
     let receiver = Receiver::default();
@@ -275,9 +267,7 @@ async fn firing_and_resolving_alerts_notify_signed_webhooks() {
 
 #[tokio::test]
 async fn alerts_wait_for_their_pending_period_and_unreadable_rules_keep_their_state() {
-    let Some((_database, service)) = database().await else {
-        return;
-    };
+    let (_database, service) = database().await;
     let reading = Reading::default();
     let alerts = alerts(service, &prometheus_stand_in(Arc::clone(&reading)).await);
     let base = receiver_stand_in(Receiver::default()).await;
@@ -348,9 +338,7 @@ async fn alerts_wait_for_their_pending_period_and_unreadable_rules_keep_their_st
 
 #[tokio::test]
 async fn failed_notifications_are_retried_and_refused_ones_abandoned() {
-    let Some((_database, service)) = database().await else {
-        return;
-    };
+    let (_database, service) = database().await;
     let reading = Reading::default();
     let alerts = alerts(service, &prometheus_stand_in(Arc::clone(&reading)).await);
     let receiver = Receiver::default();
@@ -384,7 +372,8 @@ async fn failed_notifications_are_retried_and_refused_ones_abandoned() {
         "not due yet"
     );
 
-    sqlx::query("UPDATE alert_notifications SET next_attempt_at = now()")
+    sqlx::query("UPDATE alert_notifications SET next_attempt_at = ?1")
+        .bind(Utc::now())
         .execute(alerts.service.pool())
         .await
         .unwrap();
@@ -410,9 +399,7 @@ async fn failed_notifications_are_retried_and_refused_ones_abandoned() {
 
 #[tokio::test]
 async fn rules_and_channels_refuse_what_they_cannot_keep() {
-    let Some((_database, service)) = database().await else {
-        return;
-    };
+    let (_database, service) = database().await;
     let alerts = alerts(service, "http://127.0.0.1:9");
     let (scope, principal) = caller();
     let cause = Cause {

@@ -8,7 +8,7 @@ umask 077
 mkdir -p "$directory"
 chmod 700 "$directory"
 for name in postgres-admin-password identity-database-password config-database-password \
-    automation-database-password observability-database-password \
+    automation-database-password \
     bootstrap-token password-pepper; do
     file="$directory/$name"
     if [ ! -s "$file" ]; then
