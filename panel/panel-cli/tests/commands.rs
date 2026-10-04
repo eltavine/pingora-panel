@@ -208,6 +208,20 @@ async fn api(
             ]
         }))
         .into_response(),
+        ("GET", "/api/v1/host/gateway-unit") => Json(json!({
+            "name": "pingora-panel-gatewayd.service", "description": "Pingora Panel gateway",
+            "load_state": "loaded", "active_state": "active", "sub_state": "running",
+            "unit_file_state": "enabled", "main_pid": 4242,
+            "active_since": "2026-10-04T09:00:00Z", "restarts": 0, "result": "success"
+        }))
+        .into_response(),
+        ("POST", "/api/v1/host/gateway-unit/restart") => Json(json!({
+            "name": "pingora-panel-gatewayd.service", "description": "Pingora Panel gateway",
+            "load_state": "loaded", "active_state": "active", "sub_state": "running",
+            "unit_file_state": "enabled", "main_pid": 4343,
+            "active_since": "2026-10-04T10:00:00Z", "restarts": 0, "result": "success"
+        }))
+        .into_response(),
         ("GET", "/api/v1/host/listeners") => Json(json!({
             "observed_at": "2026-10-04T10:00:00Z",
             "listeners": [
@@ -1127,6 +1141,33 @@ fn the_host_agent_and_the_panels_directories_are_shown() {
     }
     let asked = stub.requests("GET", "/api/v1/host/listeners");
     assert_eq!(asked[0].query, "ports=443");
+}
+
+#[test]
+fn the_gateways_unit_is_shown_and_restarted_with_confirmation() {
+    let stub = Stub::start();
+    let unit = stub.ppanel(&["host", "unit"]);
+    assert!(unit.status.success(), "{}", stderr(&unit));
+    let printed = stdout(&unit);
+    for expected in ["pingora-panel-gatewayd.service", "active (running)", "4242"] {
+        assert!(printed.contains(expected), "{expected} in\n{printed}");
+    }
+
+    let unconfirmed = stub.ppanel(&["host", "unit", "restart"]);
+    assert!(!unconfirmed.status.success());
+    assert!(stderr(&unconfirmed).contains("--yes"));
+    assert!(stub
+        .requests("POST", "/api/v1/host/gateway-unit/restart")
+        .is_empty());
+
+    let restarted = stub.ppanel(&["host", "unit", "restart", "--yes"]);
+    assert!(restarted.status.success(), "{}", stderr(&restarted));
+    assert!(stdout(&restarted).contains("4343"));
+    assert_eq!(
+        stub.requests("POST", "/api/v1/host/gateway-unit/restart")
+            .len(),
+        1
+    );
 }
 
 #[test]

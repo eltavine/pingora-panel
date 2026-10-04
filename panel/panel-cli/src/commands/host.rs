@@ -1,10 +1,11 @@
 //! The host the gateway runs on.
 
 use crate::{
-    client::{Api, Result},
+    client::{Api, CliError, Result},
     output::{bytes, percent, text, Column, Format, Output},
 };
 use clap::{Args, Subcommand};
+use reqwest::Method;
 use serde_json::Value;
 use std::time::Duration;
 
@@ -26,6 +27,30 @@ enum HostCommand {
         /// A port to look at; repeat for more, up to 16.
         #[arg(long = "port", value_name = "PORT")]
         ports: Vec<u16>,
+    },
+    /// The gateway's systemd unit, or start, stop or restart it. A restart
+    /// waits for the gateway to drain; raise --timeout if it takes long.
+    Unit {
+        #[command(subcommand)]
+        action: Option<UnitCommand>,
+    },
+}
+
+#[derive(Subcommand)]
+enum UnitCommand {
+    /// Starts the gateway's unit.
+    Start,
+    /// Stops the gateway's unit, and with it the gateway.
+    Stop {
+        /// Confirms that the gateway stops serving.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Restarts the gateway's unit.
+    Restart {
+        /// Confirms that the gateway stops serving while it restarts.
+        #[arg(long)]
+        yes: bool,
     },
 }
 
@@ -128,6 +153,22 @@ const LISTENERS: &[Column] = &[
     ("UID", |listener| text(&listener["uid"])),
 ];
 
+const UNIT: &[Column] = &[
+    ("Unit", |unit| text(&unit["name"])),
+    ("State", |unit| {
+        format!(
+            "{} ({})",
+            text(&unit["active_state"]),
+            text(&unit["sub_state"])
+        )
+    }),
+    ("Since", |unit| text(&unit["active_since"])),
+    ("PID", |unit| text(&unit["main_pid"])),
+    ("Enabled", |unit| text(&unit["unit_file_state"])),
+    ("Restarts", |unit| text(&unit["restarts"])),
+    ("Result", |unit| text(&unit["result"])),
+];
+
 const DIRECTORIES: &[Column] = &[
     ("KIND", |directory| text(&directory["kind"])),
     ("PATH", |directory| text(&directory["path"])),
@@ -155,7 +196,35 @@ pub async fn run(api: &Api, output: &Output, args: HostArgs) -> Result<()> {
         Some(HostCommand::Agent) => agent(api, output).await,
         Some(HostCommand::Directories) => directories(api, output).await,
         Some(HostCommand::Listeners { ports }) => listeners(api, output, &ports).await,
+        Some(HostCommand::Unit { action }) => unit(api, output, action).await,
     }
+}
+
+async fn unit(api: &Api, output: &Output, action: Option<UnitCommand>) -> Result<()> {
+    let action = match action {
+        None => None,
+        Some(UnitCommand::Start) => Some("start"),
+        Some(UnitCommand::Stop { yes: false } | UnitCommand::Restart { yes: false }) => {
+            return Err(CliError::Usage(
+                "the gateway stops serving; pass --yes to confirm".into(),
+            ));
+        }
+        Some(UnitCommand::Stop { yes: true }) => Some("stop"),
+        Some(UnitCommand::Restart { yes: true }) => Some("restart"),
+    };
+    let unit = match action {
+        None => api.get("/api/v1/host/gateway-unit", &[]).await?.body,
+        Some(action) => {
+            let path = format!("/api/v1/host/gateway-unit/{action}");
+            api.change(Method::POST, &path, None, None).await?.body
+        }
+    };
+    if output.format == Format::Json {
+        output.json(&unit);
+    } else if !output.quiet {
+        output.item(&unit, UNIT);
+    }
+    Ok(())
 }
 
 async fn listeners(api: &Api, output: &Output, ports: &[u16]) -> Result<()> {
