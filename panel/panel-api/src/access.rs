@@ -475,6 +475,16 @@ pub(crate) static ROUTES: &[(&str, &str, Access)] = &[
         "/api/v1/container-engines/{engine}/containers",
         Requires(ContainersRead),
     ),
+    (
+        "DELETE",
+        "/api/v1/container-engines/{engine}/containers/{container}",
+        Requires(ContainersManage),
+    ),
+    (
+        "POST",
+        "/api/v1/container-engines/{engine}/containers/{container}/{action}",
+        Requires(ContainersManage),
+    ),
     ("GET", "/api/v1/alert-rules", Requires(AlertsRead)),
     ("PUT", "/api/v1/alert-rules/{id}", Requires(AlertsManage)),
     ("DELETE", "/api/v1/alert-rules/{id}", Requires(AlertsManage)),

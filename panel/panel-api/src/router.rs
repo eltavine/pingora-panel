@@ -252,6 +252,14 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
             get(containers::list_containers::<U>),
         )
         .route(
+            "/api/v1/container-engines/{engine}/containers/{container}",
+            delete(containers::remove_container::<U>),
+        )
+        .route(
+            "/api/v1/container-engines/{engine}/containers/{container}/{action}",
+            post(containers::act_on_container::<U>),
+        )
+        .route(
             "/api/v1/host/gateway-service/{action}",
             post(host_agent::change_gateway_service::<U>),
         )

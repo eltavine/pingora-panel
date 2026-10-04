@@ -26264,6 +26264,763 @@
         }
       }
     },
+    "/api/v1/container-engines/{engine}/containers/{container}": {
+      "parameters": [
+        {
+          "name": "x-request-id",
+          "in": "header",
+          "description": "Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1
+          }
+        },
+        {
+          "name": "traceparent",
+          "in": "header",
+          "description": "W3C Trace Context parent of the caller's trace. Invalid values are ignored.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 55
+          }
+        },
+        {
+          "name": "tracestate",
+          "in": "header",
+          "description": "W3C Trace Context vendor state, propagated with a valid traceparent.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      ],
+      "delete": {
+        "tags": [
+          "containers"
+        ],
+        "summary": "Removes a container; a running one only with `force`. The panel's own\ninstallation is never removed, and the audit trail records each removal,\nrefused or not.",
+        "operationId": "remove_container",
+        "parameters": [
+          {
+            "name": "engine",
+            "in": "path",
+            "description": "docker or podman",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "container",
+            "in": "path",
+            "description": "Its ID, a unique prefix of its ID or its name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "description": "Kills and removes a running container instead of refusing to.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "volumes",
+            "in": "query",
+            "description": "Removes its anonymous volumes with it.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "x-deadline",
+            "in": "header",
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          },
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContainerChangeView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/container-engines/{engine}/containers/{container}/{action}": {
+      "parameters": [
+        {
+          "name": "x-request-id",
+          "in": "header",
+          "description": "Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1
+          }
+        },
+        {
+          "name": "traceparent",
+          "in": "header",
+          "description": "W3C Trace Context parent of the caller's trace. Invalid values are ignored.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 55
+          }
+        },
+        {
+          "name": "tracestate",
+          "in": "header",
+          "description": "W3C Trace Context vendor state, propagated with a valid traceparent.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      ],
+      "post": {
+        "tags": [
+          "containers"
+        ],
+        "summary": "Starts, stops, restarts or kills a container. The panel's own\ninstallation is only ever started, and the audit trail records each\naction, refused or not.",
+        "operationId": "act_on_container",
+        "parameters": [
+          {
+            "name": "engine",
+            "in": "path",
+            "description": "docker or podman",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "container",
+            "in": "path",
+            "description": "Its ID, a unique prefix of its ID or its name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "action",
+            "in": "path",
+            "description": "start, stop, restart or kill",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ContainerActionName"
+            }
+          },
+          {
+            "name": "x-deadline",
+            "in": "header",
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          },
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContainerChangeView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/container-engines/{engine}/disable": {
       "parameters": [
         {
@@ -64191,6 +64948,44 @@
             "format": "int64",
             "description": "The draft version these files are.",
             "minimum": 0
+          }
+        }
+      },
+      "ContainerActionName": {
+        "type": "string",
+        "description": "What may be done to a container besides removing it.",
+        "enum": [
+          "start",
+          "stop",
+          "restart",
+          "kill"
+        ]
+      },
+      "ContainerChangeView": {
+        "type": "object",
+        "description": "A container an action was taken on.",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "container": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ContainerView",
+                "description": "The container afterwards; absent once removed."
+              }
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name before the action."
           }
         }
       },

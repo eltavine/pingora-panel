@@ -13,8 +13,8 @@ use axum::{
 };
 use chrono::{DateTime, SecondsFormat, Utc};
 use panel_application::{
-    ContainerEngine, ContainerFilter, ContainerList, ContainerState, ContainerSummary, EngineInfo,
-    EngineVersion, PortMapping,
+    ContainerAction, ContainerChange, ContainerEngine, ContainerFilter, ContainerList,
+    ContainerState, ContainerSummary, EngineInfo, EngineVersion, PortMapping,
 };
 use panel_errors::PanelError;
 use serde::{Deserialize, Serialize};
@@ -32,6 +32,24 @@ fn engine(name: String) -> Result<String, ApiError> {
     } else {
         Err(ApiError::new(PanelError::invalid_argument(format!(
             "`{name}` is not an engine's name"
+        ))))
+    }
+}
+
+/// A container as a path names it: its ID, a unique prefix of its ID or its
+/// name, by the characters the engines allow in either.
+fn container(reference: String) -> Result<String, ApiError> {
+    let valid = !reference.is_empty()
+        && reference.len() <= 128
+        && reference.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && reference
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'));
+    if valid {
+        Ok(reference)
+    } else {
+        Err(ApiError::new(PanelError::invalid_argument(format!(
+            "`{reference}` is not a container's ID or name"
         ))))
     }
 }
@@ -348,4 +366,134 @@ pub(crate) async fn list_containers<U>(
         .containers(request_scope(&headers)?, engine(name)?, filter)
         .await?;
     Ok(Json(containers.into()))
+}
+
+/// What may be done to a container besides removing it.
+#[derive(Clone, Copy, Debug, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ContainerActionName {
+    Start,
+    /// The container's stop signal, then SIGKILL once its stop timeout
+    /// passes.
+    Stop,
+    Restart,
+    /// SIGKILL at once.
+    Kill,
+}
+
+impl ContainerActionName {
+    fn parse(value: &str) -> Result<Self, ApiError> {
+        match value {
+            "start" => Ok(Self::Start),
+            "stop" => Ok(Self::Stop),
+            "restart" => Ok(Self::Restart),
+            "kill" => Ok(Self::Kill),
+            other => Err(ApiError::new(PanelError::invalid_argument(format!(
+                "`{other}` is not start, stop, restart or kill"
+            )))),
+        }
+    }
+}
+
+impl From<ContainerActionName> for ContainerAction {
+    fn from(value: ContainerActionName) -> Self {
+        match value {
+            ContainerActionName::Start => Self::Start,
+            ContainerActionName::Stop => Self::Stop,
+            ContainerActionName::Restart => Self::Restart,
+            ContainerActionName::Kill => Self::Kill,
+        }
+    }
+}
+
+/// A container an action was taken on.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct ContainerChangeView {
+    pub id: String,
+    /// Its name before the action.
+    pub name: String,
+    /// The container afterwards; absent once removed.
+    pub container: Option<ContainerView>,
+}
+
+impl From<ContainerChange> for ContainerChangeView {
+    fn from(value: ContainerChange) -> Self {
+        Self {
+            id: value.id,
+            name: value.name,
+            container: value.container.map(Into::into),
+        }
+    }
+}
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub(crate) struct RemoveQuery {
+    /// Kills and removes a running container instead of refusing to.
+    force: Option<bool>,
+    /// Removes its anonymous volumes with it.
+    volumes: Option<bool>,
+}
+
+/// Starts, stops, restarts or kills a container. The panel's own
+/// installation is only ever started, and the audit trail records each
+/// action, refused or not.
+#[utoipa::path(post, path = "/api/v1/container-engines/{engine}/containers/{container}/{action}",
+    params(
+        ("engine" = String, Path, description = "docker or podman"),
+        ("container" = String, Path, description = "Its ID, a unique prefix of its ID or its name"),
+        ("action" = ContainerActionName, Path, description = "start, stop, restart or kill"),
+        MutationHeaders,
+    ),
+    responses((status = 200, body = ContainerChangeView)), tag = "containers")]
+pub(crate) async fn act_on_container<U>(
+    State(state): State<ApiState<U>>,
+    Path((name, reference, action)): Path<(String, String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<ContainerChangeView>, ApiError> {
+    let action = ContainerActionName::parse(&action)?;
+    let change = state
+        .containers
+        .act(
+            command_context(&headers)?,
+            engine(name)?,
+            container(reference)?,
+            action.into(),
+        )
+        .await?;
+    Ok(Json(change.into()))
+}
+
+/// Removes a container; a running one only with `force`. The panel's own
+/// installation is never removed, and the audit trail records each removal,
+/// refused or not.
+#[utoipa::path(delete, path = "/api/v1/container-engines/{engine}/containers/{container}",
+    params(
+        ("engine" = String, Path, description = "docker or podman"),
+        ("container" = String, Path, description = "Its ID, a unique prefix of its ID or its name"),
+        RemoveQuery,
+        MutationHeaders,
+    ),
+    responses((status = 200, body = ContainerChangeView)), tag = "containers")]
+pub(crate) async fn remove_container<U>(
+    State(state): State<ApiState<U>>,
+    Path((name, reference)): Path<(String, String)>,
+    Query(query): Query<RemoveQuery>,
+    headers: HeaderMap,
+) -> Result<Json<ContainerChangeView>, ApiError> {
+    let action = ContainerAction::Remove {
+        force: query.force.unwrap_or(false),
+        volumes: query.volumes.unwrap_or(false),
+    };
+    let change = state
+        .containers
+        .act(
+            command_context(&headers)?,
+            engine(name)?,
+            container(reference)?,
+            action,
+        )
+        .await?;
+    Ok(Json(change.into()))
 }

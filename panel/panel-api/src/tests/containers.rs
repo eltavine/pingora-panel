@@ -109,10 +109,32 @@ impl ContainersPort for Engines {
         &self,
         _context: CommandContext,
         _engine: String,
-        container: String,
-        _action: ContainerAction,
+        reference: String,
+        action: ContainerAction,
     ) -> Result<ContainerChange> {
-        Err(PanelError::not_found(format!("no container {container}")))
+        if reference == "pingora-panel-control-1" && action != ContainerAction::Start {
+            return Err(PanelError::precondition_failed(
+                "pingora-panel-control-1 belongs to the panel's installation; manage it with Compose",
+            ));
+        }
+        if reference != "shop-web-1" {
+            return Err(PanelError::not_found(format!("no container {reference}")));
+        }
+        let state = match action {
+            ContainerAction::Start | ContainerAction::Restart => Some(ContainerState::Running),
+            ContainerAction::Stop | ContainerAction::Kill => Some(ContainerState::Exited),
+            ContainerAction::Remove { force: false, .. } => {
+                return Err(PanelError::conflict(
+                    "You cannot remove a running container",
+                ));
+            }
+            ContainerAction::Remove { .. } => None,
+        };
+        Ok(ContainerChange {
+            id: "shop-web-1-id".into(),
+            name: reference.clone(),
+            container: state.map(|state| container(&reference, "nginx:1.27", state)),
+        })
     }
 }
 
@@ -216,4 +238,78 @@ async fn containers_are_searched_and_filtered_by_state() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+}
+
+async fn delete(app: &axum::Router, path: &str) -> (StatusCode, Value) {
+    send(
+        app,
+        Request::delete(path)
+            .header("x-actor", "ops")
+            .header("idempotency-key", "container-1")
+            .header("x-deadline", "2099-01-01T00:00:00Z")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn containers_are_started_stopped_restarted_killed_and_removed() {
+    let app = app(true);
+    for (action, state) in [
+        ("stop", "exited"),
+        ("start", "running"),
+        ("restart", "running"),
+        ("kill", "exited"),
+    ] {
+        let path = format!("/api/v1/container-engines/docker/containers/shop-web-1/{action}");
+        let (status, change) = post(&app, &path).await;
+        assert_eq!(status, StatusCode::OK, "{action}: {change}");
+        assert_eq!(change["name"], "shop-web-1");
+        assert_eq!(change["container"]["state"], state, "{action}");
+    }
+
+    let (status, problem) = delete(
+        &app,
+        "/api/v1/container-engines/docker/containers/shop-web-1",
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{problem}");
+    let (status, change) = delete(
+        &app,
+        "/api/v1/container-engines/docker/containers/shop-web-1?force=true&volumes=true",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{change}");
+    assert_eq!(change["id"], "shop-web-1-id");
+    assert_eq!(change["container"], Value::Null);
+}
+
+#[tokio::test]
+async fn the_installation_and_unknown_actions_are_refused() {
+    let engines = app(true);
+    let installation = "/api/v1/container-engines/docker/containers/pingora-panel-control-1";
+    let (status, problem) = post(&engines, &format!("{installation}/stop")).await;
+    assert_eq!(status, StatusCode::PRECONDITION_FAILED, "{problem}");
+    let (status, problem) = delete(&engines, installation).await;
+    assert_eq!(status, StatusCode::PRECONDITION_FAILED, "{problem}");
+
+    let (status, problem) = post(
+        &engines,
+        "/api/v1/container-engines/docker/containers/shop-web-1/pause",
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    let (status, problem) = post(
+        &engines,
+        "/api/v1/container-engines/docker/containers/-shop/stop",
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+    let (status, problem) = post(
+        &app(false),
+        "/api/v1/container-engines/docker/containers/shop-web-1/start",
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
 }
