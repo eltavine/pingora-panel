@@ -9,7 +9,7 @@ mod query;
 mod store;
 
 pub use chain::Entry;
-pub use store::{Filter, PgAuditStore, Record, Verification};
+pub use store::{Filter, Record, SqliteAuditStore, Verification};
 
 use async_trait::async_trait;
 use panel_contracts::{audit::v1::audit_query_server, AUDIT_V1};
@@ -19,14 +19,15 @@ use panel_events::{ConsumerName, EventDelivery, EventHandler, HandlerOutcome};
 use panel_jetstream::{ConsumerSpec, JetStreamConsumer, JetStreamSettings};
 use panel_platform::{Capability, ServiceName};
 use panel_platform_codec::protocol_range;
-use panel_postgres::{SchemaMigration, SqlIdentifier};
 use panel_service::Environment;
+use panel_sqlite::SchemaMigration;
 use query::AuditQueryService;
 use std::{future::Future, net::SocketAddr, sync::Arc, time::Duration};
 use tokio_util::sync::CancellationToken;
 
 pub const SERVICE: &str = "audit-service";
-pub const SCHEMA: &str = "audit";
+/// The module's SQLite file in the data directory, `audit.db`.
+pub const MODULE: &str = "audit";
 /// The durable consumer that reads every event type.
 pub const CONSUMER: &str = "audit";
 const RETRY_AFTER: Duration = Duration::from_secs(2);
@@ -47,11 +48,11 @@ pub fn default_addresses() -> DefaultAddresses {
 
 /// Appends each delivered event to the audit trail.
 pub struct AuditWriter {
-    store: PgAuditStore,
+    store: SqliteAuditStore,
 }
 
 impl AuditWriter {
-    pub fn new(store: PgAuditStore) -> Self {
+    pub fn new(store: SqliteAuditStore) -> Self {
         Self { store }
     }
 }
@@ -70,17 +71,17 @@ pub fn process(
     _env: &mut Environment<'_>,
     settings: ProcessSettings,
 ) -> Result<ControlPlaneProcess> {
-    let process = ControlPlaneProcess::new(
+    let process = ControlPlaneProcess::on_sqlite(
         ServiceName::new(SERVICE)?,
         env!("CARGO_PKG_VERSION"),
         settings,
-        SqlIdentifier::new(SCHEMA)?,
+        MODULE,
     )?;
-    let store = PgAuditStore::new(process.database());
+    let store = SqliteAuditStore::new(process.sqlite());
     let writer: Arc<dyn EventHandler> = Arc::new(AuditWriter::new(store.clone()));
     let spec = ConsumerSpec::new(ConsumerName::new(CONSUMER)?, vec![">".to_owned()])?;
     Ok(process
-        .with_migrations(MIGRATIONS)
+        .with_sqlite_migrations(MIGRATIONS)
         .with_protocol(protocol_range(AUDIT_V1))
         .with_capability(Capability::new("audit.query", "1")?)
         .with_peer_access(

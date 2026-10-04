@@ -180,14 +180,12 @@ services:
       PINGORA_PANEL_CONFIG_DATABASE_PASSWORD_FILE: /run/secrets/config-database-password
       PINGORA_PANEL_AUTOMATION_DATABASE_PASSWORD_FILE: /run/secrets/automation-database-password
       PINGORA_PANEL_OBSERVABILITY_DATABASE_PASSWORD_FILE: /run/secrets/observability-database-password
-      PINGORA_PANEL_AUDIT_DATABASE_PASSWORD_FILE: /run/secrets/audit-database-password
     secrets:
       - postgres-admin-password
       - identity-database-password
       - config-database-password
       - automation-database-password
       - observability-database-password
-      - audit-database-password
     depends_on:
       postgres:
         condition: service_healthy
@@ -289,11 +287,9 @@ services:
     command: ["/usr/local/bin/audit-service"]
     environment:
       <<: *database
-      PINGORA_PANEL_DATABASE_URL: postgres://panel_audit@127.0.0.1:5432/pingora_panel
-      PINGORA_PANEL_DATABASE_PASSWORD_FILE: /run/secrets/audit-database-password
       PINGORA_PANEL_TLS_DIR: /var/lib/pingora-panel/credentials/audit-service
-    secrets: [audit-database-password]
     volumes:
+      - control-data:/var/lib/pingora-panel/control
       - credentials-audit-service:/var/lib/pingora-panel/credentials/audit-service:ro
     healthcheck:
       test: ["CMD", "/usr/local/bin/audit-service", "healthcheck"]
@@ -343,8 +339,6 @@ secrets:
     file: ./secrets/automation-database-password
   observability-database-password:
     file: ./secrets/observability-database-password
-  audit-database-password:
-    file: ./secrets/audit-database-password
   bootstrap-token:
     file: ./secrets/bootstrap-token
   password-pepper:
@@ -353,6 +347,8 @@ secrets:
     file: ./secrets/master-keys
 
 volumes:
+  # The control plane's SQLite files, one per module.
+  control-data:
   postgres-data:
   nats-data:
   prometheus-data:

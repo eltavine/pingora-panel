@@ -1,6 +1,6 @@
 //! `pingora.panel.audit.v1.AuditQuery` over the audit store.
 
-use crate::store::{Filter, PgAuditStore, Record};
+use crate::store::{Filter, Record, SqliteAuditStore};
 use chrono::{DateTime, Utc};
 use panel_contracts::audit::v1::{self as wire, audit_query_server::AuditQuery};
 use tonic::{Request, Response, Status};
@@ -9,11 +9,11 @@ const DEFAULT_LIMIT: u32 = 50;
 const MAX_LIMIT: u32 = 500;
 
 pub struct AuditQueryService {
-    store: PgAuditStore,
+    store: SqliteAuditStore,
 }
 
 impl AuditQueryService {
-    pub fn new(store: PgAuditStore) -> Self {
+    pub fn new(store: SqliteAuditStore) -> Self {
         Self { store }
     }
 }

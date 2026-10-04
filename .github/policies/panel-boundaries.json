@@ -21,8 +21,8 @@
         "panel-jetstream",
         "panel-platform",
         "panel-platform-codec",
-        "panel-postgres",
-        "panel-service"
+        "panel-service",
+        "panel-sqlite"
       ]
     },
     "automation-service": {

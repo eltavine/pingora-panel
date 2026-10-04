@@ -1,13 +1,13 @@
-//! Audit records in PostgreSQL: appended once per event under the chain
-//! head's lock, listed by filter, and verified against their hashes and
+//! Audit records in SQLite: appended once per event under the file's write
+//! lock, listed by filter, and verified against their hashes and
 //! checkpoints.
 
 use crate::chain::Entry;
 use chrono::{DateTime, Utc};
 use panel_errors::{PanelError, Result};
 use panel_events::EventEnvelope;
-use panel_postgres::ServiceDatabase;
-use sqlx::{PgPool, Row};
+use panel_sqlite::ServiceDatabase;
+use sqlx::{sqlite::SqliteRow, Row};
 
 /// A checkpoint of the head is written every this many records.
 const CHECKPOINT_EVERY: u64 = 256;
@@ -54,8 +54,8 @@ pub struct Verification {
 }
 
 #[derive(Clone)]
-pub struct PgAuditStore {
-    pool: PgPool,
+pub struct SqliteAuditStore {
+    database: ServiceDatabase,
 }
 
 fn storage(error: sqlx::Error) -> PanelError {
@@ -66,10 +66,10 @@ fn sequence(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| PanelError::invalid_argument("sequence is out of range"))
 }
 
-fn record(row: &sqlx::postgres::PgRow) -> Result<Record> {
+fn record(row: &SqliteRow) -> Result<Record> {
     let get = |error: sqlx::Error| storage(error);
     let number: i64 = row.try_get("sequence").map_err(get)?;
-    let version: i32 = row.try_get("event_version").map_err(get)?;
+    let version: i64 = row.try_get("event_version").map_err(get)?;
     Ok(Record {
         entry: Entry {
             sequence: u64::try_from(number).unwrap_or_default(),
@@ -93,22 +93,22 @@ fn record(row: &sqlx::postgres::PgRow) -> Result<Record> {
     })
 }
 
-impl PgAuditStore {
+impl SqliteAuditStore {
     pub fn new(database: &ServiceDatabase) -> Self {
         Self {
-            pool: database.pool().clone(),
+            database: database.clone(),
         }
     }
 
     /// Appends `event` unless it is already recorded; returns its sequence.
     pub async fn append(&self, event: &EventEnvelope) -> Result<u64> {
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
-        let head = sqlx::query("SELECT sequence, hash FROM audit_head FOR UPDATE")
+        let mut transaction = self.database.begin().await?;
+        let head = sqlx::query("SELECT sequence, hash FROM audit_head")
             .fetch_one(&mut *transaction)
             .await
             .map_err(storage)?;
         let existing: Option<i64> = sqlx::query_scalar(
-            "SELECT sequence FROM audit_records WHERE source = $1 AND event_id = $2",
+            "SELECT sequence FROM audit_records WHERE source = ?1 AND event_id = ?2",
         )
         .bind(event.source())
         .bind(event.event_id().to_string())
@@ -127,13 +127,13 @@ impl PgAuditStore {
         sqlx::query(concat!(
             "INSERT INTO audit_records (",
             columns!(),
-            ") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)"
+            ") VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)"
         ))
         .bind(sequence(next)?)
         .bind(&entry.event_id)
         .bind(&entry.source)
         .bind(&entry.event_type)
-        .bind(i32::try_from(entry.event_version).unwrap_or(i32::MAX))
+        .bind(i64::from(entry.event_version))
         .bind(&entry.subject)
         .bind(entry.occurred_at)
         .bind(entry.recorded_at)
@@ -149,19 +149,22 @@ impl PgAuditStore {
         .execute(&mut *transaction)
         .await
         .map_err(storage)?;
-        sqlx::query("UPDATE audit_head SET sequence = $1, hash = $2")
+        sqlx::query("UPDATE audit_head SET sequence = ?1, hash = ?2")
             .bind(sequence(next)?)
             .bind(&hash)
             .execute(&mut *transaction)
             .await
             .map_err(storage)?;
         if next % CHECKPOINT_EVERY == 0 {
-            sqlx::query("INSERT INTO audit_checkpoints (sequence, hash) VALUES ($1, $2)")
-                .bind(sequence(next)?)
-                .bind(&hash)
-                .execute(&mut *transaction)
-                .await
-                .map_err(storage)?;
+            sqlx::query(
+                "INSERT INTO audit_checkpoints (sequence, hash, created_at) VALUES (?1, ?2, ?3)",
+            )
+            .bind(sequence(next)?)
+            .bind(&hash)
+            .bind(Utc::now())
+            .execute(&mut *transaction)
+            .await
+            .map_err(storage)?;
         }
         transaction.commit().await.map_err(storage)?;
         Ok(next)
@@ -173,15 +176,15 @@ impl PgAuditStore {
             "SELECT ",
             columns!(),
             " FROM audit_records \
-             WHERE ($1::bigint IS NULL OR sequence < $1) \
-             AND ($2 = '' OR actor_id = $2) \
-             AND ($3 = '' OR event_type = $3 \
-                  OR (right($3, 1) = '.' AND starts_with(event_type, $3))) \
-             AND ($4 = '' OR subject = $4) \
-             AND ($5 = '' OR correlation_id = $5) \
-             AND ($6::timestamptz IS NULL OR occurred_at >= $6) \
-             AND ($7::timestamptz IS NULL OR occurred_at < $7) \
-             ORDER BY sequence DESC LIMIT $8"
+             WHERE (?1 IS NULL OR sequence < ?1) \
+             AND (?2 = '' OR actor_id = ?2) \
+             AND (?3 = '' OR event_type = ?3 \
+                  OR (substr(?3, -1) = '.' AND substr(event_type, 1, length(?3)) = ?3)) \
+             AND (?4 = '' OR subject = ?4) \
+             AND (?5 = '' OR correlation_id = ?5) \
+             AND (?6 IS NULL OR occurred_at >= ?6) \
+             AND (?7 IS NULL OR occurred_at < ?7) \
+             ORDER BY sequence DESC LIMIT ?8"
         ))
         .bind(filter.before.map(sequence).transpose()?)
         .bind(&filter.actor_id)
@@ -191,7 +194,7 @@ impl PgAuditStore {
         .bind(filter.since)
         .bind(filter.until)
         .bind(i64::from(filter.limit))
-        .fetch_all(&self.pool)
+        .fetch_all(self.database.pool())
         .await
         .map_err(storage)?;
         rows.iter().map(record).collect()
@@ -201,10 +204,10 @@ impl PgAuditStore {
         let row = sqlx::query(concat!(
             "SELECT ",
             columns!(),
-            " FROM audit_records WHERE sequence = $1"
+            " FROM audit_records WHERE sequence = ?1"
         ))
         .bind(sequence(number)?)
-        .fetch_optional(&self.pool)
+        .fetch_optional(self.database.pool())
         .await
         .map_err(storage)?
         .ok_or_else(|| PanelError::not_found(format!("there is no audit record {number}")))?;
@@ -216,7 +219,7 @@ impl PgAuditStore {
     /// the head.
     pub async fn verify(&self, from: Option<u64>, to: Option<u64>) -> Result<Verification> {
         let head = sqlx::query("SELECT sequence, hash FROM audit_head")
-            .fetch_one(&self.pool)
+            .fetch_one(self.database.pool())
             .await
             .map_err(storage)?;
         let head_sequence =
@@ -230,11 +233,11 @@ impl PgAuditStore {
             self.get(first - 1).await?.hash
         };
         let checkpoints: Vec<(i64, String)> = sqlx::query_as(
-            "SELECT sequence, hash FROM audit_checkpoints WHERE sequence BETWEEN $1 AND $2",
+            "SELECT sequence, hash FROM audit_checkpoints WHERE sequence BETWEEN ?1 AND ?2",
         )
         .bind(sequence(first)?)
         .bind(sequence(last)?)
-        .fetch_all(&self.pool)
+        .fetch_all(self.database.pool())
         .await
         .map_err(storage)?;
         let checkpoints: std::collections::BTreeMap<u64, String> = checkpoints
@@ -247,13 +250,13 @@ impl PgAuditStore {
             let rows = sqlx::query(concat!(
                 "SELECT ",
                 columns!(),
-                " FROM audit_records WHERE sequence >= $1 AND sequence <= $2 \
-                 ORDER BY sequence LIMIT $3"
+                " FROM audit_records WHERE sequence >= ?1 AND sequence <= ?2 \
+                 ORDER BY sequence LIMIT ?3"
             ))
             .bind(sequence(expected)?)
             .bind(sequence(last)?)
             .bind(VERIFY_BATCH)
-            .fetch_all(&self.pool)
+            .fetch_all(self.database.pool())
             .await
             .map_err(storage)?;
             if rows.is_empty() {

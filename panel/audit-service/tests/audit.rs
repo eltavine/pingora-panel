@@ -1,13 +1,11 @@
 #![forbid(unsafe_code)]
 
-use audit_service::PgAuditStore;
+use audit_service::SqliteAuditStore;
 use chrono::Utc;
 use panel_contracts::audit::v1::{
     audit_query_client::AuditQueryClient, ListRequest, VerifyRequest,
 };
-use panel_control_runtime::{
-    ProcessSettings, DATABASE_PASSWORD_ENV, DATABASE_URL_ENV, NATS_URL_ENV,
-};
+use panel_control_runtime::{ProcessSettings, NATS_URL_ENV};
 use panel_events::{
     Actor, AggregateId, AggregateRef, AggregateType, EventDraft, EventEnvelope, EventOrigin,
     EventPayload, EventPublisher, EventType, EventVersion, Principal, RequestId, RequestScope,
@@ -18,7 +16,6 @@ use panel_jetstream::{
     testing::{TestBroker, NATS_URL_ENV as TEST_NATS_URL_ENV},
     JetStreamPublisher,
 };
-use panel_postgres::testing::TestDatabase;
 use panel_service::Environment;
 use serde_json::{json, Value};
 use std::{collections::HashMap, ffi::OsString, sync::Arc, time::Duration};
@@ -45,20 +42,14 @@ fn event(event_type: &str, actor: &str, request: &str, data: Value) -> EventEnve
 
 #[tokio::test]
 async fn every_event_is_recorded_once_in_a_verifiable_chain() {
-    let (Some(mut database), Some(broker)) =
-        (TestDatabase::create().await, TestBroker::create().await)
-    else {
+    let Some(broker) = TestBroker::create().await else {
         return;
     };
-    let secrets = database.bootstrap(&[("audit", "audit")]).await;
-    let values: HashMap<&str, OsString> = HashMap::from([
-        (DATABASE_URL_ENV, database.service_url("audit").into()),
-        (DATABASE_PASSWORD_ENV, secrets[0].expose().into()),
-        (
-            NATS_URL_ENV,
-            std::env::var(TEST_NATS_URL_ENV).unwrap().into(),
-        ),
-    ]);
+    let directory = tempfile::tempdir().unwrap();
+    let values: HashMap<&str, OsString> = HashMap::from([(
+        NATS_URL_ENV,
+        std::env::var(TEST_NATS_URL_ENV).unwrap().into(),
+    )]);
     let mut env = Environment::from_lookup(move |name| values.get(name).cloned());
     let settings = ProcessSettings::read(&mut env, audit_service::default_addresses())
         .unwrap()
@@ -66,7 +57,8 @@ async fn every_event_is_recorded_once_in_a_verifiable_chain() {
             "127.0.0.1:0".parse().unwrap(),
             "127.0.0.1:0".parse().unwrap(),
         )
-        .with_health_interval(Duration::from_millis(50));
+        .with_health_interval(Duration::from_millis(50))
+        .with_data_directory(directory.path());
     let process = audit_service::process(&mut env, settings)
         .unwrap()
         .with_jetstream_settings((*broker.settings).clone())
@@ -173,7 +165,7 @@ async fn every_event_is_recorded_once_in_a_verifiable_chain() {
     .await;
     assert_eq!(by_correlation.records[0].event_type, "gateway.reloaded");
 
-    let store = PgAuditStore::new(process.database());
+    let store = SqliteAuditStore::new(process.sqlite());
     assert_eq!(store.append(&events[0]).await.unwrap(), 1);
     assert_eq!(list(ListRequest::default()).await.records.len(), 3);
 
@@ -187,16 +179,17 @@ async fn every_event_is_recorded_once_in_a_verifiable_chain() {
     assert_eq!(verified.head_sequence, 3);
     assert_eq!(verified.head_hash, records[0].hash);
 
-    let pool = process.database().pool();
-    let refused = sqlx::query("UPDATE audit_records SET actor_id = 'mallory' WHERE sequence = 2")
-        .execute(pool)
-        .await
-        .unwrap_err();
-    assert!(refused.to_string().contains("append-only"), "{refused}");
+    let pool = process.sqlite().pool();
     for statement in [
-        "ALTER TABLE audit_records DISABLE TRIGGER audit_records_append_only",
         "UPDATE audit_records SET actor_id = 'mallory' WHERE sequence = 2",
-        "ALTER TABLE audit_records ENABLE TRIGGER audit_records_append_only",
+        "DELETE FROM audit_records WHERE sequence = 2",
+    ] {
+        let refused = sqlx::query(statement).execute(pool).await.unwrap_err();
+        assert!(refused.to_string().contains("append-only"), "{refused}");
+    }
+    for statement in [
+        "DROP TRIGGER audit_records_no_update",
+        "UPDATE audit_records SET actor_id = 'mallory' WHERE sequence = 2",
     ] {
         sqlx::query(statement).execute(pool).await.unwrap();
     }
@@ -210,6 +203,5 @@ async fn every_event_is_recorded_once_in_a_verifiable_chain() {
     assert_eq!(tampered.checked, 1);
 
     process.stop().await;
-    database.drop().await;
     broker.drop().await;
 }

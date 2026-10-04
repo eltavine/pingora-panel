@@ -27,12 +27,14 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
  && for binary in gatewayd panel-api config-service automation-service observability-service audit-service panel-bootstrap ppanel ops-agent; do \
         cp "panel/target/release/$binary" /out/bin/; \
     done
-# Directories that named volumes mount over; volumes inherit their owner.
-RUN for directory in gateway gateway-secrets pki credentials/panel-api credentials/config-service \
-        credentials/automation-service credentials/observability-service credentials/audit-service \
-        credentials/gatewayd; do \
+# Directories that named volumes mount over; volumes inherit their owner
+# and mode.
+RUN for directory in control gateway gateway-secrets pki credentials/panel-api \
+        credentials/config-service credentials/automation-service credentials/observability-service \
+        credentials/audit-service credentials/gatewayd; do \
         mkdir -p "/out/state/$directory"; \
-    done
+    done \
+ && chmod 700 /out/state/control
 
 FROM gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
 LABEL org.opencontainers.image.title="Pingora Panel" \

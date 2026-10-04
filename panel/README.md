@@ -138,17 +138,24 @@ and `pingora.panel.platform.v1.ServiceInfo`, then migrates its schema, registers
 in the service directory and relays its outbox in the background. Run a binary
 with `healthcheck` to probe its own readiness, as container health checks do.
 
-| Process | Schema | Operational | gRPC | Other |
+| Process | Storage | Operational | gRPC | Other |
 |---|---|---|---|---|
 | `panel-api` | `identity` | `127.0.0.1:9180` | `127.0.0.1:50060` | public HTTP `127.0.0.1:8080` |
 | `config-service` | `config` | `127.0.0.1:9181` | `127.0.0.1:50061` | calls `gatewayd` at `127.0.0.1:50051` |
 | `automation-service` | `automation` | `127.0.0.1:9182` | `127.0.0.1:50062` | |
 | `observability-service` | `observability` | `127.0.0.1:9183` | `127.0.0.1:50063` | queries Prometheus at `127.0.0.1:9090` |
-| `audit-service` | `audit` | `127.0.0.1:9184` | `127.0.0.1:50064` | consumes every event |
+| `audit-service` | `audit.db` | `127.0.0.1:9184` | `127.0.0.1:50064` | consumes every event |
 
-Every process reads `PINGORA_PANEL_DATABASE_URL` (its role, without password),
-`PINGORA_PANEL_DATABASE_PASSWORD` or `PINGORA_PANEL_DATABASE_PASSWORD_FILE`,
-`PINGORA_PANEL_NATS_URL`, and optionally `PINGORA_PANEL_OPS_ADDR`,
+The control plane is moving to SQLite
+([decision](../docs/adr/0032-one-control-plane-process-on-sqlite.md)): a
+process on SQLite keeps its module's file, such as `audit.db`, in
+`PINGORA_PANEL_DATA_DIR` (`/var/lib/pingora-panel/control` by default),
+readable by its user alone, in write-ahead-log mode with full
+synchronization. A process still on PostgreSQL reads
+`PINGORA_PANEL_DATABASE_URL` (its role, without password) and
+`PINGORA_PANEL_DATABASE_PASSWORD` or `PINGORA_PANEL_DATABASE_PASSWORD_FILE`.
+Every process reads `PINGORA_PANEL_NATS_URL`, and optionally
+`PINGORA_PANEL_OPS_ADDR`,
 `PINGORA_PANEL_GRPC_ADDR` and `PINGORA_PANEL_HEALTH_INTERVAL_MS`.
 `config-service` also reads `PINGORA_PANEL_GATEWAY_URL`;
 `observability-service` reads `PINGORA_PANEL_PROMETHEUS_URL`; `panel-api` reads
