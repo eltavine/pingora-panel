@@ -16,6 +16,7 @@ import ApiFailureAlert from '@/components/ApiFailureAlert.vue'
 import CopyValue from '@/components/CopyValue.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import StatusIndicator from '@/components/StatusIndicator.vue'
+import AttentionCard from './AttentionCard.vue'
 import DataPlaneCard from './DataPlaneCard.vue'
 import FileChecksCard from './FileChecksCard.vue'
 import { Button } from '@/components/ui/button'
@@ -151,6 +152,7 @@ const updatedAt = computed(() =>
       </dl>
     </template>
 
+    <AttentionCard />
     <DataPlaneCard v-if="status.data.value" />
     <FileChecksCard v-if="status.data.value" />
   </div>

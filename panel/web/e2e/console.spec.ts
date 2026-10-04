@@ -77,6 +77,106 @@ test('the overview reports readiness and the active configuration', async ({ pag
   await expectNoHorizontalOverflow(page)
 })
 
+test('the overview points at failed requests, failing upstreams and certificates', async ({
+  page,
+}) => {
+  await mockStatus(page)
+  await page.route('**/api/v1/gateway/data-plane', (route) =>
+    route.fulfill({ json: { generation: 1, worker_count: 2, listeners: [] } }),
+  )
+  await page.route(/\/api\/v1\/logs\?/, (route) =>
+    route.fulfill({
+      json: {
+        records: [
+          {
+            time: '2026-10-04T10:00:00Z',
+            kind: 'access',
+            line: '{}',
+            site: 'shop',
+            status: 502,
+            method: 'GET',
+            path: '/cart',
+            fields: {},
+          },
+        ],
+        next_until: null,
+      },
+    }),
+  )
+  await page.route(/\/api\/v1\/traffic\?/, (route) =>
+    route.fulfill({
+      json: {
+        window_seconds: 900,
+        requests: 0,
+        requests_per_second: 0,
+        statuses: {},
+        latency: {},
+        upstreams: [],
+        routes: [],
+        domains: [],
+        upstream_failures: [
+          {
+            upstream: 'app',
+            address: '10.0.0.7',
+            port: 8080,
+            error_type: 'connect_refused',
+            failures: 12,
+          },
+        ],
+      },
+    }),
+  )
+  await page.route('**/api/v1/certificates', (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: 'shop',
+          names: ['shop.example'],
+          status: 'expired',
+          not_after: '2026-09-30T00:00:00Z',
+        },
+        { id: 'docs', names: ['docs.example'], status: 'valid', not_after: '2027-09-30T00:00:00Z' },
+      ],
+    }),
+  )
+  await page.route('**/api/v1/acme-certificates', (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: 'blog',
+          names: ['blog.example'],
+          state: 'failing',
+          failures: 3,
+          last_error: {
+            at: '2026-10-04T08:00:00Z',
+            code: 'rejected',
+            message: 'the CA refused the order',
+          },
+        },
+      ],
+    }),
+  )
+  await page.goto('/')
+
+  const failed = page.getByRole('region', { name: 'Failed requests' })
+  await expect(failed).toContainText('502 · shop')
+  await expect(failed).toContainText('GET /cart')
+  await expect(failed.getByRole('link', { name: 'Show failed requests' })).toHaveAttribute(
+    'href',
+    '/logs?status=5xx',
+  )
+  const upstreams = page.getByRole('region', { name: 'Upstream failures' })
+  await expect(upstreams).toContainText('app · 10.0.0.7:8080')
+  await expect(upstreams).toContainText('connect_refused: 12 failed attempts')
+  const certificates = page.getByRole('region', { name: 'Certificate problems' })
+  await expect(certificates).toContainText('blog.example')
+  await expect(certificates).toContainText('the CA refused the order')
+  await expect(certificates).toContainText('shop.example')
+  await expect(certificates).toContainText('Expired')
+  await expect(certificates).not.toContainText('docs.example')
+  await expectNoHorizontalOverflow(page)
+})
+
 test('file checks point at exposed keys and links out of static roots', async ({ page }) => {
   await mockStatus(page)
   await page.route('**/api/v1/gateway/data-plane', (route) =>

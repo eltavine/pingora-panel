@@ -390,7 +390,10 @@ ppanel traffic series --window 1d --step 15m
 
 The console's traffic page shows the same figures for a chosen window and
 site, charts the request rate, server errors and latency, and reads them
-again every 30 seconds.
+again every 30 seconds. The gateway overview gathers what needs attention:
+the latest requests answered with a server error, the upstream nodes whose
+attempts failed in the last 15 minutes and why, and certificates that have
+expired, expire soon or failed to renew, each leading to its page.
 
 ## Logs
 
