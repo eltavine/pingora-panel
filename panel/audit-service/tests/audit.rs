@@ -206,3 +206,30 @@ async fn every_event_is_recorded_once_in_a_verifiable_chain() {
     process.stop().await;
     broker.drop().await;
 }
+
+#[tokio::test]
+async fn stopping_does_not_wait_for_an_unreachable_broker() {
+    let directory = tempfile::tempdir().unwrap();
+    let values: HashMap<&str, OsString> =
+        HashMap::from([(NATS_URL_ENV, "nats://127.0.0.1:1".into())]);
+    let mut env = Environment::from_lookup(move |name| values.get(name).cloned());
+    let settings = ProcessSettings::read(&mut env, audit_service::default_addresses())
+        .unwrap()
+        .with_listeners(
+            "127.0.0.1:0".parse().unwrap(),
+            "127.0.0.1:0".parse().unwrap(),
+        )
+        .with_health_interval(Duration::from_millis(50))
+        .with_data_directory(directory.path());
+    let process = audit_service::process(&mut env, settings)
+        .unwrap()
+        .start()
+        .await
+        .unwrap();
+    assert!(process.migrated().await);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    tokio::time::timeout(Duration::from_secs(3), process.stop())
+        .await
+        .expect("the consumer stops while it is still reaching the broker");
+}

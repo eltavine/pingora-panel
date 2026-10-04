@@ -119,7 +119,11 @@ async fn consume(
         ready = migrated => if !ready { return },
     }
     loop {
-        match JetStreamConsumer::ensure(&context, Arc::clone(&settings), spec.clone()).await {
+        let ensured = tokio::select! {
+            () = cancel.cancelled() => return,
+            ensured = JetStreamConsumer::ensure(&context, Arc::clone(&settings), spec.clone()) => ensured,
+        };
+        match ensured {
             Ok(consumer) => match consumer
                 .run(Arc::clone(&writer), cancel.clone().cancelled_owned())
                 .await
