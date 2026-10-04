@@ -46,6 +46,23 @@ system.
   window. A job that requires a window is claimed only while an occurrence of
   it is open.
 
+## Alternatives
+
+Compared in October 2026:
+
+- **`apalis`** with `apalis-sqlite` and `apalis-cron`, at 1.0 release
+  candidates, keeps jobs in SQLite, retries through middleware and
+  re-enqueues a job whose worker stopped sending heartbeats. It schedules
+  with cron expressions rather than RFC 5545 recurrences, offers no
+  maintenance windows, and keeps its jobs in tables and migrations of its
+  own, so a job's state change could not append its event to the module's
+  outbox in the same transaction.
+- **A scheduler without durable jobs**, such as `tokio-cron-scheduler`,
+  loses queued and running work when the process restarts.
+
+`panel-jobs` keeps what the platform needs and leaves recurrence rules to
+the `rrule` crate through `panel-schedule`.
+
 ## Consequences
 
 - At-least-once execution with idempotent handlers. A worker crash costs
