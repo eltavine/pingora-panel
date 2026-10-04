@@ -181,7 +181,29 @@ jobs:
           ppanel -o json container list --state running \
             | python3 -c "import json, sys; found = json.load(sys.stdin)['containers']; assert any(c['compose_project'] == 'pingora-panel' for c in found), found"
           ppanel container list --search pingora-panel-control
-          for type in container.engine.disabled container.engine.enabled; do
+          # A throwaway container from an image the installation already has.
+          docker run --detach --name panel-ci-throwaway \
+            "$(docker compose config --images | grep '/nats:')" >/dev/null
+          status() { docker inspect --format '{{.State.Status}}' panel-ci-throwaway; }
+          ppanel container stop panel-ci-throwaway --yes
+          test "$(status)" = exited
+          ppanel container start panel-ci-throwaway
+          test "$(status)" = running
+          ppanel container restart panel-ci-throwaway --yes
+          test "$(status)" = running
+          ppanel container kill panel-ci-throwaway --yes
+          test "$(status)" = exited
+          ppanel container remove panel-ci-throwaway --yes
+          if docker inspect panel-ci-throwaway >/dev/null 2>&1; then
+            exit 1
+          fi
+          # The installation's own containers are only ever started.
+          if ppanel container stop pingora-panel-control-1 --yes; then
+            exit 1
+          fi
+          test "$(docker inspect --format '{{.State.Status}}' pingora-panel-control-1)" = running
+          for type in container.engine.disabled container.engine.enabled container.stopped \
+            container.killed container.removed container.operation.refused; do
             for _ in $(seq 1 30); do
               if ppanel -o json audit list --type "$type" --actor-id ci \
                 | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"; then
