@@ -40,7 +40,8 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-container=$("$engine" create "$image")
+# The image has no default command; the container never runs.
+container=$("$engine" create "$image" /usr/local/bin/ops-agent)
 trap '"$engine" rm --force "$container" >/dev/null' EXIT
 "$engine" cp "$container:/usr/local/bin/ops-agent" /usr/local/bin/.ops-agent.new
 chmod 0755 /usr/local/bin/.ops-agent.new

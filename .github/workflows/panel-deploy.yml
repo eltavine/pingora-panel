@@ -328,7 +328,8 @@ jobs:
         if: failure()
         run: |
           docker compose logs --no-color
-          sudo journalctl --no-pager --unit 'pingora-panel-ops-agent*'
+          sudo journalctl --no-pager --unit 'pingora-panel-ops-agent*' \
+            || echo "The host agent's units were not installed."
 
       - name: Remove the installation
         if: always()
