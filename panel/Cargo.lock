@@ -2636,6 +2636,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ops-grpc-client"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "panel-application",
+ "panel-contracts",
+ "panel-errors",
+ "panel-service",
+ "prost-types",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+]
+
+[[package]]
 name = "ouroboros"
 version = "0.18.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
