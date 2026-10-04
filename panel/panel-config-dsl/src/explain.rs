@@ -317,6 +317,7 @@ impl<'a> Explainer<'a> {
             ("https_redirect", "off"),
             ("hsts", "off"),
             ("security_policy", "none"),
+            ("access_log", "on"),
             ("www_redirect", "off"),
         ] {
             self.or_default(&mut settings, &resource, Context::Server, directive, value);

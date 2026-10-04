@@ -2,7 +2,7 @@
 //! service stores and formats, with defaults left out.
 
 use crate::{
-    lower::{print_rate, DEFAULT_REALM},
+    lower::{print_access, print_policy, print_rate, DEFAULT_REALM},
     values::{print_bool, print_duration_ms, print_size},
     variables::{escape, print_hash_key},
     LANGUAGE_VERSION,
@@ -22,7 +22,8 @@ pub fn print(model: &ConfigModel) -> String {
 }
 
 pub fn document(model: &ConfigModel) -> Document {
-    let mut http = Vec::new();
+    let mut http = print_policy(&model.logging);
+    let settings = http.len();
     http.extend(model.tls_profiles.iter().map(tls_profile));
     http.extend(model.security_policies.iter().map(security_policy));
     http.extend(
@@ -40,7 +41,7 @@ pub fn document(model: &ConfigModel) -> Document {
             .map(|site| server(site, model)),
     );
     for (index, directive) in http.iter_mut().enumerate() {
-        if index > 0 {
+        if index > 0 && index >= settings {
             directive.leading.push(Trivia::BlankLine);
         }
     }
@@ -437,6 +438,7 @@ fn route(route: &Route, model: &ConfigModel) -> Directive {
     if let Some(policy) = &route.security_policy_id {
         body.push(Directive::simple("security_policy", [policy.clone()]));
     }
+    body.extend(print_access(&route.access_log));
     body.push(action(&route.action, model));
     Directive::with_block("route", route.name.clone(), body)
 }
@@ -513,6 +515,7 @@ pub fn server(site: &Site, model: &ConfigModel) -> Directive {
     if let Some(policy) = &site.security_policy_id {
         body.push(Directive::simple("security_policy", [policy.clone()]));
     }
+    body.extend(print_access(&site.access_log));
     match site.www_redirect {
         WwwRedirect::None => {}
         WwwRedirect::AddWww => body.push(Directive::simple("www_redirect", ["add"])),

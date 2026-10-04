@@ -225,6 +225,7 @@ mod tests {
                 retry_after_seconds: None,
             },
             security_policy_id: Default::default(),
+            access_log: Default::default(),
         }
     }
 
@@ -261,6 +262,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             security_policy_id: Default::default(),
+            access_log: Default::default(),
         };
         let model = ConfigModel {
             sites: vec![site],

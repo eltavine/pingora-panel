@@ -5,6 +5,7 @@ use panel_domain::{
     EndpointAddress, EndpointId, PathPrefix, RevisionId, RouteId, SiteId, UpstreamPoolId,
 };
 use panel_errors::{Diagnostic, ErrorCode};
+use panel_ir::logging::LOGGING_CAPABILITY;
 use panel_ir::template::{uses_variables, TEMPLATE_CAPABILITY};
 use panel_ir::tls::{HSTS_CAPABILITY, TLS_SETTINGS_CAPABILITY};
 use panel_ir::{
@@ -87,6 +88,10 @@ pub fn compile(
     }
     for site in live {
         compiler.site(site);
+    }
+    compiler.snapshot.logging.clone_from(&model.logging);
+    if !model.logging.is_default() {
+        compiler.capabilities.insert(LOGGING_CAPABILITY);
     }
     if !compiler.diagnostics.is_empty() {
         return Err(compiler.diagnostics);
@@ -228,6 +233,10 @@ impl Compiler {
         compiled
             .security_policy_id
             .clone_from(&site.security_policy_id);
+        compiled.access_log.clone_from(&site.access_log);
+        if !site.access_log.is_unset() {
+            self.capabilities.insert(LOGGING_CAPABILITY);
+        }
         if site.hsts.is_some() {
             self.capabilities.insert(HSTS_CAPABILITY);
         }
@@ -311,6 +320,10 @@ impl Compiler {
         compiled
             .security_policy_id
             .clone_from(&route.security_policy_id);
+        compiled.access_log.clone_from(&route.access_log);
+        if !route.access_log.is_unset() {
+            self.capabilities.insert(LOGGING_CAPABILITY);
+        }
         self.snapshot.routes.push(compiled);
     }
 
@@ -451,6 +464,7 @@ mod tests {
                     spa_fallback: false,
                 },
                 security_policy_id: Default::default(),
+                access_log: Default::default(),
             }],
             listener_ids: BTreeSet::new(),
             https_redirect: false,
@@ -465,6 +479,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             security_policy_id: Default::default(),
+            access_log: Default::default(),
         };
         let site_id = site.id;
         let model = ConfigModel {
@@ -484,8 +499,35 @@ mod tests {
             upstreams: vec![upstream],
             sites: vec![site],
             security_policies: Default::default(),
+            logging: Default::default(),
         };
         (model, site_id)
+    }
+
+    #[test]
+    fn logging_settings_reach_the_snapshot_and_require_their_capability() {
+        let (mut model, _) = model();
+        let plain = compile(&model, RevisionId::new(1)).unwrap();
+        assert!(!plain
+            .required_capabilities
+            .iter()
+            .any(|capability| capability.name == LOGGING_CAPABILITY));
+
+        model.logging.files.keep_days = 30;
+        model.sites[0].access_log.enabled = Some(false);
+        model.sites[0].routes[0].access_log.format = Some(panel_ir::AccessLogFormat::Combined);
+        let snapshot = compile(&model, RevisionId::new(2)).unwrap();
+        assert_eq!(snapshot.logging.files.keep_days, 30);
+        assert_eq!(snapshot.sites[0].access_log.enabled, Some(false));
+        assert!(snapshot
+            .routes
+            .iter()
+            .any(|route| route.access_log.format == Some(panel_ir::AccessLogFormat::Combined)));
+        assert!(snapshot
+            .required_capabilities
+            .iter()
+            .any(|capability| capability.name == LOGGING_CAPABILITY));
+        assert!(snapshot.has_valid_content_hash());
     }
 
     #[test]

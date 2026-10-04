@@ -23,12 +23,14 @@ use std::{
 use uuid::Uuid;
 
 mod listener;
+mod logging;
 mod route;
 mod security;
 mod server;
 mod tls;
 mod upstream;
 
+pub(crate) use logging::{print_access, print_policy};
 pub(crate) use security::{print_rate, DEFAULT_REALM};
 
 /// How references in a value are resolved.
@@ -184,6 +186,8 @@ struct Lowerer<'a> {
     listeners: Vec<ListenerDraft>,
     upstreams: Vec<(Upstream, Origin)>,
     servers: Vec<ServerDraft>,
+    /// The logging directives of `http`.
+    logging: panel_ir::LoggingPolicy,
     origins: BTreeMap<String, Origin>,
     insertions: Vec<Insertion>,
     written: BTreeMap<String, Vec<Written>>,
@@ -211,6 +215,7 @@ impl<'a> Lowerer<'a> {
             listeners: Vec::new(),
             upstreams: Vec::new(),
             servers: Vec::new(),
+            logging: panel_ir::LoggingPolicy::default(),
             origins: BTreeMap::new(),
             insertions: Vec::new(),
             written: BTreeMap::new(),
@@ -723,6 +728,8 @@ impl<'a> Lowerer<'a> {
                     "listener" => lowerer.listener(file, directive, depth),
                     "upstream" => lowerer.upstream(file, directive, depth),
                     "server" => lowerer.server(file, directive, depth),
+                    "access_log" | "log_field" | "log_redact_query" | "log_redact_headers"
+                    | "log_files" => lowerer.logging(file, directive),
                     _ => unreachable!("the schema allows nothing else in http"),
                 },
             );
@@ -937,6 +944,7 @@ impl<'a> Lowerer<'a> {
                 .into_iter()
                 .map(|(upstream, _)| upstream)
                 .collect(),
+            logging: std::mem::take(&mut self.logging),
             ..ConfigModel::default()
         };
         for mut draft in std::mem::take(&mut self.listeners) {

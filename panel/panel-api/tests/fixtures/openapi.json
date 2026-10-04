@@ -53515,6 +53515,46 @@
           }
         }
       },
+      "AccessLog": {
+        "type": "object",
+        "description": "Access log settings of every site, of one site or of one route. Unset\nvalues come from the enclosing scope.",
+        "properties": {
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "fields": {
+            "type": "object",
+            "description": "Extra fields by name, as templates of request variables; they add to\nthe enclosing scope's and replace those of the same name.",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "format": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AccessLogFormat"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "AccessLogFormat": {
+        "type": "string",
+        "enum": [
+          "json",
+          "combined"
+        ]
+      },
       "AccountPatch": {
         "type": "object",
         "description": "Changes to an account; absent fields stay as they are.",
@@ -57784,6 +57824,10 @@
           "action"
         ],
         "properties": {
+          "access_log": {
+            "$ref": "#/components/schemas/AccessLog",
+            "description": "How the route's requests are logged, over its site's settings."
+          },
           "action": {
             "$ref": "#/components/schemas/Action"
           },
@@ -57827,6 +57871,17 @@
           "action"
         ],
         "properties": {
+          "access_log": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AccessLog",
+                "description": "How the route's requests are logged; absent keeps the current settings."
+              }
+            ]
+          },
           "action": {
             "$ref": "#/components/schemas/Action"
           },
@@ -58390,6 +58445,10 @@
           "updated_at"
         ],
         "properties": {
+          "access_log": {
+            "$ref": "#/components/schemas/AccessLog",
+            "description": "How the site's requests are logged, over the settings for every site."
+          },
           "action": {
             "$ref": "#/components/schemas/Action",
             "description": "What the site does for requests no route claims; also its type."
@@ -58537,6 +58596,17 @@
           "action"
         ],
         "properties": {
+          "access_log": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AccessLog",
+                "description": "How the site's requests are logged; absent keeps the current settings."
+              }
+            ]
+          },
           "action": {
             "$ref": "#/components/schemas/Action"
           },

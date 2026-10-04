@@ -651,6 +651,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             security_policy_id: Default::default(),
+            access_log: Default::default(),
         }
     }
 
@@ -949,6 +950,7 @@ mod tests {
                 spa_fallback: false,
             },
             security_policy_id: Default::default(),
+            access_log: Default::default(),
         });
         model.sites.push(shop);
         let found = messages(&model);

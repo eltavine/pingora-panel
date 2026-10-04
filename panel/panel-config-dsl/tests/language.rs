@@ -878,3 +878,102 @@ fn model_validation_points_at_the_resource() {
         "{found:#?}"
     );
 }
+
+#[test]
+fn logging_directives_read_and_print() {
+    use panel_ir::{AccessLogFormat, LogFiles};
+    use std::collections::BTreeSet;
+
+    let text = "language_version 1;\nhttp {\n    access_log format=combined;\n    log_field tenant $http_x_tenant;\n    log_redact_query token sig;\n    log_redact_headers X-Api-Key;\n    log_files max_size=50m rotate=size keep=14d max_files=10;\n\n    upstream app {\n        server 10.0.0.11:8080;\n    }\n\n    server shop {\n        server_name shop.example;\n        access_log on format=json;\n        log_field region eu;\n        proxy app;\n\n        route health {\n            match prefix /health;\n            access_log off;\n            proxy app;\n        }\n    }\n}\n";
+    let lowered = read(text);
+    assert!(lowered.is_valid(), "{:#?}", lowered.diagnostics);
+    let logging = &lowered.model.logging;
+    assert_eq!(logging.access.format, Some(AccessLogFormat::Combined));
+    assert_eq!(logging.access.fields["tenant"], "$http_x_tenant");
+    assert_eq!(
+        logging.redact_query,
+        Some(BTreeSet::from(["sig".to_owned(), "token".to_owned()]))
+    );
+    assert!(logging.redact_headers.contains("x-api-key"));
+    assert_eq!(
+        logging.files,
+        LogFiles {
+            max_size_bytes: 50 * 1024 * 1024,
+            rotate_daily: false,
+            keep_days: 14,
+            max_files: 10,
+        }
+    );
+    let site = &lowered.model.sites[0];
+    assert_eq!(site.access_log.enabled, Some(true));
+    assert_eq!(site.access_log.format, Some(AccessLogFormat::Json));
+    assert_eq!(site.access_log.fields["region"], "eu");
+    assert_eq!(site.routes[0].access_log.enabled, Some(false));
+
+    let printed = print(&lowered.model);
+    for line in [
+        "    access_log format=combined;\n",
+        "    log_field tenant $http_x_tenant;\n",
+        "    log_redact_query sig token;\n",
+        "    log_redact_headers x-api-key;\n",
+        "    log_files max_size=50m rotate=size keep=14d max_files=10;\n",
+        "        access_log on format=json;\n",
+        "        log_field region eu;\n",
+        "            access_log off;\n",
+    ] {
+        assert!(printed.contains(line), "{line}{printed}");
+    }
+    assert!(same_configuration(&lowered.model, &read(&printed).model));
+    let unlogged = read("language_version 1;\nhttp {\n    log_redact_query off;\n}\n");
+    assert_eq!(unlogged.model.logging.redact_query, Some(BTreeSet::new()));
+    assert!(print(&unlogged.model).contains("    log_redact_query off;\n"));
+
+    for (from, to, code, message) in [
+        (
+            "log_field tenant",
+            "log_field url.path",
+            codes::TYPE,
+            "cannot name a log field",
+        ),
+        (
+            "format=combined",
+            "format=xml",
+            codes::TYPE,
+            "is not json or combined",
+        ),
+        (
+            "keep=14d",
+            "keep=36h",
+            codes::TYPE,
+            "is not a number of days",
+        ),
+        (
+            "rotate=size",
+            "rotate=hourly",
+            codes::TYPE,
+            "is not daily or size",
+        ),
+        (
+            "log_field region eu;",
+            "log_field region eu;\n        log_field region us;",
+            codes::DUPLICATE,
+            "written twice",
+        ),
+        (
+            "access_log off;",
+            "access_log off on;",
+            codes::ARGUMENTS,
+            "takes on or off once",
+        ),
+    ] {
+        let broken = read(&text.replacen(from, to, 1));
+        assert!(
+            broken
+                .errors()
+                .any(|diagnostic| diagnostic.code.as_str() == code
+                    && diagnostic.message.contains(message)),
+            "{message}: {:#?}",
+            broken.diagnostics
+        );
+    }
+}

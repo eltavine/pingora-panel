@@ -575,6 +575,7 @@ impl<'a> Importer<'a> {
                     None => {}
                 },
                 "root" | "index" | "try_files" => {}
+                "access_log" => body.extend(self.access_log(inner)),
                 name if name.starts_with("ssl_") => self.unsupported(
                     inner,
                     format!("'{name}' is not carried over; certificates are set in TLS profiles"),
@@ -812,6 +813,7 @@ impl<'a> Importer<'a> {
             }
         };
         let mut action = None;
+        let mut logging = Vec::new();
         let mut static_files = inherited.cloned();
         // A location whose proxy or return cannot be carried over is left
         // out rather than serving files in its place.
@@ -834,6 +836,7 @@ impl<'a> Importer<'a> {
                     }
                 },
                 "root" | "index" | "try_files" => self.static_files(&inner, &mut static_files),
+                "access_log" => logging.extend(self.access_log(&inner)),
                 "location" => self.unsupported(&inner, "nested locations are not supported".into()),
                 "alias" => self.unsupported(&inner, "'alias' is not supported; use 'root'".into()),
                 name => {
@@ -858,8 +861,22 @@ impl<'a> Importer<'a> {
             return None;
         }
         let mut directives = vec![Directive::simple("match", [kind.to_owned(), path])];
+        directives.extend(logging);
         directives.extend(action);
         Some(Route { rank, directives })
+    }
+
+    /// `access_log off` carries over; log files and formats are the gateway's own.
+    fn access_log(&mut self, located: &Located) -> Option<Directive> {
+        if args(&located.directive).as_slice() == ["off"] {
+            return Some(Directive::simple("access_log", ["off"]));
+        }
+        self.unsupported(
+            located,
+            "access log files and formats are not carried over; the gateway writes each site's log"
+                .into(),
+        );
+        None
     }
 }
 

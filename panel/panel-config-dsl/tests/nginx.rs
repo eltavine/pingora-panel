@@ -231,3 +231,38 @@ fn absolute_includes_find_a_copied_configuration() {
 fn a_missing_entry_is_refused() {
     assert!(import_nginx(&files(), "nginx.conf").is_err());
 }
+
+#[test]
+fn turning_access_logs_off_carries_over_and_log_files_are_reported() {
+    let files = BTreeMap::from([(
+        "/etc/nginx/nginx.conf".to_owned(),
+        "http {\n    server {\n        listen 80;\n        server_name shop.example;\n        access_log /var/log/nginx/shop.log combined;\n        location /health {\n            access_log off;\n            return 204;\n        }\n        location / {\n            proxy_pass http://127.0.0.1:9000;\n        }\n    }\n}\n"
+            .to_owned(),
+    )]);
+    let imported = import_nginx(&files, "/etc/nginx/nginx.conf").unwrap();
+    let text = imported.sources.get("main.conf").unwrap();
+    assert!(text.contains("access_log off;"), "{text}");
+    assert!(
+        imported
+            .report
+            .iter()
+            .any(|note| note.code.as_str() == codes::UNSUPPORTED
+                && note
+                    .message
+                    .contains("access log files and formats are not carried over")),
+        "{:#?}",
+        imported.report
+    );
+    let environment = BTreeMap::new();
+    let lowered = lower(
+        &imported.sources,
+        &LowerOptions {
+            environment: &environment,
+            previous: None,
+            now: Utc::now(),
+        },
+    );
+    let site = &lowered.model.sites[0];
+    assert!(site.access_log.is_unset(), "{text}");
+    assert_eq!(site.routes[0].access_log.enabled, Some(false), "{text}");
+}

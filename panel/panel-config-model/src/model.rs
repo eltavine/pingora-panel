@@ -4,8 +4,9 @@ use crate::security::SecurityPolicy;
 use chrono::{DateTime, Utc};
 use panel_domain::{CertificateId, ContentHash, NormalizedHost};
 use panel_ir::{
-    ActiveHealthCheck, ListenerProtocols, LoadBalancingPolicy, PassiveHealthPolicy, RealIpHeader,
-    StrictTransportSecurity, UpstreamConnectionPolicy, UpstreamTlsPolicy, WwwRedirect,
+    AccessLog, ActiveHealthCheck, ListenerProtocols, LoadBalancingPolicy, LoggingPolicy,
+    PassiveHealthPolicy, RealIpHeader, StrictTransportSecurity, UpstreamConnectionPolicy,
+    UpstreamTlsPolicy, WwwRedirect,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -38,6 +39,9 @@ pub struct ConfigModel {
     pub upstreams: Vec<Upstream>,
     #[serde(default)]
     pub sites: Vec<Site>,
+    /// Logging for every site, and what is never logged.
+    #[serde(default, skip_serializing_if = "LoggingPolicy::is_default")]
+    pub logging: LoggingPolicy,
 }
 
 /// A certificate and the TLS settings listeners and hosts serve it with.
@@ -221,6 +225,9 @@ pub struct Site {
     /// Restrictions every request to the site passes first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub security_policy_id: Option<String>,
+    /// How the site's requests are logged, over the settings for every site.
+    #[serde(default, skip_serializing_if = "AccessLog::is_unset")]
+    pub access_log: AccessLog,
     #[serde(default)]
     pub group: Option<String>,
     #[serde(default)]
@@ -296,6 +303,9 @@ pub struct Route {
     /// Restrictions the route's requests pass after the site's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub security_policy_id: Option<String>,
+    /// How the route's requests are logged, over its site's settings.
+    #[serde(default, skip_serializing_if = "AccessLog::is_unset")]
+    pub access_log: AccessLog,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

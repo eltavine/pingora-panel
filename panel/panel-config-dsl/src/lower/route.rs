@@ -30,6 +30,7 @@ impl<'a> Lowerer<'a> {
                 },
                 action: placeholder_action(),
                 security_policy_id: None,
+                access_log: Default::default(),
             },
             priority_set: false,
             action: None,
@@ -151,6 +152,12 @@ impl<'a> Lowerer<'a> {
                             }
                             "security_policy" => {
                                 draft.route.security_policy_id = arg.map(Self::literal)
+                            }
+                            "access_log" => {
+                                lowerer.access_log(file, directive, &mut draft.route.access_log)
+                            }
+                            "log_field" => {
+                                lowerer.log_field(file, directive, &mut draft.route.access_log)
                             }
                             action => {
                                 let Some(found) = lowerer.action(file, directive, action) else {

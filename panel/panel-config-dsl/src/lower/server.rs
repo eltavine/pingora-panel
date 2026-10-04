@@ -50,6 +50,7 @@ impl<'a> Lowerer<'a> {
                 created_at: now,
                 updated_at: now,
                 security_policy_id: None,
+                access_log: Default::default(),
             },
             action: None,
             routes: Vec::new(),
@@ -225,6 +226,8 @@ impl<'a> Lowerer<'a> {
                     .unwrap_or_default()
             }
             "hsts" => draft.site.hsts = self.hsts(file, directive),
+            "access_log" => self.access_log(file, directive, &mut draft.site.access_log),
+            "log_field" => self.log_field(file, directive, &mut draft.site.access_log),
             "www_redirect" => {
                 let Some(arg) = arg else { return };
                 draft.site.www_redirect = match arg.value.as_str() {

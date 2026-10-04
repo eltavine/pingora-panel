@@ -15,8 +15,8 @@ use chrono::{DateTime, Utc};
 use panel_domain::NormalizedHost;
 use panel_errors::{Diagnostic, PanelError, Result};
 use panel_ir::{
-    ActiveHealthCheck, LoadBalancingPolicy, PassiveHealthPolicy, StrictTransportSecurity,
-    UpstreamConnectionPolicy, UpstreamTlsPolicy, WwwRedirect,
+    AccessLog, ActiveHealthCheck, LoadBalancingPolicy, PassiveHealthPolicy,
+    StrictTransportSecurity, UpstreamConnectionPolicy, UpstreamTlsPolicy, WwwRedirect,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
@@ -57,6 +57,9 @@ pub struct SiteInput {
     /// Restrictions every request to the site passes first.
     #[serde(default)]
     pub security_policy_id: Option<String>,
+    /// How the site's requests are logged; absent keeps the current settings.
+    #[serde(default)]
+    pub access_log: Option<AccessLog>,
     #[serde(default)]
     pub group: Option<String>,
     #[serde(default)]
@@ -85,6 +88,9 @@ pub struct RouteInput {
     /// Restrictions the route's requests pass after the site's.
     #[serde(default)]
     pub security_policy_id: Option<String>,
+    /// How the route's requests are logged; absent keeps the current settings.
+    #[serde(default)]
+    pub access_log: Option<AccessLog>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -187,17 +193,23 @@ fn not_found(kind: &str, id: impl std::fmt::Display) -> PanelError {
 fn routes_from(inputs: Vec<RouteInput>, existing: &[Route]) -> Vec<Route> {
     inputs
         .into_iter()
-        .map(|input| Route {
-            id: input
+        .map(|input| {
+            let kept = input
                 .id
-                .filter(|id| existing.iter().any(|route| route.id == *id))
-                .unwrap_or_else(Uuid::now_v7),
-            name: input.name,
-            enabled: input.enabled,
-            priority: input.priority,
-            matcher: input.matcher,
-            action: input.action,
-            security_policy_id: input.security_policy_id,
+                .and_then(|id| existing.iter().find(|route| route.id == id));
+            Route {
+                id: kept.map_or_else(Uuid::now_v7, |route| route.id),
+                name: input.name,
+                enabled: input.enabled,
+                priority: input.priority,
+                matcher: input.matcher,
+                action: input.action,
+                security_policy_id: input.security_policy_id,
+                access_log: input.access_log.unwrap_or_else(|| {
+                    kept.map(|route| route.access_log.clone())
+                        .unwrap_or_default()
+                }),
+            }
         })
         .collect()
 }
@@ -267,6 +279,7 @@ impl ConfigModel {
             tls_profile_id: input.tls_profile_id,
             hsts: input.hsts,
             security_policy_id: input.security_policy_id,
+            access_log: input.access_log.unwrap_or_default(),
             group: input.group,
             tags: input.tags,
             note: input.note,
@@ -294,6 +307,7 @@ impl ConfigModel {
             tls_profile_id: input.tls_profile_id,
             hsts: input.hsts,
             security_policy_id: input.security_policy_id,
+            access_log: input.access_log.unwrap_or_else(|| site.access_log.clone()),
             group: input.group,
             tags: input.tags,
             note: input.note,
@@ -467,6 +481,7 @@ impl ConfigModel {
             .iter_mut()
             .find(|candidate| candidate.id == route)
             .expect("route_site found the route");
+        let access_log = input.access_log.unwrap_or_else(|| slot.access_log.clone());
         *slot = Route {
             id: route,
             name: input.name,
@@ -475,6 +490,7 @@ impl ConfigModel {
             matcher: input.matcher,
             action: input.action,
             security_policy_id: input.security_policy_id,
+            access_log,
         };
         Ok(())
     }
@@ -919,6 +935,7 @@ mod tests {
             note: None,
             favorite: false,
             security_policy_id: Default::default(),
+            access_log: None,
         }
     }
 
@@ -954,6 +971,59 @@ mod tests {
             passive_health: None,
             note: None,
         }
+    }
+
+    #[test]
+    fn edits_without_logging_settings_keep_them() {
+        let now = Utc::now();
+        let mut model = ConfigModel::default();
+        let mut created = input("shop", &["shop.example.com"], maintenance());
+        created.access_log = Some(AccessLog {
+            enabled: Some(false),
+            ..AccessLog::default()
+        });
+        created.routes.push(RouteInput {
+            id: None,
+            name: Some("api".into()),
+            enabled: true,
+            priority: 10,
+            matcher: crate::model::RouteMatch {
+                kind: MatchKind::Prefix,
+                path: "/api".into(),
+                host: None,
+            },
+            action: maintenance(),
+            security_policy_id: None,
+            access_log: Some(AccessLog {
+                format: Some(panel_ir::AccessLogFormat::Combined),
+                ..AccessLog::default()
+            }),
+        });
+        let id = model.create_site(created, now);
+        let site = model.site(id).unwrap().clone();
+        assert_eq!(site.access_log.enabled, Some(false));
+
+        let mut replaced = input("shop", &["shop.example.com"], maintenance());
+        let route = &site.routes[0];
+        replaced.routes.push(RouteInput {
+            id: Some(route.id),
+            name: route.name.clone(),
+            enabled: true,
+            priority: route.priority,
+            matcher: route.matcher.clone(),
+            action: route.action.clone(),
+            security_policy_id: None,
+            access_log: None,
+        });
+        model.replace_site(id, replaced, now).unwrap();
+        let kept = model.site(id).unwrap();
+        assert_eq!(kept.access_log, site.access_log);
+        assert_eq!(kept.routes[0].access_log, route.access_log);
+
+        let mut cleared = input("shop", &["shop.example.com"], maintenance());
+        cleared.access_log = Some(AccessLog::default());
+        model.replace_site(id, cleared, now).unwrap();
+        assert!(model.site(id).unwrap().access_log.is_unset());
     }
 
     #[test]
@@ -1034,6 +1104,7 @@ mod tests {
             },
             action: maintenance(),
             security_policy_id: Default::default(),
+            access_log: None,
         };
         let first = model.create_route(site, route("/a"), now).unwrap();
         let second = model.create_route(site, route("/b"), now).unwrap();
