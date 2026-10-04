@@ -31,16 +31,16 @@ installs to enable it:
 |---|---|
 | Directory sizes | Read access to the configured directories |
 | Port diagnostics | `CAP_DAC_READ_SEARCH` and `CAP_SYS_PTRACE`, to read other processes' descriptors |
-| Gateway unit | A polkit rule that lets `pingora-panel-ops` start, stop and restart the gateway's unit and nothing else |
 | Containers | Membership of the group that owns the Docker or Podman socket |
+| Gateway service | The containers capability's engine; of the installation's containers, the agent stops and restarts the gateway's alone |
 
 The agent reports which capabilities it has and why any is missing, so the
 API and the console offer only those.
 
 **Transport.** The agent serves gRPC over mutual TLS on a Unix domain
 socket, `/run/pingora-panel-ops/agent.sock`, mode 0660, group 65532, and
-opens no TCP listener. Only the `panel-api` container mounts the socket's
-directory. Before a handshake the agent checks the peer's user against
+opens no TCP listener. Only the control plane's container mounts the
+socket's directory. Before a handshake the agent checks the peer's user against
 an allow list, 65532 by default. The handshake then authenticates the
 caller's workload identity from the installation's authority, and each
 gRPC service admits named identities only: `panel-api` for host and
@@ -58,8 +58,8 @@ unchanged.
 **Operations.** The gRPC API is the allow list. Each method is one
 operation with typed arguments: no command, no file path, no Engine API
 passthrough. Resources are bounded by the agent's configuration, which
-covers the one gateway unit, the configured directories and the engine's
-socket; containers, images, networks and volumes are named by identifier.
+covers the gateway's Compose service, the configured directories and the
+engine's socket; containers, images, networks and volumes are named by identifier.
 Unknown methods fail as unimplemented. Refused peers, identities and
 arguments go to the journal as security events. `panel-api` records every
 operation it relays, refused or not, in the audit trail.
@@ -68,18 +68,25 @@ operation it relays, refused or not, in the audit trail.
 
 | Need | Choice | Instead of |
 |---|---|---|
-| systemd | `zbus` with `zbus_systemd`'s proxies generated from systemd's D-Bus interfaces: pure Rust, on tokio, MIT | `dbus` (libdbus bindings and a C build dependency); `systemctl` (text output) |
 | Listening sockets and their processes | `procfs`: typed parsers for `/proc/net/tcp*` and process descriptors, MIT or Apache-2.0 | Parsing `/proc` by hand; `ss` (text output) |
 | Directory sizes | `walkdir`, staying on one file system and not following links, MIT or Unlicense | A recursive walk of our own |
 | Docker and Podman | `bollard`, as ADR 0028 decided; Podman serves the same Engine API | The `docker` command |
 
-All four are maintained, widely used, and contained behind the agent's own
+All three are maintained, widely used, and contained behind the agent's own
 gRPC types, so replacing one changes no contract.
 
-**Tests.** The systemd capability is tested against a fake manager on a
-peer-to-peer D-Bus connection, port diagnostics against `/proc` fixtures,
-and containers against a fake Engine API served on a Unix socket. No test
-needs host privileges.
+**Gateway service.** The installation runs the gateway as a container, so
+the gateway's service is that container: the one in the installation's
+Compose project labelled with the gateway's Compose service, found on an
+enabled engine. The agent reports its state, health, start and stop times,
+exit code and restarts, and starts, stops or restarts it through the
+Engine API. The contract names what supervises the gateway, so a native
+installation's systemd unit could be added beside the container without
+changing what callers already read.
+
+**Tests.** Port diagnostics are tested against `/proc` fixtures, and
+containers and the gateway's service against a fake Engine API served on
+a Unix socket. No test needs host privileges.
 
 ## Alternatives
 
@@ -90,11 +97,15 @@ needs host privileges.
   window and prove nothing the session does not.
 - Running the agent as root would turn any flaw in it into a host
   compromise.
+- Managing the gateway as a systemd unit over D-Bus, with a polkit rule for
+  the agent: the shipped installation runs the gateway as a container, so
+  there is no unit to manage, and the agent would carry a D-Bus client for
+  nothing.
 
 ## Consequences
 
-- Port diagnostics and the gateway unit are Linux only; directory sizes
-  and containers work on any Unix.
+- Port diagnostics are Linux only; directory sizes, containers and the
+  gateway's service work on any Unix.
 - Renewing the credentials restarts the agent, which keeps no state.
 - The agent checks again what `panel-api` already authorized; it is a
   second barrier, not the first.

@@ -42,8 +42,9 @@ measure (ADR 0027).
 installed on the host, outside the containers, and serves gRPC over the
 same mutual TLS as the services, to `panel-api` only. Each capability is
 enabled on its own, with only the privileges it needs: reading
-`/proc` to name the processes listening on a port; the gateway's systemd
-unit, through D-Bus and a polkit rule that allows nothing else; the sizes
+`/proc` to name the processes listening on a port; the gateway's
+container, through the engine, as the one container of the installation
+it may stop or restart; the sizes
 of the panel's configuration, log and certificate directories; and,
 only where the operator enables it, the Docker socket. It reports which
 capabilities it has, so the console offers only those. `panel-api`

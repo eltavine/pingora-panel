@@ -447,8 +447,8 @@ The console's Host page shows the same figures and warnings.
 What no container may do on the host, `ops-agent` does
 ([decision](../docs/adr/0030-ops-agent.md)). It runs on the host as a
 systemd service, as a dynamic user in a sandbox, and serves gRPC over
-mutual TLS on a Unix socket that only `panel-api` mounts; it admits the
-containers' user only, and among their identities `panel-api` only. Each
+mutual TLS on a Unix socket that only the control plane mounts; it admits
+the containers' user only, and among their identities `panel-api` only. Each
 capability is enabled on its own with the privilege it needs, and the
 agent reports which ones it has.
 
@@ -457,7 +457,7 @@ capabilities wanted, then start the installation with the agent's override:
 
 ```sh
 docker compose -f panel/deploy/compose.yaml build
-sudo panel/deploy/ops-agent/install.sh directories listeners gateway-unit
+sudo panel/deploy/ops-agent/install.sh directories listeners containers
 docker compose -f panel/deploy/compose.yaml \
   -f panel/deploy/compose.ops-agent.yaml up -d
 ```
@@ -479,27 +479,32 @@ their command line. Reading other processes' descriptors takes
 `CAP_DAC_READ_SEARCH` and `CAP_SYS_PTRACE`, which `listeners.conf` grants;
 the agent still cannot call `ptrace`.
 
-The gateway unit capability, on Linux, reads the gateway's systemd unit
-and starts, stops or restarts it over D-Bus, answering once systemd has
-finished the job. `gateway-unit.conf` names the unit, and the polkit rule
-beside it allows the agent's user that unit alone; restarting another
-unit, or this one in another way, is refused by systemd.
+The gateway service capability manages what runs the gateway: its
+container in the installation's Compose project, which the agent finds by
+the project's and the service's labels (`pingora-panel` and `gatewayd`,
+or `PINGORA_PANEL_OPS_INSTALLATION_PROJECT` and
+`PINGORA_PANEL_OPS_GATEWAY_SERVICE`) on an enabled engine. It reports the
+container's state and health, when it last started and stopped, its exit
+code and how often the engine restarted it, and starts, stops or restarts
+it, answering once the engine has finished. It needs the containers
+capability below, which reaches the engine; that container is the one in
+the installation the agent may stop or restart.
 
 ```sh
 ppanel host agent
 ppanel host directories
 ppanel host listeners --port 80 --port 443
-ppanel host unit
-ppanel host unit restart --yes
+ppanel host gateway-service
+ppanel host gateway-service restart --yes
 ```
 
 `GET /api/v1/host/agent` says whether an agent is configured and answers
 and which capabilities it has; `GET /api/v1/host/directories` reports each
 directory's size and file count, and whether the count is partial;
 `GET /api/v1/host/listeners?ports=80,443` lists what listens on those
-ports; `GET /api/v1/host/gateway-unit` reads the unit. They need
-`host.read`. `POST /api/v1/host/gateway-unit/{start,stop,restart}` needs
-`host.manage`, which only administrators hold, and the audit trail
+ports; `GET /api/v1/host/gateway-service` reads the gateway's service.
+They need `host.read`. `POST /api/v1/host/gateway-service/{start,stop,restart}`
+needs `host.manage`, which only administrators hold, and the audit trail
 records each change, refused or not. The console's Host page shows the
 agent and, when it has those capabilities, the gateway service with its
 actions, the directories and what holds ports 80 and 443, saying whether
@@ -515,7 +520,7 @@ through the engine; the file says how to add Podman's socket. Install it
 with the other capabilities:
 
 ```sh
-sudo panel/deploy/ops-agent/install.sh directories listeners gateway-unit containers
+sudo panel/deploy/ops-agent/install.sh directories listeners containers
 ```
 
 Every engine the agent is pointed at starts enabled. An operator can
