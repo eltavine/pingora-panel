@@ -30,11 +30,12 @@
         {
           "crate": "base64",
           "versions": [
+            "0.21.7",
             "0.22.1",
             "0.23.1"
           ],
           "owner": "pingora-panel-platform",
-          "reason": "instant-acme 0.8 always enables rcgen's PEM support with its ring backend, and pem 4 is on base64 0.23 while tonic, sqlx, reqwest and the vendored Pingora tree are on base64 0.22. 0.22.1 via the workspace; 0.23.1 via pem 4.",
+          "reason": "instant-acme 0.8 always enables rcgen's PEM support with its ring backend, and pem 4 is on base64 0.23 while tonic, sqlx, reqwest and the vendored Pingora tree are on base64 0.22; standardwebhooks 1.0.1, its latest release, is still on base64 0.21. 0.21.7 via standardwebhooks; 0.22.1 via the workspace; 0.23.1 via pem 4.",
           "expires_on": "2027-03-01"
         },
         {
@@ -165,20 +166,32 @@
           "crate": "rand",
           "versions": [
             "0.8.8",
+            "0.9.5",
             "0.10.3"
           ],
           "owner": "pingora-panel-platform",
-          "reason": "Inherited transitive duplicate with no unified release line: 0.8.8 via pingora-core, pingora-load-balancing and pingora-runtime; 0.10.3 via sqlx-postgres.",
+          "reason": "Inherited transitive duplicate with no unified release line: 0.8.8 via pingora-core, pingora-load-balancing and pingora-runtime; 0.9.5 via tungstenite 0.29, which axum 0.8's WebSocket support pins through tokio-tungstenite; 0.10.3 via sqlx-postgres.",
+          "expires_on": "2027-03-01"
+        },
+        {
+          "crate": "rand_chacha",
+          "versions": [
+            "0.3.1",
+            "0.9.0"
+          ],
+          "owner": "pingora-panel-platform",
+          "reason": "Inherited transitive duplicate with no unified release line: 0.3.1 via rand 0.8; 0.9.0 via rand 0.9.",
           "expires_on": "2027-03-01"
         },
         {
           "crate": "rand_core",
           "versions": [
             "0.6.4",
+            "0.9.5",
             "0.10.1"
           ],
           "owner": "pingora-panel-platform",
-          "reason": "Inherited transitive duplicate with no unified release line: 0.6.4 via rand 0.8; 0.10.1 via rand 0.10 and getrandom 0.4.",
+          "reason": "Inherited transitive duplicate with no unified release line: 0.6.4 via rand 0.8; 0.9.5 via rand 0.9; 0.10.1 via rand 0.10 and getrandom 0.4.",
           "expires_on": "2027-03-01"
         },
         {
