@@ -76,8 +76,7 @@ impl Parser {
     fn trivia(&mut self) -> Vec<Trivia> {
         let mut trivia = Vec::new();
         while let Some(token) = self.peek() {
-            let blank = token.newlines_before > 1 && !trivia.is_empty()
-                || token.newlines_before > 1 && self.position > 0;
+            let blank = token.newlines_before > 1 && (!trivia.is_empty() || self.position > 0);
             if blank {
                 trivia.push(Trivia::BlankLine);
             }

@@ -622,9 +622,9 @@ impl SecurityGate {
             return Err(Refusal::new(403, "this address may not use this site"));
         }
         if let Some((methods, allow)) = &self.methods {
-            if !methods.contains(header.method.as_str())
-                && !(header.method == Method::HEAD && methods.contains("GET"))
-            {
+            let permitted = methods.contains(header.method.as_str())
+                || header.method == Method::HEAD && methods.contains("GET");
+            if !permitted {
                 let mut refusal = Refusal::new(405, "this method is not allowed here");
                 refusal.headers.push((header::ALLOW, allow.clone()));
                 return Err(refusal);

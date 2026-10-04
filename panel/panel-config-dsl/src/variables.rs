@@ -163,7 +163,7 @@ pub fn hash_key(value: &str) -> Option<String> {
         }
     };
     let token = key.split_once(':').map_or("", |(_, token)| token);
-    (key.contains(':') == !token.is_empty()).then_some(key)
+    (key.contains(':') != token.is_empty()).then_some(key)
 }
 
 /// A hash key written as a request variable when that reads back the same.
