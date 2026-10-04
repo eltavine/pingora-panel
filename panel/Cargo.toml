@@ -61,6 +61,7 @@ members = [
     "ops-grpc-client",
     "panel-bootstrap",
     "panel-api-server",
+    "panel-control",
     "panel-cli",
 ]
 
@@ -92,6 +93,7 @@ audit-service = { version = "=0.1.0", path = "audit-service" }
 automation-service = { version = "=0.1.0", path = "automation-service" }
 automation-grpc-client = { version = "=0.1.0", path = "automation-grpc-client" }
 observability-grpc-client = { version = "=0.1.0", path = "observability-grpc-client" }
+observability-service = { version = "=0.1.0", path = "observability-service" }
 ops-grpc-client = { version = "=0.1.0", path = "ops-grpc-client" }
 config-grpc-client = { version = "=0.1.0", path = "config-grpc-client" }
 config-proto-codec = { version = "=0.1.0", path = "config-proto-codec" }
@@ -134,6 +136,7 @@ prost = "=0.14.4"
 prost-build = "=0.14.4"
 prost-types = "=0.14.4"
 procfs = { version = "=0.18.0", default-features = false }
+panel-api-server = { version = "=0.1.0", path = "panel-api-server" }
 panel-context = { version = "=0.1.0", path = "panel-context" }
 panel-control-runtime = { version = "=0.1.0", path = "panel-control-runtime" }
 panel-contracts = { version = "=0.1.0", path = "panel-contracts" }

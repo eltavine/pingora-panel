@@ -16,7 +16,6 @@
 
 mod host;
 mod in_process;
-mod main_loop;
 mod process;
 mod retry;
 mod settings;
@@ -27,7 +26,6 @@ pub use host::{
     HEALTHCHECK_ARGUMENT,
 };
 pub use in_process::InProcessHub;
-pub use main_loop::service_main;
 pub use process::{ControlPlaneProcess, RunningProcess};
 pub use settings::{
     DefaultAddresses, ProcessSettings, TlsSettings, DATA_DIR_ENV, GRPC_ADDRESS_ENV,

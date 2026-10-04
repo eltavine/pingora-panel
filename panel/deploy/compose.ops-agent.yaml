@@ -6,7 +6,7 @@
 #     -f panel/deploy/compose.ops-agent.yaml up -d
 #
 # The authority issues the agent's credentials into a host directory, and
-# only panel-api mounts the agent's socket.
+# only the control plane mounts the agent's socket.
 
 x-pki-credentials: &pki-credentials >-
   panel-api=/var/lib/pingora-panel/credentials/panel-api,config-service=/var/lib/pingora-panel/credentials/config-service,automation-service=/var/lib/pingora-panel/credentials/automation-service,observability-service=/var/lib/pingora-panel/credentials/observability-service,audit-service=/var/lib/pingora-panel/credentials/audit-service,gatewayd=/var/lib/pingora-panel/credentials/gatewayd,ops-agent=/var/lib/pingora-panel/credentials/ops-agent
@@ -27,7 +27,7 @@ services:
     volumes:
       - *ops-agent-credentials
 
-  panel-api:
+  control:
     environment:
       PINGORA_PANEL_OPS_AGENT_SOCKET: /run/pingora-panel-ops/agent.sock
     volumes:

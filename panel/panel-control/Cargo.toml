@@ -1,0 +1,22 @@
+[package]
+name = "panel-control"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+audit-service.workspace = true
+automation-service.workspace = true
+config-service.workspace = true
+observability-service.workspace = true
+panel-api-server.workspace = true
+panel-control-runtime.workspace = true
+
+[dev-dependencies]
+panel-health.workspace = true
+panel-service.workspace = true
+tempfile.workspace = true
+tokio.workspace = true

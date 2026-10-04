@@ -7,10 +7,6 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
-[[bin]]
-name = "panel-api"
-path = "src/main.rs"
-
 [dependencies]
 async-nats.workspace = true
 async-trait.workspace = true

@@ -284,19 +284,21 @@ async fn modules_of_one_process_reach_each_other_without_network_listeners() {
     let config = ControlPlaneProcess::new(
         config_service.clone(),
         "0.1.0-test",
-        settings(&unreachable_broker).with_data_directory(data.path()),
+        settings(&unreachable_broker)
+            .with_data_directory(data.path())
+            .in_process(hub.clone()),
         "config",
     )
-    .unwrap()
-    .in_process(hub.clone());
+    .unwrap();
     let api = ControlPlaneProcess::new(
         ServiceName::new("panel-api").unwrap(),
         "0.1.0-test",
-        settings(&unreachable_broker).with_data_directory(data.path()),
+        settings(&unreachable_broker)
+            .with_data_directory(data.path())
+            .in_process(hub),
         "identity",
     )
-    .unwrap()
-    .in_process(hub);
+    .unwrap();
     let to_config = api
         .peer_channel("http://127.0.0.1:1", config_service)
         .unwrap()

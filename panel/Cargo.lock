@@ -3119,6 +3119,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "panel-control"
+version = "0.1.0"
+dependencies = [
+ "audit-service",
+ "automation-service",
+ "config-service",
+ "observability-service",
+ "panel-api-server",
+ "panel-control-runtime",
+ "panel-health",
+ "panel-service",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "panel-control-runtime"
 version = "0.1.0"
 dependencies = [

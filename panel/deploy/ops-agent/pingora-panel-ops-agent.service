@@ -23,7 +23,7 @@ User=pingora-panel-ops
 SupplementaryGroups=pingora-panel
 RuntimeDirectory=pingora-panel-ops
 RuntimeDirectoryMode=0755
-# panel-api mounts this directory; keeping it keeps the mount valid.
+# The control plane mounts this directory; keeping it keeps the mount valid.
 RuntimeDirectoryPreserve=yes
 UMask=0077
 

@@ -97,6 +97,7 @@ impl ControlPlaneProcess {
                 )
             })
             .transpose()?;
+        let hub = settings.hub().cloned();
         Ok(Self {
             descriptor: ServiceDescriptor::new(service, release, Utc::now())
                 .with_protocol(protocol_range(PLATFORM_V1)),
@@ -116,16 +117,8 @@ impl ControlPlaneProcess {
             tls,
             peer_policy: PeerPolicy::new(trust_domain),
             metrics: Metrics::new(),
-            hub: None,
+            hub,
         })
-    }
-
-    /// Serves the process's gRPC to the other modules hosted on `hub`
-    /// instead of on a network listener, and reaches those modules through
-    /// it.
-    pub fn in_process(mut self, hub: InProcessHub) -> Self {
-        self.hub = Some(hub);
-        self
     }
 
     /// The metrics the operational listener serves at `/metrics`, to

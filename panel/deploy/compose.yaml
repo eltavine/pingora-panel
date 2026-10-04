@@ -3,11 +3,11 @@
 #   panel/deploy/generate-secrets.sh
 #   docker compose -f panel/deploy/compose.yaml up -d
 #
-# Every process uses the host network. Control services bind loopback
+# Every process uses the host network. The control plane binds loopback
 # addresses, so nothing but the gateway's configured listeners is reachable
 # from other hosts until the API authenticates callers; the console is at
-# http://127.0.0.1:8080. Internal gRPC additionally runs over mutual TLS with
-# credentials the pki service rotates.
+# http://127.0.0.1:8080. The control plane reaches the gateway and the host
+# agent over mutual TLS with credentials the pki service rotates.
 
 name: pingora-panel
 
@@ -62,7 +62,7 @@ services:
       timeout: 3s
       retries: 30
 
-  # Keeps the gateway's metrics; only observability-service queries it.
+  # Keeps the gateway's metrics; only the control plane queries it.
   prometheus:
     image: docker.io/prom/prometheus:v3.15.0-distroless@sha256:b2a413d5a03ea6a76782a508d1c7947440bba3b973931a25676e278431891b01
     network_mode: host
@@ -95,7 +95,7 @@ services:
     volumes:
       - /:/host:ro,rslave
 
-  # Keeps the gateway's access and error logs; only observability-service
+  # Keeps the gateway's access and error logs; only the control plane
   # queries it.
   loki:
     image: docker.io/grafana/loki:3.7.8@sha256:1107dd5274e0ada47e42472b7a7e71f3b2a2fe878878108f3e2f9e51528f0193
@@ -187,107 +187,41 @@ services:
       pki-init:
         condition: service_completed_successfully
 
-  config-service:
+  # The control plane: the API with the configuration, automation,
+  # observability and audit modules in one process. Each module keeps its own
+  # credentials, SQLite file and operational listener on 127.0.0.1:9180-9184.
+  control:
     <<: *panel
-    command: ["/usr/local/bin/config-service"]
+    command: ["/usr/local/bin/panel-control"]
     environment:
       <<: *control
-      PINGORA_PANEL_TLS_DIR: /var/lib/pingora-panel/credentials/config-service
+      PINGORA_PANEL_CREDENTIALS_DIR: /var/lib/pingora-panel/credentials
+      PINGORA_PANEL_HTTP_ADDR: 127.0.0.1:8080
+      PINGORA_PANEL_WEB_ROOT: /usr/share/pingora-panel/web
       PINGORA_PANEL_GATEWAY_URL: https://127.0.0.1:50051
-    volumes:
-      - control-data:/var/lib/pingora-panel/control
-      - credentials-config-service:/var/lib/pingora-panel/credentials/config-service:ro
-    healthcheck:
-      test: ["CMD", "/usr/local/bin/config-service", "healthcheck"]
-      interval: 5s
-      timeout: 5s
-      retries: 30
-    depends_on: *after-bootstrap
-
-  automation-service:
-    <<: *panel
-    command: ["/usr/local/bin/automation-service"]
-    environment:
-      <<: *control
-      PINGORA_PANEL_TLS_DIR: /var/lib/pingora-panel/credentials/automation-service
-      # Seal certificate keys; losing them loses every stored key.
-      PINGORA_PANEL_MASTER_KEYS_FILE: /run/secrets/master-keys
       PINGORA_PANEL_GATEWAY_SECRET_DIR: /var/lib/pingora-panel/gateway-secrets
-    secrets: [master-keys]
-    volumes:
-      - control-data:/var/lib/pingora-panel/control
-      - credentials-automation-service:/var/lib/pingora-panel/credentials/automation-service:ro
-      - gateway-secrets:/var/lib/pingora-panel/gateway-secrets
-    healthcheck:
-      test: ["CMD", "/usr/local/bin/automation-service", "healthcheck"]
-      interval: 5s
-      timeout: 5s
-      retries: 30
-    depends_on: *after-bootstrap
-
-  observability-service:
-    <<: *panel
-    command: ["/usr/local/bin/observability-service"]
-    environment:
-      <<: *control
-      PINGORA_PANEL_TLS_DIR: /var/lib/pingora-panel/credentials/observability-service
       PINGORA_PANEL_PROMETHEUS_URL: http://127.0.0.1:9090
       PINGORA_PANEL_LOKI_URL: http://127.0.0.1:3100
-      # Seals where alert channels send and the secrets they sign with.
-      PINGORA_PANEL_MASTER_KEYS_FILE: /run/secrets/master-keys
-    secrets: [master-keys]
-    volumes:
-      - control-data:/var/lib/pingora-panel/control
-      - credentials-observability-service:/var/lib/pingora-panel/credentials/observability-service:ro
-    healthcheck:
-      test: ["CMD", "/usr/local/bin/observability-service", "healthcheck"]
-      interval: 5s
-      timeout: 5s
-      retries: 30
-    depends_on: *after-bootstrap
-
-  audit-service:
-    <<: *panel
-    command: ["/usr/local/bin/audit-service"]
-    environment:
-      <<: *control
-      PINGORA_PANEL_TLS_DIR: /var/lib/pingora-panel/credentials/audit-service
-    volumes:
-      - control-data:/var/lib/pingora-panel/control
-      - credentials-audit-service:/var/lib/pingora-panel/credentials/audit-service:ro
-    healthcheck:
-      test: ["CMD", "/usr/local/bin/audit-service", "healthcheck"]
-      interval: 5s
-      timeout: 5s
-      retries: 30
-    depends_on: *after-bootstrap
-
-  panel-api:
-    <<: *panel
-    command: ["/usr/local/bin/panel-api"]
-    environment:
-      <<: *control
-      PINGORA_PANEL_TLS_DIR: /var/lib/pingora-panel/credentials/panel-api
-      PINGORA_PANEL_HTTP_ADDR: 127.0.0.1:8080
-      PINGORA_PANEL_CONFIG_URL: https://127.0.0.1:50061
-      PINGORA_PANEL_AUDIT_URL: https://127.0.0.1:50064
-      PINGORA_PANEL_AUTOMATION_URL: https://127.0.0.1:50062
-      PINGORA_PANEL_OBSERVABILITY_URL: https://127.0.0.1:50063
-      PINGORA_PANEL_WEB_ROOT: /usr/share/pingora-panel/web
       # Creates the first account once; any later use is refused.
       PINGORA_PANEL_BOOTSTRAP_TOKEN_FILE: /run/secrets/bootstrap-token
       # Keys password hashes; replacing it invalidates every password.
       PINGORA_PANEL_PASSWORD_PEPPER_FILE: /run/secrets/password-pepper
-      # Seals identity provider secrets and refresh tokens.
+      # Seals certificate keys, identity provider secrets, refresh tokens and
+      # alert channel secrets; losing them loses every sealed value.
       PINGORA_PANEL_MASTER_KEYS_FILE: /run/secrets/master-keys
     secrets: [bootstrap-token, password-pepper, master-keys]
     volumes:
       - control-data:/var/lib/pingora-panel/control
+      - gateway-secrets:/var/lib/pingora-panel/gateway-secrets
       - credentials-panel-api:/var/lib/pingora-panel/credentials/panel-api:ro
+      - credentials-config-service:/var/lib/pingora-panel/credentials/config-service:ro
+      - credentials-automation-service:/var/lib/pingora-panel/credentials/automation-service:ro
+      - credentials-observability-service:/var/lib/pingora-panel/credentials/observability-service:ro
+      - credentials-audit-service:/var/lib/pingora-panel/credentials/audit-service:ro
     healthcheck:
-      test: ["CMD", "/usr/local/bin/panel-api", "healthcheck"]
+      test: ["CMD", "/usr/local/bin/panel-control", "healthcheck"]
       interval: 5s
-      timeout: 5s
+      timeout: 15s
       retries: 30
     depends_on: *after-bootstrap
 

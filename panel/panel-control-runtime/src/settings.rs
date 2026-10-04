@@ -1,3 +1,4 @@
+use crate::InProcessHub;
 use panel_errors::Result;
 use panel_pki::TrustDomain;
 use panel_service::{require_loopback, Environment};
@@ -63,6 +64,7 @@ pub struct ProcessSettings {
     nats_url: String,
     health_interval: Duration,
     tls: Option<TlsSettings>,
+    hub: Option<InProcessHub>,
 }
 
 impl ProcessSettings {
@@ -94,6 +96,7 @@ impl ProcessSettings {
                 .string(NATS_URL_ENV)?
                 .unwrap_or_else(|| DEFAULT_NATS_URL.into()),
             health_interval: env.millis(HEALTH_INTERVAL_MS_ENV, DEFAULT_HEALTH_INTERVAL)?,
+            hub: None,
         })
     }
 
@@ -121,6 +124,10 @@ impl ProcessSettings {
         self.tls.as_ref()
     }
 
+    pub fn hub(&self) -> Option<&InProcessHub> {
+        self.hub.as_ref()
+    }
+
     pub fn with_listeners(mut self, ops: SocketAddr, grpc: SocketAddr) -> Self {
         self.ops_address = ops;
         self.grpc_address = grpc;
@@ -140,6 +147,13 @@ impl ProcessSettings {
     /// Mutual TLS with the credentials `tls` names, or none.
     pub fn with_tls(mut self, tls: Option<TlsSettings>) -> Self {
         self.tls = tls;
+        self
+    }
+
+    /// Serves gRPC to the other modules hosted on `hub` instead of on a
+    /// network listener, and reaches those modules through it.
+    pub fn in_process(mut self, hub: InProcessHub) -> Self {
+        self.hub = Some(hub);
         self
     }
 }

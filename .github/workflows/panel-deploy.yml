@@ -60,7 +60,7 @@ jobs:
       - name: Start the installation
         run: docker compose up --detach
 
-      - name: Wait for every service to become ready
+      - name: Wait for every control-plane module to become ready
         run: |
           for attempt in $(seq 1 60); do
             if curl --fail --silent --show-error "http://127.0.0.1:9180/readyz" >/dev/null; then
@@ -76,14 +76,14 @@ jobs:
         run: |
           password=$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | cut -c1-32)
           echo "::add-mask::$password"
-          printf '%s\n' "$password" | docker compose exec -T panel-api ppanel setup \
+          printf '%s\n' "$password" | docker compose exec -T control ppanel setup \
             --username ci --bootstrap-token-file /run/secrets/bootstrap-token --password-stdin
           session=$(curl --fail --silent --show-error --header 'content-type: application/json' \
             --data "{\"username\": \"ci\", \"password\": \"$password\", \"transport\": \"bearer\"}" \
             http://127.0.0.1:8080/api/v1/session \
             | python3 -c "import json, sys; print(json.load(sys.stdin)['secret'])")
           echo "::add-mask::$session"
-          token=$(docker compose exec -T -e PPANEL_TOKEN="$session" panel-api ppanel -o json \
+          token=$(docker compose exec -T -e PPANEL_TOKEN="$session" control ppanel -o json \
             token create ci --days 1 \
             | python3 -c "import json, sys; print(json.load(sys.stdin)['secret'])")
           echo "::add-mask::$token"
@@ -120,11 +120,11 @@ jobs:
             | python3 -c "import json, sys; found = json.load(sys.stdin)['directories']; assert len(found) == 3 and all(d['present'] for d in found), found"
           curl --fail --silent --show-error --header "$auth" \
             'http://127.0.0.1:8080/api/v1/host/listeners?ports=8080' \
-            | python3 -c "import json, sys; found = json.load(sys.stdin)['listeners']; assert any(p['name'] == 'panel-api' for l in found for p in l['processes']), found"
-          docker compose exec -T -e PPANEL_TOKEN panel-api ppanel host agent
-          docker compose exec -T -e PPANEL_TOKEN panel-api ppanel host directories
-          docker compose exec -T -e PPANEL_TOKEN panel-api ppanel host listeners --port 8080
-          ppanel() { docker compose exec -T -e PPANEL_TOKEN panel-api ppanel "$@"; }
+            | python3 -c "import json, sys; found = json.load(sys.stdin)['listeners']; assert any(p['name'] == 'panel-control' for l in found for p in l['processes']), found"
+          docker compose exec -T -e PPANEL_TOKEN control ppanel host agent
+          docker compose exec -T -e PPANEL_TOKEN control ppanel host directories
+          docker compose exec -T -e PPANEL_TOKEN control ppanel host listeners --port 8080
+          ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
           state() {
             ppanel -o json host unit | python3 -c "import json, sys; print(json.load(sys.stdin)['active_state'])"
           }
@@ -147,7 +147,7 @@ jobs:
 
       - name: Reach the containers through the host agent
         run: |
-          ppanel() { docker compose exec -T -e PPANEL_TOKEN panel-api ppanel "$@"; }
+          ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
           engines() {
             ppanel -o json container engines \
               | python3 -c "import json, sys; print(' '.join(f\"{e['id']}:{e['enabled']}:{e['reachable']}\" for e in json.load(sys.stdin)['engines']))"
@@ -168,7 +168,7 @@ jobs:
           ppanel container engines
           ppanel -o json container list --state running \
             | python3 -c "import json, sys; found = json.load(sys.stdin)['containers']; assert any(c['compose_project'] == 'pingora-panel' for c in found), found"
-          ppanel container list --search panel-api
+          ppanel container list --search pingora-panel-control
           for type in container.engine.disabled container.engine.enabled; do
             for attempt in $(seq 1 30); do
               if ppanel -o json audit list --type "$type" --actor-id ci \
@@ -183,7 +183,7 @@ jobs:
 
       - name: Serve a site through the gateway with the command line
         run: |
-          ppanel() { docker compose exec -T -e PPANEL_TOKEN panel-api ppanel "$@"; }
+          ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
           upstream=$(ppanel -o json upstream create --name console --node 127.0.0.1:8080 \
             | python3 -c "import json, sys; print(json.load(sys.stdin)['id'])")
           ppanel listener set edge --address 127.0.0.1:18080
@@ -203,7 +203,7 @@ jobs:
 
       - name: Serve the site over HTTPS with a certificate the panel keeps
         run: |
-          ppanel() { docker compose exec -T -e PPANEL_TOKEN panel-api ppanel "$@"; }
+          ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
           ppanel certificate generate console --name console.test --days 30
           ppanel tls-profile set console --certificate-id console
           ppanel listener set edge-tls --address 127.0.0.1:18443 --tls-profile console
@@ -262,7 +262,7 @@ jobs:
 
       - name: Audit the changes
         run: |
-          ppanel() { docker compose exec -T -e PPANEL_TOKEN panel-api ppanel "$@"; }
+          ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
           for attempt in $(seq 1 30); do
             if ppanel -o json audit list --type config.draft.applied --actor-id ci \
               | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"; then

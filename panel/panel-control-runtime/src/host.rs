@@ -36,6 +36,11 @@ impl Module {
             build,
         }
     }
+    /// The module listening on `addresses` instead.
+    pub fn with_addresses(mut self, addresses: DefaultAddresses) -> Self {
+        self.defaults = addresses;
+        self
+    }
 }
 
 /// Modules started in one process; they reach each other in process and
@@ -71,11 +76,9 @@ impl ControlPlane {
                     .with_tls(credentials.as_ref().map(|directory| TlsSettings {
                         directory: directory.join(module.service),
                         trust_domain: trust_domain.clone(),
-                    }));
-                (module.build)(env, settings)?
-                    .in_process(hub.clone())
-                    .start()
-                    .await
+                    }))
+                    .in_process(hub.clone());
+                (module.build)(env, settings)?.start().await
             }
             .await;
             match started {

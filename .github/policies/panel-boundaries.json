@@ -202,7 +202,7 @@
       ]
     },
     "observability-service": {
-      "catalog": false,
+      "catalog": true,
       "allowed_workspace_dependencies": [
         "panel-contracts",
         "panel-control-runtime",
@@ -234,7 +234,7 @@
       ]
     },
     "panel-api-server": {
-      "catalog": false,
+      "catalog": true,
       "allowed_workspace_dependencies": [
         "audit-grpc-client",
         "audit-service",
@@ -599,6 +599,19 @@
       "allowed_workspace_dependencies": [
         "panel-application",
         "panel-errors"
+      ]
+    },
+    "panel-control": {
+      "catalog": false,
+      "allowed_workspace_dependencies": [
+        "audit-service",
+        "automation-service",
+        "config-service",
+        "observability-service",
+        "panel-api-server",
+        "panel-control-runtime",
+        "panel-health",
+        "panel-service"
       ]
     }
   },
