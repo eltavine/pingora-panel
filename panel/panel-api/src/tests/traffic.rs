@@ -38,6 +38,7 @@ impl TrafficPort for Traffic {
                 requests: 50.0,
                 error_ratio: 0.1,
                 latency: Latency::default(),
+                connection_reuse_ratio: Some(0.9),
             }],
             routes: vec![RouteTraffic {
                 site: "shop".into(),
@@ -114,6 +115,7 @@ async fn summaries_read_one_scope_over_a_window() {
     assert_eq!(summary["latency"]["p50"], Value::Null);
     assert_eq!(summary["observed_at"], "2027-01-15T08:00:00Z");
     assert_eq!(summary["upstreams"][0]["error_ratio"], 0.1);
+    assert_eq!(summary["upstreams"][0]["connection_reuse_ratio"], 0.9);
     assert_eq!(
         summary["routes"],
         json!([{"site": "shop", "route": "checkout", "requests": 60.0}])

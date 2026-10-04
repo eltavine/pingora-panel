@@ -45,6 +45,9 @@ pub struct UpstreamTraffic {
     /// The share of attempts that failed, from 0 to 1.
     pub error_ratio: f64,
     pub latency: Latency,
+    /// The share of connections taken from the pool, from 0 to 1; unset
+    /// without connections.
+    pub connection_reuse_ratio: Option<f64>,
 }
 
 /// Requests one route served.

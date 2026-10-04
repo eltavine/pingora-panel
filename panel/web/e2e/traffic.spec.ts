@@ -24,6 +24,7 @@ const summary = {
       requests: 900,
       error_ratio: 0.125,
       latency: { p50: null, p90: null, p95: 1.5, p99: null },
+      connection_reuse_ratio: 0.875,
     },
   ],
   routes: [{ site: 'shop', route: 'checkout', requests: 600 }],
@@ -94,6 +95,7 @@ test('the traffic of a window is summarized and charted', async ({ page }) => {
   await expect(page.getByRole('cell', { name: 'checkout' })).toBeVisible()
   await expect(page.getByRole('cell', { name: '*.shop.example' })).toBeVisible()
   await expect(page.getByRole('cell', { name: '10.0.0.7:8080' })).toBeVisible()
+  await expect(page.getByRole('cell', { name: '87.5%' })).toBeVisible()
   await expect(page.getByRole('cell', { name: '12.5%' })).toBeVisible()
   await expect(page.getByText('Active configuration revision #7')).toBeVisible()
   await expect(page.getByRole('img', { name: '4xx: 4% of requests' })).toBeVisible()

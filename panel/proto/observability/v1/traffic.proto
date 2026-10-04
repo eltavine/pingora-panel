@@ -59,6 +59,9 @@ message UpstreamTraffic {
   // The share of attempts that failed, from 0 to 1.
   double error_ratio = 3;
   Latency latency = 4;
+  // The share of connections to it taken from the pool, from 0 to 1; unset
+  // without connections in the window.
+  optional double connection_reuse_ratio = 5;
 }
 
 // Requests one route served.

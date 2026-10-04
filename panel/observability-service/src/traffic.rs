@@ -167,9 +167,11 @@ impl TrafficService {
             self.routes(&queries),
             self.domains(&queries),
         )?;
-        let (revision, activated_at) = tokio::try_join!(
+        let (revision, activated_at, connections, reused) = tokio::try_join!(
             self.value(REVISION.to_owned()),
             self.value(ACTIVATED_AT.to_owned()),
+            self.by(queries.upstream_connections(false), "upstream"),
+            self.by(queries.upstream_connections(true), "upstream"),
         )?;
         let class = |digit: &str| classes.get(digit).copied().unwrap_or_default();
         let mut upstreams: Vec<wire::UpstreamTraffic> = attempts
@@ -180,6 +182,13 @@ impl TrafficService {
                     _ => failures.get(&upstream).copied().unwrap_or_default() / requests,
                 },
                 latency: upstream_latency.get(&upstream).cloned(),
+                connection_reuse_ratio: connections
+                    .get(&upstream)
+                    .filter(|connections| **connections > 0.0)
+                    .map(|connections| {
+                        (reused.get(&upstream).copied().unwrap_or_default() / connections)
+                            .clamp(0.0, 1.0)
+                    }),
                 upstream,
                 requests,
             })

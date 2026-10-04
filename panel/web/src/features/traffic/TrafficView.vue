@@ -332,6 +332,7 @@ function refresh() {
                   <TableHead class="text-right">{{ t('traffic.requests') }}</TableHead>
                   <TableHead class="text-right">{{ t('traffic.errorRatio') }}</TableHead>
                   <TableHead class="text-right">{{ t('traffic.latencyP95') }}</TableHead>
+                  <TableHead class="text-right">{{ t('traffic.reused') }}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -350,6 +351,14 @@ function refresh() {
                   </TableCell>
                   <TableCell class="text-right tabular-nums">
                     {{ format.seconds(upstream.latency.p95) }}
+                  </TableCell>
+                  <TableCell class="text-right tabular-nums">
+                    {{
+                      upstream.connection_reuse_ratio === null ||
+                      upstream.connection_reuse_ratio === undefined
+                        ? '—'
+                        : format.percent(upstream.connection_reuse_ratio)
+                    }}
                   </TableCell>
                 </TableRow>
               </TableBody>

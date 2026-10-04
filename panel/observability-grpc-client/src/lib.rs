@@ -154,6 +154,7 @@ fn summary(value: wire::Summary) -> TrafficSummary {
                 requests: upstream.requests,
                 error_ratio: upstream.error_ratio,
                 latency: latency(upstream.latency),
+                connection_reuse_ratio: upstream.connection_reuse_ratio,
             })
             .collect(),
         routes: value

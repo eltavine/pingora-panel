@@ -709,6 +709,7 @@ const en: Messages = {
     upstreams: 'Upstreams',
     upstream: 'Upstream',
     errorRatio: 'Failures',
+    reused: 'Reused connections',
     noUpstreams: 'No request went upstream in this window.',
     routes: 'Busiest routes',
     route: 'Route',

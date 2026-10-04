@@ -98,6 +98,9 @@ pub struct UpstreamTrafficItem {
     /// The share of attempts that failed, from 0 to 1.
     pub error_ratio: f64,
     pub latency: LatencyQuantiles,
+    /// The share of connections taken from the gateway's pool, from 0 to 1;
+    /// absent without connections in the window.
+    pub connection_reuse_ratio: Option<f64>,
 }
 
 impl From<UpstreamTraffic> for UpstreamTrafficItem {
@@ -107,6 +110,7 @@ impl From<UpstreamTraffic> for UpstreamTrafficItem {
             requests: value.requests,
             error_ratio: value.error_ratio,
             latency: value.latency.into(),
+            connection_reuse_ratio: value.connection_reuse_ratio,
         }
     }
 }

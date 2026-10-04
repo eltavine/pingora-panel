@@ -140,6 +140,9 @@ const UPSTREAMS: &[Column] = &[
     ("REQUESTS", |upstream| count(&upstream["requests"])),
     ("ERRORS", |upstream| percent(&upstream["error_ratio"])),
     ("P95", |upstream| seconds(&upstream["latency"]["p95"])),
+    ("REUSED", |upstream| {
+        percent(&upstream["connection_reuse_ratio"])
+    }),
 ];
 
 const ROUTES: &[Column] = &[

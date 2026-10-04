@@ -149,6 +149,7 @@ async fn api(
             "bytes_received": 2048, "bytes_sent": 1_572_864,
             "open_connections": 3, "tls_handshakes": 7,
             "upstreams": [{"upstream": "app", "requests": 50, "error_ratio": 0.125,
+                           "connection_reuse_ratio": 0.875,
                            "latency": {"p50": null, "p90": null, "p95": 1.5, "p99": null}}],
             "routes": [{"site": "shop", "route": "checkout", "requests": 60}],
             "domains": [{"site": "shop", "domain": "*.shop.example", "requests": 45}],
@@ -942,6 +943,7 @@ fn traffic_is_summarized_and_charted() {
         "*.shop.example",
         "10.0.0.7:8080",
         "connect_refused",
+        "87.5%",
     ] {
         assert!(printed.contains(expected), "{expected} in\n{printed}");
     }

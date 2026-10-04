@@ -685,6 +685,7 @@ const zhCN = {
     upstreams: '上游',
     upstream: '上游',
     errorRatio: '失败率',
+    reused: '复用的连接',
     noUpstreams: '这段时间没有请求发往上游。',
     routes: '热门路由',
     route: '路由',

@@ -49,6 +49,10 @@ fn answer(query: &str) -> Vec<serde_json::Value> {
                 "1",
             ),
         ]
+    } else if query.contains("pingora_panel_gateway_upstream_connections_total{reused") {
+        vec![sample(&[("upstream", "app")], "30")]
+    } else if query.contains("pingora_panel_gateway_upstream_connections_total") {
+        vec![sample(&[("upstream", "app")], "40")]
     } else if query.contains("pingora_panel_gateway_domain_requests_total") {
         vec![
             sample(&[("site", "shop"), ("domain", "*.shop.example")], "30"),
@@ -194,6 +198,7 @@ async fn summaries_gather_every_figure_of_a_scope() {
     );
     assert!((upstream.error_ratio - 0.1).abs() < 1e-9);
     assert_eq!(upstream.latency.as_ref().unwrap().p50, Some(0.1));
+    assert_eq!(upstream.connection_reuse_ratio, Some(0.75));
     assert_eq!(summary.revision, Some(42));
     assert_eq!(summary.activated_at.unwrap().seconds, 1_700_000_000);
 

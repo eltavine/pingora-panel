@@ -213,6 +213,16 @@ impl Queries {
         )
     }
 
+    /// Connections used to reach each `upstream`; with `reused`, only those
+    /// taken from the pool.
+    pub fn upstream_connections(&self, reused: bool) -> String {
+        let selector = if reused { "{reused=\"true\"}" } else { "" };
+        format!(
+            "sum by (upstream) (increase(pingora_panel_gateway_upstream_connections_total{selector}[{}]))",
+            self.range
+        )
+    }
+
     /// Failed attempts by upstream node and why, most first.
     pub fn upstream_failures(&self, limit: usize) -> String {
         format!(

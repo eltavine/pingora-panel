@@ -66041,6 +66041,14 @@
           "latency"
         ],
         "properties": {
+          "connection_reuse_ratio": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The share of connections taken from the gateway's pool, from 0 to 1;\nabsent without connections in the window."
+          },
           "error_ratio": {
             "type": "number",
             "format": "double",
