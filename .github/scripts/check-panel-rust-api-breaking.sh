@@ -56,14 +56,24 @@ git -C "$repo_root" archive "$baseline_ref" | tar -x -C "$baseline_source"
 current_packages="$semver_operation_root/current-packages"
 baseline_packages="$semver_operation_root/baseline-packages"
 generated_packages="$semver_operation_root/generated-packages"
+current_libraries="$semver_operation_root/current-libraries"
+baseline_libraries="$semver_operation_root/baseline-libraries"
 python3 "$package_lister" "$repo_root/panel/Cargo.toml" >"$current_packages"
 python3 "$package_lister" "$baseline_source/panel/Cargo.toml" >"$baseline_packages"
 python3 "$package_lister" --generated "$repo_root/panel/Cargo.toml" >"$generated_packages"
+python3 "$package_lister" --libraries "$repo_root/panel/Cargo.toml" >"$current_libraries"
+python3 "$package_lister" --libraries "$baseline_source/panel/Cargo.toml" >"$baseline_libraries"
 
 removed_packages="$(LC_ALL=C comm -23 "$baseline_packages" "$current_packages")"
 if [[ -n "$removed_packages" ]]; then
   printf 'Rust API packages were removed from the Panel workspace:\n%s\n' \
     "$removed_packages" >&2
+  exit 1
+fi
+
+removed_libraries="$(LC_ALL=C comm -23 "$baseline_libraries" "$current_libraries")"
+if [[ -n "$removed_libraries" ]]; then
+  printf 'Rust API packages lost their library target:\n%s\n' "$removed_libraries" >&2
   exit 1
 fi
 
@@ -73,13 +83,14 @@ is_generated() {
   grep -Fqx -- "$1" "$generated_packages"
 }
 
+# Only a library target has an API; a binary-only package has none to break.
 declare -a packages_to_check=()
 while IFS= read -r package; do
   [[ -n "$package" ]] || continue
   if ! is_generated "$package"; then
     packages_to_check+=("$package")
   fi
-done < <(LC_ALL=C comm -12 "$baseline_packages" "$current_packages")
+done < <(LC_ALL=C comm -12 "$baseline_libraries" "$current_libraries")
 
 while IFS= read -r package; do
   [[ -n "$package" ]] || continue

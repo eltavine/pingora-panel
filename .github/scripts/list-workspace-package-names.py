@@ -4,6 +4,9 @@
 With --generated, list only the packages generated from another contract,
 which declare it as `[package.metadata.pingora-panel] generated-from`; that
 contract's own tooling owns their compatibility.
+
+With --libraries, list only the packages with a library target, the only
+kind of target with a Rust API.
 """
 
 from __future__ import annotations
@@ -15,11 +18,16 @@ import sys
 from pathlib import Path
 
 
+LIBRARY_KINDS = frozenset({"lib", "rlib", "dylib"})
+
+
 class MetadataError(ValueError):
     """A malformed manifest or Cargo metadata response."""
 
 
-def workspace_package_names(manifest: Path, generated: bool = False) -> tuple[str, ...]:
+def workspace_package_names(
+    manifest: Path, generated: bool = False, libraries: bool = False
+) -> tuple[str, ...]:
     if not manifest.is_file():
         raise MetadataError(f"workspace manifest does not exist: {manifest}")
     try:
@@ -74,8 +82,11 @@ def workspace_package_names(manifest: Path, generated: bool = False) -> tuple[st
         if not isinstance(name, str) or not name or "\n" in name or "\r" in name:
             raise MetadataError("Cargo metadata contains a malformed package name")
         names.append(name)
-        if generated_from(package, name) is not None or not generated:
-            selected.append(name)
+        if generated and generated_from(package, name) is None:
+            continue
+        if libraries and not has_library(package, name):
+            continue
+        selected.append(name)
     if not names:
         raise MetadataError("Cargo workspace contains no packages")
     if discovered_member_ids != member_ids:
@@ -83,6 +94,15 @@ def workspace_package_names(manifest: Path, generated: bool = False) -> tuple[st
     if len(names) != len(set(names)):
         raise MetadataError("Cargo workspace contains duplicate package names")
     return tuple(sorted(selected))
+
+
+def has_library(package: dict[str, object], name: str) -> bool:
+    targets = package.get("targets")
+    if not isinstance(targets, list) or not all(
+        isinstance(target, dict) and isinstance(target.get("kind"), list) for target in targets
+    ):
+        raise MetadataError(f"package {name} has malformed targets")
+    return any(LIBRARY_KINDS.intersection(target["kind"]) for target in targets)
 
 
 def generated_from(package: dict[str, object], name: str) -> str | None:
@@ -110,9 +130,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="list only packages generated from another contract",
     )
+    parser.add_argument(
+        "--libraries",
+        action="store_true",
+        help="list only packages with a library target",
+    )
     arguments = parser.parse_args(argv)
     try:
-        names = workspace_package_names(arguments.manifest.resolve(), arguments.generated)
+        names = workspace_package_names(
+            arguments.manifest.resolve(), arguments.generated, arguments.libraries
+        )
     except MetadataError as error:
         print(f"workspace package discovery failed closed: {error}", file=sys.stderr)
         return 2

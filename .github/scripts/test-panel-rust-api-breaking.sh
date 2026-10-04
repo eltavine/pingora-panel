@@ -29,14 +29,28 @@ test_repo="$test_root/repository"
 mkdir -p \
   "$test_repo/.github/scripts" \
   "$test_repo/panel/generated-contracts/src" \
-  "$test_repo/panel/stable-api/src"
+  "$test_repo/panel/stable-api/src" \
+  "$test_repo/panel/tool/src"
 cp "$script_dir/check-panel-rust-api-breaking.sh" "$test_repo/.github/scripts/"
 cp "$script_dir/list-workspace-package-names.py" "$test_repo/.github/scripts/"
 
 cat >"$test_repo/panel/Cargo.toml" <<'EOF'
 [workspace]
 resolver = "2"
-members = ["generated-contracts", "stable-api"]
+members = ["generated-contracts", "stable-api", "tool"]
+EOF
+
+# A binary-only package has no Rust API to compare.
+cat >"$test_repo/panel/tool/Cargo.toml" <<'EOF'
+[package]
+name = "tool"
+version = "0.1.0"
+edition = "2021"
+publish = false
+EOF
+
+cat >"$test_repo/panel/tool/src/main.rs" <<'EOF'
+fn main() {}
 EOF
 
 cat >"$test_repo/panel/generated-contracts/Cargo.toml" <<'EOF'
@@ -128,7 +142,7 @@ cat >"$test_repo/panel/new-api/src/lib.rs" <<'EOF'
 pub struct NewlyIntroducedValue;
 EOF
 sed -i.bak \
-  's/members = \["generated-contracts", "stable-api"\]/members = ["generated-contracts", "stable-api", "new-api"]/' \
+  's/members = \["generated-contracts", "stable-api", "tool"\]/members = ["generated-contracts", "stable-api", "tool", "new-api"]/' \
   "$test_repo/panel/Cargo.toml"
 rm -f -- "$test_repo/panel/Cargo.toml.bak"
 cargo generate-lockfile --manifest-path "$test_repo/panel/Cargo.toml" --quiet
@@ -171,8 +185,14 @@ rm -f -- "$test_repo/panel/stable-api/Cargo.toml.bak"
 cargo generate-lockfile --manifest-path "$test_repo/panel/Cargo.toml" --quiet
 bash "$test_repo/.github/scripts/check-panel-rust-api-breaking.sh" "$baseline_ref" >/dev/null
 
+mv "$test_repo/panel/stable-api/src/lib.rs" "$test_root/stable-api-lib.rs"
+printf 'fn main() {}\n' >"$test_repo/panel/stable-api/src/main.rs"
+assert_breaking_rejected "removed library target"
+rm -f -- "$test_repo/panel/stable-api/src/main.rs"
+mv "$test_root/stable-api-lib.rs" "$test_repo/panel/stable-api/src/lib.rs"
+
 sed -i.bak \
-  's/members = \["generated-contracts", "stable-api", "new-api"\]/members = ["generated-contracts", "new-api"]/' \
+  's/members = \["generated-contracts", "stable-api", "tool", "new-api"\]/members = ["generated-contracts", "tool", "new-api"]/' \
   "$test_repo/panel/Cargo.toml"
 rm -f -- "$test_repo/panel/Cargo.toml.bak"
 cargo generate-lockfile --manifest-path "$test_repo/panel/Cargo.toml" --quiet
