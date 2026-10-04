@@ -149,7 +149,9 @@ Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交
 
 0.5 告警（`OBS-051`～`OBS-053`）按 ADR 0027 实现：`observability-service` 每 30 秒由持有告警咨询锁的实例评估规则；规则以固定 PromQL 读取最近五分钟的 5xx 占比、P95 延迟、请求速率、上游失败占比或打开的连接数，可限定网站、路由或上游，条件持续满足到设定时长后触发，首次不满足即恢复，读取失败时保持原状态并说明原因。触发与恢复在状态变更的同一事务中为每个渠道排队通知，由发送方以 `FOR UPDATE SKIP LOCKED` 领取，按 Alertmanager Webhook（version 4）格式、依 Standard Webhooks 规范以 HMAC-SHA256 签名发送，失败时退避重试一天。渠道的地址与签名密钥以主密钥加密保存，只显示地址的来源，密钥仅在创建或轮换时显示一次；邮件渠道作为预留接口在合约中命名，创建时返回不支持。规则与渠道的变更及告警的触发与恢复都写入审计。查看需要 `alerts.read`，修改需要 `alerts.manage`；REST API、`ppanel alert` 与控制台告警页提供同样的能力，网关概览首先列出正在触发的告警。
 
-0.5 主机概览（`HOST-001`～`HOST-011`）按 ADR 0028 实现：Compose 安装运行只监听回环地址、只读挂载主机根目录且不带任何能力的 node exporter，Prometheus 抓取它；`observability-service` 以固定 PromQL 回答主机名、操作系统、内核、架构、系统时间与时区、运行时长、CPU 使用率与核数、负载、内存、按设备去重并按占用率排序的真实文件系统，以及物理网卡的收发流量，没有 node exporter 时说明主机未上报。`GET /api/v1/host`（需要 `host.read`）为每个文件系统给出已用比例与级别（85% 起为警告、95% 起为严重），`ppanel host` 与控制台主机页展示同样的数据与预警。端口占用诊断、systemd 管理与目录容量（`HOST-012`～`HOST-018`）由 `ops-agent` 提供，尚未实现。
+0.5 主机概览（`HOST-001`～`HOST-011`）按 ADR 0028 实现：Compose 安装运行只监听回环地址、只读挂载主机根目录且不带任何能力的 node exporter，Prometheus 抓取它；`observability-service` 以固定 PromQL 回答主机名、操作系统、内核、架构、系统时间与时区、运行时长、CPU 使用率与核数、负载、内存、按设备去重并按占用率排序的真实文件系统，以及物理网卡的收发流量，没有 node exporter 时说明主机未上报。`GET /api/v1/host`（需要 `host.read`）为每个文件系统给出已用比例与级别（85% 起为警告、95% 起为严重），`ppanel host` 与控制台主机页展示同样的数据与预警。端口占用诊断、systemd 管理与目录容量（`HOST-012`～`HOST-018`）由 `ops-agent` 提供，见下一段。
+
+0.5 主机代理按 ADR 0030 实现：`ops-agent` 以宿主机原生 systemd 服务运行，使用动态用户与沙箱，不开 TCP 端口；它在权限为 0660、属组为容器用户的 Unix 套接字上以 mTLS 提供 gRPC，握手前校验对端用户，握手后按工作负载身份只允许 `panel-api` 调用，每项能力是独立的 gRPC 服务。凭据由安装的证书机构签发，经 systemd `LoadCredential=` 交给 agent，续期后由路径单元重启它；Compose 安装通过 `compose.ops-agent.yaml` 签发凭据并只把套接字挂进 `panel-api`。每项能力单独启用、只获得所需权限，agent 报告每项能力是否可用及原因。目录容量（`HOST-016`～`HOST-018`）统计配置、日志与证书目录（Compose 安装中即网关的卷）中常规文件的大小与数量，只在同一文件系统内、不跟随链接，超过条目或时间上限时标明不完整；读取所需的 `CAP_DAC_READ_SEARCH` 只在挂载命名空间隐藏 `/var` 其余部分与主机凭据时授予。`GET /api/v1/host/agent`、`GET /api/v1/host/directories`（需要 `host.read`）、`ppanel host agent`、`ppanel host directories` 与控制台主机页提供同样的数据，未安装或无响应的 agent 显示为状态而非错误；CI 的 Compose 检查在运行器上安装并连接 agent。端口占用诊断与 systemd 管理（`HOST-012`～`HOST-015`）尚未实现。
 
 ### 3.2 目标仓库边界
 
@@ -1246,9 +1248,9 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | HOST-013 | 503 | Pingora systemd 状态 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“Pingora systemd 状态”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
 | HOST-014 | 504 | Pingora systemd 启停 | 0.5 | A/C/G/I | Administrator | ops-agent | 执行“Pingora systemd 启停”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | HOST-015 | 505 | Pingora systemd 重启 | 0.5 | A/C/G/I | Administrator | ops-agent | 执行“Pingora systemd 重启”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HOST-016 | 506 | 配置目录容量统计 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“配置目录容量统计”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| HOST-017 | 507 | 日志目录容量统计 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“日志目录容量统计”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| HOST-018 | 508 | 证书目录容量统计 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“证书目录容量统计”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
+| HOST-016 | 506 | 配置目录容量统计 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“配置目录容量统计”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| HOST-017 | 507 | 日志目录容量统计 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“日志目录容量统计”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| HOST-018 | 508 | 证书目录容量统计 | 0.5 | A/C/G/I | Viewer | ops-agent | 查询“证书目录容量统计”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
 | BACKUP-001 | 509 | 简单文件查看器，仅限项目配置目录 | 0.5 | A/C/G/I | Viewer | automation-service | 查询“简单文件查看器，仅限项目配置目录”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
 | BACKUP-002 | 510 | 简单文件编辑器，仅限 DSL/Lua/静态站点目录 | 0.5 | A/C/G/I | Operator | automation-service | 执行“简单文件编辑器，仅限 DSL/Lua/静态站点目录”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | BACKUP-003 | 511 | 文件上传，仅限网站目录 | 0.5 | A/C/G/I | Operator | automation-service | 执行“文件上传，仅限网站目录”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
@@ -1435,7 +1437,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | 新增团队/平台需求 | 105 |
 | 总 Feature ID | 685 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
-| 当前 `Implemented` | 384（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-005`；身份：`IAM-001`～`IAM-038`；证书：`TLS-001`～`TLS-033`；安全：`SEC-001`～`SEC-035`；可观测：`OBS-001`～`OBS-044`、`OBS-047`～`OBS-053`；主机：`HOST-001`～`HOST-011`） |
+| 当前 `Implemented` | 387（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-005`；身份：`IAM-001`～`IAM-038`；证书：`TLS-001`～`TLS-033`；安全：`SEC-001`～`SEC-035`；可观测：`OBS-001`～`OBS-044`、`OBS-047`～`OBS-053`；主机：`HOST-001`～`HOST-011`、`HOST-016`～`HOST-018`） |
 | 1.0 要求 `Verified` | 685 |
 
 分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 47、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。
