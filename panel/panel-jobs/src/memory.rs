@@ -1,7 +1,7 @@
 use crate::{
-    CancelOutcome, ClaimRequest, Enqueued, Finish, Job, JobError, JobId, JobKind, JobSpec,
-    JobState, JobStore, Lease, MaintenanceWindow, Progress, Renewal, Schedule, ScheduleName,
-    ScheduleStore,
+    time::duration, CancelOutcome, ClaimRequest, Enqueued, Finish, Job, JobError, JobId, JobKind,
+    JobSpec, JobState, JobStore, Lease, MaintenanceWindow, Progress, Renewal, Schedule,
+    ScheduleName, ScheduleStore,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -34,10 +34,6 @@ impl MemoryJobStore {
     pub fn new() -> Self {
         Self::default()
     }
-}
-
-fn duration(value: Duration) -> chrono::Duration {
-    chrono::Duration::from_std(value).unwrap_or(chrono::Duration::MAX)
 }
 
 fn holds(stored: &Stored, lease: &Lease, now: DateTime<Utc>) -> bool {

@@ -15,6 +15,7 @@ mod model;
 mod policy;
 mod recurrence;
 mod store;
+mod time;
 mod worker;
 
 pub use memory::MemoryJobStore;

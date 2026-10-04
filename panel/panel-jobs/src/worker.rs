@@ -264,7 +264,7 @@ impl Worker {
         if retryable && lease.attempt < lease.job.max_attempts {
             let delay = self.options.retry.delay(lease.attempt);
             Finish::Retry {
-                at: Utc::now() + chrono::Duration::from_std(delay).unwrap_or_default(),
+                at: Utc::now() + crate::time::duration(delay),
                 error,
             }
         } else {

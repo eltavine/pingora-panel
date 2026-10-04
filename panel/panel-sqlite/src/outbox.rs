@@ -95,7 +95,7 @@ impl SqliteOutbox {
 
 /// The time `age` ago.
 pub(crate) fn cutoff(age: Duration) -> DateTime<Utc> {
-    Utc::now() - chrono::Duration::from_std(age).unwrap_or(chrono::Duration::MAX)
+    Utc::now() - crate::time::span(age)
 }
 
 #[async_trait]

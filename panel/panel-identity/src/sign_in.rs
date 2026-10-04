@@ -6,6 +6,7 @@ use crate::{
     csrf_token,
     service::{cause, ensure_managers, role_permissions},
     store::{Attempt, NewAccount, NewSession},
+    time::duration,
     AccountId, Client, IdentityProvider, IdentityStore, Login, OpenIdConnect, PendingSignIn,
     ProviderDirectory, ProviderLink, ProviderSession, ProviderSignIn, ProviderStore, Refreshed,
     Secret, SecretHash, Session, SessionId, SessionPolicy, Transport, Username,
@@ -122,10 +123,6 @@ fn groups(claims: &Map<String, Value>, name: &str) -> BTreeSet<String> {
         Some(Value::String(group)) => BTreeSet::from([group.clone()]),
         _ => BTreeSet::new(),
     }
-}
-
-fn duration(value: Duration) -> chrono::Duration {
-    chrono::Duration::from_std(value).unwrap_or(chrono::Duration::MAX)
 }
 
 impl ProviderSignIns {

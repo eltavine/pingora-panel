@@ -14,6 +14,10 @@ use tokio_tungstenite::{
 };
 use uuid::Uuid;
 
+/// The furthest deadline a change names; a longer timeout still waits for the
+/// answer.
+const LONGEST_DEADLINE: Duration = Duration::from_secs(24 * 60 * 60);
+
 /// Process exit codes; scripts may rely on them.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Exit {
@@ -198,7 +202,8 @@ impl Api {
         if_match: Option<&str>,
     ) -> Result<Reply> {
         let deadline = Utc::now()
-            + chrono::Duration::from_std(self.timeout).unwrap_or(chrono::Duration::seconds(30));
+            + chrono::Duration::from_std(self.timeout.min(LONGEST_DEADLINE))
+                .unwrap_or(chrono::Duration::seconds(30));
         let key = self
             .idempotency_key
             .clone()

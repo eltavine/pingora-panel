@@ -112,8 +112,7 @@ pub struct Session {
 impl Session {
     /// When it ends unless there is activity first.
     pub fn idle_until(&self, policy: &SessionPolicy) -> DateTime<Utc> {
-        let idle = chrono::Duration::from_std(policy.idle).unwrap_or(chrono::Duration::MAX);
-        (self.last_seen_at + idle).min(self.expires_at)
+        (self.last_seen_at + crate::time::duration(policy.idle)).min(self.expires_at)
     }
 
     pub fn is_live(&self, now: DateTime<Utc>, policy: &SessionPolicy) -> bool {
@@ -172,5 +171,11 @@ mod tests {
         assert!(!session.is_live(hours(23) + chrono::Duration::minutes(45), &policy));
         assert_eq!(Transport::parse("bearer"), Some(Transport::Bearer));
         assert_eq!(Transport::Cookie.as_str(), "cookie");
+
+        let unbounded = SessionPolicy {
+            idle: Duration::MAX,
+            ..SessionPolicy::default()
+        };
+        assert_eq!(session.idle_until(&unbounded), session.expires_at);
     }
 }

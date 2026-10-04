@@ -91,7 +91,7 @@ impl ProcessedEventStore for SqliteProcessedEventStore {
         )
         .bind(consumer.as_str())
         .bind(uuid(event_id))
-        .bind(now + chrono::Duration::from_std(lease).unwrap_or(chrono::Duration::MAX))
+        .bind(now + crate::time::span(lease))
         .bind(now)
         .fetch_optional(&self.pool)
         .await

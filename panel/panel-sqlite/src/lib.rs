@@ -13,6 +13,7 @@ mod event_log;
 mod health;
 mod inbox;
 mod outbox;
+mod time;
 
 pub use database::{SchemaMigration, ServiceDatabase, ServiceDatabaseConfig};
 pub use error::storage_error;

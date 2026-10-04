@@ -23,6 +23,7 @@ mod session;
 mod sign_in;
 pub mod store;
 mod throttle;
+mod time;
 mod workload;
 
 pub use account::{Account, AccountId, PasswordSignIn, Username};

@@ -8,6 +8,7 @@ use crate::{
         AccountChange, Attempt, Cause, Failure, IdentityStore, NewAccount, NewSession, NewToken,
         StoredAccount,
     },
+    time::duration,
     Account, AccountId, ApiToken, Credential, FailurePolicy, Grant, GrantConditions, GrantId,
     GrantScope, HeldGrant, PasswordHasher, PasswordPolicy, PasswordSignIn, Permission,
     PermissionSet, Principal, Role, Secret, SecretHash, Session, SessionId, SessionPolicy, TokenId,
@@ -192,10 +193,6 @@ pub(crate) fn cause(scope: &RequestScope, actor: &str) -> Cause {
         scope: scope.clone(),
         actor: actor.to_owned(),
     }
-}
-
-fn duration(value: Duration) -> chrono::Duration {
-    chrono::Duration::from_std(value).unwrap_or(chrono::Duration::MAX)
 }
 
 impl Identity {
