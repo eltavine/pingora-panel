@@ -15,6 +15,10 @@ COPY panel/panel-api/tests/fixtures/openapi.json /panel/panel-api/tests/fixtures
 RUN pnpm codegen && pnpm build-only
 
 FROM docker.io/library/rust:1.98.0-bookworm@sha256:82150a52ec202c1b14d7817e14516c392bb7f5cfebd88f1ed531cb37ebd39922 AS build
+# pingora-core compresses with zlib-ng, which builds with CMake.
+RUN apt-get update \
+ && apt-get install --yes --no-install-recommends cmake \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
