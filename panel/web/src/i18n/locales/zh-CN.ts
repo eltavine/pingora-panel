@@ -1147,6 +1147,8 @@ const zhCN = {
     config_write: '修改草稿：资源、配置文件与版本备注',
     config_apply: '应用草稿、试运行与回滚',
     audit_read: '读取并校验审计日志',
+    logs_read: '检索、实时查看与下载网关的访问日志和错误日志',
+    logs_delete: '删除某个网站或全部网站的网关日志',
     platform_read: '读取控制面服务',
     identity_read: '读取账户、角色与会话',
     identity_manage: '创建、修改、停用与解锁账户，分配角色并结束会话',

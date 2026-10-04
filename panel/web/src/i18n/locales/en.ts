@@ -1194,6 +1194,8 @@ const en: Messages = {
     config_write: 'Change the draft: resources, files and revision notes',
     config_apply: 'Apply the draft, run dry runs and roll back',
     audit_read: 'Read and verify the audit trail',
+    logs_read: "Search, follow and download the gateway's access and error logs",
+    logs_delete: "Delete the gateway's logs of a site or of every site",
     platform_read: 'Read the services of the control plane',
     identity_read: 'Read accounts, roles and sessions',
     identity_manage: 'Create, change, disable and unlock accounts, grant roles and end sessions',

@@ -28,6 +28,8 @@ const PERMISSIONS = [
   'certificate.read',
   'certificate.manage',
   'audit.read',
+  'logs.read',
+  'logs.delete',
   'platform.read',
   'identity.read',
   'identity.manage',

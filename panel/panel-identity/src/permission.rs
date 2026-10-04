@@ -21,6 +21,8 @@ pub enum Permission {
     CertificateRead,
     CertificateManage,
     AuditRead,
+    LogsRead,
+    LogsDelete,
     PlatformRead,
     IdentityRead,
     IdentityManage,
@@ -87,6 +89,16 @@ const CATALOG: &[(Permission, &str, &str)] = &[
         Permission::AuditRead,
         "audit.read",
         "Read and verify the audit trail.",
+    ),
+    (
+        Permission::LogsRead,
+        "logs.read",
+        "Search, follow and download the gateway's access and error logs.",
+    ),
+    (
+        Permission::LogsDelete,
+        "logs.delete",
+        "Delete the gateway's logs of a site or of every site.",
     ),
     (
         Permission::PlatformRead,
@@ -237,7 +249,7 @@ pub fn built_in_roles() -> Vec<Role> {
         role(
             "operator",
             "Operator",
-            "Changes and applies configuration, decides on others' changes, manages certificates and operates the gateway.",
+            "Changes and applies configuration, decides on others' changes, manages certificates, operates the gateway and keeps its logs.",
             [
                 GatewayRead,
                 GatewayOperate,
@@ -247,6 +259,8 @@ pub fn built_in_roles() -> Vec<Role> {
                 ApprovalDecide,
                 CertificateRead,
                 CertificateManage,
+                LogsRead,
+                LogsDelete,
                 PlatformRead,
             ]
             .into_iter()
@@ -255,17 +269,24 @@ pub fn built_in_roles() -> Vec<Role> {
         role(
             "viewer",
             "Viewer",
-            "Reads configuration, certificates and the gateway's state.",
-            [GatewayRead, ConfigRead, CertificateRead, PlatformRead]
-                .into_iter()
-                .collect(),
+            "Reads configuration, certificates, the gateway's state and its logs.",
+            [
+                GatewayRead,
+                ConfigRead,
+                CertificateRead,
+                LogsRead,
+                PlatformRead,
+            ]
+            .into_iter()
+            .collect(),
         ),
         role(
             "auditor",
             "Auditor",
-            "Reads the audit trail, configuration, certificates and accounts.",
+            "Reads the audit trail, the gateway's logs, configuration, certificates and accounts.",
             [
                 AuditRead,
+                LogsRead,
                 ConfigRead,
                 CertificateRead,
                 GatewayRead,
