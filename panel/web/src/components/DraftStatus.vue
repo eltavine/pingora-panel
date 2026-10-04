@@ -23,10 +23,10 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { notifyFailure, plainHeaders, useRefreshConfiguration } from '@/lib/configuration'
+import { notifyFailure, plainHeaders, useRefreshApplied } from '@/lib/configuration'
 
 const { t } = useI18n()
-const refresh = useRefreshConfiguration()
+const refresh = useRefreshApplied()
 const draft = useQuery({ ...draftOptions(), refetchInterval: 15_000 })
 const confirming = ref(false)
 const note = ref('')

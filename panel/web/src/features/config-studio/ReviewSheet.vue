@@ -35,7 +35,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { Textarea } from '@/components/ui/textarea'
 import { toApiFailure } from '@/lib/api'
 import { isApprovalRequest } from '@/lib/approvals'
-import { notifyFailure, plainHeaders, useRefreshConfiguration } from '@/lib/configuration'
+import { notifyFailure, plainHeaders, useRefreshApplied } from '@/lib/configuration'
 import { useSession } from '@/lib/session'
 
 const open = defineModel<boolean>('open', { required: true })
@@ -48,7 +48,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const { can } = useSession()
-const refresh = useRefreshConfiguration()
+const refresh = useRefreshApplied()
 const plan = useQuery(computed(() => ({ ...planOptions(), enabled: open.value })))
 const dryRun = useMutation(dryRunMutation())
 const apply = useMutation(applyMutation())
