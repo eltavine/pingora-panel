@@ -167,14 +167,24 @@ pub(crate) struct HeadDeadline<A> {
     app: Arc<A>,
     timeout: Duration,
     connections: Arc<Connections>,
+    /// When the connections are to finish, which the listener's own signal
+    /// to stop accepting is not: a connection accepted just before must not
+    /// be told to finish before it was served.
+    serving: ShutdownWatch,
 }
 
 impl<A> HeadDeadline<A> {
-    pub(crate) fn new(app: A, timeout: Duration, connections: Arc<Connections>) -> Self {
+    pub(crate) fn new(
+        app: A,
+        timeout: Duration,
+        connections: Arc<Connections>,
+        serving: ShutdownWatch,
+    ) -> Self {
         Self {
             app: Arc::new(app),
             timeout,
             connections,
+            serving,
         }
     }
 }
@@ -184,7 +194,7 @@ impl<A: ServerApp + Send + Sync + 'static> ServerApp for HeadDeadline<A> {
     async fn process_new(
         self: &Arc<Self>,
         stream: Stream,
-        shutdown: &ShutdownWatch,
+        _accepting: &ShutdownWatch,
     ) -> Option<Stream> {
         let watched = if stream.as_any().is::<Watched>() {
             let mut watched = stream
@@ -200,7 +210,7 @@ impl<A: ServerApp + Send + Sync + 'static> ServerApp for HeadDeadline<A> {
                 Arc::clone(&self.connections),
             ))
         };
-        self.app.process_new(watched, shutdown).await
+        self.app.process_new(watched, &self.serving).await
     }
 
     /// Leaves out the proxy's cleanup, which drops every connection waiting

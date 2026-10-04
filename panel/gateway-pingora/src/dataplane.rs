@@ -47,6 +47,8 @@ const RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const DEFAULT_DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a retired generation's workers have to stop once drained.
 const RUNTIME_SHUTDOWN: Duration = Duration::from_secs(5);
+/// How long a retired generation's listeners have to stop accepting.
+const LISTENER_STOP: Duration = Duration::from_secs(5);
 const DEFAULT_UPSTREAM_POOL_SIZE: usize = 128;
 
 #[derive(Clone, Debug)]
@@ -137,7 +139,13 @@ struct Generation {
     plans: Vec<ListenerPlan>,
     workers: usize,
     runtime: Option<Runtime>,
-    shutdown: watch::Sender<bool>,
+    /// Stops the listeners accepting connections.
+    accepting: watch::Sender<bool>,
+    /// The listeners' accept loops, which end once they stop accepting.
+    listening: Vec<JoinHandle<()>>,
+    /// Tells the connections accepted to finish: no more keep-alive, and an
+    /// HTTP/2 GOAWAY.
+    serving: watch::Sender<bool>,
     in_flight: Arc<AtomicUsize>,
     /// Each listener's connections, held by the generation and by what
     /// serves them.
@@ -295,9 +303,10 @@ impl DataPlane {
         self.adapter
             .set_bound_sockets(state.sockets.keys().cloned().collect());
         state.retiring.retain(|task| !task.is_finished());
-        if let Some(previous) = previous {
+        if let Some(mut previous) = previous {
+            previous.stop_accepting().await;
             let drain = self.options.drain_timeout;
-            state.retiring.push(tokio::spawn(previous.retire(drain)));
+            state.retiring.push(tokio::spawn(previous.drain(drain)));
         }
         let status = DataPlaneStatus {
             generation: state.generations,
@@ -396,9 +405,11 @@ impl Generation {
             upstream_keepalive_pool_size: options.upstream_pool_size,
             ..ServerConf::default()
         });
-        let (shutdown, watch) = watch::channel(false);
+        let (accepting, accept) = watch::channel(false);
+        let (serving, serve) = watch::channel(false);
         let in_flight = Arc::new(AtomicUsize::new(0));
         let mut listening = Vec::with_capacity(plans.len());
+        let mut tracked = Vec::with_capacity(plans.len());
         for plan in &plans {
             let socket = sockets.get(&plan.socket).ok_or_else(|| {
                 PanelError::internal(format!("listener {} has no socket", plan.id))
@@ -408,7 +419,7 @@ impl Generation {
             let connections = Arc::new(Connections::new(
                 metrics.as_ref().map(|metrics| metrics.connections(&label)),
             ));
-            listening.push(Arc::clone(&connections));
+            tracked.push(Arc::clone(&connections));
             let handshakes = HandshakeRecorder(metrics.clone().map(|metrics| (metrics, label)));
             let proxy = PanelProxy::new(
                 ListenerContext {
@@ -431,7 +442,7 @@ impl Generation {
             proxy.handle_init_modules();
             let mut service = Service::new(
                 format!("listener {}", plan.id),
-                HeadDeadline::new(proxy, plan.head_timeout, connections),
+                HeadDeadline::new(proxy, plan.head_timeout, connections, serve.clone()),
             );
             let address = plan.socket.address.to_string();
             if plan.tls {
@@ -445,8 +456,8 @@ impl Generation {
                 service.add_tcp(&address);
             }
             let fds = inherited(&address, socket)?;
-            let shutdown = watch.clone();
-            runtime.spawn(async move {
+            let shutdown = accept.clone();
+            listening.push(runtime.spawn(async move {
                 #[cfg(unix)]
                 service.start_service(fds, shutdown, 1).await;
                 #[cfg(not(unix))]
@@ -454,25 +465,42 @@ impl Generation {
                     let () = fds;
                     service.start_service(shutdown, 1).await;
                 }
-            });
+            }));
         }
         Ok(Self {
             id,
             plans,
             workers,
             runtime: Some(runtime),
-            shutdown,
+            accepting,
+            listening,
+            serving,
             in_flight,
-            connections: listening,
+            connections: tracked,
             started_at: SystemTime::now(),
         })
     }
 
-    /// Stops accepting and closes the connections idle between requests,
-    /// lets every other connection it accepted finish its request within
-    /// `drain`, the first one included, then closes what remains.
+    /// Stops accepting connections and waits for its listeners to stop, so
+    /// that from here on only the next generation accepts them.
+    async fn stop_accepting(&mut self) {
+        let _ = self.accepting.send(true);
+        for listener in self.listening.drain(..) {
+            let _ = tokio::time::timeout(LISTENER_STOP, listener).await;
+        }
+    }
+
     async fn retire(mut self, drain: Duration) {
-        let _ = self.shutdown.send(true);
+        self.stop_accepting().await;
+        self.drain(drain).await;
+    }
+
+    /// Closes the connections idle between requests, lets every other
+    /// connection it accepted finish its request within `drain`, the first
+    /// one included, then closes what remains. Call once it stopped
+    /// accepting.
+    async fn drain(mut self, drain: Duration) {
+        let _ = self.serving.send(true);
         for connections in &self.connections {
             connections.retire();
         }
