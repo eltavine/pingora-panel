@@ -27,6 +27,9 @@ pub enum Permission {
     AlertsManage,
     HostRead,
     HostManage,
+    ContainersRead,
+    ContainersInspect,
+    ContainersManage,
     PlatformRead,
     IdentityRead,
     IdentityManage,
@@ -123,6 +126,21 @@ const CATALOG: &[(Permission, &str, &str)] = &[
         Permission::HostManage,
         "host.manage",
         "Start, stop and restart the gateway's service on the host.",
+    ),
+    (
+        Permission::ContainersRead,
+        "containers.read",
+        "Read the container engines and their containers, images, networks, volumes and Compose projects.",
+    ),
+    (
+        Permission::ContainersInspect,
+        "containers.inspect",
+        "Read containers' logs and details and Compose files, which can hold secrets.",
+    ),
+    (
+        Permission::ContainersManage,
+        "containers.manage",
+        "Enable engines and start, stop, remove and prune what runs on them.",
     ),
     (
         Permission::PlatformRead,
@@ -288,6 +306,9 @@ pub fn built_in_roles() -> Vec<Role> {
                 AlertsRead,
                 AlertsManage,
                 HostRead,
+                ContainersRead,
+                ContainersInspect,
+                ContainersManage,
                 PlatformRead,
             ]
             .into_iter()
@@ -304,6 +325,7 @@ pub fn built_in_roles() -> Vec<Role> {
                 LogsRead,
                 AlertsRead,
                 HostRead,
+                ContainersRead,
                 PlatformRead,
             ]
             .into_iter()
@@ -318,6 +340,7 @@ pub fn built_in_roles() -> Vec<Role> {
                 LogsRead,
                 AlertsRead,
                 HostRead,
+                ContainersRead,
                 ConfigRead,
                 CertificateRead,
                 GatewayRead,

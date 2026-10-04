@@ -1569,6 +1569,11 @@ const en: Messages = {
     host_read:
       "Read the host's figures and what its agent reports: the panel's directories, what holds ports and the gateway service",
     host_manage: 'Start, stop and restart the gateway service on the host',
+    containers_read:
+      'Read the container engines and their containers, images, networks, volumes and Compose projects',
+    containers_inspect:
+      "Read containers' logs and details and Compose files, which can hold secrets",
+    containers_manage: 'Enable engines and start, stop, remove and prune what runs on them',
     platform_read: 'Read the services of the control plane',
     identity_read: 'Read accounts, roles and sessions',
     identity_manage: 'Create, change, disable and unlock accounts, grant roles and end sessions',
