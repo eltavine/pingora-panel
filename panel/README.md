@@ -417,6 +417,24 @@ ppanel logs download --request-id 01J9Z8 --file request.log
 ppanel logs delete --site shop --yes
 ```
 
+## Host
+
+The Compose installation runs Prometheus's node exporter on loopback,
+reading the host's root read-only without capabilities
+([decision](../docs/adr/0028-host-and-container-operations.md)), and
+Prometheus scrapes it. `observability-service` reads the host name,
+operating system, kernel, architecture, clock and time zone, uptime, CPU
+use, load, memory, each real filesystem once and each physical network
+device's traffic with fixed queries. `GET /api/v1/host` serves them with
+each filesystem's share used and a warning from 85% and a critical level
+from 95%; it needs `host.read`.
+
+```sh
+ppanel host
+```
+
+The console's Host page shows the same figures and warnings.
+
 ## Alerts
 
 `observability-service` evaluates alert rules
