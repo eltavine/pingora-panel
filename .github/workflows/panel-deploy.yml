@@ -45,8 +45,13 @@ jobs:
 
       - name: Install the host agent
         run: |
+          # A stand-in for the gateway's unit, which the agent manages.
+          printf '[Unit]\nDescription=Stand-in for the gateway\n[Service]\nExecStart=/bin/sleep infinity\n' \
+            | sudo tee /etc/systemd/system/pingora-panel-gatewayd.service >/dev/null
+          sudo systemctl daemon-reload
+          sudo systemctl start pingora-panel-gatewayd.service
           sudo env PINGORA_PANEL_IMAGE=localhost/pingora-panel:dev \
-            panel/deploy/ops-agent/install.sh directories listeners
+            panel/deploy/ops-agent/install.sh directories listeners gateway-unit
           sudo systemd-analyze verify \
             /etc/systemd/system/pingora-panel-ops-agent.service \
             /etc/systemd/system/pingora-panel-ops-agent-credentials.service \
@@ -119,6 +124,26 @@ jobs:
           docker compose exec -T -e PPANEL_TOKEN panel-api ppanel host agent
           docker compose exec -T -e PPANEL_TOKEN panel-api ppanel host directories
           docker compose exec -T -e PPANEL_TOKEN panel-api ppanel host listeners --port 8080
+          ppanel() { docker compose exec -T -e PPANEL_TOKEN panel-api ppanel "$@"; }
+          state() {
+            ppanel -o json host unit | python3 -c "import json, sys; print(json.load(sys.stdin)['active_state'])"
+          }
+          test "$(state)" = active
+          ppanel --timeout 120 host unit restart --yes
+          test "$(state)" = active
+          ppanel --timeout 120 host unit stop --yes
+          test "$(state)" = inactive
+          ppanel --timeout 120 host unit start
+          test "$(state)" = active
+          for attempt in $(seq 1 30); do
+            if ppanel -o json audit list --type host.gateway_unit.restarted --actor-id ci \
+              | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"; then
+              break
+            fi
+            sleep 1
+          done
+          ppanel -o json audit list --type host.gateway_unit.restarted --actor-id ci \
+            | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"
 
       - name: Serve a site through the gateway with the command line
         run: |
