@@ -100,6 +100,21 @@ describe('audit presentation', () => {
       'audit.summary.generation{"generation":"3","workers":"2"}',
     )
     expect(summaryOf(event('other.event', { a: 1 }), t)).toBe('{"a":1}')
+    expect(
+      summaryOf(event('container.stopped', { engine: 'docker', id: 'b2', name: 'shop-web-1' }), t),
+    ).toBe('docker · shop-web-1')
+    expect(
+      summaryOf(
+        event('container.removed', {
+          engine: 'docker',
+          id: 'b2',
+          name: 'shop-web-1',
+          force: true,
+          remove_volumes: false,
+        }),
+        t,
+      ),
+    ).toBe('docker · shop-web-1 · audit.summary.killedFirst')
   })
 
   it('summarizes roles, token rotations and certificates', () => {
