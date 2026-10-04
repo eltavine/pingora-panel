@@ -3,8 +3,8 @@ use crate::{
     sign_in::ProviderAccess,
 };
 use panel_application::{
-    AlertsPort, AuditPort, CertificatePort, ConfigurationPort, GatewayRuntimePort, HostPort,
-    LogsPort, TlsProbe, TrafficPort,
+    AlertsPort, AuditPort, CertificatePort, ConfigurationPort, GatewayRuntimePort, HostAgentPort,
+    HostPort, LogsPort, NoHostAgent, TlsProbe, TrafficPort,
 };
 use panel_health::HealthWatch;
 use panel_identity::{Identity, ProviderDirectory, ProviderSignIns, WorkloadIdentity};
@@ -24,6 +24,7 @@ pub struct ApiState<U> {
     pub(crate) logs: Option<Arc<dyn LogsPort>>,
     pub(crate) alerts: Option<Arc<dyn AlertsPort>>,
     pub(crate) host: Option<Arc<dyn HostPort>>,
+    pub(crate) host_agent: Arc<dyn HostAgentPort>,
     pub(crate) identity: Option<Arc<Gate>>,
     pub(crate) providers: Option<Arc<ProviderAccess>>,
     pub(crate) workloads: Option<Arc<WorkloadIdentity>>,
@@ -45,6 +46,7 @@ impl<U> Clone for ApiState<U> {
             logs: self.logs.clone(),
             alerts: self.alerts.clone(),
             host: self.host.clone(),
+            host_agent: Arc::clone(&self.host_agent),
             identity: self.identity.clone(),
             providers: self.providers.clone(),
             workloads: self.workloads.clone(),
@@ -68,6 +70,7 @@ impl<U> ApiState<U> {
             logs: None,
             alerts: None,
             host: None,
+            host_agent: Arc::new(NoHostAgent),
             identity: None,
             providers: None,
             workloads: None,
@@ -138,6 +141,13 @@ impl<U> ApiState<U> {
     /// Serves the host's figures under `/api/v1/host`.
     pub fn with_host(mut self, host: Arc<dyn HostPort>) -> Self {
         self.host = Some(host);
+        self
+    }
+
+    /// Serves what the host agent does under `/api/v1/host/agent` and the
+    /// paths beside it; without one they say no agent is configured.
+    pub fn with_host_agent(mut self, agent: Arc<dyn HostAgentPort>) -> Self {
+        self.host_agent = agent;
         self
     }
 

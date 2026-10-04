@@ -40,6 +40,8 @@ mod tests;
         crate::logs::search_logs, crate::logs::download_logs, crate::logs::tail_logs,
         crate::logs::delete_logs, crate::logs::list_log_deletions,
         crate::host::host_summary,
+        crate::host_agent::host_agent,
+        crate::host_agent::host_directories,
         crate::alerts::list_alert_rules, crate::alerts::put_alert_rule,
         crate::alerts::delete_alert_rule, crate::alerts::list_alert_channels,
         crate::alerts::create_alert_channel, crate::alerts::rotate_alert_channel,

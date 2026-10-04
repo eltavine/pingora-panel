@@ -22,6 +22,7 @@ mod error_contract;
 mod gateway_runtime;
 mod grants;
 mod host;
+mod host_agent;
 mod identity;
 mod language;
 mod logs;
