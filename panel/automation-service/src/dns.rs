@@ -6,12 +6,13 @@ use crate::{acme::slug, certificates::Cause, events::refused};
 use chrono::{DateTime, Utc};
 use dns_rfc2136::{Algorithm, Rfc2136, Rfc2136Settings};
 use panel_acme::{Dns01, DnsProvider};
+use panel_certificate_api::{DnsProviderChange, NewDnsProvider, Rfc2136Config};
 use panel_errors::{PanelError, Result};
 use panel_event_contracts::tls::v1 as event;
 use panel_events::EventData;
 use panel_secrets::{Sealed, SecretVault};
 use panel_sqlite::{storage_error, EventLog, ServiceDatabase, SqliteOutbox};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
 use sqlx::{sqlite::SqliteRow, Row, SqliteConnection};
 use std::{sync::Arc, time::Duration};
@@ -42,25 +43,9 @@ fn provider_updated(provider: &DnsProviderRecord) -> event::DnsProviderUpdated {
     }
 }
 const MAX_PROPAGATION_SECONDS: u32 = 3600;
-
-fn default_propagation() -> u32 {
-    30
-}
-
-/// Where and how an RFC 2136 provider sends updates.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Rfc2136Config {
-    /// The primary server as `host:port`.
-    pub server: String,
-    /// The zones the key may update.
-    pub zones: Vec<String>,
-    pub key_name: String,
-    /// `hmac-sha256` or `hmac-sha512`.
-    pub algorithm: String,
-    #[serde(default)]
-    pub ttl: Option<u32>,
-}
+/// Seconds a record takes to reach every authoritative server, unless a
+/// provider says otherwise.
+const DEFAULT_PROPAGATION_SECONDS: u32 = 30;
 
 /// A DNS provider as kept: its kind and settings, without its secret.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -79,30 +64,6 @@ impl DnsProviderRecord {
     pub fn etag(&self) -> String {
         format!("\"{}\"", self.version)
     }
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct NewDnsProvider {
-    pub id: String,
-    /// Only `rfc2136` so far.
-    pub kind: String,
-    pub rfc2136: Rfc2136Config,
-    /// The TSIG secret, base64-encoded.
-    pub secret: Zeroizing<String>,
-    #[serde(default = "default_propagation")]
-    pub propagation_seconds: u32,
-}
-
-/// New settings; the secret stays unless a new one is given.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DnsProviderChange {
-    pub rfc2136: Rfc2136Config,
-    #[serde(default)]
-    pub secret: Option<Zeroizing<String>>,
-    #[serde(default = "default_propagation")]
-    pub propagation_seconds: u32,
 }
 
 /// Builds the provider a stored kind and settings describe.
@@ -126,7 +87,7 @@ impl DnsProviderFactory for StandardDnsProviders {
                     server: config.server,
                     zones: config.zones,
                     key_name: config.key_name,
-                    algorithm: Algorithm::parse(&config.algorithm)?,
+                    algorithm: Algorithm::parse(config.algorithm.as_str())?,
                     secret: Zeroizing::new(secret.to_owned()),
                     ttl: config.ttl,
                 })?))
@@ -245,13 +206,17 @@ impl DnsProviders {
         let id = body.id.clone();
         let result = async {
             let id = slug(&body.id, "a DNS provider ID")?;
-            check_propagation(body.propagation_seconds)?;
+            let propagation = body
+                .propagation_seconds
+                .unwrap_or(DEFAULT_PROPAGATION_SECONDS);
+            check_propagation(propagation)?;
             let settings = serde_json::to_value(&body.rfc2136)
                 .map_err(|_| PanelError::internal("DNS provider settings do not serialize"))?;
-            self.factory.build(&body.kind, &settings, &body.secret)?;
+            let kind = body.kind.as_str();
+            self.factory.build(kind, &settings, body.secret.expose())?;
             let sealed = self
                 .vault()?
-                .seal(&owner(&id), body.secret.as_bytes())
+                .seal(&owner(&id), body.secret.expose().as_bytes())
                 .await?;
             let now = Utc::now();
             let mut transaction = self.database.begin().await?;
@@ -261,10 +226,10 @@ impl DnsProviders {
                  VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?6) ON CONFLICT (provider_id) DO NOTHING",
             )
             .bind(&id)
-            .bind(&body.kind)
+            .bind(kind)
             .bind(settings.to_string())
             .bind(sealed.as_str())
-            .bind(i32::try_from(body.propagation_seconds).unwrap_or(0))
+            .bind(i32::try_from(propagation).unwrap_or(0))
             .bind(now)
             .execute(&mut *transaction)
             .await
@@ -277,9 +242,9 @@ impl DnsProviders {
             }
             let created = DnsProviderRecord {
                 id: id.clone(),
-                kind: body.kind,
+                kind: kind.to_owned(),
                 rfc2136: body.rfc2136,
-                propagation_seconds: body.propagation_seconds,
+                propagation_seconds: propagation,
                 version: 1,
                 created_at: now,
                 updated_at: now,
@@ -306,7 +271,10 @@ impl DnsProviders {
         body: DnsProviderChange,
     ) -> Result<DnsProviderRecord> {
         let result = async {
-            check_propagation(body.propagation_seconds)?;
+            let propagation = body
+                .propagation_seconds
+                .unwrap_or(DEFAULT_PROPAGATION_SECONDS);
+            check_propagation(propagation)?;
             let mut transaction = self.database.begin().await?;
             let row = sqlx::query(concat!(
                 "SELECT ",
@@ -327,7 +295,7 @@ impl DnsProviders {
             }
             let vault = self.vault()?;
             let secret = match body.secret {
-                Some(secret) => secret,
+                Some(secret) => Zeroizing::new(secret.expose().to_owned()),
                 None => {
                     let sealed = Sealed::new(
                         row.try_get::<String, _>("sealed_secret")
@@ -345,7 +313,7 @@ impl DnsProviders {
             let sealed = vault.seal(&owner(id), secret.as_bytes()).await?;
             let updated = DnsProviderRecord {
                 rfc2136: body.rfc2136,
-                propagation_seconds: body.propagation_seconds,
+                propagation_seconds: propagation,
                 version: current.version + 1,
                 updated_at: Utc::now(),
                 ..current

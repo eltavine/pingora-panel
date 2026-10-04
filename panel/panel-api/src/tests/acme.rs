@@ -1,11 +1,14 @@
 use super::*;
-use panel_application::{
-    CertificateChange, CertificateOutput, CertificatePort, CertificateRead, RequestScope,
+use panel_application::RequestScope;
+use panel_certificate_api::{
+    self as api, CertificateChange, CertificateCommand, CertificateOutput, CertificatePort,
+    CertificateQuery,
 };
+use panel_domain::CertificateId;
 use serde_json::{json, Value};
 use std::sync::Mutex;
 
-type Call = (String, String, Option<String>, Value);
+type Call = (String, String, Option<String>, Option<CertificateCommand>);
 
 #[derive(Default)]
 struct FakeAutomation {
@@ -70,14 +73,17 @@ fn output(value: Value, etag: Option<&str>) -> CertificateOutput {
 
 #[async_trait]
 impl CertificatePort for FakeAutomation {
-    async fn read(&self, _scope: RequestScope, read: CertificateRead) -> Result<CertificateOutput> {
-        self.calls.lock().unwrap().push((
-            read.operation.clone(),
-            read.resource.clone(),
-            None,
-            Value::Null,
-        ));
-        match (read.operation.as_str(), read.resource.as_str()) {
+    async fn read(
+        &self,
+        _scope: RequestScope,
+        query: CertificateQuery,
+    ) -> Result<CertificateOutput> {
+        let (operation, resource) = (query.operation(), query.resource());
+        self.calls
+            .lock()
+            .unwrap()
+            .push((operation.into(), resource.clone(), None, None));
+        match (operation, resource.as_str()) {
             ("acme.accounts.list", "acme-accounts") => Ok(output(json!([account()]), None)),
             ("acme.accounts.get", "acme-accounts/letsencrypt") => {
                 Ok(output(account(), Some("\"1\"")))
@@ -102,18 +108,14 @@ impl CertificatePort for FakeAutomation {
         change: CertificateChange,
     ) -> Result<CertificateOutput> {
         assert_eq!(context.actor(), "operator");
-        let content = if change.content.is_empty() {
-            Value::Null
-        } else {
-            serde_json::from_slice(&change.content).unwrap()
-        };
+        let operation = change.command.operation();
         self.calls.lock().unwrap().push((
-            change.operation.clone(),
-            change.resource.clone(),
+            operation.into(),
+            change.command.resource(),
             change.if_match.clone(),
-            content,
+            Some(change.command),
         ));
-        Ok(match change.operation.as_str() {
+        Ok(match operation {
             "acme.accounts.create" => output(account(), Some("\"1\"")),
             "acme.certificates.create" => output(automatic("pending"), Some("\"1\"")),
             "acme.certificates.renew" => output(automatic("issued"), Some("\"2\"")),
@@ -265,7 +267,22 @@ async fn acme_accounts_map_onto_the_automation_port() {
             ),
         ]
     );
-    assert_eq!(calls[1].3, registration);
+    assert_eq!(
+        calls[1].3,
+        Some(CertificateCommand::CreateAccount {
+            account: api::NewAccount {
+                id: api::AccountId::new("letsencrypt").unwrap(),
+                directory: "https://acme-v02.api.letsencrypt.org/directory".into(),
+                ca_bundle: None,
+                contact: vec!["ops@example.com".into()],
+                terms_of_service_agreed: true,
+                external_account: Some(api::ExternalAccount {
+                    key_id: "kid-1".into(),
+                    mac_key: api::Secret::new("c2VjcmV0"),
+                }),
+            },
+        })
+    );
 }
 
 #[tokio::test]
@@ -362,7 +379,18 @@ async fn automatic_certificates_map_onto_the_automation_port() {
             ),
         ]
     );
-    assert_eq!(calls[0].3, order);
+    assert_eq!(
+        calls[0].3,
+        Some(CertificateCommand::CreateAutomaticCertificate {
+            certificate: api::NewAutomaticCertificate {
+                id: CertificateId::new("example.com").unwrap(),
+                account: api::AccountId::new("letsencrypt").unwrap(),
+                names: vec!["example.com".into(), "www.example.com".into()],
+                challenge: api::Challenge::Http01,
+                dns_provider: None,
+            },
+        })
+    );
 }
 
 #[tokio::test]
@@ -492,6 +520,34 @@ async fn dns_providers_map_onto_the_automation_port_without_their_secret() {
             ),
         ]
     );
-    assert_eq!(calls[1].3, created_body);
-    assert_eq!(calls[2].3, change);
+    let settings = |server: &str, algorithm| api::Rfc2136Config {
+        server: server.into(),
+        zones: vec!["example.com".into()],
+        key_name: "acme-update".into(),
+        algorithm,
+        ttl: None,
+    };
+    assert_eq!(
+        calls[1].3,
+        Some(CertificateCommand::CreateDnsProvider {
+            provider: api::NewDnsProvider {
+                id: "primary-ns".into(),
+                kind: api::DnsProviderKind::Rfc2136,
+                rfc2136: settings("ns1.example.com:53", api::TsigAlgorithm::HmacSha256),
+                secret: api::Secret::new("c2VjcmV0"),
+                propagation_seconds: None,
+            },
+        })
+    );
+    assert_eq!(
+        calls[2].3,
+        Some(CertificateCommand::UpdateDnsProvider {
+            id: "primary-ns".into(),
+            change: api::DnsProviderChange {
+                rfc2136: settings("ns2.example.com:53", api::TsigAlgorithm::HmacSha512),
+                secret: None,
+                propagation_seconds: Some(60),
+            },
+        })
+    );
 }

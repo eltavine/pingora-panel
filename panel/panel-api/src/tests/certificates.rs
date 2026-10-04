@@ -1,13 +1,14 @@
 use super::*;
 use chrono::Utc;
-use panel_application::{
-    CertificateChange, CertificateOutput, CertificatePort, CertificateRead, RequestScope,
+use panel_application::RequestScope;
+use panel_certificate_api::{
+    CertificateChange, CertificateCommand, CertificateOutput, CertificatePort, CertificateQuery,
 };
 use panel_certificates::{self_signed, Certificate, CertificateId, CertificateSource};
 use serde_json::{json, Value};
 use std::sync::Mutex;
 
-type Call = (String, String, Option<String>, Value);
+type Call = (String, String, Option<String>, Option<CertificateCommand>);
 
 #[derive(Default)]
 struct FakeInventory {
@@ -41,14 +42,17 @@ fn output(certificate: Certificate) -> CertificateOutput {
 
 #[async_trait]
 impl CertificatePort for FakeInventory {
-    async fn read(&self, _scope: RequestScope, read: CertificateRead) -> Result<CertificateOutput> {
-        self.calls.lock().unwrap().push((
-            read.operation.clone(),
-            read.resource.clone(),
-            None,
-            Value::Null,
-        ));
-        match (read.operation.as_str(), read.resource.as_str()) {
+    async fn read(
+        &self,
+        _scope: RequestScope,
+        query: CertificateQuery,
+    ) -> Result<CertificateOutput> {
+        let (operation, resource) = (query.operation(), query.resource());
+        self.calls
+            .lock()
+            .unwrap()
+            .push((operation.into(), resource.clone(), None, None));
+        match (operation, resource.as_str()) {
             ("certificates.list", "certificates") => Ok(CertificateOutput {
                 content: serde_json::to_vec(&[stored(1)]).unwrap(),
                 etag: None,
@@ -64,18 +68,14 @@ impl CertificatePort for FakeInventory {
         change: CertificateChange,
     ) -> Result<CertificateOutput> {
         assert_eq!(context.actor(), "operator");
-        let content = if change.content.is_empty() {
-            Value::Null
-        } else {
-            serde_json::from_slice(&change.content).unwrap()
-        };
+        let operation = change.command.operation();
         self.calls.lock().unwrap().push((
-            change.operation.clone(),
-            change.resource.clone(),
+            operation.into(),
+            change.command.resource(),
             change.if_match.clone(),
-            content,
+            Some(change.command),
         ));
-        Ok(match change.operation.as_str() {
+        Ok(match operation {
             "certificates.delete" => CertificateOutput {
                 content: Vec::new(),
                 etag: None,
@@ -222,6 +222,8 @@ async fn certificate_requests_map_onto_the_inventory_port() {
         .filter(|(operation, ..)| operation != "certificates.list")
         .cloned()
         .collect();
+    let id = |value: &str| CertificateId::new(value).unwrap();
+    let secret = panel_certificate_api::Secret::new;
     assert_eq!(
         changes,
         [
@@ -229,25 +231,39 @@ async fn certificate_requests_map_onto_the_inventory_port() {
                 "certificates.upload".to_owned(),
                 "certificates".to_owned(),
                 None,
-                json!({ "id": "example.com", "chain": "C", "key": "K" })
+                Some(CertificateCommand::Upload {
+                    id: id("example.com"),
+                    chain: "C".into(),
+                    key: secret("K"),
+                })
             ),
             (
                 "certificates.generate".into(),
                 "certificates".into(),
                 None,
-                json!({ "id": "internal", "names": ["a.example"], "days": 30 })
+                Some(CertificateCommand::Generate {
+                    id: id("internal"),
+                    names: vec!["a.example".into()],
+                    days: 30,
+                })
             ),
             (
                 "certificates.replace".into(),
                 "certificates/example.com".into(),
                 Some("\"3\"".into()),
-                json!({ "chain": "C2", "key": "K2" })
+                Some(CertificateCommand::Replace {
+                    id: id("example.com"),
+                    chain: "C2".into(),
+                    key: secret("K2"),
+                })
             ),
             (
                 "certificates.delete".into(),
                 "certificates/example.com".into(),
                 Some("\"1\"".into()),
-                Value::Null
+                Some(CertificateCommand::Delete {
+                    id: id("example.com"),
+                })
             ),
         ]
     );

@@ -3,7 +3,7 @@
 //! leave it.
 
 use crate::{
-    certificates::{body, change, decoded, read},
+    certificates::{body, certificate_id, change, decoded, read},
     error::ApiError,
     request_context::{MutationHeaders, QueryHeaders},
     ApiState,
@@ -15,15 +15,16 @@ use axum::{
     Json,
 };
 use chrono::{DateTime, Utc};
-use panel_application::CertificateOutput;
+use panel_certificate_api::{
+    AccountId, CertificateCommand, CertificateOutput, CertificateQuery, Challenge,
+    DnsProviderChange as ProviderChange, DnsProviderKind as ProviderKind, ExternalAccount,
+    NewAccount, NewAutomaticCertificate as NewCertificate, NewDnsProvider as NewProvider,
+    Rfc2136Config, TsigAlgorithm as Tsig,
+};
 use panel_errors::PanelError;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use zeroize::Zeroizing;
-
-const ACCOUNTS: &str = "acme-accounts";
-const AUTOMATIC: &str = "acme-certificates";
-const DNS_PROVIDERS: &str = "dns-providers";
 
 /// An account with an ACME CA.
 #[derive(Deserialize, Serialize, ToSchema)]
@@ -331,8 +332,78 @@ fn tagged<T: Serialize>(status: StatusCode, view: T, output: CertificateOutput) 
     response
 }
 
-fn json(value: &impl Serialize) -> Zeroizing<Vec<u8>> {
-    Zeroizing::new(serde_json::to_vec(value).expect("request bodies serialize"))
+fn account_id(id: &str) -> Result<AccountId, ApiError> {
+    AccountId::new(id).map_err(ApiError::new)
+}
+
+impl NewAcmeAccount {
+    fn into_account(self) -> Result<NewAccount, ApiError> {
+        Ok(NewAccount {
+            id: account_id(&self.id)?,
+            directory: self.directory,
+            ca_bundle: self.ca_bundle,
+            contact: self.contact,
+            terms_of_service_agreed: self.terms_of_service_agreed,
+            external_account: self.external_account.map(|binding| ExternalAccount {
+                key_id: binding.key_id,
+                mac_key: binding.mac_key.into(),
+            }),
+        })
+    }
+}
+
+impl NewAutomaticCertificate {
+    fn into_certificate(self) -> Result<NewCertificate, ApiError> {
+        Ok(NewCertificate {
+            id: certificate_id(&self.id)?,
+            account: account_id(&self.account)?,
+            names: self.names,
+            challenge: match self.challenge {
+                None | Some(AcmeChallenge::Http01) => Challenge::Http01,
+                Some(AcmeChallenge::Dns01) => Challenge::Dns01,
+            },
+            dns_provider: self.dns_provider,
+        })
+    }
+}
+
+impl Rfc2136Settings {
+    fn into_config(self) -> Rfc2136Config {
+        Rfc2136Config {
+            server: self.server,
+            zones: self.zones,
+            key_name: self.key_name,
+            algorithm: match self.algorithm {
+                TsigAlgorithm::HmacSha256 => Tsig::HmacSha256,
+                TsigAlgorithm::HmacSha512 => Tsig::HmacSha512,
+            },
+            ttl: self.ttl,
+        }
+    }
+}
+
+impl NewDnsProvider {
+    fn into_provider(self) -> NewProvider {
+        NewProvider {
+            id: self.id,
+            kind: match self.kind {
+                DnsProviderKind::Rfc2136 => ProviderKind::Rfc2136,
+            },
+            rfc2136: self.rfc2136.into_config(),
+            secret: self.secret.into(),
+            propagation_seconds: self.propagation_seconds,
+        }
+    }
+}
+
+impl DnsProviderChange {
+    fn into_change(self) -> ProviderChange {
+        ProviderChange {
+            rfc2136: self.rfc2136.into_config(),
+            secret: self.secret.map(Into::into),
+            propagation_seconds: self.propagation_seconds,
+        }
+    }
 }
 
 /// Every ACME account.
@@ -342,7 +413,7 @@ pub(crate) async fn list_acme_accounts<U>(
     State(state): State<ApiState<U>>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<AcmeAccountView>>, ApiError> {
-    let output = read(&state, &headers, "acme.accounts.list", ACCOUNTS.into()).await?;
+    let output = read(&state, &headers, CertificateQuery::Accounts).await?;
     Ok(Json(
         decoded::<Vec<AcmeAccount>>(&output)?
             .into_iter()
@@ -359,14 +430,13 @@ pub(crate) async fn create_acme_account<U>(
     headers: HeaderMap,
     payload: Result<Json<NewAcmeAccount>, JsonRejection>,
 ) -> Result<Response, ApiError> {
-    let content = json(&body(payload)?);
     let output = change(
         &state,
         &headers,
-        "acme.accounts.create",
-        ACCOUNTS.into(),
+        CertificateCommand::CreateAccount {
+            account: body(payload)?.into_account()?,
+        },
         None,
-        content.to_vec(),
     )
     .await?;
     let view = AcmeAccountView::from(decoded::<AcmeAccount>(&output)?);
@@ -381,8 +451,14 @@ pub(crate) async fn get_acme_account<U>(
     headers: HeaderMap,
     Path(path): Path<AcmeAccountPath>,
 ) -> Result<Response, ApiError> {
-    let resource = format!("{ACCOUNTS}/{}", path.id);
-    let output = read(&state, &headers, "acme.accounts.get", resource).await?;
+    let output = read(
+        &state,
+        &headers,
+        CertificateQuery::Account {
+            id: account_id(&path.id)?,
+        },
+    )
+    .await?;
     let view = AcmeAccountView::from(decoded::<AcmeAccount>(&output)?);
     Ok(tagged(StatusCode::OK, view, output))
 }
@@ -401,10 +477,10 @@ pub(crate) async fn delete_acme_account<U>(
     change(
         &state,
         &headers,
-        "acme.accounts.delete",
-        format!("{ACCOUNTS}/{}", path.id),
+        CertificateCommand::DeleteAccount {
+            id: account_id(&path.id)?,
+        },
         Some(expected),
-        Vec::new(),
     )
     .await?;
     Ok(StatusCode::NO_CONTENT)
@@ -417,7 +493,7 @@ pub(crate) async fn list_automatic_certificates<U>(
     State(state): State<ApiState<U>>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<AutomaticCertificateView>>, ApiError> {
-    let output = read(&state, &headers, "acme.certificates.list", AUTOMATIC.into()).await?;
+    let output = read(&state, &headers, CertificateQuery::AutomaticCertificates).await?;
     Ok(Json(
         decoded::<Vec<AutomaticCertificate>>(&output)?
             .into_iter()
@@ -436,14 +512,13 @@ pub(crate) async fn create_automatic_certificate<U>(
     headers: HeaderMap,
     payload: Result<Json<NewAutomaticCertificate>, JsonRejection>,
 ) -> Result<Response, ApiError> {
-    let content = json(&body(payload)?);
     let output = change(
         &state,
         &headers,
-        "acme.certificates.create",
-        AUTOMATIC.into(),
+        CertificateCommand::CreateAutomaticCertificate {
+            certificate: body(payload)?.into_certificate()?,
+        },
         None,
-        content.to_vec(),
     )
     .await?;
     let view = AutomaticCertificateView::from(decoded::<AutomaticCertificate>(&output)?);
@@ -458,8 +533,14 @@ pub(crate) async fn get_automatic_certificate<U>(
     headers: HeaderMap,
     Path(path): Path<AutomaticCertificatePath>,
 ) -> Result<Response, ApiError> {
-    let resource = format!("{AUTOMATIC}/{}", path.id);
-    let output = read(&state, &headers, "acme.certificates.get", resource).await?;
+    let output = read(
+        &state,
+        &headers,
+        CertificateQuery::AutomaticCertificate {
+            id: certificate_id(&path.id)?,
+        },
+    )
+    .await?;
     let view = AutomaticCertificateView::from(decoded::<AutomaticCertificate>(&output)?);
     Ok(tagged(StatusCode::OK, view, output))
 }
@@ -476,10 +557,10 @@ pub(crate) async fn renew_automatic_certificate<U>(
     let output = change(
         &state,
         &headers,
-        "acme.certificates.renew",
-        format!("{AUTOMATIC}/{}", path.id),
+        CertificateCommand::RenewAutomaticCertificate {
+            id: certificate_id(&path.id)?,
+        },
         None,
-        Vec::new(),
     )
     .await?;
     let view = AutomaticCertificateView::from(decoded::<AutomaticCertificate>(&output)?);
@@ -500,10 +581,10 @@ pub(crate) async fn delete_automatic_certificate<U>(
     change(
         &state,
         &headers,
-        "acme.certificates.delete",
-        format!("{AUTOMATIC}/{}", path.id),
+        CertificateCommand::DeleteAutomaticCertificate {
+            id: certificate_id(&path.id)?,
+        },
         Some(expected),
-        Vec::new(),
     )
     .await?;
     Ok(StatusCode::NO_CONTENT)
@@ -516,13 +597,7 @@ pub(crate) async fn list_dns_providers<U>(
     State(state): State<ApiState<U>>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<DnsProviderView>>, ApiError> {
-    let output = read(
-        &state,
-        &headers,
-        "acme.dns_providers.list",
-        DNS_PROVIDERS.into(),
-    )
-    .await?;
+    let output = read(&state, &headers, CertificateQuery::DnsProviders).await?;
     Ok(Json(
         decoded::<Vec<DnsProvider>>(&output)?
             .into_iter()
@@ -539,14 +614,13 @@ pub(crate) async fn create_dns_provider<U>(
     headers: HeaderMap,
     payload: Result<Json<NewDnsProvider>, JsonRejection>,
 ) -> Result<Response, ApiError> {
-    let content = json(&body(payload)?);
     let output = change(
         &state,
         &headers,
-        "acme.dns_providers.create",
-        DNS_PROVIDERS.into(),
+        CertificateCommand::CreateDnsProvider {
+            provider: body(payload)?.into_provider(),
+        },
         None,
-        content.to_vec(),
     )
     .await?;
     let view = DnsProviderView::from(decoded::<DnsProvider>(&output)?);
@@ -561,8 +635,12 @@ pub(crate) async fn get_dns_provider<U>(
     headers: HeaderMap,
     Path(path): Path<DnsProviderPath>,
 ) -> Result<Response, ApiError> {
-    let resource = format!("{DNS_PROVIDERS}/{}", path.id);
-    let output = read(&state, &headers, "acme.dns_providers.get", resource).await?;
+    let output = read(
+        &state,
+        &headers,
+        CertificateQuery::DnsProvider { id: path.id },
+    )
+    .await?;
     let view = DnsProviderView::from(decoded::<DnsProvider>(&output)?);
     Ok(tagged(StatusCode::OK, view, output))
 }
@@ -579,14 +657,14 @@ pub(crate) async fn update_dns_provider<U>(
     payload: Result<Json<DnsProviderChange>, JsonRejection>,
 ) -> Result<Response, ApiError> {
     let expected = if_match(&headers, "DNS provider")?;
-    let content = json(&body(payload)?);
     let output = change(
         &state,
         &headers,
-        "acme.dns_providers.update",
-        format!("{DNS_PROVIDERS}/{}", path.id),
+        CertificateCommand::UpdateDnsProvider {
+            id: path.id,
+            change: body(payload)?.into_change(),
+        },
         Some(expected),
-        content.to_vec(),
     )
     .await?;
     let view = DnsProviderView::from(decoded::<DnsProvider>(&output)?);
@@ -607,10 +685,8 @@ pub(crate) async fn delete_dns_provider<U>(
     change(
         &state,
         &headers,
-        "acme.dns_providers.delete",
-        format!("{DNS_PROVIDERS}/{}", path.id),
+        CertificateCommand::DeleteDnsProvider { id: path.id },
         Some(expected),
-        Vec::new(),
     )
     .await?;
     Ok(StatusCode::NO_CONTENT)

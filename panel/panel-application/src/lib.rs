@@ -46,7 +46,6 @@ macro_rules! operations {
 
 mod alerts;
 mod audit;
-mod certificates;
 mod containers;
 mod context;
 mod gateway;
@@ -66,7 +65,6 @@ pub use alerts::{
     AlertRule, AlertRuleSpec, AlertSeverity, AlertState, AlertTest, AlertsPort, NewAlertChannel,
 };
 pub use audit::{AuditFilter, AuditPage, AuditPort, AuditRecord, AuditVerification};
-pub use certificates::{CertificateChange, CertificateOutput, CertificatePort, CertificateRead};
 pub use containers::{
     ContainerAction, ContainerChange, ContainerDetail, ContainerEngine, ContainerFilter,
     ContainerList, ContainerMount, ContainerNetwork, ContainerState, ContainerSummary,

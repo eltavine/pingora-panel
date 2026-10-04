@@ -36,6 +36,7 @@ members = [
     "panel-config-json",
     "panel-config-model",
     "panel-config-api",
+    "panel-certificate-api",
     "panel-dsl",
     "panel-config-dsl",
     "panel-ir",
@@ -91,8 +92,8 @@ futures-core = "=0.3.34"
 futures-util = "=0.3.34"
 audit-grpc-client = { version = "=0.1.0", path = "audit-grpc-client" }
 audit-service = { version = "=0.1.0", path = "audit-service" }
-automation-service = { version = "=0.1.0", path = "automation-service" }
-automation-grpc-client = { version = "=0.1.0", path = "automation-grpc-client" }
+automation-service = { version = "=0.2.0", path = "automation-service" }
+automation-grpc-client = { version = "=0.2.0", path = "automation-grpc-client" }
 observability-grpc-client = { version = "=0.1.0", path = "observability-grpc-client" }
 observability-service = { version = "=0.1.0", path = "observability-service" }
 ops-grpc-client = { version = "=0.1.0", path = "ops-grpc-client" }
@@ -145,6 +146,7 @@ panel-config-domain = { version = "=0.1.0", path = "panel-config-domain" }
 panel-config-json = { version = "=0.1.0", path = "panel-config-json" }
 panel-config-model = { version = "=0.1.0", path = "panel-config-model" }
 panel-config-api = { version = "=0.1.0", path = "panel-config-api" }
+panel-certificate-api = { version = "=0.1.0", path = "panel-certificate-api" }
 panel-dsl = { version = "=0.1.0", path = "panel-dsl" }
 panel-config-dsl = { version = "=0.1.0", path = "panel-config-dsl" }
 panel-api = { version = "=0.3.0", path = "panel-api" }

@@ -18,20 +18,18 @@ mod delivery;
 mod dns;
 mod events;
 mod jobs;
+mod transport;
 
 pub use acme::{
-    renewal_schedule, AccountId, AcmeAccount, AcmeAutomation, AutomaticCertificate, IssuanceState,
-    IssueHandler, LastError, NewAccount, NewAutomaticCertificate, RenewalCheckHandler, ISSUE_JOB,
-    RENEWAL_CHECK_JOB,
+    renewal_schedule, AcmeAccount, AcmeAutomation, AutomaticCertificate, IssuanceState,
+    IssueHandler, LastError, RenewalCheckHandler, ISSUE_JOB, RENEWAL_CHECK_JOB,
 };
 pub use certificate_api::CertificateService;
 pub use certificates::{Cause, CertificateInventory};
 pub use delivery::{Delivery, SecretDirectory};
-pub use dns::{
-    DnsProviderChange, DnsProviderFactory, DnsProviderRecord, DnsProviders, NewDnsProvider,
-    Rfc2136Config, StandardDnsProviders,
-};
+pub use dns::{DnsProviderFactory, DnsProviderRecord, DnsProviders, StandardDnsProviders};
 pub use jobs::SqliteJobStore;
+pub use transport::CertificatesTransport;
 
 use chrono::Utc;
 use panel_acme::AcmeClient;
@@ -151,7 +149,11 @@ pub fn process(
             [ServiceName::new("panel-api")?],
         )
         .with_grpc_service(certificates_server::CertificatesServer::new(
-            CertificateService::new(inventory.clone(), acme, dns),
+            CertificatesTransport::new(Arc::new(CertificateService::new(
+                inventory.clone(),
+                acme,
+                dns,
+            ))),
         ))
         .on_start(move |running| {
             running.spawn(maintain(

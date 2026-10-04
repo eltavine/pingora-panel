@@ -1,6 +1,6 @@
 [package]
-name = "automation-grpc-client"
-version = "0.2.0"
+name = "panel-certificate-api"
+version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -10,13 +10,10 @@ publish.workspace = true
 [dependencies]
 async-trait.workspace = true
 panel-application.workspace = true
-panel-certificate-api.workspace = true
-panel-contracts.workspace = true
+panel-domain.workspace = true
 panel-errors.workspace = true
-panel-service.workspace = true
-serde_json.workspace = true
-tonic.workspace = true
-zeroize.workspace = true
+serde.workspace = true
+zeroize = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
-tokio.workspace = true
+serde_json.workspace = true

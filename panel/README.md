@@ -12,7 +12,8 @@ panel-engine -> panel-errors + panel-domain + panel-ir
 panel-application -> panel-context + panel-errors + panel-domain + panel-ir
 panel-config-model -> panel-domain + panel-errors + panel-ir
 panel-config-api -> panel-application + panel-config-model
-panel-api -> panel-application + panel-config-api + panel-config-model + panel-errors
+panel-certificate-api -> panel-application + panel-domain
+panel-api -> panel-application + panel-config-api + panel-certificate-api + panel-config-model + panel-errors
 panel-config-json -> panel-application + panel-errors + panel-ir
 
 panel-gateway-runtime -> panel-engine ports
@@ -43,7 +44,7 @@ gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC/Proto adapters
 config-service -> panel-control-runtime + gateway-grpc-client + panel-config-json + panel-config-api + panel-config-model + config-proto-codec
 panel-api-server -> panel-control-runtime + panel-api + config-grpc-client + gateway-grpc-client
 panel-cli (no workspace dependencies: a client of the public REST API)
-automation-service -> panel-control-runtime + panel-jobs + panel-sqlite + panel-events
+automation-service -> panel-control-runtime + panel-certificate-api + panel-jobs + panel-sqlite + panel-events
 observability-service -> panel-control-runtime + panel-contracts + panel-domain
 audit-service -> panel-control-runtime + panel-jetstream + panel-events + panel-contracts
 panel-control -> panel-control-runtime + panel-api-server + config-service + automation-service + observability-service + audit-service
@@ -81,6 +82,7 @@ panel-bootstrap -> panel-jetstream + panel-pki
 | `panel-config-json` | JSON `ConfigCompiler` adapter with schema and document limits | HTTP, Proto, storage, Pingora, application orchestration |
 | `panel-config-model` | The editable configuration document: listeners, TLS profiles, upstreams and sites with domains and routes; validation, queries, checked edits and compilation into the IR | HTTP, Proto, storage, Pingora |
 | `panel-config-api` | The configuration API as one contract: its port and every read and change as a typed operation, shared by callers and the service | HTTP, Proto, storage, Pingora |
+| `panel-certificate-api` | The certificate API as one contract: its port, every read and change of certificates, ACME accounts and DNS providers as a typed operation, and secrets that are never printed | HTTP, Proto, storage, Pingora |
 | `panel-gateway-runtime` | Prepare/Activate/CAS/LKG orchestration | Tonic, filesystem, Pingora |
 | `snapshot-store-fs` | Versioned JSON records, fsync and atomic rename | Tonic, Pingora, runtime policy |
 | `gateway-pingora` | Compile IR into private Pingora values with atomic `ArcSwap` publication, and run the data plane: listener generations, virtual hosts, routes, TLS, static files and upstream pools with health | Proto, control-plane policy |
@@ -91,7 +93,7 @@ panel-bootstrap -> panel-jetstream + panel-pki
 | `gateway-grpc-client` | Tonic client adapter implementing `panel-application::GatewayPort`, and the gateway health check | HTTP, storage, identity, generated Proto outside this adapter |
 | `config-service` | Publication and configuration APIs: the configuration use cases behind their port, storage ports with SQLite stores for the draft, revisions, approvals and activation receipts in `config.db`, and the gRPC adapter | HTTP, Pingora |
 | `panel-api-server` | The `panel-api` module: public REST and web console, degraded admission and the service directory | Storage implementation, Pingora |
-| `automation-service` | Job store with outbox events, worker, scheduler and the certificate inventory, kept in `automation.db` | HTTP, Pingora |
+| `automation-service` | Job store with outbox events, worker, scheduler, and the certificate inventory behind its port with a gRPC adapter, kept in `automation.db` | HTTP, Pingora |
 | `observability-service` | Traffic summaries and series from Prometheus over the gateway's metrics, and alerts kept in `observability.db` | Pingora |
 | `observability-grpc-client` | `TrafficPort` over `observability-service` | Storage, Pingora, metric backends |
 | `audit-service` | The audit trail: every event appended once to a hash chain in `audit.db`, with queries and verification | HTTP, Pingora |

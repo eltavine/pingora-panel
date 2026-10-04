@@ -5,15 +5,17 @@
 //! failures and their events.
 
 use automation_service::{
-    handlers, AccountId, AcmeAutomation, Cause, CertificateInventory, DnsProviderChange,
-    DnsProviderFactory, DnsProviders, IssuanceState, NewAccount, NewAutomaticCertificate,
-    NewDnsProvider, Rfc2136Config, SecretDirectory, SqliteJobStore, StandardDnsProviders,
-    MIGRATIONS,
+    handlers, AcmeAutomation, Cause, CertificateInventory, DnsProviderFactory, DnsProviders,
+    IssuanceState, SecretDirectory, SqliteJobStore, StandardDnsProviders, MIGRATIONS,
 };
 use chrono::Utc;
 use panel_acme::{
     testing::{Pebble, TestDns},
-    AcmeClient, ChallengeKind, DnsProvider,
+    AcmeClient, DnsProvider,
+};
+use panel_certificate_api::{
+    AccountId, Challenge, DnsProviderChange, DnsProviderKind, NewAccount, NewAutomaticCertificate,
+    NewDnsProvider, Rfc2136Config, Secret, TsigAlgorithm,
 };
 use panel_certificates::{CertificateId, CertificateSource, ACME_CHALLENGE_DIRECTORY};
 use panel_errors::ErrorCode;
@@ -28,7 +30,6 @@ use std::{
     time::Duration,
 };
 use tokio_util::sync::CancellationToken;
-use zeroize::Zeroizing;
 
 static ALICE: LazyLock<Principal> = LazyLock::new(|| EventLog::user("alice"));
 
@@ -69,7 +70,7 @@ fn automatic(certificate: &str, names: &[&str]) -> NewAutomaticCertificate {
         id: id(certificate),
         account: AccountId::new("pebble").unwrap(),
         names: names.iter().map(|name| (*name).to_owned()).collect(),
-        challenge: ChallengeKind::Http01,
+        challenge: Challenge::Http01,
         dns_provider: None,
     }
 }
@@ -95,7 +96,7 @@ fn rfc2136(zone: &str) -> Rfc2136Config {
         server: "127.0.0.1:53".into(),
         zones: vec![zone.into()],
         key_name: "acme-update".into(),
-        algorithm: "hmac-sha256".into(),
+        algorithm: TsigAlgorithm::HmacSha256,
         ttl: None,
     }
 }
@@ -344,10 +345,10 @@ async fn wildcard_certificates_are_issued_through_a_dns_provider() {
             cause(&scope),
             NewDnsProvider {
                 id: "zone".into(),
-                kind: "rfc2136".into(),
+                kind: DnsProviderKind::Rfc2136,
                 rfc2136: rfc2136("wild.test"),
-                secret: Zeroizing::new("not base64!".into()),
-                propagation_seconds: 0,
+                secret: Secret::new("not base64!"),
+                propagation_seconds: Some(0),
             },
         )
         .await
@@ -358,10 +359,10 @@ async fn wildcard_certificates_are_issued_through_a_dns_provider() {
             cause(&scope),
             NewDnsProvider {
                 id: "zone".into(),
-                kind: "rfc2136".into(),
+                kind: DnsProviderKind::Rfc2136,
                 rfc2136: rfc2136("wild.test"),
-                secret: Zeroizing::new("c2VjcmV0".into()),
-                propagation_seconds: 0,
+                secret: Secret::new("c2VjcmV0"),
+                propagation_seconds: Some(0),
             },
         )
         .await
@@ -369,13 +370,13 @@ async fn wildcard_certificates_are_issued_through_a_dns_provider() {
     assert_eq!(provider.version, 1);
 
     let mut wildcard = automatic("wild.test", &["wild.test", "*.wild.test"]);
-    wildcard.challenge = ChallengeKind::Dns01;
+    wildcard.challenge = Challenge::Dns01;
     let missing = acme
         .create_certificate(cause(&scope), automatic("x.test", &["x.test"]))
         .await;
     assert!(missing.is_ok(), "HTTP-01 needs no provider");
     let mut without = automatic("y.test", &["y.test"]);
-    without.challenge = ChallengeKind::Dns01;
+    without.challenge = Challenge::Dns01;
     assert_eq!(
         acme.create_certificate(cause(&scope), without)
             .await
@@ -410,7 +411,7 @@ async fn wildcard_certificates_are_issued_through_a_dns_provider() {
                     ..rfc2136("wild.test")
                 },
                 secret: None,
-                propagation_seconds: 5,
+                propagation_seconds: Some(5),
             },
         )
         .await

@@ -1,6 +1,6 @@
 [package]
 name = "automation-service"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -12,6 +12,8 @@ async-trait.workspace = true
 chrono.workspace = true
 dns-rfc2136.workspace = true
 panel-acme.workspace = true
+panel-application.workspace = true
+panel-certificate-api.workspace = true
 panel-certificates.workspace = true
 panel-contracts.workspace = true
 panel-control-runtime.workspace = true

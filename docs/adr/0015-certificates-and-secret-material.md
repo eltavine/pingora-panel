@@ -24,6 +24,10 @@ for key sizes.
   `automation-service` owns the certificate inventory in its schema,
   records every change with its event through the outbox, and serves it
   over gRPC; `panel-api` reaches it through a port, like the audit trail.
+  `panel-certificate-api` declares that port with every read and change as
+  a typed operation both sides match exhaustively, and keys and other
+  secrets travel in a type that is wiped from memory when dropped and
+  never printed.
 - **Material at rest.** Certificate chains are public and stored as PEM.
   Private keys are sealed: each gets a random 256-bit data key, is
   encrypted with AES-256-GCM, and the data key is encrypted with a master

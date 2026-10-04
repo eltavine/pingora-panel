@@ -12,6 +12,7 @@ use panel_acme::{
     AcmeClient, ChallengeKind, ChallengeSolver, Directory, ExternalAccount, Http01, OrderRequest,
     Registration,
 };
+use panel_certificate_api::{AccountId, Challenge, NewAccount, NewAutomaticCertificate};
 use panel_certificates::{
     accept, renewal_identifier, renewal_time, requested_names, CertificateId, CertificateSource,
     ACME_CHALLENGE_DIRECTORY,
@@ -29,7 +30,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{sqlite::SqliteRow, types::Json, Row, SqliteConnection};
 use std::{
-    fmt,
     path::{Path, PathBuf},
     sync::{Arc, LazyLock},
 };
@@ -72,41 +72,6 @@ pub(crate) fn slug(value: &str, what: &str) -> Result<String> {
     }
 }
 
-/// Names an ACME account: 1 to 64 lowercase letters, digits and hyphens.
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct AccountId(String);
-
-impl AccountId {
-    pub fn new(value: impl Into<String>) -> Result<Self> {
-        slug(&value.into(), "an account ID").map(Self)
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl TryFrom<String> for AccountId {
-    type Error = PanelError;
-
-    fn try_from(value: String) -> Result<Self> {
-        Self::new(value)
-    }
-}
-
-impl From<AccountId> for String {
-    fn from(value: AccountId) -> Self {
-        value.0
-    }
-}
-
-impl fmt::Display for AccountId {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
-    }
-}
-
 /// An account with an ACME CA. Its key never leaves the service.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct AcmeAccount {
@@ -129,29 +94,6 @@ impl AcmeAccount {
     pub fn etag(&self) -> String {
         format!("\"{}\"", self.version)
     }
-}
-
-/// The MAC key is used once to register and not kept.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ExternalAccountBody {
-    pub key_id: String,
-    pub mac_key: Zeroizing<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct NewAccount {
-    pub id: AccountId,
-    pub directory: String,
-    #[serde(default)]
-    pub ca_bundle: Option<String>,
-    #[serde(default)]
-    pub contact: Vec<String>,
-    #[serde(default)]
-    pub terms_of_service_agreed: bool,
-    #[serde(default)]
-    pub external_account: Option<ExternalAccountBody>,
 }
 
 /// Where an automatic certificate stands.
@@ -202,23 +144,6 @@ impl AutomaticCertificate {
     pub fn etag(&self) -> String {
         format!("\"{}\"", self.version)
     }
-}
-
-fn http01() -> ChallengeKind {
-    ChallengeKind::Http01
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct NewAutomaticCertificate {
-    pub id: CertificateId,
-    pub account: AccountId,
-    pub names: Vec<String>,
-    #[serde(default = "http01")]
-    pub challenge: ChallengeKind,
-    /// Required for DNS-01.
-    #[serde(default)]
-    pub dns_provider: Option<String>,
 }
 
 /// The columns read into an [`AcmeAccount`], as a literal so queries stay
@@ -510,7 +435,7 @@ impl AcmeAutomation {
                         terms_of_service_agreed: body.terms_of_service_agreed,
                         external_account: body.external_account.map(|binding| ExternalAccount {
                             key_id: binding.key_id.trim().to_owned(),
-                            mac_key: binding.mac_key,
+                            mac_key: Zeroizing::new(binding.mac_key.expose().to_owned()),
                         }),
                     },
                 )
@@ -687,16 +612,20 @@ impl AcmeAutomation {
         body: NewAutomaticCertificate,
     ) -> Result<AutomaticCertificate> {
         let id = body.id.clone();
+        let challenge = match body.challenge {
+            Challenge::Http01 => ChallengeKind::Http01,
+            Challenge::Dns01 => ChallengeKind::Dns01,
+        };
         let result = async {
             let names = requested_names(&body.names)?;
-            if body.challenge == ChallengeKind::Http01
+            if challenge == ChallengeKind::Http01
                 && names.iter().any(|name| name.starts_with("*."))
             {
                 return Err(PanelError::validation_failed(
                     "wildcard names can only be validated with DNS-01",
                 ));
             }
-            match (body.challenge, body.dns_provider.as_deref()) {
+            match (challenge, body.dns_provider.as_deref()) {
                 (ChallengeKind::Dns01, Some(provider)) => {
                     self.dns.get(provider).await?;
                 }
@@ -723,7 +652,7 @@ impl AcmeAutomation {
             .bind(id.as_str())
             .bind(body.account.as_str())
             .bind(Json(&names))
-            .bind(body.challenge.as_str())
+            .bind(challenge.as_str())
             .bind(&body.dns_provider)
             .bind(now)
             .execute(&mut *transaction)
@@ -743,7 +672,7 @@ impl AcmeAutomation {
                     id: id.to_string(),
                     account: body.account.as_str().to_owned(),
                     names: names.clone(),
-                    challenge: body.challenge.as_str().to_owned(),
+                    challenge: challenge.as_str().to_owned(),
                     dns_provider: body.dns_provider.clone(),
                 },
             )

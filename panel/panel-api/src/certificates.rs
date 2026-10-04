@@ -14,12 +14,13 @@ use axum::{
     Json,
 };
 use chrono::{DateTime, Utc};
-use panel_application::{CertificateChange, CertificateOutput, CertificatePort, CertificateRead};
+use panel_certificate_api::{
+    CertificateChange, CertificateCommand, CertificateOutput, CertificatePort, CertificateQuery,
+};
 use panel_certificates::{accept, describe, Certificate, CertificateDetails, CertificateStatus};
-use panel_domain::NormalizedHost;
+use panel_domain::{CertificateId, NormalizedHost};
 use panel_errors::PanelError;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use serde_json::json;
 use std::sync::Arc;
 use utoipa::{IntoParams, ToSchema};
 use zeroize::Zeroizing;
@@ -147,40 +148,28 @@ pub(crate) struct CoverageQuery {
 pub(crate) async fn read<U>(
     state: &ApiState<U>,
     headers: &HeaderMap,
-    operation: &str,
-    resource: String,
+    query: CertificateQuery,
 ) -> Result<CertificateOutput, ApiError> {
-    Ok(port(state)?
-        .read(
-            request_scope(headers)?,
-            CertificateRead {
-                operation: operation.into(),
-                resource,
-                parameters: Vec::new(),
-            },
-        )
-        .await?)
+    Ok(port(state)?.read(request_scope(headers)?, query).await?)
 }
 
 pub(crate) async fn change<U>(
     state: &ApiState<U>,
     headers: &HeaderMap,
-    operation: &str,
-    resource: String,
+    command: CertificateCommand,
     if_match: Option<String>,
-    content: Vec<u8>,
 ) -> Result<CertificateOutput, ApiError> {
     Ok(port(state)?
         .change(
             command_context(headers)?,
-            CertificateChange {
-                operation: operation.into(),
-                resource,
-                if_match,
-                content,
-            },
+            CertificateChange { command, if_match },
         )
         .await?)
+}
+
+pub(crate) fn certificate_id(id: &str) -> Result<CertificateId, ApiError> {
+    CertificateId::new(id)
+        .map_err(|error| ApiError::new(PanelError::invalid_argument(error.to_string())))
 }
 
 /// The `If-Match` entity tag replacing and deleting need.
@@ -217,10 +206,6 @@ fn certificate(status: StatusCode, output: CertificateOutput) -> Result<Response
     Ok(response)
 }
 
-fn resource(id: &str) -> String {
-    format!("certificates/{id}")
-}
-
 /// Every certificate of the inventory.
 #[utoipa::path(get, path = "/api/v1/certificates", params(QueryHeaders),
     responses((status = 200, body = Vec<CertificateView>)), tag = "certificates")]
@@ -228,7 +213,7 @@ pub(crate) async fn list_certificates<U>(
     State(state): State<ApiState<U>>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<CertificateView>>, ApiError> {
-    let output = read(&state, &headers, "certificates.list", "certificates".into()).await?;
+    let output = read(&state, &headers, CertificateQuery::Certificates).await?;
     Ok(Json(
         decoded::<Vec<Certificate>>(&output)?
             .into_iter()
@@ -245,26 +230,19 @@ pub(crate) async fn create_certificate<U>(
     headers: HeaderMap,
     payload: Result<Json<NewCertificate>, JsonRejection>,
 ) -> Result<Response, ApiError> {
-    let (operation, content) = match body(payload)? {
-        NewCertificate::Upload { id, chain, key } => (
-            "certificates.upload",
-            json!({ "id": id, "chain": chain, "key": *key }),
-        ),
-        NewCertificate::SelfSigned { id, names, days } => (
-            "certificates.generate",
-            json!({ "id": id, "names": names, "days": days }),
-        ),
+    let command = match body(payload)? {
+        NewCertificate::Upload { id, chain, key } => CertificateCommand::Upload {
+            id: certificate_id(&id)?,
+            chain,
+            key: key.into(),
+        },
+        NewCertificate::SelfSigned { id, names, days } => CertificateCommand::Generate {
+            id: certificate_id(&id)?,
+            names,
+            days,
+        },
     };
-    let content = Zeroizing::new(content.to_string().into_bytes());
-    let output = change(
-        &state,
-        &headers,
-        operation,
-        "certificates".into(),
-        None,
-        content.to_vec(),
-    )
-    .await?;
+    let output = change(&state, &headers, command, None).await?;
     certificate(StatusCode::CREATED, output)
 }
 
@@ -276,7 +254,14 @@ pub(crate) async fn get_certificate<U>(
     headers: HeaderMap,
     Path(path): Path<CertificatePath>,
 ) -> Result<Response, ApiError> {
-    let output = read(&state, &headers, "certificates.get", resource(&path.id)).await?;
+    let output = read(
+        &state,
+        &headers,
+        CertificateQuery::Certificate {
+            id: certificate_id(&path.id)?,
+        },
+    )
+    .await?;
     certificate(StatusCode::OK, output)
 }
 
@@ -292,16 +277,16 @@ pub(crate) async fn replace_certificate<U>(
     payload: Result<Json<CertificateMaterial>, JsonRejection>,
 ) -> Result<Response, ApiError> {
     let expected = if_match(&headers)?;
-    let content = Zeroizing::new(
-        serde_json::to_vec(&body(payload)?).expect("certificate material serializes"),
-    );
+    let material = body(payload)?;
     let output = change(
         &state,
         &headers,
-        "certificates.replace",
-        resource(&path.id),
+        CertificateCommand::Replace {
+            id: certificate_id(&path.id)?,
+            chain: material.chain,
+            key: material.key.into(),
+        },
         Some(expected),
-        content.to_vec(),
     )
     .await?;
     certificate(StatusCode::OK, output)
@@ -321,10 +306,10 @@ pub(crate) async fn delete_certificate<U>(
     change(
         &state,
         &headers,
-        "certificates.delete",
-        resource(&path.id),
+        CertificateCommand::Delete {
+            id: certificate_id(&path.id)?,
+        },
         Some(expected),
-        Vec::new(),
     )
     .await?;
     Ok(StatusCode::NO_CONTENT)
@@ -358,7 +343,14 @@ pub(crate) async fn certificate_coverage<U>(
             "name at least one host",
         )));
     }
-    let output = read(&state, &headers, "certificates.get", resource(&path.id)).await?;
+    let output = read(
+        &state,
+        &headers,
+        CertificateQuery::Certificate {
+            id: certificate_id(&path.id)?,
+        },
+    )
+    .await?;
     let certificate: Certificate = decoded(&output)?;
     Ok(Json(CertificateCoverage {
         status: certificate.details.status(Utc::now()),

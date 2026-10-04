@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
 use automation_service::{
-    AcmeAutomation, Cause, CertificateInventory, CertificateService, DnsProviders, SecretDirectory,
-    StandardDnsProviders, MIGRATIONS,
+    AcmeAutomation, Cause, CertificateInventory, CertificateService, CertificatesTransport,
+    DnsProviders, SecretDirectory, StandardDnsProviders, MIGRATIONS,
 };
 use chrono::Utc;
 use panel_acme::AcmeClient;
@@ -314,37 +314,36 @@ fn context() -> Option<common::RequestContext> {
     Some(common::RequestContext {
         request_id: "request-2".into(),
         actor: "alice".into(),
+        deadline: "2099-01-01T00:00:00Z".into(),
+        idempotency_key: "key-2".into(),
         ..common::RequestContext::default()
     })
 }
 
+/// A change as the wire carries it: an operation and its parameters as JSON.
 async fn change(
-    service: &CertificateService,
-    operation: &str,
-    resource: &str,
+    transport: &CertificatesTransport,
+    command: serde_json::Value,
     if_match: &str,
-    content: serde_json::Value,
 ) -> wire::ChangeResponse {
-    service
+    transport
         .change(Request::new(wire::ChangeRequest {
             context: context(),
-            operation: operation.into(),
-            resource: resource.into(),
             if_match: if_match.into(),
-            content: serde_json::to_vec(&content).unwrap(),
+            command: serde_json::to_vec(&command).unwrap(),
+            ..wire::ChangeRequest::default()
         }))
         .await
         .unwrap()
         .into_inner()
 }
 
-async fn read(service: &CertificateService, operation: &str, resource: &str) -> wire::ReadResponse {
-    service
+async fn read(transport: &CertificatesTransport, query: serde_json::Value) -> wire::ReadResponse {
+    transport
         .read(Request::new(wire::ReadRequest {
             context: context(),
-            operation: operation.into(),
-            resource: resource.into(),
-            parameters: Vec::new(),
+            query: serde_json::to_vec(&query).unwrap(),
+            ..wire::ReadRequest::default()
         }))
         .await
         .unwrap()
@@ -363,15 +362,16 @@ async fn operations_map_to_the_inventory_over_grpc() {
         Some(vault),
         Arc::new(StandardDnsProviders),
     );
-    let service = CertificateService::new(inventory, acme, dns);
+    let transport =
+        CertificatesTransport::new(Arc::new(CertificateService::new(inventory, acme, dns)));
     let first = material("example.com");
 
     let uploaded = change(
-        &service,
-        "certificates.upload",
-        "certificates",
+        &transport,
+        json!({"operation": "certificates.upload", "parameters": {
+            "id": "example.com", "chain": first.chain, "key": *first.key
+        }}),
         "",
-        json!({ "id": "example.com", "chain": first.chain, "key": *first.key }),
     )
     .await;
     assert_eq!(uploaded.error, None);
@@ -381,73 +381,71 @@ async fn operations_map_to_the_inventory_over_grpc() {
     assert!(!String::from_utf8_lossy(&uploaded.content).contains("PRIVATE KEY"));
 
     let generated = change(
-        &service,
-        "certificates.generate",
-        "certificates",
+        &transport,
+        json!({"operation": "certificates.generate", "parameters": {
+            "id": "internal", "names": ["intranet.example"], "days": 30
+        }}),
         "",
-        json!({ "id": "internal", "names": ["intranet.example"], "days": 30 }),
     )
     .await;
     assert_eq!(generated.error, None);
 
-    let listed = read(&service, "certificates.list", "certificates").await;
+    let listed = read(&transport, json!({"operation": "certificates.list"})).await;
     let listed: Vec<Certificate> = serde_json::from_slice(&listed.content).unwrap();
     assert_eq!(listed.len(), 2);
-    let one = read(&service, "certificates.get", "certificates/example.com").await;
+    let one = read(
+        &transport,
+        json!({"operation": "certificates.get", "parameters": {"id": "example.com"}}),
+    )
+    .await;
     assert_eq!(one.etag, "\"1\"");
 
     let second = material("example.com");
     let replaced = change(
-        &service,
-        "certificates.replace",
-        "certificates/example.com",
+        &transport,
+        json!({"operation": "certificates.replace", "parameters": {
+            "id": "example.com", "chain": second.chain, "key": *second.key
+        }}),
         "\"1\"",
-        json!({ "chain": second.chain, "key": *second.key }),
     )
     .await;
     assert_eq!(replaced.etag, "\"2\"");
     let deleted = change(
-        &service,
-        "certificates.delete",
-        "certificates/internal",
+        &transport,
+        json!({"operation": "certificates.delete", "parameters": {"id": "internal"}}),
         "",
-        json!(null),
     )
     .await;
     assert_eq!(deleted.error, None);
 
-    for (operation, resource, code) in [
+    for (query, code) in [
         (
-            "certificates.get",
-            "certificates/missing",
+            json!({"operation": "certificates.get", "parameters": {"id": "missing"}}),
             ErrorCode::NOT_FOUND,
         ),
         (
-            "certificates.get",
-            "certificates/../etc",
+            json!({"operation": "certificates.get", "parameters": {"id": "../etc"}}),
             ErrorCode::INVALID_ARGUMENT,
         ),
         (
-            "certificates.list",
-            "certificates/example.com",
+            json!({"operation": "certificates.list", "parameters": {"id": "example.com"}}),
             ErrorCode::INVALID_ARGUMENT,
         ),
         (
-            "certificates.export",
-            "certificates",
+            json!({"operation": "certificates.export"}),
             ErrorCode::INVALID_ARGUMENT,
         ),
-        ("certificates.list", "secrets", ErrorCode::INVALID_ARGUMENT),
+        (json!({}), ErrorCode::INVALID_ARGUMENT),
     ] {
-        let response = read(&service, operation, resource).await;
-        assert_eq!(response.error.unwrap().code, code, "{operation} {resource}");
+        let response = read(&transport, query.clone()).await;
+        assert_eq!(response.error.unwrap().code, code, "{query}");
     }
     let unknown_field = change(
-        &service,
-        "certificates.generate",
-        "certificates",
+        &transport,
+        json!({"operation": "certificates.generate", "parameters": {
+            "id": "x", "names": ["x.example"], "days": 1, "key": "nope"
+        }}),
         "",
-        json!({ "id": "x", "names": ["x.example"], "days": 1, "key": "nope" }),
     )
     .await;
     assert_eq!(

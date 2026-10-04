@@ -4,9 +4,9 @@
 //! the certificate inventory without holding private keys.
 
 use async_trait::async_trait;
-use panel_application::{
-    CertificateChange, CertificateOutput, CertificatePort, CertificateRead, CommandContext,
-    RequestScope,
+use panel_application::{CommandContext, RequestScope};
+use panel_certificate_api::{
+    CertificateChange, CertificateOutput, CertificatePort, CertificateQuery,
 };
 use panel_contracts::{
     automation::v1::{self as wire, certificates_client::CertificatesClient},
@@ -72,12 +72,15 @@ fn etag(value: String) -> Option<String> {
 
 #[async_trait]
 impl CertificatePort for AutomationClient {
-    async fn read(&self, scope: RequestScope, read: CertificateRead) -> Result<CertificateOutput> {
+    async fn read(
+        &self,
+        scope: RequestScope,
+        query: CertificateQuery,
+    ) -> Result<CertificateOutput> {
         let message = wire::ReadRequest {
             context: Some(request_context(&scope)),
-            operation: read.operation,
-            resource: read.resource,
-            parameters: read.parameters,
+            query: serde_json::to_vec(&query).expect("certificate queries serialize"),
+            ..wire::ReadRequest::default()
         };
         let response = CertificatesClient::new(self.channel.clone())
             .read(self.request(message, &scope))
@@ -97,7 +100,9 @@ impl CertificatePort for AutomationClient {
         change: CertificateChange,
     ) -> Result<CertificateOutput> {
         let scope = context.scope();
-        let content = Zeroizing::new(change.content);
+        let command = Zeroizing::new(
+            serde_json::to_vec(&change.command).expect("certificate commands serialize"),
+        );
         let message = wire::ChangeRequest {
             context: Some(common::RequestContext {
                 request_id: context.request_id().as_str().into(),
@@ -108,10 +113,9 @@ impl CertificatePort for AutomationClient {
                 schema_version: PROTOCOL_VERSION.into(),
                 site_scope: None,
             }),
-            operation: change.operation,
-            resource: change.resource,
             if_match: change.if_match.unwrap_or_default(),
-            content: content.to_vec(),
+            command: command.to_vec(),
+            ..wire::ChangeRequest::default()
         };
         let response = CertificatesClient::new(self.channel.clone())
             .change(self.request(message, &scope))

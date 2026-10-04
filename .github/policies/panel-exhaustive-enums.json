@@ -210,6 +210,36 @@
       "name": "Gate",
       "owner": "pingora-panel-platform",
       "reason": "What the approvals say about applying a change. Applying matches every outcome, so a new one must fail to compile there instead of letting a change through or holding it by default."
+    },
+    {
+      "package": "panel-certificate-api",
+      "name": "CertificateQuery",
+      "owner": "pingora-panel-platform",
+      "reason": "An operation of the certificate API contract. The certificate service matches it exhaustively, so a new operation must fail to compile where it is not handled yet instead of reaching a wildcard."
+    },
+    {
+      "package": "panel-certificate-api",
+      "name": "CertificateCommand",
+      "owner": "pingora-panel-platform",
+      "reason": "An operation of the certificate API contract. The certificate service matches it exhaustively, so a new operation must fail to compile where it is not handled yet instead of reaching a wildcard."
+    },
+    {
+      "package": "panel-certificate-api",
+      "name": "Challenge",
+      "owner": "pingora-panel-platform",
+      "reason": "The ACME challenges an automatic certificate can use. The service maps each onto its ACME client's, so a new one must fail to compile where it is not mapped yet."
+    },
+    {
+      "package": "panel-certificate-api",
+      "name": "DnsProviderKind",
+      "owner": "pingora-panel-platform",
+      "reason": "The DNS providers the service can build. Each maps onto a provider implementation, so a new kind must fail to compile where none is built for it yet."
+    },
+    {
+      "package": "panel-certificate-api",
+      "name": "TsigAlgorithm",
+      "owner": "pingora-panel-platform",
+      "reason": "The TSIG algorithms (RFC 8945) a provider signs updates with. Each maps onto the DNS client's, so a new one must fail to compile where it is not mapped yet."
     }
   ]
 }

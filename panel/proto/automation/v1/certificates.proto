@@ -8,11 +8,11 @@ import "common/v1/common.proto";
 // certificates whose private keys the service seals and delivers to the
 // gateway.
 //
-// Certificates travel as JSON documents (`pingora.panel.certificates/v1`),
-// so they can gain fields without changing this contract. Every request
-// names one operation from a closed set, which permissions and audit
-// records refer to. Private keys are accepted in change requests and never
-// returned.
+// Operations and certificates travel as JSON documents of the certificate
+// API's types (the `panel-certificate-api` crate), which both ends share, so
+// they can gain fields without changing this contract. Each read and change
+// is one operation of a closed set, which audit records refer to by name.
+// Private keys are accepted in change requests and never returned.
 service Certificates {
   rpc Read(ReadRequest) returns (ReadResponse);
   rpc Change(ChangeRequest) returns (ChangeResponse);
@@ -20,12 +20,12 @@ service Certificates {
 
 message ReadRequest {
   .pingora.panel.common.v1.RequestContext context = 1;
-  // `certificates.list` or `certificates.get`.
-  string operation = 2;
-  // `certificates` or `certificates/{id}`.
-  string resource = 3;
-  // Operation parameters as a JSON object.
-  bytes parameters = 4;
+  // Replaced by `query`, which names the operation and its parameters.
+  string operation = 2 [deprecated = true];
+  string resource = 3 [deprecated = true];
+  bytes parameters = 4 [deprecated = true];
+  // The read, a `CertificateQuery` as JSON.
+  bytes query = 5;
 }
 
 message ReadResponse {
@@ -38,15 +38,17 @@ message ReadResponse {
 
 message ChangeRequest {
   .pingora.panel.common.v1.RequestContext context = 1;
-  // For example `certificates.upload`, `certificates.generate`,
-  // `certificates.replace` or `certificates.delete`.
-  string operation = 2;
-  string resource = 3;
+  // Replaced by `command`, which names the operation, its target and its
+  // input.
+  string operation = 2 [deprecated = true];
+  string resource = 3 [deprecated = true];
   // Entity tag the certificate must still have (RFC 9110 §13.1.1); empty
   // skips the check.
   string if_match = 4;
-  // The request body as JSON.
-  bytes content = 5;
+  bytes content = 5 [deprecated = true];
+  // The change, a `CertificateCommand` as JSON; it may hold private keys
+  // and secrets.
+  bytes command = 6;
 }
 
 message ChangeResponse {

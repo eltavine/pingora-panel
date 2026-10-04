@@ -3,9 +3,10 @@ use crate::{
     sign_in::ProviderAccess,
 };
 use panel_application::{
-    AlertsPort, AuditPort, CertificatePort, ContainersPort, GatewayRuntimePort, HostAgentPort,
-    HostPort, LogsPort, NoContainers, NoHostAgent, TlsProbe, TrafficPort,
+    AlertsPort, AuditPort, ContainersPort, GatewayRuntimePort, HostAgentPort, HostPort, LogsPort,
+    NoContainers, NoHostAgent, TlsProbe, TrafficPort,
 };
+use panel_certificate_api::CertificatePort;
 use panel_config_api::ConfigurationPort;
 use panel_health::HealthWatch;
 use panel_identity::{Identity, ProviderDirectory, ProviderSignIns, WorkloadIdentity};

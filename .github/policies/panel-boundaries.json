@@ -30,6 +30,8 @@
       "allowed_workspace_dependencies": [
         "dns-rfc2136",
         "panel-acme",
+        "panel-application",
+        "panel-certificate-api",
         "panel-certificates",
         "panel-context",
         "panel-contracts",
@@ -224,6 +226,7 @@
       "catalog": true,
       "allowed_workspace_dependencies": [
         "panel-application",
+        "panel-certificate-api",
         "panel-certificates",
         "panel-config-api",
         "panel-config-dsl",
@@ -339,6 +342,14 @@
       "allowed_workspace_dependencies": [
         "panel-application",
         "panel-config-model",
+        "panel-domain",
+        "panel-errors"
+      ]
+    },
+    "panel-certificate-api": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-application",
         "panel-domain",
         "panel-errors"
       ]
@@ -602,6 +613,7 @@
       "catalog": true,
       "allowed_workspace_dependencies": [
         "panel-application",
+        "panel-certificate-api",
         "panel-contracts",
         "panel-errors",
         "panel-service"

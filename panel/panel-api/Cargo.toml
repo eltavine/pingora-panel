@@ -17,6 +17,7 @@ axum = { workspace = true, features = ["ws"] }
 futures-util.workspace = true
 panel-application.workspace = true
 panel-config-api.workspace = true
+panel-certificate-api.workspace = true
 panel-certificates = { workspace = true, features = ["openapi"] }
 panel-config-dsl = { workspace = true, features = ["openapi"] }
 panel-config-model = { workspace = true, features = ["openapi"] }
