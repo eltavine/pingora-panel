@@ -2,6 +2,10 @@
 
 use gatewayd::{initialize_observability, serve_gatewayd, GatewaydConfig, GatewaydError};
 
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static ALLOCATOR: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 /// Management traffic is light; proxied traffic runs on the data plane's
 /// own workers, sized by the configured worker count.
 const MANAGEMENT_THREADS: usize = 2;
