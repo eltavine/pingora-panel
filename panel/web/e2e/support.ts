@@ -18,6 +18,7 @@ export const ALL_PERMISSIONS = [
   'logs.delete',
   'alerts.read',
   'alerts.manage',
+  'host.read',
   'platform.read',
   'identity.read',
   'identity.manage',

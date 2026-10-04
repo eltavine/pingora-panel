@@ -34,6 +34,7 @@ const PERMISSIONS = [
   'logs.delete',
   'alerts.read',
   'alerts.manage',
+  'host.read',
   'platform.read',
   'identity.read',
   'identity.manage',

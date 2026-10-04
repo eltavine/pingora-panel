@@ -25,6 +25,7 @@ pub enum Permission {
     LogsDelete,
     AlertsRead,
     AlertsManage,
+    HostRead,
     PlatformRead,
     IdentityRead,
     IdentityManage,
@@ -111,6 +112,11 @@ const CATALOG: &[(Permission, &str, &str)] = &[
         Permission::AlertsManage,
         "alerts.manage",
         "Change alert rules and channels and send test notifications.",
+    ),
+    (
+        Permission::HostRead,
+        "host.read",
+        "Read the host's CPU, memory, disks, load, network and system.",
     ),
     (
         Permission::PlatformRead,
@@ -275,6 +281,7 @@ pub fn built_in_roles() -> Vec<Role> {
                 LogsDelete,
                 AlertsRead,
                 AlertsManage,
+                HostRead,
                 PlatformRead,
             ]
             .into_iter()
@@ -290,6 +297,7 @@ pub fn built_in_roles() -> Vec<Role> {
                 CertificateRead,
                 LogsRead,
                 AlertsRead,
+                HostRead,
                 PlatformRead,
             ]
             .into_iter()
@@ -303,6 +311,7 @@ pub fn built_in_roles() -> Vec<Role> {
                 AuditRead,
                 LogsRead,
                 AlertsRead,
+                HostRead,
                 ConfigRead,
                 CertificateRead,
                 GatewayRead,

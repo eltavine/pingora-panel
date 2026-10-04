@@ -1381,6 +1381,7 @@ const zhCN = {
     logs_delete: '删除某个网站或全部网站的网关日志',
     alerts_read: '查看告警规则及其状态、通知渠道与已发送的通知',
     alerts_manage: '修改告警规则与通知渠道，并发送测试通知',
+    host_read: '查看主机的 CPU、内存、磁盘、负载、网络与系统信息',
     platform_read: '读取控制面服务',
     identity_read: '读取账户、角色与会话',
     identity_manage: '创建、修改、停用与解锁账户，分配角色并结束会话',
