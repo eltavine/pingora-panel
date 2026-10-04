@@ -32521,6 +32521,677 @@
         }
       }
     },
+    "/api/v1/host/gateway-unit": {
+      "parameters": [
+        {
+          "name": "x-request-id",
+          "in": "header",
+          "description": "Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1
+          }
+        },
+        {
+          "name": "traceparent",
+          "in": "header",
+          "description": "W3C Trace Context parent of the caller's trace. Invalid values are ignored.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 55
+          }
+        },
+        {
+          "name": "tracestate",
+          "in": "header",
+          "description": "W3C Trace Context vendor state, propagated with a valid traceparent.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "host"
+        ],
+        "summary": "The gateway's systemd unit, when the host agent manages it.",
+        "operationId": "gateway_unit",
+        "parameters": [
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayUnitView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/host/gateway-unit/{action}": {
+      "parameters": [
+        {
+          "name": "x-request-id",
+          "in": "header",
+          "description": "Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1
+          }
+        },
+        {
+          "name": "traceparent",
+          "in": "header",
+          "description": "W3C Trace Context parent of the caller's trace. Invalid values are ignored.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 55
+          }
+        },
+        {
+          "name": "tracestate",
+          "in": "header",
+          "description": "W3C Trace Context vendor state, propagated with a valid traceparent.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      ],
+      "post": {
+        "tags": [
+          "host"
+        ],
+        "summary": "Starts, stops or restarts the gateway's unit and answers once systemd\nhas finished; the audit trail records it, refused or not.",
+        "operationId": "change_gateway_unit",
+        "parameters": [
+          {
+            "name": "action",
+            "in": "path",
+            "description": "start, stop or restart",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/UnitActionName"
+            }
+          },
+          {
+            "name": "x-deadline",
+            "in": "header",
+            "description": "Absolute request deadline in RFC 3339 format.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1
+            }
+          },
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayUnitView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/host/listeners": {
       "parameters": [
         {
@@ -62793,6 +63464,71 @@
           }
         }
       },
+      "GatewayUnitView": {
+        "type": "object",
+        "description": "The gateway's systemd unit, in systemd's own words.",
+        "required": [
+          "name",
+          "description",
+          "load_state",
+          "active_state",
+          "sub_state",
+          "unit_file_state",
+          "restarts",
+          "result"
+        ],
+        "properties": {
+          "active_since": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When it last became active, RFC 3339."
+          },
+          "active_state": {
+            "type": "string",
+            "description": "Such as `active`, `inactive` or `failed`."
+          },
+          "description": {
+            "type": "string"
+          },
+          "load_state": {
+            "type": "string",
+            "description": "Such as `loaded` or `not-found`."
+          },
+          "main_pid": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The main process, when there is one.",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string",
+            "description": "Such as `pingora-panel-gatewayd.service`."
+          },
+          "restarts": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How often systemd restarted it on its own.",
+            "minimum": 0
+          },
+          "result": {
+            "type": "string",
+            "description": "How it last ended, such as `success` or `exit-code`."
+          },
+          "sub_state": {
+            "type": "string",
+            "description": "Such as `running` or `dead`."
+          },
+          "unit_file_state": {
+            "type": "string",
+            "description": "Such as `enabled` or `disabled`."
+          }
+        }
+      },
       "GrantConditionsBody": {
         "type": "object",
         "description": "When a grant counts; every condition set must hold.",
@@ -66879,6 +67615,15 @@
         "x-extensible-enum": [
           "hmac-sha256",
           "hmac-sha512"
+        ]
+      },
+      "UnitActionName": {
+        "type": "string",
+        "description": "What may be done to the gateway's unit.",
+        "enum": [
+          "start",
+          "stop",
+          "restart"
         ]
       },
       "Upstream": {

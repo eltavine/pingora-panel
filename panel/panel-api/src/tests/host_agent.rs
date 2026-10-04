@@ -212,3 +212,51 @@ async fn what_holds_ports_is_served_for_the_ports_asked_for() {
         assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}: {problem}");
     }
 }
+
+async fn post(app: &axum::Router, path: &str, actor: &str) -> (StatusCode, Value) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post(path)
+                .header("x-actor", actor)
+                .header("idempotency-key", "unit-1")
+                .header("x-deadline", "2099-01-01T00:00:00Z")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+
+#[tokio::test]
+async fn the_gateways_unit_is_read_and_changed() {
+    let router = app(Some(Agent { reachable: true }));
+    let (status, unit) = get(&router, "/api/v1/host/gateway-unit").await;
+    assert_eq!(status, StatusCode::OK, "{unit}");
+    assert_eq!(unit["name"], "pingora-panel-gatewayd.service");
+    assert_eq!(unit["active_state"], "active");
+    assert_eq!(unit["main_pid"], 4242);
+    assert_eq!(unit["active_since"], "2027-01-15T08:00:00Z");
+
+    let (status, unit) = post(&router, "/api/v1/host/gateway-unit/stop", "ops").await;
+    assert_eq!(status, StatusCode::OK, "{unit}");
+    assert_eq!(unit["active_state"], "inactive");
+    assert_eq!(unit["main_pid"], Value::Null);
+
+    let (status, problem) = post(&router, "/api/v1/host/gateway-unit/stop", "careless").await;
+    assert_eq!(status, StatusCode::PRECONDITION_FAILED, "{problem}");
+
+    let (status, problem) = post(&router, "/api/v1/host/gateway-unit/reboot", "ops").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{problem}");
+
+    let (status, problem) = post(&app(None), "/api/v1/host/gateway-unit/start", "ops").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+}

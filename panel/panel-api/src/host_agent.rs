@@ -2,18 +2,19 @@
 
 use crate::{
     error::ApiError,
-    request_context::{request_scope, QueryHeaders},
+    request_context::{command_context, request_scope, MutationHeaders, QueryHeaders},
     ApiState,
 };
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::HeaderMap,
     Json,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
 use panel_application::{
     AgentCapability, AgentDescription, CapabilityState, CapabilityStatus, DirectoriesReport,
-    DirectoryKind, DirectoryUsage, ListenersReport, ListeningProcess, PortListener,
+    DirectoryKind, DirectoryUsage, GatewayUnitStatus, ListenersReport, ListeningProcess,
+    PortListener, UnitAction,
 };
 use panel_errors::{ErrorCode, PanelError};
 use serde::{Deserialize, Serialize};
@@ -358,4 +359,110 @@ pub(crate) async fn host_listeners<U>(
         .listeners(request_scope(&headers)?, ports)
         .await?;
     Ok(Json(report.into()))
+}
+
+/// What may be done to the gateway's unit.
+#[derive(Clone, Copy, Debug, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum UnitActionName {
+    Start,
+    Stop,
+    Restart,
+}
+
+impl UnitActionName {
+    fn parse(value: &str) -> Result<Self, ApiError> {
+        match value {
+            "start" => Ok(Self::Start),
+            "stop" => Ok(Self::Stop),
+            "restart" => Ok(Self::Restart),
+            other => Err(ApiError::new(PanelError::invalid_argument(format!(
+                "`{other}` is not start, stop or restart"
+            )))),
+        }
+    }
+}
+
+impl From<UnitActionName> for UnitAction {
+    fn from(value: UnitActionName) -> Self {
+        match value {
+            UnitActionName::Start => Self::Start,
+            UnitActionName::Stop => Self::Stop,
+            UnitActionName::Restart => Self::Restart,
+        }
+    }
+}
+
+/// The gateway's systemd unit, in systemd's own words.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct GatewayUnitView {
+    /// Such as `pingora-panel-gatewayd.service`.
+    pub name: String,
+    pub description: String,
+    /// Such as `loaded` or `not-found`.
+    pub load_state: String,
+    /// Such as `active`, `inactive` or `failed`.
+    pub active_state: String,
+    /// Such as `running` or `dead`.
+    pub sub_state: String,
+    /// Such as `enabled` or `disabled`.
+    pub unit_file_state: String,
+    /// The main process, when there is one.
+    pub main_pid: Option<u32>,
+    /// When it last became active, RFC 3339.
+    pub active_since: Option<String>,
+    /// How often systemd restarted it on its own.
+    pub restarts: u32,
+    /// How it last ended, such as `success` or `exit-code`.
+    pub result: String,
+}
+
+impl From<GatewayUnitStatus> for GatewayUnitView {
+    fn from(value: GatewayUnitStatus) -> Self {
+        Self {
+            name: value.name,
+            description: value.description,
+            load_state: value.load_state,
+            active_state: value.active_state,
+            sub_state: value.sub_state,
+            unit_file_state: value.unit_file_state,
+            main_pid: (value.main_pid != 0).then_some(value.main_pid),
+            active_since: value.active_since.map(rfc3339),
+            restarts: value.restarts,
+            result: value.result,
+        }
+    }
+}
+
+/// The gateway's systemd unit, when the host agent manages it.
+#[utoipa::path(get, path = "/api/v1/host/gateway-unit", params(QueryHeaders),
+    responses((status = 200, body = GatewayUnitView)), tag = "host")]
+pub(crate) async fn gateway_unit<U>(
+    State(state): State<ApiState<U>>,
+    headers: HeaderMap,
+) -> Result<Json<GatewayUnitView>, ApiError> {
+    let status = state
+        .host_agent
+        .gateway_unit(request_scope(&headers)?)
+        .await?;
+    Ok(Json(status.into()))
+}
+
+/// Starts, stops or restarts the gateway's unit and answers once systemd
+/// has finished; the audit trail records it, refused or not.
+#[utoipa::path(post, path = "/api/v1/host/gateway-unit/{action}",
+    params(("action" = UnitActionName, Path, description = "start, stop or restart"), MutationHeaders),
+    responses((status = 200, body = GatewayUnitView)), tag = "host")]
+pub(crate) async fn change_gateway_unit<U>(
+    State(state): State<ApiState<U>>,
+    Path(action): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<GatewayUnitView>, ApiError> {
+    let action = UnitActionName::parse(&action)?;
+    let status = state
+        .host_agent
+        .change_gateway_unit(command_context(&headers)?, action.into())
+        .await?;
+    Ok(Json(status.into()))
 }

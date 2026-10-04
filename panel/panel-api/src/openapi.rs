@@ -43,6 +43,8 @@ mod tests;
         crate::host_agent::host_agent,
         crate::host_agent::host_directories,
         crate::host_agent::host_listeners,
+        crate::host_agent::gateway_unit,
+        crate::host_agent::change_gateway_unit,
         crate::alerts::list_alert_rules, crate::alerts::put_alert_rule,
         crate::alerts::delete_alert_rule, crate::alerts::list_alert_channels,
         crate::alerts::create_alert_channel, crate::alerts::rotate_alert_channel,
@@ -132,7 +134,8 @@ mod tests;
         panel_config_model::SiteSort,
         panel_config_model::SiteStatus,
         panel_config_model::SiteKind,
-        crate::logs::LogTailMessage
+        crate::logs::LogTailMessage,
+        crate::host_agent::UnitActionName
     ))
 )]
 pub struct ApiDoc;
