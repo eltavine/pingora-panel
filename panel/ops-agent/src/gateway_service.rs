@@ -2,16 +2,17 @@
 //! project, found by the project's and the service's labels on an enabled
 //! engine. The agent starts, stops and restarts that one container.
 
-use crate::containers::{self, Engines, ACTION_TIMEOUT, COMPOSE_PROJECT, COMPOSE_SERVICE};
+use crate::containers::{
+    self, health, time, Engines, ACTION_TIMEOUT, COMPOSE_PROJECT, COMPOSE_SERVICE,
+};
 use bollard::{
-    models::{ContainerSummary, HealthStatusEnum},
+    models::ContainerSummary,
     query_parameters::{
         InspectContainerOptions, ListContainersOptionsBuilder, RestartContainerOptions,
         StartContainerOptions, StopContainerOptions,
     },
     Docker,
 };
-use chrono::DateTime;
 use panel_contracts::ops::v1::{
     self as wire, gateway_service_server, gateway_service_status::Supervisor, AgentCapability,
     Capability, CapabilityState, GatewayServiceAction,
@@ -127,11 +128,7 @@ impl GatewayService {
                 finished_at: time(state.finished_at.as_deref()).map(Into::into),
                 exit_code: state.exit_code.unwrap_or(0),
                 restarts: u32::try_from(inspected.restart_count.unwrap_or(0)).unwrap_or(0),
-                health: state
-                    .health
-                    .and_then(|health| health.status)
-                    .map(health)
-                    .unwrap_or_default(),
+                health: health(state.health.and_then(|health| health.status)),
             })),
         })
     }
@@ -172,24 +169,6 @@ impl GatewayService {
         tracing::info!(event = "gateway_service_changed", container = %id, action = verb);
         self.read().await
     }
-}
-
-/// An engine's timestamp; it reports the zero time for one that never was.
-fn time(value: Option<&str>) -> Option<SystemTime> {
-    value
-        .and_then(|text| DateTime::parse_from_rfc3339(text).ok())
-        .filter(|moment| moment.timestamp() > 0)
-        .map(SystemTime::from)
-}
-
-fn health(status: HealthStatusEnum) -> String {
-    match status {
-        HealthStatusEnum::STARTING => "starting",
-        HealthStatusEnum::HEALTHY => "healthy",
-        HealthStatusEnum::UNHEALTHY => "unhealthy",
-        _ => "",
-    }
-    .to_owned()
 }
 
 #[tonic::async_trait]

@@ -17,6 +17,9 @@ service Containers {
   // of the panel's own installation are only ever started; Compose manages
   // them otherwise.
   rpc Act(ContainersActRequest) returns (ContainersActResponse);
+  // A container's configuration and state, without its environment or
+  // command line, which carry secrets.
+  rpc Inspect(ContainersInspectRequest) returns (ContainersInspectResponse);
 }
 
 message EngineVersion {
@@ -165,4 +168,66 @@ message ContainersActResponse {
   // The container afterwards; unset once removed.
   Container container = 3;
   .pingora.panel.common.v1.Error error = 4;
+}
+
+message ContainerMount {
+  // `volume`, `bind`, `tmpfs` and so on.
+  string type = 1;
+  // The volume's name, for a volume.
+  string name = 2;
+  // Where it comes from on the host.
+  string source = 3;
+  // Where it appears in the container.
+  string destination = 4;
+  bool read_write = 5;
+}
+
+message ContainerNetwork {
+  string name = 1;
+  string ip_address = 2;
+  string ipv6_address = 3;
+  string gateway = 4;
+  string mac_address = 5;
+  repeated string aliases = 6;
+}
+
+// What inspecting a container shows, without its environment or command
+// line, which carry secrets.
+message ContainerDetail {
+  Container container = 1;
+  // When it last started and last stopped; unset when it never has.
+  google.protobuf.Timestamp started_at = 2;
+  google.protobuf.Timestamp finished_at = 3;
+  // How it last stopped; 0 until it has.
+  int64 exit_code = 4;
+  // Why it last failed, in the engine's words.
+  string error = 5;
+  bool oom_killed = 6;
+  // How often the engine restarted it under its restart policy.
+  uint32 restarts = 7;
+  // `healthy`, `unhealthy` or `starting`; empty without a health check.
+  string health = 8;
+  // `no`, `always`, `unless-stopped` or `on-failure`.
+  string restart_policy = 9;
+  // How often `on-failure` restarts it; 0 for no limit.
+  uint32 restart_retries = 10;
+  string hostname = 11;
+  string user = 12;
+  string working_directory = 13;
+  // Such as `linux`.
+  string platform = 14;
+  repeated ContainerMount mounts = 15;
+  repeated ContainerNetwork networks = 16;
+}
+
+message ContainersInspectRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string engine = 2;
+  // Its ID, a unique prefix of its ID, or its name.
+  string container = 3;
+}
+
+message ContainersInspectResponse {
+  ContainerDetail detail = 1;
+  .pingora.panel.common.v1.Error error = 2;
 }

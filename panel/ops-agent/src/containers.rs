@@ -5,7 +5,10 @@
 use crate::config::ENGINES_ENV;
 use bollard::{
     errors::Error as EngineError,
-    models::{ContainerSummary, ContainerSummaryStateEnum, PortSummary},
+    models::{
+        ContainerInspectResponse, ContainerSummary, ContainerSummaryStateEnum, HealthStatusEnum,
+        PortSummary,
+    },
     query_parameters::{
         InspectContainerOptions, KillContainerOptionsBuilder, ListContainersOptionsBuilder,
         RemoveContainerOptionsBuilder, RestartContainerOptions, StartContainerOptions,
@@ -279,6 +282,83 @@ pub(crate) fn container(value: ContainerSummary) -> wire::Container {
     }
 }
 
+/// An engine's timestamp; it reports the zero time for one that never was.
+pub(crate) fn time(value: Option<&str>) -> Option<SystemTime> {
+    value
+        .and_then(|text| chrono::DateTime::parse_from_rfc3339(text).ok())
+        .filter(|moment| moment.timestamp() > 0)
+        .map(SystemTime::from)
+}
+
+/// `healthy`, `unhealthy` or `starting`; empty without a health check.
+pub(crate) fn health(status: Option<HealthStatusEnum>) -> String {
+    match status {
+        Some(HealthStatusEnum::STARTING) => "starting",
+        Some(HealthStatusEnum::HEALTHY) => "healthy",
+        Some(HealthStatusEnum::UNHEALTHY) => "unhealthy",
+        _ => "",
+    }
+    .to_owned()
+}
+
+/// What inspecting a container shows, without its environment or command
+/// line, which carry secrets.
+fn detail(summary: wire::Container, inspected: ContainerInspectResponse) -> wire::ContainerDetail {
+    let state = inspected.state.unwrap_or_default();
+    let config = inspected.config.unwrap_or_default();
+    let restart = inspected
+        .host_config
+        .and_then(|host| host.restart_policy)
+        .unwrap_or_default();
+    let mut networks: Vec<wire::ContainerNetwork> = inspected
+        .network_settings
+        .and_then(|settings| settings.networks)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(name, endpoint)| wire::ContainerNetwork {
+            name,
+            ip_address: endpoint.ip_address.unwrap_or_default(),
+            ipv6_address: endpoint.global_ipv6_address.unwrap_or_default(),
+            gateway: endpoint.gateway.unwrap_or_default(),
+            mac_address: endpoint.mac_address.unwrap_or_default(),
+            aliases: endpoint.aliases.unwrap_or_default(),
+        })
+        .collect();
+    networks.sort_by(|left, right| left.name.cmp(&right.name));
+    wire::ContainerDetail {
+        container: Some(summary),
+        started_at: time(state.started_at.as_deref()).map(Into::into),
+        finished_at: time(state.finished_at.as_deref()).map(Into::into),
+        exit_code: state.exit_code.unwrap_or(0),
+        error: state.error.unwrap_or_default(),
+        oom_killed: state.oom_killed.unwrap_or(false),
+        restarts: u32::try_from(inspected.restart_count.unwrap_or(0)).unwrap_or(0),
+        health: health(state.health.and_then(|health| health.status)),
+        restart_policy: restart
+            .name
+            .map(|name| name.to_string())
+            .unwrap_or_default(),
+        restart_retries: u32::try_from(restart.maximum_retry_count.unwrap_or(0)).unwrap_or(0),
+        hostname: config.hostname.unwrap_or_default(),
+        user: config.user.unwrap_or_default(),
+        working_directory: config.working_dir.unwrap_or_default(),
+        platform: inspected.platform.unwrap_or_default(),
+        mounts: inspected
+            .mounts
+            .unwrap_or_default()
+            .into_iter()
+            .map(|mount| wire::ContainerMount {
+                r#type: mount.typ.unwrap_or_default(),
+                name: mount.name.unwrap_or_default(),
+                source: mount.source.unwrap_or_default(),
+                destination: mount.destination.unwrap_or_default(),
+                read_write: mount.rw.unwrap_or(false),
+            })
+            .collect(),
+        networks,
+    }
+}
+
 /// Whether a container answers a search and a set of states.
 fn matches(container: &wire::Container, search: &str, states: &[i32]) -> bool {
     let search = search.trim().to_lowercase();
@@ -304,6 +384,37 @@ impl ContainerService {
             engines,
             installation,
         }
+    }
+
+    /// A container as listing and inspecting it show.
+    async fn inspect_one(
+        &self,
+        request: &wire::ContainersInspectRequest,
+    ) -> Result<wire::ContainerDetail, PanelError> {
+        let reference = request.container.trim();
+        if reference.is_empty() {
+            return Err(PanelError::invalid_argument("name the container"));
+        }
+        let client = self.engines.enabled(&request.engine)?;
+        let inspected = client
+            .inspect_container(reference, None::<InspectContainerOptions>)
+            .await
+            .map_err(|error| failure(&error))?;
+        let id = inspected.id.clone().unwrap_or_default();
+        let filters = HashMap::from([("id", vec![id.as_str()])]);
+        let options = ListContainersOptionsBuilder::default()
+            .all(true)
+            .filters(&filters)
+            .build();
+        let summary = client
+            .list_containers(Some(options))
+            .await
+            .map_err(|error| failure(&error))?
+            .into_iter()
+            .next()
+            .map(container)
+            .ok_or_else(|| PanelError::not_found(format!("{reference} is gone")))?;
+        Ok(detail(summary, inspected))
     }
 
     /// Acts on a container, then reads it again unless it was removed.
@@ -476,6 +587,17 @@ impl Containers for ContainerService {
         }))
     }
 
+    async fn inspect(
+        &self,
+        request: Request<wire::ContainersInspectRequest>,
+    ) -> Result<Response<wire::ContainersInspectResponse>, Status> {
+        let (detail, error) = answer(self.inspect_one(request.get_ref()).await);
+        Ok(Response::new(wire::ContainersInspectResponse {
+            detail,
+            error,
+        }))
+    }
+
     async fn act(
         &self,
         request: Request<wire::ContainersActRequest>,
@@ -549,10 +671,28 @@ mod tests {
         if let Some(project) = project {
             labels.insert(COMPOSE_PROJECT.into(), project.into());
         }
-        Some(json!({"Id": id, "Name": format!("/{name}"),
+        Some(
+            json!({"Id": id, "Name": format!("/{name}"), "RestartCount": 1,
+                    "Platform": "linux",
                     "State": {"Status": if running { "running" } else { "exited" },
-                              "Running": running},
-                    "Config": {"Labels": labels}}))
+                              "Running": running, "ExitCode": 0, "OOMKilled": false,
+                              "Error": "", "StartedAt": "2027-01-15T08:00:00Z",
+                              "FinishedAt": "0001-01-01T00:00:00Z",
+                              "Health": {"Status": "healthy"}},
+                    "Config": {"Labels": labels, "Hostname": "web", "User": "nginx",
+                               "WorkingDir": "/srv",
+                               "Env": ["DATABASE_PASSWORD=hunter2"],
+                               "Cmd": ["nginx", "--token", "hunter2"]},
+                    "HostConfig": {"RestartPolicy": {"Name": "unless-stopped",
+                                                     "MaximumRetryCount": 0}},
+                    "Mounts": [{"Type": "volume", "Name": "shop_html",
+                                "Source": "/var/lib/docker/volumes/shop_html/_data",
+                                "Destination": "/usr/share/nginx/html", "RW": false}],
+                    "NetworkSettings": {"Networks": {
+                        "shop_default": {"IPAddress": "172.18.0.2", "Gateway": "172.18.0.1",
+                                         "MacAddress": "02:42:ac:12:00:02",
+                                         "Aliases": ["web"]}}}}),
+        )
     }
 
     fn refusal(status: StatusCode, message: &str) -> Answer {
@@ -831,6 +971,47 @@ mod tests {
             .await
             .unwrap()
             .into_inner()
+    }
+
+    #[tokio::test]
+    async fn containers_are_inspected_without_their_environment() {
+        let directory = tempfile::tempdir().unwrap();
+        let socket = engine(directory.path()).await;
+        let service = ContainerService::new(engines(socket, None), "pingora-panel".into());
+        let inspect = |container: &str| {
+            service.inspect(Request::new(wire::ContainersInspectRequest {
+                context: None,
+                engine: "docker".into(),
+                container: container.into(),
+            }))
+        };
+
+        let answer = inspect("shop-web-1").await.unwrap().into_inner();
+        let detail = answer.detail.unwrap();
+        assert!(!format!("{detail:?}").contains("hunter2"), "{detail:?}");
+        let summary = detail.container.as_ref().unwrap();
+        assert_eq!(summary.names, vec!["shop-web-1".to_owned()]);
+        assert_eq!(summary.ports[0].public_port, 8081);
+        assert_eq!(
+            (
+                detail.restart_policy.as_str(),
+                detail.restarts,
+                detail.health.as_str()
+            ),
+            ("unless-stopped", 1, "healthy")
+        );
+        assert_eq!(
+            (detail.hostname.as_str(), detail.user.as_str()),
+            ("web", "nginx")
+        );
+        assert!(detail.started_at.is_some() && detail.finished_at.is_none());
+        assert_eq!(detail.mounts[0].destination, "/usr/share/nginx/html");
+        assert!(!detail.mounts[0].read_write);
+        assert_eq!(detail.networks[0].name, "shop_default");
+        assert_eq!(detail.networks[0].ip_address, "172.18.0.2");
+
+        let missing = inspect("nothing").await.unwrap().into_inner();
+        assert_eq!(missing.error.unwrap().code, "NOT_FOUND");
     }
 
     #[tokio::test]
