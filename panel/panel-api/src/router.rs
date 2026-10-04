@@ -227,6 +227,10 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
             "/api/v1/host/directories",
             get(host_agent::host_directories::<U>),
         )
+        .route(
+            "/api/v1/host/listeners",
+            get(host_agent::host_listeners::<U>),
+        )
         .route("/api/v1/alert-rules", get(alerts::list_alert_rules::<U>))
         .route(
             "/api/v1/alert-rules/{id}",

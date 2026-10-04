@@ -42,6 +42,7 @@ mod tests;
         crate::host::host_summary,
         crate::host_agent::host_agent,
         crate::host_agent::host_directories,
+        crate::host_agent::host_listeners,
         crate::alerts::list_alert_rules, crate::alerts::put_alert_rule,
         crate::alerts::delete_alert_rule, crate::alerts::list_alert_channels,
         crate::alerts::create_alert_channel, crate::alerts::rotate_alert_channel,

@@ -5,15 +5,27 @@ use crate::{
     request_context::{request_scope, QueryHeaders},
     ApiState,
 };
-use axum::{extract::State, http::HeaderMap, Json};
+use axum::{
+    extract::{Query, State},
+    http::HeaderMap,
+    Json,
+};
 use chrono::{DateTime, SecondsFormat, Utc};
 use panel_application::{
     AgentCapability, AgentDescription, CapabilityState, CapabilityStatus, DirectoriesReport,
-    DirectoryKind, DirectoryUsage,
+    DirectoryKind, DirectoryUsage, ListenersReport, ListeningProcess, PortListener,
 };
-use panel_errors::ErrorCode;
-use serde::Serialize;
-use utoipa::ToSchema;
+use panel_errors::{ErrorCode, PanelError};
+use serde::{Deserialize, Serialize};
+use std::time::SystemTime;
+use utoipa::{IntoParams, ToSchema};
+
+/// How many ports one look at listeners may name.
+const MAX_PORTS: usize = 16;
+
+fn rfc3339(time: SystemTime) -> String {
+    DateTime::<Utc>::from(time).to_rfc3339_opts(SecondsFormat::Secs, true)
+}
 
 /// Whether the panel reaches a host agent.
 #[derive(Clone, Copy, Debug, Serialize, ToSchema)]
@@ -186,11 +198,112 @@ pub struct DirectoriesView {
 impl From<DirectoriesReport> for DirectoriesView {
     fn from(value: DirectoriesReport) -> Self {
         Self {
-            observed_at: value
-                .observed_at
-                .map(|time| DateTime::<Utc>::from(time).to_rfc3339_opts(SecondsFormat::Secs, true)),
+            observed_at: value.observed_at.map(rfc3339),
             directories: value.directories.into_iter().map(Into::into).collect(),
         }
+    }
+}
+
+/// A process that holds a listening socket.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct ListeningProcessView {
+    pub pid: i32,
+    /// The command's name, such as `nginx`.
+    pub name: String,
+    /// The executable's path, when the agent may read it.
+    pub executable: Option<String>,
+    pub uid: u32,
+}
+
+impl From<ListeningProcess> for ListeningProcessView {
+    fn from(value: ListeningProcess) -> Self {
+        Self {
+            pid: value.pid,
+            name: value.name,
+            executable: (!value.executable.is_empty()).then_some(value.executable),
+            uid: value.uid,
+        }
+    }
+}
+
+/// A socket listening on a TCP port, with the processes that hold it.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct PortListenerView {
+    /// The local address, such as `0.0.0.0` or `::`.
+    pub address: String,
+    pub port: u16,
+    /// The socket's owner.
+    pub uid: u32,
+    /// Empty when the agent may not see them.
+    pub processes: Vec<ListeningProcessView>,
+}
+
+impl From<PortListener> for PortListenerView {
+    fn from(value: PortListener) -> Self {
+        Self {
+            address: value.address,
+            port: value.port,
+            uid: value.uid,
+            processes: value.processes.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct ListenersView {
+    /// When the agent looked, RFC 3339.
+    pub observed_at: Option<String>,
+    /// By port, then address; empty when nothing listens.
+    pub listeners: Vec<PortListenerView>,
+}
+
+impl From<ListenersReport> for ListenersView {
+    fn from(value: ListenersReport) -> Self {
+        Self {
+            observed_at: value.observed_at.map(rfc3339),
+            listeners: value.listeners.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub(crate) struct ListenersQuery {
+    /// Comma-separated TCP ports, at most 16; 80 and 443 when absent.
+    #[param(example = "80,443")]
+    ports: Option<String>,
+}
+
+impl ListenersQuery {
+    fn ports(&self) -> Result<Vec<u16>, ApiError> {
+        let Some(ports) = self
+            .ports
+            .as_deref()
+            .filter(|ports| !ports.trim().is_empty())
+        else {
+            return Ok(Vec::new());
+        };
+        let ports = ports
+            .split(',')
+            .map(|port| {
+                port.trim()
+                    .parse::<u16>()
+                    .ok()
+                    .filter(|port| *port != 0)
+                    .ok_or_else(|| {
+                        ApiError::new(PanelError::invalid_argument(format!(
+                            "`{}` is not a TCP port",
+                            port.trim()
+                        )))
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if ports.len() > MAX_PORTS {
+            return Err(ApiError::new(PanelError::invalid_argument(format!(
+                "name at most {MAX_PORTS} ports"
+            ))));
+        }
+        Ok(ports)
     }
 }
 
@@ -226,6 +339,23 @@ pub(crate) async fn host_directories<U>(
     let report = state
         .host_agent
         .directories(request_scope(&headers)?)
+        .await?;
+    Ok(Json(report.into()))
+}
+
+/// Which processes listen on TCP ports, such as whatever holds 80 and 443
+/// before the gateway can.
+#[utoipa::path(get, path = "/api/v1/host/listeners", params(ListenersQuery, QueryHeaders),
+    responses((status = 200, body = ListenersView)), tag = "host")]
+pub(crate) async fn host_listeners<U>(
+    State(state): State<ApiState<U>>,
+    Query(query): Query<ListenersQuery>,
+    headers: HeaderMap,
+) -> Result<Json<ListenersView>, ApiError> {
+    let ports = query.ports()?;
+    let report = state
+        .host_agent
+        .listeners(request_scope(&headers)?, ports)
         .await?;
     Ok(Json(report.into()))
 }

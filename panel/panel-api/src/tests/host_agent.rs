@@ -150,3 +150,32 @@ async fn an_unreachable_agent_is_a_state_not_a_leak() {
         "the transport's error stays in the log"
     );
 }
+
+#[tokio::test]
+async fn what_holds_ports_is_served_for_the_ports_asked_for() {
+    let app = app(Some(Agent { reachable: true }));
+    let (status, found) = get(&app, "/api/v1/host/listeners").await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    assert_eq!(found["listeners"].as_array().map(Vec::len), Some(0));
+
+    let (status, found) = get(&app, "/api/v1/host/listeners?ports=443,8443").await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    assert_eq!(found["observed_at"], "2027-01-15T08:00:00Z");
+    assert_eq!(found["listeners"][0]["port"], 443);
+    assert_eq!(found["listeners"][1]["port"], 8443);
+    assert_eq!(found["listeners"][0]["processes"][0]["name"], "nginx");
+    assert_eq!(
+        found["listeners"][0]["processes"][0]["executable"],
+        "/usr/sbin/nginx"
+    );
+
+    for refused in [
+        "ports=0",
+        "ports=65536",
+        "ports=http",
+        "ports=1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17",
+    ] {
+        let (status, problem) = get(&app, &format!("/api/v1/host/listeners?{refused}")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}: {problem}");
+    }
+}
