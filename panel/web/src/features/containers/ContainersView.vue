@@ -39,12 +39,11 @@ import ContainerEngines from './ContainerEngines.vue'
 import {
   CONTAINER_STATES,
   chosenEngine,
-  engineName,
   portLabel,
   REFRESH_INTERVAL_MS,
-  stateTone,
   withoutAgent,
 } from './presentation'
+import { engineName, stateTone } from '@/lib/containers'
 
 const ALL = 'all'
 const FIELDS = ['engine', 'search', 'state'] as const

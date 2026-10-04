@@ -15,7 +15,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-import { summaryOf, toneOf } from './presentation'
+import { toneOf } from './presentation'
+import { summaryOf } from '@/lib/logs'
 
 const open = defineModel<boolean>('open', { required: true })
 const props = defineProps<{ record?: LogRecordItem }>()

@@ -4,13 +4,12 @@ import {
   chosenEngine,
   conditionTone,
   engineCondition,
-  engineName,
   portLabel,
   sortedLabels,
-  stateTone,
   stoppable,
   withoutAgent,
 } from '../presentation'
+import { engineName, stateTone } from '@/lib/containers'
 
 function engine(id: string, enabled: boolean, reachable: boolean): ContainerEngineView {
   return { id, socket: `/run/${id}.sock`, enabled, reachable }

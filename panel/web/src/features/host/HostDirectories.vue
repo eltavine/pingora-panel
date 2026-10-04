@@ -17,7 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { formatters } from '@/features/traffic/presentation'
+import { formatters } from '@/lib/format'
 import { DIRECTORY_REFRESH_MS, directoryNotes, type DirectoryNote } from './presentation'
 
 const { t, locale } = useI18n()

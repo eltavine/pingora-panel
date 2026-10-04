@@ -1,14 +1,12 @@
 import type {
   AgentStatusName,
   CapabilityStateName,
-  ContainerStateName,
   DirectoryUsageView,
   DiskLevel,
   HostSummaryView,
   PortListenerView,
 } from '@/api/generated'
 import type { StatusTone } from '@/components/StatusIndicator.vue'
-import { stateTone } from '@/features/containers/presentation'
 
 /** How the host page reads figures again. */
 export const REFRESH_INTERVAL_MS = 30_000
@@ -37,32 +35,6 @@ export function capabilityTone(state: CapabilityStateName): StatusTone {
     default:
       return 'neutral'
   }
-}
-
-/** Container health checks the console names in its own words. */
-const GATEWAY_HEALTH = ['healthy', 'unhealthy', 'starting'] as const
-
-export type GatewayHealthKey = (typeof GATEWAY_HEALTH)[number]
-
-/** The message key for a container's health, or `null` without a check or for one it does not know. */
-export function gatewayHealthKey(health: string | null | undefined): GatewayHealthKey | null {
-  return health && (GATEWAY_HEALTH as readonly string[]).includes(health)
-    ? (health as GatewayHealthKey)
-    : null
-}
-
-/** The gateway container's tone: its state's, unless a running container's health check disagrees. */
-export function gatewayTone(
-  state: ContainerStateName,
-  health: string | null | undefined,
-): StatusTone {
-  if (state === 'running' && health === 'unhealthy') {
-    return 'negative'
-  }
-  if (state === 'running' && health === 'starting') {
-    return 'pending'
-  }
-  return stateTone(state)
 }
 
 /** The gateway's process name, as the host agent reports it. */

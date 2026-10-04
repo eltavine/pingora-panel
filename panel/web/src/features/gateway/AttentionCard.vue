@@ -21,9 +21,9 @@ import {
 } from '@/api/generated/@tanstack/vue-query.gen'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { formatMeasure } from '@/features/alerts/presentation'
-import { summaryOf } from '@/features/logs/presentation'
-import { nodeOf } from '@/features/traffic/presentation'
+import { formatMeasure } from '@/lib/alerts'
+import { summaryOf } from '@/lib/logs'
+import { nodeOf } from '@/lib/format'
 import { useSession } from '@/lib/session'
 
 const REFRESH_INTERVAL_MS = 30_000

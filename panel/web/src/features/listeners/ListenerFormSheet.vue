@@ -36,8 +36,8 @@ import {
   plainHeaders,
   useRefreshConfiguration,
 } from '@/lib/configuration'
-import { REAL_IP_HEADERS } from '@/features/security/forms'
-import { RESOURCE_ID, listenerBody, listenerForm, type ListenerForm } from './forms'
+import { REAL_IP_HEADERS, RESOURCE_ID } from '@/lib/forms'
+import { listenerBody, listenerForm, type ListenerForm } from './forms'
 
 const NONE = '-'
 

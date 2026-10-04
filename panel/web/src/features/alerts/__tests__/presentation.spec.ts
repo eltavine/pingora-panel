@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AlertRuleView } from '@/api/generated'
-import { formatMeasure, ruleBody, ruleForm, stateKey, toneOf } from '../presentation'
+import { ruleBody, ruleForm, stateKey, toneOf } from '../presentation'
+import { formatMeasure } from '@/lib/alerts'
 
 function rule(overrides: Partial<AlertRuleView> = {}): AlertRuleView {
   return {

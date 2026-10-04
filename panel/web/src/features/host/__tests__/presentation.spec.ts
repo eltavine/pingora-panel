@@ -4,14 +4,13 @@ import {
   agentTone,
   capabilityTone,
   directoryNotes,
-  gatewayHealthKey,
-  gatewayTone,
   holderTone,
   levelTone,
   memoryUsed,
   portHolder,
   uptimeParts,
 } from '../presentation'
+import { gatewayHealthKey, gatewayTone } from '@/lib/containers'
 
 describe('host figures', () => {
   it('read full filesystems as warnings and critical ones as negative', () => {

@@ -26,7 +26,8 @@ import {
 import { changeHeaders, notifyFailure } from '@/lib/configuration'
 import { useSession } from '@/lib/session'
 import AlertRuleFormSheet from './AlertRuleFormSheet.vue'
-import { formatMeasure, stateKey, toneOf } from './presentation'
+import { stateKey, toneOf } from './presentation'
+import { formatMeasure } from '@/lib/alerts'
 
 /** Rules are read again this often, so states stay current. */
 const REFRESH_INTERVAL_MS = 15_000

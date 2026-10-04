@@ -16,8 +16,8 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
-import { gatewayHealthKey, gatewayTone } from '@/features/host/presentation'
-import { engineName, sortedLabels } from './presentation'
+import { gatewayHealthKey, gatewayTone, engineName } from '@/lib/containers'
+import { sortedLabels } from './presentation'
 
 const open = defineModel<boolean>('open', { required: true })
 const props = defineProps<{ engine: string; container: ContainerView }>()

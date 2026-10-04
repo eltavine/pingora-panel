@@ -49,7 +49,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { isApprovalRequest } from '@/lib/approvals'
 import { notifyFailure, plainHeaders, useRefreshConfiguration } from '@/lib/configuration'
-import { sortPaths } from '@/features/config-studio/useConfigFiles'
+import { sortPaths } from '@/lib/files'
 import { isComparison, outcomeTones, type Comparison } from './presentation'
 
 const TABS = ['changes', 'files'] as const

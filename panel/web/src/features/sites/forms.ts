@@ -11,6 +11,7 @@ import type {
   WwwRedirect,
 } from '@/api/generated'
 import { parseHosts } from './presentation'
+import { optionalText, optionalNumber } from '@/lib/forms'
 
 export type ActionType = Action['type']
 
@@ -98,21 +99,6 @@ export interface RouteForm {
   action: ActionForm
   securityPolicyId: string
   accessLog: AccessLogForm
-}
-
-/** Empty text is absent, not an empty value. */
-export function optionalText(value: string): string | null {
-  const trimmed = value.trim()
-  return trimmed === '' ? null : trimmed
-}
-
-/** Empty or non-numeric input is absent. */
-export function optionalNumber(value: number | string | null | undefined): number | null {
-  if (value === null || value === undefined || value === '') {
-    return null
-  }
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : null
 }
 
 export function splitList(value: string): string[] {

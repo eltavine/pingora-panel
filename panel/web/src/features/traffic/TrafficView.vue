@@ -51,7 +51,8 @@ import {
 import { useSession } from '@/lib/session'
 import StatusBreakdown from './StatusBreakdown.vue'
 import TrafficChart from './TrafficChart.vue'
-import { formatters, nodeOf, REFRESH_INTERVAL_MS, WINDOWS } from './presentation'
+import { REFRESH_INTERVAL_MS, WINDOWS } from './presentation'
+import { formatters, nodeOf } from '@/lib/format'
 
 const ALL = '*'
 

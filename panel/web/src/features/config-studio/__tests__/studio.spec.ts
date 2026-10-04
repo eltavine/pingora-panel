@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import type { DiagnosticDetails, DirectiveSpec } from '@/api/generated'
 import { baseContext, contextAt, directiveCompletion, includeMatcher } from '../completion'
 import { editorDiagnostics } from '../lint'
-import { isFilePath, sortPaths } from '../useConfigFiles'
+import { isFilePath, sortPaths } from '@/lib/files'
 
 function directive(
   name: string,

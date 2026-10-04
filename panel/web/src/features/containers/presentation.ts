@@ -15,13 +15,6 @@ export const CONTAINER_STATES = [
   'dead',
 ] as const satisfies readonly ContainerStateName[]
 
-const ENGINE_NAMES: Record<string, string> = { docker: 'Docker', podman: 'Podman' }
-
-/** An engine's product name, or its identifier for one the console does not know. */
-export function engineName(id: string): string {
-  return ENGINE_NAMES[id] ?? id
-}
-
 export type EngineCondition = 'reachable' | 'unreachable' | 'disabled'
 
 export function engineCondition(engine: ContainerEngineView): EngineCondition {
@@ -63,23 +56,6 @@ export function sortedLabels(labels: Record<string, string>): { name: string; va
 /** Whether a container has something running to stop, restart or kill. */
 export function stoppable(state: ContainerStateName): boolean {
   return state === 'running' || state === 'restarting' || state === 'paused'
-}
-
-export function stateTone(state: ContainerStateName): StatusTone {
-  switch (state) {
-    case 'running':
-      return 'positive'
-    case 'restarting':
-    case 'removing':
-    case 'stopping':
-      return 'pending'
-    case 'paused':
-      return 'warning'
-    case 'dead':
-      return 'negative'
-    default:
-      return 'neutral'
-  }
 }
 
 /** A port as `docker ps` writes it, such as `0.0.0.0:8081->80/tcp`. */

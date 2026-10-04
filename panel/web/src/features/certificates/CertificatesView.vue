@@ -61,7 +61,8 @@ import CertificateGenerateSheet from './CertificateGenerateSheet.vue'
 import CertificateUploadSheet from './CertificateUploadSheet.vue'
 import DnsProviderSheet from './DnsProviderSheet.vue'
 import DnsProvidersTable from './DnsProvidersTable.vue'
-import { STATUS_TONES, daysLeft } from './presentation'
+import { daysLeft } from './presentation'
+import { STATUS_TONES } from '@/lib/certificates'
 
 const SHOWN_NAMES = 3
 const TABS = ['inventory', 'automatic', 'accounts', 'dns'] as const

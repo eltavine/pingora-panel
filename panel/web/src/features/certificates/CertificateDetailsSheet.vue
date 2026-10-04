@@ -18,7 +18,8 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { notifyFailure } from '@/lib/configuration'
-import { KEY_ALGORITHMS, STATUS_TONES, fingerprint, parseNames } from './presentation'
+import { KEY_ALGORITHMS, fingerprint, parseNames } from './presentation'
+import { STATUS_TONES } from '@/lib/certificates'
 
 const open = defineModel<boolean>('open', { required: true })
 const props = defineProps<{ certificate?: CertificateView }>()

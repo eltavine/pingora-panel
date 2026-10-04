@@ -40,7 +40,7 @@ import {
   plainHeaders,
   useRefreshConfiguration,
 } from '@/lib/configuration'
-import SecurityPolicySelect from '@/features/security/SecurityPolicySelect.vue'
+import SecurityPolicySelect from '@/components/SecurityPolicySelect.vue'
 import AccessLogFields from './AccessLogFields.vue'
 import ActionFields from './ActionFields.vue'
 import {

@@ -60,7 +60,8 @@ import { useSession } from '@/lib/session'
 import LogDeletionsSheet from './LogDeletionsSheet.vue'
 import LogRecordSheet from './LogRecordSheet.vue'
 import LogStatus from './LogStatus.vue'
-import { downloadUrl, FILTERS, queryOf, summaryOf, tailUrl, type ApiLocation } from './presentation'
+import { downloadUrl, FILTERS, queryOf, tailUrl, type ApiLocation } from './presentation'
+import { summaryOf } from '@/lib/logs'
 import { useLogTail } from './tail'
 
 const PAGE_SIZE = 100

@@ -29,7 +29,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { formatters } from '@/features/traffic/presentation'
+import { formatters } from '@/lib/format'
 import HostAgentSection from './HostAgentSection.vue'
 import { levelTone, memoryUsed, REFRESH_INTERVAL_MS, uptimeParts } from './presentation'
 

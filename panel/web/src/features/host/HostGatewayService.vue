@@ -22,10 +22,10 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { engineName } from '@/features/containers/presentation'
+import { engineName, gatewayHealthKey, gatewayTone } from '@/lib/containers'
 import { notifyFailure, plainHeaders } from '@/lib/configuration'
 import { useSession } from '@/lib/session'
-import { REFRESH_INTERVAL_MS, gatewayHealthKey, gatewayTone } from './presentation'
+import { REFRESH_INTERVAL_MS } from './presentation'
 
 const { t, d } = useI18n()
 const { can } = useSession()

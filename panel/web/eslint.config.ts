@@ -1,3 +1,5 @@
+import { readdirSync } from 'node:fs'
+import type { Linter } from 'eslint'
 import { globalIgnores } from 'eslint/config'
 import { defineConfigWithVueTs, vueTsConfigs } from '@vue/eslint-config-typescript'
 import pluginVue from 'eslint-plugin-vue'
@@ -10,6 +12,41 @@ import skipFormatting from 'eslint-config-prettier/flat'
 // import { configureVueProject } from '@vue/eslint-config-typescript'
 // configureVueProject({ scriptLangs: ['ts', 'tsx'] })
 // More info at https://github.com/vuejs/eslint-config-typescript/#advanced-setup
+
+const ACROSS_FEATURES =
+  'A feature imports no other feature: what features share belongs in src/lib or src/components.'
+
+/**
+ * Each feature imports only itself, the feature registry's types and shared
+ * modules, so features can change and go independently. Relative imports may
+ * not leave the feature either; features nest one directory deep.
+ */
+const featureBoundaries = readdirSync(new URL('./src/features/', import.meta.url), {
+  withFileTypes: true,
+})
+  .filter((entry) => entry.isDirectory())
+  .flatMap(({ name }) => {
+    const others = { regex: `^@/features/(?!(?:${name}|types)(?:/|$))`, message: ACROSS_FEATURES }
+    const boundary = (files: string, parent: string): Linter.Config => ({
+      name: `app/feature-boundaries/${name}${parent === '../' ? '' : '/nested'}`,
+      files: [files],
+      rules: {
+        'no-restricted-imports': [
+          'error',
+          {
+            patterns: [
+              others,
+              { regex: `^${parent.replaceAll('.', '\\.')}`, message: ACROSS_FEATURES },
+            ],
+          },
+        ],
+      },
+    })
+    return [
+      boundary(`src/features/${name}/*.{ts,vue}`, '../'),
+      boundary(`src/features/${name}/*/**/*.{ts,vue}`, '../../'),
+    ]
+  })
 
 export default defineConfigWithVueTs(
   {
@@ -40,6 +77,8 @@ export default defineConfigWithVueTs(
     files: ['src/components/ui/**/*.vue'],
     rules: { 'vue/multi-word-component-names': 'off' },
   },
+
+  ...featureBoundaries,
 
   ...pluginOxlint.buildFromOxlintConfigFile('.oxlintrc.json'),
 

@@ -21,10 +21,11 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { formatters } from '@/features/traffic/presentation'
+import { formatters } from '@/lib/format'
 import { notifyFailure, plainHeaders } from '@/lib/configuration'
 import { useSession } from '@/lib/session'
-import { conditionTone, engineCondition, engineName } from './presentation'
+import { conditionTone, engineCondition } from './presentation'
+import { engineName } from '@/lib/containers'
 
 defineProps<{ engines: readonly ContainerEngineView[] }>()
 

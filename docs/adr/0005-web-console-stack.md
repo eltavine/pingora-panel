@@ -34,7 +34,9 @@ Security Policy, and it must not drift from the HTTP contract.
   is not committed. Mutations send the command metadata the contract
   requires, including a per-command idempotency key that a retry reuses.
 - Each feature module owns its routes and icon-bearing navigation entries.
-  The shell renders the registered features and knows none of them.
+  The shell renders the registered features and knows none of them, and no
+  feature imports another: a lint rule refuses it, and what features share
+  lives in shared modules.
 - Playwright runs against the production build with the API mocked, in
   desktop Chromium, mobile Chromium and mobile WebKit, and fails on
   horizontal overflow.

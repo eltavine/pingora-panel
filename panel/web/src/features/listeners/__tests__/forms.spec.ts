@@ -1,12 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import {
-  NEWEST,
-  RESOURCE_ID,
-  listenerBody,
-  listenerForm,
-  tlsProfileBody,
-  tlsProfileForm,
-} from '../forms'
+import { NEWEST, listenerBody, listenerForm, tlsProfileBody, tlsProfileForm } from '../forms'
+import { RESOURCE_ID } from '@/lib/forms'
 
 describe('listener forms', () => {
   it('leaves IPv6-only and empty references unset', () => {

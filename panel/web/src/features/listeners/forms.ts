@@ -1,5 +1,5 @@
 import type { ListenerView, RealIpHeader, TlsProfileView } from '@/api/generated'
-import { optionalNumber } from '@/features/sites/forms'
+import { optionalNumber } from '@/lib/forms'
 
 export const TLS_VERSIONS = ['TLSv1.2', 'TLSv1.3'] as const
 /** The maximum version when none is named. */
@@ -21,7 +21,6 @@ export const CIPHER_SUITES = {
   ],
 } as const
 export const ALPN_PROTOCOLS = ['h2', 'http/1.1'] as const
-export const RESOURCE_ID = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/
 
 export interface ListenerForm {
   id: string

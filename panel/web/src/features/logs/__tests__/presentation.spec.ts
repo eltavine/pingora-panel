@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { LogRecordItem } from '@/api/generated'
-import { downloadUrl, queryOf, summaryOf, tailUrl, toneOf } from '../presentation'
+import { downloadUrl, queryOf, tailUrl, toneOf } from '../presentation'
+import { summaryOf } from '@/lib/logs'
 
 function record(overrides: Partial<LogRecordItem>): LogRecordItem {
   return {

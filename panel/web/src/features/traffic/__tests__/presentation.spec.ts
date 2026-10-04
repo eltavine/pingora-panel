@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { areaPath, formatters, linePath, nodeOf, scaleOf } from '../presentation'
+import { areaPath, linePath, scaleOf } from '../presentation'
+import { formatters, nodeOf } from '@/lib/format'
 
 describe('traffic figures', () => {
   const format = formatters('en')

@@ -1,11 +1,5 @@
-import type {
-  RateLimit,
-  RateLimitKey,
-  RealIpHeader,
-  SecurityPolicy,
-  SecurityPolicyView,
-} from '@/api/generated'
-import { optionalNumber, optionalText } from '@/features/sites/forms'
+import type { RateLimit, RateLimitKey, SecurityPolicy, SecurityPolicyView } from '@/api/generated'
+import { optionalNumber, optionalText } from '@/lib/forms'
 
 export const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const
 export const KEY_KINDS: readonly RateLimitKey['kind'][] = [
@@ -21,11 +15,6 @@ export const PERIODS = [
   { seconds: 3600, name: 'hour' },
   { seconds: 86_400, name: 'day' },
 ] as const
-export const REAL_IP_HEADERS: readonly RealIpHeader[] = [
-  'x-forwarded-for',
-  'x-real-ip',
-  'forwarded',
-]
 
 export interface RateLimitForm {
   requests: number | string

@@ -8,7 +8,7 @@ import type {
   UpstreamView,
 } from '@/api/generated'
 import type { StatusTone } from '@/components/StatusIndicator.vue'
-import { optionalNumber, optionalText } from '@/features/sites/forms'
+import { optionalNumber, optionalText } from '@/lib/forms'
 
 export type Algorithm = 'round_robin' | 'random' | 'consistent_hash'
 export const ALGORITHMS: readonly Algorithm[] = ['round_robin', 'random', 'consistent_hash']

@@ -41,12 +41,12 @@ import {
   ALPN_PROTOCOLS,
   CIPHER_SUITES,
   NEWEST,
-  RESOURCE_ID,
   TLS_VERSIONS,
   tlsProfileBody,
   tlsProfileForm,
   type TlsProfileForm,
 } from './forms'
+import { RESOURCE_ID } from '@/lib/forms'
 
 const open = defineModel<boolean>('open', { required: true })
 const props = defineProps<{ profile?: TlsProfileView; taken: readonly string[] }>()

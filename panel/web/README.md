@@ -33,7 +33,12 @@ import `e2e/sample.ts` run against the same answers through
   a feature offers destinations to the phone navigation bar with `navigationBar`.
 - `src/features/<feature>`: routes, navigation entries and views of one capability.
   Add a capability by adding a folder and registering it in `src/features/index.ts`.
+  A feature imports no other feature, which ESLint enforces; what several
+  features use belongs in `src/lib` or `src/components`.
 - `src/components`: shared presentation such as status, page headers and API failures.
+- `src/lib`: shared logic, such as how API resources read, form values and
+  queries. A change refreshes only the queries of the API tags it can affect;
+  the generated query keys carry their operations' tags.
 - `src/components/ui`: shadcn-vue components, added and updated with
   `pnpm dlx shadcn-vue@latest add <component>`.
 - `src/i18n`: Simplified Chinese and English messages. The English messages

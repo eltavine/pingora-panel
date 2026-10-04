@@ -17,7 +17,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-import { STATUS_TONES } from '@/features/certificates/presentation'
+import { STATUS_TONES } from '@/lib/certificates'
 import { toApiFailure } from '@/lib/api'
 
 const open = defineModel<boolean>('open', { required: true })

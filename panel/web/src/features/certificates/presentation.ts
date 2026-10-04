@@ -1,4 +1,4 @@
-import type { CertificateStatus, IssuanceState, KeyAlgorithm } from '@/api/generated'
+import type { IssuanceState, KeyAlgorithm } from '@/api/generated'
 import type { StatusTone } from '@/components/StatusIndicator.vue'
 
 /** Lowercase letters, digits and hyphens in labels separated by dots. */
@@ -8,13 +8,6 @@ export const CERTIFICATE_ID =
 export const MAX_SELF_SIGNED_DAYS = 825
 
 const DAY = 24 * 60 * 60 * 1000
-
-export const STATUS_TONES: Record<CertificateStatus, StatusTone> = {
-  valid: 'positive',
-  expiring: 'warning',
-  expired: 'negative',
-  not_yet_valid: 'pending',
-}
 
 /** Names of the key algorithms the panel knows; others show as they are. */
 export const KEY_ALGORITHMS: Partial<Record<KeyAlgorithm, string>> = {
