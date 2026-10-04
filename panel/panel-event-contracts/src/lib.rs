@@ -27,6 +27,7 @@ packages! {
     config => "pingora.panel.events.config.v1",
     gateway => "pingora.panel.events.gateway.v1",
     identity => "pingora.panel.events.identity.v1",
+    observability => "pingora.panel.events.observability.v1",
     tls => "pingora.panel.events.tls.v1",
 }
 
@@ -127,6 +128,16 @@ event_types! {
     tls::v1::DnsProviderUpdated => "tls.acme.dns_provider.updated",
     tls::v1::DnsProviderDeleted => "tls.acme.dns_provider.deleted",
     tls::v1::DnsProviderRefused => "tls.acme.dns_provider.refused",
+    observability::v1::AlertRuleCreated => "observability.alert_rule.created",
+    observability::v1::AlertRuleUpdated => "observability.alert_rule.updated",
+    observability::v1::AlertRuleDeleted => "observability.alert_rule.deleted",
+    observability::v1::AlertRuleRefused => "observability.alert_rule.refused",
+    observability::v1::AlertChannelCreated => "observability.alert_channel.created",
+    observability::v1::AlertChannelRotated => "observability.alert_channel.rotated",
+    observability::v1::AlertChannelDeleted => "observability.alert_channel.deleted",
+    observability::v1::AlertChannelRefused => "observability.alert_channel.refused",
+    observability::v1::AlertFired => "observability.alert.fired",
+    observability::v1::AlertResolved => "observability.alert.resolved",
 }
 
 #[cfg(test)]

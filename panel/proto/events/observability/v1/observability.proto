@@ -1,0 +1,104 @@
+syntax = "proto3";
+
+// The data of alert events (ADR 0027). Each message is the data of one event
+// type, named in its comment; events carry it as JSON in the proto3 JSON
+// mapping, with the field names below.
+package pingora.panel.events.observability.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// What a rule watches and whom it tells, as kept.
+message AlertRuleSettings {
+  string name = 1;
+  // `server_error_ratio`, `latency_p95`, `request_rate`,
+  // `upstream_error_ratio` or `open_connections`.
+  string measure = 2;
+  // `above` or `below`.
+  string comparison = 3;
+  double threshold = 4;
+  uint64 pending_seconds = 5;
+  string site = 6;
+  string route = 7;
+  string upstream = 8;
+  // `warning` or `critical`.
+  string severity = 9;
+  bool enabled = 10;
+  repeated string channels = 11;
+}
+
+// `observability.alert_rule.created`
+message AlertRuleCreated {
+  string id = 1;
+  AlertRuleSettings settings = 2;
+  uint64 version = 3;
+}
+
+// `observability.alert_rule.updated`
+message AlertRuleUpdated {
+  string id = 1;
+  AlertRuleSettings settings = 2;
+  uint64 version = 3;
+}
+
+// `observability.alert_rule.deleted`
+message AlertRuleDeleted {
+  string id = 1;
+}
+
+// `observability.alert_rule.refused`
+message AlertRuleRefused {
+  string id = 1;
+  string operation = 2;
+  string code = 3;
+  string message = 4;
+}
+
+// `observability.alert_channel.created`
+message AlertChannelCreated {
+  string id = 1;
+  // `webhook`.
+  string kind = 2;
+  // A webhook URL's scheme, host and port.
+  string target = 3;
+  uint64 version = 4;
+}
+
+// `observability.alert_channel.rotated`: its signing secret was replaced,
+// and its URL with it when `target` changed.
+message AlertChannelRotated {
+  string id = 1;
+  string target = 2;
+  uint64 version = 3;
+}
+
+// `observability.alert_channel.deleted`
+message AlertChannelDeleted {
+  string id = 1;
+}
+
+// `observability.alert_channel.refused`
+message AlertChannelRefused {
+  string id = 1;
+  string operation = 2;
+  string code = 3;
+  string message = 4;
+}
+
+// `observability.alert.fired`
+message AlertFired {
+  string rule = 1;
+  string name = 2;
+  string severity = 3;
+  double value = 4;
+  double threshold = 5;
+  // When the condition began to hold.
+  google.protobuf.Timestamp since = 6;
+}
+
+// `observability.alert.resolved`
+message AlertResolved {
+  string rule = 1;
+  string name = 2;
+  // When the alert fired.
+  google.protobuf.Timestamp fired_at = 3;
+}

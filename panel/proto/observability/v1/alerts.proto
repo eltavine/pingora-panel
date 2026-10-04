@@ -1,0 +1,267 @@
+syntax = "proto3";
+
+package pingora.panel.observability.v1;
+
+import "common/v1/common.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// Alert rules, the channels they notify and the notifications sent to them
+// (ADR 0027). Rules name a measure; the service writes the queries.
+service Alerts {
+  // Every rule with its state, by ID.
+  rpc ListRules(AlertsListRulesRequest) returns (AlertsListRulesResponse);
+  // Creates a rule, or replaces one at the expected version.
+  rpc PutRule(AlertsPutRuleRequest) returns (AlertsPutRuleResponse);
+  rpc DeleteRule(AlertsDeleteRuleRequest) returns (AlertsDeleteRuleResponse);
+  // Every channel by ID; where a channel sends is shown only as its origin.
+  rpc ListChannels(AlertsListChannelsRequest) returns (AlertsListChannelsResponse);
+  // Creates a channel and returns its signing secret, shown only now.
+  rpc CreateChannel(AlertsCreateChannelRequest) returns (AlertsCreateChannelResponse);
+  // Replaces a channel's signing secret, and its URL when one is given, and
+  // returns the new secret, shown only now.
+  rpc RotateChannel(AlertsRotateChannelRequest) returns (AlertsRotateChannelResponse);
+  // Deletes a channel no rule names.
+  rpc DeleteChannel(AlertsDeleteChannelRequest) returns (AlertsDeleteChannelResponse);
+  // Sends one test notification now and reports how the receiver answered.
+  rpc TestChannel(AlertsTestChannelRequest) returns (AlertsTestChannelResponse);
+  // Notifications newest first.
+  rpc ListNotifications(AlertsListNotificationsRequest) returns (AlertsListNotificationsResponse);
+}
+
+// What a rule reads, over the last five minutes.
+enum AlertMeasure {
+  ALERT_MEASURE_UNSPECIFIED = 0;
+  // The share of requests answered with a 5xx status, from 0 to 1.
+  ALERT_MEASURE_SERVER_ERROR_RATIO = 1;
+  // The 95th percentile request latency, in seconds.
+  ALERT_MEASURE_LATENCY_P95 = 2;
+  // Requests per second; no requests read as zero.
+  ALERT_MEASURE_REQUEST_RATE = 3;
+  // The share of failed upstream attempts, from 0 to 1.
+  ALERT_MEASURE_UPSTREAM_ERROR_RATIO = 4;
+  // The gateway's open client connections.
+  ALERT_MEASURE_OPEN_CONNECTIONS = 5;
+}
+
+enum AlertComparison {
+  ALERT_COMPARISON_UNSPECIFIED = 0;
+  ALERT_COMPARISON_ABOVE = 1;
+  ALERT_COMPARISON_BELOW = 2;
+}
+
+enum AlertSeverity {
+  ALERT_SEVERITY_UNSPECIFIED = 0;
+  ALERT_SEVERITY_WARNING = 1;
+  ALERT_SEVERITY_CRITICAL = 2;
+}
+
+enum AlertState {
+  ALERT_STATE_UNSPECIFIED = 0;
+  ALERT_STATE_INACTIVE = 1;
+  // The condition holds, for less than the pending period so far.
+  ALERT_STATE_PENDING = 2;
+  ALERT_STATE_FIRING = 3;
+}
+
+// What a rule watches and whom it tells.
+message AlertRuleSpec {
+  string name = 1;
+  string description = 2;
+  AlertMeasure measure = 3;
+  AlertComparison comparison = 4;
+  double threshold = 5;
+  // How long the condition holds before the rule fires; unset fires at
+  // once. At most a day.
+  google.protobuf.Duration pending_for = 6;
+  // Request measures: one site, or every site when empty.
+  string site = 7;
+  // Request measures: one route of `site`.
+  string route = 8;
+  // The upstream measure: one upstream, or every upstream when empty.
+  string upstream = 9;
+  AlertSeverity severity = 10;
+  bool enabled = 11;
+  // The channels notified when the rule fires and resolves.
+  repeated string channels = 12;
+}
+
+message AlertRule {
+  string id = 1;
+  AlertRuleSpec spec = 2;
+  uint64 version = 3;
+  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp updated_at = 5;
+  AlertState state = 6;
+  // When the state began; unset while inactive.
+  google.protobuf.Timestamp since = 7;
+  // The measure at the last evaluation; unset without data.
+  optional double value = 8;
+  // When the rule was last evaluated; unset before the first evaluation.
+  google.protobuf.Timestamp evaluated_at = 9;
+  // Why the last evaluation failed; empty when it did not.
+  string evaluation_error = 10;
+}
+
+message AlertsListRulesRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+}
+
+message AlertsListRulesResponse {
+  repeated AlertRule rules = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message AlertsPutRuleRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string id = 2;
+  AlertRuleSpec spec = 3;
+  // The version being replaced; 0 creates the rule.
+  uint64 expected_version = 4;
+}
+
+message AlertsPutRuleResponse {
+  AlertRule rule = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message AlertsDeleteRuleRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string id = 2;
+  // 0 deletes whatever the version.
+  uint64 expected_version = 3;
+}
+
+message AlertsDeleteRuleResponse {
+  .pingora.panel.common.v1.Error error = 1;
+}
+
+enum AlertChannelKind {
+  ALERT_CHANNEL_KIND_UNSPECIFIED = 0;
+  // Alertmanager's webhook payload, signed as Standard Webhooks specify.
+  ALERT_CHANNEL_KIND_WEBHOOK = 1;
+  // Reserved: refused as unsupported until the panel can send mail.
+  ALERT_CHANNEL_KIND_EMAIL = 2;
+}
+
+message AlertChannel {
+  string id = 1;
+  AlertChannelKind kind = 2;
+  // Where it sends, without what can authorize a sender: a webhook URL's
+  // scheme, host and port, or an email channel's recipients.
+  string target = 3;
+  uint64 version = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp updated_at = 6;
+}
+
+message AlertsListChannelsRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+}
+
+message AlertsListChannelsResponse {
+  repeated AlertChannel channels = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message AlertsCreateChannelRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string id = 2;
+  AlertChannelKind kind = 3;
+  // Webhooks: where notifications are posted, `http` or `https`.
+  string url = 4;
+  // Email: who receives notifications.
+  repeated string recipients = 5;
+}
+
+message AlertsCreateChannelResponse {
+  AlertChannel channel = 1;
+  // `whsec_` and the base64 key receivers verify signatures with.
+  string secret = 2;
+  .pingora.panel.common.v1.Error error = 3;
+}
+
+message AlertsRotateChannelRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string id = 2;
+  // A new URL; the current one stays when empty.
+  string url = 3;
+  // 0 rotates whatever the version.
+  uint64 expected_version = 4;
+}
+
+message AlertsRotateChannelResponse {
+  AlertChannel channel = 1;
+  string secret = 2;
+  .pingora.panel.common.v1.Error error = 3;
+}
+
+message AlertsDeleteChannelRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string id = 2;
+  uint64 expected_version = 3;
+}
+
+message AlertsDeleteChannelResponse {
+  .pingora.panel.common.v1.Error error = 1;
+}
+
+message AlertsTestChannelRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string id = 2;
+}
+
+message AlertsTestChannelResponse {
+  bool delivered = 1;
+  // The receiver's HTTP status; 0 when it did not answer.
+  uint32 status = 2;
+  // Why the notification was not delivered; empty when it was.
+  string failure = 3;
+  .pingora.panel.common.v1.Error error = 4;
+}
+
+enum AlertNotificationKind {
+  ALERT_NOTIFICATION_KIND_UNSPECIFIED = 0;
+  ALERT_NOTIFICATION_KIND_FIRING = 1;
+  ALERT_NOTIFICATION_KIND_RESOLVED = 2;
+}
+
+enum AlertNotificationState {
+  ALERT_NOTIFICATION_STATE_UNSPECIFIED = 0;
+  // Waiting for its first or next attempt.
+  ALERT_NOTIFICATION_STATE_QUEUED = 1;
+  ALERT_NOTIFICATION_STATE_DELIVERED = 2;
+  // Refused by the receiver, or still failing after a day.
+  ALERT_NOTIFICATION_STATE_ABANDONED = 3;
+}
+
+message AlertNotification {
+  // The `webhook-id` receivers see, the same on every attempt.
+  string id = 1;
+  string rule = 2;
+  string channel = 3;
+  AlertNotificationKind kind = 4;
+  AlertNotificationState state = 5;
+  uint32 attempts = 6;
+  google.protobuf.Timestamp created_at = 7;
+  // When it is tried next; unset once delivered or abandoned.
+  google.protobuf.Timestamp next_attempt_at = 8;
+  google.protobuf.Timestamp delivered_at = 9;
+  // Why the last attempt failed; empty when none did.
+  string last_failure = 10;
+}
+
+message AlertsListNotificationsRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  // Only one rule's notifications.
+  string rule = 2;
+  // Only one channel's notifications.
+  string channel = 3;
+  // At most 200; 50 by default.
+  uint32 limit = 4;
+}
+
+message AlertsListNotificationsResponse {
+  repeated AlertNotification notifications = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
