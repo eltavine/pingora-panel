@@ -1,9 +1,10 @@
 use crate::{ConfigPublicationClient, MAX_MESSAGE_BYTES};
 use async_trait::async_trait;
 use config_proto_codec as codec;
-use panel_application::{
-    ApplyOutcome, ApplyRequest, CommandContext, ConfigurationChange, ConfigurationOutput,
-    ConfigurationPort, ConfigurationRead, RequestScope,
+use panel_application::{CommandContext, RequestScope};
+use panel_config_api::{
+    ApplyOutcome, ApplyRequest, ConfigurationChange, ConfigurationOutput, ConfigurationPort,
+    ConfigurationQuery,
 };
 use panel_contracts::config::v1::{self as wire, configuration_client::ConfigurationClient};
 use panel_errors::Result;
@@ -35,13 +36,12 @@ impl ConfigurationPort for ConfigPublicationClient {
     async fn read(
         &self,
         scope: RequestScope,
-        read: ConfigurationRead,
+        query: ConfigurationQuery,
     ) -> Result<ConfigurationOutput> {
         let request = wire::ReadRequest {
             context: Some(codec::encode_scope(&scope)),
-            operation: read.operation,
-            resource: read.resource,
-            parameters: read.parameters,
+            query: codec::encode_query(&query),
+            ..wire::ReadRequest::default()
         };
         let response = self
             .configuration()
@@ -60,10 +60,9 @@ impl ConfigurationPort for ConfigPublicationClient {
     ) -> Result<ConfigurationOutput> {
         let request = wire::ChangeRequest {
             context: Some(codec::encode_command(&context)),
-            operation: change.operation,
-            resource: change.resource,
             if_match: change.if_match.unwrap_or_default(),
-            content: change.content,
+            command: codec::encode_change(&change.command),
+            ..wire::ChangeRequest::default()
         };
         let response = self
             .configuration()

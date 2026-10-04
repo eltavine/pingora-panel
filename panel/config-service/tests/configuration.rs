@@ -4,21 +4,26 @@
 
 use config_grpc_client::{ConfigClientConfig, ConfigPublicationClient};
 use gateway_grpc::GatewayGrpcService;
-use panel_application::{
-    ApplyOutcome, ApplyRequest, CommandContext, ConfigurationChange, ConfigurationPort,
-    ConfigurationRead, IdempotencyKey, RequestDeadline, RequestId, RequestScope,
+use panel_application::{CommandContext, IdempotencyKey, RequestDeadline, RequestId, RequestScope};
+use panel_config_api::{
+    ApplyOutcome, ApplyRequest, ConfigurationChange, ConfigurationCommand, ConfigurationPort,
+    DiffBase, Files, LanguageChange, LanguageQuery, ModelChange, ModelQuery, RevisionChange,
+    RevisionQuery,
 };
+use panel_config_model::SiteQuery;
 use panel_control_runtime::{ProcessSettings, RunningProcess, NATS_URL_ENV};
 use panel_engine::{EngineCapability, FakeGatewayEngine};
 use panel_errors::ErrorCode;
 use panel_health::HealthStatus;
 use panel_jetstream::testing::{TestBroker, NATS_URL_ENV as TEST_NATS_URL_ENV};
 use panel_service::Environment;
+use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use std::{collections::HashMap, ffi::OsString, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::Server;
+use uuid::Uuid;
 
 const CAPABILITIES: &[&str] = &[
     "action.redirect",
@@ -76,13 +81,22 @@ fn command(key: &str) -> CommandContext {
     .unwrap()
 }
 
-fn change(operation: &str, resource: &str, body: Value) -> ConfigurationChange {
-    ConfigurationChange {
-        operation: operation.into(),
-        resource: resource.into(),
-        if_match: None,
-        content: serde_json::to_vec(&body).unwrap(),
-    }
+fn change(command: impl Into<ConfigurationCommand>) -> ConfigurationChange {
+    ConfigurationChange::new(command)
+}
+
+/// A model input, written as JSON.
+fn input<T: DeserializeOwned>(value: Value) -> T {
+    serde_json::from_value(value).unwrap()
+}
+
+fn id(value: &Value) -> Uuid {
+    value.as_str().unwrap().parse().unwrap()
+}
+
+/// Files with only the entry file.
+fn main(text: impl Into<String>) -> Files {
+    Files::from([("main.conf".to_owned(), text.into())])
 }
 
 fn json(content: &[u8]) -> Value {
@@ -157,14 +171,7 @@ async fn draft_changes_are_idempotent_conditional_and_applied() {
     let client = &harness.client;
 
     let summary = client
-        .read(
-            scope(),
-            ConfigurationRead {
-                operation: "sites.summary".into(),
-                resource: "sites".into(),
-                parameters: Vec::new(),
-            },
-        )
+        .read(scope(), ModelQuery::SiteSummary.into())
         .await
         .unwrap();
     assert_eq!(json(&summary.content)["total"], 0);
@@ -182,30 +189,26 @@ async fn draft_changes_are_idempotent_conditional_and_applied() {
     let upstream = client
         .change(
             command("upstream"),
-            change(
-                "upstreams.create",
-                "upstreams",
-                json!({"name": "app", "nodes": [{"host": "127.0.0.1", "port": 8080}]}),
-            ),
+            change(ModelChange::CreateUpstream {
+                upstream: input(
+                    json!({"name": "app", "nodes": [{"host": "127.0.0.1", "port": 8080}]}),
+                ),
+            }),
         )
         .await
         .unwrap();
     let upstream_id = json(&upstream.content)["id"].as_str().unwrap().to_owned();
-    let listener = change(
-        "listeners.put",
-        "listeners/http",
-        json!({"id": "http", "address": "0.0.0.0:80"}),
-    );
+    let listener = change(ModelChange::PutListener {
+        listener: input(json!({"id": "http", "address": "0.0.0.0:80"})),
+    });
     client.change(command("listener"), listener).await.unwrap();
-    let create = change(
-        "sites.create",
-        "sites",
-        json!({
+    let create = change(ModelChange::CreateSite {
+        site: input(json!({
             "name": "shop",
             "action": {"type": "proxy", "upstream_id": upstream_id},
             "domains": [{"host": "shop.example.com"}]
-        }),
-    );
+        })),
+    });
     let site = client
         .change(command("site"), create.clone())
         .await
@@ -217,19 +220,17 @@ async fn draft_changes_are_idempotent_conditional_and_applied() {
     let reused = client
         .change(
             command("site"),
-            change(
-                "sites.create",
-                "sites",
-                json!({"name": "other", "action": {"type": "respond"}}),
-            ),
+            change(ModelChange::CreateSite {
+                site: input(json!({"name": "other", "action": {"type": "respond"}})),
+            }),
         )
         .await
         .unwrap_err();
     assert_eq!(reused.code.as_str(), ErrorCode::CONFLICT);
 
     let site = json(&site.content);
-    let resource = format!("sites/{}", site["id"].as_str().unwrap());
-    let mut stale = change("sites.disable", &resource, Value::Null);
+    let site_id = id(&site["id"]);
+    let mut stale = change(ModelChange::DisableSite { id: site_id });
     stale.if_match = Some("\"stale\"".into());
     assert_eq!(
         client
@@ -243,11 +244,7 @@ async fn draft_changes_are_idempotent_conditional_and_applied() {
     let duplicate = client
         .change(
             command("duplicate"),
-            change(
-                "sites.create",
-                "sites",
-                json!({"name": "copy", "action": {"type": "respond"}, "domains": [{"host": "SHOP.example.com"}]}),
-            ),
+            change(ModelChange::CreateSite { site: input(json!({"name": "copy", "action": {"type": "respond"}, "domains": [{"host": "SHOP.example.com"}]})) }),
         )
         .await
         .unwrap_err();
@@ -284,24 +281,15 @@ async fn draft_changes_are_idempotent_conditional_and_applied() {
     let listed = client
         .read(
             scope(),
-            ConfigurationRead {
-                operation: "sites.list".into(),
-                resource: "sites".into(),
-                parameters: serde_json::to_vec(&json!({"q": "shop"})).unwrap(),
-            },
+            ModelQuery::Sites {
+                query: input(json!({"q": "shop"})),
+            }
+            .into(),
         )
         .await
         .unwrap();
     assert_eq!(json(&listed.content)["items"][0]["status"], "running");
     assert_eq!(listed.draft.applied_version, Some(3));
-}
-
-fn read(operation: &str, resource: &str, parameters: Value) -> ConfigurationRead {
-    ConfigurationRead {
-        operation: operation.into(),
-        resource: resource.into(),
-        parameters: serde_json::to_vec(&parameters).unwrap(),
-    }
 }
 
 const SHOP: &str = "\
@@ -330,7 +318,7 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
     let client = &harness.client;
 
     let source = client
-        .read(scope(), read("config.source", "config/source", json!({})))
+        .read(scope(), LanguageQuery::Source.into())
         .await
         .unwrap();
     assert_eq!(
@@ -341,7 +329,13 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
     assert_eq!(json(&source.content)["etag"], "\"draft-0\"");
 
     let invalid = client
-        .read(scope(), read("config.check", "config", json!({"files": {"main.conf": "language_version 1;\nhttp {\n    server s { proxy nowhere; }\n}\n"}})))
+        .read(
+            scope(),
+            LanguageQuery::Check {
+                files: main("language_version 1;\nhttp {\n    server s { proxy nowhere; }\n}\n"),
+            }
+            .into(),
+        )
         .await
         .unwrap();
     let invalid = json(&invalid.content);
@@ -359,11 +353,10 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
     let formatted = client
         .read(
             scope(),
-            read(
-                "config.format",
-                "config",
-                json!({"files": {"main.conf": "language_version  1 ;"}}),
-            ),
+            LanguageQuery::Format {
+                files: main("language_version  1 ;"),
+            }
+            .into(),
         )
         .await
         .unwrap();
@@ -372,7 +365,7 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
         "language_version 1;\n"
     );
     let schema = client
-        .read(scope(), read("config.schema", "config", json!({})))
+        .read(scope(), LanguageQuery::Schema.into())
         .await
         .unwrap();
     assert!(
@@ -383,22 +376,14 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
             > 40
     );
 
-    let mut stale = change(
-        "config.source.replace",
-        "config/source",
-        json!({"files": {"main.conf": SHOP}}),
-    );
+    let mut stale = change(LanguageChange::ReplaceSource { files: main(SHOP) });
     stale.if_match = Some("\"draft-7\"".into());
     let error = client
         .change(command("text-stale"), stale)
         .await
         .unwrap_err();
     assert_eq!(error.code.as_str(), ErrorCode::PRECONDITION_FAILED);
-    let mut saved = change(
-        "config.source.replace",
-        "config/source",
-        json!({"files": {"main.conf": SHOP}}),
-    );
+    let mut saved = change(LanguageChange::ReplaceSource { files: main(SHOP) });
     saved.if_match = Some("\"draft-0\"".into());
     let saved = client.change(command("text"), saved).await.unwrap();
     assert_eq!(saved.etag.as_deref(), Some("\"draft-1\""));
@@ -415,11 +400,11 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
     let tree = client
         .read(
             scope(),
-            read(
-                "config.ast",
-                "config",
-                json!({"files": {"main.conf": SHOP}}),
-            ),
+            LanguageQuery::Syntax {
+                files: main(SHOP),
+                file: None,
+            }
+            .into(),
         )
         .await
         .unwrap();
@@ -432,11 +417,11 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
     let missing = client
         .read(
             scope(),
-            read(
-                "config.ast",
-                "config",
-                json!({"files": {"main.conf": SHOP}, "file": "sites/none.conf"}),
-            ),
+            LanguageQuery::Syntax {
+                files: main(SHOP),
+                file: Some("sites/none.conf".into()),
+            }
+            .into(),
         )
         .await
         .unwrap_err();
@@ -445,11 +430,13 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
     let explained = client
         .read(
             scope(),
-            read(
-                "config.explain",
-                "config",
-                json!({"files": {"main.conf": SHOP}, "file": "main.conf", "line": 15, "column": 9}),
-            ),
+            LanguageQuery::Explain {
+                files: main(SHOP),
+                file: "main.conf".into(),
+                line: 15,
+                column: 9,
+            }
+            .into(),
         )
         .await
         .unwrap();
@@ -468,18 +455,20 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
     let nowhere = client
         .read(
             scope(),
-            read(
-                "config.explain",
-                "config",
-                json!({"files": {"main.conf": SHOP}, "file": "main.conf", "line": 1}),
-            ),
+            LanguageQuery::Explain {
+                files: main(SHOP),
+                file: "main.conf".into(),
+                line: 1,
+                column: 1,
+            }
+            .into(),
         )
         .await
         .unwrap_err();
     assert_eq!(nowhere.code.as_str(), ErrorCode::NOT_FOUND);
 
     let ir = client
-        .read(scope(), read("config.ir", "config", json!({})))
+        .read(scope(), LanguageQuery::Ir.into())
         .await
         .unwrap();
     let ir = json(&ir.content);
@@ -487,7 +476,7 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
     assert_eq!(ir["sites"].as_array().unwrap().len(), 1);
 
     let upstreams = client
-        .read(scope(), read("upstreams.list", "upstreams", json!({})))
+        .read(scope(), ModelQuery::Upstreams.into())
         .await
         .unwrap();
     let upstream = json(&upstreams.content)[0].clone();
@@ -496,15 +485,14 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
     for field in ["id", "etag", "used_by", "created_at", "updated_at"] {
         edited.as_object_mut().unwrap().remove(field);
     }
-    let mut replace = change(
-        "upstreams.replace",
-        &format!("upstreams/{}", upstream["id"].as_str().unwrap()),
-        edited,
-    );
+    let mut replace = change(ModelChange::ReplaceUpstream {
+        id: id(&upstream["id"]),
+        upstream: input(edited),
+    });
     replace.if_match = Some(upstream["etag"].as_str().unwrap().to_owned());
     client.change(command("note"), replace).await.unwrap();
     let source = client
-        .read(scope(), read("config.source", "config/source", json!({})))
+        .read(scope(), LanguageQuery::Source.into())
         .await
         .unwrap();
     let text = json(&source.content)["files"]["main.conf"]
@@ -518,7 +506,7 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
     );
 
     let plan = client
-        .read(scope(), read("config.plan", "config", json!({})))
+        .read(scope(), LanguageQuery::Plan.into())
         .await
         .unwrap();
     let resources = json(&plan.content)["resources"].as_array().unwrap().len();
@@ -541,11 +529,9 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
         other => panic!("expected an applied draft, got {other:?}"),
     };
 
-    let mut replaced = change(
-        "config.source.replace",
-        "config/source",
-        json!({"files": {"main.conf": text.replace("shop.example", "store.example")}}),
-    );
+    let mut replaced = change(LanguageChange::ReplaceSource {
+        files: main(text.replace("shop.example", "store.example")),
+    });
     replaced.if_match = Some("\"draft-2\"".into());
     client.change(command("rename"), replaced).await.unwrap();
     let second = match client
@@ -559,7 +545,14 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
     assert_eq!(second, first + 1);
 
     let listed = client
-        .read(scope(), read("revisions.list", "revisions", json!({})))
+        .read(
+            scope(),
+            RevisionQuery::Revisions {
+                before: None,
+                limit: None,
+            }
+            .into(),
+        )
         .await
         .unwrap();
     let items = json(&listed.content)["items"].clone();
@@ -572,7 +565,11 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
     let diff = client
         .read(
             scope(),
-            read("revisions.diff", &format!("revisions/{second}"), json!({})),
+            RevisionQuery::Diff {
+                id: second,
+                against: DiffBase::Previous,
+            }
+            .into(),
         )
         .await
         .unwrap();
@@ -586,23 +583,16 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
     client
         .change(
             command("restore"),
-            change(
-                "revisions.restore",
-                &format!("revisions/{first}"),
-                Value::Null,
-            ),
+            change(RevisionChange::Restore { id: first }),
         )
         .await
         .unwrap();
     let restored = client
-        .read(scope(), read("config.source", "config/source", json!({})))
+        .read(scope(), LanguageQuery::Source.into())
         .await
         .unwrap();
     let detail = client
-        .read(
-            scope(),
-            read("revisions.get", &format!("revisions/{first}"), json!({})),
-        )
+        .read(scope(), RevisionQuery::Revision { id: first }.into())
         .await
         .unwrap();
     assert_eq!(
@@ -610,7 +600,7 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
         json(&detail.content)["files"]
     );
     let plan = client
-        .read(scope(), read("config.plan", "config", json!({})))
+        .read(scope(), LanguageQuery::Plan.into())
         .await
         .unwrap();
     assert_eq!(
@@ -621,11 +611,10 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
     let noted = client
         .change(
             command("note-1"),
-            change(
-                "revisions.note",
-                &format!("revisions/{first}"),
-                json!({"note": "first launch"}),
-            ),
+            change(RevisionChange::Note {
+                id: first,
+                note: Some("first launch".into()),
+            }),
         )
         .await
         .unwrap();
@@ -635,11 +624,9 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
         "address 127.0.0.1:18080;",
         "address 127.0.0.1:18080;\n        protocols http1 http3;",
     );
-    let mut saved = change(
-        "config.source.replace",
-        "config/source",
-        json!({"files": {"main.conf": reserved}}),
-    );
+    let mut saved = change(LanguageChange::ReplaceSource {
+        files: main(reserved),
+    });
     saved.if_match = Some("*".into());
     client.change(command("http3"), saved).await.unwrap();
     let error = client
@@ -650,7 +637,11 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
     let listed = client
         .read(
             scope(),
-            read("revisions.list", "revisions", json!({"limit": 1})),
+            RevisionQuery::Revisions {
+                before: None,
+                limit: Some(1),
+            }
+            .into(),
         )
         .await
         .unwrap();
@@ -658,7 +649,14 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
     assert_eq!(latest["items"][0]["outcome"], "failed");
     assert_eq!(latest["next_before"], latest["items"][0]["id"]);
     let active = client
-        .read(scope(), read("revisions.list", "revisions", json!({})))
+        .read(
+            scope(),
+            RevisionQuery::Revisions {
+                before: None,
+                limit: None,
+            }
+            .into(),
+        )
         .await
         .unwrap();
     assert_eq!(json(&active.content)["items"][1]["outcome"], "active");
@@ -711,25 +709,21 @@ async fn callers_limited_to_a_site_group_act_only_on_its_sites() {
     client
         .change(
             command("listener"),
-            change(
-                "listeners.put",
-                "listeners/http",
-                json!({"id": "http", "address": "0.0.0.0:80"}),
-            ),
+            change(ModelChange::PutListener {
+                listener: input(json!({"id": "http", "address": "0.0.0.0:80"})),
+            }),
         )
         .await
         .unwrap();
     let site = |name: &str, group: &str| {
-        change(
-            "sites.create",
-            "sites",
-            json!({
+        change(ModelChange::CreateSite {
+            site: input(json!({
                 "name": name,
                 "group": group,
                 "action": {"type": "respond"},
                 "domains": [{"host": format!("{name}.example.com")}]
-            }),
-        )
+            })),
+        })
     };
     let shop = json(
         &client
@@ -745,8 +739,8 @@ async fn callers_limited_to_a_site_group_act_only_on_its_sites() {
             .unwrap()
             .content,
     );
-    let shop = format!("sites/{}", shop["id"].as_str().unwrap());
-    let corp = format!("sites/{}", corp["id"].as_str().unwrap());
+    let shop = id(&shop["id"]);
+    let corp = id(&corp["id"]);
     let ApplyOutcome::Applied { .. } = client
         .apply(command("apply-1"), ApplyRequest::new(0))
         .await
@@ -757,7 +751,13 @@ async fn callers_limited_to_a_site_group_act_only_on_its_sites() {
 
     let listed = json(
         &client
-            .read(scoped_read(), read("sites.list", "sites", json!({})))
+            .read(
+                scoped_read(),
+                ModelQuery::Sites {
+                    query: SiteQuery::default(),
+                }
+                .into(),
+            )
             .await
             .unwrap()
             .content,
@@ -770,15 +770,12 @@ async fn callers_limited_to_a_site_group_act_only_on_its_sites() {
         .collect();
     assert_eq!(names, ["shop"]);
     let hidden = client
-        .read(scoped_read(), read("sites.get", &corp, json!({})))
+        .read(scoped_read(), ModelQuery::Site { id: corp }.into())
         .await
         .unwrap_err();
     assert_eq!(hidden.code.as_str(), ErrorCode::NOT_FOUND);
     let whole = client
-        .read(
-            scoped_read(),
-            read("config.source", "config/source", json!({})),
-        )
+        .read(scoped_read(), LanguageQuery::Source.into())
         .await
         .unwrap_err();
     assert_eq!(whole.code.as_str(), ErrorCode::PERMISSION_DENIED);
@@ -789,7 +786,7 @@ async fn callers_limited_to_a_site_group_act_only_on_its_sites() {
             client
                 .change(
                     scoped("theirs"),
-                    change("sites.disable", &corp, Value::Null)
+                    change(ModelChange::DisableSite { id: corp })
                 )
                 .await
                 .unwrap_err()
@@ -801,11 +798,9 @@ async fn callers_limited_to_a_site_group_act_only_on_its_sites() {
             client
                 .change(
                     scoped("shared"),
-                    change(
-                        "listeners.put",
-                        "listeners/https",
-                        json!({"id": "https", "address": "0.0.0.0:443"})
-                    ),
+                    change(ModelChange::PutListener {
+                        listener: input(json!({"id": "https", "address": "0.0.0.0:443"}))
+                    }),
                 )
                 .await
                 .unwrap_err()
@@ -815,21 +810,23 @@ async fn callers_limited_to_a_site_group_act_only_on_its_sites() {
     let moved = client
         .change(
             scoped("move"),
-            change(
-                "sites.replace",
-                &shop,
-                json!({
+            change(ModelChange::ReplaceSite {
+                id: shop,
+                site: input(json!({
                     "name": "shop",
                     "group": "corp",
                     "action": {"type": "respond"},
                     "domains": [{"host": "shop.example.com"}]
-                }),
-            ),
+                })),
+            }),
         )
         .await;
     assert!(moved.is_err(), "a site cannot be moved out of reach");
     client
-        .change(scoped("mine"), change("sites.disable", &shop, Value::Null))
+        .change(
+            scoped("mine"),
+            change(ModelChange::DisableSite { id: shop }),
+        )
         .await
         .unwrap();
     let ApplyOutcome::Applied { .. } = client
@@ -843,7 +840,7 @@ async fn callers_limited_to_a_site_group_act_only_on_its_sites() {
     client
         .change(
             command("theirs-2"),
-            change("sites.disable", &corp, Value::Null),
+            change(ModelChange::DisableSite { id: corp }),
         )
         .await
         .unwrap();

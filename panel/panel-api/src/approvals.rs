@@ -2,7 +2,7 @@
 //! (ADR 0019).
 
 use crate::{
-    configuration::{change, port, read, Precondition},
+    configuration::{change, json, port, read, Precondition},
     error::ApiError,
     request_context::{command_context, MutationHeaders, QueryHeaders},
     ApiState,
@@ -14,7 +14,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::{DateTime, Utc};
-use panel_application::{ConfigurationChange, GatewayUseCases};
+use panel_application::GatewayUseCases;
+use panel_config_api::{ApprovalChange, ApprovalQuery, ConfigurationChange};
 use panel_config_model::{
     ApprovalPolicy, ApprovalPolicyInput, ApprovalRequest, ApprovalRequestList,
 };
@@ -59,14 +60,7 @@ pub(crate) async fn list_approval_policies<U: GatewayUseCases>(
     State(state): State<ApiState<U>>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
-    read(
-        &state,
-        &headers,
-        "approval_policies.list",
-        "approval-policies".into(),
-        None::<&()>,
-    )
-    .await
+    read(&state, &headers, ApprovalQuery::Policies).await
 }
 
 /// One approval policy.
@@ -77,14 +71,7 @@ pub(crate) async fn get_approval_policy<U: GatewayUseCases>(
     headers: HeaderMap,
     Path(path): Path<PolicyPath>,
 ) -> Result<Response, ApiError> {
-    read(
-        &state,
-        &headers,
-        "approval_policies.get",
-        format!("approval-policies/{}", path.id),
-        None::<&()>,
-    )
-    .await
+    read(&state, &headers, ApprovalQuery::Policy { id: path.id }).await
 }
 
 #[derive(Deserialize)]
@@ -105,15 +92,15 @@ pub(crate) async fn put_approval_policy<U: GatewayUseCases>(
     Path(path): Path<PolicyPath>,
     body: Bytes,
 ) -> Result<Response, ApiError> {
+    let context = command_context(&headers)?;
+    let policy = json(&headers, &body)?;
     let output = port(&state)?
         .change(
-            command_context(&headers)?,
-            ConfigurationChange {
-                operation: "approval_policies.put".into(),
-                resource: format!("approval-policies/{}", path.id),
-                if_match: None,
-                content: body.to_vec(),
-            },
+            context,
+            ConfigurationChange::new(ApprovalChange::PutPolicy {
+                id: path.id,
+                policy,
+            }),
         )
         .await?;
     let saved: SavedPolicy = serde_json::from_slice(&output.content)
@@ -142,12 +129,7 @@ pub(crate) async fn delete_approval_policy<U: GatewayUseCases>(
     port(&state)?
         .change(
             command_context(&headers)?,
-            ConfigurationChange {
-                operation: "approval_policies.delete".into(),
-                resource: format!("approval-policies/{}", path.id),
-                if_match: None,
-                content: Vec::new(),
-            },
+            ConfigurationChange::new(ApprovalChange::DeletePolicy { id: path.id }),
         )
         .await?;
     Ok(StatusCode::NO_CONTENT)
@@ -161,14 +143,11 @@ pub(crate) async fn list_approval_requests<U: GatewayUseCases>(
     headers: HeaderMap,
     Query(page): Query<ApprovalPage>,
 ) -> Result<Response, ApiError> {
-    read(
-        &state,
-        &headers,
-        "approvals.list",
-        "approvals".into(),
-        Some(&page),
-    )
-    .await
+    let query = ApprovalQuery::Requests {
+        before: page.before,
+        limit: page.limit,
+    };
+    read(&state, &headers, query).await
 }
 
 /// One approval request.
@@ -179,29 +158,18 @@ pub(crate) async fn get_approval_request<U: GatewayUseCases>(
     headers: HeaderMap,
     Path(path): Path<RequestPath>,
 ) -> Result<Response, ApiError> {
-    read(
-        &state,
-        &headers,
-        "approvals.get",
-        format!("approvals/{}", path.id),
-        None::<&()>,
-    )
-    .await
+    read(&state, &headers, ApprovalQuery::Request { id: path.id }).await
 }
 
 async fn decide<U>(
     state: &ApiState<U>,
     headers: &HeaderMap,
-    operation: &str,
-    id: uuid::Uuid,
-    body: Bytes,
+    decision: ApprovalChange,
 ) -> Result<Response, ApiError> {
     change(
         state,
         headers,
-        operation,
-        format!("approvals/{id}"),
-        body,
+        decision,
         Precondition::Optional,
         StatusCode::OK,
     )
@@ -217,7 +185,7 @@ pub(crate) async fn approve_request<U: GatewayUseCases>(
     headers: HeaderMap,
     Path(path): Path<RequestPath>,
 ) -> Result<Response, ApiError> {
-    decide(&state, &headers, "approvals.approve", path.id, Bytes::new()).await
+    decide(&state, &headers, ApprovalChange::Approve { id: path.id }).await
 }
 
 /// Rejects a request someone else opened.
@@ -230,7 +198,20 @@ pub(crate) async fn reject_request<U: GatewayUseCases>(
     Path(path): Path<RequestPath>,
     body: Bytes,
 ) -> Result<Response, ApiError> {
-    decide(&state, &headers, "approvals.reject", path.id, body).await
+    let reason = if body.is_empty() {
+        None
+    } else {
+        json::<Rejection>(&headers, &body)?.reason
+    };
+    decide(
+        &state,
+        &headers,
+        ApprovalChange::Reject {
+            id: path.id,
+            reason,
+        },
+    )
+    .await
 }
 
 /// Takes back the caller's approval of a request not yet applied.
@@ -241,7 +222,7 @@ pub(crate) async fn revoke_approval<U: GatewayUseCases>(
     headers: HeaderMap,
     Path(path): Path<RequestPath>,
 ) -> Result<Response, ApiError> {
-    decide(&state, &headers, "approvals.revoke", path.id, Bytes::new()).await
+    decide(&state, &headers, ApprovalChange::Revoke { id: path.id }).await
 }
 
 /// Withdraws the caller's own request.
@@ -252,12 +233,5 @@ pub(crate) async fn withdraw_request<U: GatewayUseCases>(
     headers: HeaderMap,
     Path(path): Path<RequestPath>,
 ) -> Result<Response, ApiError> {
-    decide(
-        &state,
-        &headers,
-        "approvals.withdraw",
-        path.id,
-        Bytes::new(),
-    )
-    .await
+    decide(&state, &headers, ApprovalChange::Withdraw { id: path.id }).await
 }

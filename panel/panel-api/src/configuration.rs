@@ -1,8 +1,8 @@
 //! Configuration resources: sites with their domains and routes, upstreams,
 //! listeners and TLS profiles, plus applying the draft to the gateway.
 //!
-//! Each endpoint maps onto one named operation of the configuration port and
-//! forwards the JSON body unchanged; the configuration service validates it.
+//! Each endpoint reads its request into one typed operation of the
+//! configuration port; the configuration service validates what it asks.
 
 use crate::{
     error::ApiError,
@@ -16,9 +16,10 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::{DateTime, SecondsFormat, Utc};
-use panel_application::{
-    ActivatedDeployment, ApplyOutcome, ApprovalBypass, ConfigurationChange, ConfigurationOutput,
-    ConfigurationPort, ConfigurationRead, DraftInfo, GatewayUseCases,
+use panel_application::{ActivatedDeployment, GatewayUseCases};
+use panel_config_api::{
+    ApplyOutcome, ApprovalBypass, ConfigurationChange, ConfigurationCommand, ConfigurationOutput,
+    ConfigurationPort, ConfigurationQuery, DraftInfo, ModelChange, ModelQuery,
 };
 use panel_config_model::{
     ApprovalRequest, BatchRequest, Domain, DomainCheck, DomainView, Listener, ListenerView,
@@ -26,9 +27,10 @@ use panel_config_model::{
     SiteList, SiteQuery, SiteSummary, SiteView, TlsProfile, TlsProfileInput, TlsProfileView,
     UpstreamInput, UpstreamView, ValidationResult,
 };
+use panel_domain::NormalizedHost;
 use panel_errors::PanelError;
 use panel_identity::{Permission, Principal};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::sync::Arc;
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
@@ -81,25 +83,40 @@ pub(crate) fn insert_draft(headers: &mut HeaderMap, draft: &DraftInfo) {
 pub(crate) async fn read<U>(
     state: &ApiState<U>,
     headers: &HeaderMap,
-    operation: &str,
-    resource: String,
-    parameters: Option<&impl Serialize>,
+    query: impl Into<ConfigurationQuery>,
 ) -> Result<Response, ApiError> {
     let scope = request_scope(headers)?;
-    let parameters = parameters
-        .map(|parameters| serde_json::to_vec(parameters).expect("query parameters serialize"))
-        .unwrap_or_default();
-    let output = port(state)?
-        .read(
-            scope,
-            ConfigurationRead {
-                operation: operation.into(),
-                resource,
-                parameters,
-            },
-        )
-        .await?;
+    let output = port(state)?.read(scope, query.into()).await?;
     Ok(respond(StatusCode::OK, output))
+}
+
+/// A JSON request body as `T`.
+pub(crate) fn json<T: DeserializeOwned>(headers: &HeaderMap, body: &Bytes) -> Result<T, ApiError> {
+    let json = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value
+                .split(';')
+                .next()
+                .is_some_and(|media| media.trim().eq_ignore_ascii_case("application/json"))
+        });
+    if !json {
+        return Err(ApiError::new(PanelError::invalid_argument(
+            "request bodies must be application/json",
+        )));
+    }
+    serde_json::from_slice(body).map_err(|error| {
+        ApiError::new(PanelError::invalid_argument(format!(
+            "invalid request body: {error}"
+        )))
+    })
+}
+
+/// A host name from a path, in its normalized form.
+fn host(value: &str) -> Result<NormalizedHost, ApiError> {
+    NormalizedHost::new(value)
+        .map_err(|error| ApiError::new(PanelError::invalid_argument(error.to_string())))
 }
 
 /// How a change treats `If-Match`.
@@ -113,9 +130,7 @@ pub(crate) enum Precondition {
 pub(crate) async fn change<U>(
     state: &ApiState<U>,
     headers: &HeaderMap,
-    operation: &str,
-    resource: String,
-    body: Bytes,
+    command: impl Into<ConfigurationCommand>,
     precondition: Precondition,
     status: StatusCode,
 ) -> Result<Response, ApiError> {
@@ -135,30 +150,12 @@ pub(crate) async fn change<U>(
             "send If-Match with the ETag of the representation being changed",
         )));
     }
-    if !body.is_empty() {
-        let json = headers
-            .get(header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| {
-                value
-                    .split(';')
-                    .next()
-                    .is_some_and(|media| media.trim().eq_ignore_ascii_case("application/json"))
-            });
-        if !json {
-            return Err(ApiError::new(PanelError::invalid_argument(
-                "request bodies must be application/json",
-            )));
-        }
-    }
     let output = port(state)?
         .change(
             context,
             ConfigurationChange {
-                operation: operation.into(),
-                resource,
+                command: command.into(),
                 if_match,
-                content: body.to_vec(),
             },
         )
         .await?;
@@ -340,14 +337,14 @@ impl ApplyResponse {
 }
 
 macro_rules! read_route {
-    ($name:ident, $path:literal, $operation:literal, $resource:expr, $body:ty, $doc:literal) => {
+    ($name:ident, $path:literal, $query:expr, $body:ty, $doc:literal) => {
         #[doc = $doc]
         #[utoipa::path(get, path = $path, params(QueryHeaders), responses((status = 200, body = $body)), tag = "configuration")]
         pub(crate) async fn $name<U: GatewayUseCases>(
             State(state): State<ApiState<U>>,
             headers: HeaderMap,
         ) -> Result<Response, ApiError> {
-            read(&state, &headers, $operation, $resource.into(), None::<&()>).await
+            read(&state, &headers, $query).await
         }
     };
 }
@@ -355,40 +352,35 @@ macro_rules! read_route {
 read_route!(
     list_upstreams,
     "/api/v1/upstreams",
-    "upstreams.list",
-    "upstreams",
+    ModelQuery::Upstreams,
     Vec<UpstreamView>,
     "Lists upstreams with the sites that use them."
 );
 read_route!(
     list_listeners,
     "/api/v1/listeners",
-    "listeners.list",
-    "listeners",
+    ModelQuery::Listeners,
     Vec<ListenerView>,
     "Lists listeners."
 );
 read_route!(
     list_tls_profiles,
     "/api/v1/tls-profiles",
-    "tls_profiles.list",
-    "tls-profiles",
+    ModelQuery::TlsProfiles,
     Vec<TlsProfileView>,
     "Lists TLS profiles."
 );
 read_route!(
     list_security_policies,
     "/api/v1/security-policies",
-    "security_policies.list",
-    "security-policies",
+    ModelQuery::SecurityPolicies,
     Vec<SecurityPolicyView>,
     "Lists security policies with the sites that use them."
 );
 read_route!(
     site_summary,
     "/api/v1/sites/summary",
-    "sites.summary",
-    "sites",
+    ModelQuery::SiteSummary,
     SiteSummary,
     "Counts sites by status, type and HTTPS."
 );
@@ -400,7 +392,7 @@ pub(crate) async fn list_sites<U: GatewayUseCases>(
     headers: HeaderMap,
     Query(query): Query<SiteQuery>,
 ) -> Result<Response, ApiError> {
-    read(&state, &headers, "sites.list", "sites".into(), Some(&query)).await
+    read(&state, &headers, ModelQuery::Sites { query }).await
 }
 
 /// Creates a site.
@@ -414,9 +406,9 @@ pub(crate) async fn create_site<U: GatewayUseCases>(
     change(
         &state,
         &headers,
-        "sites.create",
-        "sites".into(),
-        body,
+        ModelChange::CreateSite {
+            site: json(&headers, &body)?,
+        },
         Precondition::Optional,
         StatusCode::CREATED,
     )
@@ -431,14 +423,7 @@ pub(crate) async fn get_site<U: GatewayUseCases>(
     headers: HeaderMap,
     Path(path): Path<SitePath>,
 ) -> Result<Response, ApiError> {
-    read(
-        &state,
-        &headers,
-        "sites.get",
-        format!("sites/{}", path.id),
-        None::<&()>,
-    )
-    .await
+    read(&state, &headers, ModelQuery::Site { id: path.id }).await
 }
 
 /// Replaces a site; `If-Match` must carry its current ETag.
@@ -454,9 +439,10 @@ pub(crate) async fn replace_site<U: GatewayUseCases>(
     change(
         &state,
         &headers,
-        "sites.replace",
-        format!("sites/{}", path.id),
-        body,
+        ModelChange::ReplaceSite {
+            id: path.id,
+            site: json(&headers, &body)?,
+        },
         Precondition::Required,
         StatusCode::OK,
     )
@@ -473,17 +459,16 @@ pub(crate) async fn delete_site<U: GatewayUseCases>(
     Path(path): Path<SitePath>,
     Query(query): Query<DeleteQuery>,
 ) -> Result<Response, ApiError> {
-    let operation = if query.permanent {
-        "sites.purge"
+    let id = path.id;
+    let command = if query.permanent {
+        ModelChange::PurgeSite { id }
     } else {
-        "sites.delete"
+        ModelChange::DeleteSite { id }
     };
     change(
         &state,
         &headers,
-        operation,
-        format!("sites/{}", path.id),
-        Bytes::new(),
+        command,
         Precondition::Required,
         StatusCode::OK,
     )
@@ -491,7 +476,7 @@ pub(crate) async fn delete_site<U: GatewayUseCases>(
 }
 
 macro_rules! site_action {
-    ($name:ident, $path:literal, $operation:literal, $doc:literal) => {
+    ($name:ident, $path:literal, $change:ident, $doc:literal) => {
         #[doc = $doc]
         #[utoipa::path(post, path = $path,
             params(MutationHeaders, SitePath, ("If-Match" = Option<String>, Header, description = "ETag the site must still have")),
@@ -501,7 +486,7 @@ macro_rules! site_action {
             headers: HeaderMap,
             Path(path): Path<SitePath>,
         ) -> Result<Response, ApiError> {
-            change(&state, &headers, $operation, format!("sites/{}", path.id), Bytes::new(), Precondition::Optional, StatusCode::OK).await
+            change(&state, &headers, ModelChange::$change { id: path.id }, Precondition::Optional, StatusCode::OK).await
         }
     };
 }
@@ -509,31 +494,31 @@ macro_rules! site_action {
 site_action!(
     enable_site,
     "/api/v1/sites/{id}/enable",
-    "sites.enable",
+    EnableSite,
     "Starts serving a site."
 );
 site_action!(
     disable_site,
     "/api/v1/sites/{id}/disable",
-    "sites.disable",
+    DisableSite,
     "Stops serving a site while keeping its configuration."
 );
 site_action!(
     favorite_site,
     "/api/v1/sites/{id}/favorite",
-    "sites.favorite",
+    FavoriteSite,
     "Pins a site."
 );
 site_action!(
     unfavorite_site,
     "/api/v1/sites/{id}/unfavorite",
-    "sites.unfavorite",
+    UnfavoriteSite,
     "Unpins a site."
 );
 site_action!(
     restore_site,
     "/api/v1/sites/{id}/restore",
-    "sites.restore",
+    RestoreSite,
     "Restores a site from the recycle bin."
 );
 
@@ -549,9 +534,10 @@ pub(crate) async fn clone_site<U: GatewayUseCases>(
     change(
         &state,
         &headers,
-        "sites.clone",
-        format!("sites/{}", path.id),
-        body,
+        ModelChange::CloneSite {
+            id: path.id,
+            name: json::<CloneSiteRequest>(&headers, &body)?.name,
+        },
         Precondition::Optional,
         StatusCode::CREATED,
     )
@@ -569,9 +555,9 @@ pub(crate) async fn batch_sites<U: GatewayUseCases>(
     change(
         &state,
         &headers,
-        "sites.batch",
-        "sites".into(),
-        body,
+        ModelChange::BatchSites {
+            batch: json(&headers, &body)?,
+        },
         Precondition::Optional,
         StatusCode::OK,
     )
@@ -587,14 +573,7 @@ pub(crate) async fn export_sites<U: GatewayUseCases>(
     Query(query): Query<ExportQuery>,
 ) -> Result<Response, ApiError> {
     let ids = id_list(query.ids.as_deref())?;
-    let mut response = read(
-        &state,
-        &headers,
-        "sites.export",
-        "sites".into(),
-        Some(&serde_json::json!({ "ids": ids })),
-    )
-    .await?;
+    let mut response = read(&state, &headers, ModelQuery::ExportSites { ids }).await?;
     response.headers_mut().insert(
         header::CONTENT_DISPOSITION,
         HeaderValue::from_static("attachment; filename=\"sites.json\""),
@@ -613,9 +592,9 @@ pub(crate) async fn import_sites<U: GatewayUseCases>(
     change(
         &state,
         &headers,
-        "sites.import",
-        "sites".into(),
-        body,
+        ModelChange::ImportSites {
+            bundle: json(&headers, &body)?,
+        },
         Precondition::Optional,
         StatusCode::CREATED,
     )
@@ -633,9 +612,10 @@ pub(crate) async fn list_domains<U: GatewayUseCases>(
     read(
         &state,
         &headers,
-        "domains.list",
-        "domains".into(),
-        Some(&query),
+        ModelQuery::Domains {
+            site_id: query.site_id,
+            q: query.q,
+        },
     )
     .await
 }
@@ -648,17 +628,12 @@ pub(crate) async fn check_domains<U: GatewayUseCases>(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ApiError> {
-    let request: serde_json::Value = serde_json::from_slice(&body).map_err(|error| {
-        ApiError::new(PanelError::invalid_argument(format!(
-            "invalid request body: {error}"
-        )))
-    })?;
     read(
         &state,
         &headers,
-        "domains.check",
-        "domains".into(),
-        Some(&request),
+        ModelQuery::CheckDomains {
+            hosts: json::<DomainCheckRequest>(&headers, &body)?.hosts,
+        },
     )
     .await
 }
@@ -675,9 +650,10 @@ pub(crate) async fn add_domains<U: GatewayUseCases>(
     change(
         &state,
         &headers,
-        "domains.add",
-        format!("sites/{}/domains", path.id),
-        body,
+        ModelChange::AddDomains {
+            site: path.id,
+            domains: json(&headers, &body)?,
+        },
         Precondition::Optional,
         StatusCode::OK,
     )
@@ -697,9 +673,11 @@ pub(crate) async fn replace_domain<U: GatewayUseCases>(
     change(
         &state,
         &headers,
-        "domains.replace",
-        format!("sites/{}/domains/{}", path.id, path.host),
-        body,
+        ModelChange::ReplaceDomain {
+            site: path.id,
+            host: host(&path.host)?,
+            domain: json(&headers, &body)?,
+        },
         Precondition::Required,
         StatusCode::OK,
     )
@@ -718,9 +696,10 @@ pub(crate) async fn remove_domain<U: GatewayUseCases>(
     change(
         &state,
         &headers,
-        "domains.remove",
-        format!("sites/{}/domains/{}", path.id, path.host),
-        Bytes::new(),
+        ModelChange::RemoveDomain {
+            site: path.id,
+            host: host(&path.host)?,
+        },
         Precondition::Required,
         StatusCode::OK,
     )
@@ -735,14 +714,7 @@ pub(crate) async fn list_routes<U: GatewayUseCases>(
     headers: HeaderMap,
     Path(path): Path<SitePath>,
 ) -> Result<Response, ApiError> {
-    read(
-        &state,
-        &headers,
-        "routes.list",
-        format!("sites/{}/routes", path.id),
-        None::<&()>,
-    )
-    .await
+    read(&state, &headers, ModelQuery::Routes { site: path.id }).await
 }
 
 /// Adds a route to a site.
@@ -757,9 +729,10 @@ pub(crate) async fn create_route<U: GatewayUseCases>(
     change(
         &state,
         &headers,
-        "routes.create",
-        format!("sites/{}/routes", path.id),
-        body,
+        ModelChange::CreateRoute {
+            site: path.id,
+            route: json(&headers, &body)?,
+        },
         Precondition::Optional,
         StatusCode::CREATED,
     )
@@ -778,9 +751,10 @@ pub(crate) async fn reorder_routes<U: GatewayUseCases>(
     change(
         &state,
         &headers,
-        "routes.reorder",
-        format!("sites/{}/routes", path.id),
-        body,
+        ModelChange::ReorderRoutes {
+            site: path.id,
+            order: json::<RouteOrderRequest>(&headers, &body)?.order,
+        },
         Precondition::Optional,
         StatusCode::OK,
     )
@@ -795,14 +769,7 @@ pub(crate) async fn get_route<U: GatewayUseCases>(
     headers: HeaderMap,
     Path(path): Path<SitePath>,
 ) -> Result<Response, ApiError> {
-    read(
-        &state,
-        &headers,
-        "routes.get",
-        format!("routes/{}", path.id),
-        None::<&()>,
-    )
-    .await
+    read(&state, &headers, ModelQuery::Route { id: path.id }).await
 }
 
 /// Replaces a route.
@@ -818,9 +785,10 @@ pub(crate) async fn replace_route<U: GatewayUseCases>(
     change(
         &state,
         &headers,
-        "routes.replace",
-        format!("routes/{}", path.id),
-        body,
+        ModelChange::ReplaceRoute {
+            id: path.id,
+            route: json(&headers, &body)?,
+        },
         Precondition::Required,
         StatusCode::OK,
     )
@@ -839,9 +807,7 @@ pub(crate) async fn delete_route<U: GatewayUseCases>(
     change(
         &state,
         &headers,
-        "routes.delete",
-        format!("routes/{}", path.id),
-        Bytes::new(),
+        ModelChange::DeleteRoute { id: path.id },
         Precondition::Required,
         StatusCode::OK,
     )
@@ -859,9 +825,9 @@ pub(crate) async fn create_upstream<U: GatewayUseCases>(
     change(
         &state,
         &headers,
-        "upstreams.create",
-        "upstreams".into(),
-        body,
+        ModelChange::CreateUpstream {
+            upstream: json(&headers, &body)?,
+        },
         Precondition::Optional,
         StatusCode::CREATED,
     )
@@ -876,14 +842,7 @@ pub(crate) async fn get_upstream<U: GatewayUseCases>(
     headers: HeaderMap,
     Path(path): Path<SitePath>,
 ) -> Result<Response, ApiError> {
-    read(
-        &state,
-        &headers,
-        "upstreams.get",
-        format!("upstreams/{}", path.id),
-        None::<&()>,
-    )
-    .await
+    read(&state, &headers, ModelQuery::Upstream { id: path.id }).await
 }
 
 /// Replaces an upstream; nodes keep their identity when their id is sent.
@@ -899,9 +858,10 @@ pub(crate) async fn replace_upstream<U: GatewayUseCases>(
     change(
         &state,
         &headers,
-        "upstreams.replace",
-        format!("upstreams/{}", path.id),
-        body,
+        ModelChange::ReplaceUpstream {
+            id: path.id,
+            upstream: json(&headers, &body)?,
+        },
         Precondition::Required,
         StatusCode::OK,
     )
@@ -920,9 +880,7 @@ pub(crate) async fn delete_upstream<U: GatewayUseCases>(
     change(
         &state,
         &headers,
-        "upstreams.delete",
-        format!("upstreams/{}", path.id),
-        Bytes::new(),
+        ModelChange::DeleteUpstream { id: path.id },
         Precondition::Required,
         StatusCode::OK,
     )
@@ -941,9 +899,10 @@ pub(crate) async fn add_node<U: GatewayUseCases>(
     change(
         &state,
         &headers,
-        "nodes.add",
-        format!("upstreams/{}/nodes", path.id),
-        body,
+        ModelChange::AddNode {
+            upstream: path.id,
+            node: json(&headers, &body)?,
+        },
         Precondition::Optional,
         StatusCode::CREATED,
     )
@@ -963,9 +922,11 @@ pub(crate) async fn replace_node<U: GatewayUseCases>(
     change(
         &state,
         &headers,
-        "nodes.replace",
-        format!("upstreams/{}/nodes/{}", path.id, path.node),
-        body,
+        ModelChange::ReplaceNode {
+            upstream: path.id,
+            id: path.node,
+            node: json(&headers, &body)?,
+        },
         Precondition::Required,
         StatusCode::OK,
     )
@@ -984,9 +945,10 @@ pub(crate) async fn delete_node<U: GatewayUseCases>(
     change(
         &state,
         &headers,
-        "nodes.delete",
-        format!("upstreams/{}/nodes/{}", path.id, path.node),
-        Bytes::new(),
+        ModelChange::DeleteNode {
+            upstream: path.id,
+            id: path.node,
+        },
         Precondition::Required,
         StatusCode::OK,
     )
@@ -994,7 +956,7 @@ pub(crate) async fn delete_node<U: GatewayUseCases>(
 }
 
 macro_rules! named_resource {
-    ($get:ident, $put:ident, $delete:ident, $path:literal, $prefix:literal, $kind:literal, $body:ty, $input:ty) => {
+    ($get:ident, $put:ident, $delete:ident, $path:literal, $body:ty, $input:ty, $read:ident, $write:ident { $field:ident }, $remove:ident) => {
         #[utoipa::path(get, path = $path, params(QueryHeaders, NamedPath),
             responses((status = 200, body = $body, headers(("ETag" = String)))), tag = "configuration")]
         pub(crate) async fn $get<U: GatewayUseCases>(
@@ -1002,7 +964,7 @@ macro_rules! named_resource {
             headers: HeaderMap,
             Path(path): Path<NamedPath>,
         ) -> Result<Response, ApiError> {
-            read(&state, &headers, concat!($kind, ".get"), format!(concat!($prefix, "/{}"), path.id), None::<&()>).await
+            read(&state, &headers, ModelQuery::$read { id: path.id }).await
         }
 
         /// Creates or replaces the resource; replacing needs `If-Match`.
@@ -1015,7 +977,13 @@ macro_rules! named_resource {
             Path(path): Path<NamedPath>,
             body: Bytes,
         ) -> Result<Response, ApiError> {
-            change(&state, &headers, concat!($kind, ".put"), format!(concat!($prefix, "/{}"), path.id), body, Precondition::Optional, StatusCode::OK).await
+            let $field = json::<$input>(&headers, &body)?;
+            if $field.id != path.id {
+                return Err(ApiError::new(PanelError::invalid_argument(
+                    "the body id must match the path",
+                )));
+            }
+            change(&state, &headers, ModelChange::$write { $field }, Precondition::Optional, StatusCode::OK).await
         }
 
         #[utoipa::path(delete, path = $path,
@@ -1026,7 +994,7 @@ macro_rules! named_resource {
             headers: HeaderMap,
             Path(path): Path<NamedPath>,
         ) -> Result<Response, ApiError> {
-            change(&state, &headers, concat!($kind, ".delete"), format!(concat!($prefix, "/{}"), path.id), Bytes::new(), Precondition::Required, StatusCode::OK).await
+            change(&state, &headers, ModelChange::$remove { id: path.id }, Precondition::Required, StatusCode::OK).await
         }
     };
 }
@@ -1036,30 +1004,33 @@ named_resource!(
     put_listener,
     delete_listener,
     "/api/v1/listeners/{id}",
-    "listeners",
-    "listeners",
     Listener,
-    Listener
+    Listener,
+    Listener,
+    PutListener { listener },
+    DeleteListener
 );
 named_resource!(
     get_tls_profile,
     put_tls_profile,
     delete_tls_profile,
     "/api/v1/tls-profiles/{id}",
-    "tls-profiles",
-    "tls_profiles",
     TlsProfile,
-    TlsProfileInput
+    TlsProfileInput,
+    TlsProfile,
+    PutTlsProfile { profile },
+    DeleteTlsProfile
 );
 named_resource!(
     get_security_policy,
     put_security_policy,
     delete_security_policy,
     "/api/v1/security-policies/{id}",
-    "security-policies",
-    "security_policies",
     SecurityPolicy,
-    SecurityPolicy
+    SecurityPolicy,
+    SecurityPolicy,
+    PutSecurityPolicy { policy },
+    DeleteSecurityPolicy
 );
 
 /// The draft's version and whether the gateway runs it.
@@ -1070,16 +1041,7 @@ pub(crate) async fn draft<U: GatewayUseCases>(
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     let scope = request_scope(&headers)?;
-    let output = port(&state)?
-        .read(
-            scope,
-            ConfigurationRead {
-                operation: "sites.summary".into(),
-                resource: "sites".into(),
-                parameters: Vec::new(),
-            },
-        )
-        .await?;
+    let output = port(&state)?.read(scope, ModelQuery::Draft.into()).await?;
     let mut response = axum::Json(DraftResponse::from(&output.draft)).into_response();
     insert_draft(response.headers_mut(), &output.draft);
     Ok(response)
@@ -1094,14 +1056,7 @@ pub(crate) async fn validation<U: GatewayUseCases>(
     Query(query): Query<ValidationQuery>,
 ) -> Result<Response, ApiError> {
     let site_ids = id_list(query.site_ids.as_deref())?;
-    read(
-        &state,
-        &headers,
-        "config.validate",
-        String::new(),
-        Some(&serde_json::json!({ "site_ids": site_ids })),
-    )
-    .await
+    read(&state, &headers, ModelQuery::Validate { site_ids }).await
 }
 
 /// Compiles the draft and activates it on the gateway, unless approval
@@ -1128,7 +1083,7 @@ pub(crate) async fn apply<U: GatewayUseCases>(
             )))
         })?
     };
-    let mut apply = panel_application::ApplyRequest::new(request.expected_version.unwrap_or(0));
+    let mut apply = panel_config_api::ApplyRequest::new(request.expected_version.unwrap_or(0));
     if let Some(note) = request.note.filter(|note| !note.trim().is_empty()) {
         apply = apply.with_note(note);
     }
@@ -1154,11 +1109,7 @@ pub(crate) async fn apply<U: GatewayUseCases>(
             Ok(response)
         }
         ApplyOutcome::AwaitingApproval { draft, request, .. } => {
-            let mut response = (StatusCode::ACCEPTED, request).into_response();
-            response.headers_mut().insert(
-                header::CONTENT_TYPE,
-                HeaderValue::from_static("application/json"),
-            );
+            let mut response = (StatusCode::ACCEPTED, axum::Json(request)).into_response();
             insert_draft(response.headers_mut(), &draft);
             Ok(response)
         }

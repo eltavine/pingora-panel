@@ -10,7 +10,6 @@
 mod alerts;
 mod audit;
 mod certificates;
-mod configuration;
 mod containers;
 mod context;
 mod gateway;
@@ -31,10 +30,6 @@ pub use alerts::{
 };
 pub use audit::{AuditFilter, AuditPage, AuditPort, AuditRecord, AuditVerification};
 pub use certificates::{CertificateChange, CertificateOutput, CertificatePort, CertificateRead};
-pub use configuration::{
-    ApplyOutcome, ApplyRequest, ApprovalBypass, ConfigurationChange, ConfigurationOutput,
-    ConfigurationPort, ConfigurationRead, DraftInfo,
-};
 pub use containers::{
     ContainerAction, ContainerChange, ContainerDetail, ContainerEngine, ContainerFilter,
     ContainerList, ContainerMount, ContainerNetwork, ContainerState, ContainerSummary,

@@ -1,6 +1,6 @@
 [package]
 name = "config-grpc-client"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -12,6 +12,7 @@ async-trait.workspace = true
 config-proto-codec.workspace = true
 gateway-proto-codec.workspace = true
 panel-application.workspace = true
+panel-config-api.workspace = true
 panel-contracts.workspace = true
 panel-errors.workspace = true
 panel-service.workspace = true

@@ -1,10 +1,11 @@
 use super::*;
 use chrono::Utc;
-use panel_application::{
-    ApplyOutcome, ApplyRequest, ConfigurationChange, ConfigurationOutput, ConfigurationPort,
-    ConfigurationRead, DraftInfo, RequestScope, TlsProbe, TlsProbeReport, TlsProbeTarget,
-};
+use panel_application::{RequestScope, TlsProbe, TlsProbeReport, TlsProbeTarget};
 use panel_certificates::self_signed;
+use panel_config_api::{
+    ApplyOutcome, ApplyRequest, ConfigurationChange, ConfigurationOutput, ConfigurationPort,
+    ConfigurationQuery, DraftInfo, ModelQuery,
+};
 use rustls_pki_types::{pem::PemObject, CertificateDer};
 use serde_json::{json, Value};
 use std::{sync::Mutex, time::Duration};
@@ -16,14 +17,17 @@ impl ConfigurationPort for Listeners {
     async fn read(
         &self,
         _scope: RequestScope,
-        read: ConfigurationRead,
-    ) -> Result<panel_application::ConfigurationOutput> {
-        let (listener, etag) = match read.resource.as_str() {
-            "listeners/https" => (
+        query: ConfigurationQuery,
+    ) -> Result<ConfigurationOutput> {
+        let ConfigurationQuery::Model(ModelQuery::Listener { id }) = query else {
+            return Err(PanelError::unavailable("only listeners are read here"));
+        };
+        let (listener, etag) = match id.as_str() {
+            "https" => (
                 json!({"id": "https", "address": "0.0.0.0:8443", "tls_profile_id": "edge"}),
                 "\"l1\"",
             ),
-            "listeners/http" => (
+            "http" => (
                 json!({"id": "http", "address": "0.0.0.0:8080", "tls_profile_id": null}),
                 "\"l2\"",
             ),

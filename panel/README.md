@@ -11,7 +11,8 @@ panel-ir -> panel-domain
 panel-engine -> panel-errors + panel-domain + panel-ir
 panel-application -> panel-context + panel-errors + panel-domain + panel-ir
 panel-config-model -> panel-domain + panel-errors + panel-ir
-panel-api -> panel-application + panel-config-model + panel-errors
+panel-config-api -> panel-application + panel-config-model
+panel-api -> panel-application + panel-config-api + panel-config-model + panel-errors
 panel-config-json -> panel-application + panel-errors + panel-ir
 
 panel-gateway-runtime -> panel-engine ports
@@ -33,13 +34,13 @@ panel-sqlite -> panel-outbox + panel-event-codec + panel-events + panel-health +
 panel-jetstream -> panel-event-codec + panel-events + panel-health + panel-errors
 gateway-grpc -> gateway-proto-codec + panel-engine::GatewayEngine
 gateway-grpc-client -> panel-application + gateway-proto-codec + panel-contracts + panel-health
-config-proto-codec -> panel-application + gateway-proto-codec + panel-contracts
-config-grpc-client -> panel-application + config-proto-codec + panel-service
+config-proto-codec -> panel-application + panel-config-api + gateway-proto-codec + panel-contracts
+config-grpc-client -> panel-config-api + config-proto-codec + panel-service
 observability-grpc-client -> panel-application + panel-contracts + panel-service
 panel-control-runtime -> panel-sqlite + panel-jetstream + panel-outbox + panel-service + panel-tls
 
 gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC/Proto adapters + REST/compiler adapters
-config-service -> panel-control-runtime + gateway-grpc-client + panel-config-json + panel-config-model + config-proto-codec
+config-service -> panel-control-runtime + gateway-grpc-client + panel-config-json + panel-config-api + panel-config-model + config-proto-codec
 panel-api-server -> panel-control-runtime + panel-api + config-grpc-client + gateway-grpc-client
 panel-cli (no workspace dependencies: a client of the public REST API)
 automation-service -> panel-control-runtime + panel-jobs + panel-sqlite + panel-events
@@ -79,6 +80,7 @@ panel-bootstrap -> panel-jetstream + panel-pki
 | `panel-api` | Axum HTTP mapping, body limits, request-ID propagation, RFC 9457 Problem Details and OpenAPI projection | Pingora, storage, identity implementation, generated Proto, use-case orchestration |
 | `panel-config-json` | JSON `ConfigCompiler` adapter with schema and document limits | HTTP, Proto, storage, Pingora, application orchestration |
 | `panel-config-model` | The editable configuration document: listeners, TLS profiles, upstreams and sites with domains and routes; validation, queries, checked edits and compilation into the IR | HTTP, Proto, storage, Pingora |
+| `panel-config-api` | The configuration API as one contract: its port and every read and change as a typed operation, shared by callers and the service | HTTP, Proto, storage, Pingora |
 | `panel-gateway-runtime` | Prepare/Activate/CAS/LKG orchestration | Tonic, filesystem, Pingora |
 | `snapshot-store-fs` | Versioned JSON records, fsync and atomic rename | Tonic, Pingora, runtime policy |
 | `gateway-pingora` | Compile IR into private Pingora values with atomic `ArcSwap` publication, and run the data plane: listener generations, virtual hosts, routes, TLS, static files and upstream pools with health | Proto, control-plane policy |
@@ -87,7 +89,7 @@ panel-bootstrap -> panel-jetstream + panel-pki
 | `config-proto-codec` | Protobuf form of the configuration publication contract | Storage, transports, Pingora |
 | `config-grpc-client` | `GatewayUseCases` over `config-service`'s publication API | Storage, Pingora |
 | `gateway-grpc-client` | Tonic client adapter implementing `panel-application::GatewayPort`, and the gateway health check | HTTP, storage, identity, generated Proto outside this adapter |
-| `config-service` | Publication and configuration APIs, the draft configuration and activation receipts, kept in `config.db` | HTTP, Pingora |
+| `config-service` | Publication and configuration APIs: the configuration use cases behind their port, storage ports with SQLite stores for the draft, revisions, approvals and activation receipts in `config.db`, and the gRPC adapter | HTTP, Pingora |
 | `panel-api-server` | The `panel-api` module: public REST and web console, degraded admission and the service directory | Storage implementation, Pingora |
 | `automation-service` | Job store with outbox events, worker, scheduler and the certificate inventory, kept in `automation.db` | HTTP, Pingora |
 | `observability-service` | Traffic summaries and series from Prometheus over the gateway's metrics, and alerts kept in `observability.db` | Pingora |

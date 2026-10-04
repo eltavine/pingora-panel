@@ -8,8 +8,9 @@ use axum::{
     Json,
 };
 use chrono::Utc;
-use panel_application::{ConfigurationRead, TlsProbe, TlsProbeTarget};
+use panel_application::{TlsProbe, TlsProbeTarget};
 use panel_certificates::{describe_der, CertificateDetails, CertificateStatus};
+use panel_config_api::ModelQuery;
 use panel_config_model::Listener;
 use panel_domain::NormalizedHost;
 use panel_errors::PanelError;
@@ -106,11 +107,10 @@ pub(crate) async fn check_tls<U>(
     let output = configuration::port(&state)?
         .read(
             scope.clone(),
-            ConfigurationRead {
-                operation: "listeners.get".into(),
-                resource: format!("listeners/{}", request.listener),
-                parameters: Vec::new(),
-            },
+            ModelQuery::Listener {
+                id: request.listener.clone(),
+            }
+            .into(),
         )
         .await?;
     let listener: Listener = serde_json::from_slice(&output.content).map_err(|_| {

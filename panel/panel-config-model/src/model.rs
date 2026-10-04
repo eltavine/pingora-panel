@@ -118,7 +118,7 @@ fn tls12() -> String {
 
 /// A TLS profile as written: a certificate of the inventory, or a chain and
 /// key placed in the gateway's secret directory.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub struct TlsProfileInput {

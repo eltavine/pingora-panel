@@ -138,6 +138,78 @@
       "name": "ContainerAction",
       "owner": "pingora-panel-platform",
       "reason": "Each action is a call on the engine and an audit event of its own; a new action must fail to compile in every adapter until it maps it, rather than doing something else."
+    },
+    {
+      "package": "panel-config-api",
+      "name": "ConfigurationQuery",
+      "owner": "pingora-panel-platform",
+      "reason": "An operation of the configuration API contract. The configuration service and its callers match it exhaustively, so a new operation must fail to compile wherever it is not handled yet instead of reaching a wildcard."
+    },
+    {
+      "package": "panel-config-api",
+      "name": "ModelQuery",
+      "owner": "pingora-panel-platform",
+      "reason": "An operation of the configuration API contract. The configuration service and its callers match it exhaustively, so a new operation must fail to compile wherever it is not handled yet instead of reaching a wildcard."
+    },
+    {
+      "package": "panel-config-api",
+      "name": "LanguageQuery",
+      "owner": "pingora-panel-platform",
+      "reason": "An operation of the configuration API contract. The configuration service and its callers match it exhaustively, so a new operation must fail to compile wherever it is not handled yet instead of reaching a wildcard."
+    },
+    {
+      "package": "panel-config-api",
+      "name": "RevisionQuery",
+      "owner": "pingora-panel-platform",
+      "reason": "An operation of the configuration API contract. The configuration service and its callers match it exhaustively, so a new operation must fail to compile wherever it is not handled yet instead of reaching a wildcard."
+    },
+    {
+      "package": "panel-config-api",
+      "name": "ApprovalQuery",
+      "owner": "pingora-panel-platform",
+      "reason": "An operation of the configuration API contract. The configuration service and its callers match it exhaustively, so a new operation must fail to compile wherever it is not handled yet instead of reaching a wildcard."
+    },
+    {
+      "package": "panel-config-api",
+      "name": "ConfigurationCommand",
+      "owner": "pingora-panel-platform",
+      "reason": "An operation of the configuration API contract. The configuration service and its callers match it exhaustively, so a new operation must fail to compile wherever it is not handled yet instead of reaching a wildcard."
+    },
+    {
+      "package": "panel-config-api",
+      "name": "ModelChange",
+      "owner": "pingora-panel-platform",
+      "reason": "An operation of the configuration API contract. The configuration service and its callers match it exhaustively, so a new operation must fail to compile wherever it is not handled yet instead of reaching a wildcard."
+    },
+    {
+      "package": "panel-config-api",
+      "name": "LanguageChange",
+      "owner": "pingora-panel-platform",
+      "reason": "An operation of the configuration API contract. The configuration service and its callers match it exhaustively, so a new operation must fail to compile wherever it is not handled yet instead of reaching a wildcard."
+    },
+    {
+      "package": "panel-config-api",
+      "name": "RevisionChange",
+      "owner": "pingora-panel-platform",
+      "reason": "An operation of the configuration API contract. The configuration service and its callers match it exhaustively, so a new operation must fail to compile wherever it is not handled yet instead of reaching a wildcard."
+    },
+    {
+      "package": "panel-config-api",
+      "name": "ApprovalChange",
+      "owner": "pingora-panel-platform",
+      "reason": "An operation of the configuration API contract. The configuration service and its callers match it exhaustively, so a new operation must fail to compile wherever it is not handled yet instead of reaching a wildcard."
+    },
+    {
+      "package": "panel-config-api",
+      "name": "DiffBase",
+      "owner": "pingora-panel-platform",
+      "reason": "What a revision is compared with. The configuration service resolves each base explicitly, so a new base must fail to compile where it is not resolved yet."
+    },
+    {
+      "package": "config-service",
+      "name": "Gate",
+      "owner": "pingora-panel-platform",
+      "reason": "What the approvals say about applying a change. Applying matches every outcome, so a new one must fail to compile there instead of letting a change through or holding it by default."
     }
   ]
 }

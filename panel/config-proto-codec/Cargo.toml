@@ -10,7 +10,9 @@ publish.workspace = true
 [dependencies]
 gateway-proto-codec.workspace = true
 panel-application.workspace = true
+panel-config-api.workspace = true
 panel-contracts.workspace = true
 panel-domain.workspace = true
 panel-errors.workspace = true
 prost-types.workspace = true
+serde_json.workspace = true

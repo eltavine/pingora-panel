@@ -817,12 +817,13 @@ dependencies = [
 
 [[package]]
 name = "config-grpc-client"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "config-proto-codec",
  "gateway-proto-codec",
  "panel-application",
+ "panel-config-api",
  "panel-contracts",
  "panel-errors",
  "panel-service",
@@ -837,10 +838,12 @@ version = "0.1.0"
 dependencies = [
  "gateway-proto-codec",
  "panel-application",
+ "panel-config-api",
  "panel-contracts",
  "panel-domain",
  "panel-errors",
  "prost-types",
+ "serde_json",
 ]
 
 [[package]]
@@ -855,6 +858,7 @@ dependencies = [
  "gateway-grpc-client",
  "gateway-proto-codec",
  "panel-application",
+ "panel-config-api",
  "panel-config-dsl",
  "panel-config-json",
  "panel-config-model",
@@ -873,7 +877,6 @@ dependencies = [
  "panel-service",
  "panel-sqlite",
  "prost",
- "prost-types",
  "serde",
  "serde_json",
  "sqlx",
@@ -2783,7 +2786,7 @@ dependencies = [
 
 [[package]]
 name = "panel-api"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -2794,6 +2797,7 @@ dependencies = [
  "httpdate",
  "panel-application",
  "panel-certificates",
+ "panel-config-api",
  "panel-config-dsl",
  "panel-config-model",
  "panel-domain",
@@ -2878,7 +2882,7 @@ dependencies = [
 
 [[package]]
 name = "panel-application"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "futures-core",
@@ -2951,6 +2955,21 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-tungstenite",
+ "uuid",
+]
+
+[[package]]
+name = "panel-config-api"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "panel-application",
+ "panel-config-model",
+ "panel-domain",
+ "panel-errors",
+ "serde",
+ "serde_json",
  "uuid",
 ]
 

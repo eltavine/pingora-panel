@@ -2,7 +2,7 @@
 //! checking, formatting, plans, dry runs and revisions.
 
 use crate::{
-    configuration::{change, insert_draft, port, read, DraftResponse, Precondition},
+    configuration::{change, insert_draft, json, port, read, DraftResponse, Precondition},
     contract::DiagnosticDetails,
     error::ApiError,
     request_context::{command_context, MutationHeaders, QueryHeaders},
@@ -15,7 +15,11 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use panel_application::{ApplyOutcome, ApplyRequest as Apply, GatewayUseCases};
+use panel_application::GatewayUseCases;
+use panel_config_api::{
+    ApplyOutcome, ApplyRequest as Apply, LanguageChange, LanguageQuery, RevisionChange,
+    RevisionQuery,
+};
 use panel_config_dsl::{plan::Changes, schema::DirectiveSpec, Explanation, SyntaxTree};
 use panel_config_model::{Revision, RevisionDetail, RevisionList};
 use panel_errors::PanelError;
@@ -157,14 +161,7 @@ pub(crate) async fn source<U: GatewayUseCases>(
     State(state): State<ApiState<U>>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
-    read(
-        &state,
-        &headers,
-        "config.source",
-        "config/source".into(),
-        None::<&()>,
-    )
-    .await
+    read(&state, &headers, LanguageQuery::Source).await
 }
 
 /// Replaces the draft with files of the configuration language. Text with
@@ -180,9 +177,9 @@ pub(crate) async fn replace_source<U: GatewayUseCases>(
     change(
         &state,
         &headers,
-        "config.source.replace",
-        "config/source".into(),
-        body,
+        LanguageChange::ReplaceSource {
+            files: json::<ConfigFiles>(&headers, &body)?.files,
+        },
         Precondition::Optional,
         StatusCode::OK,
     )
@@ -201,9 +198,7 @@ pub(crate) async fn check<U: GatewayUseCases>(
     read(
         &state,
         &headers,
-        "config.check",
-        "config".into(),
-        Some(&files),
+        LanguageQuery::Check { files: files.files },
     )
     .await
 }
@@ -220,9 +215,7 @@ pub(crate) async fn format<U: GatewayUseCases>(
     read(
         &state,
         &headers,
-        "config.format",
-        "config".into(),
-        Some(&files),
+        LanguageQuery::Format { files: files.files },
     )
     .await
 }
@@ -239,9 +232,10 @@ pub(crate) async fn ast<U: GatewayUseCases>(
     read(
         &state,
         &headers,
-        "config.ast",
-        "config".into(),
-        Some(&request),
+        LanguageQuery::Syntax {
+            files: request.files,
+            file: request.file,
+        },
     )
     .await
 }
@@ -260,9 +254,12 @@ pub(crate) async fn explain<U: GatewayUseCases>(
     read(
         &state,
         &headers,
-        "config.explain",
-        "config".into(),
-        Some(&request),
+        LanguageQuery::Explain {
+            files: request.files,
+            file: request.file,
+            line: request.line,
+            column: request.column.unwrap_or(1),
+        },
     )
     .await
 }
@@ -280,9 +277,10 @@ pub(crate) async fn import_nginx<U: GatewayUseCases>(
     read(
         &state,
         &headers,
-        "config.import.nginx",
-        "config".into(),
-        Some(&request),
+        LanguageQuery::ImportNginx {
+            files: request.files,
+            entry: request.entry,
+        },
     )
     .await
 }
@@ -296,7 +294,7 @@ pub(crate) async fn ir<U: GatewayUseCases>(
     State(state): State<ApiState<U>>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
-    read(&state, &headers, "config.ir", "config".into(), None::<&()>).await
+    read(&state, &headers, LanguageQuery::Ir).await
 }
 
 /// The language's directives, contexts and arguments, for editor completion.
@@ -306,14 +304,7 @@ pub(crate) async fn schema<U: GatewayUseCases>(
     State(state): State<ApiState<U>>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
-    read(
-        &state,
-        &headers,
-        "config.schema",
-        "config".into(),
-        None::<&()>,
-    )
-    .await
+    read(&state, &headers, LanguageQuery::Schema).await
 }
 
 /// What applying the draft would change: resources and file differences
@@ -324,14 +315,7 @@ pub(crate) async fn plan<U: GatewayUseCases>(
     State(state): State<ApiState<U>>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
-    read(
-        &state,
-        &headers,
-        "config.plan",
-        "config".into(),
-        None::<&()>,
-    )
-    .await
+    read(&state, &headers, LanguageQuery::Plan).await
 }
 
 /// Compiles the draft and prepares it on the gateway without activating it.
@@ -389,9 +373,10 @@ pub(crate) async fn list_revisions<U: GatewayUseCases>(
     read(
         &state,
         &headers,
-        "revisions.list",
-        "revisions".into(),
-        Some(&page),
+        RevisionQuery::Revisions {
+            before: page.before,
+            limit: page.limit,
+        },
     )
     .await
 }
@@ -404,14 +389,7 @@ pub(crate) async fn get_revision<U: GatewayUseCases>(
     headers: HeaderMap,
     Path(path): Path<RevisionPath>,
 ) -> Result<Response, ApiError> {
-    read(
-        &state,
-        &headers,
-        "revisions.get",
-        format!("revisions/{}", path.id),
-        None::<&()>,
-    )
-    .await
+    read(&state, &headers, RevisionQuery::Revision { id: path.id }).await
 }
 
 /// What a revision changed relative to another, the draft or the active one.
@@ -426,9 +404,15 @@ pub(crate) async fn diff_revision<U: GatewayUseCases>(
     read(
         &state,
         &headers,
-        "revisions.diff",
-        format!("revisions/{}", path.id),
-        Some(&query),
+        RevisionQuery::Diff {
+            id: path.id,
+            against: query
+                .against
+                .as_deref()
+                .map(str::parse)
+                .transpose()?
+                .unwrap_or_default(),
+        },
     )
     .await
 }
@@ -444,9 +428,7 @@ pub(crate) async fn restore_revision<U: GatewayUseCases>(
     change(
         &state,
         &headers,
-        "revisions.restore",
-        format!("revisions/{}", path.id),
-        Bytes::new(),
+        RevisionChange::Restore { id: path.id },
         Precondition::Optional,
         StatusCode::OK,
     )
@@ -462,12 +444,11 @@ pub(crate) async fn note_revision<U: GatewayUseCases>(
     Path(path): Path<RevisionPath>,
     body: Bytes,
 ) -> Result<Response, ApiError> {
+    let note = json::<RevisionNote>(&headers, &body)?.note;
     change(
         &state,
         &headers,
-        "revisions.note",
-        format!("revisions/{}", path.id),
-        body,
+        RevisionChange::Note { id: path.id, note },
         Precondition::Optional,
         StatusCode::OK,
     )

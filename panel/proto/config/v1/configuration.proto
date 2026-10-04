@@ -8,10 +8,10 @@ import "google/protobuf/timestamp.proto";
 
 // Reads and edits the draft configuration and publishes it to the gateway.
 //
-// Resources travel as JSON documents of the configuration model
-// (`pingora.panel.config/v1`), so the model can gain fields without changing
-// this contract. Every request names one operation from a closed set, which
-// permissions and audit records refer to.
+// Operations and resources travel as JSON documents of the configuration
+// API's types (the `panel-config-api` crate), which both ends share, so the
+// model can gain fields without changing this contract. Each read and change
+// is one operation of a closed set, which audit records refer to by name.
 service Configuration {
   rpc Read(ReadRequest) returns (ReadResponse);
   rpc Change(ChangeRequest) returns (ChangeResponse);
@@ -30,12 +30,12 @@ message Draft {
 
 message ReadRequest {
   .pingora.panel.common.v1.RequestContext context = 1;
-  // For example `sites.list`, `sites.get` or `upstreams.list`.
-  string operation = 2;
-  // Resource path such as `sites/{id}` or `upstreams/{id}/nodes`.
-  string resource = 3;
-  // Operation parameters as a JSON object, such as list filters.
-  bytes parameters = 4;
+  // Replaced by `query`, which names the operation and its parameters.
+  string operation = 2 [deprecated = true];
+  string resource = 3 [deprecated = true];
+  bytes parameters = 4 [deprecated = true];
+  // The read, a `ConfigurationQuery` as JSON.
+  bytes query = 5;
 }
 
 message ReadResponse {
@@ -49,13 +49,15 @@ message ReadResponse {
 
 message ChangeRequest {
   .pingora.panel.common.v1.RequestContext context = 1;
-  // For example `sites.create`, `sites.replace` or `domains.import`.
-  string operation = 2;
-  string resource = 3;
+  // Replaced by `command`, which names the operation, its target and its
+  // input.
+  string operation = 2 [deprecated = true];
+  string resource = 3 [deprecated = true];
   // Entity tag the target must still have (RFC 9110 §13.1.1); empty skips the check.
   string if_match = 4;
-  // The request body as JSON.
-  bytes content = 5;
+  bytes content = 5 [deprecated = true];
+  // The change, a `ConfigurationCommand` as JSON.
+  bytes command = 6;
 }
 
 message ChangeResponse {

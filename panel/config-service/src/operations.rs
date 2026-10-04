@@ -1,17 +1,14 @@
-//! The configuration API's operations over the draft model. Each operation
-//! name is part of the contract that permissions and audit records use.
+//! The configuration API's operations over the draft model.
 
 use chrono::{DateTime, Utc};
+use panel_config_api::{ModelChange, ModelQuery};
 use panel_config_model::{
     abnormal_sites, checked, entity_tag, query_sites, summarize, validate, BatchAction,
-    BatchRequest, ConfigModel, Domain, DomainCheck, DomainView, Listener, ListenerView, NodeInput,
-    Route, RouteInput, RouteView, SecurityPolicy, SecurityPolicyView, SiteBundle, SiteInput,
-    SiteList, SiteQuery, SiteView, TlsProfile, TlsProfileInput, TlsProfileView, UpstreamInput,
-    UpstreamView, ValidationResult,
+    ConfigModel, DomainCheck, DomainView, ListenerView, Route, RouteView, SecurityPolicyView,
+    SiteList, SiteView, TlsProfile, TlsProfileView, UpstreamView, ValidationResult,
 };
-use panel_domain::NormalizedHost;
 use panel_errors::{Diagnostic, PanelError, Result};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
@@ -38,77 +35,6 @@ impl Output {
             ..Self::json(value)
         }
     }
-}
-
-enum Path<'a> {
-    Root,
-    Sites,
-    Site(Uuid),
-    SiteDomains(Uuid),
-    SiteDomain(Uuid, NormalizedHost),
-    SiteRoutes(Uuid),
-    Route(Uuid),
-    Upstreams,
-    Upstream(Uuid),
-    Nodes(Uuid),
-    Node(Uuid, Uuid),
-    Listeners,
-    Listener(&'a str),
-    TlsProfiles,
-    TlsProfile(&'a str),
-    SecurityPolicies,
-    SecurityPolicy(&'a str),
-    Domains,
-}
-
-fn parse(resource: &str) -> Result<Path<'_>> {
-    let id = |segment: &str| {
-        Uuid::try_parse(segment)
-            .map_err(|_| PanelError::invalid_argument(format!("{segment:?} is not an id")))
-    };
-    let segments: Vec<&str> = resource
-        .split('/')
-        .filter(|segment| !segment.is_empty())
-        .collect();
-    Ok(match segments.as_slice() {
-        [] => Path::Root,
-        ["sites"] => Path::Sites,
-        ["sites", site] => Path::Site(id(site)?),
-        ["sites", site, "domains"] => Path::SiteDomains(id(site)?),
-        ["sites", site, "domains", host] => Path::SiteDomain(
-            id(site)?,
-            NormalizedHost::new(host)
-                .map_err(|error| PanelError::invalid_argument(error.to_string()))?,
-        ),
-        ["sites", site, "routes"] => Path::SiteRoutes(id(site)?),
-        ["routes", route] => Path::Route(id(route)?),
-        ["upstreams"] => Path::Upstreams,
-        ["upstreams", upstream] => Path::Upstream(id(upstream)?),
-        ["upstreams", upstream, "nodes"] => Path::Nodes(id(upstream)?),
-        ["upstreams", upstream, "nodes", node] => Path::Node(id(upstream)?, id(node)?),
-        ["listeners"] => Path::Listeners,
-        ["listeners", listener] => Path::Listener(listener),
-        ["tls-profiles"] => Path::TlsProfiles,
-        ["tls-profiles", profile] => Path::TlsProfile(profile),
-        ["security-policies"] => Path::SecurityPolicies,
-        ["security-policies", policy] => Path::SecurityPolicy(policy),
-        ["domains"] => Path::Domains,
-        _ => return Err(PanelError::not_found(format!("no resource {resource:?}"))),
-    })
-}
-
-fn decode<T: DeserializeOwned>(content: &[u8]) -> Result<T> {
-    let content = if content.is_empty() {
-        b"null".as_slice()
-    } else {
-        content
-    };
-    serde_json::from_slice(content)
-        .map_err(|error| PanelError::invalid_argument(format!("invalid request body: {error}")))
-}
-
-fn unsupported(operation: &str, resource: &str) -> PanelError {
-    PanelError::invalid_argument(format!("{operation} does not apply to {resource:?}"))
 }
 
 /// RFC 9110 §13.1.1: `*` matches any current representation.
@@ -146,6 +72,17 @@ fn route_view(model: &ConfigModel, id: Uuid) -> Result<Output> {
     Ok(Output::tagged(&view, etag))
 }
 
+fn routes(model: &ConfigModel, site: Uuid) -> Result<Output> {
+    let site = model.site(site)?;
+    let mut routes: Vec<&Route> = site.routes.iter().collect();
+    routes.sort_by_key(|route| (route.priority, route.id));
+    let views: Vec<RouteView> = routes
+        .into_iter()
+        .map(|route| RouteView::new(site.id, route))
+        .collect();
+    Ok(Output::json(&views))
+}
+
 fn upstream_view(model: &ConfigModel, id: Uuid) -> Result<Output> {
     let view = UpstreamView::new(model, model.upstream(id)?);
     let etag = view.etag.clone();
@@ -164,48 +101,18 @@ fn named<'a, T: Serialize>(
         .ok_or_else(|| PanelError::not_found(format!("{kind} {id} does not exist")))
 }
 
-#[derive(Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct ExportParameters {
-    ids: Vec<Uuid>,
+#[derive(Serialize)]
+struct Created {
+    created: Vec<Uuid>,
 }
 
-#[derive(Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct DomainParameters {
-    site_id: Option<Uuid>,
-    q: Option<String>,
-}
-
-#[derive(Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct CheckParameters {
-    hosts: Vec<String>,
-}
-
-#[derive(Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct ValidateParameters {
-    site_ids: Vec<Uuid>,
-}
-
-/// Answers a read operation against `model`.
-pub fn read(
-    model: &ConfigModel,
-    operation: &str,
-    resource: &str,
-    parameters: &[u8],
-) -> Result<Output> {
-    let path = parse(resource)?;
-    match (operation, path) {
-        ("sites.list", Path::Sites) => {
-            let query: SiteQuery = if parameters.is_empty() {
-                SiteQuery::default()
-            } else {
-                decode(parameters)?
-            };
+/// Answers a read of `model`.
+pub fn read(model: &ConfigModel, query: &ModelQuery) -> Result<Output> {
+    match query {
+        ModelQuery::Draft => Ok(Output::json(&serde_json::json!({}))),
+        ModelQuery::Sites { query } => {
             let abnormal = abnormal_sites(model, &validate(model));
-            let page = query_sites(model, &abnormal, &query)?;
+            let page = query_sites(model, &abnormal, query)?;
             Ok(Output::json(&SiteList {
                 items: page
                     .items
@@ -216,29 +123,17 @@ pub fn read(
                 total: page.total,
             }))
         }
-        ("sites.get", Path::Site(id)) => site_view(model, id),
-        ("sites.summary", Path::Sites) => {
+        ModelQuery::Site { id } => site_view(model, *id),
+        ModelQuery::SiteSummary => {
             let abnormal = abnormal_sites(model, &validate(model));
             Ok(Output::json(&summarize(model, &abnormal)))
         }
-        ("sites.export", Path::Sites) => {
-            let parameters: ExportParameters = if parameters.is_empty() {
-                ExportParameters::default()
-            } else {
-                decode(parameters)?
-            };
-            Ok(Output::json(&model.export_sites(&parameters.ids)?))
-        }
-        ("domains.list", Path::Domains) => {
-            let parameters: DomainParameters = if parameters.is_empty() {
-                DomainParameters::default()
-            } else {
-                decode(parameters)?
-            };
-            let keyword = parameters.q.map(|q| q.to_lowercase());
+        ModelQuery::ExportSites { ids } => Ok(Output::json(&model.export_sites(ids)?)),
+        ModelQuery::Domains { site_id, q } => {
+            let keyword = q.as_deref().map(str::to_lowercase);
             let domains: Vec<DomainView> = DomainView::all(model)
                 .into_iter()
-                .filter(|view| parameters.site_id.is_none_or(|site| view.site_id == site))
+                .filter(|view| site_id.is_none_or(|site| view.site_id == site))
                 .filter(|view| {
                     keyword.as_ref().is_none_or(|keyword| {
                         view.domain.host.as_str().contains(keyword.as_str())
@@ -248,30 +143,19 @@ pub fn read(
                 .collect();
             Ok(Output::json(&domains))
         }
-        ("domains.check", Path::Domains) => {
-            let parameters: CheckParameters = decode(parameters)?;
-            if parameters.hosts.len() > 1000 {
+        ModelQuery::CheckDomains { hosts } => {
+            if hosts.len() > 1000 {
                 return Err(PanelError::invalid_argument("at most 1000 hosts per check"));
             }
-            let checks: Vec<DomainCheck> = parameters
-                .hosts
+            let checks: Vec<DomainCheck> = hosts
                 .iter()
                 .map(|host| DomainCheck::new(model, host))
                 .collect();
             Ok(Output::json(&checks))
         }
-        ("routes.list", Path::SiteRoutes(site)) => {
-            let site = model.site(site)?;
-            let mut routes: Vec<&Route> = site.routes.iter().collect();
-            routes.sort_by_key(|route| (route.priority, route.id));
-            let views: Vec<RouteView> = routes
-                .into_iter()
-                .map(|route| RouteView::new(site.id, route))
-                .collect();
-            Ok(Output::json(&views))
-        }
-        ("routes.get", Path::Route(id)) => route_view(model, id),
-        ("upstreams.list", Path::Upstreams) => {
+        ModelQuery::Routes { site } => routes(model, *site),
+        ModelQuery::Route { id } => route_view(model, *id),
+        ModelQuery::Upstreams => {
             let views: Vec<UpstreamView> = model
                 .upstreams
                 .iter()
@@ -279,25 +163,25 @@ pub fn read(
                 .collect();
             Ok(Output::json(&views))
         }
-        ("upstreams.get", Path::Upstream(id)) => upstream_view(model, id),
-        ("listeners.list", Path::Listeners) => {
+        ModelQuery::Upstream { id } => upstream_view(model, *id),
+        ModelQuery::Listeners => {
             let views: Vec<ListenerView> = model.listeners.iter().map(ListenerView::new).collect();
             Ok(Output::json(&views))
         }
-        ("listeners.get", Path::Listener(id)) => {
+        ModelQuery::Listener { id } => {
             let listener = named(&model.listeners, id, |item| &item.id, "listener")?;
             Ok(Output::tagged(listener, entity_tag(listener)))
         }
-        ("tls_profiles.list", Path::TlsProfiles) => {
+        ModelQuery::TlsProfiles => {
             let views: Vec<TlsProfileView> =
                 model.tls_profiles.iter().map(TlsProfileView::new).collect();
             Ok(Output::json(&views))
         }
-        ("tls_profiles.get", Path::TlsProfile(id)) => {
+        ModelQuery::TlsProfile { id } => {
             let profile = named(&model.tls_profiles, id, |item| &item.id, "TLS profile")?;
             Ok(Output::tagged(profile, entity_tag(profile)))
         }
-        ("security_policies.list", Path::SecurityPolicies) => {
+        ModelQuery::SecurityPolicies => {
             let views: Vec<SecurityPolicyView> = model
                 .security_policies
                 .iter()
@@ -305,24 +189,19 @@ pub fn read(
                 .collect();
             Ok(Output::json(&views))
         }
-        ("security_policies.get", Path::SecurityPolicy(id)) => {
+        ModelQuery::SecurityPolicy { id } => {
             let policy = named(&model.security_policies, id, |item| &item.id, POLICY)?;
             Ok(Output::tagged(policy, entity_tag(policy)))
         }
-        ("config.validate", Path::Root) => {
-            let parameters: ValidateParameters = if parameters.is_empty() {
-                ValidateParameters::default()
-            } else {
-                decode(parameters)?
-            };
-            for site in &parameters.site_ids {
+        ModelQuery::Validate { site_ids } => {
+            for site in site_ids {
                 model.site(*site)?;
             }
             let diagnostics: Vec<Diagnostic> = validate(model)
                 .into_iter()
                 .filter(|diagnostic| {
-                    parameters.site_ids.is_empty()
-                        || parameters.site_ids.iter().any(|site| {
+                    site_ids.is_empty()
+                        || site_ids.iter().any(|site| {
                             diagnostic.resource_id.as_deref().is_some_and(|resource| {
                                 resource.starts_with(&format!("sites/{site}"))
                             })
@@ -334,95 +213,73 @@ pub fn read(
                 diagnostics,
             }))
         }
-        (operation, _) => Err(unsupported(operation, resource)),
     }
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct CloneRequest {
-    name: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ReorderRequest {
-    order: Vec<Uuid>,
-}
-
-#[derive(Serialize)]
-struct Created {
-    created: Vec<Uuid>,
-}
-
-/// Applies a change operation, returning the new model and its result.
+/// Applies `change` to `model`, returning the new model and its result.
+/// `if_match` holds the entity tags the target must still match; empty
+/// skips the check.
 pub fn change(
     model: &ConfigModel,
-    operation: &str,
-    resource: &str,
+    change: ModelChange,
     if_match: &str,
-    content: &[u8],
     now: DateTime<Utc>,
 ) -> Result<(ConfigModel, Output)> {
-    let path = parse(resource)?;
     let site_tag = |id| model.site(id).map(entity_tag);
     let upstream_tag = |id| model.upstream(id).map(entity_tag);
-    match (operation, path) {
-        ("sites.create", Path::Sites) => {
-            let input: SiteInput = decode(content)?;
-            let (next, id) = checked(model, |model| Ok(model.create_site(input, now)))?;
+    let deleted = || Output::json(&serde_json::json!({}));
+    match change {
+        ModelChange::CreateSite { site } => {
+            let (next, id) = checked(model, |model| Ok(model.create_site(site, now)))?;
             let output = site_view(&next, id)?;
             Ok((next, output))
         }
-        ("sites.replace", Path::Site(id)) => {
+        ModelChange::ReplaceSite { id, site } => {
             precondition(if_match, &site_tag(id)?)?;
-            let input: SiteInput = decode(content)?;
-            let (next, ()) = checked(model, |model| model.replace_site(id, input, now))?;
+            let (next, ()) = checked(model, |model| model.replace_site(id, site, now))?;
             let output = site_view(&next, id)?;
             Ok((next, output))
         }
-        (
-            "sites.enable" | "sites.disable" | "sites.favorite" | "sites.unfavorite"
-            | "sites.delete" | "sites.restore",
-            Path::Site(id),
-        ) => {
+        ModelChange::EnableSite { id }
+        | ModelChange::DisableSite { id }
+        | ModelChange::FavoriteSite { id }
+        | ModelChange::UnfavoriteSite { id }
+        | ModelChange::DeleteSite { id }
+        | ModelChange::RestoreSite { id } => {
             precondition(if_match, &site_tag(id)?)?;
-            let (next, ()) = checked(model, |model| match operation {
-                "sites.enable" => model.set_site_enabled(id, true, now),
-                "sites.disable" => model.set_site_enabled(id, false, now),
-                "sites.favorite" => model.set_site_favorite(id, true, now),
-                "sites.unfavorite" => model.set_site_favorite(id, false, now),
-                "sites.delete" => model.delete_site(id, now),
+            let (next, ()) = checked(model, |model| match change {
+                ModelChange::EnableSite { .. } => model.set_site_enabled(id, true, now),
+                ModelChange::DisableSite { .. } => model.set_site_enabled(id, false, now),
+                ModelChange::FavoriteSite { .. } => model.set_site_favorite(id, true, now),
+                ModelChange::UnfavoriteSite { .. } => model.set_site_favorite(id, false, now),
+                ModelChange::DeleteSite { .. } => model.delete_site(id, now),
                 _ => model.restore_site(id, now),
             })?;
             let output = site_view(&next, id)?;
             Ok((next, output))
         }
-        ("sites.purge", Path::Site(id)) => {
+        ModelChange::PurgeSite { id } => {
             precondition(if_match, &site_tag(id)?)?;
             let (next, ()) = checked(model, |model| model.purge_site(id))?;
-            Ok((next, Output::json(&serde_json::json!({}))))
+            Ok((next, deleted()))
         }
-        ("sites.clone", Path::Site(id)) => {
-            let request: CloneRequest = decode(content)?;
-            let (next, clone) = checked(model, |model| model.clone_site(id, request.name, now))?;
+        ModelChange::CloneSite { id, name } => {
+            let (next, clone) = checked(model, |model| model.clone_site(id, name, now))?;
             let output = site_view(&next, clone)?;
             Ok((next, output))
         }
-        ("sites.import", Path::Sites) => {
-            let bundle: SiteBundle = decode(content)?;
+        ModelChange::ImportSites { bundle } => {
             let (next, created) = checked(model, |model| model.import_sites(bundle, now))?;
             Ok((next, Output::json(&Created { created })))
         }
-        ("sites.batch", Path::Sites) => {
-            let request: BatchRequest = decode(content)?;
-            let ids: BTreeSet<Uuid> = request.ids.iter().copied().collect();
-            if ids.is_empty() || ids.len() != request.ids.len() {
+        ModelChange::BatchSites { batch } => {
+            let ids: BTreeSet<Uuid> = batch.ids.iter().copied().collect();
+            if ids.is_empty() || ids.len() != batch.ids.len() {
                 return Err(PanelError::invalid_argument("list each site exactly once"));
             }
             let (next, ()) = checked(model, |model| {
                 for id in &ids {
-                    match request.action {
+                    match batch.action {
                         BatchAction::Enable => model.set_site_enabled(*id, true, now)?,
                         BatchAction::Disable => model.set_site_enabled(*id, false, now)?,
                         BatchAction::Delete => model.delete_site(*id, now)?,
@@ -441,8 +298,7 @@ pub fn change(
                 .collect();
             Ok((next, Output::json(&views)))
         }
-        ("domains.add", Path::SiteDomains(site)) => {
-            let domains: Vec<Domain> = decode(content)?;
+        ModelChange::AddDomains { site, domains } => {
             if domains.is_empty() || domains.len() > 1000 {
                 return Err(PanelError::invalid_argument(
                     "add between 1 and 1000 domains",
@@ -452,201 +308,166 @@ pub fn change(
             let output = site_view(&next, site)?;
             Ok((next, output))
         }
-        ("domains.replace", Path::SiteDomain(site, host)) => {
+        ModelChange::ReplaceDomain { site, host, domain } => {
             precondition(if_match, &site_tag(site)?)?;
-            let domain: Domain = decode(content)?;
             let (next, ()) = checked(model, |model| {
                 model.replace_domain(site, &host, domain, now)
             })?;
             let output = site_view(&next, site)?;
             Ok((next, output))
         }
-        ("domains.remove", Path::SiteDomain(site, host)) => {
+        ModelChange::RemoveDomain { site, host } => {
             precondition(if_match, &site_tag(site)?)?;
             let (next, ()) = checked(model, |model| model.remove_domain(site, &host, now))?;
             let output = site_view(&next, site)?;
             Ok((next, output))
         }
-        ("routes.create", Path::SiteRoutes(site)) => {
-            let input: RouteInput = decode(content)?;
-            let (next, id) = checked(model, |model| model.create_route(site, input, now))?;
+        ModelChange::CreateRoute { site, route } => {
+            let (next, id) = checked(model, |model| model.create_route(site, route, now))?;
             let output = route_view(&next, id)?;
             Ok((next, output))
         }
-        ("routes.reorder", Path::SiteRoutes(site)) => {
-            let request: ReorderRequest = decode(content)?;
-            let (next, ()) = checked(model, |model| {
-                model.reorder_routes(site, &request.order, now)
-            })?;
-            let output = read(&next, "routes.list", resource, &[])?;
+        ModelChange::ReorderRoutes { site, order } => {
+            let (next, ()) = checked(model, |model| model.reorder_routes(site, &order, now))?;
+            let output = routes(&next, site)?;
             Ok((next, output))
         }
-        ("routes.replace" | "routes.delete", Path::Route(id)) => {
+        ModelChange::ReplaceRoute { id, route } => {
             precondition(if_match, &route_view(model, id)?.etag)?;
-            if operation == "routes.delete" {
-                let (next, ()) = checked(model, |model| model.delete_route(id, now))?;
-                return Ok((next, Output::json(&serde_json::json!({}))));
-            }
-            let input: RouteInput = decode(content)?;
-            let (next, ()) = checked(model, |model| model.replace_route(id, input, now))?;
+            let (next, ()) = checked(model, |model| model.replace_route(id, route, now))?;
             let output = route_view(&next, id)?;
             Ok((next, output))
         }
-        ("upstreams.create", Path::Upstreams) => {
-            let input: UpstreamInput = decode(content)?;
-            let (next, id) = checked(model, |model| Ok(model.create_upstream(input, now)))?;
+        ModelChange::DeleteRoute { id } => {
+            precondition(if_match, &route_view(model, id)?.etag)?;
+            let (next, ()) = checked(model, |model| model.delete_route(id, now))?;
+            Ok((next, deleted()))
+        }
+        ModelChange::CreateUpstream { upstream } => {
+            let (next, id) = checked(model, |model| Ok(model.create_upstream(upstream, now)))?;
             let output = upstream_view(&next, id)?;
             Ok((next, output))
         }
-        ("upstreams.replace", Path::Upstream(id)) => {
+        ModelChange::ReplaceUpstream { id, upstream } => {
             precondition(if_match, &upstream_tag(id)?)?;
-            let input: UpstreamInput = decode(content)?;
-            let (next, ()) = checked(model, |model| model.replace_upstream(id, input, now))?;
+            let (next, ()) = checked(model, |model| model.replace_upstream(id, upstream, now))?;
             let output = upstream_view(&next, id)?;
             Ok((next, output))
         }
-        ("upstreams.delete", Path::Upstream(id)) => {
+        ModelChange::DeleteUpstream { id } => {
             precondition(if_match, &upstream_tag(id)?)?;
             let (next, ()) = checked(model, |model| model.delete_upstream(id))?;
-            Ok((next, Output::json(&serde_json::json!({}))))
+            Ok((next, deleted()))
         }
-        ("nodes.add", Path::Nodes(upstream)) => {
-            let input: NodeInput = decode(content)?;
-            let (next, _) = checked(model, |model| model.add_node(upstream, input, now))?;
+        ModelChange::AddNode { upstream, node } => {
+            let (next, _) = checked(model, |model| model.add_node(upstream, node, now))?;
             let output = upstream_view(&next, upstream)?;
             Ok((next, output))
         }
-        ("nodes.replace" | "nodes.delete", Path::Node(upstream, node)) => {
+        ModelChange::ReplaceNode { upstream, id, node } => {
             precondition(if_match, &upstream_tag(upstream)?)?;
-            let (next, ()) = if operation == "nodes.delete" {
-                checked(model, |model| model.delete_node(upstream, node, now))?
-            } else {
-                let input: NodeInput = decode(content)?;
-                checked(model, |model| {
-                    model.replace_node(upstream, node, input, now)
-                })?
-            };
+            let (next, ()) = checked(model, |model| model.replace_node(upstream, id, node, now))?;
             let output = upstream_view(&next, upstream)?;
             Ok((next, output))
         }
-        ("listeners.put", Path::Listener(id)) => {
-            let listener: Listener = decode(content)?;
-            if listener.id != id {
-                return Err(PanelError::invalid_argument(
-                    "the body id must match the path",
-                ));
-            }
-            if let Ok(existing) = named(&model.listeners, id, |item| &item.id, "listener") {
+        ModelChange::DeleteNode { upstream, id } => {
+            precondition(if_match, &upstream_tag(upstream)?)?;
+            let (next, ()) = checked(model, |model| model.delete_node(upstream, id, now))?;
+            let output = upstream_view(&next, upstream)?;
+            Ok((next, output))
+        }
+        ModelChange::PutListener { listener } => {
+            let id = listener.id.clone();
+            if let Ok(existing) = named(&model.listeners, &id, |item| &item.id, "listener") {
                 precondition(if_match, &entity_tag(existing))?;
             }
             let (next, _) = checked(model, |model| Ok(model.put_listener(listener)))?;
-            let listener = named(&next.listeners, id, |item| &item.id, "listener")?.clone();
+            let listener = named(&next.listeners, &id, |item| &item.id, "listener")?.clone();
             let etag = entity_tag(&listener);
             Ok((next, Output::tagged(&listener, etag)))
         }
-        ("listeners.delete", Path::Listener(id)) => {
+        ModelChange::DeleteListener { id } => {
             precondition(
                 if_match,
-                &entity_tag(named(&model.listeners, id, |item| &item.id, "listener")?),
+                &entity_tag(named(&model.listeners, &id, |item| &item.id, "listener")?),
             )?;
-            let (next, ()) = checked(model, |model| model.delete_listener(id))?;
-            Ok((next, Output::json(&serde_json::json!({}))))
+            let (next, ()) = checked(model, |model| model.delete_listener(&id))?;
+            Ok((next, deleted()))
         }
-        ("tls_profiles.put", Path::TlsProfile(id)) => {
-            let profile = TlsProfile::from(decode::<TlsProfileInput>(content)?);
-            if profile.id != id {
-                return Err(PanelError::invalid_argument(
-                    "the body id must match the path",
-                ));
-            }
-            if let Ok(existing) = named(&model.tls_profiles, id, |item| &item.id, "TLS profile") {
+        ModelChange::PutTlsProfile { profile } => {
+            let profile = TlsProfile::from(profile);
+            let id = profile.id.clone();
+            if let Ok(existing) = named(&model.tls_profiles, &id, |item| &item.id, "TLS profile") {
                 precondition(if_match, &entity_tag(existing))?;
             }
             let (next, _) = checked(model, |model| Ok(model.put_tls_profile(profile)))?;
-            let profile = named(&next.tls_profiles, id, |item| &item.id, "TLS profile")?.clone();
+            let profile = named(&next.tls_profiles, &id, |item| &item.id, "TLS profile")?.clone();
             let etag = entity_tag(&profile);
             Ok((next, Output::tagged(&profile, etag)))
         }
-        ("security_policies.put", Path::SecurityPolicy(id)) => {
-            let policy = decode::<SecurityPolicy>(content)?;
-            if policy.id != id {
-                return Err(PanelError::invalid_argument(
-                    "the body id must match the path",
-                ));
-            }
-            if let Ok(existing) = named(&model.security_policies, id, |item| &item.id, POLICY) {
-                precondition(if_match, &entity_tag(existing))?;
-            }
-            let (next, _) = checked(model, |model| Ok(model.put_security_policy(policy)))?;
-            let policy = named(&next.security_policies, id, |item| &item.id, POLICY)?.clone();
-            let etag = entity_tag(&policy);
-            Ok((next, Output::tagged(&policy, etag)))
-        }
-        ("security_policies.delete", Path::SecurityPolicy(id)) => {
-            precondition(
-                if_match,
-                &entity_tag(named(
-                    &model.security_policies,
-                    id,
-                    |item| &item.id,
-                    POLICY,
-                )?),
-            )?;
-            let (next, ()) = checked(model, |model| model.delete_security_policy(id))?;
-            Ok((next, Output::json(&serde_json::json!({}))))
-        }
-        ("tls_profiles.delete", Path::TlsProfile(id)) => {
+        ModelChange::DeleteTlsProfile { id } => {
             precondition(
                 if_match,
                 &entity_tag(named(
                     &model.tls_profiles,
-                    id,
+                    &id,
                     |item| &item.id,
                     "TLS profile",
                 )?),
             )?;
-            let (next, ()) = checked(model, |model| model.delete_tls_profile(id))?;
-            Ok((next, Output::json(&serde_json::json!({}))))
+            let (next, ()) = checked(model, |model| model.delete_tls_profile(&id))?;
+            Ok((next, deleted()))
         }
-        (operation, _) => Err(unsupported(operation, resource)),
+        ModelChange::PutSecurityPolicy { policy } => {
+            let id = policy.id.clone();
+            if let Ok(existing) = named(&model.security_policies, &id, |item| &item.id, POLICY) {
+                precondition(if_match, &entity_tag(existing))?;
+            }
+            let (next, _) = checked(model, |model| Ok(model.put_security_policy(policy)))?;
+            let policy = named(&next.security_policies, &id, |item| &item.id, POLICY)?.clone();
+            let etag = entity_tag(&policy);
+            Ok((next, Output::tagged(&policy, etag)))
+        }
+        ModelChange::DeleteSecurityPolicy { id } => {
+            precondition(
+                if_match,
+                &entity_tag(named(
+                    &model.security_policies,
+                    &id,
+                    |item| &item.id,
+                    POLICY,
+                )?),
+            )?;
+            let (next, ()) = checked(model, |model| model.delete_security_policy(&id))?;
+            Ok((next, deleted()))
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use panel_config_model::{BatchRequest, SiteQuery};
+    use panel_errors::ErrorCode;
+    use serde::de::DeserializeOwned;
     use serde_json::{json, Value};
 
-    fn apply(
-        model: &ConfigModel,
-        operation: &str,
-        resource: &str,
-        body: Value,
-    ) -> (ConfigModel, Value) {
-        let (next, output) = change(
-            model,
-            operation,
-            resource,
-            "",
-            &serde_json::to_vec(&body).unwrap(),
-            Utc::now(),
-        )
-        .unwrap();
+    /// A model input, written as JSON.
+    fn input<T: DeserializeOwned>(value: Value) -> T {
+        serde_json::from_value(value).unwrap()
+    }
+
+    fn apply(model: &ConfigModel, change: ModelChange) -> (ConfigModel, Value) {
+        let (next, output) = super::change(model, change, "", Utc::now()).unwrap();
         (next, serde_json::from_slice(&output.content).unwrap())
     }
 
-    fn get(model: &ConfigModel, operation: &str, resource: &str, parameters: Value) -> Value {
-        let parameters = if parameters.is_null() {
-            Vec::new()
-        } else {
-            serde_json::to_vec(&parameters).unwrap()
-        };
-        serde_json::from_slice(
-            &read(model, operation, resource, &parameters)
-                .unwrap()
-                .content,
-        )
-        .unwrap()
+    fn get(model: &ConfigModel, query: ModelQuery) -> Value {
+        serde_json::from_slice(&read(model, &query).unwrap().content).unwrap()
+    }
+
+    fn uuid(value: &Value) -> Uuid {
+        value.as_str().unwrap().parse().unwrap()
     }
 
     #[test]
@@ -654,102 +475,78 @@ mod tests {
         let model = ConfigModel::default();
         let (model, policy) = apply(
             &model,
-            "security_policies.put",
-            "security-policies/office",
-            json!({"id": "office", "allowed_cidrs": ["10.0.0.0/8"], "allowed_methods": ["GET"]}),
+            ModelChange::PutSecurityPolicy {
+                policy: input(json!({
+                    "id": "office", "allowed_cidrs": ["10.0.0.0/8"], "allowed_methods": ["GET"]
+                })),
+            },
         );
         assert_eq!(policy["allowed_methods"][0], "GET");
         let (model, site) = apply(
             &model,
-            "sites.create",
-            "sites",
-            json!({
-                "name": "intranet",
-                "action": {"type": "respond", "status": 200},
-                "domains": [{"host": "intranet.example"}],
-                "security_policy_id": "office",
-                "routes": [{"priority": 1, "match": {"kind": "prefix", "path": "/hr"},
-                    "action": {"type": "respond", "status": 204}, "security_policy_id": "office"}]
-            }),
+            ModelChange::CreateSite {
+                site: input(json!({
+                    "name": "intranet",
+                    "action": {"type": "respond", "status": 200},
+                    "domains": [{"host": "intranet.example"}],
+                    "security_policy_id": "office",
+                    "routes": [{"priority": 1, "match": {"kind": "prefix", "path": "/hr"},
+                        "action": {"type": "respond", "status": 204}, "security_policy_id": "office"}]
+                })),
+            },
         );
         let site_id = site["id"].as_str().unwrap().to_owned();
-        let list = get(
-            &model,
-            "security_policies.list",
-            "security-policies",
-            Value::Null,
-        );
+        let list = get(&model, ModelQuery::SecurityPolicies);
         assert_eq!(list[0]["used_by"][0], site_id);
         assert!(list[0]["etag"].is_string());
 
-        let current = read(
-            &model,
-            "security_policies.get",
-            "security-policies/office",
-            &[],
-        )
-        .unwrap();
-        let replaced = change(
-            &model,
-            "security_policies.put",
-            "security-policies/office",
-            "\"stale\"",
-            br#"{"id": "office"}"#,
-            Utc::now(),
-        );
+        let office = || ModelQuery::SecurityPolicy {
+            id: "office".into(),
+        };
+        let current = read(&model, &office()).unwrap();
+        let put = |if_match: &str, policy: Value| {
+            super::change(
+                &model,
+                ModelChange::PutSecurityPolicy {
+                    policy: input(policy),
+                },
+                if_match,
+                Utc::now(),
+            )
+        };
+        let replaced = put("\"stale\"", json!({"id": "office"}));
         assert_eq!(
             replaced.unwrap_err().code.as_str(),
-            panel_errors::ErrorCode::PRECONDITION_FAILED
+            ErrorCode::PRECONDITION_FAILED
         );
-        let refused = change(
+        let refused = super::change(
             &model,
-            "security_policies.delete",
-            "security-policies/office",
+            ModelChange::DeleteSecurityPolicy {
+                id: "office".into(),
+            },
             &current.etag,
-            &[],
             Utc::now(),
         );
-        assert_eq!(
-            refused.unwrap_err().code.as_str(),
-            panel_errors::ErrorCode::CONFLICT
-        );
-        let invalid = change(
-            &model,
-            "security_policies.put",
-            "security-policies/office",
+        assert_eq!(refused.unwrap_err().code.as_str(), ErrorCode::CONFLICT);
+        let invalid = put(
             &current.etag,
-            br#"{"id": "office", "rate_limits": [{"key": {"kind": "client_address"}, "requests": 0, "per_seconds": 1}]}"#,
-            Utc::now(),
+            json!({"id": "office", "rate_limits": [{"key": {"kind": "client_address"}, "requests": 0, "per_seconds": 1}]}),
         );
         assert_eq!(
             invalid.unwrap_err().code.as_str(),
-            panel_errors::ErrorCode::VALIDATION_FAILED
+            ErrorCode::VALIDATION_FAILED
         );
-        let mismatched = change(
+        let (model, _) = apply(
             &model,
-            "security_policies.put",
-            "security-policies/office",
-            "",
-            br#"{"id": "other"}"#,
-            Utc::now(),
-        );
-        assert!(mismatched.is_err());
-        let missing = apply(
-            &model,
-            "security_policies.put",
-            "security-policies/open",
-            json!({"id": "open"}),
+            ModelChange::PutSecurityPolicy {
+                policy: input(json!({"id": "open"})),
+            },
         );
         assert_eq!(
-            get(
-                &missing.0,
-                "security_policies.list",
-                "security-policies",
-                Value::Null
-            )
-            .as_array()
-            .unwrap()
-            .len(),
+            get(&model, ModelQuery::SecurityPolicies)
+                .as_array()
+                .unwrap()
+                .len(),
             2
         );
     }
@@ -759,20 +556,22 @@ mod tests {
         let model = ConfigModel::default();
         let (model, upstream) = apply(
             &model,
-            "upstreams.create",
-            "upstreams",
-            json!({"name": "app", "nodes": [{"host": "127.0.0.1", "port": 8080}]}),
+            ModelChange::CreateUpstream {
+                upstream: input(
+                    json!({"name": "app", "nodes": [{"host": "127.0.0.1", "port": 8080}]}),
+                ),
+            },
         );
-        let upstream_id = upstream["id"].as_str().unwrap().to_owned();
+        let upstream_id = uuid(&upstream["id"]);
         let (model, site) = apply(
             &model,
-            "sites.create",
-            "sites",
-            json!({
-                "name": "shop",
-                "action": {"type": "proxy", "upstream_id": upstream_id},
-                "domains": [{"host": "Shop.Example.com"}, {"host": "bücher.example"}]
-            }),
+            ModelChange::CreateSite {
+                site: input(json!({
+                    "name": "shop",
+                    "action": {"type": "proxy", "upstream_id": upstream_id},
+                    "domains": [{"host": "Shop.Example.com"}, {"host": "bücher.example"}]
+                })),
+            },
         );
         assert_eq!(site["status"], "running");
         assert_eq!(site["kind"], "reverse_proxy");
@@ -780,126 +579,118 @@ mod tests {
             site["unicode_hosts"]["xn--bcher-kva.example"],
             "bücher.example"
         );
-        let site_id = site["id"].as_str().unwrap().to_owned();
+        let site_id = uuid(&site["id"]);
         let (model, route) = apply(
             &model,
-            "routes.create",
-            &format!("sites/{site_id}/routes"),
-            json!({"priority": 5, "match": {"kind": "prefix", "path": "/api"}, "action": {"type": "respond", "status": 204}}),
+            ModelChange::CreateRoute {
+                site: site_id,
+                route: input(
+                    json!({"priority": 5, "match": {"kind": "prefix", "path": "/api"}, "action": {"type": "respond", "status": 204}}),
+                ),
+            },
         );
-        assert_eq!(route["site_id"], site_id);
-        let list = get(&model, "sites.list", "sites", json!({"q": "shop"}));
-        assert_eq!(list["total"], 1);
-        let summary = get(&model, "sites.summary", "sites", Value::Null);
-        assert_eq!(summary["reverse_proxy"], 1);
-        let upstream = get(
+        assert_eq!(route["site_id"], site_id.to_string());
+        let list = get(
             &model,
-            "upstreams.get",
-            &format!("upstreams/{upstream_id}"),
-            Value::Null,
+            ModelQuery::Sites {
+                query: SiteQuery {
+                    q: Some("shop".into()),
+                    ..SiteQuery::default()
+                },
+            },
         );
-        assert_eq!(upstream["used_by"][0], site_id);
+        assert_eq!(list["total"], 1);
+        let summary = get(&model, ModelQuery::SiteSummary);
+        assert_eq!(summary["reverse_proxy"], 1);
+        let upstream = get(&model, ModelQuery::Upstream { id: upstream_id });
+        assert_eq!(upstream["used_by"][0], site_id.to_string());
         let checks = get(
             &model,
-            "domains.check",
-            "domains",
-            json!({"hosts": ["SHOP.example.com", "bad host", "new.example"]}),
+            ModelQuery::CheckDomains {
+                hosts: vec![
+                    "SHOP.example.com".into(),
+                    "bad host".into(),
+                    "new.example".into(),
+                ],
+            },
         );
         assert_eq!(checks[0]["owner"]["site_name"], "shop");
         assert!(checks[1]["error"].is_string());
         assert!(checks[2]["owner"].is_null());
-        let error = change(
+        let error = super::change(
             &model,
-            "upstreams.delete",
-            &format!("upstreams/{upstream_id}"),
+            ModelChange::DeleteUpstream { id: upstream_id },
             "",
-            &[],
             Utc::now(),
         )
         .unwrap_err();
-        assert_eq!(error.code.as_str(), panel_errors::ErrorCode::CONFLICT);
+        assert_eq!(error.code.as_str(), ErrorCode::CONFLICT);
     }
 
     #[test]
-    fn stale_entity_tags_and_unknown_operations_are_refused() {
+    fn stale_entity_tags_and_missing_resources_are_refused() {
         let model = ConfigModel::default();
         let (model, site) = apply(
             &model,
-            "sites.create",
-            "sites",
-            json!({"name": "shop", "action": {"type": "respond"}}),
+            ModelChange::CreateSite {
+                site: input(json!({"name": "shop", "action": {"type": "respond"}})),
+            },
         );
-        let resource = format!("sites/{}", site["id"].as_str().unwrap());
-        let error = change(
-            &model,
-            "sites.disable",
-            &resource,
-            "\"stale\"",
-            &[],
-            Utc::now(),
-        )
-        .unwrap_err();
+        let id = uuid(&site["id"]);
+        let disable = |if_match: &str| {
+            super::change(
+                &model,
+                ModelChange::DisableSite { id },
+                if_match,
+                Utc::now(),
+            )
+        };
         assert_eq!(
-            error.code.as_str(),
-            panel_errors::ErrorCode::PRECONDITION_FAILED
+            disable("\"stale\"").unwrap_err().code.as_str(),
+            ErrorCode::PRECONDITION_FAILED
         );
-        let etag = site["etag"].as_str().unwrap();
-        assert!(change(&model, "sites.disable", &resource, etag, &[], Utc::now()).is_ok());
-        assert!(change(&model, "sites.explode", &resource, "", &[], Utc::now()).is_err());
-        assert!(read(&model, "sites.get", "sites/not-an-id", &[]).is_err());
+        assert!(disable(site["etag"].as_str().unwrap()).is_ok());
         assert_eq!(
-            read(&model, "sites.get", "nowhere", &[])
+            read(&model, &ModelQuery::Site { id: Uuid::now_v7() })
                 .unwrap_err()
                 .code
                 .as_str(),
-            panel_errors::ErrorCode::NOT_FOUND
+            ErrorCode::NOT_FOUND
         );
     }
 
     #[test]
     fn batches_apply_entirely_or_not_at_all() {
         let model = ConfigModel::default();
-        let (model, first) = apply(
-            &model,
-            "sites.create",
-            "sites",
-            json!({"name": "a", "action": {"type": "respond"}}),
-        );
-        let (model, second) = apply(
-            &model,
-            "sites.create",
-            "sites",
-            json!({"name": "b", "action": {"type": "respond"}}),
-        );
-        let ids = [first["id"].clone(), second["id"].clone()];
-        let (model, views) = apply(
-            &model,
-            "sites.batch",
-            "sites",
-            json!({"action": "disable", "ids": ids}),
-        );
+        let create = |model: &ConfigModel, name: &str| {
+            apply(
+                model,
+                ModelChange::CreateSite {
+                    site: input(json!({"name": name, "action": {"type": "respond"}})),
+                },
+            )
+        };
+        let (model, first) = create(&model, "a");
+        let (model, second) = create(&model, "b");
+        let ids = [uuid(&first["id"]), uuid(&second["id"])];
+        let batch = |action: &str, ids: &[Uuid]| ModelChange::BatchSites {
+            batch: input::<BatchRequest>(json!({"action": action, "ids": ids})),
+        };
+        let (model, views) = apply(&model, batch("disable", &ids));
         assert!(views
             .as_array()
             .unwrap()
             .iter()
             .all(|view| view["status"] == "stopped"));
-        let error = change(
+        let error = super::change(
             &model,
-            "sites.batch",
-            "sites",
+            batch("enable", &[ids[0], Uuid::now_v7()]),
             "",
-            &serde_json::to_vec(&json!({"action": "enable", "ids": [ids[0], Uuid::now_v7()]}))
-                .unwrap(),
             Utc::now(),
         )
         .unwrap_err();
-        assert_eq!(error.code.as_str(), panel_errors::ErrorCode::NOT_FOUND);
-        let unchanged = get(
-            &model,
-            "sites.get",
-            &format!("sites/{}", ids[0].as_str().unwrap()),
-            Value::Null,
-        );
+        assert_eq!(error.code.as_str(), ErrorCode::NOT_FOUND);
+        let unchanged = get(&model, ModelQuery::Site { id: ids[0] });
         assert_eq!(unchanged["status"], "stopped");
     }
 }

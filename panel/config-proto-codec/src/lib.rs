@@ -5,11 +5,11 @@
 
 use gateway_proto_codec::{decode_hash, encode_hash};
 use panel_application::{
-    AbortOutcome, ActivatedDeployment, ApplyOutcome, CommandContext, ConfigDocument,
-    DeploymentOutcome, DraftInfo, GatewayStatus, IdempotencyKey, IdempotencyLookup,
-    IdempotencyRecord, PreparedDeployment, RequestDeadline, RequestId, RequestScope, SiteAccess,
-    SiteScope, TraceContext,
+    AbortOutcome, ActivatedDeployment, CommandContext, ConfigDocument, DeploymentOutcome,
+    GatewayStatus, IdempotencyKey, IdempotencyLookup, IdempotencyRecord, PreparedDeployment,
+    RequestDeadline, RequestId, RequestScope, SiteAccess, SiteScope, TraceContext,
 };
+use panel_config_api::{ApplyOutcome, ConfigurationCommand, ConfigurationQuery, DraftInfo};
 use panel_contracts::{
     common::v1 as common,
     config::v1::{self as wire, activation_receipt::Outcome},
@@ -168,6 +168,26 @@ pub fn decode_draft(value: Option<wire::Draft>) -> Result<DraftInfo> {
     })
 }
 
+pub fn encode_query(query: &ConfigurationQuery) -> Vec<u8> {
+    serde_json::to_vec(query).expect("configuration queries serialize")
+}
+
+pub fn decode_query(value: &[u8]) -> Result<ConfigurationQuery> {
+    serde_json::from_slice(value).map_err(|error| {
+        PanelError::invalid_argument(format!("the configuration query cannot be read: {error}"))
+    })
+}
+
+pub fn encode_change(command: &ConfigurationCommand) -> Vec<u8> {
+    serde_json::to_vec(command).expect("configuration commands serialize")
+}
+
+pub fn decode_change(value: &[u8]) -> Result<ConfigurationCommand> {
+    serde_json::from_slice(value).map_err(|error| {
+        PanelError::invalid_argument(format!("the configuration command cannot be read: {error}"))
+    })
+}
+
 /// How an apply ended, as the response to it.
 pub fn encode_apply_outcome(outcome: &ApplyOutcome) -> wire::ApplyResponse {
     match outcome {
@@ -200,7 +220,7 @@ pub fn encode_apply_outcome(outcome: &ApplyOutcome) -> wire::ApplyResponse {
         },
         ApplyOutcome::AwaitingApproval { draft, request, .. } => wire::ApplyResponse {
             draft: Some(encode_draft(draft)),
-            approval: request.clone(),
+            approval: serde_json::to_vec(request).expect("approval requests serialize"),
             ..wire::ApplyResponse::default()
         },
         _ => wire::ApplyResponse {
@@ -217,7 +237,10 @@ pub fn decode_apply_outcome(response: wire::ApplyResponse) -> Result<ApplyOutcom
     decode_error(response.error)?;
     let draft = decode_draft(response.draft)?;
     if !response.approval.is_empty() {
-        return Ok(ApplyOutcome::awaiting_approval(draft, response.approval));
+        let request = serde_json::from_slice(&response.approval).map_err(|error| {
+            PanelError::internal(format!("the approval request cannot be read: {error}"))
+        })?;
+        return Ok(ApplyOutcome::awaiting_approval(draft, request));
     }
     let revision = (response.revision != 0).then_some(response.revision);
     Ok(match (response.deployment, revision) {

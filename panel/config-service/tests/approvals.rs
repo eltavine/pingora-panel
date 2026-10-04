@@ -4,9 +4,10 @@
 
 use config_grpc_client::{ConfigClientConfig, ConfigPublicationClient};
 use gateway_grpc::GatewayGrpcService;
-use panel_application::{
-    ApplyOutcome, ApplyRequest, ApprovalBypass, CommandContext, ConfigurationChange,
-    ConfigurationPort, ConfigurationRead, IdempotencyKey, RequestDeadline, RequestId, RequestScope,
+use panel_application::{CommandContext, IdempotencyKey, RequestDeadline, RequestId, RequestScope};
+use panel_config_api::{
+    ApplyOutcome, ApplyRequest, ApprovalBypass, ApprovalChange, ApprovalQuery, ConfigurationChange,
+    ConfigurationCommand, ConfigurationPort, ModelChange,
 };
 use panel_control_runtime::{ProcessSettings, RunningProcess, NATS_URL_ENV};
 use panel_engine::{EngineCapability, FakeGatewayEngine};
@@ -14,6 +15,7 @@ use panel_errors::ErrorCode;
 use panel_health::HealthStatus;
 use panel_jetstream::testing::{TestBroker, NATS_URL_ENV as TEST_NATS_URL_ENV};
 use panel_service::Environment;
+use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
@@ -27,6 +29,7 @@ use std::{
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::Server;
+use uuid::Uuid;
 
 struct Harness {
     client: ConfigPublicationClient,
@@ -122,13 +125,13 @@ fn by(actor: &str) -> CommandContext {
     .unwrap()
 }
 
-fn change(operation: &str, resource: &str, body: Value) -> ConfigurationChange {
-    ConfigurationChange {
-        operation: operation.into(),
-        resource: resource.into(),
-        if_match: None,
-        content: serde_json::to_vec(&body).unwrap(),
-    }
+/// A model input, written as JSON.
+fn input<T: DeserializeOwned>(value: Value) -> T {
+    serde_json::from_value(value).unwrap()
+}
+
+fn id(value: &Value) -> Uuid {
+    value.as_str().unwrap().parse().unwrap()
 }
 
 fn json(content: &[u8]) -> Value {
@@ -136,20 +139,22 @@ fn json(content: &[u8]) -> Value {
 }
 
 impl Harness {
-    async fn change(&self, actor: &str, operation: &str, resource: &str, body: Value) -> Value {
+    async fn change(&self, actor: &str, command: impl Into<ConfigurationCommand>) -> Value {
+        let command = command.into();
+        let operation = command.operation();
         json(
             &self
                 .client
-                .change(by(actor), change(operation, resource, body))
+                .change(by(actor), ConfigurationChange::new(command))
                 .await
-                .unwrap_or_else(|error| panic!("{operation} {resource}: {error:?}"))
+                .unwrap_or_else(|error| panic!("{operation}: {error:?}"))
                 .content,
         )
     }
 
-    async fn refused(&self, actor: &str, operation: &str, resource: &str) -> String {
+    async fn refused(&self, actor: &str, command: impl Into<ConfigurationCommand>) -> String {
         self.client
-            .change(by(actor), change(operation, resource, json!({})))
+            .change(by(actor), ConfigurationChange::new(command))
             .await
             .unwrap_err()
             .code
@@ -163,22 +168,20 @@ impl Harness {
 
     async fn awaiting(&self, actor: &str) -> Value {
         match self.apply(actor, ApplyRequest::new(0)).await {
-            ApplyOutcome::AwaitingApproval { request, .. } => json(&request),
+            ApplyOutcome::AwaitingApproval { request, .. } => {
+                serde_json::to_value(request).unwrap()
+            }
             other => panic!("expected to wait for approval, got {other:?}"),
         }
     }
 
-    async fn get(&self, id: &str) -> Value {
+    async fn get(&self, id: Uuid) -> Value {
         json(
             &self
                 .client
                 .read(
                     RequestScope::new(RequestId::new("read").unwrap()),
-                    ConfigurationRead {
-                        operation: "approvals.get".into(),
-                        resource: format!("approvals/{id}"),
-                        parameters: Vec::new(),
-                    },
+                    ApprovalQuery::Request { id }.into(),
                 )
                 .await
                 .unwrap()
@@ -205,9 +208,12 @@ async fn covered_changes_wait_for_someone_else_to_approve_them() {
     let put = harness
         .change(
             "admin",
-            "approval_policies.put",
-            "approval-policies/production",
-            json!({"description": "Production needs a second person", "site_tags": ["production"]}),
+            ApprovalChange::PutPolicy {
+                id: "production".into(),
+                policy: input(
+                    json!({"description": "Production needs a second person", "site_tags": ["production"]}),
+                ),
+            },
         )
         .await;
     assert_eq!(put["created"], true);
@@ -216,17 +222,19 @@ async fn covered_changes_wait_for_someone_else_to_approve_them() {
     harness
         .change(
             "alice",
-            "listeners.put",
-            "listeners/http",
-            json!({"id": "http", "address": "0.0.0.0:80"}),
+            ModelChange::PutListener {
+                listener: input(json!({"id": "http", "address": "0.0.0.0:80"})),
+            },
         )
         .await;
     harness
         .change(
             "alice",
-            "sites.create",
-            "sites",
-            json!({"name": "intranet", "action": {"type": "respond"}, "domains": [{"host": "intranet.example"}]}),
+            ModelChange::CreateSite {
+                site: input(
+                    json!({"name": "intranet", "action": {"type": "respond"}, "domains": [{"host": "intranet.example"}]}),
+                ),
+            },
         )
         .await;
     let outcome = harness.apply("alice", ApplyRequest::new(0)).await;
@@ -238,14 +246,16 @@ async fn covered_changes_wait_for_someone_else_to_approve_them() {
     let shop = harness
         .change(
             "alice",
-            "sites.create",
-            "sites",
-            json!({"name": "shop", "action": {"type": "respond"}, "tags": ["production"], "domains": [{"host": "shop.example"}]}),
+            ModelChange::CreateSite {
+                site: input(
+                    json!({"name": "shop", "action": {"type": "respond"}, "tags": ["production"], "domains": [{"host": "shop.example"}]}),
+                ),
+            },
         )
         .await;
-    let shop = format!("sites/{}", shop["id"].as_str().unwrap());
+    let shop = id(&shop["id"]);
     let request = harness.awaiting("alice").await;
-    let id = request["id"].as_str().unwrap().to_owned();
+    let request_id = id(&request["id"]);
     assert_eq!(request["state"], "pending");
     assert_eq!(request["requested_by"], "alice");
     assert_eq!(
@@ -254,36 +264,29 @@ async fn covered_changes_wait_for_someone_else_to_approve_them() {
     );
     assert_eq!(
         request["changes"],
-        json!([{"resource": shop, "change": "added"}])
+        json!([{"resource": format!("sites/{shop}"), "change": "added"}])
     );
     assert_eq!(
         harness.awaiting("alice").await["id"],
-        id,
+        request["id"],
         "the same content waits on one request"
     );
 
-    let approval = format!("approvals/{id}");
+    let approve = || ApprovalChange::Approve { id: request_id };
     assert_eq!(
-        harness
-            .refused("alice", "approvals.approve", &approval)
-            .await,
+        harness.refused("alice", approve()).await,
         ErrorCode::PERMISSION_DENIED,
         "nobody approves their own request"
     );
-    let approved = harness
-        .change("bob", "approvals.approve", &approval, json!({}))
-        .await;
+    let approved = harness.change("bob", approve()).await;
     assert_eq!(approved["state"], "approved");
     assert_eq!(approved["approvals"][0]["approver"], "bob");
-    assert_eq!(
-        harness.refused("bob", "approvals.approve", &approval).await,
-        ErrorCode::CONFLICT
-    );
+    assert_eq!(harness.refused("bob", approve()).await, ErrorCode::CONFLICT);
     let outcome = harness.apply("alice", ApplyRequest::new(0)).await;
     let ApplyOutcome::Applied { revision, .. } = outcome else {
         panic!("approved content applies, got {outcome:?}");
     };
-    let done = harness.get(&id).await;
+    let done = harness.get(request_id).await;
     assert_eq!(
         (done["state"].clone(), done["revision"].clone()),
         (json!("applied"), json!(revision))
@@ -291,24 +294,19 @@ async fn covered_changes_wait_for_someone_else_to_approve_them() {
 
     // Editing the policy outdates approvals given under it.
     harness
-        .change("alice", "sites.disable", &shop, Value::Null)
+        .change("alice", ModelChange::DisableSite { id: shop })
         .await;
-    let second = harness.awaiting("alice").await;
-    let second_id = second["id"].as_str().unwrap().to_owned();
+    let second_id = id(&harness.awaiting("alice").await["id"]);
     harness
-        .change(
-            "bob",
-            "approvals.approve",
-            &format!("approvals/{second_id}"),
-            json!({}),
-        )
+        .change("bob", ApprovalChange::Approve { id: second_id })
         .await;
     let edited = harness
         .change(
             "admin",
-            "approval_policies.put",
-            "approval-policies/production",
-            json!({"site_tags": ["production"], "valid_minutes": 30}),
+            ApprovalChange::PutPolicy {
+                id: "production".into(),
+                policy: input(json!({"site_tags": ["production"], "valid_minutes": 30})),
+            },
         )
         .await;
     assert_eq!(
@@ -318,40 +316,38 @@ async fn covered_changes_wait_for_someone_else_to_approve_them() {
         ),
         (json!(false), json!(2))
     );
-    let third = harness.awaiting("alice").await;
-    let third_id = third["id"].as_str().unwrap().to_owned();
+    let third_id = id(&harness.awaiting("alice").await["id"]);
     assert_ne!(third_id, second_id);
-    assert_eq!(harness.get(&second_id).await["state"], "outdated");
+    assert_eq!(harness.get(second_id).await["state"], "outdated");
 
     // Approvals can be revoked, and only the requester withdraws.
-    let third_path = format!("approvals/{third_id}");
     harness
-        .change("bob", "approvals.approve", &third_path, json!({}))
+        .change("bob", ApprovalChange::Approve { id: third_id })
         .await;
     let revoked = harness
-        .change("bob", "approvals.revoke", &third_path, json!({}))
+        .change("bob", ApprovalChange::Revoke { id: third_id })
         .await;
     assert_eq!(revoked["state"], "pending");
     assert!(revoked["approvals"][0]["revoked_at"].is_string());
     assert_eq!(
         harness
-            .refused("carol", "approvals.withdraw", &third_path)
+            .refused("carol", ApprovalChange::Withdraw { id: third_id })
             .await,
         ErrorCode::PERMISSION_DENIED
     );
     let withdrawn = harness
-        .change("alice", "approvals.withdraw", &third_path, json!({}))
+        .change("alice", ApprovalChange::Withdraw { id: third_id })
         .await;
     assert_eq!(withdrawn["state"], "withdrawn");
 
-    let fourth = harness.awaiting("alice").await;
-    let fourth_path = format!("approvals/{}", fourth["id"].as_str().unwrap());
+    let fourth_id = id(&harness.awaiting("alice").await["id"]);
     let rejected = harness
         .change(
             "bob",
-            "approvals.reject",
-            &fourth_path,
-            json!({"reason": "not during the sale"}),
+            ApprovalChange::Reject {
+                id: fourth_id,
+                reason: Some("not during the sale".into()),
+            },
         )
         .await;
     assert_eq!(
@@ -398,11 +394,11 @@ async fn covered_changes_wait_for_someone_else_to_approve_them() {
             .client
             .read(
                 RequestScope::new(RequestId::new("list").unwrap()),
-                ConfigurationRead {
-                    operation: "approvals.list".into(),
-                    resource: "approvals".into(),
-                    parameters: serde_json::to_vec(&json!({"limit": 2})).unwrap(),
-                },
+                ApprovalQuery::Requests {
+                    before: None,
+                    limit: Some(2),
+                }
+                .into(),
             )
             .await
             .unwrap()

@@ -1,81 +1,51 @@
 //! Approval policies, decisions on requests, and the gate an apply passes
 //! (ADR 0019).
 
-use super::{decode, json_output, ConfigurationService};
+use super::{json_output, ConfigurationService};
 use crate::{
     approval_rules::{assess, Bypass, Gate, Opening},
     language, operations,
     store::{ChangeOutput, DraftState},
 };
 use chrono::{DateTime, Utc};
-use panel_application::{ApplyRequest, CommandContext, ConfigurationChange};
-use panel_config_model::{
-    ApprovalPolicy, ApprovalPolicyInput, ApprovalRequest, ApprovalRequestList,
-};
-use panel_errors::{PanelError, Result};
-use serde::Deserialize;
-use serde_json::json;
+use panel_application::{CommandContext, ContentHash};
+use panel_config_api::{ApplyRequest, ApprovalChange, ApprovalQuery};
+use panel_config_model::{ApprovalPolicy, ApprovalRequest, ApprovalRequestList};
+use panel_errors::Result;
+use serde_json::{json, Value};
 use uuid::Uuid;
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ApprovalPage {
-    before: Option<DateTime<Utc>>,
-    limit: Option<u32>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ReasonBody {
-    reason: Option<String>,
-}
 
 const DEFAULT_APPROVAL_PAGE: u32 = 50;
 const MAX_APPROVAL_PAGE: u32 = 200;
 
-fn approval_id(resource: &str) -> Result<Uuid> {
-    resource
-        .strip_prefix("approvals/")
-        .and_then(|id| Uuid::parse_str(id).ok())
-        .ok_or_else(|| PanelError::not_found(format!("no resource {resource:?}")))
-}
-
-fn policy_id(resource: &str) -> Result<&str> {
-    resource
-        .strip_prefix("approval-policies/")
-        .filter(|id| !id.is_empty())
-        .ok_or_else(|| PanelError::not_found(format!("no resource {resource:?}")))
+/// A request as of `now`, against the draft's content.
+fn current(mut request: ApprovalRequest, now: DateTime<Utc>, draft_hash: &ContentHash) -> Value {
+    request.state = request.state_at(now, draft_hash.as_str());
+    serde_json::to_value(&request).expect("API values serialize")
 }
 
 impl ConfigurationService {
-    /// Reads of approval policies and requests; `None` for every other
-    /// operation. Requests report their state as of now.
+    /// Reads of approval policies and requests. Requests report their state
+    /// as of now.
     pub(super) async fn read_approvals(
         &self,
         draft: &DraftState,
-        operation: &str,
-        resource: &str,
-        parameters: &[u8],
-    ) -> Result<Option<operations::Output>> {
+        query: ApprovalQuery,
+    ) -> Result<operations::Output> {
         let now = Utc::now();
         let draft_hash = language::content_hash(&draft.sources);
-        let output = match (operation, resource) {
-            ("approval_policies.list", "approval-policies") => {
+        Ok(match query {
+            ApprovalQuery::Policies => {
                 json_output(&self.approvals.policies().await?, String::new())
             }
-            ("approval_policies.get", resource) if resource.starts_with("approval-policies/") => {
-                json_output(
-                    &self.approvals.policy(policy_id(resource)?).await?,
-                    String::new(),
-                )
+            ApprovalQuery::Policy { id } => {
+                json_output(&self.approvals.policy(&id).await?, String::new())
             }
-            ("approvals.list", "approvals") => {
-                let page: ApprovalPage = decode(parameters)?;
-                let limit = page
-                    .limit
+            ApprovalQuery::Requests { before, limit } => {
+                let limit = limit
                     .unwrap_or(DEFAULT_APPROVAL_PAGE)
                     .clamp(1, MAX_APPROVAL_PAGE);
-                let mut items = self.approvals.requests(page.before, limit).await?;
+                let mut items = self.approvals.requests(before, limit).await?;
                 for item in &mut items {
                     item.state = item.state_at(now, draft_hash.as_str());
                 }
@@ -84,76 +54,80 @@ impl ConfigurationService {
                     .flatten();
                 json_output(&ApprovalRequestList { items, next_before }, String::new())
             }
-            ("approvals.get", resource) if resource.starts_with("approvals/") => {
-                let mut item = self.approvals.request(approval_id(resource)?).await?;
-                item.state = item.state_at(now, draft_hash.as_str());
-                json_output(&item, String::new())
-            }
-            _ => return Ok(None),
-        };
-        Ok(Some(output))
+            ApprovalQuery::Request { id } => json_output(
+                &current(self.approvals.request(id).await?, now, &draft_hash),
+                String::new(),
+            ),
+        })
     }
 
-    /// Changes to approval policies and decisions on requests; `None` for
-    /// every other operation.
+    /// The time and the draft content a decision on a request is made against.
+    async fn decision_basis(&self) -> Result<(DateTime<Utc>, ContentHash)> {
+        let draft = self.drafts.load().await?;
+        Ok((Utc::now(), language::content_hash(&draft.sources)))
+    }
+
+    /// Changes to approval policies and decisions on requests.
     pub(super) async fn change_approvals(
         &self,
         context: &CommandContext,
-        request: &ConfigurationChange,
-    ) -> Result<Option<ChangeOutput>> {
+        change: ApprovalChange,
+    ) -> Result<ChangeOutput> {
         let scope = context.scope();
         let actor = context.actor();
-        let resource = request.resource.as_str();
-        let value = match request.operation.as_str() {
-            "approval_policies.put" => {
-                let input: ApprovalPolicyInput = decode(&request.content)?;
+        let value = match change {
+            ApprovalChange::PutPolicy { id, policy } => {
                 let (policy, created) = self
                     .approvals
-                    .put_policy(policy_id(resource)?, input, &scope, actor)
+                    .put_policy(&id, policy, &scope, actor)
                     .await?;
                 json!({ "policy": policy, "created": created })
             }
-            "approval_policies.delete" => {
-                self.approvals
-                    .delete_policy(policy_id(resource)?, &scope, actor)
-                    .await?;
+            ApprovalChange::DeletePolicy { id } => {
+                self.approvals.delete_policy(&id, &scope, actor).await?;
                 json!({})
             }
-            operation @ ("approvals.approve" | "approvals.reject" | "approvals.withdraw"
-            | "approvals.revoke") => {
-                let id = approval_id(resource)?;
-                let now = Utc::now();
-                let draft = self.drafts.load().await?;
-                let draft_hash = language::content_hash(&draft.sources);
-                let mut decided = match operation {
-                    "approvals.approve" => {
-                        self.approvals
-                            .approve(id, actor, draft_hash.as_str(), now, &scope)
-                            .await?
-                    }
-                    "approvals.reject" => {
-                        let body: ReasonBody = decode(&request.content)?;
-                        let reason = body
-                            .reason
-                            .as_deref()
-                            .map(str::trim)
-                            .filter(|reason| !reason.is_empty());
-                        self.approvals
-                            .reject(id, actor, reason, draft_hash.as_str(), now, &scope)
-                            .await?
-                    }
-                    "approvals.withdraw" => self.approvals.withdraw(id, actor, now, &scope).await?,
-                    _ => self.approvals.revoke(id, actor, now, &scope).await?,
-                };
-                decided.state = decided.state_at(now, draft_hash.as_str());
-                serde_json::to_value(&decided).expect("API values serialize")
+            ApprovalChange::Approve { id } => {
+                let (now, hash) = self.decision_basis().await?;
+                let request = self
+                    .approvals
+                    .approve(id, actor, hash.as_str(), now, &scope)
+                    .await?;
+                current(request, now, &hash)
             }
-            _ => return Ok(None),
+            ApprovalChange::Reject { id, reason } => {
+                let (now, hash) = self.decision_basis().await?;
+                let reason = reason
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|reason| !reason.is_empty());
+                let request = self
+                    .approvals
+                    .reject(id, actor, reason, hash.as_str(), now, &scope)
+                    .await?;
+                current(request, now, &hash)
+            }
+            ApprovalChange::Withdraw { id } => {
+                let (now, hash) = self.decision_basis().await?;
+                current(
+                    self.approvals.withdraw(id, actor, now, &scope).await?,
+                    now,
+                    &hash,
+                )
+            }
+            ApprovalChange::Revoke { id } => {
+                let (now, hash) = self.decision_basis().await?;
+                current(
+                    self.approvals.revoke(id, actor, now, &scope).await?,
+                    now,
+                    &hash,
+                )
+            }
         };
-        Ok(Some(ChangeOutput {
+        Ok(ChangeOutput {
             content: serde_json::to_vec(&value).expect("API values serialize"),
             etag: String::new(),
-        }))
+        })
     }
 
     /// Whether policies let the draft through: no policy covers it, enough

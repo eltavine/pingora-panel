@@ -6,9 +6,8 @@
 //! status codes are left to the transport.
 
 use config_proto_codec as codec;
-use panel_application::{
+use panel_config_api::{
     ApplyRequest, ApprovalBypass, ConfigurationChange, ConfigurationOutput, ConfigurationPort,
-    ConfigurationRead,
 };
 use panel_contracts::config::v1::{self as wire, configuration_server::Configuration};
 use panel_errors::Result;
@@ -45,12 +44,8 @@ impl Configuration for ConfigurationTransport {
         let request = request.into_inner();
         let result: Result<_> = async {
             let scope = codec::decode_scope(request.context, trace)?;
-            let read = ConfigurationRead {
-                operation: request.operation,
-                resource: request.resource,
-                parameters: request.parameters,
-            };
-            self.port.read(scope, read).await
+            let query = codec::decode_query(&request.query)?;
+            self.port.read(scope, query).await
         }
         .await;
         Ok(Response::new(match result.map(encoded) {
@@ -76,10 +71,8 @@ impl Configuration for ConfigurationTransport {
         let result: Result<_> = async {
             let context = codec::decode_command(request.context, trace)?;
             let change = ConfigurationChange {
-                operation: request.operation,
-                resource: request.resource,
+                command: codec::decode_change(&request.command)?,
                 if_match: Some(request.if_match).filter(|tag| !tag.is_empty()),
-                content: request.content,
             };
             self.port.change(context, change).await
         }

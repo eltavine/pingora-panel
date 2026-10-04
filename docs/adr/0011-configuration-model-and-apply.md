@@ -25,11 +25,20 @@ kinds should not force new RPCs or wire changes in every layer.
   changes. Sites with errors, no enabled domain or no enabled upstream node
   report as `abnormal`, so problems stay visible instead of failing apply
   late.
-- **Named operations.** The gRPC service has three methods — `Read`,
-  `Change` and `Apply` — over a closed set of operation names such as
-  `sites.create` or `routes.reorder`, a resource path and JSON content.
-  Adding a resource adds operation names, not RPCs, and the names are what
-  permissions and audit records refer to.
+- **Typed operations.** The gRPC service has three methods — `Read`,
+  `Change` and `Apply` — over a closed set of operations that
+  `panel-config-api` declares as enums, a variant for each read or change
+  with its typed inputs: the REST API, the gRPC adapters and the
+  configuration service share them, and each side matches them
+  exhaustively, so an operation one side does not handle fails to compile.
+  On the wire an operation travels as its JSON encoding, under the name
+  audit records and change receipts know it by, such as `sites.create` or
+  `routes.reorder`. Adding a resource adds operations, not RPCs.
+- **Layers.** The configuration service's use cases implement the same
+  port its gRPC client does; a thin adapter serves that port over gRPC.
+  The draft, revisions and approvals are ports the use cases hold, SQLite
+  being one implementation, and approval rules are pure functions every
+  store applies within its own transaction.
 - **Concurrency and retries.** Each resource has an entity tag. Replacing or
   deleting requires `If-Match` (428 without it, 412 when stale, RFC 9110
   §13.1.1 and RFC 6585). Every change carries an idempotency key; its

@@ -1,5 +1,7 @@
-use crate::{ActivatedDeployment, CommandContext, RequestScope};
+use crate::{ConfigurationCommand, ConfigurationQuery};
 use async_trait::async_trait;
+use panel_application::{ActivatedDeployment, CommandContext, RequestScope};
+use panel_config_model::ApprovalRequest;
 use panel_errors::{Result, ValidationReport};
 use std::time::SystemTime;
 
@@ -20,22 +22,26 @@ impl DraftInfo {
     }
 }
 
-/// A named read of the configuration; `parameters` is a JSON object.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ConfigurationRead {
-    pub operation: String,
-    pub resource: String,
-    pub parameters: Vec<u8>,
+/// A change, and the entity tags its target must still match (RFC 9110
+/// §13.1.1).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ConfigurationChange {
+    pub command: ConfigurationCommand,
+    pub if_match: Option<String>,
 }
 
-/// A named change; `content` is the JSON body.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ConfigurationChange {
-    pub operation: String,
-    pub resource: String,
-    /// Entity tags the target must still match (RFC 9110 §13.1.1).
-    pub if_match: Option<String>,
-    pub content: Vec<u8>,
+impl ConfigurationChange {
+    pub fn new(command: impl Into<ConfigurationCommand>) -> Self {
+        Self {
+            command: command.into(),
+            if_match: None,
+        }
+    }
+
+    pub fn if_match(mut self, tags: impl Into<String>) -> Self {
+        self.if_match = Some(tags.into());
+        self
+    }
 }
 
 /// A JSON result with the draft state it was produced from.
@@ -127,10 +133,12 @@ pub enum ApplyOutcome {
         draft: DraftInfo,
         report: ValidationReport,
     },
-    /// Policies ask for approvals first; nothing was published. `request`
-    /// is the approval request as JSON.
+    /// Policies ask for approvals first; nothing was published.
     #[non_exhaustive]
-    AwaitingApproval { draft: DraftInfo, request: Vec<u8> },
+    AwaitingApproval {
+        draft: DraftInfo,
+        request: Box<ApprovalRequest>,
+    },
 }
 
 impl ApplyOutcome {
@@ -154,18 +162,22 @@ impl ApplyOutcome {
         Self::Checked { draft, report }
     }
 
-    pub fn awaiting_approval(draft: DraftInfo, request: Vec<u8>) -> Self {
-        Self::AwaitingApproval { draft, request }
+    pub fn awaiting_approval(draft: DraftInfo, request: ApprovalRequest) -> Self {
+        Self::AwaitingApproval {
+            draft,
+            request: Box::new(request),
+        }
     }
 }
 
 /// The configuration API: reads and changes of the draft and applying it.
+/// Results are JSON, as the HTTP API serves them.
 #[async_trait]
 pub trait ConfigurationPort: Send + Sync {
     async fn read(
         &self,
         scope: RequestScope,
-        read: ConfigurationRead,
+        query: ConfigurationQuery,
     ) -> Result<ConfigurationOutput>;
 
     async fn change(

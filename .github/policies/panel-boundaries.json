@@ -51,6 +51,7 @@
         "config-proto-codec",
         "gateway-proto-codec",
         "panel-application",
+        "panel-config-api",
         "panel-contracts",
         "panel-errors",
         "panel-service"
@@ -61,6 +62,7 @@
       "allowed_workspace_dependencies": [
         "gateway-proto-codec",
         "panel-application",
+        "panel-config-api",
         "panel-contracts",
         "panel-domain",
         "panel-errors"
@@ -75,6 +77,7 @@
         "gateway-grpc-client",
         "gateway-proto-codec",
         "panel-application",
+        "panel-config-api",
         "panel-config-dsl",
         "panel-config-json",
         "panel-config-model",
@@ -222,6 +225,7 @@
       "allowed_workspace_dependencies": [
         "panel-application",
         "panel-certificates",
+        "panel-config-api",
         "panel-config-dsl",
         "panel-config-model",
         "panel-domain",
@@ -328,6 +332,15 @@
         "panel-errors",
         "panel-ir",
         "panel-schedule"
+      ]
+    },
+    "panel-config-api": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-application",
+        "panel-config-model",
+        "panel-domain",
+        "panel-errors"
       ]
     },
     "panel-config-state-codec": {
