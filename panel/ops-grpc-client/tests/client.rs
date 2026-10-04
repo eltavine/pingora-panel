@@ -2,9 +2,9 @@
 
 use ops_grpc_client::OpsAgentClient;
 use panel_application::{
-    AgentCapability, CommandContext, ContainerAction, ContainerState, ContainersPort,
-    DirectoryKind, GatewayServiceAction, HostAgentPort, IdempotencyKey, RequestDeadline, RequestId,
-    RequestScope,
+    AgentCapability, CommandContext, ContainerAction, ContainerLogQuery, ContainerLogStart,
+    ContainerLogStream, ContainerState, ContainersPort, DirectoryKind, GatewayServiceAction,
+    HostAgentPort, IdempotencyKey, RequestDeadline, RequestId, RequestScope,
 };
 use panel_contracts::{
     common::v1 as common,
@@ -261,18 +261,62 @@ impl Containers for FakeContainers {
 
     async fn logs(
         &self,
-        _: Request<wire::ContainersLogsRequest>,
+        request: Request<wire::ContainersLogsRequest>,
     ) -> Result<Response<wire::ContainersLogsResponse>, Status> {
-        Err(Status::unimplemented("logs"))
+        let request = request.into_inner();
+        assert_eq!(
+            (request.container.as_str(), request.lines),
+            ("shop-web-1", 2)
+        );
+        assert_eq!(request.since.unwrap().seconds, 1_800_000_000);
+        Ok(Response::new(wire::ContainersLogsResponse {
+            observed_at: Some(at(10).into()),
+            lines: vec![
+                line(1, wire::ContainerLogStream::Stdout, "GET / 200"),
+                line(2, wire::ContainerLogStream::Stderr, "upstream timed out"),
+            ],
+            truncated: true,
+            error: None,
+        }))
     }
 
-    type FollowLogsStream = tokio_stream::Empty<Result<wire::ContainersFollowLogsResponse, Status>>;
+    type FollowLogsStream =
+        tokio_stream::Iter<std::vec::IntoIter<Result<wire::ContainersFollowLogsResponse, Status>>>;
 
     async fn follow_logs(
         &self,
-        _: Request<wire::ContainersFollowLogsRequest>,
+        request: Request<wire::ContainersFollowLogsRequest>,
     ) -> Result<Response<Self::FollowLogsStream>, Status> {
-        Err(Status::unimplemented("logs"))
+        let request = request.into_inner();
+        assert_eq!(request.lines, 0, "a resumed follow names no lines");
+        assert_eq!(request.after.unwrap().seconds, 1_800_000_002);
+        Ok(Response::new(tokio_stream::iter(vec![
+            Ok(wire::ContainersFollowLogsResponse {
+                lines: vec![line(3, 99, "GET /new 200")],
+                error: None,
+            }),
+            Ok(wire::ContainersFollowLogsResponse {
+                lines: Vec::new(),
+                error: Some(common::Error {
+                    code: "UNAVAILABLE".into(),
+                    message: "the engine went away".into(),
+                    retryable: true,
+                    diagnostics: Vec::new(),
+                }),
+            }),
+        ])))
+    }
+}
+
+fn at(second: u64) -> std::time::SystemTime {
+    std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_800_000_000 + second)
+}
+
+fn line(second: u64, stream: impl Into<i32>, text: &str) -> wire::ContainerLogLine {
+    wire::ContainerLogLine {
+        time: Some(at(second).into()),
+        stream: stream.into(),
+        text: text.into(),
     }
 }
 
@@ -408,4 +452,53 @@ async fn containers_are_inspected_and_refusals_keep_their_codes() {
         .await
         .unwrap_err();
     assert_eq!(refused.code.as_str(), "PRECONDITION_FAILED");
+}
+
+#[tokio::test]
+async fn container_logs_are_read_and_followed() {
+    use tokio_stream::StreamExt;
+
+    let client = client(false).await;
+    let logs = client
+        .logs(
+            scope(),
+            "docker".into(),
+            "shop-web-1".into(),
+            ContainerLogQuery {
+                lines: 2,
+                since: Some(at(0)),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(logs.truncated);
+    assert_eq!(logs.observed_at, Some(at(10)));
+    assert_eq!(logs.lines[0].time, at(1));
+    assert_eq!(
+        (logs.lines[1].stream, logs.lines[1].text.as_str()),
+        (ContainerLogStream::Stderr, "upstream timed out")
+    );
+
+    let followed: Vec<_> = client
+        .follow_logs(
+            scope(),
+            "docker".into(),
+            "shop-web-1".into(),
+            ContainerLogStart::After(at(2)),
+        )
+        .await
+        .unwrap()
+        .collect()
+        .await;
+    let first = followed[0].as_ref().unwrap();
+    assert_eq!(first[0].text, "GET /new 200");
+    assert_eq!(
+        first[0].stream,
+        ContainerLogStream::Stdout,
+        "a stream this build does not know is standard output"
+    );
+    assert_eq!(
+        followed[1].as_ref().unwrap_err().code.as_str(),
+        "UNAVAILABLE"
+    );
 }

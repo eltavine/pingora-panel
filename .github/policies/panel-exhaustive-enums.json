@@ -140,6 +140,18 @@
       "reason": "Each action is a call on the engine and an audit event of its own; a new action must fail to compile in every adapter until it maps it, rather than doing something else."
     },
     {
+      "package": "panel-application",
+      "name": "ContainerLogStream",
+      "owner": "pingora-panel-platform",
+      "reason": "Which output a line came from decides where the command line writes it and how the console marks it; a new output must fail to compile in every adapter until it is mapped, rather than being shown as another one."
+    },
+    {
+      "package": "panel-application",
+      "name": "ContainerLogStart",
+      "owner": "pingora-panel-platform",
+      "reason": "Where following starts decides which lines a client receives; a new start must fail to compile in every adapter until it maps it, rather than following from somewhere else."
+    },
+    {
       "package": "panel-config-api",
       "name": "ConfigurationQuery",
       "owner": "pingora-panel-platform",

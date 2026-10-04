@@ -1,11 +1,13 @@
 use super::*;
 use panel_application::{
     CommandContext, ContainerAction, ContainerChange, ContainerDetail, ContainerEngine,
-    ContainerFilter, ContainerList, ContainerMount, ContainerNetwork, ContainerState,
-    ContainerSummary, ContainersPort, EngineInfo, EngineVersion, PortMapping, RequestScope,
+    ContainerFilter, ContainerList, ContainerLogLine, ContainerLogQuery, ContainerLogStart,
+    ContainerLogStream, ContainerLogTail, ContainerLogs, ContainerMount, ContainerNetwork,
+    ContainerState, ContainerSummary, ContainersPort, EngineInfo, EngineVersion, PortMapping,
+    RequestScope,
 };
 use serde_json::Value;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// A `docker` engine with two containers, and a `podman` one that does not
 /// answer.
@@ -178,6 +180,82 @@ impl ContainersPort for Engines {
             container: state.map(|state| container(&reference, "nginx:1.27", state)),
         })
     }
+
+    async fn logs(
+        &self,
+        _scope: RequestScope,
+        _engine: String,
+        reference: String,
+        query: ContainerLogQuery,
+    ) -> Result<ContainerLogs> {
+        if reference != "shop-web-1" {
+            return Err(PanelError::not_found(format!("no container {reference}")));
+        }
+        let printed = printed();
+        let lines: Vec<ContainerLogLine> = printed
+            .into_iter()
+            .filter(|line| query.since.is_none_or(|since| line.time >= since))
+            .collect();
+        let last = lines.len().saturating_sub(query.lines as usize);
+        Ok(ContainerLogs {
+            observed_at: Some(second(10)),
+            lines: lines[last..].to_vec(),
+            truncated: false,
+        })
+    }
+
+    async fn follow_logs(
+        &self,
+        _scope: RequestScope,
+        _engine: String,
+        reference: String,
+        start: ContainerLogStart,
+    ) -> Result<ContainerLogTail> {
+        let printed = printed();
+        let batches: Vec<Result<Vec<ContainerLogLine>>> = match (reference.as_str(), start) {
+            ("shop-web-1", ContainerLogStart::Last(lines)) => {
+                let last = printed.len().saturating_sub(lines as usize);
+                vec![
+                    Ok(printed[last..].to_vec()),
+                    Ok(vec![printed_at(3, "GET /new 200")]),
+                ]
+            }
+            ("shop-web-1", ContainerLogStart::After(after)) => vec![Ok(printed
+                .into_iter()
+                .filter(|line| line.time > after)
+                .collect())],
+            ("crashing", _) => vec![
+                Ok(vec![printed_at(3, "GET /new 200")]),
+                Err(PanelError::unavailable("the engine went away")),
+            ],
+            _ => return Err(PanelError::not_found(format!("no container {reference}"))),
+        };
+        Ok(Box::pin(futures_util::stream::iter(batches)))
+    }
+}
+
+fn second(offset: u64) -> SystemTime {
+    UNIX_EPOCH + Duration::from_secs(1_800_000_000 + offset)
+}
+
+fn printed_at(offset: u64, text: &str) -> ContainerLogLine {
+    ContainerLogLine {
+        time: second(offset) + Duration::from_nanos(1),
+        stream: ContainerLogStream::Stdout,
+        text: text.into(),
+    }
+}
+
+/// What `shop-web-1` printed.
+fn printed() -> Vec<ContainerLogLine> {
+    vec![
+        printed_at(0, "GET / 200"),
+        ContainerLogLine {
+            stream: ContainerLogStream::Stderr,
+            ..printed_at(1, "upstream timed out")
+        },
+        printed_at(2, "GET /cart 200"),
+    ]
 }
 
 fn app(engines: bool) -> axum::Router {

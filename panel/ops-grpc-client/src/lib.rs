@@ -7,10 +7,11 @@ use async_trait::async_trait;
 use panel_application::{
     AgentCapability, AgentDescription, CapabilityState, CapabilityStatus, CommandContext,
     ContainerAction, ContainerChange, ContainerDetail, ContainerEngine, ContainerFilter,
-    ContainerList, ContainerMount, ContainerNetwork, ContainerState, ContainerSummary,
-    ContainersPort, DirectoriesReport, DirectoryKind, DirectoryUsage, EngineInfo, EngineVersion,
-    GatewayContainer, GatewayServiceAction, GatewayServiceStatus, HostAgentPort, ListenersReport,
-    ListeningProcess, PortListener, PortMapping, RequestScope,
+    ContainerList, ContainerLogLine, ContainerLogQuery, ContainerLogStart, ContainerLogStream,
+    ContainerLogTail, ContainerLogs, ContainerMount, ContainerNetwork, ContainerState,
+    ContainerSummary, ContainersPort, DirectoriesReport, DirectoryKind, DirectoryUsage, EngineInfo,
+    EngineVersion, GatewayContainer, GatewayServiceAction, GatewayServiceStatus, HostAgentPort,
+    ListenersReport, ListeningProcess, PortListener, PortMapping, RequestScope,
 };
 use panel_contracts::ops::v1::{
     self as wire, agent_client::AgentClient, containers_client::ContainersClient,
@@ -23,6 +24,7 @@ use panel_service::{
     GrpcHealthCheck,
 };
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio_stream::StreamExt;
 use tonic::transport::Channel;
 
 /// Longer than the agent's own limit on a directory walk.
@@ -469,6 +471,78 @@ impl ContainersPort for OpsAgentClient {
             .into_inner();
         response_error(response.error)?;
         Ok(detail(response.detail.unwrap_or_default()))
+    }
+
+    async fn logs(
+        &self,
+        scope: RequestScope,
+        engine_id: String,
+        container: String,
+        query: ContainerLogQuery,
+    ) -> Result<ContainerLogs> {
+        let message = wire::ContainersLogsRequest {
+            context: Some(request_context(&scope)),
+            engine: engine_id,
+            container,
+            lines: query.lines,
+            since: query.since.map(Into::into),
+        };
+        let response = ContainersClient::new(self.channel.clone())
+            .logs(self.request(message, &scope))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        Ok(ContainerLogs {
+            observed_at: time(response.observed_at),
+            lines: response.lines.into_iter().map(log_line).collect(),
+            truncated: response.truncated,
+        })
+    }
+
+    async fn follow_logs(
+        &self,
+        scope: RequestScope,
+        engine_id: String,
+        container: String,
+        start: ContainerLogStart,
+    ) -> Result<ContainerLogTail> {
+        let (lines, after) = match start {
+            ContainerLogStart::Last(lines) => (lines, None),
+            ContainerLogStart::After(after) => (0, Some(after.into())),
+        };
+        let message = wire::ContainersFollowLogsRequest {
+            context: Some(request_context(&scope)),
+            engine: engine_id,
+            container,
+            lines,
+            after,
+        };
+        // Following lasts as long as its reader, so it has no deadline.
+        let mut request = tonic::Request::new(message);
+        propagate_trace(request.metadata_mut(), scope.trace_context());
+        let stream = ContainersClient::new(self.channel.clone())
+            .follow_logs(request)
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        Ok(Box::pin(stream.map(|message| {
+            let message = message.map_err(status_error)?;
+            response_error(message.error)?;
+            Ok(message.lines.into_iter().map(log_line).collect())
+        })))
+    }
+}
+
+/// A line from a stream this build does not know counts as standard output.
+fn log_line(value: wire::ContainerLogLine) -> ContainerLogLine {
+    ContainerLogLine {
+        time: time(value.time).unwrap_or(UNIX_EPOCH),
+        stream: match wire::ContainerLogStream::try_from(value.stream) {
+            Ok(wire::ContainerLogStream::Stderr) => ContainerLogStream::Stderr,
+            _ => ContainerLogStream::Stdout,
+        },
+        text: value.text,
     }
 }
 

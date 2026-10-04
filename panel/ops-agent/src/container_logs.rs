@@ -135,7 +135,8 @@ pub(crate) async fn read(
 
 /// Lines as the container prints them, up to `BATCH` at a time: first the
 /// last `lines` it printed before, or the lines after `after`. A response
-/// with an error is the last; the stream ends when the container stops.
+/// with an error, and no lines, is the last; the stream ends when the
+/// container stops.
 pub(crate) fn follow(
     client: &Docker,
     container: &str,
@@ -158,18 +159,23 @@ pub(crate) fn follow(
             ready(!matches!((line, after), (Ok(line), Some(after)) if line.time <= after))
         })
         .ready_chunks(BATCH)
-        .map(|lines| {
-            let mut response = wire::ContainersFollowLogsResponse::default();
+        .flat_map(|lines| {
+            let mut sent = wire::ContainersFollowLogsResponse::default();
+            let mut failed = None;
             for line in lines {
                 match line {
-                    Ok(line) => response.lines.push(line.into()),
+                    Ok(line) => sent.lines.push(line.into()),
                     Err(error) => {
-                        response.error = Some((&error).into());
+                        failed = Some(wire::ContainersFollowLogsResponse {
+                            lines: Vec::new(),
+                            error: Some((&error).into()),
+                        });
                         break;
                     }
                 }
             }
-            response
+            let sent = (!sent.lines.is_empty()).then_some(sent);
+            futures_util::stream::iter(sent.into_iter().chain(failed))
         })
         .scan(false, |ended, response| {
             if *ended {

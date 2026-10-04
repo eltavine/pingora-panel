@@ -3,8 +3,9 @@
 
 use crate::{CommandContext, Operation, OperationLog, RequestScope};
 use async_trait::async_trait;
+use futures_core::Stream;
 use panel_errors::{PanelError, Result};
-use std::{collections::BTreeMap, sync::Arc, time::SystemTime};
+use std::{collections::BTreeMap, pin::Pin, sync::Arc, time::SystemTime};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct EngineVersion {
@@ -206,6 +207,64 @@ pub struct ContainerChange {
     pub container: Option<ContainerSummary>,
 }
 
+/// Which of a container's outputs a line came from. Everything a container
+/// with a terminal prints is standard output.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ContainerLogStream {
+    Stdout,
+    Stderr,
+}
+
+impl ContainerLogStream {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Stdout => "stdout",
+            Self::Stderr => "stderr",
+        }
+    }
+}
+
+/// A line a container printed.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContainerLogLine {
+    /// When its engine recorded it.
+    pub time: SystemTime,
+    pub stream: ContainerLogStream,
+    /// Without its line break; at most 16 KiB.
+    pub text: String,
+}
+
+/// Which of the lines a container printed to read.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ContainerLogQuery {
+    /// The last this many; the agent's default when 0.
+    pub lines: u32,
+    /// Only lines at or after this time.
+    pub since: Option<SystemTime>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContainerLogs {
+    pub observed_at: Option<SystemTime>,
+    /// Oldest first.
+    pub lines: Vec<ContainerLogLine>,
+    /// Older lines were left out to keep within the agent's size limit.
+    pub truncated: bool,
+}
+
+/// Where following a container's lines starts.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ContainerLogStart {
+    /// After this many of the lines it printed before.
+    Last(u32),
+    /// After the line printed at this time, the last one received.
+    After(SystemTime),
+}
+
+/// Lines as a container prints them, oldest first, until it stops; an
+/// error ends it.
+pub type ContainerLogTail = Pin<Box<dyn Stream<Item = Result<Vec<ContainerLogLine>>> + Send>>;
+
 #[async_trait]
 pub trait ContainersPort: Send + Sync {
     async fn engines(&self, scope: RequestScope) -> Result<Vec<ContainerEngine>>;
@@ -242,6 +301,24 @@ pub trait ContainersPort: Send + Sync {
         container: String,
         action: ContainerAction,
     ) -> Result<ContainerChange>;
+
+    /// The last lines a container printed, named by its ID or name.
+    async fn logs(
+        &self,
+        scope: RequestScope,
+        engine: String,
+        container: String,
+        query: ContainerLogQuery,
+    ) -> Result<ContainerLogs>;
+
+    /// The lines a container prints, from `start` on.
+    async fn follow_logs(
+        &self,
+        scope: RequestScope,
+        engine: String,
+        container: String,
+        start: ContainerLogStart,
+    ) -> Result<ContainerLogTail>;
 }
 
 /// The port of an installation whose agent manages no engine.
@@ -283,6 +360,26 @@ impl ContainersPort for NoContainers {
         _: String,
         _: ContainerAction,
     ) -> Result<ContainerChange> {
+        Err(Self::refusal())
+    }
+
+    async fn logs(
+        &self,
+        _: RequestScope,
+        _: String,
+        _: String,
+        _: ContainerLogQuery,
+    ) -> Result<ContainerLogs> {
+        Err(Self::refusal())
+    }
+
+    async fn follow_logs(
+        &self,
+        _: RequestScope,
+        _: String,
+        _: String,
+        _: ContainerLogStart,
+    ) -> Result<ContainerLogTail> {
         Err(Self::refusal())
     }
 }
@@ -363,6 +460,28 @@ impl ContainersPort for RecordedContainers {
         self.log.record(&context, operation).await;
         result
     }
+
+    async fn logs(
+        &self,
+        scope: RequestScope,
+        engine: String,
+        container: String,
+        query: ContainerLogQuery,
+    ) -> Result<ContainerLogs> {
+        self.inner.logs(scope, engine, container, query).await
+    }
+
+    async fn follow_logs(
+        &self,
+        scope: RequestScope,
+        engine: String,
+        container: String,
+        start: ContainerLogStart,
+    ) -> Result<ContainerLogTail> {
+        self.inner
+            .follow_logs(scope, engine, container, start)
+            .await
+    }
 }
 
 #[cfg(test)]
@@ -425,6 +544,26 @@ mod tests {
                 name: container,
                 container: None,
             })
+        }
+
+        async fn logs(
+            &self,
+            _: RequestScope,
+            _: String,
+            _: String,
+            _: ContainerLogQuery,
+        ) -> Result<ContainerLogs> {
+            Err(NoContainers::refusal())
+        }
+
+        async fn follow_logs(
+            &self,
+            _: RequestScope,
+            _: String,
+            _: String,
+            _: ContainerLogStart,
+        ) -> Result<ContainerLogTail> {
+            Err(NoContainers::refusal())
         }
     }
 

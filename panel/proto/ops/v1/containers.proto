@@ -288,6 +288,7 @@ message ContainersFollowLogsRequest {
 message ContainersFollowLogsResponse {
   // Oldest first.
   repeated ContainerLogLine lines = 1;
-  // Ends the stream: the engine failed, or too many logs are followed.
+  // Ends the stream, in a response without lines: the engine failed, or
+  // too many logs are followed.
   .pingora.panel.common.v1.Error error = 2;
 }
