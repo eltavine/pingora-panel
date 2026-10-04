@@ -7,6 +7,7 @@ import {
   engineName,
   portLabel,
   stateTone,
+  stoppable,
   withoutAgent,
 } from '../presentation'
 
@@ -67,5 +68,13 @@ describe('containers', () => {
     expect(stateTone('dead')).toBe('negative')
     expect(stateTone('exited')).toBe('neutral')
     expect(stateTone('unknown')).toBe('neutral')
+  })
+
+  it('offer stopping only what has something running', () => {
+    expect(stoppable('running')).toBe(true)
+    expect(stoppable('paused')).toBe(true)
+    expect(stoppable('restarting')).toBe(true)
+    expect(stoppable('exited')).toBe(false)
+    expect(stoppable('created')).toBe(false)
   })
 })

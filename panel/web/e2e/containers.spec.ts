@@ -124,6 +124,24 @@ async function setUp(
       },
     })
   })
+  await page.route(
+    /\/api\/v1\/container-engines\/docker\/containers\/[\w.-]+(\/\w+)?(\?.*)?$/,
+    (route) => {
+      const request = route.request()
+      const url = new URL(request.url())
+      seen.changes.push(`${request.method()} ${url.pathname}${url.search}`)
+      const [, , , , , , id, action] = url.pathname.split('/')
+      const found = containers.find((container) => container.id === id)!
+      const state = action === 'start' || action === 'restart' ? 'running' : 'exited'
+      route.fulfill({
+        json: {
+          id: found.id,
+          name: found.names[0],
+          container: request.method() === 'DELETE' ? null : { ...found, state },
+        },
+      })
+    },
+  )
   await page.route(/\/api\/v1\/container-engines\/\w+\/(enable|disable)$/, (route) => {
     const path = new URL(route.request().url()).pathname
     seen.changes.push(path)
@@ -206,6 +224,43 @@ test('readers see engines and containers without changing them', async ({ page }
   await expect(page.getByRole('row').filter({ hasText: 'shop-web-1' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Disable' })).toHaveCount(0)
   await expect(page.getByText("Reaching an engine's socket is root on this host.")).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Actions for shop-web-1' })).toHaveCount(0)
+})
+
+test('running containers are stopped after confirming and removed by force', async ({ page }) => {
+  const seen = await setUp(page)
+  await page.goto('/containers')
+  const actions = page.getByRole('button', { name: 'Actions for shop-web-1' })
+  await actions.click()
+  await expect(page.getByRole('menuitem', { name: 'Start', exact: true })).toHaveCount(0)
+  await page.getByRole('menuitem', { name: 'Stop' }).click()
+  const stop = page.getByRole('alertdialog', { name: 'Stop shop-web-1?' })
+  await expect(stop).toContainText('kills it once its stop timeout passes')
+  await stop.getByRole('button', { name: 'Stop' }).click()
+  await expect(page.getByText('shop-web-1 stopped')).toBeVisible()
+
+  await actions.click()
+  await page.getByRole('menuitem', { name: 'Remove' }).click()
+  const remove = page.getByRole('alertdialog', { name: 'Remove shop-web-1?' })
+  await remove.getByRole('checkbox', { name: 'Kill it first if it is running' }).check()
+  await remove.getByRole('button', { name: 'Remove' }).click()
+  await expect(page.getByText('shop-web-1 removed')).toBeVisible()
+  expect(seen.changes).toEqual([
+    'POST /api/v1/container-engines/docker/containers/4f1c2a9be03d71aa/stop',
+    'DELETE /api/v1/container-engines/docker/containers/4f1c2a9be03d71aa?force=true&volumes=false',
+  ])
+})
+
+test('a stopped container starts without asking', async ({ page }) => {
+  const seen = await setUp(page)
+  await page.goto('/containers')
+  await page.getByRole('button', { name: 'Actions for nightly-report' }).click()
+  await expect(page.getByRole('menuitem', { name: 'Stop' })).toHaveCount(0)
+  await page.getByRole('menuitem', { name: 'Start', exact: true }).click()
+  await expect(page.getByText('nightly-report started')).toBeVisible()
+  expect(seen.changes).toEqual([
+    'POST /api/v1/container-engines/docker/containers/e5d8b3a2f6c19d07/start',
+  ])
 })
 
 test('a host without the agent says how to manage containers', async ({ page }) => {

@@ -53,6 +53,11 @@ export function chosenEngine(
   return (engines.find((engine) => engine.enabled && engine.reachable) ?? engines[0])?.id ?? null
 }
 
+/** Whether a container has something running to stop, restart or kill. */
+export function stoppable(state: ContainerStateName): boolean {
+  return state === 'running' || state === 'restarting' || state === 'paused'
+}
+
 export function stateTone(state: ContainerStateName): StatusTone {
   switch (state) {
     case 'running':

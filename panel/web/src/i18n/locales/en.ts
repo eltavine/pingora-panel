@@ -1095,6 +1095,41 @@ const en: Messages = {
       noMatch: 'No containers match',
       empty: 'Nothing runs on this engine',
     },
+    actions: {
+      menu: 'Actions for {name}',
+      start: 'Start',
+      stop: 'Stop',
+      restart: 'Restart',
+      kill: 'Kill',
+      remove: 'Remove',
+      force: 'Kill it first if it is running',
+      volumes: 'Remove its anonymous volumes too',
+      confirm: {
+        stop: {
+          title: 'Stop {name}?',
+          detail: 'The engine sends its stop signal, then kills it once its stop timeout passes.',
+        },
+        restart: {
+          title: 'Restart {name}?',
+          detail: 'What runs in it stops and starts again.',
+        },
+        kill: {
+          title: 'Kill {name}?',
+          detail: 'What runs in it stops at once, without a chance to finish what it is doing.',
+        },
+        remove: {
+          title: 'Remove {name}?',
+          detail: 'The container and what it wrote outside its volumes are gone for good.',
+        },
+      },
+      done: {
+        start: '{name} started',
+        stop: '{name} stopped',
+        restart: '{name} restarted',
+        kill: '{name} killed',
+        remove: '{name} removed',
+      },
+    },
     states: {
       created: 'Created',
       running: 'Running',

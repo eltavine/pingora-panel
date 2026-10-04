@@ -102,6 +102,19 @@ export function containerHandlers(): AnyHandler[] {
     },
   ]
 
+  function missing(container: string) {
+    return HttpResponse.json(
+      {
+        type: 'about:blank',
+        title: 'Not found',
+        status: 404,
+        code: 'NOT_FOUND',
+        detail: `No such container: ${container}`,
+      },
+      { status: 404 },
+    )
+  }
+
   return [
     http.get('*/api/v1/container-engines', () => HttpResponse.json({ engines })),
     http.post<{ engine: string; action: string }>(
@@ -116,6 +129,48 @@ export function containerHandlers(): AnyHandler[] {
         }
         engine.enabled = params.action === 'enable'
         return HttpResponse.json(engine)
+      },
+    ),
+    http.post<{ engine: string; container: string; action: string }>(
+      '*/api/v1/container-engines/:engine/containers/:container/:action',
+      ({ params }) => {
+        const found = containers.find((container) => container.id === params.container)
+        if (!found) {
+          return missing(params.container)
+        }
+        const running = params.action === 'start' || params.action === 'restart'
+        Object.assign(found, {
+          state: running ? 'running' : 'exited',
+          status: running
+            ? 'Up 1 second'
+            : `Exited (${params.action === 'kill' ? 137 : 0}) 1 second ago`,
+        })
+        return HttpResponse.json({ id: found.id, name: found.names[0], container: found })
+      },
+    ),
+    http.delete<{ engine: string; container: string }>(
+      '*/api/v1/container-engines/:engine/containers/:container',
+      ({ params, request }) => {
+        const index = containers.findIndex((container) => container.id === params.container)
+        const found = containers[index]
+        if (!found) {
+          return missing(params.container)
+        }
+        const force = new URL(request.url).searchParams.get('force') === 'true'
+        if (found.state === 'running' && !force) {
+          return HttpResponse.json(
+            {
+              type: 'about:blank',
+              title: 'Conflict',
+              status: 409,
+              code: 'CONFLICT',
+              detail: 'You cannot remove a running container',
+            },
+            { status: 409 },
+          )
+        }
+        containers.splice(index, 1)
+        return HttpResponse.json({ id: found.id, name: found.names[0], container: null })
       },
     ),
     http.get('*/api/v1/container-engines/:engine/containers', ({ params, request }) => {

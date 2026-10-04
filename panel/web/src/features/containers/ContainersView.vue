@@ -31,6 +31,8 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { toApiFailure } from '@/lib/api'
+import { useSession } from '@/lib/session'
+import ContainerActions from './ContainerActions.vue'
 import ContainerEngines from './ContainerEngines.vue'
 import {
   CONTAINER_STATES,
@@ -47,6 +49,7 @@ const FIELDS = ['engine', 'search', 'state'] as const
 type Field = (typeof FIELDS)[number]
 
 const { t, d } = useI18n()
+const { can } = useSession()
 const route = useRoute()
 const router = useRouter()
 
@@ -260,6 +263,9 @@ function refresh() {
                   <TableHead>{{ t('containers.list.state') }}</TableHead>
                   <TableHead>{{ t('containers.list.ports') }}</TableHead>
                   <TableHead>{{ t('containers.list.created') }}</TableHead>
+                  <TableHead v-if="can('containers.manage')">
+                    <span class="sr-only">{{ t('common.actions') }}</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -303,6 +309,9 @@ function refresh() {
                   </TableCell>
                   <TableCell class="text-muted-foreground text-sm whitespace-nowrap">
                     {{ container.created ? d(new Date(container.created), 'datetime') : '—' }}
+                  </TableCell>
+                  <TableCell v-if="can('containers.manage') && engineId" class="text-right">
+                    <ContainerActions :engine="engineId" :container="container" />
                   </TableCell>
                 </TableRow>
               </TableBody>

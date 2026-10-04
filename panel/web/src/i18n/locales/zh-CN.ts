@@ -1056,6 +1056,41 @@ const zhCN = {
       noMatch: '没有匹配的容器',
       empty: '这个引擎上没有容器',
     },
+    actions: {
+      menu: '{name} 的操作',
+      start: '启动',
+      stop: '停止',
+      restart: '重启',
+      kill: '强制停止',
+      remove: '删除',
+      force: '如果正在运行，先强制停止它',
+      volumes: '同时删除它的匿名卷',
+      confirm: {
+        stop: {
+          title: '停止 {name}？',
+          detail: '引擎先发送它的停止信号，超过停止超时后强制结束。',
+        },
+        restart: {
+          title: '重启 {name}？',
+          detail: '容器内运行的程序会停止后重新启动。',
+        },
+        kill: {
+          title: '强制停止 {name}？',
+          detail: '容器内运行的程序会立即停止，来不及完成手头的工作。',
+        },
+        remove: {
+          title: '删除 {name}？',
+          detail: '容器以及它写在卷之外的内容将被永久删除。',
+        },
+      },
+      done: {
+        start: '{name} 已启动',
+        stop: '{name} 已停止',
+        restart: '{name} 已重启',
+        kill: '{name} 已强制停止',
+        remove: '{name} 已删除',
+      },
+    },
     states: {
       created: '已创建',
       running: '运行中',
