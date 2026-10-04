@@ -9,7 +9,8 @@
 # Each capability is a drop-in beside this script that grants its privilege:
 # directories to measure the gateway's volumes, listeners to name the
 # processes on TCP ports, gateway-unit to start, stop and restart the
-# gateway's systemd unit with the polkit rule that allows it.
+# gateway's systemd unit with the polkit rule that allows it, containers to
+# list and manage what runs on Docker, which makes the agent root-equivalent.
 #
 # PINGORA_PANEL_IMAGE names the image holding the agent, and
 # CONTAINER_ENGINE the engine that has it, docker or podman.
@@ -24,7 +25,7 @@ if [ "${#capabilities[@]}" -eq 0 ]; then
 fi
 for capability in "${capabilities[@]}"; do
   case "$capability" in
-    directories | listeners | gateway-unit) ;;
+    directories | listeners | gateway-unit | containers) ;;
     *)
       echo "unknown capability: $capability" >&2
       exit 1
