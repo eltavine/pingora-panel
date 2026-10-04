@@ -71,17 +71,17 @@ pub fn process(
     _env: &mut Environment<'_>,
     settings: ProcessSettings,
 ) -> Result<ControlPlaneProcess> {
-    let process = ControlPlaneProcess::on_sqlite(
+    let process = ControlPlaneProcess::new(
         ServiceName::new(SERVICE)?,
         env!("CARGO_PKG_VERSION"),
         settings,
         MODULE,
     )?;
-    let store = SqliteAuditStore::new(process.sqlite());
+    let store = SqliteAuditStore::new(process.database());
     let writer: Arc<dyn EventHandler> = Arc::new(AuditWriter::new(store.clone()));
     let spec = ConsumerSpec::new(ConsumerName::new(CONSUMER)?, vec![">".to_owned()])?;
     Ok(process
-        .with_sqlite_migrations(MIGRATIONS)
+        .with_migrations(MIGRATIONS)
         .with_protocol(protocol_range(AUDIT_V1))
         .with_capability(Capability::new("audit.query", "1")?)
         .with_peer_access(

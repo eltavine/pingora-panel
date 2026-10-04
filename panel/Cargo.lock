@@ -3137,7 +3137,6 @@ dependencies = [
  "panel-pki",
  "panel-platform",
  "panel-platform-codec",
- "panel-postgres",
  "panel-service",
  "panel-sqlite",
  "panel-tls",
@@ -3331,11 +3330,10 @@ dependencies = [
  "panel-outbox",
  "panel-platform",
  "panel-platform-codec",
- "panel-postgres",
+ "panel-sqlite",
  "percent-encoding",
  "serde",
  "serde_json",
- "sqlx",
  "tokio",
  "tracing",
  "uuid",
@@ -3435,30 +3433,6 @@ dependencies = [
  "panel-platform",
  "prost",
  "prost-types",
- "uuid",
-]
-
-[[package]]
-name = "panel-postgres"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "chrono",
- "getrandom 0.4.3",
- "hmac",
- "panel-errors",
- "panel-event-codec",
- "panel-events",
- "panel-health",
- "panel-outbox",
- "pbkdf2",
- "serde_json",
- "sha2 0.11.0",
- "sqlx",
- "stringprep",
- "tokio",
- "tracing",
  "uuid",
 ]
 
@@ -3631,16 +3605,6 @@ dependencies = [
  "prost",
  "prost-build",
  "serde",
-]
-
-[[package]]
-name = "pbkdf2"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "112d82ceb8c5bf524d9af484d4e4970c9fd5a0cc15ba14ad93dccd28873b0629"
-dependencies = [
- "digest 0.11.3",
- "hmac",
 ]
 
 [[package]]
@@ -5039,7 +5003,6 @@ dependencies = [
  "log",
  "memchr",
  "percent-encoding",
- "rustls",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -5050,7 +5013,6 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
- "webpki-roots 1.0.9",
 ]
 
 [[package]]

@@ -165,7 +165,7 @@ async fn every_event_is_recorded_once_in_a_verifiable_chain() {
     .await;
     assert_eq!(by_correlation.records[0].event_type, "gateway.reloaded");
 
-    let store = SqliteAuditStore::new(process.sqlite());
+    let store = SqliteAuditStore::new(process.database());
     assert_eq!(store.append(&events[0]).await.unwrap(), 1);
     assert_eq!(list(ListRequest::default()).await.records.len(), 3);
 
@@ -179,7 +179,7 @@ async fn every_event_is_recorded_once_in_a_verifiable_chain() {
     assert_eq!(verified.head_sequence, 3);
     assert_eq!(verified.head_hash, records[0].hash);
 
-    let pool = process.sqlite().pool();
+    let pool = process.database().pool();
     for statement in [
         "UPDATE audit_records SET actor_id = 'mallory' WHERE sequence = 2",
         "DELETE FROM audit_records WHERE sequence = 2",

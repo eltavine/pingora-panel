@@ -1,6 +1,5 @@
 use panel_errors::Result;
 use panel_pki::TrustDomain;
-use panel_postgres::RoleSecret;
 use panel_service::{require_loopback, Environment};
 use std::{
     net::SocketAddr,
@@ -10,11 +9,8 @@ use std::{
 
 pub const OPS_ADDRESS_ENV: &str = "PINGORA_PANEL_OPS_ADDR";
 pub const GRPC_ADDRESS_ENV: &str = "PINGORA_PANEL_GRPC_ADDR";
-pub const DATABASE_URL_ENV: &str = "PINGORA_PANEL_DATABASE_URL";
 /// Where the control plane keeps its modules' SQLite files.
 pub const DATA_DIR_ENV: &str = "PINGORA_PANEL_DATA_DIR";
-/// Also read from the file named by `PINGORA_PANEL_DATABASE_PASSWORD_FILE`.
-pub const DATABASE_PASSWORD_ENV: &str = "PINGORA_PANEL_DATABASE_PASSWORD";
 pub const NATS_URL_ENV: &str = "PINGORA_PANEL_NATS_URL";
 pub const HEALTH_INTERVAL_MS_ENV: &str = "PINGORA_PANEL_HEALTH_INTERVAL_MS";
 /// Directory with the service's `identity.pem` and `trust.pem`; enables
@@ -63,8 +59,6 @@ impl TlsSettings {
 pub struct ProcessSettings {
     ops_address: SocketAddr,
     grpc_address: SocketAddr,
-    database_url: Option<String>,
-    database_password: Option<RoleSecret>,
     data_directory: PathBuf,
     nats_url: String,
     health_interval: Duration,
@@ -92,15 +86,10 @@ impl ProcessSettings {
                 require_loopback(GRPC_ADDRESS_ENV, grpc_address)?
             },
             tls,
-            database_url: env.string(DATABASE_URL_ENV)?,
             data_directory: PathBuf::from(
                 env.string(DATA_DIR_ENV)?
                     .unwrap_or_else(|| DEFAULT_DATA_DIR.into()),
             ),
-            database_password: env
-                .secret(DATABASE_PASSWORD_ENV)?
-                .map(RoleSecret::new)
-                .transpose()?,
             nats_url: env
                 .string(NATS_URL_ENV)?
                 .unwrap_or_else(|| DEFAULT_NATS_URL.into()),
@@ -116,16 +105,8 @@ impl ProcessSettings {
         self.grpc_address
     }
 
-    pub fn database_url(&self) -> Option<&str> {
-        self.database_url.as_deref()
-    }
-
     pub fn data_directory(&self) -> &Path {
         &self.data_directory
-    }
-
-    pub fn database_password(&self) -> Option<&RoleSecret> {
-        self.database_password.as_ref()
     }
 
     pub fn nats_url(&self) -> &str {
@@ -181,42 +162,30 @@ mod tests {
     }
 
     #[test]
-    fn settings_default_to_loopback_listeners_and_a_local_broker() {
-        let settings = read(&[(DATABASE_URL_ENV, "postgres://config@db/panel")]).unwrap();
+    fn settings_default_to_loopback_listeners_a_local_broker_and_the_data_directory() {
+        let settings = read(&[]).unwrap();
         assert_eq!(settings.ops_address(), defaults().ops);
         assert_eq!(settings.grpc_address(), defaults().grpc);
         assert_eq!(settings.nats_url(), DEFAULT_NATS_URL);
-        assert!(settings.database_password().is_none());
         assert_eq!(settings.health_interval(), DEFAULT_HEALTH_INTERVAL);
-        let defaults = read(&[]).unwrap();
-        assert_eq!(defaults.database_url(), None);
         assert_eq!(
-            defaults.data_directory(),
+            settings.data_directory(),
             Path::new("/var/lib/pingora-panel/control")
         );
+        let elsewhere = read(&[(DATA_DIR_ENV, "/srv/panel")]).unwrap();
+        assert_eq!(elsewhere.data_directory(), Path::new("/srv/panel"));
     }
 
     #[test]
     fn listeners_stay_on_loopback() {
-        assert!(read(&[
-            (DATABASE_URL_ENV, "postgres://config@db/panel"),
-            (GRPC_ADDRESS_ENV, "0.0.0.0:50061"),
-        ])
-        .is_err());
-        let settings = read(&[
-            (DATABASE_URL_ENV, "postgres://config@db/panel"),
-            (DATABASE_PASSWORD_ENV, "secret"),
-            (OPS_ADDRESS_ENV, "[::1]:9999"),
-        ])
-        .unwrap();
-        assert_eq!(settings.database_password().unwrap().expose(), "secret");
+        assert!(read(&[(GRPC_ADDRESS_ENV, "0.0.0.0:50061")]).is_err());
+        let settings = read(&[(OPS_ADDRESS_ENV, "[::1]:9999")]).unwrap();
         assert_eq!(settings.ops_address().port(), 9999);
     }
 
     #[test]
     fn mutual_tls_lets_the_grpc_listener_leave_loopback() {
         let settings = read(&[
-            (DATABASE_URL_ENV, "postgres://config@db/panel"),
             (GRPC_ADDRESS_ENV, "0.0.0.0:50061"),
             (TLS_DIR_ENV, "/run/pingora-panel/tls"),
         ])
@@ -225,7 +194,6 @@ mod tests {
         assert_eq!(tls.trust_domain.as_str(), "pingora-panel.internal");
         assert!(
             read(&[
-                (DATABASE_URL_ENV, "postgres://config@db/panel"),
                 (OPS_ADDRESS_ENV, "0.0.0.0:9181"),
                 (TLS_DIR_ENV, "/run/pingora-panel/tls"),
             ])

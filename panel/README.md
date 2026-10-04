@@ -29,23 +29,23 @@ panel-platform -> panel-context + panel-errors
 panel-platform-codec -> panel-contracts + panel-platform
 panel-service -> panel-environment + panel-health + panel-platform-codec + panel-contracts
 panel-outbox -> panel-events + panel-errors
-panel-postgres -> panel-outbox + panel-event-codec + panel-events + panel-health + panel-errors
+panel-sqlite -> panel-outbox + panel-event-codec + panel-events + panel-health + panel-errors
 panel-jetstream -> panel-event-codec + panel-events + panel-health + panel-errors
 gateway-grpc -> gateway-proto-codec + panel-engine::GatewayEngine
 gateway-grpc-client -> panel-application + gateway-proto-codec + panel-contracts + panel-health
 config-proto-codec -> panel-application + gateway-proto-codec + panel-contracts
 config-grpc-client -> panel-application + config-proto-codec + panel-service
 observability-grpc-client -> panel-application + panel-contracts + panel-service
-panel-control-runtime -> panel-postgres + panel-jetstream + panel-outbox + panel-service + panel-tls
+panel-control-runtime -> panel-sqlite + panel-jetstream + panel-outbox + panel-service + panel-tls
 
 gatewayd -> runtime + filesystem adapter + Pingora adapter + gRPC/Proto adapters + REST/compiler adapters
 config-service -> panel-control-runtime + gateway-grpc-client + panel-config-json + panel-config-model + config-proto-codec
 panel-api-server -> panel-control-runtime + panel-api + config-grpc-client + gateway-grpc-client
 panel-cli (no workspace dependencies: a client of the public REST API)
-automation-service -> panel-control-runtime + panel-jobs + panel-postgres + panel-events
+automation-service -> panel-control-runtime + panel-jobs + panel-sqlite + panel-events
 observability-service -> panel-control-runtime + panel-contracts + panel-domain
 audit-service -> panel-control-runtime + panel-jetstream + panel-events + panel-contracts
-panel-bootstrap -> panel-postgres + panel-jetstream + panel-pki
+panel-bootstrap -> panel-jetstream + panel-pki
 ```
 
 箭头表示左侧 crate 依赖右侧 crate。
@@ -64,13 +64,13 @@ panel-bootstrap -> panel-postgres + panel-jetstream + panel-pki
 | `panel-platform` | Service descriptors, protocol revision ranges and negotiation, capability directory and registration ports | Transports, registries, Pingora |
 | `panel-platform-codec` | Protobuf form of service descriptors | Registries, transports, Pingora |
 | `panel-service` | Liveness/readiness endpoints, gRPC health and `ServiceInfo`, peer negotiation, trace metadata, settings, signals and logging shared by service processes | Storage, brokers, application rules, Pingora |
-| `panel-control-runtime` | Composition of control-plane processes: lazy dependencies, migrations, registration, outbox relay leadership, health and graceful shutdown | Application rules, Pingora |
+| `panel-control-runtime` | Composition of control-plane processes: the module's database and its migrations, lazy broker connection, registration, the outbox relay, health and graceful shutdown | Application rules, Pingora |
 | `panel-schedule` | RFC 5545 recurrences and the time windows they open, shared by schedules, maintenance windows, approval policies and grants | Storage, transports, Pingora |
 | `panel-jobs` | Durable job model, leasing worker, retry policy, schedules and maintenance windows, and an in-memory store | Storage, transports, Pingora |
 | `panel-pki` | Internal certificate authority, workload identities, credential files and renewal | Transports, storage, Pingora |
 | `panel-tls` | TLS 1.3 mutual authentication with reloadable credentials, tonic server and client integration, and per-service peer authorization | Storage, application rules, Pingora |
 | `panel-outbox` | Ordered at-least-once outbox relay over `OutboxSource`, `OutboxWakeup` and `EventPublisher` ports | Storage, brokers, Pingora |
-| `panel-postgres` | Service schema ownership, SCRAM role bootstrap, per-schema migrations, the transactional outbox, the idempotent-consumer inbox and the database health check | Application rules, transports, Pingora |
+| `panel-sqlite` | One private SQLite file per module in write-ahead-log mode, its migrations, the transactional outbox, the idempotent-consumer inbox and the database health check | Application rules, transports, Pingora |
 | `panel-jetstream` | Stream provisioning, deduplicated CloudEvents publication, durable consumers, dead letters, targeted replay and the broker health check | Storage, application rules, Pingora |
 | `panel-ir` | Versioned canonical runtime snapshot | Proto, storage, Pingora |
 | `panel-engine` | `GatewayEngine`, `DataPlaneAdapter`, `SnapshotStore`, runtime-info ports and Fake | Proto, storage implementation, Pingora |
@@ -86,13 +86,13 @@ panel-bootstrap -> panel-postgres + panel-jetstream + panel-pki
 | `config-proto-codec` | Protobuf form of the configuration publication contract | Storage, transports, Pingora |
 | `config-grpc-client` | `GatewayUseCases` over `config-service`'s publication API | Storage, Pingora |
 | `gateway-grpc-client` | Tonic client adapter implementing `panel-application::GatewayPort`, and the gateway health check | HTTP, storage, identity, generated Proto outside this adapter |
-| `config-service` | Publication and configuration APIs, the draft configuration, PostgreSQL activation receipts and the `config` schema | HTTP, Pingora |
+| `config-service` | Publication and configuration APIs, the draft configuration and activation receipts, kept in `config.db` | HTTP, Pingora |
 | `panel-api-server` | The `panel-api` process: public REST and web console, degraded admission and the service directory | Storage implementation, Pingora |
-| `automation-service` | PostgreSQL job store with outbox events, worker and scheduler in the `automation` schema | HTTP, Pingora |
-| `observability-service` | Traffic summaries and series from Prometheus over the gateway's metrics, and the `observability` schema | Pingora |
+| `automation-service` | Job store with outbox events, worker, scheduler and the certificate inventory, kept in `automation.db` | HTTP, Pingora |
+| `observability-service` | Traffic summaries and series from Prometheus over the gateway's metrics, and alerts kept in `observability.db` | Pingora |
 | `observability-grpc-client` | `TrafficPort` over `observability-service` | Storage, Pingora, metric backends |
-| `audit-service` | The audit trail: every event appended once to a hash chain in the `audit` schema, with queries and verification | HTTP, Pingora |
-| `panel-bootstrap` | Idempotent provisioning of service roles, schemas, streams and the service registry; issuance and rotation of service credentials | Application rules, Pingora |
+| `audit-service` | The audit trail: every event appended once to a hash chain in `audit.db`, with queries and verification | HTTP, Pingora |
+| `panel-bootstrap` | Idempotent provisioning of the event streams and the service registry; issuance and rotation of service credentials | Application rules, Pingora |
 | `gatewayd` | Dependency construction, REST/gRPC adapter composition, bind/readiness policies, environment configuration, process clock, worker executor, the data plane, its runtime API and standard gRPC Health | Business rules |
 | `panel-cli` | The `ppanel` command line over the public REST API | Server crates, storage, Pingora |
 
@@ -146,14 +146,9 @@ with `healthcheck` to probe its own readiness, as container health checks do.
 | `observability-service` | `observability.db` | `127.0.0.1:9183` | `127.0.0.1:50063` | queries Prometheus at `127.0.0.1:9090` |
 | `audit-service` | `audit.db` | `127.0.0.1:9184` | `127.0.0.1:50064` | consumes every event |
 
-The control plane is moving to SQLite
-([decision](../docs/adr/0032-one-control-plane-process-on-sqlite.md)): a
-process on SQLite keeps its module's file, such as `audit.db`, in
-`PINGORA_PANEL_DATA_DIR` (`/var/lib/pingora-panel/control` by default),
-readable by its user alone, in write-ahead-log mode with full
-synchronization. A process still on PostgreSQL reads
-`PINGORA_PANEL_DATABASE_URL` (its role, without password) and
-`PINGORA_PANEL_DATABASE_PASSWORD` or `PINGORA_PANEL_DATABASE_PASSWORD_FILE`.
+Each process keeps its module's SQLite file, such as `audit.db`, in
+`PINGORA_PANEL_DATA_DIR` (`/var/lib/pingora-panel/control` by default)
+([decision](../docs/adr/0032-one-control-plane-process-on-sqlite.md)).
 Every process reads `PINGORA_PANEL_NATS_URL`, and optionally
 `PINGORA_PANEL_OPS_ADDR`,
 `PINGORA_PANEL_GRPC_ADDR` and `PINGORA_PANEL_HEALTH_INTERVAL_MS`.
@@ -1021,29 +1016,30 @@ evaluated before the activation and fails with `412 Precondition Failed`, and
 the gateway's compare-and-swap still refuses a change made since. The
 response's `ETag` is the new active hash, ready for the next `If-Match`.
 
-## Service-owned PostgreSQL schemas
+## Module-owned SQLite databases
 
-Each service connects as a login role that owns exactly one schema. `DatabaseBootstrap`
-applies PostgreSQL's secure schema usage pattern idempotently: it revokes `PUBLIC`
-privileges on the database and on `public`, creates each role with a client-computed
-SCRAM-SHA-256 verifier so the server never sees a plaintext password, makes the role
-own its schema, and pins the role's `search_path` to that schema. Unqualified platform
-SQL therefore resolves to the caller's own tables and cannot reach another service's
-schema. The administrator, never a service role, must own the database.
+Each module owns one SQLite file in the data directory
+([decision](../docs/adr/0032-one-control-plane-process-on-sqlite.md)). The
+directory and the files are created for the control plane's user alone, and
+the write-ahead log takes the file's permissions. Files are opened with
+`journal_mode=WAL`, `synchronous=FULL`, foreign keys and a busy timeout;
+tables are `STRICT`. `ServiceDatabase::begin` starts a transaction that
+writes with `BEGIN IMMEDIATE`, so a writer waits its turn for the file's lock
+instead of failing when a read would have to become a write. No transaction
+spans files, and no module writes another's.
 
-`ServiceDatabase::migrate` applies platform migrations (versions below 10000) and the
-service's own migrations (10000 and above) in one ordered history stored in the
-service schema, so services migrate independently. A published migration is never
-edited, renamed or removed, and a new one sorts after every published version in its
-directory: CI compares them with the baseline commit, because a database that applied
-the old file would otherwise refuse to start or apply changes out of order.
+`ServiceDatabase::migrate` applies platform migrations (versions below 10000)
+and the module's own migrations (10000 and above) in one ordered history
+stored in the file, so modules migrate independently. A published migration
+is never edited, renamed or removed, and a new one sorts after every
+published version in its directory: CI compares them with the baseline
+commit, because a database that applied the old file would otherwise refuse
+to start or apply changes out of order.
 
-Producers call `PgOutbox::append` inside the transaction that changes their state, so an
-event exists exactly when that change commits. Each row stores the CloudEvents Protobuf
-form. A statement trigger issues `NOTIFY` (delivered only after commit) to wake the
-relay, and polling bounds the delay when a notification is lost. One relay per schema
-holds a PostgreSQL advisory lock and publishes in append order; a producer must lock the
-aggregate before appending so append order matches the aggregate's commit order.
+Producers call `SqliteOutbox::append` inside the transaction that changes
+their state, so an event exists exactly when that change commits. Each row
+stores the CloudEvents Protobuf form. One relay per file publishes in append
+order; a module wakes it after a commit, and otherwise it looks every 250 ms.
 
 `panel-jetstream` publishes relayed events to NATS JetStream and drives durable consumers.
 Events a consumer cannot process are parked in a dead-letter stream, either by the handler's
@@ -1051,8 +1047,9 @@ decision, after the final failed attempt, or from the max-deliveries advisory. R
 returns them to that consumer alone. See
 [the delivery decision](../docs/adr/0006-jetstream-delivery-and-dead-letters.md).
 
-Integration tests use disposable servers named by `PANEL_TEST_DATABASE_URL`,
-`PANEL_TEST_NATS_URL` and `PANEL_TEST_ACME_*` and skip without them; CI sets
+Database tests open temporary files. Integration tests use disposable
+servers named by `PANEL_TEST_NATS_URL` and `PANEL_TEST_ACME_*` and skip
+without them; CI sets
 `PANEL_REQUIRE_INTEGRATION_SERVICES` so a missing server fails instead. The
 ACME server is Pebble, Let's Encrypt's test CA, with its DNS test server
 resolving every name to 127.0.0.1; its release binaries are downloaded once
@@ -1061,8 +1058,9 @@ and checked against pinned digests. Locally:
 ```sh
 panel/scripts/dev-services.sh up
 eval "$(panel/scripts/dev-services.sh env)"
-cargo test --manifest-path panel/Cargo.toml --package panel-postgres --package panel-jetstream \
-  --package panel-acme --package automation-service --all-features
+cargo test --manifest-path panel/Cargo.toml --package panel-jetstream \
+  --package panel-control-runtime --package panel-acme --package automation-service \
+  --package config-service --package audit-service --package panel-api-server --all-features
 panel/scripts/dev-services.sh down
 ```
 
@@ -1074,7 +1072,7 @@ real primary for `example.com`, as described in
 
 `deploy/compose.yaml` installs Pingora Panel on one Linux host with Docker
 Compose or Podman Compose, from one image built by `deploy/Containerfile`
-(distroless, non-root) and digest-pinned PostgreSQL and NATS images:
+(distroless, non-root) and digest-pinned third-party images:
 
 ```bash
 panel/deploy/generate-secrets.sh
@@ -1085,13 +1083,14 @@ Every container uses the host network and binds loopback addresses, so the
 console at <http://127.0.0.1:8080> and every internal port stay local until
 the API authenticates callers. `pki-init` creates the certificate authority
 and every service's credentials, `pki` renews them, and `bootstrap`
-provisions roles, schemas, streams and the service registry before the
-services start; internal gRPC runs over mutual TLS. Each service mounts only
+provisions the event streams and the service registry before the services
+start; internal gRPC runs over mutual TLS. The control plane's SQLite files
+live in the `control-data` volume. Each service mounts only
 its own credential volume, read-only, and runs with a read-only root file
-system, no capabilities and `no-new-privileges`. Passwords, the bootstrap
-token, the password pepper and the master key that seals certificate keys
-are generated into `deploy/secrets/` (never committed) and mounted as
-Compose secrets; back the master key up with the database, since stored
+system, no capabilities and `no-new-privileges`. The bootstrap token, the
+password pepper and the master key that seals certificate keys are
+generated into `deploy/secrets/` (never committed) and mounted as Compose
+secrets; back the master key up with the `control-data` volume, since stored
 private keys cannot be opened without it. `automation-service` writes
 certificates into the `gateway-secrets` volume, which the gateway mounts
 read-only.

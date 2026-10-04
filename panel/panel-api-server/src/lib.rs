@@ -158,7 +158,7 @@ pub fn process(
         .transpose()?;
     // Bound now so a taken address fails the start before anything else runs.
     let listener = PublicListener::bind(HTTP_ADDRESS_ENV, &http_address)?;
-    let mut process = ControlPlaneProcess::on_sqlite(
+    let mut process = ControlPlaneProcess::new(
         ServiceName::new(SERVICE)?,
         env!("CARGO_PKG_VERSION"),
         settings,
@@ -201,7 +201,7 @@ pub fn process(
     let observability_health = observability.health_check();
     let automation_health = automation.health_check();
     let config_health = config.health_check();
-    let events = EventLog::new(process.sqlite(), ServiceName::new(SERVICE)?);
+    let events = EventLog::new(process.database(), ServiceName::new(SERVICE)?);
     let operations = Arc::new(operations::OutboxOperations(events.clone()));
     let runtime = RecordedRuntime::new(Arc::new(gateway), operations.clone());
     let logs = RecordedLogs::new(Arc::new(observability.clone()), operations.clone());
@@ -211,7 +211,7 @@ pub fn process(
     let recorded_containers = agent
         .clone()
         .map(|agent| RecordedContainers::new(Arc::new(agent), operations.clone()));
-    let store = Arc::new(SqliteIdentityStore::new(process.sqlite(), events));
+    let store = Arc::new(SqliteIdentityStore::new(process.database(), events));
     let roles = roles::BuiltInRoles::new(Arc::clone(&store), bootstrap.is_some());
     let oidc = Arc::new(OidcClient::new(PROVIDER_TIMEOUT)?);
     let workloads = WorkloadIdentity::new(store.clone(), store.clone(), oidc.clone());
@@ -234,7 +234,7 @@ pub fn process(
         None => process,
     };
     Ok(process
-        .with_sqlite_migrations(identity_sqlite::MIGRATIONS)
+        .with_migrations(identity_sqlite::MIGRATIONS)
         .with_database_impact(Impact::Degrading)
         .with_check(Arc::new(roles), Impact::Required)
         .with_check(Arc::new(config_health), Impact::Degrading)

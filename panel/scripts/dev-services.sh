@@ -1,24 +1,22 @@
 #!/usr/bin/env bash
-# Disposable PostgreSQL, NATS JetStream and ACME servers for local
-# integration tests. The ACME server is Pebble, Let's Encrypt's test CA, with
-# its DNS test server resolving every name to 127.0.0.1.
+# Disposable NATS JetStream and ACME servers for local integration tests;
+# the control plane's databases are temporary SQLite files the tests create.
+# The ACME server is Pebble, Let's Encrypt's test CA, with its DNS test server
+# resolving every name to 127.0.0.1.
 #
 #   panel/scripts/dev-services.sh up     start all servers
 #   panel/scripts/dev-services.sh acme   start only the ACME servers
 #   eval "$(panel/scripts/dev-services.sh env)"
 #   panel/scripts/dev-services.sh down   stop them and delete all data
 #
-# Data lives under PANEL_DEV_SERVICES_DIR and is deleted by `down`. Durability
-# settings are relaxed because the data is throwaway. Pebble's release
-# binaries and test certificates are downloaded once into PANEL_DEV_TOOLS_DIR
-# and checked against pinned SHA-256 digests.
+# Data lives under PANEL_DEV_SERVICES_DIR and is deleted by `down`. Pebble's
+# release binaries and test certificates are downloaded once into
+# PANEL_DEV_TOOLS_DIR and checked against pinned SHA-256 digests.
 set -euo pipefail
 
 root="${PANEL_DEV_SERVICES_DIR:-${TMPDIR:-/tmp}/pingora-panel-dev-services}"
 tools="${PANEL_DEV_TOOLS_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/pingora-panel/tools}"
-pg_port="${PANEL_DEV_PG_PORT:-55432}"
 nats_port="${PANEL_DEV_NATS_PORT:-54222}"
-pg_password="${PANEL_DEV_PG_PASSWORD:-panel-dev-superuser}"
 acme_port="${PANEL_DEV_ACME_PORT:-14000}"
 acme_management_port="${PANEL_DEV_ACME_MANAGEMENT_PORT:-15000}"
 # Pebble validates HTTP-01 challenges on this port of 127.0.0.1.
@@ -51,24 +49,6 @@ require() {
   if ! command -v "$1" >/dev/null 2>&1; then
     printf 'required command is unavailable: %s\n' "$1" >&2
     exit 2
-  fi
-}
-
-start_postgres() {
-  require initdb
-  require pg_ctl
-  if [[ ! -d "$root/pg" ]]; then
-    mkdir -p "$root"
-    printf '%s\n' "$pg_password" >"$root/pg-password"
-    initdb --pgdata="$root/pg" --username=postgres --pwfile="$root/pg-password" \
-      --auth-local=trust --auth-host=scram-sha-256 --encoding=UTF8 --locale=C \
-      >"$root/initdb.log"
-    rm -f "$root/pg-password"
-  fi
-  if ! pg_ctl --pgdata="$root/pg" status >/dev/null 2>&1; then
-    pg_ctl --pgdata="$root/pg" --log="$root/postgres.log" --wait start \
-      -o "-p $pg_port -k $root -c listen_addresses=127.0.0.1 -c fsync=off -c synchronous_commit=off -c full_page_writes=off -c max_connections=300" \
-      >/dev/null
   fi
 }
 
@@ -193,19 +173,16 @@ start_nats() {
 
 case "${1:-}" in
   up)
-    start_postgres
     start_nats
     start_acme
-    printf 'PostgreSQL on 127.0.0.1:%s, NATS on 127.0.0.1:%s and ACME on 127.0.0.1:%s (data in %s)\n' \
-      "$pg_port" "$nats_port" "$acme_port" "$root"
+    printf 'NATS on 127.0.0.1:%s and ACME on 127.0.0.1:%s (data in %s)\n' \
+      "$nats_port" "$acme_port" "$root"
     ;;
   acme)
     start_acme
     printf 'ACME on 127.0.0.1:%s (data in %s)\n' "$acme_port" "$root"
     ;;
   env)
-    printf 'export PANEL_TEST_DATABASE_URL=%q\n' \
-      "postgres://postgres:${pg_password}@127.0.0.1:${pg_port}/postgres"
     printf 'export PANEL_TEST_NATS_URL=%q\n' "nats://127.0.0.1:${nats_port}"
     printf 'export PANEL_TEST_ACME_DIRECTORY=%q\n' "https://127.0.0.1:${acme_port}/dir"
     printf 'export PANEL_TEST_ACME_CA=%q\n' "$pebble_dir/pebble.minica.pem"
@@ -213,9 +190,6 @@ case "${1:-}" in
     printf 'export PANEL_TEST_ACME_DNS=%q\n' "http://127.0.0.1:${acme_dns_management_port}"
     ;;
   down)
-    if [[ -d "$root/pg" ]]; then
-      pg_ctl --pgdata="$root/pg" --mode=fast stop >/dev/null 2>&1 || true
-    fi
     for pid in "$root/nats.pid" "$root/acme/pebble.pid" "$root/acme/dns.pid"; do
       if [[ -f "$pid" ]]; then
         kill "$(cat "$pid")" 2>/dev/null || true

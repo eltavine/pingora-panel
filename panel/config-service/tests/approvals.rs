@@ -189,7 +189,7 @@ impl Harness {
     async fn events(&self, event_type: &str) -> i64 {
         sqlx::query_scalar("SELECT count(*) FROM outbox WHERE event_type LIKE '%.' || ?1 || '.v1'")
             .bind(event_type)
-            .fetch_one(self._process.sqlite().pool())
+            .fetch_one(self._process.database().pool())
             .await
             .unwrap()
     }

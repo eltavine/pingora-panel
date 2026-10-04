@@ -7,7 +7,7 @@ use panel_events::{
 };
 use panel_jetstream::{testing::TestBroker, ConsumerSpec, JetStreamConsumer, JetStreamPublisher};
 use panel_outbox::{OutboxRelay, RelayOptions};
-use panel_postgres::{testing::TestDatabase, PgOutbox, PgProcessedEventStore};
+use panel_sqlite::{testing::TestDatabase, SqliteOutbox, SqliteProcessedEventStore};
 use std::{sync::Arc, time::Duration};
 use support::{event, ScriptedHandler};
 use tokio::sync::oneshot;
@@ -16,32 +16,22 @@ use tokio::sync::oneshot;
 /// identity intact, through the outbox, the relay and JetStream.
 #[tokio::test]
 async fn committed_events_flow_from_the_outbox_to_an_idempotent_consumer() {
-    let (Some(mut database), Some(broker)) =
-        (TestDatabase::create().await, TestBroker::create().await)
-    else {
+    let Some(broker) = TestBroker::create().await else {
         return;
     };
-    let secrets = database
-        .bootstrap(&[("config", "config"), ("automation", "automation")])
-        .await;
-    let producer = database
-        .connect_service("config", "config", &secrets[0])
-        .await;
-    let consumer_db = database
-        .connect_service("automation", "automation", &secrets[1])
-        .await;
-    producer.migrate(&[]).await.unwrap();
-    consumer_db.migrate(&[]).await.unwrap();
+    let producer_file = TestDatabase::migrated(&[]).await;
+    let consumer_file = TestDatabase::migrated(&[]).await;
+    let producer = producer_file.database().clone();
+    let consumer_db = consumer_file.database().clone();
 
-    let outbox = PgOutbox::new(&producer);
-    let leadership = outbox.try_lead().await.unwrap().expect("relay leads");
+    let outbox = SqliteOutbox::new(&producer);
     let relay = OutboxRelay::new(
         Arc::new(outbox.clone()),
         Arc::new(JetStreamPublisher::new(
             broker.context.clone(),
             Arc::clone(&broker.settings),
         )),
-        Arc::new(outbox.listen().await.unwrap()),
+        Arc::new(outbox.wakeup()),
         RelayOptions::default().with_idle_poll(Duration::from_millis(500)),
     );
     let (stop_relay, relay_stopped) = oneshot::channel::<()>();
@@ -52,7 +42,7 @@ async fn committed_events_flow_from_the_outbox_to_an_idempotent_consumer() {
     let recorder = ScriptedHandler::new(Vec::new(), HandlerOutcome::Ack);
     let handler = Arc::new(IdempotentEventHandler::new(
         Arc::clone(&recorder),
-        Arc::new(PgProcessedEventStore::new(&consumer_db)),
+        Arc::new(SqliteProcessedEventStore::new(&consumer_db)),
         Duration::from_secs(30),
     ));
     let consumer = JetStreamConsumer::ensure(
@@ -87,12 +77,15 @@ async fn committed_events_flow_from_the_outbox_to_an_idempotent_consumer() {
         EventOrigin::caused_by(ServiceName::new("config-service").unwrap(), &original),
         chrono::Utc::now(),
     );
-    let mut transaction = producer.pool().begin().await.unwrap();
-    PgOutbox::append(&mut transaction, &original).await.unwrap();
-    PgOutbox::append(&mut transaction, &follow_up)
+    let mut transaction = producer.begin().await.unwrap();
+    SqliteOutbox::append(&mut transaction, &original)
+        .await
+        .unwrap();
+    SqliteOutbox::append(&mut transaction, &follow_up)
         .await
         .unwrap();
     transaction.commit().await.unwrap();
+    producer.committed();
 
     recorder.wait_for(2).await;
     let deliveries = recorder.deliveries();
@@ -118,9 +111,7 @@ async fn committed_events_flow_from_the_outbox_to_an_idempotent_consumer() {
     let _ = stop_consumer.send(());
     relay_task.await.unwrap();
     consumer_task.await.unwrap();
-    leadership.release().await.unwrap();
     producer.close().await;
     consumer_db.close().await;
-    database.drop().await;
     broker.drop().await;
 }

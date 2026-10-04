@@ -665,7 +665,7 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
 
     let recorded: Vec<String> =
         sqlx::query_scalar("SELECT event_type FROM outbox ORDER BY position")
-            .fetch_all(harness.process.sqlite().pool())
+            .fetch_all(harness.process.database().pool())
             .await
             .unwrap();
     for expected in [

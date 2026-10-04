@@ -104,7 +104,7 @@ pub fn process(
     let gateway_url = env
         .string(GATEWAY_URL_ENV)?
         .unwrap_or_else(|| DEFAULT_GATEWAY_URL.into());
-    let process = ControlPlaneProcess::on_sqlite(
+    let process = ControlPlaneProcess::new(
         ServiceName::new(SERVICE)?,
         env!("CARGO_PKG_VERSION"),
         settings,
@@ -125,9 +125,9 @@ pub fn process(
             JsonCompilerConfig::default(),
         )?),
     ));
-    let receipts = Arc::new(SqliteActivationReceipts::new(process.sqlite()));
-    let events = EventLog::new(process.sqlite(), ServiceName::new(SERVICE)?);
-    let deployments = SqliteDeployments::new(process.sqlite());
+    let receipts = Arc::new(SqliteActivationReceipts::new(process.database()));
+    let events = EventLog::new(process.database(), ServiceName::new(SERVICE)?);
+    let deployments = SqliteDeployments::new(process.database());
     let (reconciler, reconciliation) = Reconciler::new(
         Arc::clone(&gateway),
         Arc::clone(&receipts),
@@ -139,11 +139,11 @@ pub fn process(
         reconciliation.clone(),
         events.clone(),
     ));
-    let drafts = SqliteDrafts::new(process.sqlite(), events.clone());
-    let revisions = revisions::SqliteRevisions::new(process.sqlite());
-    let approvals = approvals::SqliteApprovals::new(process.sqlite(), events.clone());
+    let drafts = SqliteDrafts::new(process.database(), events.clone());
+    let revisions = revisions::SqliteRevisions::new(process.database());
+    let approvals = approvals::SqliteApprovals::new(process.database(), events.clone());
     Ok(process
-        .with_sqlite_migrations(MIGRATIONS)
+        .with_migrations(MIGRATIONS)
         .with_protocol(protocol_range(CONFIG_V1))
         .with_capability(Capability::new("config.publication", "1")?)
         .with_capability(Capability::new("config.configuration", "1")?)

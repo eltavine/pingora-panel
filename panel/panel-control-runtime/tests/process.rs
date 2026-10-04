@@ -1,10 +1,7 @@
 #![forbid(unsafe_code)]
 
 use chrono::Utc;
-use panel_control_runtime::{
-    ControlPlaneProcess, DefaultAddresses, ProcessSettings, DATABASE_PASSWORD_ENV,
-    DATABASE_URL_ENV, NATS_URL_ENV,
-};
+use panel_control_runtime::{ControlPlaneProcess, DefaultAddresses, ProcessSettings, NATS_URL_ENV};
 use panel_events::{
     Actor, AggregateId, AggregateRef, AggregateType, EventDraft, EventEnvelope, EventOrigin,
     EventPayload, EventType, EventVersion, Principal, RequestId, RequestScope,
@@ -12,9 +9,8 @@ use panel_events::{
 use panel_health::{HealthStatus, ServiceMode};
 use panel_jetstream::{testing::TestBroker, JetStreamServiceRegistry};
 use panel_platform::{RegistrationPolicy, ServiceDirectory, ServiceName};
-use panel_postgres::{testing::TestDatabase, PgOutbox, SqlIdentifier};
-use panel_sqlite::SqliteOutbox;
 use panel_service::{describe_peer, Environment};
+use panel_sqlite::SqliteOutbox;
 use std::{collections::HashMap, ffi::OsString, future::Future, time::Duration};
 use tonic::transport::Channel;
 
@@ -70,22 +66,16 @@ fn event() -> EventEnvelope {
 
 #[tokio::test]
 async fn a_ready_process_serves_registers_relays_and_deregisters() {
-    let (Some(mut database), Some(broker)) =
-        (TestDatabase::create().await, TestBroker::create().await)
-    else {
+    let Some(broker) = TestBroker::create().await else {
         return;
     };
-    let secrets = database.bootstrap(&[("config", "config")]).await;
+    let data = tempfile::tempdir().unwrap();
     let nats_url = std::env::var(panel_jetstream::testing::NATS_URL_ENV).unwrap();
     let process = ControlPlaneProcess::new(
         ServiceName::new("config-service").unwrap(),
         "0.1.0-test",
-        settings(&[
-            (DATABASE_URL_ENV, &database.service_url("config")),
-            (DATABASE_PASSWORD_ENV, secrets[0].expose()),
-            (NATS_URL_ENV, &nats_url),
-        ]),
-        SqlIdentifier::new("config").unwrap(),
+        settings(&[(NATS_URL_ENV, &nats_url)]).with_data_directory(data.path()),
+        "config",
     )
     .unwrap()
     .with_jetstream_settings((*broker.settings).clone())
@@ -119,12 +109,13 @@ async fn a_ready_process_serves_registers_relays_and_deregisters() {
         metrics.contains("pingora_panel_service_ready 1\n"),
         "{metrics}"
     );
-    for check in ["schema", "postgresql", "nats"] {
+    for check in ["schema", "sqlite", "nats"] {
         assert_eq!(
             readiness["checks"][format!("{check}:responseTime")][0]["status"],
             "pass"
         );
     }
+    assert!(data.path().join("config.db").is_file());
 
     let channel = Channel::from_shared(format!("http://{}", process.grpc_address()))
         .unwrap()
@@ -149,10 +140,12 @@ async fn a_ready_process_serves_registers_relays_and_deregisters() {
     })
     .await;
 
-    let mut transaction = process.database().pool().begin().await.unwrap();
-    PgOutbox::append(&mut transaction, &event()).await.unwrap();
+    let mut transaction = process.database().begin().await.unwrap();
+    SqliteOutbox::append(&mut transaction, &event())
+        .await
+        .unwrap();
     transaction.commit().await.unwrap();
-    let outbox = PgOutbox::new(process.database());
+    let outbox = SqliteOutbox::new(process.database());
     eventually("the relay publishes the event", || async {
         outbox.backlog().await.unwrap().pending == 0
     })
@@ -168,80 +161,17 @@ async fn a_ready_process_serves_registers_relays_and_deregisters() {
         .delete_key_value(broker.settings.service_bucket())
         .await
         .unwrap();
-    database.drop().await;
     broker.drop().await;
 }
 
 #[tokio::test]
-async fn a_process_on_sqlite_migrates_its_file_and_relays_its_outbox() {
-    let Some(broker) = TestBroker::create().await else {
-        return;
-    };
-    let directory = tempfile::tempdir().unwrap();
-    let nats_url = std::env::var(panel_jetstream::testing::NATS_URL_ENV).unwrap();
-    let process = ControlPlaneProcess::on_sqlite(
-        ServiceName::new("audit-service").unwrap(),
-        "0.1.0-test",
-        settings(&[(NATS_URL_ENV, &nats_url)]).with_data_directory(directory.path()),
-        "audit",
-    )
-    .unwrap()
-    .with_jetstream_settings((*broker.settings).clone())
-    .start()
-    .await
-    .unwrap();
-
-    let health = process.health();
-    eventually("the process is ready", || {
-        let health = health.clone();
-        async move { health.current().status() == HealthStatus::Pass }
-    })
-    .await;
-    let readiness: serde_json::Value = get(format!("http://{}/readyz", process.ops_address()))
-        .await
-        .json()
-        .await
-        .unwrap();
-    for check in ["schema", "sqlite", "nats"] {
-        assert_eq!(
-            readiness["checks"][format!("{check}:responseTime")][0]["status"],
-            "pass"
-        );
-    }
-    assert_eq!(process.descriptor().schema_version(), "2");
-    assert!(directory.path().join("audit.db").is_file());
-
-    let mut transaction = process.sqlite().begin().await.unwrap();
-    SqliteOutbox::append(&mut transaction, &event()).await.unwrap();
-    transaction.commit().await.unwrap();
-    let outbox = SqliteOutbox::new(process.sqlite());
-    eventually("the relay publishes the event", || async {
-        outbox.backlog().await.unwrap().pending == 0
-    })
-    .await;
-
-    process.stop().await;
-    broker
-        .context
-        .delete_key_value(broker.settings.service_bucket())
-        .await
-        .unwrap();
-    broker.drop().await;
-}
-
-#[tokio::test]
-async fn an_unreachable_database_keeps_the_process_unavailable_but_stoppable() {
+async fn an_unreachable_broker_neither_blocks_readiness_nor_stopping() {
+    let data = tempfile::tempdir().unwrap();
     let process = ControlPlaneProcess::new(
         ServiceName::new("observability-service").unwrap(),
         "0.1.0-test",
-        settings(&[
-            (
-                DATABASE_URL_ENV,
-                "postgres://observability@127.0.0.1:1/panel",
-            ),
-            (NATS_URL_ENV, "nats://127.0.0.1:1"),
-        ]),
-        SqlIdentifier::new("observability").unwrap(),
+        settings(&[(NATS_URL_ENV, "nats://127.0.0.1:1")]).with_data_directory(data.path()),
+        "observability",
     )
     .unwrap()
     .start()
@@ -249,21 +179,13 @@ async fn an_unreachable_database_keeps_the_process_unavailable_but_stoppable() {
     .unwrap();
 
     let health = process.health();
-    eventually("checks have run", || {
+    eventually("the schema is migrated", || {
         let health = health.clone();
-        async move {
-            health
-                .current()
-                .checks()
-                .contains_key("schema:responseTime")
-        }
+        async move { health.current().mode() == ServiceMode::Normal }
     })
     .await;
-    let report = health.current();
-    assert_eq!(report.status(), HealthStatus::Fail);
-    assert_eq!(report.mode(), ServiceMode::Unavailable);
     let response = get(format!("http://{}/readyz", process.ops_address())).await;
-    assert_eq!(response.status(), 503);
+    assert_eq!(response.status(), 200);
     let liveness = get(format!("http://{}/livez", process.ops_address())).await;
     assert_eq!(liveness.status(), 200);
 
@@ -272,17 +194,31 @@ async fn an_unreachable_database_keeps_the_process_unavailable_but_stoppable() {
         .expect("stopping does not wait for unreachable dependencies");
 }
 
+#[tokio::test]
+async fn a_data_directory_that_cannot_be_made_refuses_the_process() {
+    let data = tempfile::tempdir().unwrap();
+    let file = data.path().join("not-a-directory");
+    std::fs::write(&file, b"").unwrap();
+    let refused = ControlPlaneProcess::new(
+        ServiceName::new("audit-service").unwrap(),
+        "0.1.0-test",
+        settings(&[]).with_data_directory(&file),
+        "audit",
+    )
+    .err()
+    .expect("a file is not a data directory");
+    assert_eq!(refused.code.as_str(), "STORAGE_UNAVAILABLE");
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn socket_peers_are_never_reached_over_plaintext() {
+    let data = tempfile::tempdir().unwrap();
     let process = ControlPlaneProcess::new(
         ServiceName::new("panel-api").unwrap(),
         "0.1.0-test",
-        settings(&[
-            (DATABASE_URL_ENV, "postgres://panel@127.0.0.1:1/panel"),
-            (NATS_URL_ENV, "nats://127.0.0.1:1"),
-        ]),
-        SqlIdentifier::new("identity").unwrap(),
+        settings(&[(NATS_URL_ENV, "nats://127.0.0.1:1")]).with_data_directory(data.path()),
+        "identity",
     )
     .unwrap();
     let refused = process

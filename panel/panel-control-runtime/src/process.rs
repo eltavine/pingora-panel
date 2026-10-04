@@ -20,11 +20,10 @@ use panel_platform::{
     Capability, ProtocolRange, RegistrationPolicy, ServiceDescriptor, ServiceName,
 };
 use panel_platform_codec::protocol_range;
-use panel_postgres::{
-    PgHealthCheck, PgOutbox, SchemaMigration, ServiceDatabase, ServiceDatabaseConfig, SqlIdentifier,
-};
 use panel_service::{ops_router, publish_grpc_health, register_readiness, ServiceInfoService};
-use panel_sqlite::{SqliteHealthCheck, SqliteOutbox};
+use panel_sqlite::{
+    SchemaMigration, ServiceDatabase, ServiceDatabaseConfig, SqliteHealthCheck, SqliteOutbox,
+};
 use panel_tls::{PeerPolicy, TlsCredentials};
 use std::{convert::Infallible, future::Future, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{net::TcpListener, sync::watch, task::JoinHandle};
@@ -46,44 +45,12 @@ const PEER_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 type StartHook = Box<dyn FnOnce(&RunningProcess) -> Result<()> + Send>;
 
-/// Where a process keeps its state while services move from PostgreSQL to
-/// their own SQLite files (ADR 0032).
-#[derive(Clone, Debug)]
-enum Storage {
-    Postgres(ServiceDatabase),
-    Sqlite(panel_sqlite::ServiceDatabase),
-}
-
-impl Storage {
-    fn postgres(&self, service: &ServiceName) -> &ServiceDatabase {
-        match self {
-            Self::Postgres(database) => database,
-            Self::Sqlite(_) => panic!("{service} keeps its state in SQLite"),
-        }
-    }
-
-    fn sqlite(&self, service: &ServiceName) -> &panel_sqlite::ServiceDatabase {
-        match self {
-            Self::Sqlite(database) => database,
-            Self::Postgres(_) => panic!("{service} keeps its state in PostgreSQL"),
-        }
-    }
-
-    async fn close(&self) {
-        match self {
-            Self::Postgres(database) => database.close().await,
-            Self::Sqlite(database) => database.close().await,
-        }
-    }
-}
-
 /// A control-plane service process before it starts.
 pub struct ControlPlaneProcess {
     descriptor: ServiceDescriptor,
     settings: ProcessSettings,
-    storage: Storage,
+    database: ServiceDatabase,
     migrations: &'static [SchemaMigration],
-    sqlite_migrations: &'static [panel_sqlite::SchemaMigration],
     database_impact: Impact,
     broker_impact: Impact,
     checks: Vec<(Arc<dyn HealthCheck>, Impact)>,
@@ -100,7 +67,8 @@ pub struct ControlPlaneProcess {
 }
 
 impl ControlPlaneProcess {
-    /// A process for `service` built as `release` that owns `schema`.
+    /// A process for `service` built as `release` that keeps its state in
+    /// the SQLite file of `module` in the data directory.
     ///
     /// By default a failing database makes the service unavailable, while a
     /// failing broker is only reported: events wait in the outbox.
@@ -108,39 +76,12 @@ impl ControlPlaneProcess {
         service: ServiceName,
         release: impl Into<String>,
         settings: ProcessSettings,
-        schema: SqlIdentifier,
-    ) -> Result<Self> {
-        let url = settings.database_url().ok_or_else(|| {
-            PanelError::invalid_argument(format!("set {}", crate::DATABASE_URL_ENV))
-        })?;
-        let mut database_config = ServiceDatabaseConfig::new(url, service.as_str(), schema)?;
-        if let Some(secret) = settings.database_password() {
-            database_config = database_config.with_secret(secret);
-        }
-        let storage = Storage::Postgres(ServiceDatabase::connect_lazy(database_config));
-        Self::with_storage(service, release, settings, storage)
-    }
-
-    /// A process for `service` built as `release` that keeps its state in
-    /// the SQLite file of `module` in the data directory.
-    pub fn on_sqlite(
-        service: ServiceName,
-        release: impl Into<String>,
-        settings: ProcessSettings,
         module: &str,
     ) -> Result<Self> {
-        let database = panel_sqlite::ServiceDatabase::open(
-            panel_sqlite::ServiceDatabaseConfig::new(settings.data_directory(), module)?,
-        )?;
-        Self::with_storage(service, release, settings, Storage::Sqlite(database))
-    }
-
-    fn with_storage(
-        service: ServiceName,
-        release: impl Into<String>,
-        settings: ProcessSettings,
-        storage: Storage,
-    ) -> Result<Self> {
+        let database = ServiceDatabase::open(ServiceDatabaseConfig::new(
+            settings.data_directory(),
+            module,
+        )?)?;
         let trust_domain = settings
             .tls()
             .map(|tls| tls.trust_domain.clone())
@@ -157,10 +98,9 @@ impl ControlPlaneProcess {
         Ok(Self {
             descriptor: ServiceDescriptor::new(service, release, Utc::now())
                 .with_protocol(protocol_range(PLATFORM_V1)),
-            storage,
+            database,
             settings,
             migrations: &[],
-            sqlite_migrations: &[],
             database_impact: Impact::Required,
             broker_impact: Impact::Informational,
             checks: Vec::new(),
@@ -256,31 +196,16 @@ impl ControlPlaneProcess {
         self
     }
 
-    /// The service's PostgreSQL database. It connects on first use, so
-    /// adapters can be built on it before the process starts.
+    /// The service's database. It connects on first use, so adapters can be
+    /// built on it before the process starts.
     pub fn database(&self) -> &ServiceDatabase {
-        self.storage.postgres(self.descriptor.service())
-    }
-
-    /// The service's SQLite database, opened on first use.
-    pub fn sqlite(&self) -> &panel_sqlite::ServiceDatabase {
-        self.storage.sqlite(self.descriptor.service())
+        &self.database
     }
 
     /// Service migrations, at versions from
     /// [`SchemaMigration::SERVICE_VERSION_FLOOR`].
     pub fn with_migrations(mut self, migrations: &'static [SchemaMigration]) -> Self {
         self.migrations = migrations;
-        self
-    }
-
-    /// Service migrations of a SQLite database, at versions from
-    /// [`panel_sqlite::SchemaMigration::SERVICE_VERSION_FLOOR`].
-    pub fn with_sqlite_migrations(
-        mut self,
-        migrations: &'static [panel_sqlite::SchemaMigration],
-    ) -> Self {
-        self.sqlite_migrations = migrations;
         self
     }
 
@@ -353,15 +278,11 @@ impl ControlPlaneProcess {
         let grpc_listener = bind(self.settings.grpc_address(), "gRPC").await?;
         let ops_address = local_address(&ops_listener)?;
         let grpc_address = local_address(&grpc_listener)?;
-        let schema_version = match &self.storage {
-            Storage::Postgres(_) => SchemaMigration::latest(self.migrations),
-            Storage::Sqlite(_) => panel_sqlite::SchemaMigration::latest(self.sqlite_migrations),
-        };
         let descriptor = self
             .descriptor
-            .with_schema_version(schema_version.to_string());
+            .with_schema_version(SchemaMigration::latest(self.migrations).to_string());
 
-        let storage = self.storage;
+        let database = self.database;
         let client = async_nats::ConnectOptions::new()
             .name(service.as_str())
             .retry_on_initial_connect()
@@ -384,15 +305,7 @@ impl ControlPlaneProcess {
                 Impact::Required,
             )
             .register(
-                match &storage {
-                    Storage::Postgres(database) => {
-                        Arc::new(PgHealthCheck::new(database.pool().clone()))
-                            as Arc<dyn HealthCheck>
-                    }
-                    Storage::Sqlite(database) => {
-                        Arc::new(SqliteHealthCheck::new(database.pool().clone()))
-                    }
-                },
+                Arc::new(SqliteHealthCheck::new(database.pool().clone())),
                 self.database_impact,
             )
             .register(
@@ -406,39 +319,19 @@ impl ControlPlaneProcess {
 
         let cancel = CancellationToken::new();
         let tasks = TaskTracker::new();
-        let publisher = JetStreamPublisher::new(context.clone(), Arc::clone(&jetstream));
-        match &storage {
-            Storage::Postgres(database) => {
-                tasks.spawn(tasks::migrate(
-                    database.clone(),
-                    self.migrations,
-                    migrated,
-                    cancel.clone(),
-                ));
-                tasks.spawn(tasks::relay(
-                    PgOutbox::new(database),
-                    publisher,
-                    self.relay,
-                    migration_state.clone(),
-                    cancel.clone(),
-                ));
-            }
-            Storage::Sqlite(database) => {
-                tasks.spawn(tasks::migrate_sqlite(
-                    database.clone(),
-                    self.sqlite_migrations,
-                    migrated,
-                    cancel.clone(),
-                ));
-                tasks.spawn(tasks::relay_sqlite(
-                    SqliteOutbox::new(database),
-                    publisher,
-                    self.relay,
-                    migration_state.clone(),
-                    cancel.clone(),
-                ));
-            }
-        }
+        tasks.spawn(tasks::migrate(
+            database.clone(),
+            self.migrations,
+            migrated,
+            cancel.clone(),
+        ));
+        tasks.spawn(tasks::relay(
+            SqliteOutbox::new(&database),
+            JetStreamPublisher::new(context.clone(), Arc::clone(&jetstream)),
+            self.relay,
+            migration_state.clone(),
+            cancel.clone(),
+        ));
         tasks.spawn(tasks::register(
             context.clone(),
             Arc::clone(&jetstream),
@@ -521,7 +414,7 @@ impl ControlPlaneProcess {
             descriptor,
             health,
             migrated: migration_state,
-            storage,
+            database,
             context,
             jetstream,
             ops_address,
@@ -545,7 +438,7 @@ pub struct RunningProcess {
     descriptor: ServiceDescriptor,
     health: HealthWatch,
     migrated: watch::Receiver<bool>,
-    storage: Storage,
+    database: ServiceDatabase,
     context: Context,
     jetstream: Arc<JetStreamSettings>,
     ops_address: SocketAddr,
@@ -565,11 +458,7 @@ impl RunningProcess {
     }
 
     pub fn database(&self) -> &ServiceDatabase {
-        self.storage.postgres(self.descriptor.service())
-    }
-
-    pub fn sqlite(&self) -> &panel_sqlite::ServiceDatabase {
-        self.storage.sqlite(self.descriptor.service())
+        &self.database
     }
 
     /// Resolves once the service schema is migrated, or with `false` when
@@ -623,7 +512,7 @@ impl RunningProcess {
             tracing::warn!("background work did not stop in time");
         }
         self.monitor.abort();
-        if tokio::time::timeout(SHUTDOWN_TIMEOUT, self.storage.close())
+        if tokio::time::timeout(SHUTDOWN_TIMEOUT, self.database.close())
             .await
             .is_err()
         {

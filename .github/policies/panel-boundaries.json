@@ -361,7 +361,6 @@
         "panel-pki",
         "panel-platform",
         "panel-platform-codec",
-        "panel-postgres",
         "panel-service",
         "panel-sqlite",
         "panel-tls"
@@ -504,16 +503,6 @@
         "panel-contracts",
         "panel-errors",
         "panel-platform"
-      ]
-    },
-    "panel-postgres": {
-      "catalog": true,
-      "allowed_workspace_dependencies": [
-        "panel-errors",
-        "panel-event-codec",
-        "panel-events",
-        "panel-health",
-        "panel-outbox"
       ]
     },
     "panel-service": {

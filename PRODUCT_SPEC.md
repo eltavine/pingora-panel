@@ -122,7 +122,7 @@ Pingora Panel 是一个面向团队运维的单节点网站网关控制平台。
 
 ### 3.1 当前仓库事实
 
-当前仓库是 Pingora 0.9.0 的完整 Rust workspace，包含 `pingora-core`、`pingora-proxy`、`pingora-load-balancing`、TLS、缓存、指标等上游 crates，并包含针对 Rust 与 OpenResty 基线的 CI 调整。Pingora Panel 现处于 `In Progress / durable gateway foundation`：`panel/` 独立 workspace 已提供 Proto-first 契约、稳定错误模型、领域值对象、Engine-neutral IR、`GatewayEngine`/`SnapshotStore`/`DataPlaneAdapter`/`GatewayRuntimeInfoProvider` ports、内存 `FakeGatewayEngine`、独立 durable runtime、原子文件快照存储、Pingora 0.9.0 adapter、Tonic gRPC transport、标准 gRPC Health、`gatewayd` 组合根、v1/v2 磁盘格式 Golden Fixture、真实 TCP 与文件系统故障黑盒测试、有界 mutation admission、两阶段 readiness drain、plaintext loopback-only 管理绑定、恢复诊断、Proto compatibility guard 自测试、security lockfile resolver hermetic 自测试、依赖边界检查，模块化 Axum/Utoipa REST adapter、从 HTTP 经 gRPC 到事件贯通的 Request-ID/Correlation/W3C Trace Context 传播、CloudEvents 领域事件契约（事件数据以 proto3 定义并受 Buf 兼容检查）、服务独占 PostgreSQL schema 与迁移、事务性 Outbox、幂等 Inbox、NATS JetStream 投递与 DLQ，以及 shadcn-vue 管理控制台。`panel-api`、`config-service`、`automation-service`、`observability-service` 已作为独立进程运行：统一的控制面运行时负责延迟连接依赖、迁移、Outbox relay 选主、`application/health+json` 聚合 Readiness、gRPC Health、Degraded Mode、服务描述与 JetStream KV 服务注册，`panel-bootstrap` 幂等初始化角色、schema 与流；`automation-service` 提供带租约、取消、指数退避重试、进度事件、RFC 5545 持久化调度与维护窗口的作业引擎。`panel-api` 在公共 listener 上提供 REST 与控制台，发布请求经 `pingora.panel.config.v1` 交给 `config-service`，回执持久化在 `config` schema。服务间 gRPC 可启用基于内部 CA 的 mTLS（SPIFFE/DNS 工作负载身份、TLS 1.3、按调用方授权、证书自动轮换）。`panel/deploy` 提供单镜像与 Docker/Podman Compose 安装（host 网络 loopback 绑定、内部 mTLS、证书轮换、只读根文件系统）。`gatewayd` 以 Pingora 数据面服务生效配置的 listener、虚拟主机、路由、TLS（SNI 选证）、静态内容与上游池（加权轮询、随机、一致性哈希、主备、主动与被动健康检查、手动摘除），并支持平滑 reload、worker 调整与 graceful shutdown；`config-service` 以单一版本化草稿保存站点、域名、路由、上游、监听与证书配置，变更经校验、`If-Match` 条件与幂等回执后提交，应用时编译为 IR 并以比较交换激活；REST API、`ppanel` CLI 与 Web 控制台提供同一套操作。配置语言以文件编辑草稿并记录可回滚的配置版本；`audit-service` 将各服务的事件记录为防篡改的哈希链审计日志。`panel-api` 对每个请求认证并按权限目录授权：本地账户、浏览器会话、Bearer 会话与 API 令牌，以及内置与自定义角色。`automation-service` 另保存证书库：私钥以主密钥信封加密，证书原子下发到网关密钥目录，网关热加载更新的证书。
+当前仓库是 Pingora 0.9.0 的完整 Rust workspace，包含 `pingora-core`、`pingora-proxy`、`pingora-load-balancing`、TLS、缓存、指标等上游 crates，并包含针对 Rust 与 OpenResty 基线的 CI 调整。Pingora Panel 现处于 `In Progress / durable gateway foundation`：`panel/` 独立 workspace 已提供 Proto-first 契约、稳定错误模型、领域值对象、Engine-neutral IR、`GatewayEngine`/`SnapshotStore`/`DataPlaneAdapter`/`GatewayRuntimeInfoProvider` ports、内存 `FakeGatewayEngine`、独立 durable runtime、原子文件快照存储、Pingora 0.9.0 adapter、Tonic gRPC transport、标准 gRPC Health、`gatewayd` 组合根、v1/v2 磁盘格式 Golden Fixture、真实 TCP 与文件系统故障黑盒测试、有界 mutation admission、两阶段 readiness drain、plaintext loopback-only 管理绑定、恢复诊断、Proto compatibility guard 自测试、security lockfile resolver hermetic 自测试、依赖边界检查，模块化 Axum/Utoipa REST adapter、从 HTTP 经 gRPC 到事件贯通的 Request-ID/Correlation/W3C Trace Context 传播、CloudEvents 领域事件契约（事件数据以 proto3 定义并受 Buf 兼容检查）、每个模块独占的 SQLite 数据库文件与迁移、事务性 Outbox、幂等 Inbox、NATS JetStream 投递与 DLQ，以及 shadcn-vue 管理控制台。`panel-api`、`config-service`、`automation-service`、`observability-service` 已作为独立进程运行：统一的控制面运行时负责延迟连接依赖、迁移、Outbox relay、`application/health+json` 聚合 Readiness、gRPC Health、Degraded Mode、服务描述与 JetStream KV 服务注册，`panel-bootstrap` 幂等初始化角色、schema 与流；`automation-service` 提供带租约、取消、指数退避重试、进度事件、RFC 5545 持久化调度与维护窗口的作业引擎。`panel-api` 在公共 listener 上提供 REST 与控制台，发布请求经 `pingora.panel.config.v1` 交给 `config-service`，回执持久化在 `config` schema。服务间 gRPC 可启用基于内部 CA 的 mTLS（SPIFFE/DNS 工作负载身份、TLS 1.3、按调用方授权、证书自动轮换）。`panel/deploy` 提供单镜像与 Docker/Podman Compose 安装（host 网络 loopback 绑定、内部 mTLS、证书轮换、只读根文件系统）。`gatewayd` 以 Pingora 数据面服务生效配置的 listener、虚拟主机、路由、TLS（SNI 选证）、静态内容与上游池（加权轮询、随机、一致性哈希、主备、主动与被动健康检查、手动摘除），并支持平滑 reload、worker 调整与 graceful shutdown；`config-service` 以单一版本化草稿保存站点、域名、路由、上游、监听与证书配置，变更经校验、`If-Match` 条件与幂等回执后提交，应用时编译为 IR 并以比较交换激活；REST API、`ppanel` CLI 与 Web 控制台提供同一套操作。配置语言以文件编辑草稿并记录可回滚的配置版本；`audit-service` 将各服务的事件记录为防篡改的哈希链审计日志。`panel-api` 对每个请求认证并按权限目录授权：本地账户、浏览器会话、Bearer 会话与 API 令牌，以及内置与自定义角色。`automation-service` 另保存证书库：私钥以主密钥信封加密，证书原子下发到网关密钥目录，网关热加载更新的证书。
 
 Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交：`665fd57`；该提交的 Pingora crates：`0.8.0`；许可证：Apache-2.0；此记录不代表当前提交的验收状态）：
 
@@ -147,7 +147,7 @@ Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交
 
 0.5 日志（`OBS-001`～`OBS-019`、`SEC-028`）按 ADR 0025 与 ADR 0026 实现：设置了日志目录的网关把网站接收的请求写入各自的 `sites/<网站>.access.log`，其余请求写入 `access.log`，失败的请求另写 `error.log`。访问记录是以 OpenTelemetry 属性名为键的 JSON 行或 Combined Log Format，带请求 ID（合法的 `X-Request-Id` 原样保留，否则写入新的 UUIDv7 并一并转发给上游）、trace ID、网站、路由、修订与上游节点；敏感查询参数（OpenTelemetry 的默认列表或自定义列表）、凭据类请求头与全部 Cookie 记为 `REDACTED`。文件按大小与 UTC 日期轮转，按保留天数与文件数清理；写入队列满时丢弃记录并计数，不阻塞请求。配置语言在 `http`、`server` 与 `route` 中设置开关、格式与自定义字段，在 `http` 中设置脱敏列表与轮转保留；Compose 安装由 OpenTelemetry Collector 把日志送入 Loki。`observability-service` 按类型化的过滤条件（类型、网站、路由、状态码或状态类、客户端地址或 CIDR、路径前缀、请求 ID 与文本）自行生成 LogQL，调用方不写 LogQL：检索按时间倒序分页，每页至多 500 条；Tail 每秒读取 Loki，由 `panel-api` 经 WebSocket（RFC 6455，HTTP/2 下按 RFC 8441）推送，只接受控制台来源的会话握手，跟不上的客户端收到可续读的游标；下载以纯文本流式返回至多 100,000 条原始行；清空向 Loki 提交删除请求，撤销期过后执行，审计记为 `gateway.logs.deleted`。查看需要 `logs.read`，清空需要 `logs.delete`。`ppanel logs` 与控制台的日志页提供同样的检索、实时跟踪、下载与清空，网站与路由表单设置日志开关、格式与自定义字段。
 
-0.5 告警（`OBS-051`～`OBS-053`）按 ADR 0027 实现：`observability-service` 每 30 秒由持有告警咨询锁的实例评估规则；规则以固定 PromQL 读取最近五分钟的 5xx 占比、P95 延迟、请求速率、上游失败占比或打开的连接数，可限定网站、路由或上游，条件持续满足到设定时长后触发，首次不满足即恢复，读取失败时保持原状态并说明原因。触发与恢复在状态变更的同一事务中为每个渠道排队通知，由发送方以 `FOR UPDATE SKIP LOCKED` 领取，按 Alertmanager Webhook（version 4）格式、依 Standard Webhooks 规范以 HMAC-SHA256 签名发送，失败时退避重试一天。渠道的地址与签名密钥以主密钥加密保存，只显示地址的来源，密钥仅在创建或轮换时显示一次；邮件渠道作为预留接口在合约中命名，创建时返回不支持。规则与渠道的变更及告警的触发与恢复都写入审计。查看需要 `alerts.read`，修改需要 `alerts.manage`；REST API、`ppanel alert` 与控制台告警页提供同样的能力，网关概览首先列出正在触发的告警。
+0.5 告警（`OBS-051`～`OBS-053`）按 ADR 0027 实现：`observability-service` 每 30 秒评估规则；规则以固定 PromQL 读取最近五分钟的 5xx 占比、P95 延迟、请求速率、上游失败占比或打开的连接数，可限定网站、路由或上游，条件持续满足到设定时长后触发，首次不满足即恢复，读取失败时保持原状态并说明原因。触发与恢复在状态变更的同一事务中为每个渠道排队通知，由唯一的发送任务在事务之外逐条投递，按 Alertmanager Webhook（version 4）格式、依 Standard Webhooks 规范以 HMAC-SHA256 签名发送，失败时退避重试一天。渠道的地址与签名密钥以主密钥加密保存，只显示地址的来源，密钥仅在创建或轮换时显示一次；邮件渠道作为预留接口在合约中命名，创建时返回不支持。规则与渠道的变更及告警的触发与恢复都写入审计。查看需要 `alerts.read`，修改需要 `alerts.manage`；REST API、`ppanel alert` 与控制台告警页提供同样的能力，网关概览首先列出正在触发的告警。
 
 0.5 主机概览（`HOST-001`～`HOST-011`）按 ADR 0028 实现：Compose 安装运行只监听回环地址、只读挂载主机根目录且不带任何能力的 node exporter，Prometheus 抓取它；`observability-service` 以固定 PromQL 回答主机名、操作系统、内核、架构、系统时间与时区、运行时长、CPU 使用率与核数、负载、内存、按设备去重并按占用率排序的真实文件系统，以及物理网卡的收发流量，没有 node exporter 时说明主机未上报。`GET /api/v1/host`（需要 `host.read`）为每个文件系统给出已用比例与级别（85% 起为警告、95% 起为严重），`ppanel host` 与控制台主机页展示同样的数据与预警。端口占用诊断、systemd 管理与目录容量（`HOST-012`～`HOST-018`）由 `ops-agent` 提供，见下一段。
 
@@ -273,7 +273,7 @@ flowchart TB
 
 - 承载 Pingora 数据面、固定 listener、Engine-neutral IR 校验和 Runtime Snapshot 构造。
 - 只有内部 `gateway-pingora` 适配器依赖上游 `pingora-*`。
-- 保持最后可用快照，即使控制面、PostgreSQL或 NATS 不可用也继续代理。
+- 保持最后可用快照，即使控制面、其数据库或 NATS 不可用也继续代理。
 - 输出版本、配置 Hash、连接、路由、上游、TLS、Lua 与错误指标。
 
 ### 5.4 `automation-service`
@@ -454,7 +454,7 @@ stateDiagram-v2
 sequenceDiagram
     participant U as API/CLI/GUI
     participant C as config-service
-    participant D as PostgreSQL
+    participant D as config.db (SQLite)
     participant G as gatewayd
     participant E as JetStream
 
@@ -563,7 +563,7 @@ Protobuf package 使用 `pingora.panel.<domain>.v1`。控制面模块之间经�
 
 持久存储使用 CloudEvents Protobuf format；JetStream 使用 NATS protocol binding 的 binary content mode（`ce-` 头），消费者同时接受 JSON structured mode。单个事件不超过 CloudEvents 中间件必须转发的 64 KiB；大对象通过引用传递。
 
-投递语义为 at-least-once；消费者必须幂等。Outbox relay 只有在 PostgreSQL 事务提交后才发布。无法处理的事件进入 DLQ 并触发告警，不得无限快速重试。
+投递语义为 at-least-once；消费者必须幂等。Outbox relay 只有在模块数据库的事务提交后才发布。无法处理的事件进入 DLQ 并触发告警，不得无限快速重试。
 
 ### 9.4 CLI
 
@@ -579,7 +579,7 @@ ppanel gateway status --output json
 ppanel audit list --correlation-id req_01...
 ```
 
-支持本地/远程 profile、OIDC device flow、短期 Token、`table|json|yaml` 输出、`--quiet`、`--dry-run`、shell completion 和稳定退出码。CLI 不允许直接读写 PostgreSQL 或本地 DSL 事实源。
+支持本地/远程 profile、OIDC device flow、短期 Token、`table|json|yaml` 输出、`--quiet`、`--dry-run`、shell completion 和稳定退出码。CLI 不允许直接读写控制面数据库或本地 DSL 事实源。
 
 ### 9.5 Web GUI
 
@@ -1362,7 +1362,7 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | PLAT-002 | - | 服务 Capability 注册 | 0.1 | I | Administrator | platform | 执行“服务 Capability 注册”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | PLAT-003 | - | 内部 mTLS CA 初始化 | 0.1 | I | Administrator | platform | 执行“内部 mTLS CA 初始化”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | PLAT-004 | - | 内部服务证书自动轮换 | 0.1 | I | Administrator | platform | 执行“内部服务证书自动轮换”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
-| PLAT-005 | - | PostgreSQL Schema 写权限隔离 | 0.1 | I | Administrator | platform | 执行“PostgreSQL Schema 写权限隔离”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| PLAT-005 | - | 模块数据库写权限隔离 | 0.1 | I | Administrator | platform | 执行“模块数据库写权限隔离”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | PLAT-006 | - | Transactional Outbox | 0.1 | I | Administrator | platform | 执行“Transactional Outbox”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | PLAT-007 | - | Outbox Relay | 0.1 | I | Administrator | platform | 执行“Outbox Relay”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | PLAT-008 | - | JetStream Stream 自动配置 | 0.1 | I | Administrator | platform | 执行“JetStream Stream 自动配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
@@ -1493,7 +1493,7 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | 并发 Apply | 只有 expected active hash 匹配者成功，其余返回冲突 |
 | 审批后内容变化 | 原审批失效，禁止激活 |
 | gateway 已 Activate、ACK 丢失 | Reconciliation 依据持久 receipt 完成 DB 状态 |
-| PostgreSQL/NATS/控制服务故障 | gateway 使用 LKG 持续代理，不同步依赖控制面 |
+| 控制面数据库/NATS/控制服务故障 | gateway 使用 LKG 持续代理，不同步依赖控制面 |
 | 回滚 | 创建新 revision，经过完整验证/审批，历史记录不改写 |
 | OIDC 故障 | 已建立 Session 按策略继续；break-glass 可审计使用 |
 | Lua 超时/超内存 | 中断脚本、执行 fallback、请求路径不崩溃、指标递增 |

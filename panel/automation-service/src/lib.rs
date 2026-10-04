@@ -116,27 +116,23 @@ pub fn process(
         .string(GATEWAY_SECRET_DIR_ENV)?
         .map(SecretDirectory::new);
     let service = ServiceName::new(SERVICE)?;
-    let process = ControlPlaneProcess::on_sqlite(
-        service.clone(),
-        env!("CARGO_PKG_VERSION"),
-        settings,
-        MODULE,
-    )?;
-    let store = Arc::new(SqliteJobStore::new(process.sqlite(), service.clone()));
+    let process =
+        ControlPlaneProcess::new(service.clone(), env!("CARGO_PKG_VERSION"), settings, MODULE)?;
+    let store = Arc::new(SqliteJobStore::new(process.database(), service.clone()));
     let secret_directory = directory
         .as_ref()
         .map(|directory| directory.path().to_owned());
-    let events = EventLog::new(process.sqlite(), service);
+    let events = EventLog::new(process.database(), service);
     let inventory =
-        CertificateInventory::new(process.sqlite(), events.clone(), vault.clone(), directory);
+        CertificateInventory::new(process.database(), events.clone(), vault.clone(), directory);
     let dns = DnsProviders::new(
-        process.sqlite(),
+        process.database(),
         events.clone(),
         vault.clone(),
         Arc::new(StandardDnsProviders),
     );
     let acme = AcmeAutomation::new(
-        process.sqlite(),
+        process.database(),
         events,
         vault,
         inventory.clone(),
@@ -147,7 +143,7 @@ pub fn process(
     );
     let handlers = handlers(&acme)?;
     Ok(process
-        .with_sqlite_migrations(MIGRATIONS)
+        .with_migrations(MIGRATIONS)
         .with_protocol(protocol_range(AUTOMATION_V1))
         .with_capability(Capability::new("certificates", "1")?)
         .with_peer_access(

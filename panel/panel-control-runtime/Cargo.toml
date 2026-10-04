@@ -22,7 +22,6 @@ panel-outbox.workspace = true
 panel-platform.workspace = true
 panel-pki.workspace = true
 panel-platform-codec.workspace = true
-panel-postgres.workspace = true
 panel-service.workspace = true
 panel-sqlite.workspace = true
 panel-tls.workspace = true
@@ -37,7 +36,6 @@ tracing.workspace = true
 chrono.workspace = true
 panel-events.workspace = true
 panel-jetstream = { workspace = true, features = ["test-support"] }
-panel-postgres = { workspace = true, features = ["test-support"] }
 reqwest.workspace = true
 rustls.workspace = true
 serde_json.workspace = true

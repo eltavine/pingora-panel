@@ -108,21 +108,17 @@ pub fn process(
             .map(str::to_owned)
     });
     let service = ServiceName::new(SERVICE)?;
-    let process = ControlPlaneProcess::on_sqlite(
-        service.clone(),
-        env!("CARGO_PKG_VERSION"),
-        settings,
-        MODULE,
-    )?;
-    let events = EventLog::new(process.sqlite(), service);
+    let process =
+        ControlPlaneProcess::new(service.clone(), env!("CARGO_PKG_VERSION"), settings, MODULE)?;
+    let events = EventLog::new(process.database(), service);
     let notices = Arc::new(Notices::new(console));
-    let rules = AlertRules::new(process.sqlite(), events.clone(), Arc::clone(&notices));
-    let channels = AlertChannels::new(process.sqlite(), events, vault);
-    let notifier = Notifier::new(process.sqlite(), channels.clone(), notices)?;
+    let rules = AlertRules::new(process.database(), events.clone(), Arc::clone(&notices));
+    let channels = AlertChannels::new(process.database(), events, vault);
+    let notifier = Notifier::new(process.database(), channels.clone(), notices)?;
     let evaluator = Evaluator::new(rules.clone(), prometheus(&url)?, SERVICE)?;
     let alerts = AlertsService::new(rules, channels, notifier.clone());
     Ok(process
-        .with_sqlite_migrations(MIGRATIONS)
+        .with_migrations(MIGRATIONS)
         .with_protocol(protocol_range(OBSERVABILITY_V1))
         .with_capability(Capability::new("observability.traffic", "1")?)
         .with_capability(Capability::new("observability.logs", "1")?)

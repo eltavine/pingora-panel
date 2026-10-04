@@ -153,20 +153,7 @@ jobs:
     name: Integration services
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    services:
-      postgres:
-        image: postgres:18.6-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
-        env:
-          POSTGRES_PASSWORD: panel-ci-superuser
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready --username postgres"
-          --health-interval 2s
-          --health-timeout 5s
-          --health-retries 30
     env:
-      PANEL_TEST_DATABASE_URL: postgres://postgres:panel-ci-superuser@127.0.0.1:5432/postgres
       PANEL_TEST_NATS_URL: nats://127.0.0.1:4222
       # A missing service must fail the job instead of skipping the tests.
       PANEL_REQUIRE_INTEGRATION_SERVICES: "1"
@@ -204,17 +191,22 @@ jobs:
           PANEL_DEV_TOOLS_DIR: ${{ runner.temp }}/panel-tools
         run: panel/scripts/dev-services.sh acme
 
-      - name: Run storage, broker, ACME and certificate automation tests
+      - name: Run the broker, ACME and service integration tests
         env:
           PANEL_DEV_TOOLS_DIR: ${{ runner.temp }}/panel-tools
         run: |
           eval "$(panel/scripts/dev-services.sh env | grep PANEL_TEST_ACME_)"
           cargo test \
             --manifest-path panel/Cargo.toml \
-            --package panel-postgres \
             --package panel-jetstream \
+            --package panel-control-runtime \
+            --package panel-bootstrap \
             --package panel-acme \
             --package automation-service \
+            --package audit-service \
+            --package config-service \
+            --package observability-service \
+            --package panel-api-server \
             --all-features \
             --locked
 
