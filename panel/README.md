@@ -538,6 +538,8 @@ ppanel container engines
 ppanel container engine disable podman
 ppanel container list --search nginx --state running
 ppanel container inspect shop-web-1
+ppanel container logs shop-web-1 --lines 500 --since 1h --timestamps
+ppanel container logs shop-web-1 --follow
 ppanel container restart shop-web-1 --yes
 ppanel container remove nightly-report --volumes --yes
 ```
@@ -552,6 +554,20 @@ published ports and Compose project. Both need `containers.read`.
 code, restarts, health, restart policy, host name, user, working
 directory, platform, labels, mounts and networks; never its environment
 or command line, which carry secrets.
+`GET /api/v1/container-engines/{engine}/containers/{container}/logs`
+needs `containers.inspect` too, since what a container prints can hold
+secrets. It returns the container's last lines as its engine's log driver
+kept them, 200 by default and at most 5000, optionally from a time on,
+oldest first. Each line has the time its engine recorded, to the
+nanosecond, and whether it came from standard output or standard error;
+everything a container with a terminal prints is standard output. Lines
+are cut at 16 KiB, and an answer keeps to the newest 2 MiB and says when
+older lines were left out. `.../logs/tail` follows the lines a container
+prints over a WebSocket, after up to 1000 of its last lines or after the
+line a client last received (`after`, a message's `cursor`), and closes
+normally once the container stops. The agent follows at most 64 logs at
+once. `ppanel container logs` writes standard error to standard error,
+as the container did.
 `POST /api/v1/container-engines/{engine}/{enable,disable}` needs
 `containers.manage`, as do
 `POST /api/v1/container-engines/{engine}/containers/{container}/{start,stop,restart,kill}`
@@ -561,8 +577,10 @@ volumes with `volumes`. A container is named by its ID, a unique prefix
 of its ID or its name, and the installation's own containers are only
 ever started. The audit trail records each change and action, refused or
 not. The console's Containers page shows the engines and their
-containers, opens a container's details from its name, and has a menu on
-each container that asks before anything but a start.
+containers, opens a container's details from its name and its logs from
+the details or its row, and has a menu on each container that asks
+before anything but a start. Its logs can be filtered by output and
+text, followed from the last line read and saved as a file.
 
 ## Alerts
 
