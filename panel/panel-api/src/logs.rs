@@ -4,36 +4,33 @@
 use crate::{
     error::ApiError,
     request_context::{command_context, request_scope, MutationHeaders, QueryHeaders},
+    tail::{relay, LogTailError, Relayed},
+    time::parse_time,
     ApiState,
 };
 use axum::{
     body::{Body, Bytes},
-    extract::{
-        ws::{CloseFrame, Message, Utf8Bytes, WebSocket, WebSocketUpgrade},
-        Query, State,
-    },
+    extract::{ws::WebSocketUpgrade, Query, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
-use futures_util::{stream, Stream, StreamExt};
+use futures_util::{future::ready, stream, Stream, StreamExt};
 use panel_application::{
     LogDeletion, LogDeletionState, LogFilter, LogKind, LogPage, LogRecord, LogSearch, LogTail,
     LogsPort, RequestScope,
 };
 use panel_domain::{RouteId, SiteId};
-use panel_errors::{ErrorCode, PanelError};
+use panel_errors::PanelError;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, sync::Arc, time::Duration, time::SystemTime};
+use std::{collections::BTreeMap, sync::Arc, time::SystemTime};
 use utoipa::{IntoParams, ToSchema};
 
 /// The most records a download holds.
 const DOWNLOAD_LIMIT: usize = 100_000;
 /// Records a download reads at a time.
 const PAGE: u32 = 500;
-/// How often an idle tail is pinged.
-const PING: Duration = Duration::from_secs(30);
 
 fn port<U>(state: &ApiState<U>) -> Result<Arc<dyn LogsPort>, ApiError> {
     state.logs.clone().ok_or_else(|| {
@@ -45,21 +42,6 @@ fn port<U>(state: &ApiState<U>) -> Result<Arc<dyn LogsPort>, ApiError> {
 
 fn rfc3339(time: SystemTime) -> String {
     DateTime::<Utc>::from(time).to_rfc3339_opts(SecondsFormat::AutoSi, true)
-}
-
-fn parse_time(name: &str, value: Option<String>) -> Result<Option<SystemTime>, ApiError> {
-    value
-        .filter(|value| !value.is_empty())
-        .map(|value| {
-            DateTime::parse_from_rfc3339(&value)
-                .map(SystemTime::from)
-                .map_err(|_| {
-                    ApiError::new(PanelError::invalid_argument(format!(
-                        "{name} is not an RFC 3339 time"
-                    )))
-                })
-        })
-        .transpose()
 }
 
 fn identifier<T, E>(
@@ -143,12 +125,6 @@ pub struct LogTailMessage {
     /// Pass as `after` to resume after these records.
     pub cursor: Option<String>,
     pub error: Option<LogTailError>,
-}
-
-#[derive(Clone, Debug, Serialize, ToSchema)]
-pub struct LogTailError {
-    pub code: String,
-    pub message: String,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, ToSchema)]
@@ -252,8 +228,8 @@ impl LogParams {
     fn search(mut self) -> Result<LogSearch, ApiError> {
         Ok(LogSearch {
             filter: self.filter()?,
-            since: parse_time("since", self.since.take())?,
-            until: parse_time("until", self.until.take())?,
+            since: parse_time("since", self.since.as_deref())?,
+            until: parse_time("until", self.until.as_deref())?,
             limit: self.limit,
         })
     }
@@ -368,68 +344,21 @@ fn tail_message(records: Vec<LogRecord>, cursor: Option<SystemTime>) -> LogTailM
     }
 }
 
-async fn send(socket: &mut WebSocket, message: &LogTailMessage) -> bool {
-    let text = serde_json::to_string(message).expect("tail messages serialize");
-    socket
-        .send(Message::Text(Utf8Bytes::from(text)))
-        .await
-        .is_ok()
-}
-
-/// Relays `tail` to `socket` until either side ends it.
-async fn relay(mut socket: WebSocket, mut tail: LogTail) {
-    let mut ping = tokio::time::interval(PING);
-    ping.tick().await;
-    let mut cursor = None;
-    loop {
-        tokio::select! {
-            batch = tail.next() => {
-                match batch {
-                    Some(Ok(batch)) => {
-                        cursor = Some(batch.cursor);
-                        if !send(&mut socket, &tail_message(batch.records, cursor)).await {
-                            return;
-                        }
-                    }
-                    Some(Err(error)) => {
-                        let code = match error.code.as_str() {
-                            ErrorCode::INVALID_ARGUMENT => 1008,
-                            ErrorCode::UNAVAILABLE | ErrorCode::RESOURCE_EXHAUSTED => 1013,
-                            _ => 1011,
-                        };
-                        let mut message = tail_message(Vec::new(), cursor);
-                        message.error = Some(LogTailError {
-                            code: error.code.as_str().to_owned(),
-                            message: error.message,
-                        });
-                        let _ = send(&mut socket, &message).await;
-                        let _ = socket
-                            .send(Message::Close(Some(CloseFrame {
-                                code,
-                                reason: Utf8Bytes::from_static("the tail ended"),
-                            })))
-                            .await;
-                        return;
-                    }
-                    None => {
-                        let _ = socket.send(Message::Close(None)).await;
-                        return;
-                    }
-                }
+/// The tail's batches as messages, each with where to resume after it.
+fn messages(tail: LogTail) -> impl Stream<Item = Relayed<LogTailMessage>> {
+    tail.scan(None, |cursor, batch| {
+        ready(Some(match batch {
+            Ok(batch) => {
+                *cursor = Some(batch.cursor);
+                Relayed::Sent(tail_message(batch.records, *cursor))
             }
-            incoming = socket.recv() => {
-                match incoming {
-                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return,
-                    Some(Ok(_)) => {}
-                }
+            Err(error) => {
+                let mut message = tail_message(Vec::new(), *cursor);
+                message.error = Some(LogTailError::from(&error));
+                Relayed::Failed(message, error)
             }
-            _ = ping.tick() => {
-                if socket.send(Message::Ping(Bytes::new())).await.is_err() {
-                    return;
-                }
-            }
-        }
-    }
+        }))
+    })
 }
 
 /// Follows matching records as they arrive, over a WebSocket. Each text
@@ -444,9 +373,9 @@ pub(crate) async fn tail_logs<U>(
 ) -> Result<Response, ApiError> {
     let scope = request_scope(&headers)?;
     let filter = params.filter()?;
-    let after = parse_time("after", params.after.take())?;
+    let after = parse_time("after", params.after.as_deref())?;
     let tail = port(&state)?.tail(scope, filter, after).await?;
-    Ok(upgrade.on_upgrade(move |socket| relay(socket, tail)))
+    Ok(upgrade.on_upgrade(move |socket| relay(socket, messages(tail), None)))
 }
 
 /// Asks the log store to delete records of one site or every site; it
@@ -460,7 +389,7 @@ pub(crate) async fn delete_logs<U>(
 ) -> Result<(StatusCode, Json<LogDeletionItem>), ApiError> {
     let context = command_context(&headers)?;
     let site = identifier("site", request.site, SiteId::new)?;
-    let since = parse_time("since", request.since)?;
+    let since = parse_time("since", request.since.as_deref())?;
     let deletion = port(&state)?.delete(context, site, since).await?;
     Ok((StatusCode::ACCEPTED, Json(deletion.into())))
 }

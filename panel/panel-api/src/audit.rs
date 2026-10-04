@@ -4,6 +4,7 @@
 use crate::{
     error::ApiError,
     request_context::{request_scope, QueryHeaders},
+    time::parse_time,
     ApiState,
 };
 use axum::{
@@ -28,20 +29,6 @@ fn port<U>(state: &ApiState<U>) -> Result<Arc<dyn AuditPort>, ApiError> {
 
 fn rfc3339(time: Option<SystemTime>) -> Option<String> {
     time.map(|time| DateTime::<Utc>::from(time).to_rfc3339_opts(SecondsFormat::Micros, true))
-}
-
-fn parse_time(name: &str, value: Option<&String>) -> Result<Option<SystemTime>, ApiError> {
-    value
-        .map(|value| {
-            DateTime::parse_from_rfc3339(value)
-                .map(|time| SystemTime::from(time.with_timezone(&Utc)))
-                .map_err(|_| {
-                    ApiError::new(PanelError::invalid_argument(format!(
-                        "{name} must be an RFC 3339 time"
-                    )))
-                })
-        })
-        .transpose()
 }
 
 /// One audited event.
@@ -187,8 +174,8 @@ pub(crate) async fn list_audit_events<U>(
         event_type: query.event_type.unwrap_or_default(),
         subject: query.subject.unwrap_or_default(),
         correlation_id: query.correlation_id.unwrap_or_default(),
-        since: parse_time("since", query.since.as_ref())?,
-        until: parse_time("until", query.until.as_ref())?,
+        since: parse_time("since", query.since.as_deref())?,
+        until: parse_time("until", query.until.as_deref())?,
     };
     let page = port(&state)?.list(scope, filter).await?;
     Ok(Json(AuditEventPage {

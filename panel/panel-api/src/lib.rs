@@ -34,6 +34,8 @@ mod router;
 mod routes;
 mod sign_in;
 mod state;
+mod tail;
+mod time;
 mod tls_checks;
 mod traffic;
 mod workload;
