@@ -145,6 +145,10 @@ enum Command {
     /// What the gateway served, from its metrics.
     #[command(subcommand)]
     Traffic(commands::traffic::TrafficCommand),
+    /// The gateway's access and error logs: searched, followed, downloaded
+    /// and deleted.
+    #[command(subcommand)]
+    Logs(commands::logs::LogsCommand),
     /// The running gateway.
     #[command(subcommand)]
     Gateway(commands::gateway::GatewayCommand),
@@ -240,6 +244,7 @@ async fn main() -> ExitCode {
             Command::Revision(command) => commands::revisions::run(&api, &output, command).await,
             Command::Audit(command) => commands::audit::run(&api, &output, command).await,
             Command::Traffic(command) => commands::traffic::run(&api, &output, command).await,
+            Command::Logs(command) => commands::logs::run(&api, &output, command).await,
             Command::Gateway(command) => commands::gateway::gateway(&api, &output, command).await,
             Command::Completion { .. } => Ok(()),
         }

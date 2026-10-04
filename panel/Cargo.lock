@@ -2796,6 +2796,7 @@ dependencies = [
  "chrono",
  "clap",
  "clap_complete",
+ "futures-util",
  "humantime",
  "rcgen",
  "reqwest",
@@ -2805,6 +2806,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-rustls",
+ "tokio-tungstenite",
  "uuid",
 ]
 

@@ -8,6 +8,7 @@ pub mod config;
 pub mod domains;
 pub mod gateway;
 pub mod identity;
+pub mod logs;
 pub mod providers;
 pub mod revisions;
 pub mod routes;

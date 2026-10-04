@@ -5,6 +5,13 @@ use chrono::{SecondsFormat, Utc};
 use reqwest::{header, Method, StatusCode};
 use serde_json::Value;
 use std::{fmt, process::ExitCode, time::Duration};
+use tokio_tungstenite::{
+    tungstenite::{
+        handshake::{client::generate_key, derive_accept_key},
+        protocol::Role,
+    },
+    WebSocketStream,
+};
 use uuid::Uuid;
 
 /// Process exit codes; scripts may rely on them.
@@ -31,6 +38,12 @@ pub(crate) enum CliError {
     Transport(String),
     /// A check that ran and found a problem.
     Failed(String),
+    /// A stream the API ended with an error code, such as
+    /// `RESOURCE_EXHAUSTED`.
+    Ended {
+        code: String,
+        message: String,
+    },
 }
 
 impl CliError {
@@ -52,6 +65,19 @@ impl CliError {
             Self::Usage(_) => 2,
             Self::Failed(_) => Exit::Failure as u8,
             Self::Transport(_) => Exit::Unavailable as u8,
+            Self::Ended { code, .. } => {
+                (match code.as_str() {
+                    "NOT_FOUND" => Exit::NotFound,
+                    "CONFLICT" | "PRECONDITION_FAILED" => Exit::Conflict,
+                    "INVALID_ARGUMENT" | "VALIDATION_FAILED" => Exit::Rejected,
+                    "UNAUTHENTICATED" | "PERMISSION_DENIED" => Exit::Denied,
+                    "UNAVAILABLE"
+                    | "STORAGE_UNAVAILABLE"
+                    | "RESOURCE_EXHAUSTED"
+                    | "DEADLINE_EXCEEDED" => Exit::Unavailable,
+                    _ => Exit::Failure,
+                }) as u8
+            }
             Self::Api { status, .. } => {
                 (match status.as_u16() {
                     404 => Exit::NotFound,
@@ -72,6 +98,7 @@ impl fmt::Display for CliError {
         match self {
             Self::Usage(message) | Self::Failed(message) => write!(formatter, "{message}"),
             Self::Transport(message) => write!(formatter, "cannot reach the API: {message}"),
+            Self::Ended { message, .. } => write!(formatter, "{message}"),
             Self::Api { status, problem } => {
                 let detail = problem["detail"]
                     .as_str()
@@ -194,12 +221,83 @@ impl Api {
         self.execute(request).await
     }
 
-    async fn execute(&self, request: reqwest::RequestBuilder) -> Result<Reply> {
-        let request = match &self.credential {
+    /// A read whose body is not JSON, such as a log file, as it arrives.
+    pub async fn stream(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+        timeout: Duration,
+    ) -> Result<reqwest::Response> {
+        let request = self
+            .http
+            .get(format!("{}{path}", self.base))
+            .query(query)
+            .timeout(timeout)
+            .header("x-request-id", Uuid::now_v7().to_string());
+        let response = self
+            .authorized(request)
+            .send()
+            .await
+            .map_err(CliError::transport)?;
+        if response.status().is_success() {
+            Ok(response)
+        } else {
+            Err(refused(response).await)
+        }
+    }
+
+    /// A WebSocket (RFC 6455) opened over the API's own HTTP client, so it
+    /// is trusted and authenticated as every other request is.
+    pub async fn websocket(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<WebSocketStream<reqwest::Upgraded>> {
+        let key = generate_key();
+        let request = self
+            .http
+            .get(format!("{}{path}", self.base))
+            .query(query)
+            .header(header::CONNECTION, "upgrade")
+            .header(header::UPGRADE, "websocket")
+            .header(header::SEC_WEBSOCKET_VERSION, "13")
+            .header(header::SEC_WEBSOCKET_KEY, &key)
+            .header("x-request-id", Uuid::now_v7().to_string());
+        let response = self
+            .authorized(request)
+            .send()
+            .await
+            .map_err(CliError::transport)?;
+        if response.status() != StatusCode::SWITCHING_PROTOCOLS {
+            return Err(refused(response).await);
+        }
+        let accept = derive_accept_key(key.as_bytes());
+        let accepted = response
+            .headers()
+            .get(header::SEC_WEBSOCKET_ACCEPT)
+            .and_then(|value| value.to_str().ok());
+        if accepted != Some(accept.as_str()) {
+            return Err(CliError::Transport(
+                "the API did not accept the WebSocket handshake".into(),
+            ));
+        }
+        let upgraded = response.upgrade().await.map_err(CliError::transport)?;
+        Ok(WebSocketStream::from_raw_socket(upgraded, Role::Client, None).await)
+    }
+
+    fn authorized(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        match &self.credential {
             Some(credential) => request.bearer_auth(credential),
             None => request,
-        };
-        let response = request.send().await.map_err(CliError::transport)?;
+        }
+    }
+
+    async fn execute(&self, request: reqwest::RequestBuilder) -> Result<Reply> {
+        let response = self
+            .authorized(request)
+            .send()
+            .await
+            .map_err(CliError::transport)?;
         let status = response.status();
         let etag = response
             .headers()
@@ -207,12 +305,7 @@ impl Api {
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned);
         let bytes = response.bytes().await.map_err(CliError::transport)?;
-        let body = if bytes.is_empty() {
-            Value::Null
-        } else {
-            serde_json::from_slice(&bytes)
-                .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned()))
-        };
+        let body = body(&bytes);
         if status.is_success() {
             Ok(Reply { body, etag, status })
         } else {
@@ -221,5 +314,25 @@ impl Api {
                 problem: body,
             })
         }
+    }
+}
+
+fn body(bytes: &[u8]) -> Value {
+    if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(bytes)
+            .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(bytes).into_owned()))
+    }
+}
+
+async fn refused(response: reqwest::Response) -> CliError {
+    let status = response.status();
+    match response.bytes().await {
+        Ok(bytes) => CliError::Api {
+            status,
+            problem: body(&bytes),
+        },
+        Err(error) => CliError::transport(error),
     }
 }

@@ -4,10 +4,13 @@
 //! sends.
 
 use axum::{
-    extract::State,
+    extract::{
+        ws::{self, WebSocketUpgrade},
+        State,
+    },
     http::{HeaderMap, Method, StatusCode, Uri},
     response::{IntoResponse, Response},
-    routing::any,
+    routing::{any, get},
     Json, Router,
 };
 use serde_json::{json, Value};
@@ -154,6 +157,36 @@ async fn api(
         ("GET", "/api/v1/traffic/series") => Json(json!({
             "points": [{"at": "2026-10-04T09:59:00Z", "requests_per_second": 2,
                         "server_errors_per_second": 0.1, "p95": null}]
+        }))
+        .into_response(),
+        ("GET", "/api/v1/logs") => Json(json!({
+            "records": [{
+                "time": "2026-10-04T10:00:00.5Z", "kind": "access", "line": "{}",
+                "site": "shop", "route": "checkout", "status": 502, "method": "GET",
+                "path": "/cart", "client": "192.0.2.1", "request_id": "req-9", "fields": {}
+            }],
+            "next_until": "2026-10-04T10:00:00.5Z"
+        }))
+        .into_response(),
+        ("GET", "/api/v1/logs/download") => (
+            [("content-type", "text/plain; charset=utf-8")],
+            "newest\noldest\n",
+        )
+            .into_response(),
+        ("POST", "/api/v1/logs/deletions") => (
+            StatusCode::ACCEPTED,
+            Json(json!({
+                "site": body["site"], "since": "1970-01-01T00:00:00Z",
+                "until": "2026-10-04T10:00:00Z", "requested_at": "2026-10-04T10:00:00Z",
+                "state": "pending"
+            })),
+        )
+            .into_response(),
+        ("GET", "/api/v1/logs/deletions") => Json(json!({
+            "deletions": [{
+                "site": null, "since": "1970-01-01T00:00:00Z", "until": "2026-10-03T10:00:00Z",
+                "requested_at": "2026-10-03T10:00:00Z", "state": "applied"
+            }]
         }))
         .into_response(),
         ("GET", "/api/v1/audit-events") => Json(json!({
@@ -464,6 +497,56 @@ async fn api(
     }
 }
 
+/// Follows twice: the first tail falls behind and the second ends because
+/// the log store is unavailable.
+async fn tail(State(log): State<Log>, uri: Uri, upgrade: WebSocketUpgrade) -> Response {
+    let follow = {
+        let mut log = log.lock().unwrap();
+        log.push(Request {
+            method: Method::GET,
+            path: uri.path().to_owned(),
+            query: uri.query().unwrap_or_default().to_owned(),
+            if_match: None,
+            authorization: None,
+            body: Value::Null,
+        });
+        log.iter()
+            .filter(|request| request.path == uri.path())
+            .count()
+    };
+    upgrade.on_upgrade(move |mut socket| async move {
+        let (line, cursor, code, message) = if follow == 1 {
+            (
+                "first line",
+                "2026-10-04T10:00:01Z",
+                "RESOURCE_EXHAUSTED",
+                "the tail fell behind",
+            )
+        } else {
+            (
+                "second line",
+                "2026-10-04T10:00:02Z",
+                "UNAVAILABLE",
+                "the log store is unavailable",
+            )
+        };
+        for message in [
+            json!({"records": [{"line": format!("{line}\n")}], "cursor": cursor, "error": null}),
+            json!({"records": [], "cursor": cursor, "error": {"code": code, "message": message}}),
+        ] {
+            let _ = socket
+                .send(ws::Message::Text(message.to_string().into()))
+                .await;
+        }
+        let _ = socket
+            .send(ws::Message::Close(Some(ws::CloseFrame {
+                code: 1013,
+                reason: "the tail ended".into(),
+            })))
+            .await;
+    })
+}
+
 struct Stub {
     base: String,
     log: Log,
@@ -475,6 +558,7 @@ impl Stub {
     fn start() -> Self {
         let log = Log::default();
         let router = Router::new()
+            .route("/api/v1/logs/tail", get(tail))
             .route("/{*path}", any(api))
             .with_state(log.clone());
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -810,6 +894,80 @@ fn traffic_is_summarized_and_charted() {
     );
     let routeless = stub.ppanel(&["traffic", "summary", "--route", "checkout"]);
     assert_eq!(routeless.status.code(), Some(2));
+}
+
+#[test]
+fn logs_are_searched_followed_downloaded_and_deleted() {
+    let stub = Stub::start();
+    let search = stub.ppanel(&[
+        "logs",
+        "search",
+        "--site",
+        "shop",
+        "--status",
+        "5xx",
+        "--since",
+        "2026-10-04T09:00:00Z",
+        "--limit",
+        "20",
+    ]);
+    assert!(search.status.success(), "{}", stderr(&search));
+    let printed = stdout(&search);
+    for expected in ["502", "/cart", "req-9", "checkout"] {
+        assert!(printed.contains(expected), "{expected} in\n{printed}");
+    }
+    assert!(stderr(&search).contains("pass --until 2026-10-04T10:00:00.5Z"));
+    assert_eq!(
+        stub.requests("GET", "/api/v1/logs")[0].query,
+        "site=shop&status=5xx&since=2026-10-04T09%3A00%3A00Z&limit=20"
+    );
+
+    let tail = stub.ppanel(&["logs", "tail", "--kind", "error"]);
+    assert_eq!(stdout(&tail), "first line\nsecond line\n");
+    assert_eq!(tail.status.code(), Some(6), "{}", stderr(&tail));
+    let complaint = stderr(&tail);
+    assert!(
+        complaint.contains("the log store is unavailable"),
+        "{complaint}"
+    );
+    assert!(
+        complaint.contains("resume with --after 2026-10-04T10:00:02Z"),
+        "{complaint}"
+    );
+    let tails = stub.requests("GET", "/api/v1/logs/tail");
+    assert_eq!(tails[0].query, "kind=error");
+    assert_eq!(tails[1].query, "kind=error&after=2026-10-04T10%3A00%3A01Z");
+
+    let file = stub.config.path().join("gateway.log");
+    let download = stub.ppanel(&[
+        "logs",
+        "download",
+        "--site",
+        "shop",
+        "--file",
+        file.to_str().unwrap(),
+    ]);
+    assert!(download.status.success(), "{}", stderr(&download));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "newest\noldest\n");
+    assert!(stdout(&download).contains("Wrote 2 records"));
+
+    let unconfirmed = stub.ppanel(&["logs", "delete", "--site", "shop"]);
+    assert_eq!(unconfirmed.status.code(), Some(2));
+    assert!(stub.requests("POST", "/api/v1/logs/deletions").is_empty());
+    let delete = stub.ppanel(&["logs", "delete", "--site", "shop", "--yes"]);
+    assert!(delete.status.success(), "{}", stderr(&delete));
+    assert!(
+        stdout(&delete).contains("Asked to delete shop's records up to 2026-10-04T10:00:00Z"),
+        "{}",
+        stdout(&delete)
+    );
+    assert_eq!(
+        stub.requests("POST", "/api/v1/logs/deletions")[0].body,
+        json!({"site": "shop", "since": null})
+    );
+    let printed = stdout(&stub.ppanel(&["logs", "deletions"]));
+    assert!(printed.contains("every site"), "{printed}");
+    assert!(printed.contains("applied"), "{printed}");
 }
 
 #[test]

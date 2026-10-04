@@ -390,6 +390,28 @@ The console's traffic page shows the same figures for a chosen window and
 site, charts the request rate, server errors and latency, and reads them
 again every 30 seconds.
 
+## Logs
+
+`observability-service` reads the gateway's access and error logs from Loki
+([decision](../docs/adr/0026-log-search-tail-and-deletion.md)) with typed
+filters — kind, site, route, status or status class, client address or
+CIDR block, path prefix, request ID and text — that it turns into LogQL
+itself, so callers never write LogQL. `GET /api/v1/logs` returns matching
+records newest first, up to 500 a page; `/api/v1/logs/download` streams the
+original lines of up to 100,000 of them as a file; `/api/v1/logs/tail`
+follows them over a WebSocket, and a tail that falls behind ends with a
+cursor to resume from. `POST /api/v1/logs/deletions` asks Loki to delete
+one site's or every site's records up to now; Loki applies the deletion
+once it can no longer be cancelled, and the audit trail records who asked.
+Reading needs `logs.read` and deleting `logs.delete`.
+
+```sh
+ppanel logs search --site shop --status 5xx --since 1h
+ppanel logs tail --kind error
+ppanel logs download --request-id 01J9Z8 --file request.log
+ppanel logs delete --site shop --yes
+```
+
 ## Accounts and access
 
 Every request to `panel-api` is authenticated and authorized
