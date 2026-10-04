@@ -99,9 +99,10 @@ async fn every_event_is_recorded_once_in_a_verifiable_chain() {
         publisher.publish(event).await.unwrap();
     }
 
-    let mut client = AuditQueryClient::connect(format!("http://{}", process.grpc_address()))
-        .await
-        .unwrap();
+    let mut client =
+        AuditQueryClient::connect(format!("http://{}", process.grpc_address().unwrap()))
+            .await
+            .unwrap();
     let list = |request: ListRequest| {
         let mut client = client.clone();
         async move { client.list(request).await.unwrap().into_inner() }

@@ -136,6 +136,12 @@ impl ProcessSettings {
         self.data_directory = directory.into();
         self
     }
+
+    /// Mutual TLS with the credentials `tls` names, or none.
+    pub fn with_tls(mut self, tls: Option<TlsSettings>) -> Self {
+        self.tls = tls;
+        self
+    }
 }
 
 #[cfg(test)]

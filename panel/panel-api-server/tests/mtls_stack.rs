@@ -210,7 +210,7 @@ async fn every_internal_hop_is_mutually_authenticated() {
         ),
         (
             panel_api_server::CONFIG_URL_ENV,
-            format!("https://{}", config.grpc_address()),
+            format!("https://{}", config.grpc_address().unwrap()),
         ),
         (
             panel_api_server::WEB_ROOT_ENV,
@@ -218,7 +218,7 @@ async fn every_internal_hop_is_mutually_authenticated() {
         ),
         (
             panel_api_server::AUDIT_URL_ENV,
-            format!("https://{}", audit.grpc_address()),
+            format!("https://{}", audit.grpc_address().unwrap()),
         ),
     ]);
     let api_settings = ProcessSettings::read(&mut api_env, panel_api_server::default_addresses())
@@ -289,7 +289,7 @@ async fn every_internal_hop_is_mutually_authenticated() {
     // Only the public API may read the audit trail.
     let mut snooper = AuditQueryClient::new(
         panel_tls::channel(
-            &audit.grpc_address().to_string(),
+            &audit.grpc_address().unwrap().to_string(),
             &WorkloadIdentity::new(
                 ServiceName::new("audit-service").unwrap(),
                 TrustDomain::default(),
@@ -306,7 +306,7 @@ async fn every_internal_hop_is_mutually_authenticated() {
     // A service the policy does not list cannot publish.
     let intruder = ConfigPublicationClient::from_channel(
         panel_tls::channel(
-            &config.grpc_address().to_string(),
+            &config.grpc_address().unwrap().to_string(),
             &WorkloadIdentity::new(
                 ServiceName::new("config-service").unwrap(),
                 TrustDomain::default(),

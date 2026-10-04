@@ -1,10 +1,10 @@
-use crate::{ControlPlaneProcess, DefaultAddresses, ProcessSettings, OPS_ADDRESS_ENV};
+use crate::{
+    ControlPlaneProcess, DefaultAddresses, ProcessSettings, HEALTHCHECK_ARGUMENT, OPS_ADDRESS_ENV,
+};
 use panel_errors::Result;
 use panel_service::{init_logging, probe_http, shutdown_signal, Environment, READINESS_PATH};
 use std::{process::ExitCode, time::Duration};
 
-/// Argument that turns the binary into its own container health check.
-pub const HEALTHCHECK_ARGUMENT: &str = "healthcheck";
 const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// The entry point of a control-plane service binary.

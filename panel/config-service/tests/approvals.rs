@@ -95,7 +95,7 @@ async fn start() -> Option<Harness> {
     .await
     .expect("config-service becomes ready");
     let client = ConfigPublicationClient::connect_lazy(
-        format!("http://{}", process.grpc_address()),
+        format!("http://{}", process.grpc_address().unwrap()),
         ConfigClientConfig::default(),
     )
     .unwrap();

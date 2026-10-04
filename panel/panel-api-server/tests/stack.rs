@@ -126,12 +126,12 @@ async fn the_public_api_publishes_through_config_service_and_serves_the_console(
         ),
         (
             panel_api_server::CONFIG_URL_ENV,
-            format!("http://{}", config.grpc_address()),
+            format!("http://{}", config.grpc_address().unwrap()),
         ),
         (panel_api_server::WEB_ROOT_ENV, web.display().to_string()),
         (
             panel_api_server::AUDIT_URL_ENV,
-            format!("http://{}", audit.grpc_address()),
+            format!("http://{}", audit.grpc_address().unwrap()),
         ),
     ]);
     let api_settings =

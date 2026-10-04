@@ -1,6 +1,6 @@
 use crate::{
     tasks::{self, SchemaCheck},
-    ProcessSettings,
+    InProcessHub, ProcessSettings,
 };
 use async_nats::jetstream::Context;
 use axum::response::IntoResponse;
@@ -29,6 +29,7 @@ use std::{convert::Infallible, future::Future, net::SocketAddr, sync::Arc, time:
 use tokio::{net::TcpListener, sync::watch, task::JoinHandle};
 use tokio_stream::wrappers::TcpListenerStream;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
+use tonic::codegen::BoxFuture;
 use tonic::{
     body::Body,
     codegen::{http::Request, Service},
@@ -64,6 +65,7 @@ pub struct ControlPlaneProcess {
     tls: Option<Arc<TlsCredentials>>,
     peer_policy: PeerPolicy,
     metrics: Metrics,
+    hub: Option<InProcessHub>,
 }
 
 impl ControlPlaneProcess {
@@ -114,7 +116,16 @@ impl ControlPlaneProcess {
             tls,
             peer_policy: PeerPolicy::new(trust_domain),
             metrics: Metrics::new(),
+            hub: None,
         })
+    }
+
+    /// Serves the process's gRPC to the other modules hosted on `hub`
+    /// instead of on a network listener, and reaches those modules through
+    /// it.
+    pub fn in_process(mut self, hub: InProcessHub) -> Self {
+        self.hub = Some(hub);
+        self
     }
 
     /// The metrics the operational listener serves at `/metrics`, to
@@ -129,13 +140,17 @@ impl ControlPlaneProcess {
         self.tls.as_ref()
     }
 
-    /// A mutual TLS channel to `peer` at `url` when the process has
-    /// credentials; `None` when peers are reached over plaintext loopback.
+    /// An in-process channel to `peer` when this process hosts it, a mutual
+    /// TLS channel to `peer` at `url` when the process has credentials, and
+    /// `None` when peers are reached over plaintext loopback.
     pub fn peer_channel(
         &self,
         url: &str,
         peer: ServiceName,
     ) -> Result<Option<tonic::transport::Channel>> {
+        if let Some(hub) = self.hub.as_ref().filter(|hub| hub.hosts(&peer)) {
+            return Ok(Some(hub.channel(&peer)));
+        }
         let Some(credentials) = &self.tls else {
             return Ok(None);
         };
@@ -270,14 +285,20 @@ impl ControlPlaneProcess {
         self
     }
 
-    /// Binds the listeners, failing if either is taken, and starts the
+    /// Binds the listeners, failing if one is taken, and starts the
     /// process. Dependencies are reached in the background.
     pub async fn start(self) -> Result<RunningProcess> {
         let service = self.descriptor.service().clone();
         let ops_listener = bind(self.settings.ops_address(), "operational").await?;
-        let grpc_listener = bind(self.settings.grpc_address(), "gRPC").await?;
         let ops_address = local_address(&ops_listener)?;
-        let grpc_address = local_address(&grpc_listener)?;
+        let grpc_listener = match &self.hub {
+            Some(hub) => GrpcListener::InProcess(hub.clone()),
+            None => GrpcListener::Network(bind(self.settings.grpc_address(), "gRPC").await?),
+        };
+        let grpc_address = match &grpc_listener {
+            GrpcListener::Network(listener) => Some(local_address(listener)?),
+            GrpcListener::InProcess(_) => None,
+        };
         let descriptor = self
             .descriptor
             .with_schema_version(SchemaMigration::latest(self.migrations).to_string());
@@ -366,47 +387,41 @@ impl ControlPlaneProcess {
             .routes
             .add_service(health_service)
             .add_service(ServiceInfoService::new(&descriptor).into_server());
-        match &self.tls {
-            Some(credentials) => {
-                let grpc = Server::builder()
+        if let Some(credentials) = &self.tls {
+            tasks.spawn(Arc::clone(credentials).watch(CREDENTIAL_RELOAD_INTERVAL, cancel.clone()));
+        }
+        let shutdown = cancel.clone().cancelled_owned();
+        let grpc: BoxFuture<(), tonic::transport::Error> = match (grpc_listener, &self.tls) {
+            (GrpcListener::InProcess(hub), _) => Box::pin(
+                Server::builder()
+                    .add_routes(routes)
+                    .serve_with_incoming_shutdown(hub.listen(&service), shutdown),
+            ),
+            (GrpcListener::Network(listener), Some(credentials)) => Box::pin(
+                Server::builder()
                     .layer(self.peer_policy)
                     .add_routes(routes)
                     .serve_with_incoming_shutdown(
-                        panel_tls::incoming(
-                            grpc_listener,
-                            Arc::clone(credentials),
-                            HANDSHAKE_TIMEOUT,
-                        ),
-                        cancel.clone().cancelled_owned(),
-                    );
-                tasks.spawn(async move {
-                    if let Err(error) = grpc.await {
-                        tracing::error!(%error, "gRPC listener failed");
-                    }
-                });
-                tasks.spawn(
-                    Arc::clone(credentials).watch(CREDENTIAL_RELOAD_INTERVAL, cancel.clone()),
-                );
-            }
-            None => {
-                let grpc = Server::builder()
+                        panel_tls::incoming(listener, Arc::clone(credentials), HANDSHAKE_TIMEOUT),
+                        shutdown,
+                    ),
+            ),
+            (GrpcListener::Network(listener), None) => Box::pin(
+                Server::builder()
                     .add_routes(routes)
-                    .serve_with_incoming_shutdown(
-                        TcpListenerStream::new(grpc_listener),
-                        cancel.clone().cancelled_owned(),
-                    );
-                tasks.spawn(async move {
-                    if let Err(error) = grpc.await {
-                        tracing::error!(%error, "gRPC listener failed");
-                    }
-                });
+                    .serve_with_incoming_shutdown(TcpListenerStream::new(listener), shutdown),
+            ),
+        };
+        tasks.spawn(async move {
+            if let Err(error) = grpc.await {
+                tracing::error!(%error, "gRPC listener failed");
             }
-        }
+        });
         tracing::info!(
             service = %service,
             instance_id = %descriptor.instance_id(),
             %ops_address,
-            %grpc_address,
+            grpc_address = %grpc_address.map_or_else(|| "in-process".to_owned(), |address| address.to_string()),
             "service started"
         );
 
@@ -419,6 +434,7 @@ impl ControlPlaneProcess {
             jetstream,
             ops_address,
             grpc_address,
+            hub: self.hub,
             cancel,
             tasks,
             monitor,
@@ -442,7 +458,8 @@ pub struct RunningProcess {
     context: Context,
     jetstream: Arc<JetStreamSettings>,
     ops_address: SocketAddr,
-    grpc_address: SocketAddr,
+    grpc_address: Option<SocketAddr>,
+    hub: Option<InProcessHub>,
     cancel: CancellationToken,
     tasks: TaskTracker,
     monitor: JoinHandle<()>,
@@ -480,7 +497,9 @@ impl RunningProcess {
         self.ops_address
     }
 
-    pub fn grpc_address(&self) -> SocketAddr {
+    /// Where the process serves gRPC; `None` when it serves its peers in
+    /// process.
+    pub fn grpc_address(&self) -> Option<SocketAddr> {
         self.grpc_address
     }
 
@@ -503,6 +522,9 @@ impl RunningProcess {
     /// closes the database pool.
     pub async fn stop(self) {
         tracing::info!(service = %self.descriptor.service(), "service stopping");
+        if let Some(hub) = &self.hub {
+            hub.close(self.descriptor.service());
+        }
         self.cancel.cancel();
         self.tasks.close();
         if tokio::time::timeout(SHUTDOWN_TIMEOUT, self.tasks.wait())
@@ -519,6 +541,12 @@ impl RunningProcess {
             tracing::warn!("database connections did not close in time");
         }
     }
+}
+
+/// Where a process takes gRPC connections from.
+enum GrpcListener {
+    Network(TcpListener),
+    InProcess(InProcessHub),
 }
 
 async fn bind(address: SocketAddr, purpose: &str) -> Result<TcpListener> {

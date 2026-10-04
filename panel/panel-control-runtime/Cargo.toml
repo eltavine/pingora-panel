@@ -13,6 +13,7 @@ async-trait.workspace = true
 axum.workspace = true
 backon.workspace = true
 chrono.workspace = true
+hyper-util.workspace = true
 panel-contracts.workspace = true
 panel-errors.workspace = true
 panel-health.workspace = true
@@ -30,6 +31,7 @@ tokio-stream.workspace = true
 tokio-util.workspace = true
 tonic.workspace = true
 tonic-health.workspace = true
+tower.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]

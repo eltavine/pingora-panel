@@ -9,15 +9,25 @@
 //! each dependency affects readiness according to its declared impact.
 //! Every process exposes liveness and readiness, standard gRPC health and
 //! its service description, registers itself in the service directory, and
-//! relays its transactional outbox while it leads.
+//! relays its transactional outbox.
+//!
+//! Modules hosted in one process serve each other through an
+//! [`InProcessHub`] instead of network listeners.
 
+mod host;
+mod in_process;
 mod main_loop;
 mod process;
 mod retry;
 mod settings;
 mod tasks;
 
-pub use main_loop::{service_main, HEALTHCHECK_ARGUMENT};
+pub use host::{
+    control_plane_main, BuildModule, ControlPlane, Module, CREDENTIALS_DIR_ENV,
+    HEALTHCHECK_ARGUMENT,
+};
+pub use in_process::InProcessHub;
+pub use main_loop::service_main;
 pub use process::{ControlPlaneProcess, RunningProcess};
 pub use settings::{
     DefaultAddresses, ProcessSettings, TlsSettings, DATA_DIR_ENV, GRPC_ADDRESS_ENV,

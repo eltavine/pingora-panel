@@ -226,15 +226,15 @@ async fn certificates_are_kept_delivered_and_audited() {
         ),
         (
             panel_api_server::CONFIG_URL_ENV,
-            format!("http://{}", config.grpc_address()),
+            format!("http://{}", config.grpc_address().unwrap()),
         ),
         (
             panel_api_server::AUDIT_URL_ENV,
-            format!("http://{}", audit.grpc_address()),
+            format!("http://{}", audit.grpc_address().unwrap()),
         ),
         (
             panel_api_server::AUTOMATION_URL_ENV,
-            format!("http://{}", automation.grpc_address()),
+            format!("http://{}", automation.grpc_address().unwrap()),
         ),
         (
             panel_api_server::WEB_ROOT_ENV,

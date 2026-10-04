@@ -1,7 +1,10 @@
 #![forbid(unsafe_code)]
 
 use chrono::Utc;
-use panel_control_runtime::{ControlPlaneProcess, DefaultAddresses, ProcessSettings, NATS_URL_ENV};
+use panel_control_runtime::{
+    ControlPlane, ControlPlaneProcess, DefaultAddresses, InProcessHub, Module, ProcessSettings,
+    CREDENTIALS_DIR_ENV, DATA_DIR_ENV, NATS_URL_ENV,
+};
 use panel_events::{
     Actor, AggregateId, AggregateRef, AggregateType, EventDraft, EventEnvelope, EventOrigin,
     EventPayload, EventType, EventVersion, Principal, RequestId, RequestScope,
@@ -14,20 +17,56 @@ use panel_sqlite::SqliteOutbox;
 use std::{collections::HashMap, ffi::OsString, future::Future, time::Duration};
 use tonic::transport::Channel;
 
-fn settings(values: &[(&str, &str)]) -> ProcessSettings {
+fn environment(values: &[(&str, &str)]) -> Environment<'static> {
     let values: HashMap<String, OsString> = values
         .iter()
         .map(|(key, value)| ((*key).to_owned(), OsString::from(value)))
         .collect();
-    ProcessSettings::read(
-        &mut Environment::from_lookup(move |name| values.get(name).cloned()),
-        DefaultAddresses {
-            ops: "127.0.0.1:0".parse().unwrap(),
-            grpc: "127.0.0.1:0".parse().unwrap(),
-        },
+    Environment::from_lookup(move |name| values.get(name).cloned())
+}
+
+fn any_port() -> DefaultAddresses {
+    DefaultAddresses {
+        ops: "127.0.0.1:0".parse().unwrap(),
+        grpc: "127.0.0.1:0".parse().unwrap(),
+    }
+}
+
+fn settings(values: &[(&str, &str)]) -> ProcessSettings {
+    ProcessSettings::read(&mut environment(values), any_port())
+        .unwrap()
+        .with_health_interval(Duration::from_millis(50))
+}
+
+fn config_module(
+    _env: &mut Environment<'_>,
+    settings: ProcessSettings,
+) -> panel_errors::Result<ControlPlaneProcess> {
+    ControlPlaneProcess::new(
+        ServiceName::new("config-service")?,
+        "0.1.0-test",
+        settings,
+        "config",
     )
-    .unwrap()
-    .with_health_interval(Duration::from_millis(50))
+}
+
+fn api_module(
+    _env: &mut Environment<'_>,
+    settings: ProcessSettings,
+) -> panel_errors::Result<ControlPlaneProcess> {
+    ControlPlaneProcess::new(
+        ServiceName::new("panel-api")?,
+        "0.1.0-test",
+        settings,
+        "identity",
+    )
+}
+
+fn refused_module(
+    _env: &mut Environment<'_>,
+    _settings: ProcessSettings,
+) -> panel_errors::Result<ControlPlaneProcess> {
+    Err(panel_errors::PanelError::invalid_argument("refused"))
 }
 
 async fn eventually<F, Fut>(what: &str, mut condition: F)
@@ -117,7 +156,7 @@ async fn a_ready_process_serves_registers_relays_and_deregisters() {
     }
     assert!(data.path().join("config.db").is_file());
 
-    let channel = Channel::from_shared(format!("http://{}", process.grpc_address()))
+    let channel = Channel::from_shared(format!("http://{}", process.grpc_address().unwrap()))
         .unwrap()
         .connect()
         .await
@@ -229,6 +268,141 @@ async fn socket_peers_are_never_reached_over_plaintext() {
         .unwrap_err();
     assert!(
         refused.message.contains("PINGORA_PANEL_TLS_DIR"),
+        "{refused}"
+    );
+}
+
+#[tokio::test]
+async fn modules_of_one_process_reach_each_other_without_network_listeners() {
+    let data = tempfile::tempdir().unwrap();
+    let config_service = ServiceName::new("config-service").unwrap();
+    let hub = InProcessHub::new([
+        config_service.clone(),
+        ServiceName::new("panel-api").unwrap(),
+    ]);
+    let unreachable_broker = [(NATS_URL_ENV, "nats://127.0.0.1:1")];
+    let config = ControlPlaneProcess::new(
+        config_service.clone(),
+        "0.1.0-test",
+        settings(&unreachable_broker).with_data_directory(data.path()),
+        "config",
+    )
+    .unwrap()
+    .in_process(hub.clone());
+    let api = ControlPlaneProcess::new(
+        ServiceName::new("panel-api").unwrap(),
+        "0.1.0-test",
+        settings(&unreachable_broker).with_data_directory(data.path()),
+        "identity",
+    )
+    .unwrap()
+    .in_process(hub);
+    let to_config = api
+        .peer_channel("http://127.0.0.1:1", config_service)
+        .unwrap()
+        .expect("a module of the same process is reached in process");
+    assert!(
+        describe_peer(to_config.clone(), Duration::from_secs(2))
+            .await
+            .is_err(),
+        "a module that has not started is not reached"
+    );
+
+    let config = config.start().await.unwrap();
+    let api = api.start().await.unwrap();
+    assert_eq!(config.grpc_address(), None);
+    assert_eq!(api.grpc_address(), None);
+    let described = describe_peer(to_config.clone(), Duration::from_secs(2))
+        .await
+        .unwrap();
+    assert_eq!(&described, config.descriptor());
+
+    config.stop().await;
+    assert!(
+        describe_peer(to_config, Duration::from_secs(2))
+            .await
+            .is_err(),
+        "a module that has stopped is not reached"
+    );
+    api.stop().await;
+}
+
+#[tokio::test]
+async fn a_control_plane_starts_and_stops_its_modules_together() {
+    let data = tempfile::tempdir().unwrap();
+    let data_directory = data.path().to_str().unwrap();
+    let mut env = environment(&[
+        (DATA_DIR_ENV, data_directory),
+        (NATS_URL_ENV, "nats://127.0.0.1:1"),
+    ]);
+    let control_plane = ControlPlane::start(
+        &mut env,
+        &[
+            Module::new("config-service", any_port(), config_module),
+            Module::new("panel-api", any_port(), api_module),
+        ],
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(control_plane.modules().len(), 2);
+    for module in control_plane.modules() {
+        assert_eq!(module.grpc_address(), None);
+        let health = module.health();
+        eventually("the module's schema is migrated", || {
+            let health = health.clone();
+            async move { health.current().mode() == ServiceMode::Normal }
+        })
+        .await;
+        let response = get(format!("http://{}/readyz", module.ops_address())).await;
+        assert_eq!(response.status(), 200);
+    }
+    assert!(data.path().join("config.db").exists());
+    assert!(data.path().join("identity.db").exists());
+    tokio::time::timeout(Duration::from_secs(10), control_plane.stop())
+        .await
+        .expect("the modules stop");
+}
+
+#[tokio::test]
+async fn a_module_that_cannot_start_stops_the_control_plane() {
+    let data = tempfile::tempdir().unwrap();
+    let mut env = environment(&[
+        (DATA_DIR_ENV, data.path().to_str().unwrap()),
+        (NATS_URL_ENV, "nats://127.0.0.1:1"),
+    ]);
+    let refused = ControlPlane::start(
+        &mut env,
+        &[
+            Module::new("config-service", any_port(), config_module),
+            Module::new("panel-api", any_port(), refused_module),
+        ],
+    )
+    .await
+    .err()
+    .expect("a module that cannot be built fails the start");
+    assert_eq!(refused.message, "refused");
+}
+
+#[tokio::test]
+async fn each_module_loads_the_credentials_named_after_its_service() {
+    let data = tempfile::tempdir().unwrap();
+    let credentials = data.path().join("credentials");
+    let mut env = environment(&[
+        (DATA_DIR_ENV, data.path().to_str().unwrap()),
+        (CREDENTIALS_DIR_ENV, credentials.to_str().unwrap()),
+    ]);
+    let refused = ControlPlane::start(
+        &mut env,
+        &[Module::new("config-service", any_port(), config_module)],
+    )
+    .await
+    .err()
+    .expect("a module without credentials does not start");
+    assert!(
+        refused
+            .message
+            .contains(&credentials.join("config-service").display().to_string()),
         "{refused}"
     );
 }
