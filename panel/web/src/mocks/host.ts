@@ -1,5 +1,10 @@
 import { http, HttpResponse, type AnyHandler } from 'msw'
-import type { DirectoriesView, HostAgentView, ListenersView } from '@/api/generated'
+import type {
+  DirectoriesView,
+  GatewayUnitView,
+  HostAgentView,
+  ListenersView,
+} from '@/api/generated'
 
 const MIB = 1024 * 1024
 
@@ -12,12 +17,12 @@ export function hostAgentHandlers(): AnyHandler[] {
     capabilities: [
       { capability: 'directories', state: 'available', detail: '' },
       { capability: 'listeners', state: 'available', detail: '' },
+      { capability: 'gateway_unit', state: 'available', detail: '' },
       {
-        capability: 'gateway_unit',
+        capability: 'containers',
         state: 'denied',
-        detail: 'install gateway-unit.conf, which adds the polkit rule',
+        detail: 'add the agent to the group that owns the engine socket',
       },
-      { capability: 'containers', state: 'not_enabled', detail: '' },
     ],
   }
   const directories: DirectoriesView = {
@@ -69,8 +74,31 @@ export function hostAgentHandlers(): AnyHandler[] {
       },
     ],
   }
+  const unit: GatewayUnitView = {
+    name: 'pingora-panel-gatewayd.service',
+    description: 'Pingora Panel gateway',
+    load_state: 'loaded',
+    active_state: 'active',
+    sub_state: 'running',
+    unit_file_state: 'enabled',
+    main_pid: 1204,
+    active_since: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+    restarts: 0,
+    result: 'success',
+  }
   return [
     http.get('*/api/v1/host/agent', () => HttpResponse.json(agent)),
+    http.get('*/api/v1/host/gateway-unit', () => HttpResponse.json(unit)),
+    http.post('*/api/v1/host/gateway-unit/:action', ({ params }) => {
+      const stopped = params.action === 'stop'
+      Object.assign(unit, {
+        active_state: stopped ? 'inactive' : 'active',
+        sub_state: stopped ? 'dead' : 'running',
+        main_pid: stopped ? null : (unit.main_pid ?? 1204),
+        active_since: stopped ? unit.active_since : new Date().toISOString(),
+      })
+      return HttpResponse.json(unit)
+    }),
     http.get('*/api/v1/host/listeners', () => HttpResponse.json(listeners)),
     http.get('*/api/v1/host/directories', () => HttpResponse.json(directories)),
   ]

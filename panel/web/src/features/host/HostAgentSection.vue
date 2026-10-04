@@ -10,6 +10,7 @@ import StatusIndicator from '@/components/StatusIndicator.vue'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import HostDirectories from './HostDirectories.vue'
+import HostGatewayUnit from './HostGatewayUnit.vue'
 import HostListeners from './HostListeners.vue'
 import { agentTone, capabilityTone, REFRESH_INTERVAL_MS } from './presentation'
 
@@ -108,9 +109,10 @@ function offers(name: AgentCapabilityName): boolean {
     </CardContent>
   </Card>
   <div
-    v-if="offers('directories') || offers('listeners')"
+    v-if="offers('gateway_unit') || offers('directories') || offers('listeners')"
     class="grid items-start gap-4 xl:grid-cols-2"
   >
+    <HostGatewayUnit v-if="offers('gateway_unit')" />
     <HostListeners v-if="offers('listeners')" />
     <HostDirectories v-if="offers('directories')" />
   </div>

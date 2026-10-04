@@ -37,6 +37,38 @@ export function capabilityTone(state: CapabilityStateName): StatusTone {
   }
 }
 
+/** systemd's active states the console names in its own words. */
+const UNIT_STATES = [
+  'active',
+  'inactive',
+  'failed',
+  'activating',
+  'deactivating',
+  'reloading',
+] as const
+
+export type UnitStateKey = (typeof UNIT_STATES)[number]
+
+/** The message key for a systemd active state, or `null` for one to show as systemd says it. */
+export function unitStateKey(state: string): UnitStateKey | null {
+  return (UNIT_STATES as readonly string[]).includes(state) ? (state as UnitStateKey) : null
+}
+
+export function unitTone(state: string): StatusTone {
+  switch (state) {
+    case 'active':
+      return 'positive'
+    case 'failed':
+      return 'negative'
+    case 'activating':
+    case 'deactivating':
+    case 'reloading':
+      return 'pending'
+    default:
+      return 'neutral'
+  }
+}
+
 /** The gateway's process name, as the host agent reports it. */
 const GATEWAY_PROCESS = 'gatewayd'
 

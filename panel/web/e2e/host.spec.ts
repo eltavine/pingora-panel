@@ -52,8 +52,22 @@ const agent = {
   capabilities: [
     { capability: 'directories', state: 'available', detail: '' },
     { capability: 'listeners', state: 'available', detail: '' },
-    { capability: 'gateway_unit', state: 'denied', detail: 'install gateway-unit.conf' },
+    { capability: 'gateway_unit', state: 'available', detail: '' },
+    { capability: 'containers', state: 'denied', detail: 'add the agent to the docker group' },
   ],
+}
+
+const unit = {
+  name: 'pingora-panel-gatewayd.service',
+  description: 'Pingora Panel gateway',
+  load_state: 'loaded',
+  active_state: 'active',
+  sub_state: 'running',
+  unit_file_state: 'enabled',
+  main_pid: 1204,
+  active_since: '2026-10-01T10:00:00Z',
+  restarts: 0,
+  result: 'success',
 }
 
 const listeners = {
@@ -129,6 +143,10 @@ async function setUp(
   await page.route('**/api/v1/host/agent', (route) => route.fulfill({ json: hostAgent }))
   await page.route('**/api/v1/host/directories', (route) => route.fulfill({ json: directories }))
   await page.route('**/api/v1/host/listeners', (route) => route.fulfill({ json: listeners }))
+  await page.route('**/api/v1/host/gateway-unit', (route) => route.fulfill({ json: unit }))
+  await page.route('**/api/v1/host/gateway-unit/*', (route) =>
+    route.fulfill({ json: { ...unit, main_pid: 1301 } }),
+  )
 }
 
 test.afterEach(async ({ page }) => {
@@ -194,9 +212,9 @@ test('the agent shows its capabilities and the space the panel takes', async ({ 
   await expect(
     capabilities.getByRole('listitem').filter({ hasText: 'Directory sizes' }),
   ).toContainText('Available')
-  const unit = capabilities.getByRole('listitem').filter({ hasText: 'Gateway service' })
-  await expect(unit).toContainText('Missing a privilege')
-  await expect(unit).toContainText('install gateway-unit.conf')
+  const engine = capabilities.getByRole('listitem').filter({ hasText: 'Containers' })
+  await expect(engine).toContainText('Missing a privilege')
+  await expect(engine).toContainText('add the agent to the docker group')
 
   await expect(page.getByText('Ports 80 and 443')).toBeVisible()
   const web = page.getByRole('row').filter({ hasText: '/usr/sbin/nginx' })
@@ -212,4 +230,32 @@ test('the agent shows its capabilities and the space the panel takes', async ({ 
   await expect(page.getByRole('row').filter({ hasText: 'Certificates' })).toContainText(
     'Does not exist',
   )
+})
+
+test('administrators restart the gateway service after confirming', async ({ page }) => {
+  await setUp(page, host, ALL_PERMISSIONS, agent)
+  await page.goto('/host')
+  await expect(page.getByText('Active (running)')).toBeVisible()
+  await expect(page.getByText('pingora-panel-gatewayd.service')).toBeVisible()
+  const restarted = page.waitForRequest(
+    (request) =>
+      request.method() === 'POST' && request.url().endsWith('/api/v1/host/gateway-unit/restart'),
+  )
+  await page.getByRole('button', { name: 'Restart', exact: true }).click()
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Restart', exact: true }).click()
+  await restarted
+  await expect(page.getByText('Gateway service restarted')).toBeVisible()
+})
+
+test('the gateway service is shown without its actions to readers', async ({ page }) => {
+  await setUp(
+    page,
+    host,
+    ALL_PERMISSIONS.filter((permission) => permission !== 'host.manage'),
+    agent,
+  )
+  await page.goto('/host')
+  await expect(page.getByText('Active (running)')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Restart', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0)
 })

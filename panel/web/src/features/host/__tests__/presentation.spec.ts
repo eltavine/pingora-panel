@@ -8,6 +8,8 @@ import {
   levelTone,
   memoryUsed,
   portHolder,
+  unitStateKey,
+  unitTone,
   uptimeParts,
 } from '../presentation'
 
@@ -51,6 +53,15 @@ describe('host agent', () => {
     expect(capabilityTone('unreachable')).toBe('negative')
     expect(capabilityTone('not_enabled')).toBe('neutral')
     expect(capabilityTone('unsupported')).toBe('neutral')
+  })
+
+  it("reads systemd's states and names the ones it knows", () => {
+    expect(unitTone('active')).toBe('positive')
+    expect(unitTone('failed')).toBe('negative')
+    expect(unitTone('activating')).toBe('pending')
+    expect(unitTone('maintenance')).toBe('neutral')
+    expect(unitStateKey('inactive')).toBe('inactive')
+    expect(unitStateKey('maintenance')).toBeNull()
   })
 
   it('tells the gateway holding a port from another process holding it', () => {
