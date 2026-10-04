@@ -1,6 +1,7 @@
 # 0007: Service processes, health, degraded mode and discovery
 
-Status: accepted.
+Status: accepted. [ADR 0032](0032-one-control-plane-process-on-sqlite.md)
+composes the services into one process and stores them in SQLite.
 
 ## Context
 

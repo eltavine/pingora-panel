@@ -1,6 +1,7 @@
 # 0006: JetStream delivery, dead letters and replay
 
-Status: accepted.
+Status: accepted. [ADR 0032](0032-one-control-plane-process-on-sqlite.md) keeps
+the inbox of each module in its SQLite file.
 
 ## Context
 

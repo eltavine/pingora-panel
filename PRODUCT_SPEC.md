@@ -112,7 +112,7 @@ Pingora Panel 是一个面向团队运维的单节点网站网关控制平台。
 
 - 不宣称兼容全部 NGINX/OpenResty directive。
 - 不把 Cloudflare 生产数据当作本产品性能结论。
-- 不允许浏览器、CLI 或插件直接修改 PostgreSQL、Pingora 内存、Docker socket 或 systemd。
+- 不允许浏览器、CLI 或插件直接修改控制面数据库、Pingora 内存、Docker socket 或 systemd。
 - 不承诺 Lua 是不可信多租户的强安全边界。
 - 不在 1.0 动态创建任意 Pingora listener/service；首选固定 listener 与动态路由快照。
 
@@ -193,6 +193,8 @@ flowchart LR
 
 ## 5. 服务拓扑与模块职责
 
+安装只运行三个自有进程（ADR 0032）：控制面、`gatewayd` 与按需启用的 `ops-agent`。`panel-api`、`config-service`、`automation-service`、`observability-service` 与审计是控制面进程内的模块，保留各自的 gRPC 契约并经进程内通道互相调用，不监听网络地址；`gatewayd` 独立运行以保证控制面故障时流量不中断，`ops-agent` 独立运行以隔离主机特权。
+
 ```mermaid
 flowchart TB
     subgraph Clients
@@ -202,12 +204,15 @@ flowchart TB
     end
 
     subgraph Containers[Docker or Podman Compose]
-        API[panel-api]
-        CFG[config-service]
-        AUTO[automation-service]
-        OBS[observability-service]
+        subgraph Control[control plane process]
+            API[panel-api]
+            CFG[config-service]
+            AUTO[automation-service]
+            OBS[observability-service]
+            AUDIT[audit]
+            DB[(SQLite files per module)]
+        end
         GW[gatewayd]
-        PG[(PostgreSQL)]
         NATS[(NATS JetStream)]
         PROM[(Prometheus)]
         LOKI[(Loki)]
@@ -228,14 +233,16 @@ flowchart TB
     API --> OBS
     CFG --> GW
     AUTO --> AGENT
-    API --> PG
-    CFG --> PG
-    AUTO --> PG
-    OBS --> PG
+    API --> DB
+    CFG --> DB
+    AUTO --> DB
+    OBS --> DB
+    AUDIT --> DB
     API <--> NATS
     CFG <--> NATS
     AUTO <--> NATS
     OBS <--> NATS
+    AUDIT <--> NATS
     GW --> PROM
     GW --> OTEL
     API --> OTEL
@@ -290,15 +297,15 @@ flowchart TB
 
 ### 5.7 数据所有权
 
-| 服务 | PostgreSQL schema | 可写实体 |
+| 模块 | SQLite 数据库文件 | 可写实体 |
 |---|---|---|
-| `panel-api` | `identity` | users、sessions、tokens、roles、bindings |
-| `config-service` | `config` | sites、revisions、approvals、deployments、receipts |
-| `automation-service` | `automation` | jobs、schedules、leases、delivery attempts |
-| `observability-service` | `observability` | alert rules、silences、saved queries |
-| shared audit writer | `audit` | append-only audit records、hash checkpoints |
+| `panel-api` | `identity.db` | users、sessions、tokens、roles、bindings |
+| `config-service` | `config.db` | sites、revisions、approvals、deployments、receipts |
+| `automation-service` | `automation.db` | jobs、schedules、leases、delivery attempts |
+| `observability-service` | `observability.db` | alert rules、silences、saved queries |
+| audit | `audit.db` | append-only audit records、hash checkpoints |
 
-服务禁止跨 schema 写入。跨服务一致性使用 API、gRPC、Outbox 和可重放事件完成，不使用共享表触发隐式耦合。
+每个文件只属于一个模块，模块禁止写入其他模块的文件，事务不跨文件。文件以 WAL 模式、`synchronous=FULL` 与外键约束打开，写事务以 `BEGIN IMMEDIATE` 开始。跨模块一致性使用 API、gRPC、Outbox 和可重放事件完成，不使用共享表触发隐式耦合。
 
 ---
 
@@ -528,7 +535,7 @@ flowchart TD
 
 ### 9.2 Internal gRPC
 
-Protobuf package 使用 `pingora.panel.<domain>.v1`。容器间默认 mTLS TCP；`ops-agent` 默认 UDS。协议遵循：
+Protobuf package 使用 `pingora.panel.<domain>.v1`。控制面模块之间经进程内通道调用；控制面到 `gatewayd` 默认 mTLS TCP，到 `ops-agent` 默认 UDS 上的 mTLS。协议遵循：
 
 - 只允许 additive change。
 - 删除字段必须 `reserved` 原 field number 和 name。
@@ -625,9 +632,9 @@ flowchart LR
 | 边界 | 主要风险 | 必须控制 |
 |---|---|---|
 | Browser → `panel-api` | Session 劫持、CSRF、XSS | Secure/HttpOnly/SameSite、CSRF token、CSP、Origin 检查 |
-| API → internal services | 身份伪造、横向移动 | mTLS workload identity、最小 ACL、deadline |
+| control plane → `gatewayd`、`ops-agent` | 身份伪造、横向移动 | mTLS workload identity、最小 ACL、deadline |
 | `config-service` → `gatewayd` | 恶意/损坏快照 | IR schema、hash、CAS、adapter validation |
-| service → PostgreSQL | 越权写入 | 独立账号/schema、TLS、最小 grant |
+| module → SQLite 文件 | 越权写入、篡改 | 每模块独立文件、数据目录仅控制面用户可访问、事务不跨文件 |
 | service → JetStream | 伪造/重放事件 | account/subject ACL、event ID、幂等消费者 |
 | control plane → `ops-agent` | root RCE | UDS peer auth、operation allowlist、路径约束、签名 |
 | Lua → request pipeline | CPU/内存耗尽、能力滥用 | 受信角色、配额、capability、超时、版本回滚 |
@@ -676,7 +683,7 @@ SLO 是初始工程目标，不是未经测量的性能结论。吞吐、延迟�
 
 ### 12.3 Backpressure
 
-Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki。Telemetry 队列满时按策略采样/丢弃并计数，不能阻塞代理。JetStream consumer、WebSocket/SSE 和日志 Tail 必须有缓冲上限、慢消费者断开和恢复游标。
+Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或 Loki。Telemetry 队列满时按策略采样/丢弃并计数，不能阻塞代理。JetStream consumer、WebSocket/SSE 和日志 Tail 必须有缓冲上限、慢消费者断开和恢复游标。
 
 ---
 
@@ -687,7 +694,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 - Tier 1：Linux x86_64/aarch64、systemd、Docker Compose、Podman Compose。
 - `gatewayd` 使用 host network 或经验证的等价网络模式，授予最小 `CAP_NET_BIND_SERVICE`，不使用 privileged container。
 - `ops-agent` 为原生服务；Docker/Podman socket 只对 agent 可见。
-- PostgreSQL、NATS、Prometheus、Loki 和 OTel Collector 使用持久卷与显式版本锁定。
+- 控制面数据目录、NATS、Prometheus、Loki 和 OTel Collector 使用持久卷，第三方镜像显式锁定版本。
 
 ### 13.2 升级顺序
 
@@ -700,7 +707,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 
 ### 13.3 备份恢复
 
-备份包含 PostgreSQL 一致性备份、规范 DSL、证书/Secret 加密材料、LKG manifest、Compose 配置和版本清单。恢复必须支持空主机演练，并验证 active revision/hash、证书引用、审计链和服务协议版本。Loki/Prometheus 历史数据可以独立设定备份策略，不得阻止核心配置恢复。
+备份包含控制面各 SQLite 文件的在线一致性备份、规范 DSL、证书/Secret 加密材料、LKG manifest、Compose 配置和版本清单。恢复必须支持空主机演练，并验证 active revision/hash、证书引用、审计链和服务协议版本。Loki/Prometheus 历史数据可以独立设定备份策略，不得阻止核心配置恢复。
 
 ---
 
@@ -1450,7 +1457,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 
 | 版本 | 主题 | 完成门禁 |
 |---|---|---|
-| 0.1 | 基础设施 | 产品 workspace、服务骨架、PostgreSQL、NATS、Proto、Compose、上游隔离 |
+| 0.1 | 基础设施 | 产品 workspace、服务骨架、SQLite、NATS、Proto、Compose、上游隔离 |
 | 0.2 | 网关核心 | Site/Domain/Route/Upstream、HTTP/1.1/2、基础 TLS、API/CLI/GUI 闭环 |
 | 0.3 | 配置事务 | DSL v1、IR v1、revision、Diff/Plan、审批、原子发布、reconciliation、审计 |
 | 0.4 | TLS 与团队安全 | ACME、OIDC、RBAC、Session、ACL、限流、Secret、双人审批 |

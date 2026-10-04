@@ -1,6 +1,7 @@
 # 0013: Audit trail
 
-Status: accepted.
+Status: accepted. [ADR 0032](0032-one-control-plane-process-on-sqlite.md) makes
+the audit trail a module of the control plane, stored in SQLite.
 
 ## Context
 

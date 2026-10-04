@@ -1,6 +1,7 @@
 # 0008: Durable jobs, schedules and maintenance windows
 
-Status: accepted.
+Status: accepted. [ADR 0032](0032-one-control-plane-process-on-sqlite.md) keeps
+jobs in the automation module's SQLite file; leases still fence work.
 
 ## Context
 
