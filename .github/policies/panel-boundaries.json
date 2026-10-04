@@ -331,7 +331,7 @@
       ]
     },
     "panel-config-state-codec": {
-      "catalog": true,
+      "catalog": false,
       "allowed_workspace_dependencies": [
         "panel-config-domain"
       ]
