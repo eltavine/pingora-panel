@@ -145,6 +145,8 @@ Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交
 
 0.5 流量可观测（`OBS-020`～`OBS-035`、`OBS-037`、`OBS-039`～`OBS-044`、`OBS-047`）按 ADR 0022 实现：每个进程的运维监听器都提供 `/livez`、`/readyz` 与 `/metrics`（网关另有 `/healthz`，就绪状态与其 gRPC Health 一致，`panel-api` 按路由模板统计自身请求）；网关以 OpenTelemetry 语义约定命名的指标（`http.server.request.duration` 直方图及其桶边界、活跃请求、请求与响应体大小、上游 `http.client.request.duration`、打开的连接、TLS 握手、生效配置版本与激活时间）在运维监听器的 `/metrics` 上以 OpenMetrics 格式提供，标签只取自配置（网站、路由、上游、端点）而非请求，非回环地址必须以 Bearer 令牌抓取；请求路径上的记录不分配内存、不等待任何后端。Compose 安装附带只监听回环地址的 Prometheus，`observability-service` 以固定 PromQL 回答 `pingora.panel.observability.v1.Traffic` 查询，REST API（`/api/v1/traffic`、`/api/v1/traffic/series`）、`ppanel traffic` 与控制台流量页提供请求数、QPS、状态码分类、P50/P90/P95/P99 延迟、入站与出站流量、活跃连接、TLS 握手、上游延迟与失败率、热门路由及每 30 秒刷新的趋势图。
 
+0.5 日志（`OBS-001`～`OBS-007`、`OBS-015`～`OBS-017`、`SEC-028`）按 ADR 0025 进行中：设置了日志目录的网关把网站接收的请求写入各自的 `sites/<网站>.access.log`，其余请求写入 `access.log`，失败的请求另写 `error.log`。访问记录是以 OpenTelemetry 属性名为键的 JSON 行或 Combined Log Format，带请求 ID（合法的 `X-Request-Id` 原样保留，否则写入新的 UUIDv7 并一并转发给上游）、trace ID、网站、路由、修订与上游节点；敏感查询参数（OpenTelemetry 的默认列表或自定义列表）、凭据类请求头与全部 Cookie 记为 `REDACTED`。文件按大小与 UTC 日期轮转，按保留天数与文件数清理；写入队列满时丢弃记录并计数，不阻塞请求。配置语言在 `http`、`server` 与 `route` 中设置开关、格式与自定义字段，在 `http` 中设置脱敏列表与轮转保留；Compose 安装由 OpenTelemetry Collector 把日志送入 Loki。控制台的日志设置与日志检索、Tail、下载和清空（`OBS-008`～`OBS-014`、`OBS-018`、`OBS-019`）尚未完成。
+
 ### 3.2 目标仓库边界
 
 Pingora 上游 crates 继续保留在根 workspace，以便固定版本、审计源码、紧急打补丁和进行兼容测试。产品代码统一进入 `panel/` 边界。只有 `panel/gateway-pingora` 可以在 `Cargo.toml` 中依赖 `pingora-*`；其他产品 crate 只能依赖稳定的 `GatewayEngine` port 与 Engine-neutral IR。
@@ -1122,7 +1124,7 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | SEC-025 | 385 | Real IP 提取 | 0.4 | A/C/G | Operator | policy-engine | 执行“Real IP 提取”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | SEC-026 | 386 | 多级代理链处理 | 0.4 | A/C/G | Operator | policy-engine | 执行“多级代理链处理”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | SEC-027 | 387 | XFF 欺骗保护 | 0.4 | A/C/G | Operator | policy-engine | 执行“XFF 欺骗保护”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
-| SEC-028 | 388 | 敏感 Header 脱敏日志 | 0.4 | A/C/G | Operator | policy-engine | 执行“敏感 Header 脱敏日志”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| SEC-028 | 388 | 敏感 Header 脱敏日志 | 0.4 | A/C/G | Operator | policy-engine | 执行“敏感 Header 脱敏日志”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
 | SEC-029 | 389 | TLS 私钥权限检查 | 0.4 | A/C/G | Viewer | policy-engine | 查询“TLS 私钥权限检查”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
 | SEC-030 | 390 | Web 根目录越界检查 | 0.4 | A/C/G | Viewer | policy-engine | 查询“Web 根目录越界检查”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
 | SEC-031 | 391 | Path Traversal 防护 | 0.4 | A/C/G | Operator | policy-engine | 执行“Path Traversal 防护”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
@@ -1134,13 +1136,13 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | AUDIT-004 | 397 | 配置发布审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“配置发布审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | AUDIT-005 | 398 | 证书操作审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“证书操作审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | AUDIT-006 | 399 | Docker 操作审计 | 0.3 | A/C/G | Auditor | audit writer | 执行“Docker 操作审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| OBS-001 | 400 | Access Log | 0.5 | A/C/G | Operator | observability-service | 执行“Access Log”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| OBS-002 | 401 | Error Log | 0.5 | A/C/G | Operator | observability-service | 执行“Error Log”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| OBS-003 | 402 | JSON 日志 | 0.5 | A/C/G | Operator | observability-service | 执行“JSON 日志”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| OBS-004 | 403 | Combined Log | 0.5 | A/C/G | Operator | observability-service | 执行“Combined Log”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| OBS-005 | 404 | 自定义日志字段 | 0.5 | A/C/G | Operator | observability-service | 执行“自定义日志字段”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| OBS-006 | 405 | 按网站日志 | 0.5 | A/C/G | Operator | observability-service | 执行“按网站日志”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| OBS-007 | 406 | 按 Route 日志 | 0.5 | A/C/G | Operator | observability-service | 执行“按 Route 日志”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| OBS-001 | 400 | Access Log | 0.5 | A/C/G | Operator | observability-service | 执行“Access Log”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
+| OBS-002 | 401 | Error Log | 0.5 | A/C/G | Operator | observability-service | 执行“Error Log”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
+| OBS-003 | 402 | JSON 日志 | 0.5 | A/C/G | Operator | observability-service | 执行“JSON 日志”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
+| OBS-004 | 403 | Combined Log | 0.5 | A/C/G | Operator | observability-service | 执行“Combined Log”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
+| OBS-005 | 404 | 自定义日志字段 | 0.5 | A/C/G | Operator | observability-service | 执行“自定义日志字段”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
+| OBS-006 | 405 | 按网站日志 | 0.5 | A/C/G | Operator | observability-service | 执行“按网站日志”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
+| OBS-007 | 406 | 按 Route 日志 | 0.5 | A/C/G | Operator | observability-service | 执行“按 Route 日志”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
 | OBS-008 | 407 | 日志实时 Tail | 0.5 | A/C/G | Viewer | observability-service | 查询“日志实时 Tail”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
 | OBS-009 | 408 | WebSocket 日志推送 | 0.5 | A/C/G | Operator | observability-service | 执行“WebSocket 日志推送”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | OBS-010 | 409 | 日志关键词搜索 | 0.5 | A/C/G | Viewer | observability-service | 查询“日志关键词搜索”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
@@ -1148,9 +1150,9 @@ Gateway 请求路径不得同步依赖 PostgreSQL、NATS、Prometheus 或 Loki�
 | OBS-012 | 411 | IP 过滤 | 0.5 | A/C/G | Operator | observability-service | 执行“IP 过滤”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | OBS-013 | 412 | URI 过滤 | 0.5 | A/C/G | Operator | observability-service | 执行“URI 过滤”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | OBS-014 | 413 | Request-ID 检索 | 0.5 | A/C/G | Viewer | observability-service | 查询“Request-ID 检索”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| OBS-015 | 414 | 日志文件轮转 | 0.5 | A/C/G | Operator | observability-service | 执行“日志文件轮转”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| OBS-016 | 415 | 日志保留天数 | 0.5 | A/C/G | Operator | observability-service | 执行“日志保留天数”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| OBS-017 | 416 | 日志大小限制 | 0.5 | A/C/G | Operator | observability-service | 执行“日志大小限制”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| OBS-015 | 414 | 日志文件轮转 | 0.5 | A/C/G | Operator | observability-service | 执行“日志文件轮转”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
+| OBS-016 | 415 | 日志保留天数 | 0.5 | A/C/G | Operator | observability-service | 执行“日志保留天数”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
+| OBS-017 | 416 | 日志大小限制 | 0.5 | A/C/G | Operator | observability-service | 执行“日志大小限制”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | No |
 | OBS-018 | 417 | 日志下载 | 0.5 | A/C/G | Viewer | observability-service | 查询“日志下载”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
 | OBS-019 | 418 | 日志清空 | 0.5 | A/C/G | Operator | observability-service | 执行“日志清空”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | OBS-020 | 419 | 请求总量 | 0.5 | A/C/G | Operator | observability-service | 执行“请求总量”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
