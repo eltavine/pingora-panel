@@ -195,6 +195,23 @@ jobs:
             | python3 -c "import json, sys; d = json.load(sys.stdin); assert d['container']['names'] == ['panel-ci-throwaway'] and d['started_at'], d"
           ppanel -o json container inspect pingora-panel-control-1 \
             | python3 -c "import json, sys; d = json.load(sys.stdin); assert d['container']['labels']['com.docker.compose.service'] == 'control', d"
+          # What it printed, then what it prints until it stops.
+          ppanel -o json container logs panel-ci-throwaway --lines 50 \
+            | python3 -c "import json, sys; lines = json.load(sys.stdin)['lines']; assert any('Server is ready' in line['text'] for line in lines), lines"
+          timeout 60 docker compose exec -T -e PPANEL_TOKEN control \
+            ppanel -o json container logs panel-ci-throwaway --follow --lines 1 > followed.jsonl &
+          follower=$!
+          for _ in $(seq 1 30); do
+            if [ -s followed.jsonl ]; then
+              break
+            fi
+            sleep 1
+          done
+          docker stop panel-ci-throwaway >/dev/null
+          wait "$follower"
+          test "$(wc -l < followed.jsonl)" -ge 2
+          ppanel container start panel-ci-throwaway
+          test "$(status)" = running
           ppanel container kill panel-ci-throwaway --yes
           test "$(status)" = exited
           ppanel container remove panel-ci-throwaway --yes
