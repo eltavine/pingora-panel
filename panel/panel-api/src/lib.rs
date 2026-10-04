@@ -25,6 +25,7 @@ mod grants;
 mod host;
 mod host_agent;
 mod identity;
+mod images;
 mod language;
 mod logs;
 mod middleware;

@@ -50,7 +50,7 @@ const MOST_BACKLOG: u32 = 1_000;
 const DEFAULT_BACKLOG: u32 = 100;
 
 /// An engine's name as a path names it: lowercase letters only.
-fn engine(name: String) -> Result<String, ApiError> {
+pub(crate) fn engine(name: String) -> Result<String, ApiError> {
     if !name.is_empty() && name.len() <= 32 && name.bytes().all(|byte| byte.is_ascii_lowercase()) {
         Ok(name)
     } else {

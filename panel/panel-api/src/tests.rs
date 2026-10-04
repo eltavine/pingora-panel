@@ -24,6 +24,7 @@ mod conditional;
 mod containers;
 mod host;
 mod host_agent;
+mod images;
 mod logs;
 mod platform;
 mod request_identity;

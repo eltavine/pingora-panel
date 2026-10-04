@@ -26,7 +26,9 @@ use identity_sqlite::SqliteIdentityStore;
 use observability_grpc_client::ObservabilityClient;
 use ops_grpc_client::OpsAgentClient;
 use panel_api::{router_with_config, AccessSettings, ApiConfig, ApiState};
-use panel_application::{RecordedContainers, RecordedHostAgent, RecordedLogs, RecordedRuntime};
+use panel_application::{
+    RecordedContainers, RecordedHostAgent, RecordedImages, RecordedLogs, RecordedRuntime,
+};
 use panel_control_runtime::{ControlPlaneProcess, DefaultAddresses, ProcessSettings};
 use panel_errors::{PanelError, Result};
 use panel_health::Impact;
@@ -211,6 +213,9 @@ pub fn process(
     let recorded_containers = agent
         .clone()
         .map(|agent| RecordedContainers::new(Arc::new(agent), operations.clone()));
+    let recorded_images = agent
+        .clone()
+        .map(|agent| RecordedImages::new(Arc::new(agent), operations.clone()));
     let store = Arc::new(SqliteIdentityStore::new(process.database(), events));
     let roles = roles::BuiltInRoles::new(Arc::clone(&store), bootstrap.is_some());
     let oidc = Arc::new(OidcClient::new(PROVIDER_TIMEOUT)?);
@@ -273,6 +278,10 @@ pub fn process(
             };
             let state = match recorded_containers {
                 Some(containers) => state.with_containers(Arc::new(containers)),
+                None => state,
+            };
+            let state = match recorded_images {
+                Some(images) => state.with_images(Arc::new(images)),
                 None => state,
             };
             let state = match providers {
