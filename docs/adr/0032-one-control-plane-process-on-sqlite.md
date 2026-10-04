@@ -34,11 +34,15 @@ databases is atomic per file only.
 
 **Processes.** An installation runs three processes of its own: the
 control plane, `gatewayd` and, where enabled, `ops-agent`. The control
-plane composes the identity and API, configuration, automation,
-observability and audit modules. Modules keep their gRPC contracts and
-call each other over in-process channels, so nothing listens for them on a
-network address. `gatewayd` stays apart so traffic outlives the control
-plane, and `ops-agent` because it holds host privileges.
+plane, `panel-control`, composes the identity and API, configuration,
+automation, observability and audit modules. Modules keep their gRPC
+contracts and call each other through an in-process hub over in-memory
+streams, so nothing listens for them on a network address. Each module
+keeps its operational listener, its file and its credentials for the calls
+that leave the process; the modules start with the API last and stop in
+reverse, and the process's health check probes every module. `gatewayd`
+stays apart so traffic outlives the control plane, and `ops-agent` because
+it holds host privileges.
 
 **Storage.** Each module owns one SQLite database file in the control
 plane's data directory, named after the module: `identity.db`,
@@ -88,5 +92,8 @@ outside any transaction, so no write waits on a receiver.
 - An installation's state is its data directory: SQLite's online backup
   copies each file consistently while the control plane runs.
 - Tests open a temporary file instead of needing a database server.
+- The modules share a failure domain: a crash of the control plane stops
+  all of them at once, while `gatewayd` keeps serving the active
+  configuration until it is back.
 - Should several hosts ever share a control plane, a server database comes
   back as another adapter behind the same stores.

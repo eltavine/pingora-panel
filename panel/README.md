@@ -45,6 +45,7 @@ panel-cli (no workspace dependencies: a client of the public REST API)
 automation-service -> panel-control-runtime + panel-jobs + panel-sqlite + panel-events
 observability-service -> panel-control-runtime + panel-contracts + panel-domain
 audit-service -> panel-control-runtime + panel-jetstream + panel-events + panel-contracts
+panel-control -> panel-control-runtime + panel-api-server + config-service + automation-service + observability-service + audit-service
 panel-bootstrap -> panel-jetstream + panel-pki
 ```
 
@@ -64,7 +65,7 @@ panel-bootstrap -> panel-jetstream + panel-pki
 | `panel-platform` | Service descriptors, protocol revision ranges and negotiation, capability directory and registration ports | Transports, registries, Pingora |
 | `panel-platform-codec` | Protobuf form of service descriptors | Registries, transports, Pingora |
 | `panel-service` | Liveness/readiness endpoints, gRPC health and `ServiceInfo`, peer negotiation, trace metadata, settings, signals and logging shared by service processes | Storage, brokers, application rules, Pingora |
-| `panel-control-runtime` | Composition of control-plane processes: the module's database and its migrations, lazy broker connection, registration, the outbox relay, health and graceful shutdown | Application rules, Pingora |
+| `panel-control-runtime` | Composition of control-plane modules: the module's database and its migrations, lazy broker connection, registration, the outbox relay, health and graceful shutdown, and hosting modules in one process that reach each other over in-memory gRPC | Application rules, Pingora |
 | `panel-schedule` | RFC 5545 recurrences and the time windows they open, shared by schedules, maintenance windows, approval policies and grants | Storage, transports, Pingora |
 | `panel-jobs` | Durable job model, leasing worker, retry policy, schedules and maintenance windows, and an in-memory store | Storage, transports, Pingora |
 | `panel-pki` | Internal certificate authority, workload identities, credential files and renewal | Transports, storage, Pingora |
@@ -87,11 +88,12 @@ panel-bootstrap -> panel-jetstream + panel-pki
 | `config-grpc-client` | `GatewayUseCases` over `config-service`'s publication API | Storage, Pingora |
 | `gateway-grpc-client` | Tonic client adapter implementing `panel-application::GatewayPort`, and the gateway health check | HTTP, storage, identity, generated Proto outside this adapter |
 | `config-service` | Publication and configuration APIs, the draft configuration and activation receipts, kept in `config.db` | HTTP, Pingora |
-| `panel-api-server` | The `panel-api` process: public REST and web console, degraded admission and the service directory | Storage implementation, Pingora |
+| `panel-api-server` | The `panel-api` module: public REST and web console, degraded admission and the service directory | Storage implementation, Pingora |
 | `automation-service` | Job store with outbox events, worker, scheduler and the certificate inventory, kept in `automation.db` | HTTP, Pingora |
 | `observability-service` | Traffic summaries and series from Prometheus over the gateway's metrics, and alerts kept in `observability.db` | Pingora |
 | `observability-grpc-client` | `TrafficPort` over `observability-service` | Storage, Pingora, metric backends |
 | `audit-service` | The audit trail: every event appended once to a hash chain in `audit.db`, with queries and verification | HTTP, Pingora |
+| `panel-control` | The control-plane binary: the five modules in one process, its health check and graceful shutdown | Application rules, storage, Pingora |
 | `panel-bootstrap` | Idempotent provisioning of the event streams and the service registry; issuance and rotation of service credentials | Application rules, Pingora |
 | `gatewayd` | Dependency construction, REST/gRPC adapter composition, bind/readiness policies, environment configuration, process clock, worker executor, the data plane, its runtime API and standard gRPC Health | Business rules |
 | `panel-cli` | The `ppanel` command line over the public REST API | Server crates, storage, Pingora |
@@ -126,37 +128,39 @@ must present `PINGORA_PANEL_METRICS_TOKEN` (or the file
 [gateway foundation runbook](../docs/gateway-foundation-runbook.md) for startup,
 readiness, recovery and current limits.
 
-## Service processes
+## The control plane
 
-`panel-api`, `config-service`, `automation-service`, `observability-service`
-and `audit-service` are composed by `panel-control-runtime`
-([decision](../docs/adr/0007-service-processes-health-and-discovery.md)). Each
+`panel-control` runs the control plane as one process
+([decision](../docs/adr/0032-one-control-plane-process-on-sqlite.md)): the
+`audit-service`, `config-service`, `automation-service`,
+`observability-service` and `panel-api` modules, which start in that order
+and stop in reverse, so the API stops taking requests first. Each module is
+composed by `panel-control-runtime`
+([decision](../docs/adr/0007-service-processes-health-and-discovery.md)): it
 binds an operational listener with `/livez` and `/readyz`
 (`application/health+json`) and `/metrics`, where `panel-api` also counts
-its requests by route template, and a gRPC listener with `grpc.health.v1.Health`
-and `pingora.panel.platform.v1.ServiceInfo`, then migrates its schema, registers
-in the service directory and relays its outbox in the background. Run a binary
-with `healthcheck` to probe its own readiness, as container health checks do.
+its requests by route template; serves `grpc.health.v1.Health`,
+`pingora.panel.platform.v1.ServiceInfo` and its own gRPC services to the
+other modules over in-memory streams rather than a network listener; then
+migrates its schema, registers in the service directory and relays its
+outbox in the background. Run `panel-control healthcheck` to probe every
+module's readiness, as the container health check does.
 
-| Process | Storage | Operational | gRPC | Other |
-|---|---|---|---|---|
-| `panel-api` | `identity.db` | `127.0.0.1:9180` | `127.0.0.1:50060` | public HTTP `127.0.0.1:8080` |
-| `config-service` | `config.db` | `127.0.0.1:9181` | `127.0.0.1:50061` | calls `gatewayd` at `127.0.0.1:50051` |
-| `automation-service` | `automation.db` | `127.0.0.1:9182` | `127.0.0.1:50062` | |
-| `observability-service` | `observability.db` | `127.0.0.1:9183` | `127.0.0.1:50063` | queries Prometheus at `127.0.0.1:9090` |
-| `audit-service` | `audit.db` | `127.0.0.1:9184` | `127.0.0.1:50064` | consumes every event |
+| Module | Storage | Operational | Other |
+|---|---|---|---|
+| `panel-api` | `identity.db` | `127.0.0.1:9180` | public HTTP `127.0.0.1:8080` |
+| `config-service` | `config.db` | `127.0.0.1:9181` | calls `gatewayd` at `127.0.0.1:50051` |
+| `automation-service` | `automation.db` | `127.0.0.1:9182` | |
+| `observability-service` | `observability.db` | `127.0.0.1:9183` | queries Prometheus at `127.0.0.1:9090` |
+| `audit-service` | `audit.db` | `127.0.0.1:9184` | consumes every event |
 
-Each process keeps its module's SQLite file, such as `audit.db`, in
-`PINGORA_PANEL_DATA_DIR` (`/var/lib/pingora-panel/control` by default)
-([decision](../docs/adr/0032-one-control-plane-process-on-sqlite.md)).
-Every process reads `PINGORA_PANEL_NATS_URL`, and optionally
-`PINGORA_PANEL_OPS_ADDR`,
-`PINGORA_PANEL_GRPC_ADDR` and `PINGORA_PANEL_HEALTH_INTERVAL_MS`.
+Each module keeps its SQLite file in `PINGORA_PANEL_DATA_DIR`
+(`/var/lib/pingora-panel/control` by default). The process reads
+`PINGORA_PANEL_NATS_URL`, and optionally `PINGORA_PANEL_HEALTH_INTERVAL_MS`.
 `config-service` also reads `PINGORA_PANEL_GATEWAY_URL`;
 `observability-service` reads `PINGORA_PANEL_PROMETHEUS_URL`; `panel-api` reads
-`PINGORA_PANEL_HTTP_ADDR`, `PINGORA_PANEL_CONFIG_URL`,
-`PINGORA_PANEL_GATEWAY_URL` for the gateway's runtime API,
-`PINGORA_PANEL_OBSERVABILITY_URL` for its traffic,
+`PINGORA_PANEL_HTTP_ADDR`, `PINGORA_PANEL_GATEWAY_URL` for the gateway's
+runtime API,
 `PINGORA_PANEL_WEB_ROOT`, the directory of the built console, and the
 identity settings described under [Accounts and access](#accounts-and-access).
 Plaintext listeners must stay on loopback until internal transports are
@@ -167,15 +171,16 @@ group only, replaces a stale socket but never another file, and is removed
 at shutdown. As on loopback, the API takes the client address from the last
 `X-Forwarded-For` entry the proxy appends.
 
-Internal gRPC runs over mutual TLS once a service has credentials
-([decision](../docs/adr/0009-internal-mutual-tls.md)): set
-`PINGORA_PANEL_TLS_DIR` to the directory holding its `identity.pem` and
-`trust.pem`, and optionally `PINGORA_PANEL_TRUST_DOMAIN`. Its gRPC listener then
-requires client certificates from the installation's authority and may bind
-beyond loopback; clients verify each peer's identity
-`<service>.<trust domain>` whatever address they dial, and the gateway and
-publication APIs admit only `config-service` and `panel-api` respectively.
-`gatewayd` reads the same variables. Credentials reload without a restart.
+The control plane reaches `gatewayd` and the host agent over mutual TLS
+([decision](../docs/adr/0009-internal-mutual-tls.md)) once
+`PINGORA_PANEL_CREDENTIALS_DIR` names the directory with a subdirectory per
+module, named after its service, holding its `identity.pem` and `trust.pem`;
+`PINGORA_PANEL_TRUST_DOMAIN` is optional. Clients verify each peer's identity
+`<service>.<trust domain>` whatever address they dial, and the gateway's API
+admits only `config-service` and `panel-api`. `gatewayd` reads its own
+credentials from `PINGORA_PANEL_TLS_DIR`; its gRPC listener then requires
+client certificates from the installation's authority and may bind beyond
+loopback. Credentials reload without a restart.
 `panel-bootstrap pki` keeps them current: it creates the authority in
 `PINGORA_PANEL_PKI_DIR` on first run and issues to every
 `service=directory` pair in `PINGORA_PANEL_PKI_CREDENTIALS` whose credentials
@@ -1082,16 +1087,17 @@ docker compose -f panel/deploy/compose.yaml up -d
 Every container uses the host network and binds loopback addresses, so the
 console at <http://127.0.0.1:8080> and every internal port stay local until
 the API authenticates callers. `pki-init` creates the certificate authority
-and every service's credentials, `pki` renews them, and `bootstrap`
-provisions the event streams and the service registry before the services
-start; internal gRPC runs over mutual TLS. The control plane's SQLite files
-live in the `control-data` volume. Each service mounts only
-its own credential volume, read-only, and runs with a read-only root file
+and the credentials of every module and of `gatewayd`, `pki` renews them,
+and `bootstrap` provisions the event streams and the service registry before
+the `control` service starts `panel-control`; it reaches `gatewayd` over
+mutual TLS. The control plane's SQLite files live in the `control-data`
+volume. `control` mounts the five module credential volumes and `gatewayd`
+its own, read-only, and every container runs with a read-only root file
 system, no capabilities and `no-new-privileges`. The bootstrap token, the
 password pepper and the master key that seals certificate keys are
 generated into `deploy/secrets/` (never committed) and mounted as Compose
 secrets; back the master key up with the `control-data` volume, since stored
-private keys cannot be opened without it. `automation-service` writes
+private keys cannot be opened without it. The automation module writes
 certificates into the `gateway-secrets` volume, which the gateway mounts
 read-only.
 The `panel-deploy` workflow builds the image and checks the running
