@@ -199,6 +199,27 @@ async fn api(
                                  "transmit_bytes_per_second": 512}]
         }))
         .into_response(),
+        ("GET", "/api/v1/host/agent") => Json(json!({
+            "status": "connected", "build": "0.1.0", "hostname": "web-1",
+            "capabilities": [
+                {"capability": "directories", "state": "available", "detail": ""},
+                {"capability": "listeners", "state": "denied",
+                 "detail": "grant CAP_DAC_READ_SEARCH"}
+            ]
+        }))
+        .into_response(),
+        ("GET", "/api/v1/host/directories") => Json(json!({
+            "observed_at": "2026-10-04T10:00:00Z",
+            "directories": [
+                {"kind": "configuration", "path": "/var/lib/pingora-panel", "present": true,
+                 "bytes": 1_048_576, "files": 12, "unreadable": 0, "truncated": false},
+                {"kind": "logs", "path": "/var/log/pingora-panel", "present": true,
+                 "bytes": 2048, "files": 3, "unreadable": 3, "truncated": true},
+                {"kind": "certificates", "path": "/etc/pingora-panel/certificates",
+                 "present": false, "bytes": 0, "files": 0, "unreadable": 0, "truncated": false}
+            ]
+        }))
+        .into_response(),
         ("GET", "/api/v1/alert-rules") => Json(json!([{
             "id": "shop-errors", "version": 3, "etag": "\"3\"", "state": "firing",
             "since": "2026-10-04T09:58:00Z", "value": 0.12,
@@ -1050,6 +1071,38 @@ fn the_host_is_summarized_with_its_fullest_filesystems() {
         "/var",
         "critical",
         "2.0 KiB",
+    ] {
+        assert!(printed.contains(expected), "{expected} in\n{printed}");
+    }
+}
+
+#[test]
+fn the_host_agent_and_the_panels_directories_are_shown() {
+    let stub = Stub::start();
+    let agent = stub.ppanel(&["host", "agent"]);
+    assert!(agent.status.success(), "{}", stderr(&agent));
+    let printed = stdout(&agent);
+    for expected in [
+        "connected",
+        "0.1.0",
+        "web-1",
+        "directories",
+        "available",
+        "denied",
+        "grant CAP_DAC_READ_SEARCH",
+    ] {
+        assert!(printed.contains(expected), "{expected} in\n{printed}");
+    }
+
+    let directories = stub.ppanel(&["host", "directories"]);
+    assert!(directories.status.success(), "{}", stderr(&directories));
+    let printed = stdout(&directories);
+    for expected in [
+        "/var/lib/pingora-panel",
+        "1.0 MiB",
+        "partial, 3 unreadable",
+        "certificates",
+        "missing",
     ] {
         assert!(printed.contains(expected), "{expected} in\n{printed}");
     }

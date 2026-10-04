@@ -4,8 +4,24 @@ use crate::{
     client::{Api, Result},
     output::{bytes, percent, text, Column, Format, Output},
 };
+use clap::{Args, Subcommand};
 use serde_json::Value;
 use std::time::Duration;
+
+#[derive(Args)]
+pub(crate) struct HostArgs {
+    #[command(subcommand)]
+    command: Option<HostCommand>,
+}
+
+#[derive(Subcommand)]
+enum HostCommand {
+    /// Whether the panel reaches a host agent, and what it can do.
+    Agent,
+    /// The space the panel's configuration, log and certificate directories
+    /// take.
+    Directories,
+}
 
 const SUMMARY: &[Column] = &[
     ("Host", |host| text(&host["hostname"])),
@@ -72,7 +88,83 @@ const DEVICES: &[Column] = &[
     }),
 ];
 
-pub async fn run(api: &Api, output: &Output) -> Result<()> {
+const AGENT: &[Column] = &[
+    ("Status", |agent| text(&agent["status"])),
+    ("Version", |agent| text(&agent["build"])),
+    ("Host", |agent| text(&agent["hostname"])),
+];
+
+const CAPABILITIES: &[Column] = &[
+    ("CAPABILITY", |capability| text(&capability["capability"])),
+    ("STATE", |capability| text(&capability["state"])),
+    ("DETAIL", |capability| text(&capability["detail"])),
+];
+
+const DIRECTORIES: &[Column] = &[
+    ("KIND", |directory| text(&directory["kind"])),
+    ("PATH", |directory| text(&directory["path"])),
+    ("SIZE", |directory| bytes(&directory["bytes"])),
+    ("FILES", |directory| text(&directory["files"])),
+    ("NOTE", |directory| {
+        if directory["present"] != true {
+            return "missing".into();
+        }
+        let mut notes = Vec::new();
+        if directory["truncated"] == true {
+            notes.push("partial".to_owned());
+        }
+        match directory["unreadable"].as_u64() {
+            Some(0) | None => {}
+            Some(unreadable) => notes.push(format!("{unreadable} unreadable")),
+        }
+        notes.join(", ")
+    }),
+];
+
+pub async fn run(api: &Api, output: &Output, args: HostArgs) -> Result<()> {
+    match args.command {
+        None => summary(api, output).await,
+        Some(HostCommand::Agent) => agent(api, output).await,
+        Some(HostCommand::Directories) => directories(api, output).await,
+    }
+}
+
+async fn agent(api: &Api, output: &Output) -> Result<()> {
+    let agent = api.get("/api/v1/host/agent", &[]).await?.body;
+    if output.format == Format::Json {
+        output.json(&agent);
+        return Ok(());
+    }
+    if output.quiet {
+        return Ok(());
+    }
+    match agent["status"].as_str() {
+        Some("not_configured") => {
+            eprintln!("no host agent is configured; install ops-agent to act on the host");
+        }
+        Some("unreachable") => eprintln!("the host agent does not answer"),
+        _ => {
+            output.item(&agent, AGENT);
+            println!();
+            output.list(&agent["capabilities"], CAPABILITIES);
+        }
+    }
+    Ok(())
+}
+
+async fn directories(api: &Api, output: &Output) -> Result<()> {
+    let report = api.get("/api/v1/host/directories", &[]).await?.body;
+    if output.format == Format::Json {
+        output.json(&report);
+        return Ok(());
+    }
+    if !output.quiet {
+        output.list(&report["directories"], DIRECTORIES);
+    }
+    Ok(())
+}
+
+async fn summary(api: &Api, output: &Output) -> Result<()> {
     let host = api.get("/api/v1/host", &[]).await?.body;
     if output.format == Format::Json {
         output.json(&host);
