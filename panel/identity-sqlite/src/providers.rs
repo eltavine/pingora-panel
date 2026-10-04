@@ -1,8 +1,8 @@
 //! Identity providers, their links to accounts and sign-ins in progress.
 
-use super::{storage, PgIdentityStore};
+use super::{storage, SqliteIdentityStore};
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use panel_errors::{PanelError, Result};
 use panel_identity::events;
 use panel_identity::{
@@ -11,21 +11,21 @@ use panel_identity::{
     ProviderSession, ProviderSignIn, ProviderStore, SecretHash, SessionId,
 };
 use serde_json::json;
-use sqlx::{postgres::PgRow, Postgres, Row, Transaction};
+use sqlx::{sqlite::SqliteRow, types::Json, Row, Sqlite, Transaction};
 
 /// Selects every provider column, the JSON ones as text.
 macro_rules! select_providers {
     ($rest:literal) => {
         concat!(
             "SELECT id, display_name, issuer, client_id, client_secret, scopes, ",
-            "claims::text AS claims, group_roles::text AS group_roles, create_accounts, ",
+            "claims, group_roles, create_accounts, ",
             "enabled, created_at, updated_at FROM identity_providers ",
             $rest
         )
     };
 }
 
-fn provider(row: &PgRow) -> Result<IdentityProvider> {
+fn provider(row: &SqliteRow) -> Result<IdentityProvider> {
     let claims: String = row.try_get("claims").map_err(storage)?;
     let group_roles: String = row.try_get("group_roles").map_err(storage)?;
     Ok(IdentityProvider {
@@ -34,7 +34,10 @@ fn provider(row: &PgRow) -> Result<IdentityProvider> {
         issuer: row.try_get("issuer").map_err(storage)?,
         client_id: row.try_get("client_id").map_err(storage)?,
         client_secret: row.try_get("client_secret").map_err(storage)?,
-        scopes: row.try_get("scopes").map_err(storage)?,
+        scopes: row
+            .try_get::<Json<Vec<String>>, _>("scopes")
+            .map_err(storage)?
+            .0,
         claims: serde_json::from_str::<ClaimNames>(&claims)
             .map_err(|_| PanelError::corrupt_state("a provider's claim names are unreadable"))?,
         group_roles: serde_json::from_str::<Vec<GroupRole>>(&group_roles)
@@ -47,10 +50,10 @@ fn provider(row: &PgRow) -> Result<IdentityProvider> {
 }
 
 #[async_trait]
-impl ProviderStore for PgIdentityStore {
+impl ProviderStore for SqliteIdentityStore {
     async fn providers(&self) -> Result<Vec<IdentityProvider>> {
         sqlx::query(select_providers!("ORDER BY id"))
-            .fetch_all(&self.pool)
+            .fetch_all(self.database.pool())
             .await
             .map_err(storage)?
             .iter()
@@ -59,9 +62,9 @@ impl ProviderStore for PgIdentityStore {
     }
 
     async fn provider(&self, id: &str) -> Result<Option<IdentityProvider>> {
-        sqlx::query(select_providers!("WHERE id = $1"))
+        sqlx::query(select_providers!("WHERE id = ?1"))
             .bind(id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(self.database.pool())
             .await
             .map_err(storage)?
             .as_ref()
@@ -70,34 +73,40 @@ impl ProviderStore for PgIdentityStore {
     }
 
     async fn put_provider(&self, provider: IdentityProvider, cause: &Cause) -> Result<bool> {
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
-        let created: bool = sqlx::query_scalar(
+        let mut transaction = self.database.begin().await?;
+        let existed: bool =
+            sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM identity_providers WHERE id = ?1)")
+                .bind(&provider.id)
+                .fetch_one(&mut *transaction)
+                .await
+                .map_err(storage)?;
+        sqlx::query(
             "INSERT INTO identity_providers (id, display_name, issuer, client_id, client_secret, \
              scopes, claims, group_roles, create_accounts, enabled, created_at, updated_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) \
              ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name, \
              issuer = EXCLUDED.issuer, client_id = EXCLUDED.client_id, \
              client_secret = EXCLUDED.client_secret, scopes = EXCLUDED.scopes, \
              claims = EXCLUDED.claims, group_roles = EXCLUDED.group_roles, \
              create_accounts = EXCLUDED.create_accounts, enabled = EXCLUDED.enabled, \
-             updated_at = EXCLUDED.updated_at \
-             RETURNING (xmax = 0)",
+             updated_at = EXCLUDED.updated_at",
         )
         .bind(&provider.id)
         .bind(&provider.display_name)
         .bind(&provider.issuer)
         .bind(&provider.client_id)
         .bind(&provider.client_secret)
-        .bind(&provider.scopes)
+        .bind(Json(&provider.scopes))
         .bind(json!(provider.claims).to_string())
         .bind(json!(provider.group_roles).to_string())
         .bind(provider.create_accounts)
         .bind(provider.enabled)
         .bind(provider.created_at)
         .bind(provider.updated_at)
-        .fetch_one(&mut *transaction)
+        .execute(&mut *transaction)
         .await
         .map_err(storage)?;
+        let created = !existed;
         if !provider.enabled {
             end_sessions(&mut transaction, &provider.id, "provider_disabled").await?;
         }
@@ -123,9 +132,9 @@ impl ProviderStore for PgIdentityStore {
     }
 
     async fn delete_provider(&self, id: &str, cause: &Cause) -> Result<()> {
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        let mut transaction = self.database.begin().await?;
         end_sessions(&mut transaction, id, "provider_deleted").await?;
-        let deleted = sqlx::query("DELETE FROM identity_providers WHERE id = $1")
+        let deleted = sqlx::query("DELETE FROM identity_providers WHERE id = ?1")
             .bind(id)
             .execute(&mut *transaction)
             .await
@@ -146,14 +155,15 @@ impl ProviderStore for PgIdentityStore {
     }
 
     async fn save_sign_in(&self, pending: PendingSignIn) -> Result<()> {
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
-        sqlx::query("DELETE FROM pending_sign_ins WHERE expires_at < now() - interval '1 hour'")
+        let mut transaction = self.database.begin().await?;
+        sqlx::query("DELETE FROM pending_sign_ins WHERE expires_at < ?1")
+            .bind(Utc::now() - TimeDelta::hours(1))
             .execute(&mut *transaction)
             .await
             .map_err(storage)?;
         sqlx::query(
             "INSERT INTO pending_sign_ins (state_hash, provider_id, nonce, verifier, return_to, \
-             expires_at) VALUES ($1, $2, $3, $4, $5, $6)",
+             expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         )
         .bind(pending.state.as_bytes().as_slice())
         .bind(&pending.provider)
@@ -173,11 +183,11 @@ impl ProviderStore for PgIdentityStore {
         now: DateTime<Utc>,
     ) -> Result<Option<PendingSignIn>> {
         let row = sqlx::query(
-            "DELETE FROM pending_sign_ins WHERE state_hash = $1 \
+            "DELETE FROM pending_sign_ins WHERE state_hash = ?1 \
              RETURNING provider_id, nonce, verifier, return_to, expires_at",
         )
         .bind(state.as_bytes().as_slice())
-        .fetch_optional(&self.pool)
+        .fetch_optional(self.database.pool())
         .await
         .map_err(storage)?;
         let Some(row) = row else {
@@ -200,11 +210,11 @@ impl ProviderStore for PgIdentityStore {
     async fn link(&self, provider: &str, subject: &str) -> Result<Option<ProviderLink>> {
         let row = sqlx::query(
             "SELECT account_id, granted_roles FROM provider_links \
-             WHERE provider_id = $1 AND subject = $2",
+             WHERE provider_id = ?1 AND subject = ?2",
         )
         .bind(provider)
         .bind(subject)
-        .fetch_optional(&self.pool)
+        .fetch_optional(self.database.pool())
         .await
         .map_err(storage)?;
         row.map(|row| {
@@ -212,7 +222,10 @@ impl ProviderStore for PgIdentityStore {
                 provider: provider.to_owned(),
                 subject: subject.to_owned(),
                 account: AccountId::from_uuid(row.try_get("account_id").map_err(storage)?),
-                granted_roles: row.try_get("granted_roles").map_err(storage)?,
+                granted_roles: row
+                    .try_get::<Json<Vec<String>>, _>("granted_roles")
+                    .map_err(storage)?
+                    .0,
             })
         })
         .transpose()
@@ -226,11 +239,11 @@ impl ProviderStore for PgIdentityStore {
     ) -> Result<Account> {
         let session = &sign_in.session.session;
         let account_id = sign_in.link.account;
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        let mut transaction = self.database.begin().await?;
         if let Some(new) = &sign_in.new_account {
             sqlx::query(
                 "INSERT INTO accounts (id, username, display_name, created_at, updated_at) \
-                 VALUES ($1, $2, $3, $4, $4)",
+                 VALUES (?1, ?2, ?3, ?4, ?4)",
             )
             .bind(new.id.as_uuid())
             .bind(new.username.as_str())
@@ -252,17 +265,16 @@ impl ProviderStore for PgIdentityStore {
             )
             .await?;
         }
-        let disabled: bool =
-            sqlx::query_scalar("SELECT disabled FROM accounts WHERE id = $1 FOR UPDATE")
-                .bind(account_id.as_uuid())
-                .fetch_one(&mut *transaction)
-                .await
-                .map_err(storage)?;
+        let disabled: bool = sqlx::query_scalar("SELECT disabled FROM accounts WHERE id = ?1")
+            .bind(account_id.as_uuid())
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(storage)?;
         if disabled {
             return Err(PanelError::permission_denied("the account is disabled"));
         }
         let held: Vec<String> = sqlx::query_scalar(
-            "SELECT role_id FROM role_bindings WHERE account_id = $1 ORDER BY role_id",
+            "SELECT role_id FROM role_bindings WHERE account_id = ?1 ORDER BY role_id",
         )
         .bind(account_id.as_uuid())
         .fetch_all(&mut *transaction)
@@ -271,20 +283,21 @@ impl ProviderStore for PgIdentityStore {
         let mut roles = sign_in.roles.clone();
         roles.sort();
         if held != roles {
-            sqlx::query("DELETE FROM role_bindings WHERE account_id = $1")
+            sqlx::query("DELETE FROM role_bindings WHERE account_id = ?1")
                 .bind(account_id.as_uuid())
                 .execute(&mut *transaction)
                 .await
                 .map_err(storage)?;
             sqlx::query(
-                "INSERT INTO role_bindings (account_id, role_id) SELECT $1, unnest($2::text[])",
+                "INSERT INTO role_bindings (account_id, role_id) \
+                 SELECT ?1, value FROM json_each(?2)",
             )
             .bind(account_id.as_uuid())
-            .bind(&roles)
+            .bind(Json(&roles))
             .execute(&mut *transaction)
             .await
             .map_err(storage)?;
-            sqlx::query("UPDATE accounts SET updated_at = $2 WHERE id = $1")
+            sqlx::query("UPDATE accounts SET updated_at = ?2 WHERE id = ?1")
                 .bind(account_id.as_uuid())
                 .bind(session.created_at)
                 .execute(&mut *transaction)
@@ -293,13 +306,13 @@ impl ProviderStore for PgIdentityStore {
         }
         sqlx::query(
             "INSERT INTO provider_links (provider_id, subject, account_id, granted_roles, created_at) \
-             VALUES ($1, $2, $3, $4, $5) ON CONFLICT (provider_id, subject) \
+             VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT (provider_id, subject) \
              DO UPDATE SET granted_roles = EXCLUDED.granted_roles",
         )
         .bind(&sign_in.link.provider)
         .bind(&sign_in.link.subject)
         .bind(account_id.as_uuid())
-        .bind(&sign_in.link.granted_roles)
+        .bind(Json(&sign_in.link.granted_roles))
         .bind(session.created_at)
         .execute(&mut *transaction)
         .await
@@ -307,7 +320,7 @@ impl ProviderStore for PgIdentityStore {
         sqlx::query(
             "INSERT INTO sessions (id, account_id, secret_hash, transport, created_at, \
              last_seen_at, expires_at, client_address, user_agent) \
-             VALUES ($1, $2, $3, $4, $5, $5, $6, $7, $8)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?7, ?8)",
         )
         .bind(session.id.as_uuid())
         .bind(account_id.as_uuid())
@@ -322,7 +335,7 @@ impl ProviderStore for PgIdentityStore {
         .map_err(storage)?;
         sqlx::query(
             "INSERT INTO provider_sessions (session_id, provider_id, refresh_token, checked_at) \
-             VALUES ($1, $2, $3, $4)",
+             VALUES (?1, ?2, ?3, ?4)",
         )
         .bind(session.id.as_uuid())
         .bind(&sign_in.link.provider)
@@ -331,7 +344,7 @@ impl ProviderStore for PgIdentityStore {
         .execute(&mut *transaction)
         .await
         .map_err(storage)?;
-        sqlx::query("UPDATE accounts SET last_login_at = $2 WHERE id = $1")
+        sqlx::query("UPDATE accounts SET last_login_at = ?2 WHERE id = ?1")
             .bind(account_id.as_uuid())
             .bind(session.created_at)
             .execute(&mut *transaction)
@@ -356,25 +369,23 @@ impl ProviderStore for PgIdentityStore {
         now: DateTime<Utc>,
         limit: u32,
     ) -> Result<Vec<ProviderSession>> {
+        let mut transaction = self.database.begin().await?;
         let rows = sqlx::query(
-            "UPDATE provider_sessions AS claimed SET checked_at = $3 FROM ( \
-             SELECT p.session_id, s.account_id FROM provider_sessions p \
-             JOIN sessions s ON s.id = p.session_id \
-             WHERE p.refresh_token IS NOT NULL AND p.checked_at < $1 \
-             AND s.revoked_at IS NULL AND s.expires_at > $3 AND s.last_seen_at > $2 \
-             ORDER BY p.checked_at LIMIT $4 FOR UPDATE OF p SKIP LOCKED) AS due \
-             WHERE claimed.session_id = due.session_id \
-             RETURNING claimed.session_id, due.account_id, claimed.provider_id, \
-             claimed.refresh_token",
+            "SELECT p.session_id, s.account_id, p.provider_id, p.refresh_token \
+             FROM provider_sessions p JOIN sessions s ON s.id = p.session_id \
+             WHERE p.refresh_token IS NOT NULL AND p.checked_at < ?1 \
+             AND s.revoked_at IS NULL AND s.expires_at > ?3 AND s.last_seen_at > ?2 \
+             ORDER BY p.checked_at LIMIT ?4",
         )
         .bind(checked_before)
         .bind(seen_after)
         .bind(now)
         .bind(i64::from(limit))
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *transaction)
         .await
         .map_err(storage)?;
-        rows.iter()
+        let due = rows
+            .iter()
             .map(|row| {
                 Ok(ProviderSession {
                     session: SessionId::from_uuid(row.try_get("session_id").map_err(storage)?),
@@ -383,14 +394,24 @@ impl ProviderStore for PgIdentityStore {
                     refresh_token: row.try_get("refresh_token").map_err(storage)?,
                 })
             })
-            .collect()
+            .collect::<Result<Vec<_>>>()?;
+        for session in &due {
+            sqlx::query("UPDATE provider_sessions SET checked_at = ?2 WHERE session_id = ?1")
+                .bind(session.session.as_uuid())
+                .bind(now)
+                .execute(&mut *transaction)
+                .await
+                .map_err(storage)?;
+        }
+        transaction.commit().await.map_err(storage)?;
+        Ok(due)
     }
 
     async fn rotate_refresh_token(&self, session: SessionId, refresh_token: String) -> Result<()> {
-        sqlx::query("UPDATE provider_sessions SET refresh_token = $2 WHERE session_id = $1")
+        sqlx::query("UPDATE provider_sessions SET refresh_token = ?2 WHERE session_id = ?1")
             .bind(session.as_uuid())
             .bind(refresh_token)
-            .execute(&self.pool)
+            .execute(self.database.pool())
             .await
             .map_err(storage)?;
         Ok(())
@@ -399,14 +420,14 @@ impl ProviderStore for PgIdentityStore {
 
 /// Ends the sessions signed in through a provider.
 async fn end_sessions(
-    transaction: &mut Transaction<'_, Postgres>,
+    transaction: &mut Transaction<'_, Sqlite>,
     provider: &str,
     reason: &str,
 ) -> Result<()> {
     sqlx::query(
-        "UPDATE sessions SET revoked_at = now(), revoke_reason = $2 \
+        "UPDATE sessions SET revoked_at = strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now'), revoke_reason = ?2 \
          WHERE revoked_at IS NULL AND id IN \
-         (SELECT session_id FROM provider_sessions WHERE provider_id = $1)",
+         (SELECT session_id FROM provider_sessions WHERE provider_id = ?1)",
     )
     .bind(provider)
     .bind(reason)

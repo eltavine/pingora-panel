@@ -3,15 +3,12 @@
 mod support;
 
 use gateway_grpc::GatewayGrpcService;
-use panel_control_runtime::{
-    ProcessSettings, RunningProcess, DATABASE_PASSWORD_ENV, DATABASE_URL_ENV, NATS_URL_ENV,
-};
+use panel_control_runtime::{ProcessSettings, RunningProcess, DATA_DIR_ENV, NATS_URL_ENV};
 use panel_domain::RevisionId;
 use panel_engine::FakeGatewayEngine;
 use panel_health::ServiceMode;
 use panel_ir::{RuntimeSnapshot, IR_SCHEMA_VERSION};
 use panel_jetstream::testing::{TestBroker, NATS_URL_ENV as TEST_NATS_URL_ENV};
-use panel_postgres::testing::TestDatabase;
 use panel_service::Environment;
 use serde_json::{json, Value};
 use std::{collections::HashMap, ffi::OsString, net::SocketAddr, sync::Arc, time::Duration};
@@ -75,24 +72,15 @@ fn free_port() -> SocketAddr {
 
 #[tokio::test]
 async fn the_public_api_publishes_through_config_service_and_serves_the_console() {
-    let (Some(mut database), Some(broker)) =
-        (TestDatabase::create().await, TestBroker::create().await)
-    else {
+    let Some(broker) = TestBroker::create().await else {
         return;
     };
-    let secrets = database
-        .bootstrap(&[
-            ("config", "config"),
-            ("identity", "identity"),
-            ("audit", "audit"),
-        ])
-        .await;
+    let data = tempfile::tempdir().unwrap();
     let nats = std::env::var(TEST_NATS_URL_ENV).unwrap();
     let gateway = fake_gateway().await;
 
     let mut config_env = environment(vec![
-        (DATABASE_URL_ENV, database.service_url("config")),
-        (DATABASE_PASSWORD_ENV, secrets[0].expose().into()),
+        (DATA_DIR_ENV, data.path().display().to_string()),
         (NATS_URL_ENV, nats.clone()),
         (config_service::GATEWAY_URL_ENV, format!("http://{gateway}")),
     ]);
@@ -106,8 +94,7 @@ async fn the_public_api_publishes_through_config_service_and_serves_the_console(
         .unwrap();
     ready(&config).await;
     let mut audit_env = environment(vec![
-        (DATABASE_URL_ENV, database.service_url("audit")),
-        (DATABASE_PASSWORD_ENV, secrets[2].expose().into()),
+        (DATA_DIR_ENV, data.path().display().to_string()),
         (NATS_URL_ENV, nats.clone()),
     ]);
     let audit_settings =
@@ -130,8 +117,7 @@ async fn the_public_api_publishes_through_config_service_and_serves_the_console(
     std::fs::write(web.join("assets/app.js"), "export {}").unwrap();
     let http = free_port();
     let mut api_env = environment(vec![
-        (DATABASE_URL_ENV, database.service_url("identity")),
-        (DATABASE_PASSWORD_ENV, secrets[1].expose().into()),
+        (DATA_DIR_ENV, data.path().display().to_string()),
         (NATS_URL_ENV, nats),
         (panel_api_server::HTTP_ADDRESS_ENV, http.to_string()),
         (
@@ -275,6 +261,5 @@ async fn the_public_api_publishes_through_config_service_and_serves_the_console(
         .context
         .delete_key_value(broker.settings.service_bucket())
         .await;
-    database.drop().await;
     broker.drop().await;
 }

@@ -10,13 +10,10 @@ use chrono::Utc;
 use gateway_grpc::GatewayGrpcService;
 use panel_acme::testing::Pebble;
 use panel_certificates::self_signed;
-use panel_control_runtime::{
-    ProcessSettings, RunningProcess, DATABASE_PASSWORD_ENV, DATABASE_URL_ENV, NATS_URL_ENV,
-};
+use panel_control_runtime::{ProcessSettings, RunningProcess, DATA_DIR_ENV, NATS_URL_ENV};
 use panel_engine::{EngineCapability, FakeGatewayEngine};
 use panel_health::ServiceMode;
 use panel_jetstream::testing::{TestBroker, NATS_URL_ENV as TEST_NATS_URL_ENV};
-use panel_postgres::testing::TestDatabase;
 use panel_secrets::EnvelopeVault;
 use panel_service::Environment;
 use reqwest::{Client, Method, RequestBuilder, StatusCode};
@@ -156,19 +153,10 @@ impl Api {
 
 #[tokio::test]
 async fn certificates_are_kept_delivered_and_audited() {
-    let (Some(mut database), Some(broker)) =
-        (TestDatabase::create().await, TestBroker::create().await)
-    else {
+    let Some(broker) = TestBroker::create().await else {
         return;
     };
-    let secrets = database
-        .bootstrap(&[
-            ("config", "config"),
-            ("identity", "identity"),
-            ("audit", "audit"),
-            ("automation", "automation"),
-        ])
-        .await;
+    let data = tempfile::tempdir().unwrap();
     let nats = std::env::var(TEST_NATS_URL_ENV).unwrap();
     let gateway = gateway().await;
     let start = |process: panel_control_runtime::ControlPlaneProcess| {
@@ -178,8 +166,7 @@ async fn certificates_are_kept_delivered_and_audited() {
     };
 
     let mut config_env = environment(vec![
-        (DATABASE_URL_ENV, database.service_url("config")),
-        (DATABASE_PASSWORD_ENV, secrets[0].expose().into()),
+        (DATA_DIR_ENV, data.path().display().to_string()),
         (NATS_URL_ENV, nats.clone()),
         (config_service::GATEWAY_URL_ENV, format!("http://{gateway}")),
     ]);
@@ -191,8 +178,7 @@ async fn certificates_are_kept_delivered_and_audited() {
     ready(&config).await;
 
     let mut audit_env = environment(vec![
-        (DATABASE_URL_ENV, database.service_url("audit")),
-        (DATABASE_PASSWORD_ENV, secrets[2].expose().into()),
+        (DATA_DIR_ENV, data.path().display().to_string()),
         (NATS_URL_ENV, nats.clone()),
     ]);
     let settings =
@@ -204,8 +190,7 @@ async fn certificates_are_kept_delivered_and_audited() {
 
     let directory = tempfile::tempdir().unwrap();
     let mut automation_env = environment(vec![
-        (DATABASE_URL_ENV, database.service_url("automation")),
-        (DATABASE_PASSWORD_ENV, secrets[3].expose().into()),
+        (DATA_DIR_ENV, data.path().display().to_string()),
         (NATS_URL_ENV, nats.clone()),
         (
             automation_service::MASTER_KEYS_ENV,
@@ -232,8 +217,7 @@ async fn certificates_are_kept_delivered_and_audited() {
         .local_addr()
         .unwrap();
     let mut api_env = environment(vec![
-        (DATABASE_URL_ENV, database.service_url("identity")),
-        (DATABASE_PASSWORD_ENV, secrets[1].expose().into()),
+        (DATA_DIR_ENV, data.path().display().to_string()),
         (NATS_URL_ENV, nats),
         (panel_api_server::HTTP_ADDRESS_ENV, http.to_string()),
         (

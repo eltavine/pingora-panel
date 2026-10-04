@@ -14,7 +14,7 @@ use panel_event_contracts::{
 };
 use panel_events::EventData;
 use panel_identity::Principal;
-use panel_postgres::EventLog;
+use panel_sqlite::EventLog;
 
 /// The data plane as a whole, the target of its operations.
 const DATA_PLANE: (&str, &str) = ("gateway", "data-plane");

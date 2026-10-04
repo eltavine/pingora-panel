@@ -6,13 +6,10 @@
 mod support;
 
 use gateway_grpc::GatewayGrpcService;
-use panel_control_runtime::{
-    ProcessSettings, RunningProcess, DATABASE_PASSWORD_ENV, DATABASE_URL_ENV, NATS_URL_ENV,
-};
+use panel_control_runtime::{ProcessSettings, RunningProcess, DATA_DIR_ENV, NATS_URL_ENV};
 use panel_engine::{EngineCapability, FakeGatewayEngine};
 use panel_health::ServiceMode;
 use panel_jetstream::testing::{TestBroker, NATS_URL_ENV as TEST_NATS_URL_ENV};
-use panel_postgres::testing::TestDatabase;
 use panel_service::Environment;
 use reqwest::{Client, RequestBuilder, StatusCode};
 use serde_json::{json, Value};
@@ -118,29 +115,18 @@ struct Stack {
     config: RunningProcess,
     audit: RunningProcess,
     server: RunningProcess,
-    database: TestDatabase,
+    _data: tempfile::TempDir,
     broker: TestBroker,
     _web: tempfile::TempDir,
 }
 
 async fn stack() -> Option<Stack> {
-    let (Some(mut database), Some(broker)) =
-        (TestDatabase::create().await, TestBroker::create().await)
-    else {
-        return None;
-    };
-    let secrets = database
-        .bootstrap(&[
-            ("config", "config"),
-            ("identity", "identity"),
-            ("audit", "audit"),
-        ])
-        .await;
+    let broker = TestBroker::create().await?;
+    let data = tempfile::tempdir().unwrap();
     let nats = std::env::var(TEST_NATS_URL_ENV).unwrap();
     let gateway = gateway().await;
     let mut config_env = environment(vec![
-        (DATABASE_URL_ENV, database.service_url("config")),
-        (DATABASE_PASSWORD_ENV, secrets[0].expose().into()),
+        (DATA_DIR_ENV, data.path().display().to_string()),
         (NATS_URL_ENV, nats.clone()),
         (config_service::GATEWAY_URL_ENV, format!("http://{gateway}")),
     ]);
@@ -154,8 +140,7 @@ async fn stack() -> Option<Stack> {
         .unwrap();
     ready(&config).await;
     let mut audit_env = environment(vec![
-        (DATABASE_URL_ENV, database.service_url("audit")),
-        (DATABASE_PASSWORD_ENV, secrets[2].expose().into()),
+        (DATA_DIR_ENV, data.path().display().to_string()),
         (NATS_URL_ENV, nats.clone()),
     ]);
     let audit_settings =
@@ -174,8 +159,7 @@ async fn stack() -> Option<Stack> {
         .local_addr()
         .unwrap();
     let mut api_env = environment(vec![
-        (DATABASE_URL_ENV, database.service_url("identity")),
-        (DATABASE_PASSWORD_ENV, secrets[1].expose().into()),
+        (DATA_DIR_ENV, data.path().display().to_string()),
         (NATS_URL_ENV, nats),
         (panel_api_server::HTTP_ADDRESS_ENV, http.to_string()),
         (
@@ -214,7 +198,7 @@ async fn stack() -> Option<Stack> {
         config,
         audit,
         server,
-        database,
+        _data: data,
         broker,
         _web: web,
     })
@@ -230,7 +214,6 @@ impl Stack {
             .context
             .delete_key_value(self.broker.settings.service_bucket())
             .await;
-        self.database.drop().await;
         self.broker.drop().await;
     }
 }

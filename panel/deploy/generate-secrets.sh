@@ -1,14 +1,13 @@
 #!/usr/bin/env sh
-# Creates the passwords, the one-time bootstrap token, the password pepper
-# and the master key Compose mounts as secrets, keeping existing ones.
+# Creates the one-time bootstrap token, the password pepper and the master
+# key Compose mounts as secrets, keeping existing ones.
 set -eu
 
 directory=${1:-"$(dirname "$0")/secrets"}
 umask 077
 mkdir -p "$directory"
 chmod 700 "$directory"
-for name in postgres-admin-password identity-database-password \
-    bootstrap-token password-pepper; do
+for name in bootstrap-token password-pepper; do
     file="$directory/$name"
     if [ ! -s "$file" ]; then
         head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | cut -c1-40 >"$file"

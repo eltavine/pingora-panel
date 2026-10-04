@@ -1,14 +1,14 @@
 //! Trusts in workload tokens, beside the accounts they act as.
 
-use super::{storage, PgIdentityStore};
+use super::{storage, SqliteIdentityStore};
 use async_trait::async_trait;
 use panel_errors::{PanelError, Result};
 use panel_identity::events;
 use panel_identity::{store::Cause, AccountId, WorkloadStore, WorkloadTrust};
 use serde_json::json;
-use sqlx::{postgres::PgRow, Row};
+use sqlx::{sqlite::SqliteRow, Row};
 
-fn trust(row: &PgRow) -> Result<WorkloadTrust> {
+fn trust(row: &SqliteRow) -> Result<WorkloadTrust> {
     let claims: String = row.try_get("claims").map_err(storage)?;
     let minutes: i32 = row.try_get("session_minutes").map_err(storage)?;
     Ok(WorkloadTrust {
@@ -28,13 +28,13 @@ fn trust(row: &PgRow) -> Result<WorkloadTrust> {
 }
 
 #[async_trait]
-impl WorkloadStore for PgIdentityStore {
+impl WorkloadStore for SqliteIdentityStore {
     async fn trusts(&self) -> Result<Vec<WorkloadTrust>> {
         sqlx::query(
-            "SELECT id, account_id, issuer, audience, subject, claims::text AS claims, \
+            "SELECT id, account_id, issuer, audience, subject, claims, \
              session_minutes, enabled, created_at, updated_at FROM workload_trusts ORDER BY id",
         )
-        .fetch_all(&self.pool)
+        .fetch_all(self.database.pool())
         .await
         .map_err(storage)?
         .iter()
@@ -43,17 +43,22 @@ impl WorkloadStore for PgIdentityStore {
     }
 
     async fn put_trust(&self, trust: WorkloadTrust, cause: &Cause) -> Result<bool> {
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
-        let created: bool = sqlx::query_scalar(
+        let mut transaction = self.database.begin().await?;
+        let existed: bool =
+            sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM workload_trusts WHERE id = ?1)")
+                .bind(&trust.id)
+                .fetch_one(&mut *transaction)
+                .await
+                .map_err(storage)?;
+        sqlx::query(
             "INSERT INTO workload_trusts (id, account_id, issuer, audience, subject, claims, \
              session_minutes, enabled, created_at, updated_at) \
-             VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
              ON CONFLICT (id) DO UPDATE SET account_id = EXCLUDED.account_id, \
              issuer = EXCLUDED.issuer, audience = EXCLUDED.audience, \
              subject = EXCLUDED.subject, claims = EXCLUDED.claims, \
              session_minutes = EXCLUDED.session_minutes, enabled = EXCLUDED.enabled, \
-             updated_at = EXCLUDED.updated_at \
-             RETURNING (xmax = 0)",
+             updated_at = EXCLUDED.updated_at",
         )
         .bind(&trust.id)
         .bind(trust.account.as_uuid())
@@ -65,9 +70,10 @@ impl WorkloadStore for PgIdentityStore {
         .bind(trust.enabled)
         .bind(trust.created_at)
         .bind(trust.updated_at)
-        .fetch_one(&mut *transaction)
+        .execute(&mut *transaction)
         .await
         .map_err(storage)?;
+        let created = !existed;
         if created {
             self.emit_on(
                 &mut transaction,
@@ -90,8 +96,8 @@ impl WorkloadStore for PgIdentityStore {
     }
 
     async fn delete_trust(&self, id: &str, cause: &Cause) -> Result<()> {
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
-        let deleted = sqlx::query("DELETE FROM workload_trusts WHERE id = $1")
+        let mut transaction = self.database.begin().await?;
+        let deleted = sqlx::query("DELETE FROM workload_trusts WHERE id = ?1")
             .bind(id)
             .execute(&mut *transaction)
             .await

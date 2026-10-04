@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
-//! The identity store in PostgreSQL, in the `identity` schema `panel-api`
-//! owns. Every change appends its event to the outbox in the transaction
-//! that makes it.
+//! The identity store in SQLite, in the `identity.db` file `panel-api` owns.
+//! Every change appends its event to the outbox in the transaction that
+//! makes it.
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -19,9 +19,9 @@ use panel_identity::{
     Account, AccountId, ApiToken, Grant, GrantId, PasswordSignIn, Permission, PermissionSet, Role,
     SecretHash, Session, SessionId, TokenId, Transport, Username,
 };
-use panel_postgres::{EventLog, PgOutbox, SchemaMigration, ServiceDatabase};
+use panel_sqlite::{EventLog, SchemaMigration, ServiceDatabase, SqliteOutbox};
 use serde_json::json;
-use sqlx::{postgres::PgRow, PgConnection, PgPool, Row};
+use sqlx::{error::ErrorKind, sqlite::SqliteRow, types::Json, Row, SqliteConnection};
 use std::sync::LazyLock;
 
 mod providers;
@@ -30,7 +30,7 @@ mod workload;
 pub const MIGRATIONS: &[SchemaMigration] = &[
     SchemaMigration::new(
         10_000,
-        "accounts, roles, sessions and API tokens",
+        "accounts, service and break-glass accounts, roles, sessions and API tokens",
         include_str!("../migrations/10000_accounts.sql"),
     ),
     SchemaMigration::new(
@@ -40,13 +40,8 @@ pub const MIGRATIONS: &[SchemaMigration] = &[
     ),
     SchemaMigration::new(
         10_200,
-        "break-glass accounts and the password sign-in policy",
+        "the password sign-in policy",
         include_str!("../migrations/10200_break_glass.sql"),
-    ),
-    SchemaMigration::new(
-        10_300,
-        "service accounts",
-        include_str!("../migrations/10300_service_accounts.sql"),
     ),
     SchemaMigration::new(
         10_400,
@@ -66,11 +61,11 @@ const SESSION_RETENTION_DAYS: i64 = 30;
 const ACCOUNT: &str = "a.id, a.username, a.display_name, a.disabled, a.locked, a.break_glass, \
      a.service, a.created_at, a.updated_at, a.last_login_at, a.password_changed_at, a.password_hash, \
      a.failures, a.retry_after, \
-     ARRAY(SELECT b.role_id FROM role_bindings b WHERE b.account_id = a.id ORDER BY b.role_id) \
-     AS roles";
+     (SELECT json_group_array(b.role_id ORDER BY b.role_id) FROM role_bindings b \
+      WHERE b.account_id = a.id) AS roles";
 
-const PERMISSIONS: &str = "ARRAY(SELECT DISTINCT p FROM role_bindings b \
-     JOIN roles r ON r.id = b.role_id CROSS JOIN LATERAL unnest(r.permissions) AS p \
+const PERMISSIONS: &str = "(SELECT json_group_array(DISTINCT p.value) FROM role_bindings b \
+     JOIN roles r ON r.id = b.role_id, json_each(r.permissions) p \
      WHERE b.account_id = a.id) AS permissions";
 
 const SESSION: &str = "s.id AS session_id, s.account_id AS session_account, s.transport, \
@@ -88,43 +83,46 @@ macro_rules! composed {
     };
 }
 
-composed!(ACCOUNT_BY_ID = "SELECT {ACCOUNT} FROM accounts a WHERE a.id = $1");
-composed!(ACCOUNT_BY_NAME = "SELECT {ACCOUNT} FROM accounts a WHERE a.username = $1");
+composed!(ACCOUNT_BY_ID = "SELECT {ACCOUNT} FROM accounts a WHERE a.id = ?1");
+composed!(ACCOUNT_BY_NAME = "SELECT {ACCOUNT} FROM accounts a WHERE a.username = ?1");
 composed!(ACCOUNTS = "SELECT {ACCOUNT} FROM accounts a ORDER BY a.username");
 composed!(
     SESSION_GRANT = "SELECT {SESSION}, {ACCOUNT}, {PERMISSIONS} FROM sessions s \
-     JOIN accounts a ON a.id = s.account_id WHERE s.secret_hash = $1"
+     JOIN accounts a ON a.id = s.account_id WHERE s.secret_hash = ?1"
 );
 composed!(
-    SESSIONS_OF = "SELECT {SESSION} FROM sessions s WHERE s.account_id = $1 \
-     AND s.revoked_at IS NULL AND s.expires_at > $2 ORDER BY s.created_at DESC"
+    SESSIONS_OF = "SELECT {SESSION} FROM sessions s WHERE s.account_id = ?1 \
+     AND s.revoked_at IS NULL AND s.expires_at > ?2 ORDER BY s.created_at DESC"
 );
 composed!(
     TOKEN_GRANT = "SELECT {TOKEN}, {ACCOUNT}, {PERMISSIONS} FROM api_tokens t \
-     JOIN accounts a ON a.id = t.account_id WHERE t.secret_hash = $1"
+     JOIN accounts a ON a.id = t.account_id WHERE t.secret_hash = ?1"
 );
 composed!(
     TOKENS_OF =
-        "SELECT {TOKEN} FROM api_tokens t WHERE t.account_id = $1 ORDER BY t.created_at DESC"
+        "SELECT {TOKEN} FROM api_tokens t WHERE t.account_id = ?1 ORDER BY t.created_at DESC"
 );
 
 fn storage(error: sqlx::Error) -> PanelError {
-    let code = error
-        .as_database_error()
-        .and_then(|database| database.code())
-        .map(|code| code.into_owned());
-    match code.as_deref() {
-        Some("23505") => PanelError::conflict("the username is taken"),
-        Some("23503") => PanelError::invalid_argument("the account or role does not exist"),
+    match error.as_database_error().map(|database| database.kind()) {
+        Some(ErrorKind::UniqueViolation) => PanelError::conflict("the username is taken"),
+        Some(ErrorKind::ForeignKeyViolation) => {
+            PanelError::invalid_argument("the account or role does not exist")
+        }
         _ => PanelError::storage_unavailable("identity storage failed").with_source(error),
     }
 }
 
-fn get<'r, T: sqlx::Decode<'r, sqlx::Postgres> + sqlx::Type<sqlx::Postgres>>(
-    row: &'r PgRow,
+fn get<'r, T: sqlx::Decode<'r, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite>>(
+    row: &'r SqliteRow,
     column: &str,
 ) -> Result<T> {
     row.try_get(column).map_err(storage)
+}
+
+/// A JSON array column as its strings.
+fn list(row: &SqliteRow, column: &str) -> Result<Vec<String>> {
+    get::<Json<Vec<String>>>(row, column).map(|Json(values)| values)
 }
 
 fn permissions(names: Vec<String>) -> PermissionSet {
@@ -134,14 +132,14 @@ fn permissions(names: Vec<String>) -> PermissionSet {
         .collect()
 }
 
-fn account(row: &PgRow) -> Result<Account> {
+fn account(row: &SqliteRow) -> Result<Account> {
     Ok(Account {
         id: AccountId::from_uuid(get(row, "id")?),
         username: Username::new(&get::<String>(row, "username")?)?,
         display_name: get(row, "display_name")?,
         disabled: get(row, "disabled")?,
         locked: get(row, "locked")?,
-        roles: get(row, "roles")?,
+        roles: list(row, "roles")?,
         break_glass: get(row, "break_glass")?,
         service: get(row, "service")?,
         created_at: get(row, "created_at")?,
@@ -151,7 +149,7 @@ fn account(row: &PgRow) -> Result<Account> {
     })
 }
 
-fn stored_account(row: &PgRow) -> Result<StoredAccount> {
+fn stored_account(row: &SqliteRow) -> Result<StoredAccount> {
     let hash: Option<String> = get(row, "password_hash")?;
     let failures: i32 = get(row, "failures")?;
     let retry_after: Option<DateTime<Utc>> = get(row, "retry_after")?;
@@ -165,7 +163,7 @@ fn stored_account(row: &PgRow) -> Result<StoredAccount> {
     })
 }
 
-fn session(row: &PgRow) -> Result<Session> {
+fn session(row: &SqliteRow) -> Result<Session> {
     let transport: String = get(row, "transport")?;
     Ok(Session {
         id: SessionId::from_uuid(get(row, "session_id")?),
@@ -181,12 +179,12 @@ fn session(row: &PgRow) -> Result<Session> {
     })
 }
 
-fn token(row: &PgRow) -> Result<ApiToken> {
+fn token(row: &SqliteRow) -> Result<ApiToken> {
     Ok(ApiToken {
         id: TokenId::from_uuid(get(row, "token_id")?),
         account: AccountId::from_uuid(get(row, "token_account")?),
         name: get(row, "token_name")?,
-        permissions: permissions(get(row, "token_permissions")?),
+        permissions: permissions(list(row, "token_permissions")?),
         created_at: get(row, "token_created_at")?,
         expires_at: get(row, "token_expires_at")?,
         last_used_at: get(row, "last_used_at")?,
@@ -195,34 +193,34 @@ fn token(row: &PgRow) -> Result<ApiToken> {
 }
 
 #[derive(Clone)]
-pub struct PgIdentityStore {
-    pool: PgPool,
+pub struct SqliteIdentityStore {
+    database: ServiceDatabase,
     events: EventLog,
 }
 
-impl PgIdentityStore {
+impl SqliteIdentityStore {
     /// A store over `database`, recording events with `events`.
     pub fn new(database: &ServiceDatabase, events: EventLog) -> Self {
         Self {
-            pool: database.pool().clone(),
+            database: database.clone(),
             events,
         }
     }
 
     /// Writes the built-in roles as this release defines them.
     pub async fn sync_roles(&self) -> Result<()> {
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        let mut transaction = self.database.begin().await?;
         for role in built_in_roles() {
             sqlx::query(
                 "INSERT INTO roles (id, name, description, permissions, built_in) \
-                 VALUES ($1, $2, $3, $4, true) \
-                 ON CONFLICT (id) DO UPDATE SET name = $2, description = $3, \
-                 permissions = $4, built_in = true",
+                 VALUES (?1, ?2, ?3, ?4, true) \
+                 ON CONFLICT (id) DO UPDATE SET name = ?2, description = ?3, \
+                 permissions = ?4, built_in = true",
             )
             .bind(&role.id)
             .bind(&role.name)
             .bind(&role.description)
-            .bind(role.permissions.names())
+            .bind(Json(role.permissions.names()))
             .execute(&mut *transaction)
             .await
             .map_err(storage)?;
@@ -232,7 +230,7 @@ impl PgIdentityStore {
 
     async fn emit<E: EventData>(
         &self,
-        connection: &mut PgConnection,
+        connection: &mut SqliteConnection,
         account: AccountId,
         cause: &Cause,
         data: &E,
@@ -243,7 +241,7 @@ impl PgIdentityStore {
 
     async fn emit_on<E: EventData>(
         &self,
-        connection: &mut PgConnection,
+        connection: &mut SqliteConnection,
         aggregate: (&str, &str),
         cause: &Cause,
         data: &E,
@@ -251,10 +249,10 @@ impl PgIdentityStore {
         let event = self
             .events
             .event(aggregate, &cause.scope, &cause.actor, data)?;
-        PgOutbox::append(connection, &event).await
+        SqliteOutbox::append(connection, &event).await
     }
 
-    async fn reread(connection: &mut PgConnection, id: AccountId) -> Result<Account> {
+    async fn reread(connection: &mut SqliteConnection, id: AccountId) -> Result<Account> {
         let row = sqlx::query(ACCOUNT_BY_ID.as_str())
             .bind(id.as_uuid())
             .fetch_one(connection)
@@ -264,15 +262,15 @@ impl PgIdentityStore {
     }
 
     async fn end_all(
-        connection: &mut PgConnection,
+        connection: &mut SqliteConnection,
         account: AccountId,
         keep: Option<SessionId>,
         reason: &str,
         now: DateTime<Utc>,
     ) -> Result<()> {
         sqlx::query(
-            "UPDATE sessions SET revoked_at = $3, revoke_reason = $4 \
-             WHERE account_id = $1 AND revoked_at IS NULL AND id IS DISTINCT FROM $2",
+            "UPDATE sessions SET revoked_at = ?3, revoke_reason = ?4 \
+             WHERE account_id = ?1 AND revoked_at IS NULL AND id IS DISTINCT FROM ?2",
         )
         .bind(account.as_uuid())
         .bind(keep.map(|session| session.as_uuid()))
@@ -286,21 +284,17 @@ impl PgIdentityStore {
 }
 
 #[async_trait]
-impl AccountStore for PgIdentityStore {
+impl AccountStore for SqliteIdentityStore {
     async fn has_accounts(&self) -> Result<bool> {
         sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM accounts)")
-            .fetch_one(&self.pool)
+            .fetch_one(self.database.pool())
             .await
             .map_err(storage)
     }
 
     async fn create_account(&self, new: NewAccount, cause: &Cause) -> Result<Account> {
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        let mut transaction = self.database.begin().await?;
         if new.first {
-            sqlx::query("LOCK TABLE accounts IN SHARE ROW EXCLUSIVE MODE")
-                .execute(&mut *transaction)
-                .await
-                .map_err(storage)?;
             let exists: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM accounts)")
                 .fetch_one(&mut *transaction)
                 .await
@@ -312,7 +306,7 @@ impl AccountStore for PgIdentityStore {
         sqlx::query(
             "INSERT INTO accounts (id, username, display_name, password_hash, \
              password_changed_at, created_at, updated_at, service) \
-             VALUES ($1, $2, $3, $4, $5, $6, $6, $7)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?7)",
         )
         .bind(new.id.as_uuid())
         .bind(new.username.as_str())
@@ -330,10 +324,10 @@ impl AccountStore for PgIdentityStore {
             other => other,
         })?;
         sqlx::query(
-            "INSERT INTO role_bindings (account_id, role_id) SELECT $1, unnest($2::text[])",
+            "INSERT INTO role_bindings (account_id, role_id) SELECT ?1, value FROM json_each(?2)",
         )
         .bind(new.id.as_uuid())
-        .bind(&new.roles)
+        .bind(Json(&new.roles))
         .execute(&mut *transaction)
         .await
         .map_err(storage)?;
@@ -352,7 +346,7 @@ impl AccountStore for PgIdentityStore {
     async fn account(&self, id: AccountId) -> Result<Option<StoredAccount>> {
         let row = sqlx::query(ACCOUNT_BY_ID.as_str())
             .bind(id.as_uuid())
-            .fetch_optional(&self.pool)
+            .fetch_optional(self.database.pool())
             .await
             .map_err(storage)?;
         row.as_ref().map(stored_account).transpose()
@@ -361,7 +355,7 @@ impl AccountStore for PgIdentityStore {
     async fn account_named(&self, username: &Username) -> Result<Option<StoredAccount>> {
         let row = sqlx::query(ACCOUNT_BY_NAME.as_str())
             .bind(username.as_str())
-            .fetch_optional(&self.pool)
+            .fetch_optional(self.database.pool())
             .await
             .map_err(storage)?;
         row.as_ref().map(stored_account).transpose()
@@ -369,7 +363,7 @@ impl AccountStore for PgIdentityStore {
 
     async fn accounts(&self) -> Result<Vec<Account>> {
         let rows = sqlx::query(ACCOUNTS.as_str())
-            .fetch_all(&self.pool)
+            .fetch_all(self.database.pool())
             .await
             .map_err(storage)?;
         rows.iter().map(account).collect()
@@ -382,17 +376,17 @@ impl AccountStore for PgIdentityStore {
         now: DateTime<Utc>,
         cause: &Cause,
     ) -> Result<Account> {
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        let mut transaction = self.database.begin().await?;
         let updated = sqlx::query(
             "UPDATE accounts SET \
-             display_name = CASE WHEN $2 THEN $3 ELSE display_name END, \
-             disabled = COALESCE($4, disabled), \
-             locked = locked AND NOT $5, \
-             failures = CASE WHEN $5 THEN 0 ELSE failures END, \
-             retry_after = CASE WHEN $5 THEN NULL ELSE retry_after END, \
-             break_glass = COALESCE($7, break_glass), \
-             updated_at = $6 \
-             WHERE id = $1",
+             display_name = CASE WHEN ?2 THEN ?3 ELSE display_name END, \
+             disabled = COALESCE(?4, disabled), \
+             locked = locked AND NOT ?5, \
+             failures = CASE WHEN ?5 THEN 0 ELSE failures END, \
+             retry_after = CASE WHEN ?5 THEN NULL ELSE retry_after END, \
+             break_glass = COALESCE(?7, break_glass), \
+             updated_at = ?6 \
+             WHERE id = ?1",
         )
         .bind(id.as_uuid())
         .bind(change.display_name.is_some())
@@ -408,16 +402,17 @@ impl AccountStore for PgIdentityStore {
             return Err(PanelError::not_found(format!("there is no account {id}")));
         }
         if let Some(roles) = &change.roles {
-            sqlx::query("DELETE FROM role_bindings WHERE account_id = $1")
+            sqlx::query("DELETE FROM role_bindings WHERE account_id = ?1")
                 .bind(id.as_uuid())
                 .execute(&mut *transaction)
                 .await
                 .map_err(storage)?;
             sqlx::query(
-                "INSERT INTO role_bindings (account_id, role_id) SELECT $1, unnest($2::text[])",
+                "INSERT INTO role_bindings (account_id, role_id) \
+                 SELECT ?1, value FROM json_each(?2)",
             )
             .bind(id.as_uuid())
-            .bind(roles)
+            .bind(Json(roles))
             .execute(&mut *transaction)
             .await
             .map_err(storage)?;
@@ -425,7 +420,7 @@ impl AccountStore for PgIdentityStore {
         if change.disabled == Some(true) {
             Self::end_all(&mut transaction, id, None, "disabled", now).await?;
             sqlx::query(
-                "UPDATE api_tokens SET revoked_at = $2 WHERE account_id = $1 AND revoked_at IS NULL",
+                "UPDATE api_tokens SET revoked_at = ?2 WHERE account_id = ?1 AND revoked_at IS NULL",
             )
             .bind(id.as_uuid())
             .bind(now)
@@ -453,10 +448,10 @@ impl AccountStore for PgIdentityStore {
         now: DateTime<Utc>,
         cause: &Cause,
     ) -> Result<()> {
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        let mut transaction = self.database.begin().await?;
         let updated = sqlx::query(
-            "UPDATE accounts SET password_hash = $2, password_changed_at = $3, failures = 0, \
-             retry_after = NULL, locked = false, updated_at = $3 WHERE id = $1",
+            "UPDATE accounts SET password_hash = ?2, password_changed_at = ?3, failures = 0, \
+             retry_after = NULL, locked = false, updated_at = ?3 WHERE id = ?1",
         )
         .bind(id.as_uuid())
         .bind(hash)
@@ -474,19 +469,19 @@ impl AccountStore for PgIdentityStore {
     }
 
     async fn rehash_password(&self, id: AccountId, hash: String) -> Result<()> {
-        sqlx::query("UPDATE accounts SET password_hash = $2 WHERE id = $1")
+        sqlx::query("UPDATE accounts SET password_hash = ?2 WHERE id = ?1")
             .bind(id.as_uuid())
             .bind(hash)
-            .execute(&self.pool)
+            .execute(self.database.pool())
             .await
             .map_err(storage)
             .map(|_| ())
     }
 
     async fn login_failed(&self, failure: Failure, attempt: &Attempt, cause: &Cause) -> Result<()> {
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        let mut transaction = self.database.begin().await?;
         sqlx::query(
-            "UPDATE accounts SET failures = $2, retry_after = $3, locked = locked OR $4 WHERE id = $1",
+            "UPDATE accounts SET failures = ?2, retry_after = ?3, locked = locked OR ?4 WHERE id = ?1",
         )
         .bind(failure.account.as_uuid())
         .bind(i32::try_from(failure.failures).unwrap_or(i32::MAX))
@@ -523,7 +518,7 @@ impl AccountStore for PgIdentityStore {
 }
 
 #[async_trait]
-impl SessionStore for PgIdentityStore {
+impl SessionStore for SqliteIdentityStore {
     async fn create_session(
         &self,
         new: NewSession,
@@ -531,11 +526,11 @@ impl SessionStore for PgIdentityStore {
         cause: &Cause,
     ) -> Result<()> {
         let session = &new.session;
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        let mut transaction = self.database.begin().await?;
         sqlx::query(
             "INSERT INTO sessions (id, account_id, secret_hash, transport, created_at, \
              last_seen_at, expires_at, client_address, user_agent) \
-             VALUES ($1, $2, $3, $4, $5, $5, $6, $7, $8)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?7, ?8)",
         )
         .bind(session.id.as_uuid())
         .bind(session.account.as_uuid())
@@ -549,14 +544,14 @@ impl SessionStore for PgIdentityStore {
         .await
         .map_err(storage)?;
         sqlx::query(
-            "UPDATE accounts SET failures = 0, retry_after = NULL, last_login_at = $2 WHERE id = $1",
+            "UPDATE accounts SET failures = 0, retry_after = NULL, last_login_at = ?2 WHERE id = ?1",
         )
         .bind(session.account.as_uuid())
         .bind(session.created_at)
         .execute(&mut *transaction)
         .await
         .map_err(storage)?;
-        sqlx::query("DELETE FROM sessions WHERE expires_at < $1")
+        sqlx::query("DELETE FROM sessions WHERE expires_at < ?1")
             .bind(session.created_at - chrono::Duration::days(SESSION_RETENTION_DAYS))
             .execute(&mut *transaction)
             .await
@@ -583,7 +578,7 @@ impl SessionStore for PgIdentityStore {
     async fn session(&self, secret: &SecretHash) -> Result<Option<SessionGrant>> {
         let Some(row) = sqlx::query(SESSION_GRANT.as_str())
             .bind(secret.as_bytes().as_slice())
-            .fetch_optional(&self.pool)
+            .fetch_optional(self.database.pool())
             .await
             .map_err(storage)?
         else {
@@ -592,15 +587,15 @@ impl SessionStore for PgIdentityStore {
         Ok(Some(SessionGrant {
             session: session(&row)?,
             account: account(&row)?,
-            permissions: permissions(get(&row, "permissions")?),
+            permissions: permissions(list(&row, "permissions")?),
         }))
     }
 
     async fn touch_session(&self, id: SessionId, at: DateTime<Utc>) -> Result<()> {
-        sqlx::query("UPDATE sessions SET last_seen_at = $2 WHERE id = $1 AND last_seen_at < $2")
+        sqlx::query("UPDATE sessions SET last_seen_at = ?2 WHERE id = ?1 AND last_seen_at < ?2")
             .bind(id.as_uuid())
             .bind(at)
-            .execute(&self.pool)
+            .execute(self.database.pool())
             .await
             .map_err(storage)
             .map(|_| ())
@@ -610,7 +605,7 @@ impl SessionStore for PgIdentityStore {
         let rows = sqlx::query(SESSIONS_OF.as_str())
             .bind(account.as_uuid())
             .bind(now)
-            .fetch_all(&self.pool)
+            .fetch_all(self.database.pool())
             .await
             .map_err(storage)?;
         rows.iter().map(session).collect()
@@ -624,10 +619,10 @@ impl SessionStore for PgIdentityStore {
         now: DateTime<Utc>,
         cause: &Cause,
     ) -> Result<bool> {
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        let mut transaction = self.database.begin().await?;
         let ended = sqlx::query(
-            "UPDATE sessions SET revoked_at = $3, revoke_reason = $4 \
-             WHERE id = $1 AND account_id = $2 AND revoked_at IS NULL",
+            "UPDATE sessions SET revoked_at = ?3, revoke_reason = ?4 \
+             WHERE id = ?1 AND account_id = ?2 AND revoked_at IS NULL",
         )
         .bind(id.as_uuid())
         .bind(account.as_uuid())
@@ -658,10 +653,10 @@ impl SessionStore for PgIdentityStore {
         now: DateTime<Utc>,
         cause: &Cause,
     ) -> Result<u64> {
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        let mut transaction = self.database.begin().await?;
         let ended = sqlx::query(
-            "UPDATE sessions SET revoked_at = $3, revoke_reason = 'revoked' \
-             WHERE account_id = $1 AND revoked_at IS NULL AND id IS DISTINCT FROM $2",
+            "UPDATE sessions SET revoked_at = ?3, revoke_reason = 'revoked' \
+             WHERE account_id = ?1 AND revoked_at IS NULL AND id IS DISTINCT FROM ?2",
         )
         .bind(account.as_uuid())
         .bind(keep.map(|session| session.as_uuid()))
@@ -685,19 +680,19 @@ impl SessionStore for PgIdentityStore {
 }
 
 #[async_trait]
-impl TokenStore for PgIdentityStore {
+impl TokenStore for SqliteIdentityStore {
     async fn create_token(&self, new: NewToken, cause: &Cause) -> Result<()> {
         let token = &new.token;
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        let mut transaction = self.database.begin().await?;
         sqlx::query(
             "INSERT INTO api_tokens (id, account_id, name, secret_hash, permissions, created_at, \
-             expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+             expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )
         .bind(token.id.as_uuid())
         .bind(token.account.as_uuid())
         .bind(&token.name)
         .bind(new.secret.as_bytes().as_slice())
-        .bind(token.permissions.names())
+        .bind(Json(token.permissions.names()))
         .bind(token.created_at)
         .bind(token.expires_at)
         .execute(&mut *transaction)
@@ -716,7 +711,7 @@ impl TokenStore for PgIdentityStore {
     async fn token(&self, secret: &SecretHash) -> Result<Option<TokenGrant>> {
         let Some(row) = sqlx::query(TOKEN_GRANT.as_str())
             .bind(secret.as_bytes().as_slice())
-            .fetch_optional(&self.pool)
+            .fetch_optional(self.database.pool())
             .await
             .map_err(storage)?
         else {
@@ -725,15 +720,15 @@ impl TokenStore for PgIdentityStore {
         Ok(Some(TokenGrant {
             token: token(&row)?,
             account: account(&row)?,
-            permissions: permissions(get(&row, "permissions")?),
+            permissions: permissions(list(&row, "permissions")?),
         }))
     }
 
     async fn touch_token(&self, id: TokenId, at: DateTime<Utc>) -> Result<()> {
-        sqlx::query("UPDATE api_tokens SET last_used_at = $2 WHERE id = $1")
+        sqlx::query("UPDATE api_tokens SET last_used_at = ?2 WHERE id = ?1")
             .bind(id.as_uuid())
             .bind(at)
-            .execute(&self.pool)
+            .execute(self.database.pool())
             .await
             .map_err(storage)
             .map(|_| ())
@@ -742,7 +737,7 @@ impl TokenStore for PgIdentityStore {
     async fn tokens(&self, account: AccountId) -> Result<Vec<ApiToken>> {
         let rows = sqlx::query(TOKENS_OF.as_str())
             .bind(account.as_uuid())
-            .fetch_all(&self.pool)
+            .fetch_all(self.database.pool())
             .await
             .map_err(storage)?;
         rows.iter().map(token).collect()
@@ -755,10 +750,10 @@ impl TokenStore for PgIdentityStore {
         now: DateTime<Utc>,
         cause: &Cause,
     ) -> Result<bool> {
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        let mut transaction = self.database.begin().await?;
         let revoked = sqlx::query(
-            "UPDATE api_tokens SET revoked_at = $3 \
-             WHERE id = $1 AND account_id = $2 AND revoked_at IS NULL",
+            "UPDATE api_tokens SET revoked_at = ?3 \
+             WHERE id = ?1 AND account_id = ?2 AND revoked_at IS NULL",
         )
         .bind(id.as_uuid())
         .bind(account.as_uuid())
@@ -789,10 +784,10 @@ impl TokenStore for PgIdentityStore {
         cause: &Cause,
     ) -> Result<bool> {
         let token = &new.token;
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        let mut transaction = self.database.begin().await?;
         let revoked = sqlx::query(
-            "UPDATE api_tokens SET revoked_at = $3 \
-             WHERE id = $1 AND account_id = $2 AND revoked_at IS NULL",
+            "UPDATE api_tokens SET revoked_at = ?3 \
+             WHERE id = ?1 AND account_id = ?2 AND revoked_at IS NULL",
         )
         .bind(old.as_uuid())
         .bind(token.account.as_uuid())
@@ -807,13 +802,13 @@ impl TokenStore for PgIdentityStore {
         }
         sqlx::query(
             "INSERT INTO api_tokens (id, account_id, name, secret_hash, permissions, created_at, \
-             expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+             expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )
         .bind(token.id.as_uuid())
         .bind(token.account.as_uuid())
         .bind(&token.name)
         .bind(new.secret.as_bytes().as_slice())
-        .bind(token.permissions.names())
+        .bind(Json(token.permissions.names()))
         .bind(token.created_at)
         .bind(token.expires_at)
         .execute(&mut *transaction)
@@ -832,13 +827,13 @@ impl TokenStore for PgIdentityStore {
 }
 
 #[async_trait]
-impl RoleStore for PgIdentityStore {
+impl RoleStore for SqliteIdentityStore {
     async fn roles(&self) -> Result<Vec<Role>> {
         let rows = sqlx::query(
             "SELECT id, name, description, permissions, built_in FROM roles \
              ORDER BY built_in DESC, id",
         )
-        .fetch_all(&self.pool)
+        .fetch_all(self.database.pool())
         .await
         .map_err(storage)?;
         rows.iter()
@@ -847,7 +842,7 @@ impl RoleStore for PgIdentityStore {
                     id: get(row, "id")?,
                     name: get(row, "name")?,
                     description: get(row, "description")?,
-                    permissions: permissions(get(row, "permissions")?),
+                    permissions: permissions(list(row, "permissions")?),
                     built_in: get(row, "built_in")?,
                 })
             })
@@ -855,15 +850,15 @@ impl RoleStore for PgIdentityStore {
     }
 
     async fn create_role(&self, role: Role, cause: &Cause) -> Result<Role> {
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        let mut transaction = self.database.begin().await?;
         sqlx::query(
             "INSERT INTO roles (id, name, description, permissions, built_in) \
-             VALUES ($1, $2, $3, $4, false)",
+             VALUES (?1, ?2, ?3, ?4, false)",
         )
         .bind(&role.id)
         .bind(&role.name)
         .bind(&role.description)
-        .bind(role.permissions.names())
+        .bind(Json(role.permissions.names()))
         .execute(&mut *transaction)
         .await
         .map_err(|error| match storage(error) {
@@ -884,15 +879,15 @@ impl RoleStore for PgIdentityStore {
     }
 
     async fn update_role(&self, role: Role, cause: &Cause) -> Result<Role> {
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        let mut transaction = self.database.begin().await?;
         let updated = sqlx::query(
-            "UPDATE roles SET name = $2, description = $3, permissions = $4 \
-             WHERE id = $1 AND NOT built_in",
+            "UPDATE roles SET name = ?2, description = ?3, permissions = ?4 \
+             WHERE id = ?1 AND NOT built_in",
         )
         .bind(&role.id)
         .bind(&role.name)
         .bind(&role.description)
-        .bind(role.permissions.names())
+        .bind(Json(role.permissions.names()))
         .execute(&mut *transaction)
         .await
         .map_err(storage)?;
@@ -914,8 +909,8 @@ impl RoleStore for PgIdentityStore {
     }
 
     async fn delete_role(&self, id: &str, cause: &Cause) -> Result<()> {
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
-        let deleted = sqlx::query("DELETE FROM roles WHERE id = $1 AND NOT built_in")
+        let mut transaction = self.database.begin().await?;
+        let deleted = sqlx::query("DELETE FROM roles WHERE id = ?1 AND NOT built_in")
             .bind(id)
             .execute(&mut *transaction)
             .await
@@ -942,14 +937,14 @@ impl RoleStore for PgIdentityStore {
 }
 
 #[async_trait]
-impl GrantStore for PgIdentityStore {
+impl GrantStore for SqliteIdentityStore {
     async fn grants(&self, account: AccountId) -> Result<Vec<Grant>> {
         sqlx::query(
-            "SELECT id, account_id, role_id, scope::text AS scope, conditions::text AS conditions, \
-             created_at, created_by FROM grants WHERE account_id = $1 ORDER BY created_at, id",
+            "SELECT id, account_id, role_id, scope, conditions, \
+             created_at, created_by FROM grants WHERE account_id = ?1 ORDER BY created_at, id",
         )
         .bind(account.as_uuid())
-        .fetch_all(&self.pool)
+        .fetch_all(self.database.pool())
         .await
         .map_err(storage)?
         .iter()
@@ -971,10 +966,10 @@ impl GrantStore for PgIdentityStore {
     }
 
     async fn create_grant(&self, grant: Grant, cause: &Cause) -> Result<()> {
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        let mut transaction = self.database.begin().await?;
         sqlx::query(
             "INSERT INTO grants (id, account_id, role_id, scope, conditions, created_at, \
-             created_by) VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7)",
+             created_by) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )
         .bind(grant.id.as_uuid())
         .bind(grant.account.as_uuid())
@@ -997,8 +992,8 @@ impl GrantStore for PgIdentityStore {
     }
 
     async fn delete_grant(&self, account: AccountId, id: GrantId, cause: &Cause) -> Result<bool> {
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
-        let deleted = sqlx::query("DELETE FROM grants WHERE id = $1 AND account_id = $2")
+        let mut transaction = self.database.begin().await?;
+        let deleted = sqlx::query("DELETE FROM grants WHERE id = ?1 AND account_id = ?2")
             .bind(id.as_uuid())
             .bind(account.as_uuid())
             .execute(&mut *transaction)
@@ -1020,11 +1015,11 @@ impl GrantStore for PgIdentityStore {
 }
 
 #[async_trait]
-impl SignInPolicyStore for PgIdentityStore {
+impl SignInPolicyStore for SqliteIdentityStore {
     async fn password_sign_in(&self) -> Result<PasswordSignIn> {
         let policy: String =
             sqlx::query_scalar("SELECT password_sign_in FROM sign_in_policy WHERE singleton")
-                .fetch_one(&self.pool)
+                .fetch_one(self.database.pool())
                 .await
                 .map_err(storage)?;
         PasswordSignIn::parse(&policy)
@@ -1037,9 +1032,9 @@ impl SignInPolicyStore for PgIdentityStore {
         now: DateTime<Utc>,
         cause: &Cause,
     ) -> Result<()> {
-        let mut transaction = self.pool.begin().await.map_err(storage)?;
+        let mut transaction = self.database.begin().await?;
         sqlx::query(
-            "UPDATE sign_in_policy SET password_sign_in = $1, updated_at = $2 WHERE singleton",
+            "UPDATE sign_in_policy SET password_sign_in = ?1, updated_at = ?2 WHERE singleton",
         )
         .bind(policy.as_str())
         .bind(now)

@@ -20,8 +20,8 @@ Storage, Session Management and CSRF Prevention cheat sheets.
   authorization — behind store ports, one per concern: accounts, sessions,
   tokens, roles, grants and the password sign-in policy, which
   `IdentityStore` combines, beside the provider and workload stores. A new
-  concern adds a port rather than widening one. `identity-postgres`
-  implements the ports in the `identity` schema and records every change
+  concern adds a port rather than widening one. `identity-sqlite`
+  implements the ports in the `identity.db` file and records every change
   with its event through the outbox, so the audit trail covers logins,
   sessions, tokens and accounts ([ADR 0013](0013-audit-trail.md)). Requests
   are authenticated in process; no other service sees credentials.

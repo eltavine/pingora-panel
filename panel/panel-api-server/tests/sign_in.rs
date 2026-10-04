@@ -3,11 +3,8 @@
 mod support;
 
 use identity_oidc::testing::TestProvider;
-use panel_control_runtime::{
-    ProcessSettings, DATABASE_PASSWORD_ENV, DATABASE_URL_ENV, NATS_URL_ENV,
-};
+use panel_control_runtime::{ProcessSettings, DATA_DIR_ENV, NATS_URL_ENV};
 use panel_jetstream::testing::{TestBroker, NATS_URL_ENV as TEST_NATS_URL_ENV};
-use panel_postgres::testing::TestDatabase;
 use panel_secrets::EnvelopeVault;
 use panel_service::Environment;
 use reqwest::{
@@ -66,20 +63,15 @@ struct Server {
     base: String,
     _api: panel_control_runtime::RunningProcess,
     _broker: TestBroker,
-    _database: TestDatabase,
+    _data: tempfile::TempDir,
 }
 
 async fn server() -> Option<Server> {
-    let (Some(mut database), Some(broker)) =
-        (TestDatabase::create().await, TestBroker::create().await)
-    else {
-        return None;
-    };
-    let secrets = database.bootstrap(&[("identity", "identity")]).await;
+    let broker = TestBroker::create().await?;
+    let data = tempfile::tempdir().unwrap();
     let http = free_port();
     let mut env = environment(vec![
-        (DATABASE_URL_ENV, database.service_url("identity")),
-        (DATABASE_PASSWORD_ENV, secrets[0].expose().into()),
+        (DATA_DIR_ENV, data.path().display().to_string()),
         (NATS_URL_ENV, std::env::var(TEST_NATS_URL_ENV).unwrap()),
         (panel_api_server::HTTP_ADDRESS_ENV, http.to_string()),
         (
@@ -120,7 +112,7 @@ async fn server() -> Option<Server> {
         base,
         _api: api,
         _broker: broker,
-        _database: database,
+        _data: data,
     })
 }
 

@@ -2,7 +2,7 @@
 //! is required, so the API is ready only after it passed.
 
 use async_trait::async_trait;
-use identity_postgres::PgIdentityStore;
+use identity_sqlite::SqliteIdentityStore;
 use panel_health::{CheckOutcome, ComponentType, HealthCheck};
 use panel_identity::AccountStore;
 use std::sync::{
@@ -11,14 +11,14 @@ use std::sync::{
 };
 
 pub struct BuiltInRoles {
-    store: Arc<PgIdentityStore>,
+    store: Arc<SqliteIdentityStore>,
     written: AtomicBool,
     /// Whether a bootstrap token is configured, to explain an empty panel.
     bootstrap: bool,
 }
 
 impl BuiltInRoles {
-    pub fn new(store: Arc<PgIdentityStore>, bootstrap: bool) -> Self {
+    pub fn new(store: Arc<SqliteIdentityStore>, bootstrap: bool) -> Self {
         Self {
             store,
             written: AtomicBool::new(false),

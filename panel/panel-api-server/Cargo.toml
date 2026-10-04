@@ -21,7 +21,7 @@ chrono.workspace = true
 config-grpc-client.workspace = true
 gateway-grpc-client.workspace = true
 identity-oidc.workspace = true
-identity-postgres.workspace = true
+identity-sqlite.workspace = true
 observability-grpc-client.workspace = true
 ops-grpc-client.workspace = true
 panel-api.workspace = true
@@ -35,7 +35,7 @@ panel-identity.workspace = true
 panel-jetstream.workspace = true
 panel-metrics.workspace = true
 panel-platform.workspace = true
-panel-postgres.workspace = true
+panel-sqlite.workspace = true
 panel-secrets.workspace = true
 panel-service.workspace = true
 serde_json.workspace = true
@@ -64,7 +64,6 @@ panel-certificates.workspace = true
 panel-ir.workspace = true
 panel-jetstream = { workspace = true, features = ["test-support"] }
 panel-pki.workspace = true
-panel-postgres = { workspace = true, features = ["test-support"] }
 panel-tls.workspace = true
 reqwest.workspace = true
 rustls.workspace = true

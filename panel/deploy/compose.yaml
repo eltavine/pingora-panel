@@ -22,7 +22,7 @@ x-panel: &panel
   cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]
 
-x-database: &database
+x-control: &control
   PINGORA_PANEL_NATS_URL: nats://127.0.0.1:4222
   PINGORA_PANEL_TRUST_DOMAIN: pingora-panel.internal
 
@@ -49,24 +49,6 @@ x-pki: &pki
     - credentials-gatewayd:/var/lib/pingora-panel/credentials/gatewayd
 
 services:
-  postgres:
-    image: docker.io/library/postgres:18.6-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
-    network_mode: host
-    restart: unless-stopped
-    command: ["postgres", "-c", "listen_addresses=127.0.0.1", "-c", "port=5432"]
-    environment:
-      POSTGRES_DB: pingora_panel
-      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-admin-password
-      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256
-    secrets: [postgres-admin-password]
-    volumes:
-      - postgres-data:/var/lib/postgresql
-    healthcheck:
-      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "pingora_panel"]
-      interval: 5s
-      timeout: 3s
-      retries: 30
-
   nats:
     image: docker.io/library/nats:2.15.0-alpine@sha256:ac8f88a6494bffc2c2a5289a0ca61cb28a9145c11ba5677cf24265d07f46d8d4
     network_mode: host
@@ -167,22 +149,14 @@ services:
       pki-init:
         condition: service_completed_successfully
 
-  # Creates the service roles, schemas, streams and service registry.
+  # Creates the event streams and the service registry.
   bootstrap:
     <<: *panel
     restart: "no"
     command: ["/usr/local/bin/panel-bootstrap"]
     environment:
-      <<: *database
-      PINGORA_PANEL_ADMIN_DATABASE_URL: postgres://postgres@127.0.0.1:5432/pingora_panel
-      PINGORA_PANEL_ADMIN_DATABASE_PASSWORD_FILE: /run/secrets/postgres-admin-password
-      PINGORA_PANEL_IDENTITY_DATABASE_PASSWORD_FILE: /run/secrets/identity-database-password
-    secrets:
-      - postgres-admin-password
-      - identity-database-password
+      <<: *control
     depends_on:
-      postgres:
-        condition: service_healthy
       nats:
         condition: service_healthy
 
@@ -217,7 +191,7 @@ services:
     <<: *panel
     command: ["/usr/local/bin/config-service"]
     environment:
-      <<: *database
+      <<: *control
       PINGORA_PANEL_TLS_DIR: /var/lib/pingora-panel/credentials/config-service
       PINGORA_PANEL_GATEWAY_URL: https://127.0.0.1:50051
     volumes:
@@ -234,7 +208,7 @@ services:
     <<: *panel
     command: ["/usr/local/bin/automation-service"]
     environment:
-      <<: *database
+      <<: *control
       PINGORA_PANEL_TLS_DIR: /var/lib/pingora-panel/credentials/automation-service
       # Seal certificate keys; losing them loses every stored key.
       PINGORA_PANEL_MASTER_KEYS_FILE: /run/secrets/master-keys
@@ -255,7 +229,7 @@ services:
     <<: *panel
     command: ["/usr/local/bin/observability-service"]
     environment:
-      <<: *database
+      <<: *control
       PINGORA_PANEL_TLS_DIR: /var/lib/pingora-panel/credentials/observability-service
       PINGORA_PANEL_PROMETHEUS_URL: http://127.0.0.1:9090
       PINGORA_PANEL_LOKI_URL: http://127.0.0.1:3100
@@ -276,7 +250,7 @@ services:
     <<: *panel
     command: ["/usr/local/bin/audit-service"]
     environment:
-      <<: *database
+      <<: *control
       PINGORA_PANEL_TLS_DIR: /var/lib/pingora-panel/credentials/audit-service
     volumes:
       - control-data:/var/lib/pingora-panel/control
@@ -292,9 +266,7 @@ services:
     <<: *panel
     command: ["/usr/local/bin/panel-api"]
     environment:
-      <<: *database
-      PINGORA_PANEL_DATABASE_URL: postgres://panel_identity@127.0.0.1:5432/pingora_panel
-      PINGORA_PANEL_DATABASE_PASSWORD_FILE: /run/secrets/identity-database-password
+      <<: *control
       PINGORA_PANEL_TLS_DIR: /var/lib/pingora-panel/credentials/panel-api
       PINGORA_PANEL_HTTP_ADDR: 127.0.0.1:8080
       PINGORA_PANEL_CONFIG_URL: https://127.0.0.1:50061
@@ -308,8 +280,9 @@ services:
       PINGORA_PANEL_PASSWORD_PEPPER_FILE: /run/secrets/password-pepper
       # Seals identity provider secrets and refresh tokens.
       PINGORA_PANEL_MASTER_KEYS_FILE: /run/secrets/master-keys
-    secrets: [identity-database-password, bootstrap-token, password-pepper, master-keys]
+    secrets: [bootstrap-token, password-pepper, master-keys]
     volumes:
+      - control-data:/var/lib/pingora-panel/control
       - credentials-panel-api:/var/lib/pingora-panel/credentials/panel-api:ro
     healthcheck:
       test: ["CMD", "/usr/local/bin/panel-api", "healthcheck"]
@@ -319,10 +292,6 @@ services:
     depends_on: *after-bootstrap
 
 secrets:
-  postgres-admin-password:
-    file: ./secrets/postgres-admin-password
-  identity-database-password:
-    file: ./secrets/identity-database-password
   bootstrap-token:
     file: ./secrets/bootstrap-token
   password-pepper:
@@ -333,7 +302,6 @@ secrets:
 volumes:
   # The control plane's SQLite files, one per module.
   control-data:
-  postgres-data:
   nats-data:
   prometheus-data:
   loki-data:

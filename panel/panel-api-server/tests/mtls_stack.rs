@@ -11,8 +11,7 @@ use panel_application::{
 use panel_context::ServiceName;
 use panel_contracts::audit::v1::{audit_query_client::AuditQueryClient, ListRequest};
 use panel_control_runtime::{
-    ProcessSettings, RunningProcess, DATABASE_PASSWORD_ENV, DATABASE_URL_ENV, NATS_URL_ENV,
-    TLS_DIR_ENV,
+    ProcessSettings, RunningProcess, DATA_DIR_ENV, NATS_URL_ENV, TLS_DIR_ENV,
 };
 use panel_domain::RevisionId;
 use panel_engine::FakeGatewayEngine;
@@ -23,7 +22,6 @@ use panel_pki::{
     CertificateAuthority, CredentialFiles, IssuanceTarget, TrustDomain, WorkloadIdentity,
     DEFAULT_AUTHORITY_VALIDITY,
 };
-use panel_postgres::testing::TestDatabase;
 use panel_service::Environment;
 use panel_tls::{PeerPolicy, TlsCredentials};
 use serde_json::{json, Value};
@@ -138,26 +136,17 @@ fn command(key: &str) -> CommandContext {
 
 #[tokio::test]
 async fn every_internal_hop_is_mutually_authenticated() {
-    let (Some(mut database), Some(broker)) =
-        (TestDatabase::create().await, TestBroker::create().await)
-    else {
+    let Some(broker) = TestBroker::create().await else {
         return;
     };
+    let data = tempfile::tempdir().unwrap();
     let root = std::env::temp_dir().join(format!("panel-mtls-stack-{}", std::process::id()));
     let directories = issue(&root);
-    let secrets = database
-        .bootstrap(&[
-            ("config", "config"),
-            ("identity", "identity"),
-            ("audit", "audit"),
-        ])
-        .await;
     let nats = std::env::var(TEST_NATS_URL_ENV).unwrap();
     let gateway = tls_gateway(&directories["gatewayd"]).await;
 
     let mut config_env = environment(vec![
-        (DATABASE_URL_ENV, database.service_url("config")),
-        (DATABASE_PASSWORD_ENV, secrets[0].expose().into()),
+        (DATA_DIR_ENV, data.path().display().to_string()),
         (NATS_URL_ENV, nats.clone()),
         (
             TLS_DIR_ENV,
@@ -184,8 +173,7 @@ async fn every_internal_hop_is_mutually_authenticated() {
         .unwrap();
     ready(&config).await;
     let mut audit_env = environment(vec![
-        (DATABASE_URL_ENV, database.service_url("audit")),
-        (DATABASE_PASSWORD_ENV, secrets[2].expose().into()),
+        (DATA_DIR_ENV, data.path().display().to_string()),
         (NATS_URL_ENV, nats.clone()),
         (
             TLS_DIR_ENV,
@@ -212,8 +200,7 @@ async fn every_internal_hop_is_mutually_authenticated() {
         .local_addr()
         .unwrap();
     let mut api_env = environment(vec![
-        (DATABASE_URL_ENV, database.service_url("identity")),
-        (DATABASE_PASSWORD_ENV, secrets[1].expose().into()),
+        (DATA_DIR_ENV, data.path().display().to_string()),
         (NATS_URL_ENV, nats),
         (TLS_DIR_ENV, directories["panel-api"].display().to_string()),
         (panel_api_server::HTTP_ADDRESS_ENV, http.to_string()),
@@ -351,6 +338,5 @@ async fn every_internal_hop_is_mutually_authenticated() {
         .context
         .delete_key_value(broker.settings.service_bucket())
         .await;
-    database.drop().await;
     broker.drop().await;
 }

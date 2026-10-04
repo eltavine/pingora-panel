@@ -1,23 +1,23 @@
 #![forbid(unsafe_code)]
 
 use async_trait::async_trait;
-use identity_postgres::{PgIdentityStore, MIGRATIONS};
+use identity_sqlite::{SqliteIdentityStore, MIGRATIONS};
 use panel_events::ServiceName;
 use panel_identity::{
     conformance::{check, StoreUnderTest},
     memory::RecordedEvent,
     IdentityStore, ProviderStore, RoleStore, WorkloadStore,
 };
-use panel_postgres::{testing::TestDatabase, EventLog, ServiceDatabase};
+use panel_sqlite::{testing::TestDatabase, EventLog, ServiceDatabase};
 use std::sync::Arc;
 
-struct Postgres {
-    store: Arc<PgIdentityStore>,
+struct Sqlite {
+    store: Arc<SqliteIdentityStore>,
     database: ServiceDatabase,
 }
 
 #[async_trait]
-impl StoreUnderTest for Postgres {
+impl StoreUnderTest for Sqlite {
     fn store(&self) -> Arc<dyn IdentityStore> {
         self.store.clone()
     }
@@ -54,17 +54,11 @@ impl StoreUnderTest for Postgres {
 }
 
 #[tokio::test]
-async fn the_postgres_store_follows_the_identity_rules() {
-    let Some(mut test_database) = TestDatabase::create().await else {
-        return;
-    };
-    let secrets = test_database.bootstrap(&[("identity", "identity")]).await;
-    let database = test_database
-        .connect_service("identity", "identity", &secrets[0])
-        .await;
-    database.migrate(MIGRATIONS).await.unwrap();
+async fn the_sqlite_store_follows_the_identity_rules() {
+    let test_database = TestDatabase::migrated(MIGRATIONS).await;
+    let database = test_database.database().clone();
     let events = EventLog::new(&database, ServiceName::new("panel-api").unwrap());
-    let store = Arc::new(PgIdentityStore::new(&database, events));
+    let store = Arc::new(SqliteIdentityStore::new(&database, events));
     store.sync_roles().await.unwrap();
     // Built-in roles are rewritten, not duplicated.
     store.sync_roles().await.unwrap();
@@ -75,14 +69,13 @@ async fn the_postgres_store_follows_the_identity_rules() {
         let database = database.clone();
         async move {
             sqlx::raw_sql(
-                "TRUNCATE accounts, outbox CASCADE; DELETE FROM roles WHERE NOT built_in",
+                "DELETE FROM accounts; DELETE FROM outbox; DELETE FROM roles WHERE NOT built_in",
             )
             .execute(database.pool())
             .await
             .unwrap();
-            Postgres { store, database }
+            Sqlite { store, database }
         }
     })
     .await;
-    test_database.drop().await;
 }

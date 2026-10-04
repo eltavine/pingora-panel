@@ -2171,7 +2171,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "identity-postgres"
+name = "identity-sqlite"
 version = "0.1.0"
 dependencies = [
  "async-trait",
@@ -2180,7 +2180,7 @@ dependencies = [
  "panel-event-codec",
  "panel-events",
  "panel-identity",
- "panel-postgres",
+ "panel-sqlite",
  "serde_json",
  "sqlx",
  "tokio",
@@ -2908,7 +2908,7 @@ dependencies = [
  "gateway-grpc",
  "gateway-grpc-client",
  "identity-oidc",
- "identity-postgres",
+ "identity-sqlite",
  "observability-grpc-client",
  "ops-grpc-client",
  "panel-acme",
@@ -2930,9 +2930,9 @@ dependencies = [
  "panel-metrics",
  "panel-pki",
  "panel-platform",
- "panel-postgres",
  "panel-secrets",
  "panel-service",
+ "panel-sqlite",
  "panel-tls",
  "reqwest",
  "rustls",
@@ -2978,7 +2978,6 @@ dependencies = [
  "panel-errors",
  "panel-jetstream",
  "panel-pki",
- "panel-postgres",
  "panel-service",
  "tokio",
  "tokio-util",

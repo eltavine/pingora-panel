@@ -140,7 +140,7 @@ with `healthcheck` to probe its own readiness, as container health checks do.
 
 | Process | Storage | Operational | gRPC | Other |
 |---|---|---|---|---|
-| `panel-api` | `identity` | `127.0.0.1:9180` | `127.0.0.1:50060` | public HTTP `127.0.0.1:8080` |
+| `panel-api` | `identity.db` | `127.0.0.1:9180` | `127.0.0.1:50060` | public HTTP `127.0.0.1:8080` |
 | `config-service` | `config.db` | `127.0.0.1:9181` | `127.0.0.1:50061` | calls `gatewayd` at `127.0.0.1:50051` |
 | `automation-service` | `automation.db` | `127.0.0.1:9182` | `127.0.0.1:50062` | |
 | `observability-service` | `observability.db` | `127.0.0.1:9183` | `127.0.0.1:50063` | queries Prometheus at `127.0.0.1:9090` |
@@ -188,11 +188,8 @@ are missing or past two thirds of their lifetime
 (`PINGORA_PANEL_CERTIFICATE_LIFETIME_MS`, 24 hours by default), once with
 `--once` or continuously.
 
-`panel-bootstrap` runs once per installation and on every upgrade or password
-rotation. It connects with `PINGORA_PANEL_ADMIN_DATABASE_URL` (the database
-owner) and creates the `panel_<schema>` roles with the passwords in
-`PINGORA_PANEL_<SCHEMA>_DATABASE_PASSWORD` (or `_FILE`), then provisions the
-event streams and the service registry.
+`panel-bootstrap` runs once per installation and on every upgrade. It
+provisions the event streams and the service registry.
 
 `config-service` reconciles the gateway at startup and then every
 `PINGORA_PANEL_RECONCILE_INTERVAL_MS` (30 s by default). It records the

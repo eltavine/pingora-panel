@@ -22,7 +22,7 @@ use automation_grpc_client::AutomationClient;
 use config_grpc_client::{ConfigClientConfig, ConfigPublicationClient};
 use gateway_grpc_client::{GatewayGrpcClient, GatewayGrpcClientConfig};
 use identity_oidc::OidcClient;
-use identity_postgres::PgIdentityStore;
+use identity_sqlite::SqliteIdentityStore;
 use observability_grpc_client::ObservabilityClient;
 use ops_grpc_client::OpsAgentClient;
 use panel_api::{router_with_config, AccessSettings, ApiConfig, ApiState};
@@ -36,16 +36,17 @@ use panel_identity::{
 };
 use panel_metrics::{HttpServerMetrics, RoutedRequest};
 use panel_platform::ServiceName;
-use panel_postgres::{EventLog, SqlIdentifier};
 use panel_secrets::{EnvelopeVault, SecretVault};
 use panel_service::{measured, Environment};
+use panel_sqlite::EventLog;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tls_probe_rustls::RustlsProbe;
 use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 
 pub const SERVICE: &str = "panel-api";
-pub const SCHEMA: &str = "identity";
+/// The module's SQLite file in the data directory, `identity.db`.
+pub const MODULE: &str = "identity";
 /// The public listener: a loopback `ip:port`, or `unix:/path` for a Unix
 /// domain socket that a local reverse proxy in the socket's group reaches.
 pub const HTTP_ADDRESS_ENV: &str = "PINGORA_PANEL_HTTP_ADDR";
@@ -157,11 +158,11 @@ pub fn process(
         .transpose()?;
     // Bound now so a taken address fails the start before anything else runs.
     let listener = PublicListener::bind(HTTP_ADDRESS_ENV, &http_address)?;
-    let mut process = ControlPlaneProcess::new(
+    let mut process = ControlPlaneProcess::on_sqlite(
         ServiceName::new(SERVICE)?,
         env!("CARGO_PKG_VERSION"),
         settings,
-        SqlIdentifier::new(SCHEMA)?,
+        MODULE,
     )?;
     let api_metrics = HttpServerMetrics::<RoutedRequest>::register(process.metrics().registry());
     let config = match process.peer_channel(&config_url, ServiceName::new("config-service")?)? {
@@ -200,7 +201,7 @@ pub fn process(
     let observability_health = observability.health_check();
     let automation_health = automation.health_check();
     let config_health = config.health_check();
-    let events = EventLog::new(process.database(), ServiceName::new(SERVICE)?);
+    let events = EventLog::new(process.sqlite(), ServiceName::new(SERVICE)?);
     let operations = Arc::new(operations::OutboxOperations(events.clone()));
     let runtime = RecordedRuntime::new(Arc::new(gateway), operations.clone());
     let logs = RecordedLogs::new(Arc::new(observability.clone()), operations.clone());
@@ -210,7 +211,7 @@ pub fn process(
     let recorded_containers = agent
         .clone()
         .map(|agent| RecordedContainers::new(Arc::new(agent), operations.clone()));
-    let store = Arc::new(PgIdentityStore::new(process.database(), events));
+    let store = Arc::new(SqliteIdentityStore::new(process.sqlite(), events));
     let roles = roles::BuiltInRoles::new(Arc::clone(&store), bootstrap.is_some());
     let oidc = Arc::new(OidcClient::new(PROVIDER_TIMEOUT)?);
     let workloads = WorkloadIdentity::new(store.clone(), store.clone(), oidc.clone());
@@ -233,7 +234,7 @@ pub fn process(
         None => process,
     };
     Ok(process
-        .with_migrations(identity_postgres::MIGRATIONS)
+        .with_sqlite_migrations(identity_sqlite::MIGRATIONS)
         .with_database_impact(Impact::Degrading)
         .with_check(Arc::new(roles), Impact::Required)
         .with_check(Arc::new(config_health), Impact::Degrading)
@@ -307,7 +308,7 @@ fn host_agent(_: &ControlPlaneProcess, _: &std::path::Path) -> Result<OpsAgentCl
 /// Identity providers need master keys to seal their secrets, and sign-ins
 /// through them a public origin for people to return to.
 fn identity_providers(
-    store: &Arc<PgIdentityStore>,
+    store: &Arc<SqliteIdentityStore>,
     connect: Arc<dyn OpenIdConnect>,
     vault: Option<EnvelopeVault>,
     public_origin: Option<String>,

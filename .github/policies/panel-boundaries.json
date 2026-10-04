@@ -161,14 +161,14 @@
         "snapshot-store-fs"
       ]
     },
-    "identity-postgres": {
+    "identity-sqlite": {
       "catalog": true,
       "allowed_workspace_dependencies": [
         "panel-errors",
         "panel-event-codec",
         "panel-events",
         "panel-identity",
-        "panel-postgres"
+        "panel-sqlite"
       ]
     },
     "observability-grpc-client": {
@@ -245,7 +245,7 @@
         "gateway-grpc",
         "gateway-grpc-client",
         "identity-oidc",
-        "identity-postgres",
+        "identity-sqlite",
         "observability-grpc-client",
         "ops-grpc-client",
         "panel-acme",
@@ -267,9 +267,9 @@
         "panel-metrics",
         "panel-pki",
         "panel-platform",
-        "panel-postgres",
         "panel-secrets",
         "panel-service",
+        "panel-sqlite",
         "panel-tls",
         "tls-probe-rustls"
       ]
@@ -291,7 +291,6 @@
         "panel-errors",
         "panel-jetstream",
         "panel-pki",
-        "panel-postgres",
         "panel-service"
       ]
     },
