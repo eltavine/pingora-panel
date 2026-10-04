@@ -46,6 +46,7 @@
   },
   "devDependencies": {
     "@hey-api/openapi-ts": "^0.99.0",
+    "@msw/playwright": "^0.7.0",
     "@playwright/test": "^1.63.0",
     "@tailwindcss/vite": "^4.3.3",
     "@tsconfig/node24": "^24.0.5",

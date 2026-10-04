@@ -1,11 +1,11 @@
 import { sample } from 'openapi-sampler'
-import contractUrl from '../../../panel-api/tests/fixtures/openapi.json?url'
 
 interface Operation {
   responses?: Record<string, { content?: Record<string, { schema?: object }> }>
 }
 
-interface Contract {
+/** The parts of an OpenAPI document the sampler reads. */
+export interface Contract {
   paths: Record<string, Partial<Record<string, Operation>>>
 }
 
@@ -48,8 +48,7 @@ export interface Sampler {
   schema<T>(name: string): T
 }
 
-export async function loadSampler(): Promise<Sampler> {
-  const contract = (await (await fetch(contractUrl)).json()) as Contract
+export function createSampler(contract: Contract): Sampler {
   const routes: Route[] = Object.entries(contract.paths)
     .flatMap(([template, item]) =>
       METHODS.flatMap((method) => {

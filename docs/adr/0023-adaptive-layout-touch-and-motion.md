@@ -51,6 +51,12 @@ pointers.
 insets: the header, the content and the navigation bar are padded by the
 `safe-area-inset-*` environment values.
 
+**Reflow.** Every page fits a window 320 px wide without scrolling sideways
+([WCAG 2.2 SC 1.4.10](https://www.w3.org/TR/WCAG22/#reflow)). Wide tables
+scroll inside their own container, tab lists scroll sideways, page actions
+wrap below the title, and layouts that sit beside the navigation size
+themselves by their container rather than by the window.
+
 **Motion.** Transitions use Material's standard easing,
 `cubic-bezier(0.2, 0, 0, 1)`, and short durations. When people ask for
 reduced motion, animations and transitions are cut to a single frame and
@@ -69,3 +75,5 @@ startup; the other language loads when someone switches to it.
   a change to the shell.
 - Control sizes depend on the pointer, so tests check them on touch devices
   as well as on the desktop.
+- Tests render every page with the sample data of the preview mode at 320,
+  700 and 1024 px and fail when one scrolls sideways.

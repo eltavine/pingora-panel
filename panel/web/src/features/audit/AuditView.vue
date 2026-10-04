@@ -159,7 +159,7 @@ async function verify() {
 </script>
 
 <template>
-  <div class="flex flex-col gap-6">
+  <div class="@container flex flex-col gap-6">
     <PageHeader :icon="ScrollText" :title="t('audit.title')" :description="t('audit.description')">
       <template #actions>
         <Button variant="outline" size="sm" :disabled="verifying" @click="verify">
@@ -189,7 +189,9 @@ async function verify() {
       </AlertDescription>
     </Alert>
 
-    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_auto_auto_auto] lg:items-end">
+    <div
+      class="grid gap-3 @xl:grid-cols-2 @4xl:grid-cols-[1fr_1fr_1fr_auto_auto_auto] @4xl:items-end"
+    >
       <div class="flex flex-col gap-1.5">
         <Label for="audit-actor">{{ t('audit.columns.actor') }}</Label>
         <Input id="audit-actor" v-model="draft.actor" autocomplete="off" />

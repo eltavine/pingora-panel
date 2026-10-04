@@ -9,8 +9,8 @@ defineProps<{
 </script>
 
 <template>
-  <header class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-    <div class="flex min-w-0 items-start gap-3">
+  <header class="flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
+    <div class="flex min-w-0 flex-[1_1_16rem] items-start gap-3">
       <div
         class="bg-primary text-primary-foreground flex size-10 shrink-0 items-center justify-center rounded-lg"
         aria-hidden="true"
@@ -22,7 +22,7 @@ defineProps<{
         <p v-if="description" class="text-muted-foreground text-sm">{{ description }}</p>
       </div>
     </div>
-    <div v-if="$slots.actions" class="flex shrink-0 flex-wrap items-center gap-2">
+    <div v-if="$slots.actions" class="flex min-w-0 flex-wrap items-center gap-2">
       <slot name="actions" />
     </div>
   </header>

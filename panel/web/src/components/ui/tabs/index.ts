@@ -7,11 +7,12 @@ export { default as TabsList } from './TabsList.vue'
 export { default as TabsTrigger } from './TabsTrigger.vue'
 
 export const tabsListVariants = cva(
-  'rounded-lg p-0.75 group-data-horizontal/tabs:h-9 pointer-coarse:group-data-horizontal/tabs:h-11 data-[variant=line]:rounded-none group/tabs-list inline-flex w-fit items-center justify-center text-muted-foreground group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col',
+  'rounded-lg p-0.75 group-data-horizontal/tabs:h-9 pointer-coarse:group-data-horizontal/tabs:h-11 data-[variant=line]:rounded-none group/tabs-list inline-flex w-fit items-center justify-center-safe text-muted-foreground group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col',
   {
     variants: {
       variant: {
-        default: 'bg-muted',
+        default:
+          'bg-muted max-w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
         line: 'gap-1 bg-transparent',
       },
     },

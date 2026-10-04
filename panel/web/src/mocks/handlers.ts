@@ -206,25 +206,25 @@ export function handlers(sampler: Sampler): AnyHandler[] {
   }
   const siteList = sites(sampler)
   return [
-    http.get('/api/v1/session', () => HttpResponse.json(session(sampler))),
-    http.get('/api/v1/gateway/status', () => HttpResponse.json(status)),
-    http.get('/api/v1/gateway/data-plane', () => HttpResponse.json(dataPlane)),
-    http.get('/api/v1/config/draft', () => HttpResponse.json(draft)),
-    http.get('/api/v1/sites/summary', () => HttpResponse.json(siteSummary)),
-    http.get('/api/v1/sites', () =>
+    http.get('*/api/v1/session', () => HttpResponse.json(session(sampler))),
+    http.get('*/api/v1/gateway/status', () => HttpResponse.json(status)),
+    http.get('*/api/v1/gateway/data-plane', () => HttpResponse.json(dataPlane)),
+    http.get('*/api/v1/config/draft', () => HttpResponse.json(draft)),
+    http.get('*/api/v1/sites/summary', () => HttpResponse.json(siteSummary)),
+    http.get('*/api/v1/sites', () =>
       HttpResponse.json({
         items: siteList,
         total: siteList.length,
         next_cursor: null,
       } satisfies SiteList),
     ),
-    http.get('/api/v1/upstreams', () => HttpResponse.json(upstreams(sampler))),
-    http.get('/api/v1/upstreams/health', () => HttpResponse.json(health)),
-    http.get('/api/v1/traffic', ({ request }) => HttpResponse.json(summary(windowOf(request)))),
-    http.get('/api/v1/traffic/series', ({ request }) =>
+    http.get('*/api/v1/upstreams', () => HttpResponse.json(upstreams(sampler))),
+    http.get('*/api/v1/upstreams/health', () => HttpResponse.json(health)),
+    http.get('*/api/v1/traffic', ({ request }) => HttpResponse.json(summary(windowOf(request)))),
+    http.get('*/api/v1/traffic/series', ({ request }) =>
       HttpResponse.json(series(windowOf(request))),
     ),
-    http.all('/api/*', ({ request }) => {
+    http.all('*/api/*', ({ request }) => {
       const answer = sampler.respond(request.method, new URL(request.url).pathname)
       if (!answer) {
         return HttpResponse.json(

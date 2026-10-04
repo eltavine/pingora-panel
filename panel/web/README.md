@@ -23,11 +23,14 @@ after the OpenAPI fixture changes.
 `pnpm dev:mock` previews the console with every permission against
 `src/mocks`: hand-written figures for the gateway, traffic, sites and
 upstreams, and answers sampled from the OpenAPI contract for every other
-operation. Production builds leave the mocks out.
+operation. Production builds leave the mocks out. End-to-end tests that
+import `e2e/sample.ts` run against the same answers through
+[`@msw/playwright`](https://github.com/mswjs/playwright).
 
 ## Structure
 
-- `src/app`: shell, sidebar and preferences. It renders whatever features register.
+- `src/app`: shell, navigation and preferences. It renders whatever features register;
+  a feature offers destinations to the phone navigation bar with `navigationBar`.
 - `src/features/<feature>`: routes, navigation entries and views of one capability.
   Add a capability by adding a folder and registering it in `src/features/index.ts`.
 - `src/components`: shared presentation such as status, page headers and API failures.
