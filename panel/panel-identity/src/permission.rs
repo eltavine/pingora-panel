@@ -23,6 +23,8 @@ pub enum Permission {
     AuditRead,
     LogsRead,
     LogsDelete,
+    AlertsRead,
+    AlertsManage,
     PlatformRead,
     IdentityRead,
     IdentityManage,
@@ -99,6 +101,16 @@ const CATALOG: &[(Permission, &str, &str)] = &[
         Permission::LogsDelete,
         "logs.delete",
         "Delete the gateway's logs of a site or of every site.",
+    ),
+    (
+        Permission::AlertsRead,
+        "alerts.read",
+        "Read alert rules, where they stand, their channels and the notifications sent.",
+    ),
+    (
+        Permission::AlertsManage,
+        "alerts.manage",
+        "Change alert rules and channels and send test notifications.",
     ),
     (
         Permission::PlatformRead,
@@ -249,7 +261,7 @@ pub fn built_in_roles() -> Vec<Role> {
         role(
             "operator",
             "Operator",
-            "Changes and applies configuration, decides on others' changes, manages certificates, operates the gateway and keeps its logs.",
+            "Changes and applies configuration, decides on others' changes, manages certificates, operates the gateway, keeps its logs and its alerts.",
             [
                 GatewayRead,
                 GatewayOperate,
@@ -261,6 +273,8 @@ pub fn built_in_roles() -> Vec<Role> {
                 CertificateManage,
                 LogsRead,
                 LogsDelete,
+                AlertsRead,
+                AlertsManage,
                 PlatformRead,
             ]
             .into_iter()
@@ -269,12 +283,13 @@ pub fn built_in_roles() -> Vec<Role> {
         role(
             "viewer",
             "Viewer",
-            "Reads configuration, certificates, the gateway's state and its logs.",
+            "Reads configuration, certificates, the gateway's state, its logs and its alerts.",
             [
                 GatewayRead,
                 ConfigRead,
                 CertificateRead,
                 LogsRead,
+                AlertsRead,
                 PlatformRead,
             ]
             .into_iter()
@@ -283,10 +298,11 @@ pub fn built_in_roles() -> Vec<Role> {
         role(
             "auditor",
             "Auditor",
-            "Reads the audit trail, the gateway's logs, configuration, certificates and accounts.",
+            "Reads the audit trail, the gateway's logs and alerts, configuration, certificates and accounts.",
             [
                 AuditRead,
                 LogsRead,
+                AlertsRead,
                 ConfigRead,
                 CertificateRead,
                 GatewayRead,

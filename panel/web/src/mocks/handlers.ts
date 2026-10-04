@@ -31,6 +31,8 @@ const PERMISSIONS = [
   'audit.read',
   'logs.read',
   'logs.delete',
+  'alerts.read',
+  'alerts.manage',
   'platform.read',
   'identity.read',
   'identity.manage',

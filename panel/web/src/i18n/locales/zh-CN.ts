@@ -1260,6 +1260,8 @@ const zhCN = {
     audit_read: '读取并校验审计日志',
     logs_read: '检索、实时查看与下载网关的访问日志和错误日志',
     logs_delete: '删除某个网站或全部网站的网关日志',
+    alerts_read: '查看告警规则及其状态、通知渠道与已发送的通知',
+    alerts_manage: '修改告警规则与通知渠道，并发送测试通知',
     platform_read: '读取控制面服务',
     identity_read: '读取账户、角色与会话',
     identity_manage: '创建、修改、停用与解锁账户，分配角色并结束会话',
