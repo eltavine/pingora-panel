@@ -12,7 +12,6 @@ import WindowsField from '@/components/WindowsField.vue'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -103,16 +102,18 @@ function submit() {
             <legend class="mb-1 text-sm font-medium">{{ t('approvals.resources') }}</legend>
             <p class="text-muted-foreground text-xs">{{ t('approvals.resourcesHint') }}</p>
             <div class="grid grid-cols-2 gap-2">
-              <div v-for="kind in RESOURCE_KINDS" :key="kind" class="flex items-center gap-2">
+              <label
+                v-for="kind in RESOURCE_KINDS"
+                :key="kind"
+                class="flex items-center gap-2 text-sm"
+              >
                 <Checkbox
                   :id="`policy-kind-${kind}`"
                   :model-value="form.resources.includes(kind)"
                   @update:model-value="toggle(form.resources, kind, $event)"
                 />
-                <Label :for="`policy-kind-${kind}`" class="font-normal">{{
-                  t(`approvals.kinds.${kind}`)
-                }}</Label>
-              </div>
+                {{ t(`approvals.kinds.${kind}`) }}
+              </label>
             </div>
           </fieldset>
           <FormField

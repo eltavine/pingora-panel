@@ -4,7 +4,6 @@ import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import {
   blankWindow,
   DAYS,
@@ -62,16 +61,14 @@ function toggle(window: WindowForm, day: DayName, checked: boolean | 'indetermin
       <template v-else>
         <div class="flex items-start gap-2">
           <div class="flex flex-1 flex-wrap gap-x-3 gap-y-1">
-            <div v-for="day in DAYS" :key="day" class="flex items-center gap-1">
+            <label v-for="day in DAYS" :key="day" class="flex items-center gap-1 text-sm">
               <Checkbox
                 :id="`${id}-${index}-${day}`"
                 :model-value="window.days.includes(day)"
                 @update:model-value="toggle(window, day, $event)"
               />
-              <Label :for="`${id}-${index}-${day}`" class="font-normal">{{
-                t(`windows.days.${day}`)
-              }}</Label>
-            </div>
+              {{ t(`windows.days.${day}`) }}
+            </label>
           </div>
           <Button
             type="button"

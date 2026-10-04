@@ -64,6 +64,9 @@
  * against their surfaces (SC 1.4.3, SC 1.4.11).
  */
 @theme inline {
+  /* Material 3 standard easing (ADR 0023). */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
   --font-sans:
     'Geist Variable', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC',
     ui-sans-serif, system-ui, sans-serif;
@@ -180,10 +183,32 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* A checkbox or switch is tapped through its label (ADR 0023). */
+  @media (pointer: coarse) {
+    label:has(> [role='checkbox'], > [role='switch']) {
+      min-height: 2.75rem;
+      min-width: 2.75rem;
+    }
+  }
   html {
     @apply font-sans antialiased;
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/*
+ * Reduced motion (ADR 0023): a state still changes, but nothing moves and
+ * nothing spins.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

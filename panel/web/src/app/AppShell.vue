@@ -27,7 +27,7 @@ const title = computed(() =>
     <AppSidebar />
     <SidebarInset>
       <header
-        class="bg-background/95 supports-backdrop-filter:bg-background/80 sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b px-4 backdrop-blur"
+        class="bg-background/95 supports-backdrop-filter:bg-background/80 sticky top-0 z-10 flex min-h-[calc(--spacing(14)+env(safe-area-inset-top))] shrink-0 items-center gap-2 border-b pt-[env(safe-area-inset-top)] pr-[max(--spacing(4),env(safe-area-inset-right))] pl-[max(--spacing(4),env(safe-area-inset-left))] backdrop-blur"
       >
         <SidebarTrigger class="-ml-1" :aria-label="t('shell.toggleSidebar')" />
         <Separator
@@ -45,7 +45,9 @@ const title = computed(() =>
         <PreferencesMenu />
         <UserMenu />
       </header>
-      <main class="mx-auto w-full max-w-6xl flex-1 p-4 md:p-6">
+      <main
+        class="mx-auto w-full max-w-6xl flex-1 py-4 pr-[max(--spacing(4),env(safe-area-inset-right))] pl-[max(--spacing(4),env(safe-area-inset-left))] md:py-6 md:pr-[max(--spacing(6),env(safe-area-inset-right))] md:pl-[max(--spacing(6),env(safe-area-inset-left))]"
+      >
         <RouterView />
       </main>
     </SidebarInset>

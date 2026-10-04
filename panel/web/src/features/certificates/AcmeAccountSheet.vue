@@ -211,8 +211,8 @@ function submit() {
             />
           </FormField>
           <div class="flex flex-col gap-4 rounded-lg border p-3">
-            <div class="flex items-center justify-between gap-3">
-              <div class="flex flex-col gap-0.5">
+            <label class="flex items-center justify-between gap-3">
+              <span class="flex flex-col gap-0.5">
                 <span class="text-sm font-medium" id="acme-binding-label">{{
                   t('certificates.acme.binding')
                 }}</span>
@@ -221,13 +221,13 @@ function submit() {
                     ? t('certificates.acme.bindingRequired')
                     : t('certificates.acme.bindingHint')
                 }}</span>
-              </div>
+              </span>
               <Switch
                 v-if="!needsBinding"
                 v-model="form.binding"
                 aria-labelledby="acme-binding-label"
               />
-            </div>
+            </label>
             <template v-if="usesBinding">
               <FormField id="acme-key-id" :label="t('certificates.acme.keyId')">
                 <Input
