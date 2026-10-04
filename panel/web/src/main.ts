@@ -9,12 +9,19 @@ import { queryClient } from './lib/query'
 import { installSession } from './lib/session'
 import router, { loginFor } from './router'
 
-configureApi()
-installSession(() => {
-  const current = router.currentRoute.value
-  if (!current.meta.public) {
-    void router.replace(loginFor(current.fullPath))
+async function start() {
+  if (import.meta.env.MODE === 'mock') {
+    const { startMocks } = await import('./mocks')
+    await startMocks()
   }
-})
+  configureApi()
+  installSession(() => {
+    const current = router.currentRoute.value
+    if (!current.meta.public) {
+      void router.replace(loginFor(current.fullPath))
+    }
+  })
+  createApp(App).use(router).use(i18n).use(VueQueryPlugin, { queryClient }).mount('#app')
+}
 
-createApp(App).use(router).use(i18n).use(VueQueryPlugin, { queryClient }).mount('#app')
+void start()

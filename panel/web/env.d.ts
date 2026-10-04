@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+/// <reference types="msw/vite/client" />
 
 interface ImportMetaEnv {
   /** Origin of the management API when it differs from the console's origin. */

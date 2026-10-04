@@ -9,6 +9,7 @@ components on Reka UI, Tailwind CSS v4 and Lucide icons, in a monochrome theme.
 pnpm install --frozen-lockfile
 pnpm codegen      # typed client from ../panel-api/tests/fixtures/openapi.json
 pnpm dev          # Vite dev server; /api is proxied to PANEL_API_URL (default http://127.0.0.1:8080)
+pnpm dev:mock     # the same without a backend: Mock Service Worker answers /api in the browser
 pnpm type-check
 pnpm lint
 pnpm exec vitest run
@@ -18,6 +19,11 @@ pnpm build
 
 The generated client in `src/api/generated` is never committed; regenerate it
 after the OpenAPI fixture changes.
+
+`pnpm dev:mock` previews the console with every permission against
+`src/mocks`: hand-written figures for the gateway, traffic, sites and
+upstreams, and answers sampled from the OpenAPI contract for every other
+operation. Production builds leave the mocks out.
 
 ## Structure
 

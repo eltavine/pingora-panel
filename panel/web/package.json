@@ -6,6 +6,7 @@
   "scripts": {
     "codegen": "openapi-ts",
     "dev": "openapi-ts && vite",
+    "dev:mock": "openapi-ts && vite --mode mock",
     "build": "openapi-ts && run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
     "test:unit": "vitest",
@@ -63,7 +64,9 @@
     "eslint-plugin-vue": "~10.11.0",
     "jiti": "^2.7.0",
     "jsdom": "^30.0.1",
+    "msw": "^3.0.2",
     "npm-run-all2": "^9.0.3",
+    "openapi-sampler": "^1.7.6",
     "oxlint": "~1.82.0",
     "prettier": "3.9.6",
     "tailwindcss": "^4.3.3",
