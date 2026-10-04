@@ -163,9 +163,11 @@ services:
   gatewayd:
     <<: *panel
     command: ["/usr/local/bin/gatewayd"]
-    # Binding ports below 1024 on the host network needs this one capability.
+    # Root with two capabilities: binding ports below 1024 on the host
+    # network, and reading the credentials and certificates other services
+    # write as their own user. It writes only its state and logs.
     user: "0:0"
-    cap_add: [NET_BIND_SERVICE]
+    cap_add: [NET_BIND_SERVICE, DAC_READ_SEARCH]
     environment:
       PINGORA_PANEL_GATEWAY_ADDR: 127.0.0.1:50051
       PINGORA_PANEL_STATE_DIR: /var/lib/pingora-panel/gateway
