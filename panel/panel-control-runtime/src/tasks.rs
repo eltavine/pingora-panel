@@ -8,6 +8,7 @@ use panel_jetstream::{
 use panel_outbox::{OutboxRelay, RelayOptions};
 use panel_platform::{maintain_registration, RegistrationPolicy, ServiceDescriptor};
 use panel_postgres::{PgOutbox, SchemaMigration, ServiceDatabase};
+use panel_sqlite::SqliteOutbox;
 use std::{sync::Arc, time::Duration};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
@@ -57,6 +58,25 @@ pub(crate) async fn migrate(
     if applied.is_some() {
         tracing::info!(
             schema_version = SchemaMigration::latest(migrations),
+            "schema migrated"
+        );
+        migrated.send_replace(true);
+    }
+}
+
+pub(crate) async fn migrate_sqlite(
+    database: panel_sqlite::ServiceDatabase,
+    migrations: &'static [panel_sqlite::SchemaMigration],
+    migrated: watch::Sender<bool>,
+    cancel: CancellationToken,
+) {
+    let applied = until_success("schema migration", &cancel, || async {
+        database.migrate(migrations).await
+    })
+    .await;
+    if applied.is_some() {
+        tracing::info!(
+            schema_version = panel_sqlite::SchemaMigration::latest(migrations),
             "schema migrated"
         );
         migrated.send_replace(true);
@@ -131,6 +151,48 @@ pub(crate) async fn relay(
             return;
         }
         tracing::warn!("outbox relay leadership lost; standing by");
+    }
+}
+
+/// Relays a module's outbox. One process owns each SQLite file, so it
+/// relays without leadership.
+pub(crate) async fn relay_sqlite(
+    outbox: SqliteOutbox,
+    publisher: JetStreamPublisher,
+    options: RelayOptions,
+    mut migrated: watch::Receiver<bool>,
+    cancel: CancellationToken,
+) {
+    tokio::select! {
+        () = cancel.cancelled() => return,
+        ready = migrated.wait_for(|migrated| *migrated) => if ready.is_err() { return },
+    }
+    let purge = tokio::spawn(purge_sqlite(outbox.clone(), cancel.child_token()));
+    let relay = OutboxRelay::new(
+        Arc::new(outbox.clone()),
+        Arc::new(publisher),
+        Arc::new(outbox.wakeup()),
+        options,
+    );
+    relay.run(cancel.cancelled()).await;
+    purge.abort();
+}
+
+async fn purge_sqlite(outbox: SqliteOutbox, cancel: CancellationToken) {
+    let mut ticker = tokio::time::interval(PURGE_INTERVAL);
+    loop {
+        tokio::select! {
+            () = cancel.cancelled() => return,
+            _ = ticker.tick() => {}
+        }
+        match outbox
+            .purge_published(PUBLISHED_RETENTION, PURGE_BATCH)
+            .await
+        {
+            Ok(0) => {}
+            Ok(purged) => tracing::debug!(purged, "purged published outbox rows"),
+            Err(error) => tracing::warn!(error_code = %error.code, "outbox purge failed"),
+        }
     }
 }
 

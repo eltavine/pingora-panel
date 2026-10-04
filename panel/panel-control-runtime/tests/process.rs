@@ -13,6 +13,7 @@ use panel_health::{HealthStatus, ServiceMode};
 use panel_jetstream::{testing::TestBroker, JetStreamServiceRegistry};
 use panel_platform::{RegistrationPolicy, ServiceDirectory, ServiceName};
 use panel_postgres::{testing::TestDatabase, PgOutbox, SqlIdentifier};
+use panel_sqlite::SqliteOutbox;
 use panel_service::{describe_peer, Environment};
 use std::{collections::HashMap, ffi::OsString, future::Future, time::Duration};
 use tonic::transport::Channel;
@@ -168,6 +169,63 @@ async fn a_ready_process_serves_registers_relays_and_deregisters() {
         .await
         .unwrap();
     database.drop().await;
+    broker.drop().await;
+}
+
+#[tokio::test]
+async fn a_process_on_sqlite_migrates_its_file_and_relays_its_outbox() {
+    let Some(broker) = TestBroker::create().await else {
+        return;
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let nats_url = std::env::var(panel_jetstream::testing::NATS_URL_ENV).unwrap();
+    let process = ControlPlaneProcess::on_sqlite(
+        ServiceName::new("audit-service").unwrap(),
+        "0.1.0-test",
+        settings(&[(NATS_URL_ENV, &nats_url)]).with_data_directory(directory.path()),
+        "audit",
+    )
+    .unwrap()
+    .with_jetstream_settings((*broker.settings).clone())
+    .start()
+    .await
+    .unwrap();
+
+    let health = process.health();
+    eventually("the process is ready", || {
+        let health = health.clone();
+        async move { health.current().status() == HealthStatus::Pass }
+    })
+    .await;
+    let readiness: serde_json::Value = get(format!("http://{}/readyz", process.ops_address()))
+        .await
+        .json()
+        .await
+        .unwrap();
+    for check in ["schema", "sqlite", "nats"] {
+        assert_eq!(
+            readiness["checks"][format!("{check}:responseTime")][0]["status"],
+            "pass"
+        );
+    }
+    assert_eq!(process.descriptor().schema_version(), "2");
+    assert!(directory.path().join("audit.db").is_file());
+
+    let mut transaction = process.sqlite().begin().await.unwrap();
+    SqliteOutbox::append(&mut transaction, &event()).await.unwrap();
+    transaction.commit().await.unwrap();
+    let outbox = SqliteOutbox::new(process.sqlite());
+    eventually("the relay publishes the event", || async {
+        outbox.backlog().await.unwrap().pending == 0
+    })
+    .await;
+
+    process.stop().await;
+    broker
+        .context
+        .delete_key_value(broker.settings.service_bucket())
+        .await
+        .unwrap();
     broker.drop().await;
 }
 

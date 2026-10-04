@@ -364,6 +364,7 @@
         "panel-platform-codec",
         "panel-postgres",
         "panel-service",
+        "panel-sqlite",
         "panel-tls"
       ]
     },
