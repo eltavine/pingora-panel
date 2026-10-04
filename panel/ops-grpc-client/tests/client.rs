@@ -8,6 +8,7 @@ use panel_contracts::{
         self as wire,
         agent_server::{Agent, AgentServer},
         directories_server::{Directories, DirectoriesServer},
+        listeners_server::{Listeners, ListenersServer},
     },
 };
 use tokio_stream::wrappers::TcpListenerStream;
@@ -85,6 +86,33 @@ impl Directories for FakeDirectories {
     }
 }
 
+struct FakeListeners;
+
+#[tonic::async_trait]
+impl Listeners for FakeListeners {
+    async fn list(
+        &self,
+        request: Request<wire::ListenersListRequest>,
+    ) -> Result<Response<wire::ListenersListResponse>, Status> {
+        assert_eq!(request.into_inner().ports, vec![80, 443]);
+        Ok(Response::new(wire::ListenersListResponse {
+            observed_at: Some(std::time::SystemTime::now().into()),
+            listeners: vec![wire::Listener {
+                address: "0.0.0.0".into(),
+                port: 443,
+                uid: 0,
+                processes: vec![wire::ListeningProcess {
+                    pid: 812,
+                    name: "nginx".into(),
+                    executable: "/usr/sbin/nginx".into(),
+                    uid: 33,
+                }],
+            }],
+            error: None,
+        }))
+    }
+}
+
 async fn client(fail: bool) -> OpsAgentClient {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -92,6 +120,7 @@ async fn client(fail: bool) -> OpsAgentClient {
         Server::builder()
             .add_service(AgentServer::new(FakeAgent))
             .add_service(DirectoriesServer::new(FakeDirectories { fail }))
+            .add_service(ListenersServer::new(FakeListeners))
             .serve_with_incoming(TcpListenerStream::new(listener)),
     );
     OpsAgentClient::from_channel(
@@ -125,6 +154,20 @@ async fn the_agent_and_its_directories_reach_the_application() {
         ),
         (4096, 4, 1)
     );
+}
+
+#[tokio::test]
+async fn what_holds_the_web_ports_reaches_the_application() {
+    let report = client(false)
+        .await
+        .listeners(scope(), vec![80, 443])
+        .await
+        .unwrap();
+    assert!(report.observed_at.is_some());
+    let listener = &report.listeners[0];
+    assert_eq!((listener.address.as_str(), listener.port), ("0.0.0.0", 443));
+    assert_eq!(listener.processes[0].name, "nginx");
+    assert_eq!(listener.processes[0].pid, 812);
 }
 
 #[tokio::test]

@@ -75,6 +75,32 @@ pub struct DirectoriesReport {
     pub directories: Vec<DirectoryUsage>,
 }
 
+/// A process that holds a listening socket.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ListeningProcess {
+    pub pid: i32,
+    pub name: String,
+    /// Empty when the agent may not read it.
+    pub executable: String,
+    pub uid: u32,
+}
+
+/// A socket listening on a TCP port.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PortListener {
+    pub address: String,
+    pub port: u16,
+    /// The socket's owner.
+    pub uid: u32,
+    pub processes: Vec<ListeningProcess>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ListenersReport {
+    pub observed_at: Option<SystemTime>,
+    pub listeners: Vec<PortListener>,
+}
+
 #[async_trait]
 pub trait HostAgentPort: Send + Sync {
     /// The agent and its capabilities; fails as unsupported when no agent
@@ -82,6 +108,9 @@ pub trait HostAgentPort: Send + Sync {
     async fn agent(&self, scope: RequestScope) -> Result<AgentDescription>;
 
     async fn directories(&self, scope: RequestScope) -> Result<DirectoriesReport>;
+
+    /// What listens on `ports`; 80 and 443 when empty.
+    async fn listeners(&self, scope: RequestScope, ports: Vec<u16>) -> Result<ListenersReport>;
 }
 
 /// The port of an installation without the agent.
@@ -100,6 +129,10 @@ impl HostAgentPort for NoHostAgent {
     }
 
     async fn directories(&self, _: RequestScope) -> Result<DirectoriesReport> {
+        Err(Self::refusal())
+    }
+
+    async fn listeners(&self, _: RequestScope, _: Vec<u16>) -> Result<ListenersReport> {
         Err(Self::refusal())
     }
 }

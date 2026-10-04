@@ -6,10 +6,12 @@
 use async_trait::async_trait;
 use panel_application::{
     AgentCapability, AgentDescription, CapabilityState, CapabilityStatus, DirectoriesReport,
-    DirectoryKind, DirectoryUsage, HostAgentPort, RequestScope,
+    DirectoryKind, DirectoryUsage, HostAgentPort, ListenersReport, ListeningProcess, PortListener,
+    RequestScope,
 };
 use panel_contracts::ops::v1::{
     self as wire, agent_client::AgentClient, directories_client::DirectoriesClient,
+    listeners_client::ListenersClient,
 };
 use panel_errors::Result;
 use panel_service::{
@@ -118,6 +120,24 @@ fn directory(value: wire::DirectoryUsage) -> Option<DirectoryUsage> {
     })
 }
 
+fn listener(value: wire::Listener) -> Option<PortListener> {
+    Some(PortListener {
+        address: value.address,
+        port: u16::try_from(value.port).ok()?,
+        uid: value.uid,
+        processes: value
+            .processes
+            .into_iter()
+            .map(|process| ListeningProcess {
+                pid: process.pid,
+                name: process.name,
+                executable: process.executable,
+                uid: process.uid,
+            })
+            .collect(),
+    })
+}
+
 #[async_trait]
 impl HostAgentPort for OpsAgentClient {
     async fn agent(&self, scope: RequestScope) -> Result<AgentDescription> {
@@ -149,6 +169,27 @@ impl HostAgentPort for OpsAgentClient {
                 .directories
                 .into_iter()
                 .filter_map(directory)
+                .collect(),
+        })
+    }
+
+    async fn listeners(&self, scope: RequestScope, ports: Vec<u16>) -> Result<ListenersReport> {
+        let message = wire::ListenersListRequest {
+            context: Some(request_context(&scope)),
+            ports: ports.into_iter().map(u32::from).collect(),
+        };
+        let response = ListenersClient::new(self.channel.clone())
+            .list(self.request(message, &scope))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        Ok(ListenersReport {
+            observed_at: time(response.observed_at),
+            listeners: response
+                .listeners
+                .into_iter()
+                .filter_map(listener)
                 .collect(),
         })
     }

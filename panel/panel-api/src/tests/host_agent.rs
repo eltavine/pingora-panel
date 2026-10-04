@@ -1,7 +1,8 @@
 use super::*;
 use panel_application::{
     AgentCapability, AgentDescription, CapabilityState, CapabilityStatus, DirectoriesReport,
-    DirectoryKind, DirectoryUsage, HostAgentPort, RequestScope,
+    DirectoryKind, DirectoryUsage, HostAgentPort, ListenersReport, ListeningProcess, PortListener,
+    RequestScope,
 };
 use serde_json::Value;
 use std::time::{Duration, UNIX_EPOCH};
@@ -49,6 +50,26 @@ impl HostAgentPort for Agent {
                 unreadable: 0,
                 truncated: false,
             }],
+        })
+    }
+
+    async fn listeners(&self, _scope: RequestScope, ports: Vec<u16>) -> Result<ListenersReport> {
+        Ok(ListenersReport {
+            observed_at: Some(UNIX_EPOCH + Duration::from_secs(1_800_000_000)),
+            listeners: ports
+                .into_iter()
+                .map(|port| PortListener {
+                    address: "0.0.0.0".into(),
+                    port,
+                    uid: 0,
+                    processes: vec![ListeningProcess {
+                        pid: 812,
+                        name: "nginx".into(),
+                        executable: "/usr/sbin/nginx".into(),
+                        uid: 33,
+                    }],
+                })
+                .collect(),
         })
     }
 }
