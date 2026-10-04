@@ -1057,6 +1057,8 @@ const en: Messages = {
       title: 'Container engines',
       enable: 'Enable',
       disable: 'Disable',
+      rootNote:
+        "Reaching an engine's socket is root on this host. The panel acts on an engine only while it is enabled.",
       conditions: {
         reachable: 'Reachable',
         unreachable: 'Unreachable',

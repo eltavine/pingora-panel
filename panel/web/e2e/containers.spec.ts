@@ -179,6 +179,7 @@ test('containers are searched and filtered by state from the address bar', async
 test('disabling an engine asks first', async ({ page }) => {
   const seen = await setUp(page)
   await page.goto('/containers')
+  await expect(page.getByText("Reaching an engine's socket is root on this host.")).toBeVisible()
   const card = page.locator('[data-slot="card"]').filter({ hasText: '/run/docker.sock' })
   await card.getByRole('button', { name: 'Disable' }).click()
   const dialog = page.getByRole('alertdialog', { name: 'Disable Docker?' })
@@ -204,6 +205,7 @@ test('readers see engines and containers without changing them', async ({ page }
   await page.goto('/containers')
   await expect(page.getByRole('row').filter({ hasText: 'shop-web-1' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Disable' })).toHaveCount(0)
+  await expect(page.getByText("Reaching an engine's socket is root on this host.")).toHaveCount(0)
 })
 
 test('a host without the agent says how to manage containers', async ({ page }) => {

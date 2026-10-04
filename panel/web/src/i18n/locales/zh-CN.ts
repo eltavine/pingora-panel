@@ -1020,6 +1020,7 @@ const zhCN = {
       title: '容器引擎',
       enable: '启用',
       disable: '停用',
+      rootNote: '能访问引擎的 socket 就等同于这台主机的 root。面板只在引擎启用时操作它。',
       conditions: {
         reachable: '可连接',
         unreachable: '无法连接',

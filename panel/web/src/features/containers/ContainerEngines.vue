@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
-import { Container, Power, PowerOff } from '@lucide/vue'
+import { Container, Power, PowerOff, ShieldAlert } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import type { ContainerEngineView } from '@/api/generated'
@@ -106,6 +106,10 @@ function facts(engine: ContainerEngineView) {
 </script>
 
 <template>
+  <p v-if="can('containers.manage')" class="text-muted-foreground flex items-start gap-2 text-sm">
+    <ShieldAlert class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+    {{ t('containers.engines.rootNote') }}
+  </p>
   <section class="grid gap-4 lg:grid-cols-2" :aria-label="t('containers.engines.title')">
     <Card v-for="engine in engines" :key="engine.id" class="min-w-0">
       <CardHeader>
