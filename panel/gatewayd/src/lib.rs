@@ -30,9 +30,9 @@ pub use background_tasks::{
 pub use bind_policy::{LoopbackOnlyManagementBindPolicy, ManagementBindPolicy};
 pub use config::{
     GatewayTls, GatewayWorkerCount, GatewaydConfig, BACKGROUND_TASK_SHUTDOWN_TIMEOUT_MILLIS_ENV,
-    DRAIN_TIMEOUT_MILLIS_ENV, GATEWAY_ADDRESS_ENV, MAX_GATEWAY_WORKERS, METRICS_TOKEN_ENV,
-    OPS_ADDRESS_ENV, SECRET_DIRECTORY_ENV, STATE_DIRECTORY_ENV, STATIC_ROOT_ENV, TLS_DIR_ENV,
-    TRUST_DOMAIN_ENV, WORKER_COUNT_ENV,
+    DRAIN_TIMEOUT_MILLIS_ENV, GATEWAY_ADDRESS_ENV, LOG_DIRECTORY_ENV, MAX_GATEWAY_WORKERS,
+    METRICS_TOKEN_ENV, OPS_ADDRESS_ENV, SECRET_DIRECTORY_ENV, STATE_DIRECTORY_ENV, STATIC_ROOT_ENV,
+    TLS_DIR_ENV, TRUST_DOMAIN_ENV, WORKER_COUNT_ENV,
 };
 pub use gateway_pingora::{DataPlaneStatus, ListenerStatus};
 pub use health::{RuntimeHealthState, RuntimeReadiness, TonicHealthSynchronizer};
@@ -53,7 +53,7 @@ use gateway_grpc::{
 };
 use gateway_pingora::{
     register_configuration, AdapterOptions, ChallengeDirectory, DataPlane, DataPlaneOptions,
-    DirectorySecrets, GatewayMetrics, PingoraGatewayAdapter,
+    DirectorySecrets, GatewayMetrics, Logs, PingoraGatewayAdapter,
 };
 use panel_context::ServiceName;
 use panel_contracts::gateway::v1::{
@@ -475,11 +475,19 @@ pub async fn serve_gatewayd(
     let mut metrics = Metrics::new();
     let gateway_metrics = GatewayMetrics::register(&mut metrics);
     register_configuration(&mut metrics, Arc::clone(&runtime.adapter));
-    let data_plane = runtime.data_plane(
-        DataPlaneOptions::new(workers)
-            .with_drain_timeout(config.shutdown_policy().drain_timeout())
-            .with_metrics(gateway_metrics),
-    );
+    let mut plane_options = DataPlaneOptions::new(workers)
+        .with_drain_timeout(config.shutdown_policy().drain_timeout())
+        .with_metrics(gateway_metrics);
+    if let Some(directory) = config.log_directory() {
+        let logs = Logs::start(directory, &mut metrics).map_err(|error| {
+            panel_errors::PanelError::precondition_failed(format!(
+                "logs cannot be written to {}: {error}",
+                directory.display()
+            ))
+        })?;
+        plane_options = plane_options.with_logs(logs);
+    }
+    let data_plane = runtime.data_plane(plane_options);
     let ops_listener = tokio::net::TcpListener::bind(config.ops_address())
         .await
         .map_err(|error| {

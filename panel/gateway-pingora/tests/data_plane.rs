@@ -5,7 +5,7 @@
 use base64::Engine;
 use gateway_pingora::{
     register_configuration, AdapterOptions, ChallengeDirectory, DataPlane, DataPlaneOptions,
-    DirectorySecrets, GatewayMetrics, PingoraGatewayAdapter,
+    DirectorySecrets, GatewayMetrics, Logs, PingoraGatewayAdapter,
 };
 use panel_domain::{
     EndpointAddress, EndpointId, NormalizedHost, PathPrefix, RevisionId, RouteId, SiteId,
@@ -13,16 +13,18 @@ use panel_domain::{
 };
 use panel_engine::DataPlaneAdapter;
 use panel_ir::{
-    template::TEMPLATE_CAPABILITY, BasicAuth, CapabilityRequirement, DomainSpec, ListenerRef,
-    RateLimit, RateLimitKey, RefererRule, RouteAction, RouteMatcher, RouteSpec, RuntimeSnapshot,
-    SecurityPolicy, SiteSpec, StaticContentPolicy, StrictTransportSecurity, TlsProfile,
-    UpstreamEndpoint, UpstreamPoolSpec, WwwRedirect,
+    logging::LOGGING_CAPABILITY, template::TEMPLATE_CAPABILITY, AccessLogFormat, BasicAuth,
+    CapabilityRequirement, DomainSpec, ListenerRef, RateLimit, RateLimitKey, RefererRule,
+    RouteAction, RouteMatcher, RouteSpec, RuntimeSnapshot, SecurityPolicy, SiteSpec,
+    StaticContentPolicy, StrictTransportSecurity, TlsProfile, UpstreamEndpoint, UpstreamPoolSpec,
+    WwwRedirect,
 };
 use panel_metrics::Metrics;
 use std::{
     collections::{BTreeSet, HashMap},
     net::SocketAddr,
     num::NonZeroUsize,
+    path::Path,
     sync::Arc,
     time::Duration,
 };
@@ -150,21 +152,20 @@ struct Gateway {
 
 impl Gateway {
     async fn start(options: AdapterOptions, snapshot: RuntimeSnapshot) -> Self {
-        Self::start_with(options, snapshot, None).await
+        Self::start_with(options, snapshot, |plane| plane).await
     }
 
     async fn start_with(
         options: AdapterOptions,
         snapshot: RuntimeSnapshot,
-        metrics: Option<GatewayMetrics>,
+        configure: impl FnOnce(DataPlaneOptions) -> DataPlaneOptions,
     ) -> Self {
         let adapter = Arc::new(PingoraGatewayAdapter::with_options(options));
         Self::activate(&adapter, snapshot).await;
-        let mut plane_options = DataPlaneOptions::new(NonZeroUsize::new(2).unwrap())
-            .with_drain_timeout(Duration::from_secs(2));
-        if let Some(metrics) = metrics {
-            plane_options = plane_options.with_metrics(metrics);
-        }
+        let plane_options = configure(
+            DataPlaneOptions::new(NonZeroUsize::new(2).unwrap())
+                .with_drain_timeout(Duration::from_secs(2)),
+        );
         let plane = DataPlane::new(Arc::clone(&adapter), plane_options);
         let (stop, stopped) = oneshot::channel();
         let task = tokio::spawn(Arc::clone(&plane).run(async {
@@ -402,8 +403,10 @@ async fn requests_and_upstream_attempts_are_measured() {
     ];
     let mut metrics = Metrics::new();
     let gateway_metrics = GatewayMetrics::register(&mut metrics);
-    let gateway =
-        Gateway::start_with(AdapterOptions::default(), snapshot, Some(gateway_metrics)).await;
+    let gateway = Gateway::start_with(AdapterOptions::default(), snapshot, |plane| {
+        plane.with_metrics(gateway_metrics)
+    })
+    .await;
     register_configuration(&mut metrics, Arc::clone(&gateway.adapter));
     wait_for(listen).await;
     let text = metrics.encode();
@@ -1046,7 +1049,7 @@ async fn tls_listener_selects_certificates_by_sni_and_rejects_misdirected_hosts(
     let gateway = Gateway::start_with(
         AdapterOptions::default().with_secrets(Arc::new(DirectorySecrets::new(secrets.path()))),
         snapshot,
-        Some(gateway_metrics),
+        |plane| plane.with_metrics(gateway_metrics),
     )
     .await;
     wait_for(listen).await;
@@ -1319,5 +1322,134 @@ async fn listener_tls_settings_narrow_handshakes_and_hsts_reaches_https() {
     let plain = get(http, Some("example.com"), "/app", "").await;
     assert_eq!(plain.status, 200);
     assert!(!plain.headers.contains_key("strict-transport-security"));
+    gateway.stop().await;
+}
+
+/// The records of `path` once it has at least `wanted` of them.
+async fn logged(path: &Path, wanted: usize) -> Vec<String> {
+    for _ in 0..200 {
+        if let Ok(text) = std::fs::read_to_string(path) {
+            let lines: Vec<String> = text.lines().map(str::to_owned).collect();
+            if lines.len() >= wanted {
+                return lines;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("{} never had {wanted} records", path.display());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn requests_are_logged_by_site_route_and_format() {
+    let upstream = echo_upstream().await;
+    let refused = free_address();
+    let listen = free_address();
+    let directory = tempfile::tempdir().unwrap();
+    let mut metrics = Metrics::new();
+    let logs = Logs::start(directory.path(), &mut metrics).unwrap();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(7));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    snapshot.sites.push(site(&["shop.example"]));
+    snapshot.upstream_pools.push(pool("app", &[upstream]));
+    snapshot.upstream_pools.push(pool("gone", &[refused]));
+    let mut quiet = route("quiet", 10, prefix("/health"), proxy("app"));
+    quiet.access_log.enabled = Some(false);
+    let mut classic = route("classic", 20, prefix("/classic"), proxy("app"));
+    classic.access_log.format = Some(AccessLogFormat::Combined);
+    let broken = route("broken", 30, prefix("/broken"), proxy("gone"));
+    let mut main = route("main", 40, prefix("/"), proxy("app"));
+    main.access_log
+        .fields
+        .insert("tenant".into(), "$http_x_tenant".into());
+    snapshot.routes.extend([quiet, classic, broken, main]);
+    snapshot
+        .required_capabilities
+        .push(CapabilityRequirement::new(LOGGING_CAPABILITY, "1"));
+    let gateway = Gateway::start_with(AdapterOptions::default(), snapshot, |plane| {
+        plane.with_logs(logs)
+    })
+    .await;
+    wait_for(listen).await;
+
+    let echoed = get(
+        listen,
+        Some("shop.example"),
+        "/pay?sig=secret&order=7",
+        "x-tenant: acme\r\nauthorization: Bearer secret\r\n",
+    )
+    .await;
+    assert_eq!(echoed.status, 200);
+    let forwarded = String::from_utf8_lossy(&echoed.body).to_ascii_lowercase();
+    let request_id = forwarded
+        .lines()
+        .find_map(|line| line.strip_prefix("x-request-id: "))
+        .expect("the upstream gets a request id")
+        .trim()
+        .to_owned();
+    assert_eq!(
+        get(listen, Some("shop.example"), "/health", "")
+            .await
+            .status,
+        200
+    );
+    get(
+        listen,
+        Some("shop.example"),
+        "/classic?q=1",
+        "user-agent: curl/8\r\n",
+    )
+    .await;
+    assert_eq!(
+        get(listen, Some("shop.example"), "/broken", "")
+            .await
+            .status,
+        502
+    );
+    assert_eq!(
+        get(listen, Some("nobody.example"), "/", "").await.status,
+        421
+    );
+
+    let site = logged(&directory.path().join("sites/site.access.log"), 3).await;
+    assert_eq!(site.len(), 3, "{site:#?}");
+    let first: serde_json::Value = serde_json::from_str(&site[0]).unwrap();
+    assert_eq!(first["pingora_panel.request.id"], request_id.as_str());
+    assert_eq!(first["url.query"], "sig=REDACTED&order=7");
+    assert_eq!(first["tenant"], "acme");
+    assert_eq!(first["http.response.status_code"], 200);
+    assert_eq!(first["pingora_panel.site.id"], "site");
+    assert_eq!(first["pingora_panel.route.id"], "main");
+    assert_eq!(first["pingora_panel.revision.id"], 7);
+    assert_eq!(first["pingora_panel.upstream.id"], "app");
+    assert_eq!(first["client.address"], "127.0.0.1");
+    assert!(!site[0].contains("Bearer secret"));
+    assert!(
+        site[1].starts_with("127.0.0.1 - - [")
+            && site[1].contains("\"GET /classic?q=1 HTTP/1.1\" 200 ")
+            && site[1].ends_with("\"-\" \"curl/8\""),
+        "{}",
+        site[1]
+    );
+    let failed: serde_json::Value = serde_json::from_str(&site[2]).unwrap();
+    assert_eq!(failed["http.response.status_code"], 502);
+    assert_eq!(failed["pingora_panel.route.id"], "broken");
+    assert!(failed["error.type"].is_string(), "{failed}");
+
+    let errors = logged(&directory.path().join("error.log"), 1).await;
+    let error: serde_json::Value = serde_json::from_str(&errors[0]).unwrap();
+    assert_eq!(error["event.name"], "pingora_panel.error");
+    assert_eq!(error["severity_text"], "ERROR");
+    assert_eq!(error["pingora_panel.route.id"], "broken");
+    assert_eq!(error["error.type"], failed["error.type"]);
+
+    let unclaimed = logged(&directory.path().join("access.log"), 1).await;
+    let unclaimed: serde_json::Value = serde_json::from_str(&unclaimed[0]).unwrap();
+    assert_eq!(unclaimed["http.response.status_code"], 421);
+    assert!(unclaimed.get("pingora_panel.site.id").is_none());
+    assert!(metrics
+        .encode()
+        .contains("pingora_panel_log_records_total{log=\"access\"} 4"));
     gateway.stop().await;
 }

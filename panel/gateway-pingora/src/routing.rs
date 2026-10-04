@@ -1,6 +1,6 @@
 //! Immutable routing tables compiled before a snapshot becomes active.
 
-use crate::template::Template;
+use crate::{access_log::AccessPlan, template::Template};
 use globset::{GlobBuilder, GlobMatcher};
 use http::HeaderValue;
 use panel_domain::{NormalizedHost, PathPrefix, RouteId, SiteId};
@@ -17,6 +17,8 @@ use std::{
 const HTTPS_PORT: u16 = 443;
 
 pub(crate) struct RoutingTable {
+    /// How requests no site takes are logged.
+    access: AccessPlan,
     exact: HashMap<String, HostEntry>,
     /// Keyed by the parent of `*.parent`, so a lookup strips one label.
     wildcard: HashMap<String, HostEntry>,
@@ -42,6 +44,8 @@ pub(crate) struct SiteRoutes {
     pub hsts: Option<HeaderValue>,
     /// The security policy every request for the site passes.
     pub security: Option<usize>,
+    /// How requests the site takes without a route are logged.
+    pub access: AccessPlan,
     www: HashMap<String, String>,
     routes: Vec<CompiledRoute>,
 }
@@ -54,6 +58,7 @@ pub(crate) struct CompiledRoute {
     pub target: RouteTarget,
     /// The security policy the route's requests pass after the site's.
     pub security: Option<usize>,
+    pub access: AccessPlan,
 }
 
 enum PathMatcher {
@@ -103,6 +108,7 @@ fn policy(
 impl RoutingTable {
     pub(crate) fn compile(snapshot: &RuntimeSnapshot, targets: &Targets<'_>) -> Result<Self> {
         let mut table = Self {
+            access: AccessPlan::resolve(&[&snapshot.logging.access])?,
             exact: HashMap::new(),
             wildcard: HashMap::new(),
             sites: Vec::new(),
@@ -188,6 +194,7 @@ impl RoutingTable {
                     &format!("site {}", site.id),
                     site.security_policy_id.as_ref(),
                 )?,
+                access: AccessPlan::resolve(&[&snapshot.logging.access, &site.access_log])?,
             });
         }
         for listener in &snapshot.listeners {
@@ -199,6 +206,11 @@ impl RoutingTable {
                 table.default_sites.insert(listener.id.clone(), *index);
             }
         }
+        let site_logs: HashMap<&SiteId, &panel_ir::AccessLog> = snapshot
+            .sites
+            .iter()
+            .map(|site| (&site.id, &site.access_log))
+            .collect();
         let mut ranked: Vec<Vec<(RouteRank, CompiledRoute)>> =
             table.sites.iter().map(|_| Vec::new()).collect();
         for route in snapshot.routes.iter().filter(|route| route.enabled) {
@@ -229,6 +241,11 @@ impl RoutingTable {
                         &format!("route {}", route.id),
                         route.security_policy_id.as_ref(),
                     )?,
+                    access: AccessPlan::resolve(&[
+                        &snapshot.logging.access,
+                        site_logs[&route.site_id],
+                        &route.access_log,
+                    ])?,
                 },
             ));
         }
@@ -237,6 +254,16 @@ impl RoutingTable {
             site.routes = routes.into_iter().map(|(_, route)| route).collect();
         }
         Ok(table)
+    }
+
+    /// How a request that `site` and `route` took, if any, is logged.
+    pub(crate) fn access(&self, site: Option<usize>, route: Option<usize>) -> &AccessPlan {
+        let Some(site) = site.and_then(|site| self.sites.get(site)) else {
+            return &self.access;
+        };
+        route
+            .and_then(|route| site.routes.get(route))
+            .map_or(&site.access, |route| &route.access)
     }
 
     pub(crate) fn lookup(&self, host: &str) -> Option<HostEntry> {

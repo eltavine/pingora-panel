@@ -69,12 +69,18 @@ pub enum ErrorType {
     Named(&'static str),
 }
 
+impl std::fmt::Display for ErrorType {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Status(status) => write!(formatter, "{status}"),
+            Self::Named(name) => formatter.write_str(name),
+        }
+    }
+}
+
 impl EncodeLabelValue for ErrorType {
     fn encode(&self, encoder: &mut LabelValueEncoder) -> Result<(), std::fmt::Error> {
-        match self {
-            Self::Status(status) => write!(encoder, "{status}"),
-            Self::Named(name) => encoder.write_str(name),
-        }
+        write!(encoder, "{self}")
     }
 }
 

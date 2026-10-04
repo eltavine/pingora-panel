@@ -5,6 +5,7 @@
 //! The implementation modules are private so upstream Pingora types cannot
 //! become part of this crate's public contract.
 
+mod access_log;
 mod acme;
 mod adapter;
 mod certificates;
@@ -15,8 +16,10 @@ mod head_deadline;
 mod hosts;
 mod hsts;
 mod listeners;
+mod log_files;
 mod path;
 mod proxy;
+mod request_identity;
 mod responses;
 mod routing;
 mod secrets;
@@ -32,6 +35,7 @@ pub use dataplane::{DataPlane, DataPlaneOptions, DataPlaneStatus, ListenerStatus
 pub use file_checks::{
     EscapingLink, FileChecks, PrivateKeyCheck, StaticRootCheck, MAX_STATIC_ENTRIES,
 };
+pub use log_files::Logs;
 pub use secrets::{DirectorySecrets, NoSecrets, SecretPermissions, SecretSource};
 pub use telemetry::{register_configuration, GatewayMetrics};
 pub use upstream::{EndpointHealth, PoolHealth};

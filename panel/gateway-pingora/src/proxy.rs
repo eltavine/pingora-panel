@@ -2,6 +2,7 @@
 //! upstream selection against the active snapshot.
 
 use crate::{
+    access_log::{self, AccessPlan, LoggingPlan, Served},
     acme::ChallengeDirectory,
     adapter::{ActiveSnapshot, PreparedPingoraSnapshot},
     certificates::Handshake,
@@ -9,7 +10,8 @@ use crate::{
     head_deadline::Connections,
     hosts::{self, HostError, RequestHost},
     hsts::{StrictTransport, StrictTransportBuilder},
-    path, responses,
+    log_files::{Destination, Logs},
+    path, request_identity, responses,
     routing::{RouteTarget, SiteRoutes},
     security::{Admission, Candidate, ClientResolution, Refusal},
     static_files,
@@ -18,7 +20,9 @@ use crate::{
     upstream::{EndpointLease, UpstreamPool},
 };
 use async_trait::async_trait;
+use chrono::Utc;
 use http::header;
+use panel_ir::AccessLogFormat;
 use panel_metrics::{method, protocol_version, ActiveRequest, ClientRequest, ServerRequest};
 use pingora_core::{
     modules::http::{compression::ResponseCompressionBuilder, HttpModules},
@@ -81,6 +85,8 @@ pub(crate) struct ListenerContext {
     pub connections: Arc<Connections>,
     /// Where requests are measured, when the gateway is.
     pub metrics: Option<GatewayMetrics>,
+    /// Where requests are logged, when the gateway has a log directory.
+    pub logs: Option<Logs>,
 }
 
 pub(crate) struct PanelProxy {
@@ -177,6 +183,7 @@ impl ProxyHttp for PanelProxy {
         session: &mut Session,
         ctx: &mut RequestContext,
     ) -> pingora_core::Result<bool> {
+        request_identity::ensure_request_id(session.req_header_mut());
         if let Some(metrics) = &self.listener.metrics {
             ctx.active = Some(
                 metrics
@@ -594,6 +601,7 @@ impl ProxyHttp for PanelProxy {
         }
         ctx.lease = None;
         self.measure(session, error, ctx, status);
+        self.record(session, error, ctx, status);
         if tracing::enabled!(tracing::Level::DEBUG) {
             let site = ctx
                 .snapshot
@@ -620,6 +628,74 @@ impl PanelProxy {
             "https"
         } else {
             "http"
+        }
+    }
+
+    /// Writes the access record of a request that is done, and an error
+    /// record when it failed (ADR 0025).
+    fn record(&self, session: &Session, error: Option<&Error>, ctx: &RequestContext, status: u16) {
+        let Some(logs) = &self.listener.logs else {
+            return;
+        };
+        let snapshot = ctx.snapshot.as_deref();
+        let (logging, plan) = match snapshot {
+            Some(snapshot) => (
+                &snapshot.logging,
+                snapshot.routing.access(ctx.site, ctx.route),
+            ),
+            None => (LoggingPlan::fallback(), AccessPlan::fallback()),
+        };
+        if !plan.enabled && error.is_none() {
+            return;
+        }
+        let request = session.req_header();
+        let labels = snapshot.map(|snapshot| &snapshot.labels);
+        let site = labels
+            .zip(ctx.site)
+            .and_then(|(labels, site)| labels.site(site));
+        let route = labels
+            .zip(ctx.site.zip(ctx.route))
+            .and_then(|(labels, (site, route))| labels.route(site, route));
+        let endpoint = labels
+            .zip(ctx.pool.zip(ctx.endpoint))
+            .and_then(|(labels, (pool, endpoint))| labels.endpoint(pool, endpoint));
+        let node = endpoint
+            .as_ref()
+            .map(|endpoint| format!("{}:{}", endpoint.address, endpoint.port));
+        let host = hosts::request_host(request).ok().flatten();
+        let status = (status > 0).then_some(status);
+        let served = Served {
+            request,
+            scheme: self.scheme(),
+            host: host.as_ref().map(|host| host.name.as_str()),
+            client: ctx.client,
+            peer: client_address(session),
+            status,
+            request_bytes: u64::try_from(session.body_bytes_read()).unwrap_or(u64::MAX),
+            response_bytes: u64::try_from(session.body_bytes_sent()).unwrap_or(u64::MAX),
+            duration: ctx.started.elapsed(),
+            error_type: telemetry::server_error_type(error, status),
+            listener: &self.listener.id,
+            site: site.as_deref(),
+            route: route.as_deref(),
+            upstream: endpoint.as_ref().map(|endpoint| &*endpoint.upstream),
+            node: node.as_deref(),
+        };
+        let now = Utc::now();
+        if plan.enabled {
+            let line = match plan.format {
+                AccessLogFormat::Json => access_log::json(&served, plan, logging, now),
+                AccessLogFormat::Combined => access_log::combined(&served, logging, now),
+            };
+            let destination = site.clone().map_or(Destination::Gateway, Destination::Site);
+            logs.send(destination, line, logging.files);
+        }
+        if let Some(error) = error {
+            logs.send(
+                Destination::Errors,
+                access_log::error(&served, error, logging, now),
+                logging.files,
+            );
         }
     }
 
@@ -748,6 +824,7 @@ fn facts<'a>(session: &'a Session, host: &'a str, path: &'a str, tls: bool) -> F
         scheme: if tls { "https" } else { "http" },
         client_ip: client_address(session).map(|address| address.ip()),
         headers: &session.req_header().headers,
+        upstream: None,
     }
 }
 

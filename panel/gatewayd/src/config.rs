@@ -28,6 +28,9 @@ pub const TRUST_DOMAIN_ENV: &str = "PINGORA_PANEL_TRUST_DOMAIN";
 pub const SECRET_DIRECTORY_ENV: &str = "PINGORA_PANEL_SECRET_DIR";
 /// Directory that static content roots in snapshots are relative to.
 pub const STATIC_ROOT_ENV: &str = "PINGORA_PANEL_STATIC_ROOT";
+/// Directory the gateway writes its access and error logs to; without it,
+/// requests are not logged (ADR 0025).
+pub const LOG_DIRECTORY_ENV: &str = "PINGORA_PANEL_LOG_DIR";
 /// The operational HTTP listener, which serves `/metrics`.
 pub const OPS_ADDRESS_ENV: &str = "PINGORA_PANEL_OPS_ADDR";
 /// The bearer token scrapes of `/metrics` present, or with `_FILE`, a file
@@ -51,6 +54,7 @@ pub struct GatewaydConfig {
     tls: Option<GatewayTls>,
     secret_directory: Option<PathBuf>,
     static_root: Option<PathBuf>,
+    log_directory: Option<PathBuf>,
     ops_address: SocketAddr,
     metrics_token: ScrapeToken,
 }
@@ -152,6 +156,9 @@ impl GatewaydConfig {
         let resource_limits = GatewayResourceLimits::from_lookup(&mut lookup)?;
         let secret_directory = lookup(SECRET_DIRECTORY_ENV).map(PathBuf::from);
         let static_root = lookup(STATIC_ROOT_ENV).map(PathBuf::from);
+        let log_directory = lookup(LOG_DIRECTORY_ENV)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from);
         let mut environment = Environment::from_lookup(&mut lookup);
         let ops_address =
             environment.socket_addr(OPS_ADDRESS_ENV, SocketAddr::from(DEFAULT_OPS_ADDRESS))?;
@@ -175,6 +182,7 @@ impl GatewaydConfig {
             tls,
             secret_directory,
             static_root,
+            log_directory,
             ops_address,
             metrics_token,
         })
@@ -194,6 +202,10 @@ impl GatewaydConfig {
 
     pub fn static_root(&self) -> Option<&Path> {
         self.static_root.as_deref()
+    }
+
+    pub fn log_directory(&self) -> Option<&Path> {
+        self.log_directory.as_deref()
     }
 
     pub fn listen_address(&self) -> SocketAddr {
@@ -320,6 +332,26 @@ mod tests {
             config.background_task_shutdown_policy().total_timeout(),
             Duration::from_millis(750)
         );
+    }
+
+    #[test]
+    fn requests_are_logged_only_with_a_log_directory() {
+        let config = GatewaydConfig::from_lookup(|_| None).unwrap();
+        assert_eq!(config.log_directory(), None);
+
+        let config = GatewaydConfig::from_lookup(|key| {
+            (key == LOG_DIRECTORY_ENV).then(|| OsString::from("/var/log/pingora-panel"))
+        })
+        .unwrap();
+        assert_eq!(
+            config.log_directory(),
+            Some(Path::new("/var/log/pingora-panel"))
+        );
+
+        let config =
+            GatewaydConfig::from_lookup(|key| (key == LOG_DIRECTORY_ENV).then(OsString::new))
+                .unwrap();
+        assert_eq!(config.log_directory(), None);
     }
 
     #[test]

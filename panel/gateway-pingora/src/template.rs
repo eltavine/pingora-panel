@@ -1,15 +1,15 @@
 //! Request-variable templates: parsed when a snapshot is prepared and
 //! filled in for each request.
 
+use crate::request_identity;
 use bytes::Bytes;
 use cookie::Cookie;
 use http::HeaderMap;
-use panel_ir::template::{parse_template, RequestVariable, TemplatePart};
-use std::net::IpAddr;
-
-const REQUEST_ID: &str = "x-request-id";
-/// The longest `X-Request-Id` taken from a request.
-const MAX_REQUEST_ID: usize = 128;
+use panel_ir::{
+    logging::REDACTED,
+    template::{parse_template, RequestVariable, TemplatePart},
+};
+use std::{collections::HashSet, net::IpAddr};
 
 #[derive(Clone, Debug)]
 pub(crate) enum Template {
@@ -26,6 +26,8 @@ pub(crate) struct Facts<'a> {
     pub scheme: &'a str,
     pub client_ip: Option<IpAddr>,
     pub headers: &'a HeaderMap,
+    /// The upstream node the request went to, as `address:port`.
+    pub upstream: Option<&'a str>,
 }
 
 impl Template {
@@ -56,6 +58,30 @@ impl Template {
         }
         Bytes::from(out)
     }
+
+    /// The text for a log record, with sensitive headers and every cookie
+    /// logged as `REDACTED` (ADR 0025).
+    pub(crate) fn render_redacted(&self, facts: &Facts<'_>, redacted: &HashSet<String>) -> String {
+        let parts = match self {
+            Self::Literal(text) => return String::from_utf8_lossy(text).into_owned(),
+            Self::Parts(parts) => parts,
+        };
+        let mut out = String::new();
+        for part in parts {
+            match part {
+                TemplatePart::Text(text) => out.push_str(text),
+                TemplatePart::Variable(RequestVariable::Cookie(_)) => out.push_str(REDACTED),
+                TemplatePart::Variable(RequestVariable::Header(name))
+                    if redacted.contains(name) =>
+                {
+                    out.push_str(REDACTED);
+                }
+                TemplatePart::Variable(variable) => out.push_str(&value(variable, facts)),
+                _ => {}
+            }
+        }
+        out
+    }
 }
 
 fn header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
@@ -75,12 +101,7 @@ fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {
 
 /// The request's own ID when it is a short visible token, otherwise a new one.
 fn request_id(headers: &HeaderMap) -> String {
-    header(headers, REQUEST_ID)
-        .filter(|id| {
-            !id.is_empty()
-                && id.len() <= MAX_REQUEST_ID
-                && id.bytes().all(|byte| byte.is_ascii_graphic())
-        })
+    request_identity::request_id(headers)
         .map_or_else(|| uuid::Uuid::now_v7().to_string(), str::to_owned)
 }
 
@@ -94,7 +115,7 @@ fn value(variable: &RequestVariable, facts: &Facts<'_>) -> String {
         RequestVariable::RequestId => request_id(facts.headers),
         RequestVariable::Header(name) => header(facts.headers, name).unwrap_or_default().to_owned(),
         RequestVariable::Cookie(name) => cookie(facts.headers, name).unwrap_or_default(),
-        // Local responses are not proxied, so there is no upstream address.
+        RequestVariable::UpstreamAddr => facts.upstream.unwrap_or_default().to_owned(),
         _ => String::new(),
     }
 }
@@ -111,6 +132,7 @@ mod tests {
             scheme: "http",
             client_ip: Some("192.0.2.7".parse().unwrap()),
             headers,
+            upstream: None,
         }
     }
 
@@ -147,5 +169,31 @@ mod tests {
             .render(&facts(&headers));
         assert_eq!(rendered.len(), 36);
         assert_ne!(rendered, "has space");
+    }
+
+    #[test]
+    fn log_fields_redact_sensitive_headers_and_every_cookie() {
+        let mut headers = HeaderMap::new();
+        headers.insert("authorization", "Bearer secret".parse().unwrap());
+        headers.insert("x-api-key", "key".parse().unwrap());
+        headers.insert("x-tenant", "acme".parse().unwrap());
+        headers.insert(http::header::COOKIE, "session=xyz".parse().unwrap());
+        let redacted = HashSet::from(["authorization".to_owned(), "x-api-key".to_owned()]);
+        let mut facts = facts(&headers);
+        facts.upstream = Some("10.0.0.7:8080");
+        let template = Template::parse(
+            "$http_authorization $http_x_api_key $cookie_session $http_x_tenant $upstream_addr",
+        )
+        .unwrap();
+        assert_eq!(
+            template.render_redacted(&facts, &redacted),
+            "REDACTED REDACTED REDACTED acme 10.0.0.7:8080"
+        );
+        assert_eq!(
+            Template::parse("fixed")
+                .unwrap()
+                .render_redacted(&facts, &redacted),
+            "fixed"
+        );
     }
 }

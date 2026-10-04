@@ -11,6 +11,7 @@ use crate::{
     certificates::{HandshakeRecorder, ListenerCertificates},
     head_deadline::{Connections, HeadDeadline},
     listeners::{self, ListenerPlan, SocketKey},
+    log_files::Logs,
     proxy::{ListenerContext, PanelProxy},
     telemetry::GatewayMetrics,
 };
@@ -52,6 +53,7 @@ pub struct DataPlaneOptions {
     drain_timeout: Duration,
     upstream_pool_size: usize,
     metrics: Option<GatewayMetrics>,
+    logs: Option<Logs>,
 }
 
 impl DataPlaneOptions {
@@ -61,7 +63,14 @@ impl DataPlaneOptions {
             drain_timeout: DEFAULT_DRAIN_TIMEOUT,
             upstream_pool_size: DEFAULT_UPSTREAM_POOL_SIZE,
             metrics: None,
+            logs: None,
         }
+    }
+
+    /// Writes access and error records to `logs`.
+    pub fn with_logs(mut self, logs: Logs) -> Self {
+        self.logs = Some(logs);
+        self
     }
 
     /// Records requests, connections and handshakes in `metrics`.
@@ -398,6 +407,7 @@ impl Generation {
                 ListenerContext {
                     id: plan.id.clone(),
                     metrics,
+                    logs: options.logs.clone(),
                     tls: plan.tls,
                     http1: plan.http1,
                     challenges: challenges.clone(),

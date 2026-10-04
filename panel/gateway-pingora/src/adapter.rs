@@ -1,4 +1,5 @@
 use crate::{
+    access_log::LoggingPlan,
     acme::ChallengeDirectory,
     certificates::CertificateIndex,
     file_checks::{self, FileChecks},
@@ -46,6 +47,7 @@ const CAPABILITIES: &[&str] = &[
     "listener.request-head-timeout",
     "listener.tls-settings",
     "listener.trusted-proxies",
+    "log.access",
     "request.security",
     "response.hsts",
     "route.exact-path",
@@ -139,6 +141,8 @@ pub struct PreparedPingoraSnapshot {
     pub(crate) certificates: ArcSwap<CertificateIndex>,
     pub(crate) listeners: Vec<ListenerPlan>,
     pub(crate) labels: SnapshotLabels,
+    /// What records keep out and how log files rotate.
+    pub(crate) logging: LoggingPlan,
 }
 
 impl Default for PingoraGatewayAdapter {
@@ -413,6 +417,7 @@ impl PingoraGatewayAdapter {
             },
         )?;
         let labels = SnapshotLabels::new(&routing, &pools);
+        let logging = LoggingPlan::new(&snapshot.logging, Some(snapshot.revision_id.get()));
         Ok(PreparedPingoraSnapshot {
             snapshot,
             routing,
@@ -422,6 +427,7 @@ impl PingoraGatewayAdapter {
             certificates: ArcSwap::from_pointee(certificates),
             listeners,
             labels,
+            logging,
         })
     }
 
