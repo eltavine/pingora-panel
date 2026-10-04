@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
 use config_service::{
-    PgActivationReceipts, PgDeployments, Reconciler, Reconciliation, ReconciliationCheck,
-    RecordingUseCases, MIGRATIONS,
+    Reconciler, Reconciliation, ReconciliationCheck, RecordingUseCases, SqliteActivationReceipts,
+    SqliteDeployments, MIGRATIONS,
 };
 use gateway_grpc::GatewayGrpcService;
 use gateway_grpc_client::{GatewayGrpcClient, GatewayGrpcClientConfig};
@@ -18,7 +18,7 @@ use panel_errors::ErrorCode;
 use panel_events::ServiceName;
 use panel_health::{HealthCheck, HealthStatus};
 use panel_ir::{RuntimeSnapshot, IR_SCHEMA_VERSION};
-use panel_postgres::{testing::TestDatabase, EventLog, ServiceDatabase};
+use panel_sqlite::{testing::TestDatabase, EventLog, ServiceDatabase};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::TcpListenerStream;
@@ -66,25 +66,21 @@ fn context(key: &str) -> CommandContext {
 }
 
 struct Fixture {
-    database: TestDatabase,
+    _database: TestDatabase,
     service: ServiceDatabase,
-    receipts: Arc<PgActivationReceipts>,
-    deployments: PgDeployments,
+    receipts: Arc<SqliteActivationReceipts>,
+    deployments: SqliteDeployments,
 }
 
-async fn fixture() -> Option<Fixture> {
-    let mut database = TestDatabase::create().await?;
-    let secrets = database.bootstrap(&[("config", "config")]).await;
-    let service = database
-        .connect_service("config", "config", &secrets[0])
-        .await;
-    service.migrate(MIGRATIONS).await.unwrap();
-    Some(Fixture {
-        receipts: Arc::new(PgActivationReceipts::new(&service)),
-        deployments: PgDeployments::new(&service),
+async fn fixture() -> Fixture {
+    let database = TestDatabase::migrated(MIGRATIONS).await;
+    let service = database.database().clone();
+    Fixture {
+        receipts: Arc::new(SqliteActivationReceipts::new(&service)),
+        deployments: SqliteDeployments::new(&service),
         service,
-        database,
-    })
+        _database: database,
+    }
 }
 
 impl Fixture {
@@ -130,15 +126,12 @@ impl Fixture {
 
     async fn finish(self) {
         self.service.close().await;
-        self.database.drop().await;
     }
 }
 
 #[tokio::test]
 async fn interrupted_activations_are_completed_or_released() {
-    let Some(fixture) = fixture().await else {
-        return;
-    };
+    let fixture = fixture().await;
     let gateway = gateway().await;
     let (reconciler, publication) = fixture.reconciler(&gateway);
 
@@ -235,9 +228,7 @@ async fn interrupted_activations_are_completed_or_released() {
 
 #[tokio::test]
 async fn a_gateway_without_configuration_receives_the_desired_one() {
-    let Some(fixture) = fixture().await else {
-        return;
-    };
+    let fixture = fixture().await;
     let original = gateway().await;
     let (_, publication) = fixture.reconciler(&original);
     let prepared = publication
@@ -270,9 +261,7 @@ async fn a_gateway_without_configuration_receives_the_desired_one() {
 
 #[tokio::test]
 async fn unknown_configurations_are_quarantined_and_newer_known_ones_adopted() {
-    let Some(fixture) = fixture().await else {
-        return;
-    };
+    let fixture = fixture().await;
     let gateway = gateway().await;
     let (reconciler, publication) = fixture.reconciler(&gateway);
     let first = publication

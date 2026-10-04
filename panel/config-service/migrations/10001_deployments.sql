@@ -2,33 +2,36 @@
 -- can be completed and the desired configuration restored to a gateway that
 -- lost its state.
 CREATE TABLE prepared_deployments (
-    prepare_token text PRIMARY KEY,
-    revision_id bigint NOT NULL,
-    content_hash text NOT NULL,
-    schema_version text NOT NULL,
-    media_type text NOT NULL,
-    content bytea NOT NULL,
-    prepared_at timestamptz NOT NULL DEFAULT now()
-);
+    prepare_token TEXT PRIMARY KEY,
+    revision_id INTEGER NOT NULL,
+    content_hash TEXT NOT NULL,
+    schema_version TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    content BLOB NOT NULL,
+    prepared_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now'))
+) STRICT;
 
 CREATE INDEX prepared_deployments_content_hash ON prepared_deployments (content_hash);
 
 -- What each activation was asked to do, recorded before it claims its
 -- idempotency key so that an interrupted activation can be re-issued.
 CREATE TABLE activation_intents (
-    idempotency_key text PRIMARY KEY,
-    prepare_token text NOT NULL,
-    expected_active_hash text,
-    actor text NOT NULL,
-    correlation_id text NOT NULL,
-    recorded_at timestamptz NOT NULL DEFAULT now()
-);
+    idempotency_key TEXT PRIMARY KEY,
+    prepare_token TEXT NOT NULL,
+    expected_active_hash TEXT,
+    actor TEXT NOT NULL,
+    correlation_id TEXT NOT NULL,
+    recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now'))
+) STRICT;
 
--- The configuration the gateway must run: the newest one activated.
+CREATE INDEX activation_intents_prepare_token ON activation_intents (prepare_token);
+
+-- The configuration the gateway must run: the newest one activated. Without
+-- a rowid, the key is an ordinary column that takes its default.
 CREATE TABLE desired_configuration (
-    singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
-    prepare_token text NOT NULL REFERENCES prepared_deployments (prepare_token),
-    revision_id bigint NOT NULL,
-    content_hash text NOT NULL,
-    activated_at timestamptz NOT NULL DEFAULT now()
-);
+    singleton INTEGER PRIMARY KEY DEFAULT 1 CHECK (singleton = 1),
+    prepare_token TEXT NOT NULL REFERENCES prepared_deployments (prepare_token),
+    revision_id INTEGER NOT NULL,
+    content_hash TEXT NOT NULL,
+    activated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now'))
+) STRICT, WITHOUT ROWID;

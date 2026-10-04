@@ -1,28 +1,23 @@
--- The draft written in the configuration language, file by file, beside the
--- model it describes. Drafts stored before the language existed are printed
--- from their model when first read.
-ALTER TABLE draft_configuration ADD COLUMN sources jsonb;
-
 -- Every configuration that was applied or attempted. A revision's files never
 -- change; its note and outcome do.
 CREATE TABLE configuration_revisions (
-    id bigserial PRIMARY KEY,
-    draft_version bigint NOT NULL CHECK (draft_version > 0),
-    language_version integer NOT NULL,
-    sources jsonb NOT NULL,
-    content_hash text NOT NULL,
-    author text NOT NULL,
-    note text,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    outcome text NOT NULL
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    draft_version INTEGER NOT NULL CHECK (draft_version > 0),
+    language_version INTEGER NOT NULL,
+    sources TEXT NOT NULL CHECK (json_valid(sources)),
+    content_hash TEXT NOT NULL,
+    author TEXT NOT NULL,
+    note TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now')),
+    outcome TEXT NOT NULL
         CHECK (outcome IN ('applying', 'active', 'superseded', 'rejected', 'failed')),
-    outcome_at timestamptz NOT NULL DEFAULT now(),
+    outcome_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now')),
     -- Why a rejected or failed attempt did not run.
-    diagnostics jsonb,
+    diagnostics TEXT CHECK (diagnostics IS NULL OR json_valid(diagnostics)),
     -- The runtime snapshot the gateway activated.
-    snapshot_hash text,
-    gateway_revision bigint
-);
+    snapshot_hash TEXT,
+    gateway_revision INTEGER
+) STRICT;
 
 CREATE UNIQUE INDEX configuration_revisions_one_active
-    ON configuration_revisions ((outcome)) WHERE outcome = 'active';
+    ON configuration_revisions (outcome) WHERE outcome = 'active';

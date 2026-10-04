@@ -4,9 +4,9 @@
 use panel_config_dsl::{Sources, LANGUAGE_VERSION};
 use panel_config_model::{Revision, RevisionOutcome};
 use panel_errors::{Diagnostic, PanelError, Result};
-use panel_postgres::{storage_error, ServiceDatabase};
+use panel_sqlite::{storage_error, ServiceDatabase};
 use serde::Serialize;
-use sqlx::{postgres::PgRow, PgConnection, PgPool, Row};
+use sqlx::{sqlite::SqliteRow, Row, SqliteConnection};
 use std::collections::BTreeMap;
 
 /// A revision to record.
@@ -22,7 +22,7 @@ pub struct NewRevision<'a> {
 macro_rules! columns {
     () => {
         "id, draft_version, language_version, content_hash, author, note, created_at, outcome, \
-         outcome_at, diagnostics::text AS diagnostics, snapshot_hash, gateway_revision"
+         outcome_at, diagnostics, snapshot_hash, gateway_revision"
     };
 }
 
@@ -36,7 +36,7 @@ fn signed(value: u64, what: &str) -> Result<i64> {
         .map_err(|_| PanelError::invalid_argument(format!("{what} is out of range")))
 }
 
-fn revision(row: &PgRow) -> Result<Revision> {
+fn revision(row: &SqliteRow) -> Result<Revision> {
     let column = |error: sqlx::Error| {
         PanelError::corrupt_state(format!("stored revision is invalid: {error}"))
     };
@@ -88,14 +88,14 @@ fn encode<T: Serialize + ?Sized>(value: &T) -> Result<String> {
 }
 
 #[derive(Clone)]
-pub struct PgRevisions {
-    pool: PgPool,
+pub struct SqliteRevisions {
+    database: ServiceDatabase,
 }
 
-impl PgRevisions {
+impl SqliteRevisions {
     pub fn new(database: &ServiceDatabase) -> Self {
         Self {
-            pool: database.pool().clone(),
+            database: database.clone(),
         }
     }
 
@@ -108,7 +108,7 @@ impl PgRevisions {
         let (id,): (i64,) = sqlx::query_as(
             "INSERT INTO configuration_revisions \
              (draft_version, language_version, sources, content_hash, author, note, outcome, diagnostics, snapshot_hash) \
-             VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8::jsonb, $9) RETURNING id",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) RETURNING id",
         )
         .bind(signed(revision.draft_version, "draft version")?)
         .bind(i32::try_from(LANGUAGE_VERSION).unwrap_or(i32::MAX))
@@ -119,7 +119,7 @@ impl PgRevisions {
         .bind(outcome)
         .bind(diagnostics.map(encode).transpose()?)
         .bind(revision.snapshot_hash)
-        .fetch_one(&self.pool)
+        .fetch_one(self.database.pool())
         .await
         .map_err(storage_error)?;
         unsigned(id, "revision id")
@@ -146,19 +146,19 @@ impl PgRevisions {
         snapshot_hash: &str,
         gateway_revision: u64,
     ) -> Result<()> {
-        let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+        let mut transaction = self.database.begin().await?;
         activate(&mut transaction, id, snapshot_hash, Some(gateway_revision)).await?;
         transaction.commit().await.map_err(storage_error)
     }
 
     pub async fn fail(&self, id: u64, diagnostics: &[Diagnostic]) -> Result<()> {
         sqlx::query(
-            "UPDATE configuration_revisions SET outcome = 'failed', outcome_at = now(), \
-             diagnostics = $2::jsonb WHERE id = $1 AND outcome = 'applying'",
+            "UPDATE configuration_revisions SET outcome = 'failed', outcome_at = strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now'), \
+             diagnostics = ?2 WHERE id = ?1 AND outcome = 'applying'",
         )
         .bind(signed(id, "revision id")?)
         .bind(encode(&diagnostics)?)
-        .execute(&self.pool)
+        .execute(self.database.pool())
         .await
         .map_err(storage_error)?;
         Ok(())
@@ -167,10 +167,10 @@ impl PgRevisions {
     /// Settles attempts a crash left open: the one whose snapshot the gateway
     /// runs becomes active, the others failed.
     pub async fn settle(&self, active_hash: Option<&str>) -> Result<()> {
-        let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+        let mut transaction = self.database.begin().await?;
         let open: Vec<(i64, Option<String>)> = sqlx::query_as(
             "SELECT id, snapshot_hash FROM configuration_revisions WHERE outcome = 'applying' \
-             ORDER BY id FOR UPDATE",
+             ORDER BY id",
         )
         .fetch_all(&mut *transaction)
         .await
@@ -187,8 +187,8 @@ impl PgRevisions {
                         "the attempt ended before the gateway confirmed it",
                     )];
                     sqlx::query(
-                        "UPDATE configuration_revisions SET outcome = 'failed', outcome_at = now(), \
-                         diagnostics = $2::jsonb WHERE id = $1",
+                        "UPDATE configuration_revisions SET outcome = 'failed', outcome_at = strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now'), \
+                         diagnostics = ?2 WHERE id = ?1",
                     )
                     .bind(signed(id, "revision id")?)
                     .bind(encode(&interrupted)?)
@@ -205,10 +205,10 @@ impl PgRevisions {
         let row = sqlx::query(concat!(
             "SELECT ",
             columns!(),
-            ", sources::text AS sources FROM configuration_revisions WHERE id = $1"
+            ", sources FROM configuration_revisions WHERE id = ?1"
         ))
         .bind(signed(id, "revision id")?)
-        .fetch_optional(&self.pool)
+        .fetch_optional(self.database.pool())
         .await
         .map_err(storage_error)?
         .ok_or_else(|| PanelError::not_found(format!("no revision {id}")))?;
@@ -222,7 +222,7 @@ impl PgRevisions {
     pub async fn active(&self) -> Result<Option<(Revision, Sources)>> {
         let id: Option<(i64,)> =
             sqlx::query_as("SELECT id FROM configuration_revisions WHERE outcome = 'active'")
-                .fetch_optional(&self.pool)
+                .fetch_optional(self.database.pool())
                 .await
                 .map_err(storage_error)?;
         match id {
@@ -236,22 +236,22 @@ impl PgRevisions {
         let rows = sqlx::query(concat!(
             "SELECT ",
             columns!(),
-            " FROM configuration_revisions WHERE ($1::bigint IS NULL OR id < $1) \
-             ORDER BY id DESC LIMIT $2"
+            " FROM configuration_revisions WHERE (?1 IS NULL OR id < ?1) \
+             ORDER BY id DESC LIMIT ?2"
         ))
         .bind(before.map(|before| signed(before, "cursor")).transpose()?)
         .bind(i64::from(limit))
-        .fetch_all(&self.pool)
+        .fetch_all(self.database.pool())
         .await
         .map_err(storage_error)?;
         rows.iter().map(revision).collect()
     }
 
     pub async fn set_note(&self, id: u64, note: Option<&str>) -> Result<Revision> {
-        let updated = sqlx::query("UPDATE configuration_revisions SET note = $2 WHERE id = $1")
+        let updated = sqlx::query("UPDATE configuration_revisions SET note = ?2 WHERE id = ?1")
             .bind(signed(id, "revision id")?)
             .bind(note)
-            .execute(&self.pool)
+            .execute(self.database.pool())
             .await
             .map_err(storage_error)?;
         if updated.rows_affected() == 0 {
@@ -262,22 +262,22 @@ impl PgRevisions {
 }
 
 async fn activate(
-    connection: &mut PgConnection,
+    connection: &mut SqliteConnection,
     id: u64,
     snapshot_hash: &str,
     gateway_revision: Option<u64>,
 ) -> Result<()> {
     sqlx::query(
-        "UPDATE configuration_revisions SET outcome = 'superseded', outcome_at = now() \
-         WHERE outcome = 'active' AND id <> $1",
+        "UPDATE configuration_revisions SET outcome = 'superseded', outcome_at = strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now') \
+         WHERE outcome = 'active' AND id <> ?1",
     )
     .bind(signed(id, "revision id")?)
     .execute(&mut *connection)
     .await
     .map_err(storage_error)?;
     sqlx::query(
-        "UPDATE configuration_revisions SET outcome = 'active', outcome_at = now(), \
-         snapshot_hash = $2, gateway_revision = COALESCE($3, gateway_revision) WHERE id = $1",
+        "UPDATE configuration_revisions SET outcome = 'active', outcome_at = strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now'), \
+         snapshot_hash = ?2, gateway_revision = COALESCE(?3, gateway_revision) WHERE id = ?1",
     )
     .bind(signed(id, "revision id")?)
     .bind(snapshot_hash)

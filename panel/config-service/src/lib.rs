@@ -4,7 +4,7 @@
 //! configuration and the only caller of the gateway publication protocol.
 //!
 //! The publication API compiles documents, prepares and activates them on
-//! the gateway, and records each activation's receipt in the service schema
+//! the gateway, and records each activation's receipt in the module's database
 //! so that a retried activation replays its receipt instead of running
 //! again. A reconciler completes activations interrupted by a crash,
 //! restores the desired configuration to a gateway that lost it, and
@@ -24,10 +24,10 @@ mod revisions;
 mod scope;
 
 pub use configuration::ConfigurationService;
-pub use deployments::{PendingActivation, PgDeployments, PreparedRecord};
-pub use draft::{DraftState, PgDrafts};
+pub use deployments::{PendingActivation, PreparedRecord, SqliteDeployments};
+pub use draft::{DraftState, SqliteDrafts};
 pub use publication::PublicationService;
-pub use receipts::PgActivationReceipts;
+pub use receipts::SqliteActivationReceipts;
 pub use reconcile::{Reconciler, Reconciliation, ReconciliationCheck, ReconciliationWatch};
 pub use recording::RecordingUseCases;
 
@@ -45,12 +45,13 @@ use panel_errors::Result;
 use panel_health::Impact;
 use panel_platform::{Capability, ServiceName};
 use panel_platform_codec::protocol_range;
-use panel_postgres::{EventLog, SchemaMigration, SqlIdentifier};
 use panel_service::Environment;
+use panel_sqlite::{EventLog, SchemaMigration};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 pub const SERVICE: &str = "config-service";
-pub const SCHEMA: &str = "config";
+/// The module's SQLite file in the data directory, `config.db`.
+pub const MODULE: &str = "config";
 pub const GATEWAY_URL_ENV: &str = "PINGORA_PANEL_GATEWAY_URL";
 /// How often the gateway is reconciled after the startup reconciliation.
 pub const RECONCILE_INTERVAL_MS_ENV: &str = "PINGORA_PANEL_RECONCILE_INTERVAL_MS";
@@ -103,11 +104,11 @@ pub fn process(
     let gateway_url = env
         .string(GATEWAY_URL_ENV)?
         .unwrap_or_else(|| DEFAULT_GATEWAY_URL.into());
-    let process = ControlPlaneProcess::new(
+    let process = ControlPlaneProcess::on_sqlite(
         ServiceName::new(SERVICE)?,
         env!("CARGO_PKG_VERSION"),
         settings,
-        SqlIdentifier::new(SCHEMA)?,
+        MODULE,
     )?;
     let gateway = match process.peer_channel(&gateway_url, ServiceName::new("gatewayd")?)? {
         Some(channel) => GatewayGrpcClient::from_channel_with_config(
@@ -124,9 +125,9 @@ pub fn process(
             JsonCompilerConfig::default(),
         )?),
     ));
-    let receipts = Arc::new(PgActivationReceipts::new(process.database()));
-    let events = EventLog::new(process.database(), ServiceName::new(SERVICE)?);
-    let deployments = PgDeployments::new(process.database());
+    let receipts = Arc::new(SqliteActivationReceipts::new(process.sqlite()));
+    let events = EventLog::new(process.sqlite(), ServiceName::new(SERVICE)?);
+    let deployments = SqliteDeployments::new(process.sqlite());
     let (reconciler, reconciliation) = Reconciler::new(
         Arc::clone(&gateway),
         Arc::clone(&receipts),
@@ -138,11 +139,11 @@ pub fn process(
         reconciliation.clone(),
         events.clone(),
     ));
-    let drafts = PgDrafts::new(process.database(), events.clone());
-    let revisions = revisions::PgRevisions::new(process.database());
-    let approvals = approvals::PgApprovals::new(process.database(), events.clone());
+    let drafts = SqliteDrafts::new(process.sqlite(), events.clone());
+    let revisions = revisions::SqliteRevisions::new(process.sqlite());
+    let approvals = approvals::SqliteApprovals::new(process.sqlite(), events.clone());
     Ok(process
-        .with_migrations(MIGRATIONS)
+        .with_sqlite_migrations(MIGRATIONS)
         .with_protocol(protocol_range(CONFIG_V1))
         .with_capability(Capability::new("config.publication", "1")?)
         .with_capability(Capability::new("config.configuration", "1")?)

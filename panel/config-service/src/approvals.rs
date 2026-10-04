@@ -11,9 +11,9 @@ use panel_errors::{PanelError, Result};
 use panel_event_contracts::config::v1 as event;
 use panel_events::EventData;
 use panel_events::RequestScope;
-use panel_postgres::{storage_error, EventLog, PgOutbox, ServiceDatabase};
+use panel_sqlite::{storage_error, EventLog, ServiceDatabase, SqliteOutbox};
 use serde::Serialize;
-use sqlx::{postgres::PgRow, PgPool, Postgres, Row, Transaction};
+use sqlx::{sqlite::SqliteRow, types::Json, Row, Sqlite, Transaction};
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
@@ -21,8 +21,8 @@ macro_rules! select_requests {
     ($rest:literal) => {
         concat!(
             "SELECT id, state, draft_version, content_hash, requested_by, requested_at, ",
-            "expires_at, note, risk, policies::text AS policies, required, valid_minutes, ",
-            "changes::text AS changes, closed_by, closed_at, reason, revision ",
+            "expires_at, note, risk, policies, required, valid_minutes, ",
+            "changes, closed_by, closed_at, reason, revision ",
             "FROM approval_requests ",
             $rest
         )
@@ -94,7 +94,7 @@ fn unsigned(value: i64, what: &str) -> Result<u64> {
         .map_err(|_| PanelError::corrupt_state(format!("stored {what} is negative")))
 }
 
-fn policy(row: &PgRow) -> Result<ApprovalPolicy> {
+fn policy(row: &SqliteRow) -> Result<ApprovalPolicy> {
     let column = corrupt("approval policy");
     let body: String = row.try_get("policy").map_err(&column)?;
     Ok(ApprovalPolicy {
@@ -122,7 +122,7 @@ fn stored_state(value: &str) -> Result<ApprovalState> {
     })
 }
 
-fn request(row: &PgRow, approvals: Vec<ApprovalDecision>) -> Result<ApprovalRequest> {
+fn request(row: &SqliteRow, approvals: Vec<ApprovalDecision>) -> Result<ApprovalRequest> {
     let column = corrupt("approval request");
     let state: String = row.try_get("state").map_err(&column)?;
     let risk: String = row.try_get("risk").map_err(&column)?;
@@ -166,7 +166,7 @@ fn request(row: &PgRow, approvals: Vec<ApprovalDecision>) -> Result<ApprovalRequ
     })
 }
 
-fn decision(row: &PgRow) -> Result<ApprovalDecision> {
+fn decision(row: &SqliteRow) -> Result<ApprovalDecision> {
     let column = corrupt("approval");
     Ok(ApprovalDecision {
         approver: row.try_get("approver").map_err(&column)?,
@@ -185,8 +185,8 @@ fn risk_text(risk: Risk) -> &'static str {
 
 /// Policies, requests and approvals in the configuration schema.
 #[derive(Clone)]
-pub struct PgApprovals {
-    pool: PgPool,
+pub struct SqliteApprovals {
+    database: ServiceDatabase,
     events: EventLog,
 }
 
@@ -235,32 +235,32 @@ macro_rules! policy_event {
     }};
 }
 
-impl PgApprovals {
+impl SqliteApprovals {
     pub fn new(database: &ServiceDatabase, events: EventLog) -> Self {
         Self {
-            pool: database.pool().clone(),
+            database: database.clone(),
             events,
         }
     }
 
     async fn emit<E: EventData>(
         &self,
-        transaction: &mut Transaction<'_, Postgres>,
+        transaction: &mut Transaction<'_, Sqlite>,
         aggregate: (&str, &str),
         scope: &RequestScope,
         actor: &str,
         data: &E,
     ) -> Result<()> {
         let event = self.events.event(aggregate, scope, actor, data)?;
-        PgOutbox::append(transaction, &event).await
+        SqliteOutbox::append(transaction, &event).await
     }
 
     pub async fn policies(&self) -> Result<Vec<ApprovalPolicy>> {
         sqlx::query(
-            "SELECT id, policy::text AS policy, version, created_at, updated_at \
+            "SELECT id, policy, version, created_at, updated_at \
              FROM approval_policies ORDER BY id",
         )
-        .fetch_all(&self.pool)
+        .fetch_all(self.database.pool())
         .await
         .map_err(storage_error)?
         .iter()
@@ -270,11 +270,11 @@ impl PgApprovals {
 
     pub async fn policy(&self, id: &str) -> Result<ApprovalPolicy> {
         sqlx::query(
-            "SELECT id, policy::text AS policy, version, created_at, updated_at \
-             FROM approval_policies WHERE id = $1",
+            "SELECT id, policy, version, created_at, updated_at \
+             FROM approval_policies WHERE id = ?1",
         )
         .bind(id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(self.database.pool())
         .await
         .map_err(storage_error)?
         .map(|row| policy(&row))
@@ -295,14 +295,14 @@ impl PgApprovals {
             return Err(PanelError::validation_failed(problems.join("; ")));
         }
         let body = serde_json::to_string(&input).expect("policies serialize");
-        let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+        let mut transaction = self.database.begin().await?;
         let row = sqlx::query(
             "INSERT INTO approval_policies (id, policy, version, created_at, updated_at) \
-             VALUES ($1, $2::jsonb, 1, now(), now()) \
+             VALUES (?1, ?2, 1, strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now'), strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now')) \
              ON CONFLICT (id) DO UPDATE SET policy = EXCLUDED.policy, \
-             version = approval_policies.version + 1, updated_at = now() \
-             RETURNING id, policy::text AS policy, version, created_at, updated_at, \
-             (xmax = 0) AS created",
+             version = approval_policies.version + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now') \
+             RETURNING id, policy, version, created_at, updated_at, \
+             (version = 1) AS created",
         )
         .bind(id)
         .bind(&body)
@@ -335,8 +335,8 @@ impl PgApprovals {
     }
 
     pub async fn delete_policy(&self, id: &str, scope: &RequestScope, actor: &str) -> Result<()> {
-        let mut transaction = self.pool.begin().await.map_err(storage_error)?;
-        let deleted = sqlx::query("DELETE FROM approval_policies WHERE id = $1")
+        let mut transaction = self.database.begin().await?;
+        let deleted = sqlx::query("DELETE FROM approval_policies WHERE id = ?1")
             .bind(id)
             .execute(&mut *transaction)
             .await
@@ -362,10 +362,14 @@ impl PgApprovals {
     async fn approvals_of(&self, ids: &[Uuid]) -> Result<Vec<(Uuid, ApprovalDecision)>> {
         sqlx::query(
             "SELECT request_id, approver, approved_at, valid_until, revoked_at FROM approvals \
-             WHERE request_id = ANY($1) ORDER BY approved_at",
+             WHERE request_id IN (SELECT unhex(value) FROM json_each(?1)) ORDER BY approved_at",
         )
-        .bind(ids)
-        .fetch_all(&self.pool)
+        .bind(Json(
+            ids.iter()
+                .map(|id| id.simple().to_string())
+                .collect::<Vec<_>>(),
+        ))
+        .fetch_all(self.database.pool())
         .await
         .map_err(storage_error)?
         .iter()
@@ -378,7 +382,7 @@ impl PgApprovals {
         .collect()
     }
 
-    async fn with_approvals(&self, rows: Vec<PgRow>) -> Result<Vec<ApprovalRequest>> {
+    async fn with_approvals(&self, rows: Vec<SqliteRow>) -> Result<Vec<ApprovalRequest>> {
         let ids: Vec<Uuid> = rows
             .iter()
             .map(|row| row.try_get("id").map_err(storage_error))
@@ -405,21 +409,21 @@ impl PgApprovals {
         limit: u32,
     ) -> Result<Vec<ApprovalRequest>> {
         let rows = sqlx::query(select_requests!(
-            "WHERE ($1::timestamptz IS NULL OR requested_at < $1) \
-             ORDER BY requested_at DESC LIMIT $2"
+            "WHERE (?1 IS NULL OR requested_at < ?1) \
+             ORDER BY requested_at DESC LIMIT ?2"
         ))
         .bind(before)
         .bind(i64::from(limit))
-        .fetch_all(&self.pool)
+        .fetch_all(self.database.pool())
         .await
         .map_err(storage_error)?;
         self.with_approvals(rows).await
     }
 
     pub async fn request(&self, id: Uuid) -> Result<ApprovalRequest> {
-        let row = sqlx::query(select_requests!("WHERE id = $1"))
+        let row = sqlx::query(select_requests!("WHERE id = ?1"))
             .bind(id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(self.database.pool())
             .await
             .map_err(storage_error)?
             .ok_or_else(|| PanelError::not_found(format!("there is no approval request {id}")))?;
@@ -448,11 +452,11 @@ impl PgApprovals {
             .collect();
         versions.sort();
         let open = sqlx::query(select_requests!(
-            "WHERE content_hash = $1 AND state IN ('pending', 'approved') \
+            "WHERE content_hash = ?1 AND state IN ('pending', 'approved') \
              ORDER BY requested_at DESC"
         ))
         .bind(opening.content_hash)
-        .fetch_all(&self.pool)
+        .fetch_all(self.database.pool())
         .await
         .map_err(storage_error)?;
         for existing in self.with_approvals(open).await? {
@@ -498,12 +502,12 @@ impl PgApprovals {
             reason: None,
             revision: None,
         };
-        let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+        let mut transaction = self.database.begin().await?;
         sqlx::query(
             "INSERT INTO approval_requests (id, state, draft_version, content_hash, \
              requested_by, requested_at, expires_at, note, risk, policies, required, \
              valid_minutes, changes) \
-             VALUES ($1, 'pending', $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12::jsonb)",
+             VALUES (?1, 'pending', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         )
         .bind(created.id)
         .bind(i64::try_from(created.draft_version).unwrap_or(i64::MAX))
@@ -557,10 +561,10 @@ impl PgApprovals {
     /// Locks an open request for a decision, with its state at `now`.
     async fn locked(
         &self,
-        transaction: &mut Transaction<'_, Postgres>,
+        transaction: &mut Transaction<'_, Sqlite>,
         id: Uuid,
     ) -> Result<ApprovalRequest> {
-        let row = sqlx::query(select_requests!("WHERE id = $1 FOR UPDATE"))
+        let row = sqlx::query(select_requests!("WHERE id = ?1"))
             .bind(id)
             .fetch_optional(&mut **transaction)
             .await
@@ -568,7 +572,7 @@ impl PgApprovals {
             .ok_or_else(|| PanelError::not_found(format!("there is no approval request {id}")))?;
         let approvals = sqlx::query(
             "SELECT approver, approved_at, valid_until, revoked_at FROM approvals \
-             WHERE request_id = $1 ORDER BY approved_at",
+             WHERE request_id = ?1 ORDER BY approved_at",
         )
         .bind(id)
         .fetch_all(&mut **transaction)
@@ -602,7 +606,7 @@ impl PgApprovals {
         now: DateTime<Utc>,
         scope: &RequestScope,
     ) -> Result<ApprovalRequest> {
-        let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+        let mut transaction = self.database.begin().await?;
         let request = self.locked(&mut transaction, id).await?;
         Self::open_at(&request, now, draft_hash)?;
         if request.requested_by == approver {
@@ -620,7 +624,7 @@ impl PgApprovals {
         let valid_until = now + Duration::minutes(i64::from(request.valid_minutes));
         sqlx::query(
             "INSERT INTO approvals (request_id, approver, approved_at, valid_until) \
-             VALUES ($1, $2, $3, $4) ON CONFLICT (request_id, approver) DO UPDATE SET \
+             VALUES (?1, ?2, ?3, ?4) ON CONFLICT (request_id, approver) DO UPDATE SET \
              approved_at = EXCLUDED.approved_at, valid_until = EXCLUDED.valid_until, \
              revoked_at = NULL",
         )
@@ -633,7 +637,7 @@ impl PgApprovals {
         .map_err(storage_error)?;
         let approved = request.valid_approvals(now) + 1 >= request.required as usize;
         if approved {
-            sqlx::query("UPDATE approval_requests SET state = 'approved' WHERE id = $1")
+            sqlx::query("UPDATE approval_requests SET state = 'approved' WHERE id = ?1")
                 .bind(id)
                 .execute(&mut *transaction)
                 .await
@@ -665,7 +669,7 @@ impl PgApprovals {
         now: DateTime<Utc>,
         scope: &RequestScope,
     ) -> Result<ApprovalRequest> {
-        let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+        let mut transaction = self.database.begin().await?;
         let request = self.locked(&mut transaction, id).await?;
         Self::open_at(&request, now, draft_hash)?;
         if request.requested_by == approver {
@@ -714,7 +718,7 @@ impl PgApprovals {
         now: DateTime<Utc>,
         scope: &RequestScope,
     ) -> Result<ApprovalRequest> {
-        let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+        let mut transaction = self.database.begin().await?;
         let request = self.locked(&mut transaction, id).await?;
         if !matches!(
             request.state,
@@ -725,8 +729,8 @@ impl PgApprovals {
             ));
         }
         let revoked = sqlx::query(
-            "UPDATE approvals SET revoked_at = $3 \
-             WHERE request_id = $1 AND approver = $2 AND revoked_at IS NULL",
+            "UPDATE approvals SET revoked_at = ?3 \
+             WHERE request_id = ?1 AND approver = ?2 AND revoked_at IS NULL",
         )
         .bind(id)
         .bind(approver)
@@ -743,7 +747,7 @@ impl PgApprovals {
             .filter(|approval| approval.approver != approver && approval.is_valid(now))
             .count();
         if remaining < request.required as usize {
-            sqlx::query("UPDATE approval_requests SET state = 'pending' WHERE id = $1")
+            sqlx::query("UPDATE approval_requests SET state = 'pending' WHERE id = ?1")
                 .bind(id)
                 .execute(&mut *transaction)
                 .await
@@ -771,10 +775,10 @@ impl PgApprovals {
         actor: &str,
         scope: &RequestScope,
     ) -> Result<()> {
-        let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+        let mut transaction = self.database.begin().await?;
         sqlx::query(
-            "UPDATE approval_requests SET state = 'applied', revision = $2, closed_by = $3, \
-             closed_at = now() WHERE id = $1",
+            "UPDATE approval_requests SET state = 'applied', revision = ?2, closed_by = ?3, \
+             closed_at = strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now') WHERE id = ?1",
         )
         .bind(id)
         .bind(i64::try_from(revision).unwrap_or(i64::MAX))
@@ -812,10 +816,10 @@ impl PgApprovals {
                 "an emergency bypass needs a reason of at least 10 characters and an incident",
             ));
         }
-        let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+        let mut transaction = self.database.begin().await?;
         sqlx::query(
-            "UPDATE approval_requests SET state = 'applied', closed_by = $2, closed_at = now(), \
-             reason = $3 WHERE content_hash = $1 AND state IN ('pending', 'approved')",
+            "UPDATE approval_requests SET state = 'applied', closed_by = ?2, closed_at = strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now'), \
+             reason = ?3 WHERE content_hash = ?1 AND state IN ('pending', 'approved')",
         )
         .bind(content_hash)
         .bind(actor)
@@ -848,10 +852,10 @@ impl PgApprovals {
         scope: &RequestScope,
         now: DateTime<Utc>,
     ) -> Result<()> {
-        let mut transaction = self.pool.begin().await.map_err(storage_error)?;
+        let mut transaction = self.database.begin().await?;
         sqlx::query(
-            "UPDATE approval_requests SET state = $2, closed_by = $3, closed_at = $4, reason = $5 \
-             WHERE id = $1",
+            "UPDATE approval_requests SET state = ?2, closed_by = ?3, closed_at = ?4, reason = ?5 \
+             WHERE id = ?1",
         )
         .bind(id)
         .bind(closing.state())

@@ -1,5 +1,5 @@
 use crate::{
-    deployments::PgDeployments,
+    deployments::SqliteDeployments,
     reconcile::{Reconciliation, ReconciliationWatch},
 };
 use async_trait::async_trait;
@@ -10,7 +10,7 @@ use panel_application::{
 use panel_errors::{PanelError, Result, ValidationReport};
 use panel_event_contracts::gateway::v1 as event;
 use panel_events::EventData;
-use panel_postgres::EventLog;
+use panel_sqlite::EventLog;
 use std::sync::Arc;
 
 /// Records what reconciliation needs around publication: the document of
@@ -21,7 +21,7 @@ use std::sync::Arc;
 /// published as an event.
 pub struct RecordingUseCases {
     inner: Arc<dyn GatewayUseCases>,
-    deployments: PgDeployments,
+    deployments: SqliteDeployments,
     reconciliation: ReconciliationWatch,
     events: EventLog,
 }
@@ -32,7 +32,7 @@ const SNAPSHOT: (&str, &str) = ("gateway", "snapshot");
 impl RecordingUseCases {
     pub fn new(
         inner: Arc<dyn GatewayUseCases>,
-        deployments: PgDeployments,
+        deployments: SqliteDeployments,
         reconciliation: ReconciliationWatch,
         events: EventLog,
     ) -> Self {

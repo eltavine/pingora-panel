@@ -8,14 +8,11 @@ use panel_application::{
     ApplyOutcome, ApplyRequest, CommandContext, ConfigurationChange, ConfigurationPort,
     ConfigurationRead, IdempotencyKey, RequestDeadline, RequestId, RequestScope,
 };
-use panel_control_runtime::{
-    ProcessSettings, RunningProcess, DATABASE_PASSWORD_ENV, DATABASE_URL_ENV, NATS_URL_ENV,
-};
+use panel_control_runtime::{ProcessSettings, RunningProcess, NATS_URL_ENV};
 use panel_engine::{EngineCapability, FakeGatewayEngine};
 use panel_errors::ErrorCode;
 use panel_health::HealthStatus;
 use panel_jetstream::testing::{TestBroker, NATS_URL_ENV as TEST_NATS_URL_ENV};
-use panel_postgres::testing::TestDatabase;
 use panel_service::Environment;
 use serde_json::{json, Value};
 use std::{collections::HashMap, ffi::OsString, net::SocketAddr, sync::Arc, time::Duration};
@@ -97,20 +94,14 @@ struct Harness {
     client: ConfigPublicationClient,
     process: RunningProcess,
     _broker: TestBroker,
-    _database: TestDatabase,
+    _data: tempfile::TempDir,
 }
 
 async fn start() -> Option<Harness> {
-    let (Some(mut database), Some(broker)) =
-        (TestDatabase::create().await, TestBroker::create().await)
-    else {
-        return None;
-    };
-    let secrets = database.bootstrap(&[("config", "config")]).await;
+    let broker = TestBroker::create().await?;
+    let data = tempfile::tempdir().unwrap();
     let gateway = gateway().await;
     let values: HashMap<&str, OsString> = HashMap::from([
-        (DATABASE_URL_ENV, database.service_url("config").into()),
-        (DATABASE_PASSWORD_ENV, secrets[0].expose().into()),
         (
             NATS_URL_ENV,
             std::env::var(TEST_NATS_URL_ENV).unwrap().into(),
@@ -127,7 +118,8 @@ async fn start() -> Option<Harness> {
             "127.0.0.1:0".parse().unwrap(),
             "127.0.0.1:0".parse().unwrap(),
         )
-        .with_health_interval(Duration::from_millis(50));
+        .with_health_interval(Duration::from_millis(50))
+        .with_data_directory(data.path());
     let process = config_service::process(&mut env, settings)
         .unwrap()
         .with_jetstream_settings((*broker.settings).clone())
@@ -151,7 +143,7 @@ async fn start() -> Option<Harness> {
         client,
         process,
         _broker: broker,
-        _database: database,
+        _data: data,
     })
 }
 
@@ -673,7 +665,7 @@ async fn the_draft_is_text_and_every_apply_is_a_revision() {
 
     let recorded: Vec<String> =
         sqlx::query_scalar("SELECT event_type FROM outbox ORDER BY position")
-            .fetch_all(harness.process.database().pool())
+            .fetch_all(harness.process.sqlite().pool())
             .await
             .unwrap();
     for expected in [

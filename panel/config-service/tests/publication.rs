@@ -6,16 +6,13 @@ use panel_application::{
     CommandContext, ConfigDocument, DeploymentOutcome, GatewayUseCases, IdempotencyKey,
     IdempotencyLookup, RequestDeadline, RequestId, RequestScope,
 };
-use panel_control_runtime::{
-    ProcessSettings, DATABASE_PASSWORD_ENV, DATABASE_URL_ENV, NATS_URL_ENV,
-};
+use panel_control_runtime::{ProcessSettings, NATS_URL_ENV};
 use panel_domain::RevisionId;
 use panel_engine::FakeGatewayEngine;
 use panel_errors::ErrorCode;
 use panel_health::HealthStatus;
 use panel_ir::{RuntimeSnapshot, IR_SCHEMA_VERSION};
 use panel_jetstream::testing::{TestBroker, NATS_URL_ENV as TEST_NATS_URL_ENV};
-use panel_postgres::testing::TestDatabase;
 use panel_service::Environment;
 use std::{collections::HashMap, ffi::OsString, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::net::TcpListener;
@@ -61,16 +58,12 @@ fn command(request: &str, key: &str) -> CommandContext {
 
 #[tokio::test]
 async fn publication_prepares_activates_and_replays_receipts() {
-    let (Some(mut database), Some(broker)) =
-        (TestDatabase::create().await, TestBroker::create().await)
-    else {
+    let Some(broker) = TestBroker::create().await else {
         return;
     };
-    let secrets = database.bootstrap(&[("config", "config")]).await;
+    let data = tempfile::tempdir().unwrap();
     let gateway = fake_gateway().await;
     let values: HashMap<&str, OsString> = HashMap::from([
-        (DATABASE_URL_ENV, database.service_url("config").into()),
-        (DATABASE_PASSWORD_ENV, secrets[0].expose().into()),
         (
             NATS_URL_ENV,
             std::env::var(TEST_NATS_URL_ENV).unwrap().into(),
@@ -87,7 +80,8 @@ async fn publication_prepares_activates_and_replays_receipts() {
             "127.0.0.1:0".parse().unwrap(),
             "127.0.0.1:0".parse().unwrap(),
         )
-        .with_health_interval(Duration::from_millis(50));
+        .with_health_interval(Duration::from_millis(50))
+        .with_data_directory(data.path());
     let process = config_service::process(&mut env, settings)
         .unwrap()
         .with_jetstream_settings((*broker.settings).clone())
@@ -165,6 +159,5 @@ async fn publication_prepares_activates_and_replays_receipts() {
         .context
         .delete_key_value(broker.settings.service_bucket())
         .await;
-    database.drop().await;
     broker.drop().await;
 }

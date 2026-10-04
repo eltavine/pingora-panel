@@ -1,8 +1,8 @@
 use crate::{
-    approvals::PgApprovals,
-    draft::{ChangeOutput, ChangeRequest, DraftChange, DraftState, PgDrafts, DRAFT},
+    approvals::SqliteApprovals,
+    draft::{ChangeOutput, ChangeRequest, DraftChange, DraftState, SqliteDrafts, DRAFT},
     language, operations,
-    revisions::{NewRevision, PgRevisions},
+    revisions::{NewRevision, SqliteRevisions},
     scope,
 };
 use chrono::{DateTime, Utc};
@@ -23,8 +23,8 @@ use panel_engine::{validate_engine_ir, EngineCapability};
 use panel_errors::{Diagnostic, DiagnosticSeverity, PanelError, Result, ValidationReport};
 use panel_event_contracts::config::v1 as event;
 use panel_ir::{RuntimeSnapshot, IR_SCHEMA_VERSION};
-use panel_postgres::EventLog;
 use panel_service::trace_context;
+use panel_sqlite::EventLog;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{collections::BTreeMap, sync::Arc};
@@ -42,9 +42,9 @@ const MAX_REVISION_PAGE: u32 = 500;
 /// Application failures travel in each response's `error` field; transport
 /// status codes are left to the transport.
 pub struct ConfigurationService {
-    drafts: PgDrafts,
-    revisions: PgRevisions,
-    approvals: PgApprovals,
+    drafts: SqliteDrafts,
+    revisions: SqliteRevisions,
+    approvals: SqliteApprovals,
     publication: Arc<dyn GatewayUseCases>,
     events: EventLog,
 }
@@ -168,9 +168,9 @@ fn report_of(error: &PanelError) -> ValidationReport {
 
 impl ConfigurationService {
     pub fn new(
-        drafts: PgDrafts,
-        revisions: PgRevisions,
-        approvals: PgApprovals,
+        drafts: SqliteDrafts,
+        revisions: SqliteRevisions,
+        approvals: SqliteApprovals,
         publication: Arc<dyn GatewayUseCases>,
         events: EventLog,
     ) -> Self {

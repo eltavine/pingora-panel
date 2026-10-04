@@ -1,4 +1,4 @@
-use crate::{deployments::PgDeployments, PgActivationReceipts};
+use crate::{deployments::SqliteDeployments, SqliteActivationReceipts};
 use async_trait::async_trait;
 use chrono::{SecondsFormat, Utc};
 use panel_application::{
@@ -75,8 +75,8 @@ impl HealthCheck for ReconciliationCheck {
 /// 4. any other configuration is quarantined.
 pub struct Reconciler {
     gateway: Arc<dyn GatewayUseCases>,
-    receipts: Arc<PgActivationReceipts>,
-    deployments: PgDeployments,
+    receipts: Arc<SqliteActivationReceipts>,
+    deployments: SqliteDeployments,
     state: watch::Sender<Reconciliation>,
 }
 
@@ -84,8 +84,8 @@ impl Reconciler {
     /// `gateway` must not record receipts itself.
     pub fn new(
         gateway: Arc<dyn GatewayUseCases>,
-        receipts: Arc<PgActivationReceipts>,
-        deployments: PgDeployments,
+        receipts: Arc<SqliteActivationReceipts>,
+        deployments: SqliteDeployments,
     ) -> (Self, ReconciliationWatch) {
         let (state, receiver) = watch::channel(Reconciliation::Pending);
         (

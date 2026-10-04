@@ -26,10 +26,8 @@ pub const ADMIN_DATABASE_PASSWORD_ENV: &str = "PINGORA_PANEL_ADMIN_DATABASE_PASS
 const DEFAULT_NATS_URL: &str = "nats://127.0.0.1:4222";
 
 /// The schema of every service and the variable naming its role password.
-pub const SERVICE_SCHEMAS: &[(&str, &str)] = &[
-    ("identity", "PINGORA_PANEL_IDENTITY_DATABASE_PASSWORD"),
-    ("config", "PINGORA_PANEL_CONFIG_DATABASE_PASSWORD"),
-];
+pub const SERVICE_SCHEMAS: &[(&str, &str)] =
+    &[("identity", "PINGORA_PANEL_IDENTITY_DATABASE_PASSWORD")];
 
 /// Prefix of the login role that owns each schema, as in `panel_config`.
 pub const DEFAULT_ROLE_PREFIX: &str = "panel_";

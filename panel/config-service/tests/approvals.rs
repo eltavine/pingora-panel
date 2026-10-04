@@ -8,14 +8,11 @@ use panel_application::{
     ApplyOutcome, ApplyRequest, ApprovalBypass, CommandContext, ConfigurationChange,
     ConfigurationPort, ConfigurationRead, IdempotencyKey, RequestDeadline, RequestId, RequestScope,
 };
-use panel_control_runtime::{
-    ProcessSettings, RunningProcess, DATABASE_PASSWORD_ENV, DATABASE_URL_ENV, NATS_URL_ENV,
-};
+use panel_control_runtime::{ProcessSettings, RunningProcess, NATS_URL_ENV};
 use panel_engine::{EngineCapability, FakeGatewayEngine};
 use panel_errors::ErrorCode;
 use panel_health::HealthStatus;
 use panel_jetstream::testing::{TestBroker, NATS_URL_ENV as TEST_NATS_URL_ENV};
-use panel_postgres::testing::TestDatabase;
 use panel_service::Environment;
 use serde_json::{json, Value};
 use std::{
@@ -33,18 +30,14 @@ use tonic::transport::Server;
 
 struct Harness {
     client: ConfigPublicationClient,
-    database: TestDatabase,
+    _data: tempfile::TempDir,
     _process: RunningProcess,
     _broker: TestBroker,
 }
 
 async fn start() -> Option<Harness> {
-    let (Some(mut database), Some(broker)) =
-        (TestDatabase::create().await, TestBroker::create().await)
-    else {
-        return None;
-    };
-    let secrets = database.bootstrap(&[("config", "config")]).await;
+    let broker = TestBroker::create().await?;
+    let data = tempfile::tempdir().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let gateway = listener.local_addr().unwrap();
     let (reporter, health) = tonic_health::server::health_reporter();
@@ -69,8 +62,6 @@ async fn start() -> Option<Harness> {
             .serve_with_incoming(TcpListenerStream::new(listener)),
     );
     let values: HashMap<&str, OsString> = HashMap::from([
-        (DATABASE_URL_ENV, database.service_url("config").into()),
-        (DATABASE_PASSWORD_ENV, secrets[0].expose().into()),
         (
             NATS_URL_ENV,
             std::env::var(TEST_NATS_URL_ENV).unwrap().into(),
@@ -87,7 +78,8 @@ async fn start() -> Option<Harness> {
             "127.0.0.1:0".parse().unwrap(),
             "127.0.0.1:0".parse().unwrap(),
         )
-        .with_health_interval(Duration::from_millis(50));
+        .with_health_interval(Duration::from_millis(50))
+        .with_data_directory(data.path());
     let process = config_service::process(&mut env, settings)
         .unwrap()
         .with_jetstream_settings((*broker.settings).clone())
@@ -109,7 +101,7 @@ async fn start() -> Option<Harness> {
     .unwrap();
     Some(Harness {
         client,
-        database,
+        _data: data,
         _process: process,
         _broker: broker,
     })
@@ -195,16 +187,11 @@ impl Harness {
     }
 
     async fn events(&self, event_type: &str) -> i64 {
-        let pool = sqlx::PgPool::connect(self.database.admin_url())
+        sqlx::query_scalar("SELECT count(*) FROM outbox WHERE event_type LIKE '%.' || ?1 || '.v1'")
+            .bind(event_type)
+            .fetch_one(self._process.sqlite().pool())
             .await
-            .unwrap();
-        sqlx::query_scalar(
-            "SELECT count(*) FROM config.outbox WHERE event_type LIKE '%.' || $1 || '.v1'",
-        )
-        .bind(event_type)
-        .fetch_one(&pool)
-        .await
-        .unwrap()
+            .unwrap()
     }
 }
 

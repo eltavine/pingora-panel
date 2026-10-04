@@ -51,8 +51,9 @@ event and its audit record must survive a power loss and the control
 plane commits rarely enough to afford it; `foreign_keys=ON`; and a busy
 timeout. Transactions that write begin with `BEGIN IMMEDIATE`, so a writer
 waits its turn for the file's lock instead of failing when a read would
-have to become a write. Times are written by the module as RFC 3339 UTC
-text, never computed by SQL, so they compare in order. The data directory
+have to become a write. Times are RFC 3339 UTC text in one form, written by
+the module or by SQLite's clock as `strftime('%Y-%m-%dT%H:%M:%f+00:00')`, so
+they compare in order. The data directory
 and its files belong to the control plane's user alone.
 
 **Outbox.** A module's relay publishes its outbox to JetStream as before.

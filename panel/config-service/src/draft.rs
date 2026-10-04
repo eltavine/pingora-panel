@@ -5,8 +5,8 @@ use panel_config_dsl::Sources;
 use panel_config_model::{ConfigModel, MODEL_VERSION};
 use panel_errors::{PanelError, Result};
 use panel_event_contracts::config::v1 as event;
-use panel_postgres::{storage_error, EventLog, PgOutbox, ServiceDatabase};
-use sqlx::{PgConnection, PgPool};
+use panel_sqlite::{storage_error, EventLog, ServiceDatabase, SqliteOutbox};
+use sqlx::SqliteConnection;
 
 /// The aggregate of draft events.
 pub const DRAFT: (&str, &str) = ("configuration", "draft");
@@ -49,10 +49,10 @@ pub struct ChangeRequest<'a> {
     pub actor: &'a str,
 }
 
-/// The draft document in the service schema.
+/// The draft document in the module's database.
 #[derive(Clone)]
-pub struct PgDrafts {
-    pool: PgPool,
+pub struct SqliteDrafts {
+    database: ServiceDatabase,
     events: EventLog,
 }
 
@@ -74,20 +74,25 @@ fn stored(version: u64) -> Result<i64> {
     i64::try_from(version).map_err(|_| PanelError::resource_exhausted("draft version overflow"))
 }
 
-impl PgDrafts {
+impl SqliteDrafts {
     pub fn new(database: &ServiceDatabase, events: EventLog) -> Self {
         Self {
-            pool: database.pool().clone(),
+            database: database.clone(),
             events,
         }
     }
 
     pub async fn load(&self) -> Result<DraftState> {
-        let mut connection = self.pool.acquire().await.map_err(storage_error)?;
-        read(&mut connection, false).await
+        let mut connection = self
+            .database
+            .pool()
+            .acquire()
+            .await
+            .map_err(storage_error)?;
+        read(&mut connection).await
     }
 
-    /// Applies `change` to the current draft while holding its row lock. A
+    /// Applies `change` to the current draft under the file's write lock. A
     /// repeated idempotency key returns the recorded output when the request
     /// is the same and is refused when it differs.
     pub async fn change(
@@ -95,10 +100,10 @@ impl PgDrafts {
         request: ChangeRequest<'_>,
         change: impl FnOnce(&DraftState) -> Result<DraftChange>,
     ) -> Result<(DraftState, ChangeOutput)> {
-        let mut transaction = self.pool.begin().await.map_err(storage_error)?;
-        let current = read(&mut transaction, true).await?;
+        let mut transaction = self.database.begin().await?;
+        let current = read(&mut transaction).await?;
         let recorded: Option<(String, Vec<u8>, String)> = sqlx::query_as(
-            "SELECT request_hash, content, etag FROM change_receipts WHERE idempotency_key = $1",
+            "SELECT request_hash, content, etag FROM change_receipts WHERE idempotency_key = ?1",
         )
         .bind(request.idempotency_key.as_str())
         .fetch_optional(&mut *transaction)
@@ -126,8 +131,8 @@ impl PgDrafts {
             PanelError::internal(format!("draft files cannot be encoded: {error}"))
         })?;
         let (updated_at,): (DateTime<Utc>,) = sqlx::query_as(
-            "UPDATE draft_configuration SET version = $1, format = $2, document = $3::jsonb, \
-             sources = $4::jsonb, updated_at = now() RETURNING updated_at",
+            "UPDATE draft_configuration SET version = ?1, format = ?2, document = ?3, \
+             sources = ?4, updated_at = strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now') RETURNING updated_at",
         )
         .bind(stored(next)?)
         .bind(MODEL_VERSION)
@@ -139,7 +144,7 @@ impl PgDrafts {
         sqlx::query(
             "INSERT INTO change_receipts \
              (idempotency_key, operation, resource, request_hash, content, etag, version) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )
         .bind(request.idempotency_key.as_str())
         .bind(request.operation)
@@ -161,7 +166,7 @@ impl PgDrafts {
                 resource: request.resource.to_owned(),
             },
         )?;
-        PgOutbox::append(&mut transaction, &event).await?;
+        SqliteOutbox::append(&mut transaction, &event).await?;
         transaction.commit().await.map_err(storage_error)?;
         Ok((
             DraftState {
@@ -184,11 +189,11 @@ impl PgDrafts {
         scope: &RequestScope,
         actor: &str,
     ) -> Result<DraftState> {
-        let mut transaction = self.pool.begin().await.map_err(storage_error)?;
-        read(&mut transaction, true).await?;
+        let mut transaction = self.database.begin().await?;
+        read(&mut transaction).await?;
         sqlx::query(
-            "UPDATE draft_configuration SET applied_version = $1, applied_at = now() \
-             WHERE applied_version IS NULL OR applied_version < $1",
+            "UPDATE draft_configuration SET applied_version = ?1, applied_at = strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now') \
+             WHERE applied_version IS NULL OR applied_version < ?1",
         )
         .bind(stored(version)?)
         .execute(&mut *transaction)
@@ -204,33 +209,28 @@ impl PgDrafts {
                 note: note.map(str::to_owned),
             },
         )?;
-        PgOutbox::append(&mut transaction, &event).await?;
-        let state = read(&mut transaction, false).await?;
+        SqliteOutbox::append(&mut transaction, &event).await?;
+        let state = read(&mut transaction).await?;
         transaction.commit().await.map_err(storage_error)?;
         Ok(state)
     }
 }
 
-/// Reads the draft, creating the empty one on first use; `lock` holds the
-/// row until the transaction ends.
-async fn read(connection: &mut PgConnection, lock: bool) -> Result<DraftState> {
+/// Reads the draft, creating the empty one on first use.
+async fn read(connection: &mut SqliteConnection) -> Result<DraftState> {
     sqlx::query(
         "INSERT INTO draft_configuration (singleton, version, format, document) \
-         VALUES (true, 0, $1, '{}'::jsonb) ON CONFLICT (singleton) DO NOTHING",
+         VALUES (true, 0, ?1, '{}') ON CONFLICT (singleton) DO NOTHING",
     )
     .bind(MODEL_VERSION)
     .execute(&mut *connection)
     .await
     .map_err(storage_error)?;
-    let query = if lock {
-        "SELECT version, format, document::text, sources::text, updated_at, applied_version, \
-         applied_at FROM draft_configuration FOR UPDATE"
-    } else {
-        "SELECT version, format, document::text, sources::text, updated_at, applied_version, \
-         applied_at FROM draft_configuration"
-    };
     let (draft_version, format, document, files, updated_at, applied_version, applied_at): DraftRow =
-        sqlx::query_as(query)
+        sqlx::query_as(
+            "SELECT version, format, document, sources, updated_at, applied_version, \
+             applied_at FROM draft_configuration",
+        )
             .fetch_one(&mut *connection)
             .await
             .map_err(storage_error)?;

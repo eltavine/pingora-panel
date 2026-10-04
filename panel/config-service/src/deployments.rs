@@ -1,11 +1,11 @@
+use chrono::{DateTime, TimeDelta, Utc};
 use panel_application::{
     ActivatedDeployment, CommandContext, ConfigDocument, ContentHash, IdempotencyKey,
     PreparedDeployment, RequestId,
 };
 use panel_domain::RevisionId;
 use panel_errors::{PanelError, Result};
-use panel_postgres::{storage_error, ServiceDatabase};
-use sqlx::PgPool;
+use panel_sqlite::{storage_error, ServiceDatabase};
 use std::time::Duration;
 
 /// A prepared deployment and the document it was prepared from.
@@ -30,8 +30,8 @@ pub struct PendingActivation {
 
 /// Prepared documents, activation intents and the desired configuration.
 #[derive(Clone)]
-pub struct PgDeployments {
-    pool: PgPool,
+pub struct SqliteDeployments {
+    database: ServiceDatabase,
 }
 
 type PreparedRow = (String, i64, String, String, String, Vec<u8>);
@@ -59,10 +59,10 @@ fn revision(value: RevisionId) -> Result<i64> {
     i64::try_from(value.get()).map_err(|_| PanelError::invalid_argument("revision is too large"))
 }
 
-impl PgDeployments {
+impl SqliteDeployments {
     pub fn new(database: &ServiceDatabase) -> Self {
         Self {
-            pool: database.pool().clone(),
+            database: database.clone(),
         }
     }
 
@@ -74,7 +74,7 @@ impl PgDeployments {
         sqlx::query(
             "INSERT INTO prepared_deployments \
              (prepare_token, revision_id, content_hash, schema_version, media_type, content) \
-             VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (prepare_token) DO NOTHING",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT (prepare_token) DO NOTHING",
         )
         .bind(prepared.prepare_token())
         .bind(revision(prepared.revision_id())?)
@@ -82,7 +82,7 @@ impl PgDeployments {
         .bind(document.schema_version())
         .bind(document.media_type())
         .bind(document.body())
-        .execute(&self.pool)
+        .execute(self.database.pool())
         .await
         .map_err(storage_error)?;
         Ok(())
@@ -99,14 +99,14 @@ impl PgDeployments {
         sqlx::query(
             "INSERT INTO activation_intents \
              (idempotency_key, prepare_token, expected_active_hash, actor, correlation_id) \
-             VALUES ($1, $2, $3, $4, $5) ON CONFLICT (idempotency_key) DO NOTHING",
+             VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT (idempotency_key) DO NOTHING",
         )
         .bind(context.idempotency_key().as_str())
         .bind(prepare_token)
         .bind(expected_active_hash.map(ContentHash::as_str))
         .bind(context.actor())
         .bind(context.correlation_id().as_str())
-        .execute(&self.pool)
+        .execute(self.database.pool())
         .await
         .map_err(storage_error)?;
         Ok(())
@@ -121,15 +121,15 @@ impl PgDeployments {
     ) -> Result<()> {
         sqlx::query(
             "INSERT INTO desired_configuration (prepare_token, revision_id, content_hash) \
-             VALUES ($1, $2, $3) ON CONFLICT (singleton) DO UPDATE \
+             VALUES (?1, ?2, ?3) ON CONFLICT (singleton) DO UPDATE \
              SET prepare_token = EXCLUDED.prepare_token, revision_id = EXCLUDED.revision_id, \
-                 content_hash = EXCLUDED.content_hash, activated_at = now() \
+                 content_hash = EXCLUDED.content_hash, activated_at = strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now') \
              WHERE desired_configuration.revision_id < EXCLUDED.revision_id",
         )
         .bind(prepare_token)
         .bind(revision(activated.revision_id())?)
         .bind(activated.content_hash().as_str())
-        .execute(&self.pool)
+        .execute(self.database.pool())
         .await
         .map_err(storage_error)?;
         Ok(())
@@ -142,7 +142,7 @@ impl PgDeployments {
              FROM desired_configuration d \
              JOIN prepared_deployments p ON p.prepare_token = d.prepare_token",
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(self.database.pool())
         .await
         .map_err(storage_error)?
         .map(prepared)
@@ -156,11 +156,11 @@ impl PgDeployments {
     ) -> Result<Option<PreparedRecord>> {
         sqlx::query_as::<_, PreparedRow>(
             "SELECT prepare_token, revision_id, content_hash, schema_version, media_type, content \
-             FROM prepared_deployments WHERE content_hash = $1 \
+             FROM prepared_deployments WHERE content_hash = ?1 \
              ORDER BY revision_id DESC LIMIT 1",
         )
         .bind(content_hash.as_str())
-        .fetch_optional(&self.pool)
+        .fetch_optional(self.database.pool())
         .await
         .map_err(storage_error)?
         .map(prepared)
@@ -176,7 +176,7 @@ impl PgDeployments {
              JOIN activation_intents i ON i.idempotency_key = r.idempotency_key \
              WHERE r.receipt IS NULL ORDER BY r.claimed_at",
         )
-        .fetch_all(&self.pool)
+        .fetch_all(self.database.pool())
         .await
         .map_err(storage_error)?;
         rows.into_iter()
@@ -198,23 +198,29 @@ impl PgDeployments {
     /// Removes records older than `retention` that no pending activation or
     /// the desired configuration needs.
     pub async fn purge(&self, retention: Duration) -> Result<u64> {
-        let seconds = f64::from(u32::try_from(retention.as_secs()).unwrap_or(u32::MAX));
+        let cutoff = TimeDelta::from_std(retention)
+            .ok()
+            .and_then(|retention| Utc::now().checked_sub_signed(retention))
+            .unwrap_or(DateTime::<Utc>::MIN_UTC);
         let intents = sqlx::query(
-            "DELETE FROM activation_intents i WHERE i.recorded_at < now() - make_interval(secs => $1) \
+            "DELETE FROM activation_intents WHERE recorded_at < ?1 \
              AND NOT EXISTS (SELECT 1 FROM activation_receipts r \
-                             WHERE r.idempotency_key = i.idempotency_key AND r.receipt IS NULL)",
+                             WHERE r.idempotency_key = activation_intents.idempotency_key \
+                               AND r.receipt IS NULL)",
         )
-        .bind(seconds)
-        .execute(&self.pool)
+        .bind(cutoff)
+        .execute(self.database.pool())
         .await
         .map_err(storage_error)?;
         let prepared = sqlx::query(
-            "DELETE FROM prepared_deployments p WHERE p.prepared_at < now() - make_interval(secs => $1) \
-             AND NOT EXISTS (SELECT 1 FROM desired_configuration d WHERE d.prepare_token = p.prepare_token) \
-             AND NOT EXISTS (SELECT 1 FROM activation_intents i WHERE i.prepare_token = p.prepare_token)",
+            "DELETE FROM prepared_deployments WHERE prepared_at < ?1 \
+             AND NOT EXISTS (SELECT 1 FROM desired_configuration d \
+                             WHERE d.prepare_token = prepared_deployments.prepare_token) \
+             AND NOT EXISTS (SELECT 1 FROM activation_intents i \
+                             WHERE i.prepare_token = prepared_deployments.prepare_token)",
         )
-        .bind(seconds)
-        .execute(&self.pool)
+        .bind(cutoff)
+        .execute(self.database.pool())
         .await
         .map_err(storage_error)?;
         Ok(intents.rows_affected() + prepared.rows_affected())
