@@ -57,6 +57,21 @@ message ContainerRemoved {
   bool remove_volumes = 5;
 }
 
+// `container.image.removed`
+message ImageRemoved {
+  string engine = 1;
+  // The image's ID before it was removed.
+  string id = 2;
+  // The image as the operation named it.
+  string image = 3;
+  // The references removed.
+  repeated string untagged = 4;
+  // The images and layers deleted; none when other references remain.
+  repeated string deleted = 5;
+  // Whether it was removed though stopped containers used it.
+  bool force = 6;
+}
+
 // `container.operation.refused`: an operation on an engine that was refused
 // or failed, and changed nothing.
 message OperationRefused {
@@ -67,4 +82,6 @@ message OperationRefused {
   string message = 4;
   // The container as the operation named it, for operations on one.
   string container = 5;
+  // The image as the operation named it, for operations on one.
+  string image = 6;
 }

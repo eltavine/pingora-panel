@@ -2044,6 +2044,7 @@ const en: Messages = {
       everySite: 'every site',
       killedFirst: 'killed first',
       volumesRemoved: 'with its volumes',
+      forced: 'though stopped containers used it',
     },
     types: {
       config_draft_changed: 'Changed the draft',
@@ -2115,6 +2116,7 @@ const en: Messages = {
       container_restarted: 'Restarted a container',
       container_killed: 'Killed a container',
       container_removed: 'Removed a container',
+      container_image_removed: 'Removed an image',
       container_operation_refused: 'Refused a container operation',
     },
   },

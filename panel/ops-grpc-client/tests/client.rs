@@ -4,7 +4,8 @@ use ops_grpc_client::OpsAgentClient;
 use panel_application::{
     AgentCapability, CommandContext, ContainerAction, ContainerLogQuery, ContainerLogStart,
     ContainerLogStream, ContainerNetworkStats, ContainerState, ContainersPort, DirectoryKind,
-    GatewayServiceAction, HostAgentPort, IdempotencyKey, RequestDeadline, RequestId, RequestScope,
+    GatewayServiceAction, HostAgentPort, IdempotencyKey, ImagesPort, RequestDeadline, RequestId,
+    RequestScope,
 };
 use panel_contracts::{
     common::v1 as common,
@@ -15,6 +16,7 @@ use panel_contracts::{
         directories_server::{Directories, DirectoriesServer},
         gateway_service_server::{GatewayService, GatewayServiceServer},
         gateway_service_status::Supervisor,
+        images_server::{Images, ImagesServer},
         listeners_server::{Listeners, ListenersServer},
     },
 };
@@ -177,6 +179,67 @@ impl GatewayService for FakeGateway {
                 )),
                 error: None,
             },
+        }))
+    }
+}
+
+/// nginx, which a running container uses and so cannot be removed.
+struct FakeImages;
+
+#[tonic::async_trait]
+impl Images for FakeImages {
+    async fn list(
+        &self,
+        request: Request<wire::ImagesListRequest>,
+    ) -> Result<Response<wire::ImagesListResponse>, Status> {
+        assert_eq!(request.into_inner().search, "nginx");
+        Ok(Response::new(wire::ImagesListResponse {
+            observed_at: Some(at(10).into()),
+            images: vec![wire::Image {
+                id: "sha256:aa".into(),
+                tags: vec!["nginx:1.27".into()],
+                created: Some(at(0).into()),
+                size_bytes: 50_000_000,
+                containers: 1,
+                labels: [("maintainer".to_owned(), "NGINX".to_owned())].into(),
+                ..wire::Image::default()
+            }],
+            error: None,
+        }))
+    }
+
+    async fn inspect(
+        &self,
+        _: Request<wire::ImagesInspectRequest>,
+    ) -> Result<Response<wire::ImagesInspectResponse>, Status> {
+        Ok(Response::new(wire::ImagesInspectResponse {
+            detail: Some(wire::ImageDetail {
+                image: Some(wire::Image {
+                    id: "sha256:aa".into(),
+                    ..wire::Image::default()
+                }),
+                architecture: "arm64".into(),
+                exposed_ports: vec!["80/tcp".into()],
+                layers: 7,
+                ..wire::ImageDetail::default()
+            }),
+            error: None,
+        }))
+    }
+
+    async fn remove(
+        &self,
+        request: Request<wire::ImagesRemoveRequest>,
+    ) -> Result<Response<wire::ImagesRemoveResponse>, Status> {
+        assert!(request.into_inner().force);
+        Ok(Response::new(wire::ImagesRemoveResponse {
+            error: Some(common::Error {
+                code: "CONFLICT".into(),
+                message: "image is being used by running container b2".into(),
+                retryable: false,
+                diagnostics: Vec::new(),
+            }),
+            ..wire::ImagesRemoveResponse::default()
         }))
     }
 }
@@ -362,6 +425,7 @@ async fn client(fail: bool) -> OpsAgentClient {
             .add_service(ListenersServer::new(FakeListeners))
             .add_service(GatewayServiceServer::new(FakeGateway))
             .add_service(ContainersServer::new(FakeContainers))
+            .add_service(ImagesServer::new(FakeImages))
             .serve_with_incoming(TcpListenerStream::new(listener)),
     );
     OpsAgentClient::from_channel(
@@ -562,4 +626,46 @@ async fn running_containers_report_what_they_use() {
         (web.block_read_bytes, web.block_written_bytes),
         (4_096, 8_192)
     );
+}
+
+#[tokio::test]
+async fn images_are_listed_inspected_and_refused_removal() {
+    let client = client(false).await;
+    let list = client
+        .images(scope(), "docker".into(), "nginx".into())
+        .await
+        .unwrap();
+    assert_eq!(list.observed_at, Some(at(10)));
+    let nginx = &list.images[0];
+    assert_eq!(
+        (nginx.tags[0].as_str(), nginx.containers),
+        ("nginx:1.27", 1)
+    );
+    assert_eq!(nginx.created, Some(at(0)));
+    assert_eq!(nginx.labels["maintainer"], "NGINX");
+
+    let detail = client
+        .inspect_image(scope(), "docker".into(), "nginx:1.27".into())
+        .await
+        .unwrap();
+    assert_eq!(detail.architecture.as_deref(), Some("arm64"));
+    assert_eq!(
+        detail.os, None,
+        "an empty value is one the agent does not know"
+    );
+    assert_eq!((detail.exposed_ports.len(), detail.layers), (1, 7));
+
+    let context = CommandContext::new(
+        RequestId::new("request-1").unwrap(),
+        RequestId::new("request-1").unwrap(),
+        "ops",
+        RequestDeadline::new("2099-01-01T00:00:00Z").unwrap(),
+        IdempotencyKey::new("key-1").unwrap(),
+    )
+    .unwrap();
+    let refused = client
+        .remove_image(context, "docker".into(), "nginx:1.27".into(), true)
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code.as_str(), "CONFLICT");
 }

@@ -3,8 +3,8 @@
 
 use crate::{
     CommandContext, ContainerAction, ContainerChange, ContainerEngine, DataPlaneState, FileChecks,
-    GatewayRuntimePort, GatewayServiceAction, GatewayServiceStatus, LogDeletion, RequestScope,
-    UpstreamHealth, UpstreamHealthReport,
+    GatewayRuntimePort, GatewayServiceAction, GatewayServiceStatus, ImageRemoval, LogDeletion,
+    RequestScope, UpstreamHealth, UpstreamHealthReport,
 };
 use async_trait::async_trait;
 use panel_errors::{PanelError, Result};
@@ -47,6 +47,14 @@ pub enum Operation<'a> {
         container: &'a str,
         action: ContainerAction,
         result: std::result::Result<&'a ContainerChange, &'a PanelError>,
+    },
+    /// The host agent was asked to remove a reference to an image.
+    ImageRemoval {
+        engine: &'a str,
+        /// The image as the request named it.
+        image: &'a str,
+        force: bool,
+        result: std::result::Result<&'a ImageRemoval, &'a PanelError>,
     },
 }
 
@@ -247,6 +255,9 @@ mod tests {
                     format!("container-{}", action.as_str()),
                     result.map(|_| container.to_owned()),
                 ),
+                Operation::ImageRemoval { image, result, .. } => {
+                    ("image-remove".to_owned(), result.map(|_| image.to_owned()))
+                }
             };
             self.0
                 .lock()

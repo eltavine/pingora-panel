@@ -115,6 +115,32 @@ describe('audit presentation', () => {
         t,
       ),
     ).toBe('docker · shop-web-1 · audit.summary.killedFirst')
+    expect(
+      summaryOf(
+        event('container.image.removed', {
+          engine: 'docker',
+          id: 'sha256:bb',
+          image: 'redis:7',
+          untagged: ['redis:7'],
+          deleted: ['sha256:bb'],
+          force: true,
+        }),
+        t,
+      ),
+    ).toBe('docker · redis:7 · audit.summary.forced')
+    expect(
+      summaryOf(
+        event('container.operation.refused', {
+          engine: 'docker',
+          operation: 'image.remove',
+          code: 'PRECONDITION_FAILED',
+          message: 'nats:2.15 is used by the panel',
+          container: '',
+          image: 'nats:2.15',
+        }),
+        t,
+      ),
+    ).toBe('image.remove docker · nats:2.15 · PRECONDITION_FAILED · nats:2.15 is used by the panel')
   })
 
   it('summarizes roles, token rotations and certificates', () => {

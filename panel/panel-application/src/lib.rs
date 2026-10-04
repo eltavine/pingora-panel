@@ -52,6 +52,7 @@ mod gateway;
 mod host;
 mod host_agent;
 mod idempotency;
+mod images;
 mod logs;
 mod operations;
 mod persistence;
@@ -87,6 +88,9 @@ pub use host_agent::{
     HostAgentPort, ListenersReport, ListeningProcess, NoHostAgent, PortListener, RecordedHostAgent,
 };
 pub use idempotency::IdempotentGatewayUseCases;
+pub use images::{
+    Image, ImageDetail, ImageList, ImageRemoval, ImagesPort, NoImages, RecordedImages,
+};
 pub use logs::{
     LogBatch, LogDeletion, LogDeletionState, LogFilter, LogKind, LogPage, LogRecord, LogSearch,
     LogTail, LogsPort, RecordedLogs,

@@ -23,6 +23,7 @@ const GATEWAY_SERVICE: (&str, &str) = ("host", "gateway-service");
 /// The aggregate types of container events, by engine and by container.
 const ENGINE: &str = "container_engine";
 const CONTAINER: &str = "container";
+const IMAGE: &str = "container_image";
 
 pub struct OutboxOperations(pub EventLog);
 
@@ -167,7 +168,7 @@ impl OperationLog for OutboxOperations {
                             .to_owned(),
                             code: error.code.as_str().to_owned(),
                             message: error.message.clone(),
-                            container: String::new(),
+                            ..containers::OperationRefused::default()
                         };
                         self.0.record(target, &scope, actor, &refused).await;
                     }
@@ -223,10 +224,45 @@ impl OperationLog for OutboxOperations {
                             code: error.code.as_str().to_owned(),
                             message: error.message.clone(),
                             container: container.to_owned(),
+                            ..containers::OperationRefused::default()
                         };
                         self.0
                             .record((CONTAINER, &target_id), &scope, actor, &refused)
                             .await;
+                    }
+                }
+            }
+            Operation::ImageRemoval {
+                engine,
+                image,
+                force,
+                result,
+            } => {
+                let (scope, actor) = (context.scope(), context.actor());
+                let target_id = format!("{engine}/{image}");
+                let target = (IMAGE, target_id.as_str());
+                match result {
+                    Ok(removal) => {
+                        let data = containers::ImageRemoved {
+                            engine: engine.to_owned(),
+                            id: removal.id.clone(),
+                            image: image.to_owned(),
+                            untagged: removal.untagged.clone(),
+                            deleted: removal.deleted.clone(),
+                            force,
+                        };
+                        self.0.record(target, &scope, actor, &data).await;
+                    }
+                    Err(error) => {
+                        let refused = containers::OperationRefused {
+                            engine: engine.to_owned(),
+                            operation: "image.remove".to_owned(),
+                            code: error.code.as_str().to_owned(),
+                            message: error.message.clone(),
+                            image: image.to_owned(),
+                            ..containers::OperationRefused::default()
+                        };
+                        self.0.record(target, &scope, actor, &refused).await;
                     }
                 }
             }
@@ -266,6 +302,7 @@ mod tests {
             GATEWAY_SERVICE.0,
             ENGINE,
             CONTAINER,
+            IMAGE,
             "upstream",
             "gateway",
             "site",

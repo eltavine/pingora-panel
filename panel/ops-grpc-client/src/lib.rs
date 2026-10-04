@@ -11,13 +11,15 @@ use panel_application::{
     ContainerLogTail, ContainerLogs, ContainerMount, ContainerNetwork, ContainerNetworkStats,
     ContainerState, ContainerStats, ContainerStatsList, ContainerSummary, ContainersPort,
     DirectoriesReport, DirectoryKind, DirectoryUsage, EngineInfo, EngineVersion, GatewayContainer,
-    GatewayServiceAction, GatewayServiceStatus, HostAgentPort, ListenersReport, ListeningProcess,
-    PortListener, PortMapping, RequestScope,
+    GatewayServiceAction, GatewayServiceStatus, HostAgentPort, Image, ImageDetail, ImageList,
+    ImageRemoval, ImagesPort, ListenersReport, ListeningProcess, PortListener, PortMapping,
+    RequestScope,
 };
 use panel_contracts::ops::v1::{
     self as wire, agent_client::AgentClient, containers_client::ContainersClient,
     directories_client::DirectoriesClient, gateway_service_client::GatewayServiceClient,
-    gateway_service_status::Supervisor, listeners_client::ListenersClient,
+    gateway_service_status::Supervisor, images_client::ImagesClient,
+    listeners_client::ListenersClient,
 };
 use panel_errors::{PanelError, Result};
 use panel_service::{
@@ -637,6 +639,106 @@ fn detail(value: wire::ContainerDetail) -> ContainerDetail {
                 aliases: network.aliases,
             })
             .collect(),
+    }
+}
+
+fn image_of(value: wire::Image) -> Image {
+    Image {
+        id: value.id,
+        tags: value.tags,
+        digests: value.digests,
+        created: time(value.created),
+        size_bytes: value.size_bytes,
+        containers: value.containers,
+        labels: value.labels.into_iter().collect(),
+    }
+}
+
+#[async_trait]
+impl ImagesPort for OpsAgentClient {
+    async fn images(
+        &self,
+        scope: RequestScope,
+        engine_id: String,
+        search: String,
+    ) -> Result<ImageList> {
+        let message = wire::ImagesListRequest {
+            context: Some(request_context(&scope)),
+            engine: engine_id,
+            search,
+        };
+        let response = ImagesClient::new(self.channel.clone())
+            .list(self.request(message, &scope))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        Ok(ImageList {
+            observed_at: time(response.observed_at),
+            images: response.images.into_iter().map(image_of).collect(),
+        })
+    }
+
+    async fn inspect_image(
+        &self,
+        scope: RequestScope,
+        engine_id: String,
+        image: String,
+    ) -> Result<ImageDetail> {
+        let message = wire::ImagesInspectRequest {
+            context: Some(request_context(&scope)),
+            engine: engine_id,
+            image,
+        };
+        let response = ImagesClient::new(self.channel.clone())
+            .inspect(self.request(message, &scope))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        let value = response.detail.unwrap_or_default();
+        Ok(ImageDetail {
+            image: image_of(value.image.unwrap_or_default()),
+            architecture: known(value.architecture),
+            variant: known(value.variant),
+            os: known(value.os),
+            author: known(value.author),
+            comment: known(value.comment),
+            user: known(value.user),
+            working_directory: known(value.working_directory),
+            exposed_ports: value.exposed_ports,
+            volumes: value.volumes,
+            stop_signal: known(value.stop_signal),
+            layers: value.layers,
+        })
+    }
+
+    async fn remove_image(
+        &self,
+        context: CommandContext,
+        engine_id: String,
+        image: String,
+        force: bool,
+    ) -> Result<ImageRemoval> {
+        let message = wire::ImagesRemoveRequest {
+            context: Some(command_context(&context)),
+            engine: engine_id,
+            image,
+            force,
+        };
+        let mut request = self.request(message, &context.scope());
+        request.set_timeout(CHANGE_TIMEOUT);
+        let response = ImagesClient::new(self.channel.clone())
+            .remove(request)
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        Ok(ImageRemoval {
+            id: response.id,
+            untagged: response.untagged,
+            deleted: response.deleted,
+        })
     }
 }
 

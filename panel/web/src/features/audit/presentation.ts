@@ -72,6 +72,7 @@ export const KNOWN_TYPES = [
   'container.restarted',
   'container.killed',
   'container.removed',
+  'container.image.removed',
   'container.operation.refused',
 ] as const
 
@@ -257,8 +258,20 @@ export function summaryOf(event: AuditEvent, t: Translate): string {
       ]
         .filter(Boolean)
         .join(' · ')
+    case 'container.image.removed':
+      return [
+        `${text(data.engine)} · ${text(data.image)}`,
+        data.force === true && t('audit.summary.forced'),
+      ]
+        .filter(Boolean)
+        .join(' · ')
     case 'container.operation.refused':
-      return [`${text(data.operation)} ${text(data.engine)}`, data.code, data.message]
+      return [
+        `${text(data.operation)} ${text(data.engine)}`,
+        data.container || data.image,
+        data.code,
+        data.message,
+      ]
         .map(text)
         .filter(Boolean)
         .join(' · ')

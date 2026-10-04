@@ -151,6 +151,7 @@ event_types! {
     containers::v1::ContainerRestarted => "container.restarted",
     containers::v1::ContainerKilled => "container.killed",
     containers::v1::ContainerRemoved => "container.removed",
+    containers::v1::ImageRemoved => "container.image.removed",
     containers::v1::OperationRefused => "container.operation.refused",
 }
 
