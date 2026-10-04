@@ -11,6 +11,7 @@ const REQUESTS: &str = "http_server_request_duration_seconds_count";
 const REQUEST_BUCKETS: &str = "http_server_request_duration_seconds_bucket";
 const UPSTREAM_REQUESTS: &str = "http_client_request_duration_seconds_count";
 const UPSTREAM_BUCKETS: &str = "http_client_request_duration_seconds_bucket";
+const DOMAIN_REQUESTS: &str = "pingora_panel_gateway_domain_requests_total";
 
 /// Which requests a query reads.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -39,6 +40,14 @@ impl Scope {
             ));
         }
         Ok(Self { site, route })
+    }
+
+    /// Only the site: metrics without routes read the whole site.
+    fn site_selector(&self) -> String {
+        self.site
+            .as_ref()
+            .map(|site| format!("{{site={}}}", quoted(site.as_str())))
+            .unwrap_or_default()
     }
 
     fn selector(&self, extra: &[&str]) -> String {
@@ -157,6 +166,16 @@ impl Queries {
         )
     }
 
+    /// The busiest configured domains, as `site` and `domain`; a route's
+    /// scope reads its site's.
+    pub fn domains(&self, limit: usize) -> String {
+        format!(
+            "topk({limit}, sum by (site, domain) (increase({DOMAIN_REQUESTS}{}[{}])))",
+            self.scope.site_selector(),
+            self.range
+        )
+    }
+
     pub fn tls_handshakes(&self) -> String {
         format!(
             "sum(increase(pingora_panel_gateway_tls_handshakes_total[{}]))",
@@ -215,6 +234,16 @@ mod tests {
             everything.routes(20),
             "topk(20, sum by (site, route) \
              (increase(http_server_request_duration_seconds_count{route!=\"\"}[300s])))"
+        );
+        assert_eq!(
+            everything.domains(20),
+            "topk(20, sum by (site, domain) \
+             (increase(pingora_panel_gateway_domain_requests_total[300s])))"
+        );
+        assert_eq!(
+            queries.domains(20),
+            "topk(20, sum by (site, domain) \
+             (increase(pingora_panel_gateway_domain_requests_total{site=\"shop\"}[3600s])))"
         );
     }
 

@@ -13,6 +13,7 @@ import {
   Hash,
   LockKeyhole,
   RefreshCw,
+  Globe,
   Route as RouteIcon,
   Server,
   Timer,
@@ -384,6 +385,37 @@ function refresh() {
               </TableBody>
             </Table>
             <p v-else class="text-muted-foreground text-sm">{{ t('traffic.noRoutes') }}</p>
+          </CardContent>
+        </Card>
+        <Card class="min-w-0">
+          <CardHeader>
+            <CardTitle class="flex items-center gap-2">
+              <Globe class="size-4" aria-hidden="true" />{{ t('traffic.domains') }}
+            </CardTitle>
+          </CardHeader>
+          <CardContent class="overflow-x-auto">
+            <Table v-if="figures.domains.length">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{{ t('traffic.site') }}</TableHead>
+                  <TableHead>{{ t('traffic.domain') }}</TableHead>
+                  <TableHead class="text-right">{{ t('traffic.requests') }}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow
+                  v-for="busiest in figures.domains"
+                  :key="`${busiest.site}/${busiest.domain}`"
+                >
+                  <TableCell>{{ busiest.site }}</TableCell>
+                  <TableCell class="font-mono text-xs font-medium">{{ busiest.domain }}</TableCell>
+                  <TableCell class="text-right tabular-nums">
+                    {{ format.count(busiest.requests) }}
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+            <p v-else class="text-muted-foreground text-sm">{{ t('traffic.noDomains') }}</p>
           </CardContent>
         </Card>
       </div>

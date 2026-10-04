@@ -157,6 +157,12 @@ const ROUTES: &[Column] = &[
     ("REQUESTS", |route| count(&route["requests"])),
 ];
 
+const DOMAINS: &[Column] = &[
+    ("SITE", |domain| text(&domain["site"])),
+    ("DOMAIN", |domain| text(&domain["domain"])),
+    ("REQUESTS", |domain| count(&domain["requests"])),
+];
+
 const POINTS: &[Column] = &[
     ("TIME", |point| text(&point["at"])),
     ("REQ/S", |point| rate(&point["requests_per_second"])),
@@ -185,6 +191,13 @@ pub async fn run(api: &Api, output: &Output, command: TrafficCommand) -> Result<
                 {
                     println!();
                     output.list(&summary["routes"], ROUTES);
+                }
+                if summary["domains"]
+                    .as_array()
+                    .is_some_and(|items| !items.is_empty())
+                {
+                    println!();
+                    output.list(&summary["domains"], DOMAINS);
                 }
             }
         }

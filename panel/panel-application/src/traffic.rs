@@ -55,6 +55,15 @@ pub struct RouteTraffic {
     pub requests: f64,
 }
 
+/// Requests a site took by one of its domains.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DomainTraffic {
+    pub site: String,
+    /// As configured, such as `*.shop.example`.
+    pub domain: String,
+    pub requests: f64,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TrafficSummary {
     pub observed_at: Option<SystemTime>,
@@ -73,6 +82,8 @@ pub struct TrafficSummary {
     pub upstreams: Vec<UpstreamTraffic>,
     /// Busiest first.
     pub routes: Vec<RouteTraffic>,
+    /// Busiest first; a route's summary lists its site's.
+    pub domains: Vec<DomainTraffic>,
     /// The revision of the gateway's active configuration.
     pub revision: Option<u64>,
     pub activated_at: Option<SystemTime>,

@@ -23,6 +23,7 @@ const summary = {
   tls_handshakes: 7,
   upstreams: [],
   routes: [],
+  domains: [],
   revision: 7,
   activated_at: '2026-10-04T09:00:00Z',
 }

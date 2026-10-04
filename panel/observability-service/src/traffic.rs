@@ -18,6 +18,7 @@ const MIN_STEP: Duration = Duration::from_secs(15);
 const DEFAULT_POINTS: u32 = 120;
 const MAX_POINTS: u32 = 720;
 const ROUTES: usize = 20;
+const DOMAINS: usize = 20;
 const QUANTILES: [f64; 4] = [0.5, 0.9, 0.95, 0.99];
 
 pub struct TrafficService {
@@ -112,6 +113,24 @@ impl TrafficService {
         Ok(routes)
     }
 
+    async fn domains(&self, queries: &Queries) -> Result<Vec<wire::DomainTraffic>> {
+        let mut domains: Vec<wire::DomainTraffic> = self
+            .instant(queries.domains(DOMAINS))
+            .await?
+            .into_iter()
+            .filter(|(_, requests)| requests.is_finite())
+            .filter_map(|(mut labels, requests)| {
+                Some(wire::DomainTraffic {
+                    site: labels.remove("site")?,
+                    domain: labels.remove("domain")?,
+                    requests,
+                })
+            })
+            .collect();
+        domains.sort_by(|left, right| right.requests.total_cmp(&left.requests));
+        Ok(domains)
+    }
+
     pub async fn summarize(&self, scope: Scope, window: Duration) -> Result<wire::Summary> {
         let queries = Queries::new(scope, window);
         let (
@@ -133,11 +152,12 @@ impl TrafficService {
             self.value(OPEN_CONNECTIONS.to_owned()),
             self.value(queries.tls_handshakes()),
         )?;
-        let (attempts, failures, upstream_latency, routes, revision, activated_at) = tokio::try_join!(
+        let (attempts, failures, upstream_latency, routes, domains, revision, activated_at) = tokio::try_join!(
             self.by(queries.upstream_requests(false), "upstream"),
             self.by(queries.upstream_requests(true), "upstream"),
             self.upstream_latency(&queries),
             self.routes(&queries),
+            self.domains(&queries),
             self.value(REVISION.to_owned()),
             self.value(ACTIVATED_AT.to_owned()),
         )?;
@@ -174,6 +194,7 @@ impl TrafficService {
             tls_handshakes: tls_handshakes.unwrap_or_default(),
             upstreams,
             routes,
+            domains,
             revision: revision.and_then(|revision| {
                 (revision >= 0.0 && revision <= u64::MAX as f64).then_some(revision as u64)
             }),

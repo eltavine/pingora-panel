@@ -51,6 +51,6 @@ pub use runtime::{
 };
 pub use tls_probe::{TlsProbe, TlsProbeReport, TlsProbeTarget};
 pub use traffic::{
-    Latency, RouteTraffic, StatusClasses, TrafficPoint, TrafficPort, TrafficQuery, TrafficSummary,
-    UpstreamTraffic,
+    DomainTraffic, Latency, RouteTraffic, StatusClasses, TrafficPoint, TrafficPort, TrafficQuery,
+    TrafficSummary, UpstreamTraffic,
 };

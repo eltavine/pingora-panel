@@ -68,6 +68,14 @@ message RouteTraffic {
   double requests = 3;
 }
 
+// Requests a site took by one of its domains.
+message DomainTraffic {
+  string site = 1;
+  // As configured, such as `*.shop.example`.
+  string domain = 2;
+  double requests = 3;
+}
+
 message Summary {
   google.protobuf.Timestamp observed_at = 1;
   google.protobuf.Duration window = 2;
@@ -89,6 +97,8 @@ message Summary {
   optional uint64 revision = 13;
   // When that configuration was activated.
   google.protobuf.Timestamp activated_at = 14;
+  // Busiest first, at most 20; a route's summary lists its site's.
+  repeated DomainTraffic domains = 15;
 }
 
 message SummaryResponse {

@@ -7,8 +7,8 @@ mod logs;
 
 use async_trait::async_trait;
 use panel_application::{
-    Latency, RequestScope, RouteTraffic, StatusClasses, TrafficPoint, TrafficPort, TrafficQuery,
-    TrafficSummary, UpstreamTraffic,
+    DomainTraffic, Latency, RequestScope, RouteTraffic, StatusClasses, TrafficPoint, TrafficPort,
+    TrafficQuery, TrafficSummary, UpstreamTraffic,
 };
 use panel_contracts::observability::v1::{self as wire, traffic_client::TrafficClient};
 use panel_errors::Result;
@@ -144,6 +144,15 @@ fn summary(value: wire::Summary) -> TrafficSummary {
                 site: route.site,
                 route: route.route,
                 requests: route.requests,
+            })
+            .collect(),
+        domains: value
+            .domains
+            .into_iter()
+            .map(|domain| DomainTraffic {
+                site: domain.site,
+                domain: domain.domain,
+                requests: domain.requests,
             })
             .collect(),
         revision: value.revision,

@@ -28,6 +28,11 @@ fn answer(query: &str) -> Vec<serde_json::Value> {
             sample(&[("class", "2")], "90"),
             sample(&[("class", "5")], "10"),
         ]
+    } else if query.contains("pingora_panel_gateway_domain_requests_total") {
+        vec![
+            sample(&[("site", "shop"), ("domain", "*.shop.example")], "30"),
+            sample(&[("site", "shop"), ("domain", "shop.example")], "70"),
+        ]
     } else if query.starts_with("topk(20") {
         vec![
             sample(&[("site", "shop"), ("route", "home")], "40"),
@@ -138,6 +143,16 @@ async fn summaries_gather_every_figure_of_a_scope() {
         .map(|route| route.route.as_str())
         .collect();
     assert_eq!(routes, ["checkout", "home"], "busiest first");
+    let domains: Vec<_> = summary
+        .domains
+        .iter()
+        .map(|domain| (domain.domain.as_str(), domain.requests))
+        .collect();
+    assert_eq!(
+        domains,
+        [("shop.example", 70.0), ("*.shop.example", 30.0)],
+        "busiest first"
+    );
     let upstream = &summary.upstreams[0];
     assert_eq!(
         (upstream.upstream.as_str(), upstream.requests),

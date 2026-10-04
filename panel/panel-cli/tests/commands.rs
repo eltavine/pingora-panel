@@ -151,6 +151,7 @@ async fn api(
             "upstreams": [{"upstream": "app", "requests": 50, "error_ratio": 0.125,
                            "latency": {"p50": null, "p90": null, "p95": 1.5, "p99": null}}],
             "routes": [{"site": "shop", "route": "checkout", "requests": 60}],
+            "domains": [{"site": "shop", "domain": "*.shop.example", "requests": 45}],
             "revision": 7, "activated_at": "2026-10-04T09:00:00Z"
         }))
         .into_response(),
@@ -879,6 +880,7 @@ fn traffic_is_summarized_and_charted() {
         "7 (activated 2026-10-04T09:00:00Z)",
         "12.5%",
         "checkout",
+        "*.shop.example",
     ] {
         assert!(printed.contains(expected), "{expected} in\n{printed}");
     }

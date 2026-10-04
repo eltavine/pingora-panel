@@ -57469,6 +57469,28 @@
           }
         }
       },
+      "DomainTrafficItem": {
+        "type": "object",
+        "description": "Requests a site took by one of its domains.",
+        "required": [
+          "site",
+          "domain",
+          "requests"
+        ],
+        "properties": {
+          "domain": {
+            "type": "string",
+            "description": "As configured, such as `*.shop.example`."
+          },
+          "requests": {
+            "type": "number",
+            "format": "double"
+          },
+          "site": {
+            "type": "string"
+          }
+        }
+      },
       "DomainView": {
         "allOf": [
           {
@@ -61562,7 +61584,8 @@
           "open_connections",
           "tls_handshakes",
           "upstreams",
-          "routes"
+          "routes",
+          "domains"
         ],
         "properties": {
           "activated_at": {
@@ -61581,6 +61604,13 @@
             "type": "number",
             "format": "double",
             "description": "Response body bytes sent."
+          },
+          "domains": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DomainTrafficItem"
+            },
+            "description": "Busiest first, at most 20; a route's summary lists its site's."
           },
           "latency": {
             "$ref": "#/components/schemas/LatencyQuantiles"

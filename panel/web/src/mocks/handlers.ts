@@ -127,6 +127,12 @@ function summary(windowSeconds: number): TrafficSummaryResponse {
       { site: 'docs', route: 'pages', requests: requests * 0.2 },
       { site: 'blog', route: 'posts', requests: requests * 0.1 },
     ],
+    domains: [
+      { site: 'shop', domain: 'shop.example', requests: requests * 0.52 },
+      { site: 'docs', domain: 'docs.example', requests: requests * 0.2 },
+      { site: 'shop', domain: '*.shop.example', requests: requests * 0.1 },
+      { site: 'blog', domain: 'blog.example', requests: requests * 0.1 },
+    ],
     revision: 42,
     activated_at: activated,
   }

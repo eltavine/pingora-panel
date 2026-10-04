@@ -1,7 +1,7 @@
 use super::*;
 use panel_application::{
-    Latency, RequestScope, RouteTraffic, StatusClasses, TrafficPoint, TrafficPort, TrafficQuery,
-    TrafficSummary, UpstreamTraffic,
+    DomainTraffic, Latency, RequestScope, RouteTraffic, StatusClasses, TrafficPoint, TrafficPort,
+    TrafficQuery, TrafficSummary, UpstreamTraffic,
 };
 use panel_domain::{RouteId, SiteId};
 use serde_json::{json, Value};
@@ -43,6 +43,11 @@ impl TrafficPort for Traffic {
                 site: "shop".into(),
                 route: "checkout".into(),
                 requests: 60.0,
+            }],
+            domains: vec![DomainTraffic {
+                site: "shop".into(),
+                domain: "*.shop.example".into(),
+                requests: 30.0,
             }],
             revision: Some(7),
             ..TrafficSummary::default()
@@ -105,6 +110,10 @@ async fn summaries_read_one_scope_over_a_window() {
     assert_eq!(
         summary["routes"],
         json!([{"site": "shop", "route": "checkout", "requests": 60.0}])
+    );
+    assert_eq!(
+        summary["domains"],
+        json!([{"site": "shop", "domain": "*.shop.example", "requests": 30.0}])
     );
     assert_eq!(summary["revision"], 7);
     assert_eq!(

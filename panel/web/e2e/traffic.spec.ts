@@ -27,6 +27,7 @@ const summary = {
     },
   ],
   routes: [{ site: 'shop', route: 'checkout', requests: 600 }],
+  domains: [{ site: 'shop', domain: '*.shop.example', requests: 450 }],
   revision: 7,
   activated_at: '2026-10-04T09:00:00Z',
 }
@@ -82,6 +83,7 @@ test('the traffic of a window is summarized and charted', async ({ page }) => {
   await expect(page.getByText('1.5 MiB', { exact: true })).toBeVisible()
   await expect(page.getByRole('img', { name: 'Request rate' })).toBeVisible()
   await expect(page.getByRole('cell', { name: 'checkout' })).toBeVisible()
+  await expect(page.getByRole('cell', { name: '*.shop.example' })).toBeVisible()
   await expect(page.getByRole('cell', { name: '12.5%' })).toBeVisible()
   await expect(page.getByText('Active configuration revision #7')).toBeVisible()
   await expect(page.getByRole('img', { name: '4xx: 4% of requests' })).toBeVisible()
@@ -102,7 +104,14 @@ test('a quiet window says so', async ({ page }) => {
   await setUp(page)
   await page.route(/\/api\/v1\/traffic(\?.*)?$/, (route) =>
     route.fulfill({
-      json: { ...summary, requests: 0, upstreams: [], routes: [], revision: null },
+      json: {
+        ...summary,
+        requests: 0,
+        upstreams: [],
+        routes: [],
+        domains: [],
+        revision: null,
+      },
     }),
   )
   await page.route(/\/api\/v1\/traffic\/series/, (route) => route.fulfill({ json: { points: [] } }))
