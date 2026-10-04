@@ -45,7 +45,8 @@ jobs:
 
       - name: Install the host agent
         run: |
-          sudo env PINGORA_PANEL_IMAGE=localhost/pingora-panel:dev panel/deploy/ops-agent/install.sh
+          sudo env PINGORA_PANEL_IMAGE=localhost/pingora-panel:dev \
+            panel/deploy/ops-agent/install.sh directories listeners
           sudo systemd-analyze verify \
             /etc/systemd/system/pingora-panel-ops-agent.service \
             /etc/systemd/system/pingora-panel-ops-agent-credentials.service \
@@ -112,8 +113,12 @@ jobs:
           curl --fail --silent --show-error --header "$auth" \
             http://127.0.0.1:8080/api/v1/host/directories \
             | python3 -c "import json, sys; found = json.load(sys.stdin)['directories']; assert len(found) == 3 and all(d['present'] for d in found), found"
+          curl --fail --silent --show-error --header "$auth" \
+            'http://127.0.0.1:8080/api/v1/host/listeners?ports=8080' \
+            | python3 -c "import json, sys; found = json.load(sys.stdin)['listeners']; assert any(p['name'] == 'panel-api' for l in found for p in l['processes']), found"
           docker compose exec -T -e PPANEL_TOKEN panel-api ppanel host agent
           docker compose exec -T -e PPANEL_TOKEN panel-api ppanel host directories
+          docker compose exec -T -e PPANEL_TOKEN panel-api ppanel host listeners --port 8080
 
       - name: Serve a site through the gateway with the command line
         run: |
