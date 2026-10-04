@@ -17,6 +17,46 @@ message EngineDisabled {
   string engine = 1;
 }
 
+// `container.started`
+message ContainerStarted {
+  string engine = 1;
+  string id = 2;
+  // Without the leading slash.
+  string name = 3;
+}
+
+// `container.stopped`
+message ContainerStopped {
+  string engine = 1;
+  string id = 2;
+  string name = 3;
+}
+
+// `container.restarted`
+message ContainerRestarted {
+  string engine = 1;
+  string id = 2;
+  string name = 3;
+}
+
+// `container.killed`
+message ContainerKilled {
+  string engine = 1;
+  string id = 2;
+  string name = 3;
+}
+
+// `container.removed`
+message ContainerRemoved {
+  string engine = 1;
+  string id = 2;
+  string name = 3;
+  // Whether it was killed first because it was running.
+  bool force = 4;
+  // Whether its anonymous volumes went with it.
+  bool remove_volumes = 5;
+}
+
 // `container.operation.refused`: an operation on an engine that was refused
 // or failed, and changed nothing.
 message OperationRefused {
@@ -25,4 +65,6 @@ message OperationRefused {
   string operation = 2;
   string code = 3;
   string message = 4;
+  // The container as the operation named it, for operations on one.
+  string container = 5;
 }

@@ -160,6 +160,7 @@ impl OperationLog for OutboxOperations {
                             .to_owned(),
                             code: error.code.as_str().to_owned(),
                             message: error.message.clone(),
+                            container: String::new(),
                         };
                         self.0.record(target, &scope, actor, &refused).await;
                     }

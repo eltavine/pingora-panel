@@ -146,6 +146,11 @@ event_types! {
     host::v1::OperationRefused => "host.operation.refused",
     containers::v1::EngineEnabled => "container.engine.enabled",
     containers::v1::EngineDisabled => "container.engine.disabled",
+    containers::v1::ContainerStarted => "container.started",
+    containers::v1::ContainerStopped => "container.stopped",
+    containers::v1::ContainerRestarted => "container.restarted",
+    containers::v1::ContainerKilled => "container.killed",
+    containers::v1::ContainerRemoved => "container.removed",
     containers::v1::OperationRefused => "container.operation.refused",
 }
 
