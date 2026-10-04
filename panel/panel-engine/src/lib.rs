@@ -4,6 +4,7 @@
 
 mod events;
 pub mod fake;
+mod logging;
 pub mod ports;
 mod traffic;
 mod validation;

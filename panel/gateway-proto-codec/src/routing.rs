@@ -1,7 +1,7 @@
 //! Listener, site and route wire conversion.
 
 use crate::{
-    domain_error, optional_string, status_code,
+    domain_error, logging, optional_string, status_code,
     upstream::{decode_retry_policy, encode_retry_policy},
 };
 use panel_contracts::gateway::v1 as wire;
@@ -121,6 +121,7 @@ pub(super) fn decode_site(value: wire::SiteSpec) -> Result<SiteSpec> {
             preload: hsts.preload,
         }),
         security_policy_id: optional_string(value.security_policy_id),
+        access_log: logging::decode_access_log(value.access_log)?,
     })
 }
 
@@ -154,6 +155,7 @@ pub(super) fn encode_site(value: &SiteSpec) -> wire::SiteSpec {
             preload: hsts.preload,
         }),
         security_policy_id: value.security_policy_id.clone().unwrap_or_default(),
+        access_log: logging::encode_access_log(&value.access_log),
     }
 }
 
@@ -179,6 +181,7 @@ pub(super) fn decode_route(value: wire::RouteSpec) -> Result<RouteSpec> {
         security_policy_id: optional_string(value.security_policy_id),
         lua_policy_id: optional_string(value.lua_policy_id),
         name: optional_string(value.name),
+        access_log: logging::decode_access_log(value.access_log)?,
     })
 }
 
@@ -196,6 +199,7 @@ pub(super) fn encode_route(value: &RouteSpec) -> wire::RouteSpec {
         security_policy_id: value.security_policy_id.clone().unwrap_or_default(),
         lua_policy_id: value.lua_policy_id.clone().unwrap_or_default(),
         name: value.name.clone().unwrap_or_default(),
+        access_log: logging::encode_access_log(&value.access_log),
     }
 }
 

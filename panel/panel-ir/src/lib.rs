@@ -12,11 +12,13 @@ use panel_domain::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub use logging::{AccessLog, AccessLogFormat, LogFiles, LoggingPolicy};
 pub use security::{
     BasicAuth, LimitedResponse, RateLimit, RateLimitKey, RealIpHeader, RefererRule, SecurityPolicy,
     REQUEST_HEAD_TIMEOUT_CAPABILITY, REQUEST_SECURITY_CAPABILITY, TRUSTED_PROXIES_CAPABILITY,
 };
 
+pub mod logging;
 pub mod security;
 pub mod template;
 pub mod tls;
@@ -55,6 +57,8 @@ pub struct RuntimeSnapshot {
     pub cache_policies: Vec<CachePolicy>,
     pub security_policies: Vec<SecurityPolicy>,
     pub lua_policies: Vec<LuaPolicy>,
+    #[serde(default, skip_serializing_if = "LoggingPolicy::is_default")]
+    pub logging: LoggingPolicy,
     pub required_capabilities: Vec<CapabilityRequirement>,
 }
 
@@ -72,6 +76,8 @@ struct CanonicalSnapshot<'a> {
     cache_policies: &'a [CachePolicy],
     security_policies: &'a [SecurityPolicy],
     lua_policies: &'a [LuaPolicy],
+    #[serde(skip_serializing_if = "LoggingPolicy::is_default")]
+    logging: &'a LoggingPolicy,
     required_capabilities: &'a [CapabilityRequirement],
 }
 
@@ -91,6 +97,7 @@ impl RuntimeSnapshot {
             cache_policies: Vec::new(),
             security_policies: Vec::new(),
             lua_policies: Vec::new(),
+            logging: LoggingPolicy::default(),
             required_capabilities: Vec::new(),
         };
         snapshot.refresh_content_hash();
@@ -144,6 +151,7 @@ impl RuntimeSnapshot {
             cache_policies: &cache_policies,
             security_policies: &security_policies,
             lua_policies: &lua_policies,
+            logging: &self.logging,
             required_capabilities: &required_capabilities,
         };
         serde_json::to_vec(&canonical).expect("IR canonical values are always serializable")
@@ -274,6 +282,8 @@ pub struct SiteSpec {
     /// Every request for the site passes this policy first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub security_policy_id: Option<String>,
+    #[serde(default, skip_serializing_if = "AccessLog::is_unset")]
+    pub access_log: AccessLog,
 }
 
 /// An HTTP Strict Transport Security policy (RFC 6797 §6.1).
@@ -316,6 +326,7 @@ impl SiteSpec {
             www_redirect: WwwRedirect::None,
             hsts: None,
             security_policy_id: None,
+            access_log: AccessLog::default(),
         }
     }
 }
@@ -381,6 +392,8 @@ pub struct RouteSpec {
     pub lua_policy_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "AccessLog::is_unset")]
+    pub access_log: AccessLog,
 }
 
 impl RouteSpec {
@@ -404,6 +417,7 @@ impl RouteSpec {
             security_policy_id: None,
             lua_policy_id: None,
             name: None,
+            access_log: AccessLog::default(),
         }
     }
 }

@@ -38,6 +38,8 @@ message RuntimeSnapshot {
   repeated SecurityPolicy security_policies = 12;
   repeated LuaPolicy lua_policies = 13;
   repeated .pingora.panel.common.v1.Capability required_capabilities = 14;
+  // Absent keeps the gateway's logging defaults.
+  LoggingPolicy logging = 15;
 }
 
 message ListenerRef {
@@ -86,6 +88,7 @@ message SiteSpec {
   StrictTransportSecurity hsts = 8;
   // Every request for the site passes this policy first.
   string security_policy_id = 9;
+  AccessLog access_log = 10;
 }
 
 // An HTTP Strict Transport Security policy (RFC 6797 §6.1).
@@ -124,6 +127,51 @@ message RouteSpec {
   string security_policy_id = 10;
   string lua_policy_id = 11;
   string name = 12;
+  AccessLog access_log = 13;
+}
+
+// Access log settings of every site, of one site or of one route; unset
+// values come from the enclosing scope (ADR 0025).
+message AccessLog {
+  optional bool enabled = 1;
+  // Unspecified takes the enclosing scope's format.
+  AccessLogFormat format = 2;
+  // Extra fields by name, as templates of request variables.
+  map<string, string> fields = 3;
+}
+
+enum AccessLogFormat {
+  ACCESS_LOG_FORMAT_UNSPECIFIED = 0;
+  // One JSON object per line, keyed by OpenTelemetry attribute names.
+  ACCESS_LOG_FORMAT_JSON = 1;
+  // The Combined Log Format.
+  ACCESS_LOG_FORMAT_COMBINED = 2;
+}
+
+// How the gateway rotates and keeps each log file.
+message LogFiles {
+  uint64 max_size_bytes = 1;
+  // Whether files also rotate at midnight UTC.
+  bool rotate_daily = 2;
+  // Rotated files older than this are deleted; zero keeps them.
+  uint32 keep_days = 3;
+  // The most rotated files kept of each log; zero keeps them all.
+  uint32 max_files = 4;
+}
+
+// Logging for every site, and what is never logged.
+message LoggingPolicy {
+  AccessLog access = 1;
+  // Absent keeps the gateway's rotation and retention defaults.
+  LogFiles files = 2;
+  // Present replaces the default query parameters whose values are redacted.
+  RedactedQuery redact_query = 3;
+  // Header names redacted besides the default ones.
+  repeated string redact_headers = 4;
+}
+
+message RedactedQuery {
+  repeated string keys = 1;
 }
 
 message RouteMatcher {

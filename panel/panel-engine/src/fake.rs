@@ -249,6 +249,7 @@ mod tests {
             security_policy_id: None,
             lua_policy_id: None,
             name: None,
+            access_log: panel_ir::AccessLog::default(),
         });
         candidate.refresh_content_hash();
         let report = engine.validate(candidate).await.unwrap();

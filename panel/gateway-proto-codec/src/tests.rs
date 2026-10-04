@@ -268,3 +268,54 @@ fn absent_extension_messages_decode_to_defaults() {
     wire.upstream_pools[0].tls = None;
     assert_eq!(decode_snapshot(wire).unwrap(), snapshot);
 }
+
+#[test]
+fn logging_settings_round_trip() {
+    use panel_ir::{
+        logging::LOGGING_CAPABILITY, AccessLog, AccessLogFormat, LogFiles, LoggingPolicy,
+    };
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(9));
+    let mut site = SiteSpec::new(SiteId::new("site").unwrap(), "site", Vec::new());
+    site.access_log.enabled = Some(false);
+    snapshot.sites.push(site);
+    let mut route = RouteSpec::new(
+        RouteId::new("route").unwrap(),
+        SiteId::new("site").unwrap(),
+        10,
+        RouteMatcher::PathPrefix {
+            path: PathPrefix::new("/").unwrap(),
+        },
+        RouteAction::Proxy {
+            upstream_pool_id: UpstreamPoolId::new("pool").unwrap(),
+        },
+    );
+    route.access_log = AccessLog {
+        enabled: Some(true),
+        format: Some(AccessLogFormat::Combined),
+        fields: BTreeMap::from([("tenant".to_owned(), "$http_x_tenant".to_owned())]),
+    };
+    snapshot.routes.push(route);
+    snapshot.logging = LoggingPolicy {
+        access: AccessLog {
+            format: Some(AccessLogFormat::Json),
+            ..AccessLog::default()
+        },
+        files: LogFiles {
+            max_size_bytes: 1 << 20,
+            rotate_daily: false,
+            keep_days: 0,
+            max_files: 3,
+        },
+        redact_query: Some(BTreeSet::new()),
+        redact_headers: BTreeSet::from(["x-api-key".to_owned()]),
+    };
+    snapshot
+        .required_capabilities
+        .push(CapabilityRequirement::new(LOGGING_CAPABILITY, "1"));
+    snapshot.refresh_content_hash();
+
+    let decoded = decode_snapshot(encode_snapshot(&snapshot)).unwrap();
+    assert_eq!(decoded, snapshot);
+}

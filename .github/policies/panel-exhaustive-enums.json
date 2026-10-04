@@ -63,6 +63,12 @@
     },
     {
       "package": "panel-ir",
+      "name": "AccessLogFormat",
+      "owner": "pingora-panel-platform",
+      "reason": "gateway-proto-codec maps every access log format onto the protobuf enum. A new format must fail to compile there rather than be sent as the enclosing scope's format."
+    },
+    {
+      "package": "panel-ir",
       "name": "WwwRedirect",
       "owner": "pingora-panel-platform",
       "reason": "gateway-proto-codec maps every redirect mode onto the protobuf enum. A new mode must fail to compile there rather than be sent as no redirect."
