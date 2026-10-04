@@ -260,6 +260,14 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
             post(containers::act_on_container::<U>),
         )
         .route(
+            "/api/v1/container-engines/{engine}/containers/{container}/logs",
+            get(containers::container_logs::<U>),
+        )
+        .route(
+            "/api/v1/container-engines/{engine}/containers/{container}/logs/tail",
+            get(containers::tail_container_logs::<U>).connect(containers::tail_container_logs::<U>),
+        )
+        .route(
             "/api/v1/host/gateway-service/{action}",
             post(host_agent::change_gateway_service::<U>),
         )

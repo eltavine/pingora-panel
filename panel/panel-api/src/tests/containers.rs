@@ -463,3 +463,127 @@ async fn a_container_is_inspected_with_its_labels_mounts_and_networks() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{problem}");
 }
+
+#[tokio::test]
+async fn a_container_s_last_lines_are_read() {
+    let app = app(true);
+    let path = "/api/v1/container-engines/docker/containers/shop-web-1/logs";
+    let (status, logs) = get(&app, &format!("{path}?lines=2")).await;
+    assert_eq!(status, StatusCode::OK, "{logs}");
+    assert_eq!(logs["observed_at"], "2027-01-15T08:00:10Z");
+    assert_eq!(logs["truncated"], false);
+    assert_eq!(logs["lines"].as_array().unwrap().len(), 2);
+    assert_eq!(logs["lines"][0]["text"], "upstream timed out");
+    assert_eq!(logs["lines"][0]["stream"], "stderr");
+    assert_eq!(
+        logs["lines"][0]["time"], "2027-01-15T08:00:01.000000001Z",
+        "a line keeps the precision its engine recorded"
+    );
+    assert_eq!(logs["lines"][1]["stream"], "stdout");
+
+    let (_, every) = get(&app, path).await;
+    assert_eq!(every["lines"].as_array().unwrap().len(), 3);
+    let (_, since) = get(&app, &format!("{path}?since=2027-01-15T08:00:02Z")).await;
+    assert_eq!(since["lines"][0]["text"], "GET /cart 200");
+    assert_eq!(since["lines"].as_array().unwrap().len(), 1);
+
+    for query in ["lines=0", "lines=5001", "since=yesterday"] {
+        let (status, problem) = get(&app, &format!("{path}?{query}")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{query}: {problem}");
+    }
+    let (status, _) = get(
+        &app,
+        "/api/v1/container-engines/docker/containers/ghost/logs",
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+async fn served() -> std::net::SocketAddr {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(std::future::IntoFuture::into_future(axum::serve(
+        listener,
+        app(true),
+    )));
+    address
+}
+
+async fn followed(
+    address: std::net::SocketAddr,
+    container: &str,
+    query: &str,
+) -> (Vec<Value>, Option<tungstenite::protocol::CloseFrame>) {
+    use futures_util::StreamExt;
+
+    let (mut socket, _) = tokio_tungstenite::connect_async(format!(
+        "ws://{address}/api/v1/container-engines/docker/containers/{container}/logs/tail?{query}"
+    ))
+    .await
+    .unwrap();
+    let mut messages = Vec::new();
+    while let Some(message) = socket.next().await {
+        match message.unwrap() {
+            tungstenite::Message::Text(text) => {
+                messages.push(serde_json::from_str(text.as_str()).unwrap())
+            }
+            tungstenite::Message::Close(frame) => return (messages, frame),
+            _ => {}
+        }
+    }
+    (messages, None)
+}
+
+use tokio_tungstenite::tungstenite::{self, protocol::frame::coding::CloseCode};
+
+#[tokio::test]
+async fn a_container_s_lines_are_followed_over_a_websocket_until_it_stops() {
+    let address = served().await;
+    let (messages, closed) = followed(address, "shop-web-1", "lines=1").await;
+    assert_eq!(messages[0]["lines"][0]["text"], "GET /cart 200");
+    assert_eq!(messages[1]["lines"][0]["text"], "GET /new 200");
+    assert_eq!(messages[1]["cursor"], "2027-01-15T08:00:03.000000001Z");
+    assert!(messages.iter().all(|message| message["error"].is_null()));
+    let closed = closed.unwrap();
+    assert_eq!(
+        (closed.code, closed.reason.as_str()),
+        (CloseCode::Normal, "the container stopped")
+    );
+
+    let (resumed, _) = followed(
+        address,
+        "shop-web-1",
+        "after=2027-01-15T08:00:01.000000001Z",
+    )
+    .await;
+    assert_eq!(resumed[0]["lines"][0]["text"], "GET /cart 200");
+    assert_eq!(resumed[0]["lines"].as_array().unwrap().len(), 1);
+
+    let (failed, closed) = followed(address, "crashing", "").await;
+    assert_eq!(failed[0]["lines"][0]["text"], "GET /new 200");
+    assert_eq!(failed[1]["lines"], serde_json::json!([]));
+    assert_eq!(failed[1]["cursor"], "2027-01-15T08:00:03.000000001Z");
+    assert_eq!(failed[1]["error"]["code"], "UNAVAILABLE");
+    assert_eq!(closed.unwrap().code, CloseCode::Again);
+}
+
+#[tokio::test]
+async fn following_a_missing_container_or_too_many_lines_is_refused_before_upgrading() {
+    let address = served().await;
+    for (query, status) in [
+        ("ghost/logs/tail", StatusCode::NOT_FOUND),
+        ("shop-web-1/logs/tail?lines=1001", StatusCode::BAD_REQUEST),
+        ("shop-web-1/logs/tail?after=soon", StatusCode::BAD_REQUEST),
+    ] {
+        let refused = tokio_tungstenite::connect_async(format!(
+            "ws://{address}/api/v1/container-engines/docker/containers/{query}"
+        ))
+        .await;
+        match refused {
+            Err(tungstenite::Error::Http(response)) => {
+                assert_eq!(response.status().as_u16(), status.as_u16(), "{query}")
+            }
+            other => panic!("{query}: expected a refusal, got {other:?}"),
+        }
+    }
+}

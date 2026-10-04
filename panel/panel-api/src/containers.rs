@@ -4,18 +4,26 @@
 use crate::{
     error::ApiError,
     request_context::{command_context, request_scope, MutationHeaders, QueryHeaders},
+    tail::{relay, LogTailError, Relayed},
+    time::parse_time,
     ApiState,
 };
 use axum::{
-    extract::{Path, Query, State},
+    extract::{
+        ws::{CloseFrame, Utf8Bytes, WebSocketUpgrade},
+        Path, Query, State,
+    },
     http::HeaderMap,
+    response::Response,
     Json,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
+use futures_util::{future::ready, Stream, StreamExt};
 use panel_application::{
     ContainerAction, ContainerChange, ContainerDetail, ContainerEngine, ContainerFilter,
-    ContainerList, ContainerMount, ContainerNetwork, ContainerState, ContainerSummary, EngineInfo,
-    EngineVersion, PortMapping,
+    ContainerList, ContainerLogLine, ContainerLogQuery, ContainerLogStart, ContainerLogStream,
+    ContainerLogTail, ContainerLogs, ContainerMount, ContainerNetwork, ContainerState,
+    ContainerSummary, EngineInfo, EngineVersion, PortMapping,
 };
 use panel_errors::PanelError;
 use serde::{Deserialize, Serialize};
@@ -25,6 +33,20 @@ use utoipa::{IntoParams, ToSchema};
 fn rfc3339(time: SystemTime) -> String {
     DateTime::<Utc>::from(time).to_rfc3339_opts(SecondsFormat::Secs, true)
 }
+
+/// A line's time, as precisely as its engine recorded it.
+fn precise(time: SystemTime) -> String {
+    DateTime::<Utc>::from(time).to_rfc3339_opts(SecondsFormat::AutoSi, true)
+}
+
+/// The most lines a read returns.
+const MOST_LINES: u32 = 5_000;
+/// The lines a read returns unless asked for another number.
+const DEFAULT_LINES: u32 = 200;
+/// The most lines sent before following.
+const MOST_BACKLOG: u32 = 1_000;
+/// The lines sent before following unless asked for another number.
+const DEFAULT_BACKLOG: u32 = 100;
 
 /// An engine's name as a path names it: lowercase letters only.
 fn engine(name: String) -> Result<String, ApiError> {
@@ -628,4 +650,198 @@ pub(crate) async fn inspect_container<U>(
         )
         .await?;
     Ok(Json(detail.into()))
+}
+
+/// Which of a container's outputs a line came from.
+#[derive(Clone, Copy, Debug, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ContainerLogStreamName {
+    /// Standard output, and everything a container with a terminal prints.
+    Stdout,
+    Stderr,
+}
+
+/// A line a container printed.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct ContainerLogLineView {
+    /// When its engine recorded it, RFC 3339 with up to nanoseconds.
+    pub time: String,
+    pub stream: ContainerLogStreamName,
+    /// Without its line break; cut at 16 KiB.
+    pub text: String,
+}
+
+impl From<ContainerLogLine> for ContainerLogLineView {
+    fn from(value: ContainerLogLine) -> Self {
+        Self {
+            time: precise(value.time),
+            stream: match value.stream {
+                ContainerLogStream::Stdout => ContainerLogStreamName::Stdout,
+                ContainerLogStream::Stderr => ContainerLogStreamName::Stderr,
+            },
+            text: value.text,
+        }
+    }
+}
+
+/// A container's last lines.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct ContainerLogsView {
+    /// When the agent read them, RFC 3339.
+    pub observed_at: Option<String>,
+    /// Oldest first.
+    pub lines: Vec<ContainerLogLineView>,
+    /// Older lines were left out to keep the answer within 2 MiB.
+    pub truncated: bool,
+}
+
+impl From<ContainerLogs> for ContainerLogsView {
+    fn from(value: ContainerLogs) -> Self {
+        Self {
+            observed_at: value.observed_at.map(rfc3339),
+            lines: value.lines.into_iter().map(Into::into).collect(),
+            truncated: value.truncated,
+        }
+    }
+}
+
+/// How many lines a query asks for, between 1 and `most`.
+fn lines(value: Option<u32>, default: u32, least: u32, most: u32) -> Result<u32, ApiError> {
+    let lines = value.unwrap_or(default);
+    if (least..=most).contains(&lines) {
+        Ok(lines)
+    } else {
+        Err(ApiError::new(PanelError::invalid_argument(format!(
+            "lines must be between {least} and {most}"
+        ))))
+    }
+}
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub(crate) struct ContainerLogsQuery {
+    /// The last this many lines, 1 to 5000; 200 by default.
+    #[param(minimum = 1, maximum = 5000)]
+    lines: Option<u32>,
+    /// RFC 3339: only lines at or after this time.
+    since: Option<String>,
+}
+
+/// The last lines a container printed, oldest first, as its engine's log
+/// driver kept them. What a container prints can hold secrets.
+#[utoipa::path(get, path = "/api/v1/container-engines/{engine}/containers/{container}/logs",
+    params(
+        ("engine" = String, Path, description = "docker or podman"),
+        ("container" = String, Path, description = "Its ID, a unique prefix of its ID or its name"),
+        ContainerLogsQuery,
+        QueryHeaders,
+    ),
+    responses((status = 200, body = ContainerLogsView)), tag = "containers")]
+pub(crate) async fn container_logs<U>(
+    State(state): State<ApiState<U>>,
+    Path((name, reference)): Path<(String, String)>,
+    Query(query): Query<ContainerLogsQuery>,
+    headers: HeaderMap,
+) -> Result<Json<ContainerLogsView>, ApiError> {
+    let query = ContainerLogQuery {
+        lines: lines(query.lines, DEFAULT_LINES, 1, MOST_LINES)?,
+        since: parse_time("since", query.since.as_deref())?,
+    };
+    let logs = state
+        .containers
+        .logs(
+            request_scope(&headers)?,
+            engine(name)?,
+            container(reference)?,
+            query,
+        )
+        .await?;
+    Ok(Json(logs.into()))
+}
+
+/// What following a container sends: lines oldest first and where to
+/// resume after them, or why following ended.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct ContainerLogTailMessage {
+    pub lines: Vec<ContainerLogLineView>,
+    /// Pass as `after` to resume after these lines.
+    pub cursor: Option<String>,
+    pub error: Option<LogTailError>,
+}
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub(crate) struct ContainerLogTailQuery {
+    /// How many of the lines printed before to send first, 0 to 1000; 100
+    /// by default.
+    #[param(maximum = 1000)]
+    lines: Option<u32>,
+    /// RFC 3339: resume after the line printed at this time, a message's
+    /// `cursor`, instead.
+    after: Option<String>,
+}
+
+/// The lines as messages, each with where to resume after it.
+fn tail_messages(tail: ContainerLogTail) -> impl Stream<Item = Relayed<ContainerLogTailMessage>> {
+    tail.scan(None, |cursor, batch| {
+        ready(Some(match batch {
+            Ok(lines) => {
+                if let Some(last) = lines.last() {
+                    *cursor = Some(last.time);
+                }
+                Relayed::Sent(ContainerLogTailMessage {
+                    lines: lines.into_iter().map(Into::into).collect(),
+                    cursor: cursor.map(precise),
+                    error: None,
+                })
+            }
+            Err(error) => Relayed::Failed(
+                ContainerLogTailMessage {
+                    lines: Vec::new(),
+                    cursor: cursor.map(precise),
+                    error: Some(LogTailError::from(&error)),
+                },
+                error,
+            ),
+        }))
+    })
+}
+
+/// Follows the lines a container prints as it prints them, over a
+/// WebSocket, until the container stops. Each text message is a
+/// `ContainerLogTailMessage`; one with an error is the last.
+#[utoipa::path(get, path = "/api/v1/container-engines/{engine}/containers/{container}/logs/tail",
+    params(
+        ("engine" = String, Path, description = "docker or podman"),
+        ("container" = String, Path, description = "Its ID, a unique prefix of its ID or its name"),
+        ContainerLogTailQuery,
+        QueryHeaders,
+    ),
+    responses((status = 101, description = "Switching to the WebSocket protocol")), tag = "containers")]
+pub(crate) async fn tail_container_logs<U>(
+    State(state): State<ApiState<U>>,
+    Path((name, reference)): Path<(String, String)>,
+    Query(query): Query<ContainerLogTailQuery>,
+    headers: HeaderMap,
+    upgrade: WebSocketUpgrade,
+) -> Result<Response, ApiError> {
+    let start = match parse_time("after", query.after.as_deref())? {
+        Some(after) => ContainerLogStart::After(after),
+        None => ContainerLogStart::Last(lines(query.lines, DEFAULT_BACKLOG, 0, MOST_BACKLOG)?),
+    };
+    let tail = state
+        .containers
+        .follow_logs(
+            request_scope(&headers)?,
+            engine(name)?,
+            container(reference)?,
+            start,
+        )
+        .await?;
+    let stopped = CloseFrame {
+        code: 1000,
+        reason: Utf8Bytes::from_static("the container stopped"),
+    };
+    Ok(upgrade.on_upgrade(move |socket| relay(socket, tail_messages(tail), Some(stopped))))
 }

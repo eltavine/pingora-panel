@@ -52,6 +52,8 @@ mod tests;
         crate::containers::inspect_container,
         crate::containers::act_on_container,
         crate::containers::remove_container,
+        crate::containers::container_logs,
+        crate::containers::tail_container_logs,
         crate::alerts::list_alert_rules, crate::alerts::put_alert_rule,
         crate::alerts::delete_alert_rule, crate::alerts::list_alert_channels,
         crate::alerts::create_alert_channel, crate::alerts::rotate_alert_channel,
@@ -144,7 +146,8 @@ mod tests;
         panel_config_model::SiteKind,
         crate::logs::LogTailMessage,
         crate::host_agent::GatewayServiceActionName,
-        crate::containers::ContainerActionName
+        crate::containers::ContainerActionName,
+        crate::containers::ContainerLogTailMessage
     ))
 )]
 pub struct ApiDoc;
