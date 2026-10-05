@@ -4,8 +4,8 @@
 use crate::{
     CommandContext, ComposeAction, ComposeChange, ContainerAction, ContainerChange,
     ContainerEngine, DataPlaneState, FileChecks, GatewayRuntimePort, GatewayServiceAction,
-    GatewayServiceStatus, ImageRemoval, LogDeletion, PruneReport, RequestScope, UpstreamHealth,
-    UpstreamHealthReport,
+    GatewayServiceStatus, ImagePulled, ImageRemoval, LogDeletion, PruneReport, RequestScope,
+    UpstreamHealth, UpstreamHealthReport,
 };
 use async_trait::async_trait;
 use panel_errors::{PanelError, Result};
@@ -56,6 +56,13 @@ pub enum Operation<'a> {
         image: &'a str,
         force: bool,
         result: std::result::Result<&'a ImageRemoval, &'a PanelError>,
+    },
+    /// The host agent was asked to pull an image.
+    ImagePull {
+        engine: &'a str,
+        /// The reference as the request named it.
+        reference: &'a str,
+        result: std::result::Result<&'a ImagePulled, &'a PanelError>,
     },
     /// The host agent was asked to prune an engine.
     EnginePrune {
@@ -273,6 +280,12 @@ mod tests {
                 Operation::ImageRemoval { image, result, .. } => {
                     ("image-remove".to_owned(), result.map(|_| image.to_owned()))
                 }
+                Operation::ImagePull {
+                    reference, result, ..
+                } => (
+                    "image-pull".to_owned(),
+                    result.map(|_| reference.to_owned()),
+                ),
                 Operation::EnginePrune { engine, result } => (
                     format!("prune-{engine}"),
                     result.map(|report| report.reclaimed_bytes.to_string()),

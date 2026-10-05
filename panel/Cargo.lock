@@ -2897,6 +2897,7 @@ version = "0.3.0"
 dependencies = [
  "async-trait",
  "futures-core",
+ "futures-util",
  "panel-context",
  "panel-domain",
  "panel-errors",

@@ -130,6 +130,17 @@ describe('audit presentation', () => {
     ).toBe('docker · redis:7 · audit.summary.forced')
     expect(
       summaryOf(
+        event('container.image.pulled', {
+          engine: 'docker',
+          reference: 'nginx:1.27',
+          id: 'sha256:aa',
+          digest: 'sha256:d1',
+        }),
+        t,
+      ),
+    ).toBe('docker · nginx:1.27 · audit.summary.upToDate')
+    expect(
+      summaryOf(
         event('container.engine.pruned', {
           engine: 'docker',
           removed: ['container cache', 'image sha256:cc'],

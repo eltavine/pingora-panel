@@ -72,6 +72,18 @@ message ImageRemoved {
   bool force = 6;
 }
 
+message ImagePulled {
+  string engine = 1;
+  // The image as the operation named it, such as `nginx:1.27`.
+  string reference = 2;
+  // The ID of what the engine has under it now.
+  string id = 3;
+  // Such as `sha256:…`: what the registry served.
+  string digest = 4;
+  // Whether the engine downloaded a newer image than it had.
+  bool updated = 5;
+}
+
 // `container.engine.pruned`
 message EnginePruned {
   string engine = 1;

@@ -1,6 +1,7 @@
 use super::*;
 use panel_application::{
-    CommandContext, Image, ImageDetail, ImageList, ImageRemoval, ImagesPort, RequestScope,
+    CommandContext, Image, ImageDetail, ImageList, ImagePull, ImagePullRequest, ImageRemoval,
+    ImagesPort, RequestScope,
 };
 use serde_json::Value;
 use std::{
@@ -82,6 +83,15 @@ impl ImagesPort for Images {
             untagged: vec![image],
             deleted: vec!["sha256:bb".into()],
         })
+    }
+
+    async fn pull_image(
+        &self,
+        _: CommandContext,
+        _: String,
+        _: ImagePullRequest,
+    ) -> Result<ImagePull> {
+        Err(PanelError::unsupported_capability("not pulled here"))
     }
 }
 

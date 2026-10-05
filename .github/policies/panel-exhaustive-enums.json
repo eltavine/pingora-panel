@@ -164,6 +164,12 @@
       "reason": "Each action is a set of calls on the engine and an audit event of its own; a new action must fail to compile in every adapter until it maps it, rather than doing something else to a project."
     },
     {
+      "package": "panel-application",
+      "name": "ImagePullEvent",
+      "owner": "pingora-panel-platform",
+      "reason": "A pull reports progress and then what it pulled; the audit records a pull when it ends, so a new kind of event must fail to compile wherever pulls are relayed and recorded, rather than ending one unrecorded."
+    },
+    {
       "package": "panel-config-api",
       "name": "ConfigurationQuery",
       "owner": "pingora-panel-platform",

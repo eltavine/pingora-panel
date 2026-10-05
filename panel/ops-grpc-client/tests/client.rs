@@ -5,8 +5,9 @@ use panel_application::{
     AgentCapability, CommandContext, ComposeAction, ComposePort, ContainerAction,
     ContainerLogQuery, ContainerLogStart, ContainerLogStream, ContainerNetworkStats,
     ContainerState, ContainersPort, DirectoryKind, EngineResourcesPort, GatewayServiceAction,
-    HostAgentPort, IdempotencyKey, ImagesPort, PruneChoices, PruneItem, PruneKind, RequestDeadline,
-    RequestId, RequestScope,
+    HostAgentPort, IdempotencyKey, ImageLayerState, ImagePullEvent, ImagePullRequest, ImagesPort,
+    PruneChoices, PruneItem, PruneKind, RegistryCredentials, RequestDeadline, RequestId,
+    RequestScope,
 };
 use panel_contracts::{
     common::v1 as common,
@@ -396,11 +397,54 @@ impl EngineResources for FakeResources {
     }
 }
 
-/// nginx, which a running container uses and so cannot be removed.
+/// nginx, which a running container uses and so cannot be removed, and a
+/// private image that pulls with one layer downloading.
 struct FakeImages;
 
 #[tonic::async_trait]
 impl Images for FakeImages {
+    type PullStream =
+        tokio_stream::Iter<std::vec::IntoIter<Result<wire::ImagesPullResponse, Status>>>;
+
+    async fn pull(
+        &self,
+        request: Request<wire::ImagesPullRequest>,
+    ) -> Result<Response<Self::PullStream>, Status> {
+        let request = request.into_inner();
+        let credentials = request.credentials.unwrap_or_default();
+        assert_eq!(
+            (credentials.username.as_str(), credentials.password.as_str()),
+            ("ci", "hunter2")
+        );
+        assert_eq!(request.platform, "linux/arm64");
+        let layer = wire::ImageLayerProgress {
+            id: "9c0abc9c5bd3".into(),
+            state: wire::ImageLayerState::Downloading.into(),
+            current_bytes: 1_024,
+            total_bytes: 4_096,
+        };
+        let messages = vec![
+            Ok(wire::ImagesPullResponse {
+                layers: vec![layer.clone()],
+                ..wire::ImagesPullResponse::default()
+            }),
+            Ok(wire::ImagesPullResponse {
+                layers: vec![layer],
+                pulled: Some(wire::ImagePulled {
+                    image: Some(wire::Image {
+                        id: "sha256:ee".into(),
+                        tags: vec![request.reference],
+                        ..wire::Image::default()
+                    }),
+                    digest: String::new(),
+                    updated: true,
+                }),
+                error: None,
+            }),
+        ];
+        Ok(Response::new(tokio_stream::iter(messages)))
+    }
+
     async fn list(
         &self,
         request: Request<wire::ImagesListRequest>,
@@ -879,10 +923,44 @@ async fn images_are_listed_inspected_and_refused_removal() {
     )
     .unwrap();
     let refused = client
-        .remove_image(context, "docker".into(), "nginx:1.27".into(), true)
+        .remove_image(context.clone(), "docker".into(), "nginx:1.27".into(), true)
         .await
         .unwrap_err();
     assert_eq!(refused.code.as_str(), "CONFLICT");
+
+    use tokio_stream::StreamExt;
+    let pull = client
+        .pull_image(
+            context,
+            "docker".into(),
+            ImagePullRequest {
+                reference: "ghcr.io/example/private:2.3".into(),
+                platform: Some("linux/arm64".into()),
+                credentials: Some(RegistryCredentials {
+                    username: "ci".into(),
+                    password: "hunter2".to_owned().into(),
+                }),
+            },
+        )
+        .await
+        .unwrap();
+    let events: Vec<ImagePullEvent> = pull.map(Result::unwrap).collect().await;
+    let ImagePullEvent::Progress(layers) = &events[0] else {
+        panic!("{events:?}");
+    };
+    assert_eq!(
+        (layers[0].state, layers[0].current_bytes),
+        (ImageLayerState::Downloading, 1_024)
+    );
+    let ImagePullEvent::Pulled(pulled) = &events[1] else {
+        panic!("{events:?}");
+    };
+    assert_eq!(pulled.image.tags, ["ghcr.io/example/private:2.3"]);
+    assert_eq!(
+        pulled.digest, None,
+        "an empty digest is one the agent does not know"
+    );
+    assert!(pulled.updated);
 }
 
 #[tokio::test]

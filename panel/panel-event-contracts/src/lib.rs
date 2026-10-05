@@ -152,6 +152,7 @@ event_types! {
     containers::v1::ContainerKilled => "container.killed",
     containers::v1::ContainerRemoved => "container.removed",
     containers::v1::ImageRemoved => "container.image.removed",
+    containers::v1::ImagePulled => "container.image.pulled",
     containers::v1::EnginePruned => "container.engine.pruned",
     containers::v1::ComposeUp => "container.compose.up",
     containers::v1::ComposeDown => "container.compose.down",

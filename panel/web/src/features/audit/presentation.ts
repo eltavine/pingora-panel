@@ -73,6 +73,7 @@ export const KNOWN_TYPES = [
   'container.killed',
   'container.removed',
   'container.image.removed',
+  'container.image.pulled',
   'container.engine.pruned',
   'container.compose.up',
   'container.compose.down',
@@ -288,6 +289,13 @@ export function summaryOf(event: AuditEvent, t: Translate): string {
       return [
         `${text(data.engine)} · ${text(data.image)}`,
         data.force === true && t('audit.summary.forced'),
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    case 'container.image.pulled':
+      return [
+        `${text(data.engine)} · ${text(data.reference)}`,
+        data.updated !== true && t('audit.summary.upToDate'),
       ]
         .filter(Boolean)
         .join(' · ')

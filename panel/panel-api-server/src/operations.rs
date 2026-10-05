@@ -367,6 +367,38 @@ impl OperationLog for OutboxOperations {
                     }
                 }
             }
+            Operation::ImagePull {
+                engine,
+                reference,
+                result,
+            } => {
+                let (scope, actor) = (context.scope(), context.actor());
+                let target_id = format!("{engine}/{reference}");
+                let target = (IMAGE, target_id.as_str());
+                match result {
+                    Ok(pulled) => {
+                        let data = containers::ImagePulled {
+                            engine: engine.to_owned(),
+                            reference: reference.to_owned(),
+                            id: pulled.image.id.clone(),
+                            digest: pulled.digest.clone().unwrap_or_default(),
+                            updated: pulled.updated,
+                        };
+                        self.0.record(target, &scope, actor, &data).await;
+                    }
+                    Err(error) => {
+                        let refused = containers::OperationRefused {
+                            engine: engine.to_owned(),
+                            operation: "image.pull".to_owned(),
+                            code: error.code.as_str().to_owned(),
+                            message: error.message.clone(),
+                            image: reference.to_owned(),
+                            ..containers::OperationRefused::default()
+                        };
+                        self.0.record(target, &scope, actor, &refused).await;
+                    }
+                }
+            }
         }
     }
 }

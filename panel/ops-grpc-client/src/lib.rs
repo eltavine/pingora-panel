@@ -15,7 +15,8 @@ use panel_application::{
     DirectoryUsage, EngineDiskUsage, EngineDiskUse, EngineInfo, EngineNetwork, EngineNetworkList,
     EngineResourcesPort, EngineSubnet, EngineVersion, EngineVolume, EngineVolumeList,
     GatewayContainer, GatewayServiceAction, GatewayServiceStatus, HostAgentPort, Image,
-    ImageDetail, ImageList, ImageRemoval, ImagesPort, ListenersReport, ListeningProcess,
+    ImageDetail, ImageLayerProgress, ImageLayerState, ImageList, ImagePull, ImagePullEvent,
+    ImagePullRequest, ImagePulled, ImageRemoval, ImagesPort, ListenersReport, ListeningProcess,
     PortListener, PortMapping, ProjectService, PruneChoices, PruneItem, PruneKind, PruneOutcome,
     PrunePreview, PruneReport, RequestScope,
 };
@@ -748,6 +749,64 @@ impl ImagesPort for OpsAgentClient {
             untagged: response.untagged,
             deleted: response.deleted,
         })
+    }
+
+    async fn pull_image(
+        &self,
+        context: CommandContext,
+        engine_id: String,
+        request: ImagePullRequest,
+    ) -> Result<ImagePull> {
+        let message = wire::ImagesPullRequest {
+            context: Some(command_context(&context)),
+            engine: engine_id,
+            reference: request.reference,
+            platform: request.platform.unwrap_or_default(),
+            credentials: request
+                .credentials
+                .map(|credentials| wire::RegistryCredentials {
+                    username: credentials.username,
+                    password: credentials.password.as_str().to_owned(),
+                }),
+        };
+        // The agent bounds how long a pull takes, so it has no deadline here.
+        let mut request = tonic::Request::new(message);
+        propagate_trace(request.metadata_mut(), context.trace_context());
+        let stream = ImagesClient::new(self.channel.clone())
+            .pull(request)
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        Ok(Box::pin(stream.map(|message| {
+            let message = message.map_err(status_error)?;
+            response_error(message.error)?;
+            Ok(match message.pulled {
+                Some(pulled) => ImagePullEvent::Pulled(ImagePulled {
+                    image: image_of(pulled.image.unwrap_or_default()),
+                    digest: label(pulled.digest),
+                    updated: pulled.updated,
+                }),
+                None => {
+                    ImagePullEvent::Progress(message.layers.into_iter().map(layer_of).collect())
+                }
+            })
+        })))
+    }
+}
+
+fn layer_of(value: wire::ImageLayerProgress) -> ImageLayerProgress {
+    ImageLayerProgress {
+        state: match wire::ImageLayerState::try_from(value.state) {
+            Ok(wire::ImageLayerState::Downloading) => ImageLayerState::Downloading,
+            Ok(wire::ImageLayerState::Downloaded) => ImageLayerState::Downloaded,
+            Ok(wire::ImageLayerState::Extracting) => ImageLayerState::Extracting,
+            Ok(wire::ImageLayerState::Complete) => ImageLayerState::Complete,
+            Ok(wire::ImageLayerState::Exists) => ImageLayerState::Exists,
+            _ => ImageLayerState::Waiting,
+        },
+        id: value.id,
+        current_bytes: value.current_bytes,
+        total_bytes: value.total_bytes,
     }
 }
 

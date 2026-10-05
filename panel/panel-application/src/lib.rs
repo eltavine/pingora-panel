@@ -100,7 +100,9 @@ pub use host_agent::{
 };
 pub use idempotency::IdempotentGatewayUseCases;
 pub use images::{
-    Image, ImageDetail, ImageList, ImageRemoval, ImagesPort, NoImages, RecordedImages,
+    Image, ImageDetail, ImageLayerProgress, ImageLayerState, ImageList, ImagePull, ImagePullEvent,
+    ImagePullRequest, ImagePulled, ImageRemoval, ImagesPort, NoImages, RecordedImages,
+    RegistryCredentials,
 };
 pub use logs::{
     LogBatch, LogDeletion, LogDeletionState, LogFilter, LogKind, LogPage, LogRecord, LogSearch,
