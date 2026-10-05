@@ -163,6 +163,8 @@ Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交
 
 0.6 路由条件与路由命中测试（`ROUTE-010`～`ROUTE-025`）按 ADR 0036 实现：路由在路径之外可以要求方法（按 RFC 9110 §9.1 区分大小写）、主机（含一层 `*.parent` 通配）、请求头（名称不区分大小写，多行按 RFC 9110 §5.3 合并后判断）、查询参数（按 WHATWG URL 标准的 `application/x-www-form-urlencoded` 解码，重复参数任一值成立即可）、Cookie（取自每个 `Cookie` 字段，RFC 6265 §5.4）、客户端地址（经可信代理之后，网段或单个地址，IPv4 映射的 IPv6 按 IPv4 判断）、User-Agent、Referer 与内容类型（不含参数、不区分大小写，可写 `text/*`），取值判断有存在、不存在、等于、开头、结尾、包含与正则，并可忽略大小写；`any`、`all` 与 `not` 组合条件，最多 64 个、嵌套 8 层，正则受与路径相同的大小限制。匹配移入 `panel-routing`：它为主机找到网站、为网站的路由排序并判断路由是否接收请求，必要时说明原因；网关以它处理请求，控制面以它解释请求，二者因此一致。条件贯穿模型、配置语言（路由块内的 `method`、`host`、`header`、`query`、`cookie`、`client`、`user_agent`、`referer`、`content_type` 指令与 `any`、`all`、`not` 块，错误定位到参数，打印可往返）、IR 与网关 gRPC 契约；带条件的快照要求 `route.conditions` 能力，未知的条件种类会被网关拒绝而不是被忽略。`POST /api/v1/config/route-test` 按应用时的方式编译草稿，给出接收请求的网站与路由、是否为监听器的默认网站、比较所用的规范化主机与路径，以及之前尝试的每条路由及其第一个不成立的部分，或说明没有网站（网关返回 421）或没有路由（返回 404）。`ppanel route add` 以 `--method`、`--header`、`--query`、`--cookie`、`--client`、`--content-type` 与 `--condition` 写入条件，`ppanel route test` 测试请求；控制台的路由表单逐项编辑条件与分组，路由列表显示条件数量，“测试请求”面板展示命中的路由与原因。CI 的 Compose 检查添加只接收来自某网段之外、带 `X-Canary: 1` 的 GET 请求的路由，应用前用测试器确认去向，应用后确认网关只在条件全部成立时由该路由回答。
 
+0.6 HTTP 策略（`HTTP-001`～`HTTP-028`）按 ADR 0037 实现：HTTP 策略是有名称的资源，网站与路由引用它，先应用网站的、再应用路由的，路由策略中的 CORS 与压缩取代网站的设置。策略按删除、替换、追加的顺序修改请求字段与响应字段，值是可以引用 `$host`、`$client_ip`、`$request_id`、`$http_<name>` 等请求变量的模板；响应修改同样作用于网关生成的响应。逐跳与分帧字段、`Host` 和网关写入的转发字段不可修改，`Content-Encoding` 由压缩决定。`Server` 字段可以保留、删除或替换（RFC 9110 §10.2.4）。CORS 按 Fetch 标准的协议实现：来自所列来源（可写一层 `https://*.parent` 通配或 `*`）的预检由网关直接以 204 应答，给出允许的方法、回显所请求的字段、凭据与不超过一天的 `Access-Control-Max-Age`，其他来源只得到 `Vary`；实际请求的响应带上允许的来源（允许凭据时回显来源而不是 `*`，`*` 与凭据同时出现会被拒绝）、`Vary: Origin` 与脚本可读取的字段。压缩借助 Pingora 的压缩模块，以客户端接受的 gzip、Brotli 或 Zstandard（按 RFC 9110 §12.5.3 的权重选择，`q=0` 表示拒绝，`*` 覆盖未列出的编码）压缩代理与静态文件响应中所列媒体类型（可写 `text/*`）且不小于最小体积的部分，跳过已编码、带 `no-transform`（RFC 9111 §5.2.2.6）、部分内容、HEAD 与无主体的响应，并添加 `Vary: Accept-Encoding`。Host 透传、`X-Forwarded-For`、`X-Forwarded-Host`、`X-Forwarded-Proto`、`X-Real-IP`、`Forwarded`（RFC 7239）、Request-ID 的生成与透传和 `traceparent` 透传（W3C Trace Context）由网关对每个代理请求完成，数据面测试确认它们到达上游。策略贯穿模型、配置语言（`http_policy` 块中的 `request_header`、`response_header`、`server_header`、`cors` 块与 `compress`，服务器与路由以 `http_policy` 引用，错误定位到参数，打印可往返，变更计划与设置解释同样覆盖）、IR 与网关 gRPC 契约；引用策略的快照要求 `http.policies` 能力，未知的压缩编码或 `Server` 处理方式会被网关拒绝。`/api/v1/http-policies` 列出、读取、设置与删除策略，被使用的策略不能删除；`ppanel http-policy` 以字段行与 CORS、压缩参数设置策略，`ppanel site create` 与 `ppanel route add` 以 `--http-policy` 引用；控制台的“HTTP 策略”页面逐行编辑字段修改并设置 `Server`、CORS 与压缩，网站与路由表单选择策略。CI 的 Compose 检查在控制面的 OpenAPI 文档前放置策略，确认网关设置 `X-Frame-Options`、删除 `Server`、只为接受 br 或 gzip 的客户端压缩，并直接应答来自允许来源的预检。
+
 ### 3.2 目标仓库边界
 
 Pingora 上游 crates 继续保留在根 workspace，以便固定版本、审计源码、紧急打补丁和进行兼容测试。产品代码统一进入 `panel/` 边界。只有 `panel/gateway-pingora` 可以在 `Cargo.toml` 中依赖 `pingora-*`；其他产品 crate 只能依赖稳定的 `GatewayEngine` port 与 Engine-neutral IR。
@@ -940,34 +942,34 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | CONTENT-029 | 190 | SPA History Fallback | 0.6 | A/C/G | Operator | gatewayd | 执行“SPA History Fallback”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | CONTENT-030 | 191 | favicon 快捷配置 | 0.6 | A/C/G | Operator | gatewayd | 执行“favicon 快捷配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | CONTENT-031 | 192 | robots.txt 快捷配置 | 0.6 | A/C/G | Operator | gatewayd | 执行“robots.txt 快捷配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-001 | 193 | 请求 Header 增加 | 0.6 | A/C/G | Operator | gatewayd | 执行“请求 Header 增加”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-002 | 194 | 请求 Header 修改 | 0.6 | A/C/G | Operator | gatewayd | 执行“请求 Header 修改”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-003 | 195 | 请求 Header 删除 | 0.6 | A/C/G | Operator | gatewayd | 执行“请求 Header 删除”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-004 | 196 | 响应 Header 增加 | 0.6 | A/C/G | Operator | gatewayd | 执行“响应 Header 增加”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-005 | 197 | 响应 Header 修改 | 0.6 | A/C/G | Operator | gatewayd | 执行“响应 Header 修改”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-006 | 198 | 响应 Header 删除 | 0.6 | A/C/G | Operator | gatewayd | 执行“响应 Header 删除”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-007 | 199 | Host Header 自动透传 | 0.6 | A/C/G | Operator | gatewayd | 执行“Host Header 自动透传”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-008 | 200 | X-Forwarded-For | 0.6 | A/C/G | Operator | gatewayd | 执行“X-Forwarded-For”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-009 | 201 | X-Forwarded-Host | 0.6 | A/C/G | Operator | gatewayd | 执行“X-Forwarded-Host”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-010 | 202 | X-Forwarded-Proto | 0.6 | A/C/G | Operator | gatewayd | 执行“X-Forwarded-Proto”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-011 | 203 | X-Real-IP | 0.6 | A/C/G | Operator | gatewayd | 执行“X-Real-IP”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-012 | 204 | Forwarded 标准头 | 0.6 | A/C/G | Operator | gatewayd | 执行“Forwarded 标准头”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-013 | 205 | Request-ID 自动生成 | 0.6 | A/C/G | Operator | gatewayd | 执行“Request-ID 自动生成”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-014 | 206 | Request-ID 透传 | 0.6 | A/C/G | Operator | gatewayd | 执行“Request-ID 透传”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-015 | 207 | Trace-ID 基础透传 | 0.6 | A/C/G | Operator | gatewayd | 执行“Trace-ID 基础透传”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-016 | 208 | Server Header 隐藏 | 0.6 | A/C/G | Operator | gatewayd | 执行“Server Header 隐藏”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-017 | 209 | 自定义 Server Header | 0.6 | A/C/G | Operator | gatewayd | 执行“自定义 Server Header”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-018 | 210 | CORS 开关 | 0.6 | A/C/G | Operator | gatewayd | 执行“CORS 开关”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-019 | 211 | Allowed Origins | 0.6 | A/C/G | Operator | gatewayd | 执行“Allowed Origins”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-020 | 212 | Allowed Methods | 0.6 | A/C/G | Operator | gatewayd | 执行“Allowed Methods”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-021 | 213 | Allowed Headers | 0.6 | A/C/G | Operator | gatewayd | 执行“Allowed Headers”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-022 | 214 | Expose Headers | 0.6 | A/C/G | Operator | gatewayd | 执行“Expose Headers”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-023 | 215 | Credentials | 0.6 | A/C/G | Operator | gatewayd | 执行“Credentials”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-024 | 216 | Preflight Max-Age | 0.6 | A/C/G | Operator | gatewayd | 执行“Preflight Max-Age”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-025 | 217 | Gzip | 0.6 | A/C/G | Operator | gatewayd | 执行“Gzip”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-026 | 218 | Brotli 可选 | 0.6 | A/C/G | Operator | gatewayd | 执行“Brotli 可选”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-027 | 219 | 压缩 MIME | 0.6 | A/C/G | Operator | gatewayd | 执行“压缩 MIME”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| HTTP-028 | 220 | 压缩最小体积 | 0.6 | A/C/G | Operator | gatewayd | 执行“压缩最小体积”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| HTTP-001 | 193 | 请求 Header 增加 | 0.6 | A/C/G | Operator | gatewayd | 执行“请求 Header 增加”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-002 | 194 | 请求 Header 修改 | 0.6 | A/C/G | Operator | gatewayd | 执行“请求 Header 修改”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-003 | 195 | 请求 Header 删除 | 0.6 | A/C/G | Operator | gatewayd | 执行“请求 Header 删除”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-004 | 196 | 响应 Header 增加 | 0.6 | A/C/G | Operator | gatewayd | 执行“响应 Header 增加”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-005 | 197 | 响应 Header 修改 | 0.6 | A/C/G | Operator | gatewayd | 执行“响应 Header 修改”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-006 | 198 | 响应 Header 删除 | 0.6 | A/C/G | Operator | gatewayd | 执行“响应 Header 删除”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-007 | 199 | Host Header 自动透传 | 0.6 | A/C/G | Operator | gatewayd | 执行“Host Header 自动透传”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-008 | 200 | X-Forwarded-For | 0.6 | A/C/G | Operator | gatewayd | 执行“X-Forwarded-For”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-009 | 201 | X-Forwarded-Host | 0.6 | A/C/G | Operator | gatewayd | 执行“X-Forwarded-Host”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-010 | 202 | X-Forwarded-Proto | 0.6 | A/C/G | Operator | gatewayd | 执行“X-Forwarded-Proto”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-011 | 203 | X-Real-IP | 0.6 | A/C/G | Operator | gatewayd | 执行“X-Real-IP”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-012 | 204 | Forwarded 标准头 | 0.6 | A/C/G | Operator | gatewayd | 执行“Forwarded 标准头”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-013 | 205 | Request-ID 自动生成 | 0.6 | A/C/G | Operator | gatewayd | 执行“Request-ID 自动生成”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-014 | 206 | Request-ID 透传 | 0.6 | A/C/G | Operator | gatewayd | 执行“Request-ID 透传”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-015 | 207 | Trace-ID 基础透传 | 0.6 | A/C/G | Operator | gatewayd | 执行“Trace-ID 基础透传”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-016 | 208 | Server Header 隐藏 | 0.6 | A/C/G | Operator | gatewayd | 执行“Server Header 隐藏”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-017 | 209 | 自定义 Server Header | 0.6 | A/C/G | Operator | gatewayd | 执行“自定义 Server Header”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-018 | 210 | CORS 开关 | 0.6 | A/C/G | Operator | gatewayd | 执行“CORS 开关”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-019 | 211 | Allowed Origins | 0.6 | A/C/G | Operator | gatewayd | 执行“Allowed Origins”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-020 | 212 | Allowed Methods | 0.6 | A/C/G | Operator | gatewayd | 执行“Allowed Methods”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-021 | 213 | Allowed Headers | 0.6 | A/C/G | Operator | gatewayd | 执行“Allowed Headers”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-022 | 214 | Expose Headers | 0.6 | A/C/G | Operator | gatewayd | 执行“Expose Headers”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-023 | 215 | Credentials | 0.6 | A/C/G | Operator | gatewayd | 执行“Credentials”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-024 | 216 | Preflight Max-Age | 0.6 | A/C/G | Operator | gatewayd | 执行“Preflight Max-Age”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-025 | 217 | Gzip | 0.6 | A/C/G | Operator | gatewayd | 执行“Gzip”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-026 | 218 | Brotli 可选 | 0.6 | A/C/G | Operator | gatewayd | 执行“Brotli 可选”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-027 | 219 | 压缩 MIME | 0.6 | A/C/G | Operator | gatewayd | 执行“压缩 MIME”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| HTTP-028 | 220 | 压缩最小体积 | 0.6 | A/C/G | Operator | gatewayd | 执行“压缩最小体积”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | CACHE-001 | 221 | Proxy Cache 开关 | 0.6 | A/C/G | Operator | gateway-pingora | 执行“Proxy Cache 开关”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | CACHE-002 | 222 | Cache Key | 0.6 | A/C/G | Operator | gateway-pingora | 执行“Cache Key”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | CACHE-003 | 223 | Cache TTL | 0.6 | A/C/G | Operator | gateway-pingora | 执行“Cache TTL”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
@@ -1442,7 +1444,7 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | 新增团队/平台需求 | 105 |
 | 总 Feature ID | 685 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
-| 当前 `Implemented` | 458（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-025`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-006`；身份：`IAM-001`～`IAM-038`；证书：`TLS-001`～`TLS-033`；安全：`SEC-001`～`SEC-035`；可观测：`OBS-001`～`OBS-044`、`OBS-047`～`OBS-053`；主机：`HOST-001`～`HOST-018`；容器：`CTR-001`～`CTR-038`；文件与备份：`BACKUP-001`～`BACKUP-012`） |
+| 当前 `Implemented` | 486（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-025`、`HTTP-001`～`HTTP-028`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-006`；身份：`IAM-001`～`IAM-038`；证书：`TLS-001`～`TLS-033`；安全：`SEC-001`～`SEC-035`；可观测：`OBS-001`～`OBS-044`、`OBS-047`～`OBS-053`；主机：`HOST-001`～`HOST-018`；容器：`CTR-001`～`CTR-038`；文件与备份：`BACKUP-001`～`BACKUP-012`） |
 | 1.0 要求 `Verified` | 685 |
 
 分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 47、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。
