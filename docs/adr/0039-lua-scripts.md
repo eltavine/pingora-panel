@@ -78,7 +78,12 @@ functions, `ngx.sleep`, `ngx.get_phase`, `ngx.worker`, `ngx.config`,
 its later requests, and the light threads of `ngx.thread.spawn`, `wait`
 and `kill`, which run on the budget of the run that spawned them; a run
 ends once its entry thread and its light threads have ended, or as soon as
-one of them exits. Modules OpenResty scripts commonly load are built in:
+one of them exits. `ngx.timer.at` and `ngx.timer.every` run a callback
+later on the VM that created it, detached from the request, under the
+limits and permissions of the run that created it, with lua-nginx-module's
+default caps of 1024 pending and 256 running timers per VM; when a
+configuration replaces the one that created them, pending timers run at
+once with `premature` true, as on a worker's exit. Modules OpenResty scripts commonly load are built in:
 `cjson` and `cjson.safe`, `bit` with LuaJIT BitOp semantics, `table.new`,
 `table.clear`, `table.nkeys`, `resty.core`, `resty.string`, `resty.md5`,
 `resty.sha1`, `resty.sha256`, `resty.random`, `ngx.re` and
@@ -92,7 +97,7 @@ are not available; `lua_package_path`, `lua_package_cpath` and
 `lua_code_cache off` are refused. `sslhandshake` verifies the server's
 certificate with the system's trusted roots unless the script passes
 `ssl_verify` false, where lua-nginx-module verifies nothing by default.
-UDP and stream sockets, timers and subrequests are not available yet.
+UDP and stream sockets and subrequests are not available yet.
 
 **Native API.** Next to `ngx`, `require("panel.v1")` returns the
 capabilities the specification names — `req`, `resp`, `ctx`, `upstream`,
@@ -174,7 +179,8 @@ phase does not allow, and globals a module writes are diagnostics located
 in the script. Testing runs one handler against a request described in the
 call, in the control plane with the gateway's runtime and limits, and
 reports what it did: the changes to the request and response, the response
-it sent, its logs, duration and errors.
+it sent, its logs, duration and errors. A test reaches nothing outside: it
+opens no connections, and the timers it creates do not run.
 
 **Switch.** `lua off;` in `http` keeps the scripts in the configuration but
 runs none of them.

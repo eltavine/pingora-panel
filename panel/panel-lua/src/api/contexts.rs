@@ -61,10 +61,11 @@ pub(crate) enum Api {
     Balancer,
     Socket,
     Thread,
+    Timer,
 }
 
 impl Api {
-    const ALL: [Api; 35] = [
+    const ALL: [Api; 36] = [
         Api::Arg,
         Api::Ctx,
         Api::Eof,
@@ -100,6 +101,7 @@ impl Api {
         Api::Balancer,
         Api::Socket,
         Api::Thread,
+        Api::Timer,
     ];
 
     /// The function a path such as `ngx.var.host` or `ngx.req.get_headers`
@@ -155,13 +157,14 @@ impl Api {
             Api::Balancer => "ngx.balancer",
             Api::Socket => "ngx.socket.tcp",
             Api::Thread => "ngx.thread",
+            Api::Timer => "ngx.timer",
         }
     }
 
     pub(crate) const fn phases(self) -> u16 {
         match self {
             Api::Arg => bits(&[BF]),
-            Api::Ctx => bits(&[IW, RW, AC, CT, BL, HF, BF, LG, TM]),
+            Api::Ctx | Api::Timer => bits(&[IW, RW, AC, CT, BL, HF, BF, LG, TM]),
             Api::Eof | Api::Flush | Api::Output | Api::Redirect | Api::SendHeaders => {
                 bits(&[RW, AC, CT])
             }

@@ -7,6 +7,7 @@ use crate::{
     },
     program::{HandlerId, Program},
     shared::SharedStore,
+    timer::{TimerReports, TimerRun, Timers},
     vm::{Cell, Exceeded, HostCall, HostReply, Refused, Slot, ThreadState, Vm},
 };
 use async_trait::async_trait;
@@ -80,6 +81,10 @@ pub struct Runtime {
 struct Inner {
     vms: Vec<Vm>,
     next: AtomicUsize,
+    timers: Vec<Arc<Timers>>,
+    reports: Arc<TimerReports>,
+    /// Dropped with the runtime, which runs the pending timers at once.
+    _closing: tokio::sync::watch::Sender<()>,
 }
 
 impl Runtime {
@@ -91,11 +96,29 @@ impl Runtime {
         store: &SharedStore,
     ) -> Result<(Self, Vec<LogEntry>), Failure> {
         let dicts = store.resolve(&program.dicts);
+        let (closing, closed) = tokio::sync::watch::channel(());
+        let reports = Arc::new(TimerReports::default());
+        let handle = tokio::runtime::Handle::try_current().ok();
         let mut vms = Vec::with_capacity(settings.vms.max(1));
+        let mut timers = Vec::with_capacity(settings.vms.max(1));
         let mut logs = Vec::new();
         for index in 0..settings.vms.max(1) {
-            let (vm, mut logged) =
-                Vm::new(program, &dicts, settings, index).map_err(|error| failure(&error))?;
+            let vm_timers = Arc::new(Timers::new(
+                index,
+                closed.clone(),
+                Arc::clone(&reports),
+                handle.clone(),
+            ));
+            timers.push(Arc::clone(&vm_timers));
+            let started = Vm::new(program, &dicts, settings, index, vm_timers);
+            let (vm, mut logged) = match started {
+                Ok(started) => started,
+                Err(error) => {
+                    // The timers of a refused program never run.
+                    timers.iter().for_each(|timers| timers.discard());
+                    return Err(failure(&error));
+                }
+            };
             if index == 0 {
                 logs.append(&mut logged);
             }
@@ -106,10 +129,29 @@ impl Runtime {
                 inner: Arc::new(Inner {
                     vms,
                     next: AtomicUsize::new(0),
+                    timers,
+                    reports,
+                    _closing: closing,
                 }),
             },
             logs,
         ))
+    }
+
+    /// Hands what timers' callbacks did to `report`: first what they did
+    /// so far, then each run as it ends.
+    pub fn on_timer(&self, report: impl Fn(TimerRun) + Send + Sync + 'static) {
+        self.inner.reports.attach(Arc::new(report));
+    }
+
+    /// Keeps the scripts from reaching outside, as for a test: timers never
+    /// run, and the ones created from now on are logged instead, and
+    /// cosockets are refused.
+    pub fn isolate(&self) {
+        for vm in &self.inner.vms {
+            vm.slot.isolated.store(true, Ordering::Relaxed);
+        }
+        self.inner.timers.iter().for_each(|timers| timers.discard());
     }
 
     /// Scripts for one request, starting from `exchange`.
@@ -177,6 +219,7 @@ impl Scripts {
         {
             let mut run = cell.run.lock();
             *run = crate::vm::Run {
+                limits: handler.limits,
                 permissions: handler.permissions,
                 log_level: Some(handler.log_level),
                 work_left: i64::try_from(handler.limits.work).unwrap_or(i64::MAX),
@@ -195,25 +238,7 @@ impl Scripts {
             drive(&vm.slot, &thread, &cell, host, MultiValue::new()),
         )
         .await;
-        vm.slot.entries.lock().remove(&key);
-        end_threads(&vm.slot, &cell);
-        {
-            let mut current = vm.slot.current.lock();
-            if current
-                .as_ref()
-                .is_some_and(|current| Arc::ptr_eq(current, &cell))
-            {
-                *current = None;
-            }
-        }
-        let exceeded = cell.run.lock().exceeded;
-        let outcome = match (exceeded, result) {
-            (Some(exceeded), _) => Err(exceeded_failure(exceeded)),
-            (None, Err(_)) => Err(exceeded_failure(Exceeded::Time)),
-            (None, Ok(Err(error))) => Err(failure(&error)),
-            (None, Ok(Ok(()))) => Ok(()),
-        };
-        match outcome {
+        match settle(&vm.slot, key, &cell, result) {
             Ok(()) => {
                 let exchange = self.exchange.lock();
                 match exchange.exit {
@@ -306,6 +331,34 @@ pub(crate) async fn drive(
                 let _ = reply.send(answer);
             }
         }
+    }
+}
+
+/// Ends a run whose entry thread was `key`: drops its light threads and
+/// tells how it went.
+pub(crate) fn settle(
+    slot: &Slot,
+    key: usize,
+    cell: &Arc<Cell>,
+    result: Result<mlua::Result<()>, tokio::time::error::Elapsed>,
+) -> Result<(), Failure> {
+    slot.entries.lock().remove(&key);
+    end_threads(slot, cell);
+    {
+        let mut current = slot.current.lock();
+        if current
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, cell))
+        {
+            *current = None;
+        }
+    }
+    let exceeded = cell.run.lock().exceeded;
+    match (exceeded, result) {
+        (Some(exceeded), _) => Err(exceeded_failure(exceeded)),
+        (None, Err(_)) => Err(exceeded_failure(Exceeded::Time)),
+        (None, Ok(Err(error))) => Err(failure(&error)),
+        (None, Ok(Ok(()))) => Ok(()),
     }
 }
 

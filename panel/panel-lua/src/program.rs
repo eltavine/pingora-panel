@@ -2,7 +2,7 @@
 //! `require` loads, `init_by_lua` and `init_worker_by_lua`, and the shared
 //! dictionaries they use.
 
-use crate::exchange::Limits;
+use crate::exchange::{Limits, Permissions};
 use mlua::chunk::Compiler;
 use std::{collections::BTreeMap, fmt};
 
@@ -108,6 +108,7 @@ pub struct Program {
     pub(crate) init: Option<HandlerId>,
     pub(crate) init_worker: Option<HandlerId>,
     pub(crate) init_limits: Limits,
+    pub(crate) init_permissions: Permissions,
     pub(crate) dicts: Vec<SharedDict>,
 }
 
@@ -169,6 +170,12 @@ impl ProgramBuilder {
 
     pub fn init_worker(&mut self, handler: HandlerId) -> &mut Self {
         self.program.init_worker = Some(handler);
+        self
+    }
+
+    /// What the timers `init_by_lua` and `init_worker_by_lua` create may do.
+    pub fn init_permissions(&mut self, permissions: Permissions) -> &mut Self {
+        self.program.init_permissions = permissions;
         self
     }
 

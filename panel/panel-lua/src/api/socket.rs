@@ -5,7 +5,7 @@
 //! TLS verifies the certificate unless the script says `ssl_verify` false.
 
 use super::{cell, require_permission, results, Api};
-use crate::vm::Slot;
+use crate::vm::{refused, Slot};
 use bytes::BytesMut;
 use mlua::{
     AnyUserData, Lua, LuaString, MultiValue, Table, UserData, UserDataMethods, UserDataRefMut,
@@ -252,7 +252,15 @@ impl TcpSocket {
     /// Checks the phase and the network permission.
     fn allowed(&self) -> mlua::Result<()> {
         let cell = cell(&self.slot, Api::Socket)?;
-        require_permission(&cell, Api::Socket, |granted| granted.network, "network")
+        require_permission(&cell, Api::Socket, |granted| granted.network, "network")?;
+        if self
+            .slot
+            .isolated
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Err(refused("connections are not opened in a test"));
+        }
+        Ok(())
     }
 
     /// Reads once more into the buffer; false at the end of the stream.

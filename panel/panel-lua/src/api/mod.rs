@@ -39,6 +39,7 @@ pub(crate) struct Context {
     pub dicts: HashMap<String, Arc<Dict>>,
     pub worker: usize,
     pub workers: usize,
+    pub timers: Arc<crate::timer::Timers>,
 }
 
 pub(crate) fn install(lua: &Lua, globals: &Table, context: &Context) -> mlua::Result<()> {

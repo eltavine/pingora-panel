@@ -326,6 +326,7 @@ pub async fn try_request(
             failure.message
         ))
     })?;
+    runtime.isolate();
     let (raw_path, query) = match request.target.split_once('?') {
         Some((path, query)) => (path, Some(query.to_owned())),
         None => (request.target.as_str(), None),

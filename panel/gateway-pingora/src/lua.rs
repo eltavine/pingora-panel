@@ -79,6 +79,14 @@ pub(crate) fn compile(
     for entry in logs {
         tracing::info!(event = "lua_log", phase = "init", level = entry.level.name(), message = %entry.message);
     }
+    runtime.on_timer(|run| {
+        for entry in &run.logs {
+            tracing::info!(event = "lua_log", phase = "timer", vm = run.vm, level = entry.level.name(), message = %entry.message);
+        }
+        if let Some(failure) = &run.failure {
+            tracing::warn!(event = "lua_timer_failed", vm = run.vm, premature = run.premature, kind = failure.kind.name(), message = %failure.message);
+        }
+    });
     Ok((
         Some(Arc::new(LuaPlan {
             runtime,

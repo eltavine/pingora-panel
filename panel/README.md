@@ -1419,8 +1419,10 @@ run leaves the request as it was before it. TCP cosockets
 (`ngx.socket.tcp`) verify certificates with the system's trusted roots
 unless a script passes `ssl_verify` false. Light threads
 (`ngx.thread.spawn`) share the budget of the run that spawned them, which
-ends once they have all ended. UDP sockets, timers and subrequests are not
-available.
+ends once they have all ended. Timers (`ngx.timer.at`, `ngx.timer.every`)
+run later under the limits and permissions of the run that created them;
+when a new configuration takes over, pending ones run at once with
+`premature` true. UDP sockets and subrequests are not available.
 
 Reading the configuration compiles every script with the gateway's
 compiler and reports, at their lines, scripts that do not compile, modules
@@ -1437,7 +1439,8 @@ ppanel lua test --host shop.example --script lua/auth.lua --phase access --allow
 `GET /api/v1/config/lua` lists the scripts of the draft or of a revision,
 and `POST /api/v1/config/lua/test` runs the handlers a described request
 reaches, or one script, with the gateway's runtime and limits without
-proxying anything; tests are recorded in the audit trail. Changing or
+proxying anything, opening connections or running timers; tests are
+recorded in the audit trail. Changing or
 applying Lua takes the `config.lua` permission, which only Administrators
 hold by default and which can be granted for site groups and sites;
 approval policies can cover `lua` as a kind of their own. The gateway

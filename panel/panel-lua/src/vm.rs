@@ -2,10 +2,11 @@
 
 use crate::{
     api,
-    exchange::{Exchange, LogLevel, Permissions, Phase},
+    exchange::{Exchange, Limits, LogLevel, Permissions, Phase},
     program::{HandlerId, Program},
     runtime::Settings,
     shared::Dict,
+    timer::Timers,
 };
 use bytes::Bytes;
 use mlua::{
@@ -19,7 +20,7 @@ use std::{
     fmt,
     pin::Pin,
     sync::{
-        atomic::{AtomicI64, AtomicU64, AtomicUsize, Ordering::Relaxed},
+        atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering::Relaxed},
         Arc,
     },
     time::{Duration, Instant},
@@ -80,6 +81,8 @@ pub(crate) enum HostReply {
 /// The run under way for a request.
 #[derive(Debug, Default)]
 pub(crate) struct Run {
+    /// The limits the run was given, which the timers it creates run on.
+    pub limits: Limits,
     pub permissions: Permissions,
     pub log_level: Option<LogLevel>,
     pub work_left: i64,
@@ -162,6 +165,8 @@ pub(crate) struct Slot {
     slice_end: AtomicU64,
     pub current: Mutex<Option<Arc<Cell>>>,
     pub entries: Mutex<HashMap<usize, Arc<Cell>>>,
+    /// Runs reach nothing outside, as in a test.
+    pub isolated: AtomicBool,
 }
 
 impl Slot {
@@ -174,6 +179,7 @@ impl Slot {
             slice_end: AtomicU64::new(u64::MAX),
             current: Mutex::new(None),
             entries: Mutex::new(HashMap::new()),
+            isolated: AtomicBool::new(false),
         }
     }
 
@@ -289,6 +295,7 @@ impl Vm {
         dicts: &HashMap<String, Arc<Dict>>,
         settings: &Settings,
         index: usize,
+        timers: Arc<Timers>,
     ) -> mlua::Result<(Self, Vec<crate::exchange::LogEntry>)> {
         let lua = Lua::new_with(StdLib::ALL_SAFE, LuaOptions::new())?;
         let slot = Arc::new(Slot::new());
@@ -317,6 +324,7 @@ impl Vm {
                 dicts: dicts.clone(),
                 worker: index,
                 workers: settings.vms,
+                timers,
             },
         )?;
         let load = |index: HandlerId| -> mlua::Result<Function> {
@@ -370,6 +378,8 @@ impl Vm {
             let cell = Arc::new(Cell::new(Arc::new(Mutex::new(exchange))));
             {
                 let mut run = cell.run.lock();
+                run.limits = program.init_limits;
+                run.permissions = program.init_permissions;
                 run.work_left = i64::try_from(program.init_limits.work).unwrap_or(i64::MAX);
                 run.deadline = slot.after(program.init_limits.time);
             }

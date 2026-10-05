@@ -989,3 +989,150 @@ async fn light_threads_run_together_and_the_run_waits_for_them() {
         failure.message
     );
 }
+
+fn timer_messages(runs: &std::sync::Mutex<Vec<panel_lua::TimerRun>>) -> Vec<String> {
+    runs.lock()
+        .unwrap()
+        .iter()
+        .flat_map(|run| run.logs.iter().map(|log| log.message.clone()))
+        .collect()
+}
+
+#[tokio::test]
+async fn timers_run_later_and_at_once_when_their_runtime_is_dropped() {
+    let runs = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let lua = start(1, |builder| {
+        let worker = builder.handler(&source(
+            r#"assert(ngx.timer.at(0, function(premature)
+                ngx.log(ngx.NOTICE, "init_worker timer ", tostring(premature))
+            end))"#,
+        ));
+        builder.init_worker(worker);
+        vec![builder.handler(&source(
+            r#"
+            assert(ngx.timer.at(0.01, function(premature, word, n)
+                ngx.log(ngx.NOTICE, "at ", word, " ", n, " ", tostring(premature), " ", ngx.get_phase())
+            end, "hello", 2))
+            local every = 0
+            assert(ngx.timer.every(0.02, function()
+                every = every + 1
+                ngx.log(ngx.NOTICE, "every ", every)
+            end))
+            assert(ngx.timer.at(60, function(premature)
+                ngx.log(ngx.NOTICE, "late ", tostring(premature))
+            end))
+            assert(ngx.timer.at(0, function() ngx.req.get_headers() end))
+            ngx.say(ngx.timer.pending_count() >= 4)
+            "#,
+        ))]
+    });
+    let kept = std::sync::Arc::clone(&runs);
+    lua.runtime
+        .on_timer(move |run| kept.lock().unwrap().push(run));
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = run(&mut scripts, handler(lua.handlers[0], Phase::Content)).await;
+    assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+    assert_eq!(scripts.exchange().response.body, b"true\n");
+    drop(scripts);
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    let seen = timer_messages(&runs);
+    assert!(
+        seen.iter()
+            .any(|message| message.ends_with("init_worker timer false")),
+        "{seen:?}"
+    );
+    assert!(
+        seen.iter()
+            .any(|message| message.ends_with("at hello 2 false timer")),
+        "{seen:?}"
+    );
+    assert!(
+        seen.iter()
+            .filter(|message| message.contains("every "))
+            .count()
+            >= 2,
+        "{seen:?}"
+    );
+    assert!(
+        !seen.iter().any(|message| message.contains("late")),
+        "{seen:?}"
+    );
+    let refused: Vec<_> = runs
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|run| run.failure.clone())
+        .collect();
+    assert!(
+        refused
+            .iter()
+            .any(|failure| failure.kind == FailureKind::Refused
+                && failure.message.contains("context of ngx.timer")),
+        "{refused:?}"
+    );
+
+    drop(lua);
+    for _ in 0..100 {
+        if timer_messages(&runs)
+            .iter()
+            .any(|message| message.ends_with("late true"))
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        timer_messages(&runs)
+            .iter()
+            .any(|message| message.ends_with("late true")),
+        "the pending timer runs, premature, once the runtime is dropped"
+    );
+}
+
+#[tokio::test]
+async fn isolated_runtimes_run_no_timers_and_open_no_connections() {
+    let runs = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let lua = start(
+        1,
+        handlers(&[
+            "assert(ngx.timer.at(60, function() ngx.log(ngx.ERR, 'ran') end))",
+            "assert(ngx.timer.at(0, function() ngx.log(ngx.ERR, 'ran') end))",
+            "local sock = ngx.socket.tcp() assert(sock:connect('127.0.0.1', 9))",
+        ]),
+    );
+    let kept = std::sync::Arc::clone(&runs);
+    lua.runtime
+        .on_timer(move |run| kept.lock().unwrap().push(run));
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    assert_eq!(
+        run(&mut scripts, handler(lua.handlers[0], Phase::Access)).await,
+        Outcome::Continue
+    );
+    drop(scripts);
+    lua.runtime.isolate();
+
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    assert_eq!(
+        run(&mut scripts, handler(lua.handlers[1], Phase::Access)).await,
+        Outcome::Continue
+    );
+    assert!(scripts.exchange().logs[0]
+        .message
+        .contains("a timer created in a test does not run"));
+    let mut granted = handler(lua.handlers[2], Phase::Access);
+    granted.permissions.network = true;
+    let Outcome::Failed(failure) = run(&mut scripts, granted).await else {
+        panic!("a test opens no connections");
+    };
+    assert_eq!(failure.kind, FailureKind::Refused);
+    assert!(
+        failure.message.contains("not opened in a test"),
+        "{}",
+        failure.message
+    );
+    drop(scripts);
+    drop(lua);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(runs.lock().unwrap().is_empty());
+}

@@ -280,6 +280,7 @@ impl<'a> Compiler<'a> {
                     _ => compiler.builder.init_worker(hook.handler.id),
                 };
                 compiler.builder.init_limits(limits);
+                compiler.builder.init_permissions(hook.handler.permissions);
             }
         }
         for dict in &snapshot.lua.shared_dicts {
