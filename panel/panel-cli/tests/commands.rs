@@ -266,6 +266,15 @@ async fn api(
             "id": "b2", "name": "shop-web-1", "container": null
         }))
         .into_response(),
+        ("GET", "/api/v1/container-engines/docker/disk-usage") => Json(json!({
+            "observed_at": "2027-01-15T08:00:10Z",
+            "images": {"total": 5, "active": 2, "size_bytes": 1_073_741_824,
+                       "reclaimable_bytes": 322_122_547},
+            "containers": {"total": 3, "active": 1, "size_bytes": 4_096, "reclaimable_bytes": 0},
+            "volumes": {"total": 2, "active": 1, "size_bytes": 0, "reclaimable_bytes": 0},
+            "build_cache": {"total": 0, "active": 0, "size_bytes": 0, "reclaimable_bytes": 0}
+        }))
+        .into_response(),
         ("GET", "/api/v1/container-engines/docker/networks") => Json(json!({
             "observed_at": "2027-01-15T08:00:10Z",
             "networks": [
@@ -2749,4 +2758,19 @@ fn networks_and_volumes_from_the_command_line() {
     let none = stub.ppanel(&["volume", "list", "--engine", "podman"]);
     assert!(none.status.success());
     assert!(stderr(&none).contains("the engine has no volumes"));
+}
+
+#[test]
+fn disk_use_from_the_command_line() {
+    let stub = Stub::start();
+    let df = stub.ppanel(&["container", "engine", "df", "docker"]);
+    assert!(df.status.success(), "{}", stderr(&df));
+    let printed = stdout(&df);
+    let images = printed
+        .lines()
+        .find(|line| line.starts_with("Images"))
+        .unwrap();
+    assert!(images.contains("1.0 GiB"), "{images}");
+    assert!(images.contains("307.2 MiB (30%)"), "{images}");
+    assert!(printed.contains("Local Volumes"), "{printed}");
 }

@@ -156,7 +156,28 @@ pub(crate) enum EngineAction {
     Enable { engine: String },
     /// Leaves what runs on the engine alone.
     Disable { engine: String },
+    /// How much disk the engine's images, containers, volumes and build
+    /// cache take, as `docker system df` reports it.
+    Df { engine: String },
 }
+
+/// One row of `docker system df`: a kind's count, what is in use, size, and
+/// what removing the rest would free.
+const DISK: &[Column] = &[
+    ("TYPE", |row| text(&row["kind"])),
+    ("TOTAL", |row| text(&row["use"]["total"])),
+    ("ACTIVE", |row| text(&row["use"]["active"])),
+    ("SIZE", |row| bytes(&row["use"]["size_bytes"])),
+    ("RECLAIMABLE", |row| {
+        let reclaimable = &row["use"]["reclaimable_bytes"];
+        match (reclaimable.as_f64(), row["use"]["size_bytes"].as_f64()) {
+            (Some(part), Some(size)) if size > 0.0 => {
+                format!("{} ({:.0}%)", bytes(reclaimable), part / size * 100.0)
+            }
+            _ => bytes(reclaimable),
+        }
+    }),
+];
 
 const ENGINES: &[Column] = &[
     ("ENGINE", |engine| text(&engine["id"])),
@@ -317,19 +338,11 @@ pub async fn run(api: &Api, output: &Output, command: ContainerCommand) -> Resul
                 output.list(&engines["engines"], ENGINES);
             }
         }
-        ContainerCommand::Engine { action } => {
-            let (engine, verb) = match action {
-                EngineAction::Enable { engine } => (engine, "enable"),
-                EngineAction::Disable { engine } => (engine, "disable"),
-            };
-            let path = format!("/api/v1/container-engines/{engine}/{verb}");
-            let engine = api.change(Method::POST, &path, None, None).await?.body;
-            if output.format == Format::Json {
-                output.json(&engine);
-            } else if !output.quiet {
-                output.item(&engine, ENGINES);
-            }
-        }
+        ContainerCommand::Engine { action } => match action {
+            EngineAction::Enable { engine } => set_engine(api, output, &engine, "enable").await?,
+            EngineAction::Disable { engine } => set_engine(api, output, &engine, "disable").await?,
+            EngineAction::Df { engine } => disk_usage(api, output, &engine).await?,
+        },
         ContainerCommand::List {
             engine,
             search,
@@ -579,4 +592,35 @@ async fn tail(
             });
         }
     }
+}
+
+async fn set_engine(api: &Api, output: &Output, engine: &str, verb: &str) -> Result<()> {
+    let path = format!("/api/v1/container-engines/{engine}/{verb}");
+    let engine = api.change(Method::POST, &path, None, None).await?.body;
+    if output.format == Format::Json {
+        output.json(&engine);
+    } else if !output.quiet {
+        output.item(&engine, ENGINES);
+    }
+    Ok(())
+}
+
+async fn disk_usage(api: &Api, output: &Output, engine: &str) -> Result<()> {
+    let path = format!("/api/v1/container-engines/{engine}/disk-usage");
+    let usage = api.get(&path, &[]).await?.body;
+    if output.format == Format::Json {
+        output.json(&usage);
+        return Ok(());
+    }
+    let rows: Vec<Value> = [
+        ("Images", "images"),
+        ("Containers", "containers"),
+        ("Local Volumes", "volumes"),
+        ("Build Cache", "build_cache"),
+    ]
+    .into_iter()
+    .map(|(kind, field)| serde_json::json!({"kind": kind, "use": usage[field]}))
+    .collect();
+    output.list(&Value::Array(rows), DISK);
+    Ok(())
 }
