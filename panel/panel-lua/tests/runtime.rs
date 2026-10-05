@@ -1138,6 +1138,142 @@ async fn isolated_runtimes_run_no_timers_and_open_no_connections() {
 }
 
 #[tokio::test]
+async fn semaphores_hand_resources_to_waiters_in_order() {
+    let lua = start(
+        1,
+        handlers(&[r#"
+        local semaphore = require("ngx.semaphore")
+        local sema = semaphore.new()
+        local out = {}
+        local function handler(id)
+            local ok, err = sema:wait(1)
+            out[#out + 1] = id .. " " .. (ok and "ok" or err)
+        end
+        assert(sema:count() == 0)
+        local first = ngx.thread.spawn(handler, "a")
+        local second = ngx.thread.spawn(handler, "b")
+        assert(sema:count() == -2, sema:count())
+        sema:post(1)
+        assert(sema:count() == -1, sema:count())
+        sema:post(2)
+        assert(sema:count() == 1, sema:count())
+        ngx.thread.wait(first)
+        ngx.thread.wait(second)
+        assert(sema:wait(0))
+        local none, why = sema:wait(0)
+        assert(none == nil and why == "timeout")
+        local late, late_why = sema:wait(0.01)
+        assert(late == nil and late_why == "timeout")
+        assert(sema:count() == 0, sema:count())
+        assert(ngx.timer.at(0, function() sema:post() end))
+        assert(sema:wait(1))
+        local negative = select(2, pcall(semaphore.new, -1))
+        local zero = select(2, pcall(sema.post, sema, 0))
+        ngx.say(table.concat(out, ","), "|", negative:match("no negative number") ~= nil,
+            "|", zero:match("positive number required") ~= nil)
+        "#]),
+    );
+    let mut waiting = handler(lua.handlers[0], Phase::Content);
+    waiting.limits.time = Duration::from_secs(2);
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = run(&mut scripts, waiting).await;
+    assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+    assert_eq!(scripts.exchange().response.body, b"a ok,b ok|true|true\n");
+}
+
+#[tokio::test]
+async fn udp_cosockets_send_and_receive_datagrams_when_granted() {
+    let service = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let port = service.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let mut buffer = [0u8; 1024];
+        while let Ok((read, from)) = service.recv_from(&mut buffer).await {
+            let answer = buffer[..read].to_ascii_uppercase();
+            let _ = service.send_to(&answer, from).await;
+        }
+    });
+    let script = format!(
+        r#"
+        assert(ngx.socket.stream == ngx.socket.tcp)
+        local udp = ngx.socket.udp()
+        udp:settimeout(1000)
+        local unix, unix_err = udp:setpeername("unix:/tmp/service.sock")
+        assert(unix == nil and unix_err:find("unix domain"), unix_err)
+        assert(udp:setpeername("127.0.0.1", {port}))
+        assert(udp:send({{"pi", "ng"}}))
+        local data = assert(udp:receive())
+        assert(udp:close())
+        local closed, err = udp:close()
+        ngx.say(data, " ", tostring(closed), " ", err)
+        "#
+    );
+    let lua = start(1, handlers(&[&script]));
+    let mut granted = handler(lua.handlers[0], Phase::Content);
+    granted.permissions.network = true;
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = run(&mut scripts, granted).await;
+    assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+    assert_eq!(scripts.exchange().response.body, b"PING nil closed\n");
+
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let Outcome::Failed(failure) =
+        run(&mut scripts, handler(lua.handlers[0], Phase::Content)).await
+    else {
+        panic!("datagrams need the network permission");
+    };
+    assert!(
+        failure
+            .message
+            .contains("ngx.socket.udp needs the network permission"),
+        "{}",
+        failure.message
+    );
+}
+
+#[tokio::test]
+async fn scripts_build_a_new_request_body_piece_by_piece() {
+    let lua = start(
+        1,
+        handlers(&[
+            r#"
+            ngx.req.read_body()
+            ngx.req.init_body(8)
+            ngx.req.append_body("new ")
+            ngx.req.append_body("body")
+            ngx.req.finish_body()
+            assert(ngx.req.get_body_file() == nil)
+            assert(ngx.req.get_body_data() == "new body")
+            "#,
+            "ngx.req.append_body('x')",
+        ]),
+    );
+    let mut granted = handler(lua.handlers[0], Phase::Access);
+    granted.permissions.body = true;
+    let mut scripts = lua.runtime.scripts(request("POST", "/", &[]));
+    assert_eq!(
+        scripts.run(granted, &mut Body("old")).await,
+        Outcome::Continue
+    );
+    {
+        let exchange = scripts.exchange();
+        assert_eq!(exchange.request.body.as_deref(), Some(&b"new body"[..]));
+        assert!(exchange.changes().body);
+    }
+
+    let mut unstarted = handler(lua.handlers[1], Phase::Access);
+    unstarted.permissions.body = true;
+    let mut scripts = lua.runtime.scripts(request("POST", "/", &[]));
+    let Outcome::Failed(failure) = run(&mut scripts, unstarted).await else {
+        panic!("append_body needs init_body first");
+    };
+    assert!(
+        failure.message.contains("request body not initialized"),
+        "{}",
+        failure.message
+    );
+}
+
+#[tokio::test]
 async fn errors_of_host_functions_reach_pcall_as_strings() {
     let lua = start(
         1,

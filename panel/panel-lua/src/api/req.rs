@@ -209,6 +209,67 @@ pub(super) fn table(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
     )?;
     let s = Arc::clone(slot);
     req.raw_set(
+        "init_body",
+        lua.create_function(move |_, size: Option<usize>| {
+            let cell = cell(&s, Api::ReqInitBody)?;
+            require_permission(&cell, Api::ReqInitBody, |granted| granted.body, "body")?;
+            let mut exchange = cell.exchange.lock();
+            if exchange.request.body.is_none() {
+                return Err(mlua::Error::runtime(
+                    "request body not read yet: call ngx.req.read_body first",
+                ));
+            }
+            exchange.new_body = Some(Vec::with_capacity(size.unwrap_or(0).min(MAX_BODY)));
+            Ok(())
+        })?,
+    )?;
+    let s = Arc::clone(slot);
+    req.raw_set(
+        "append_body",
+        lua.create_function(move |_, data: LuaString| {
+            let cell = cell(&s, Api::ReqAppendBody)?;
+            require_permission(&cell, Api::ReqAppendBody, |granted| granted.body, "body")?;
+            let mut exchange = cell.exchange.lock();
+            let Some(body) = exchange.new_body.as_mut() else {
+                return Err(mlua::Error::runtime("request body not initialized"));
+            };
+            let data = data.as_bytes();
+            if body.len() + data.len() > MAX_BODY {
+                return Err(mlua::Error::runtime(
+                    "the new request body is larger than 16 MiB",
+                ));
+            }
+            body.extend_from_slice(&data);
+            Ok(())
+        })?,
+    )?;
+    let s = Arc::clone(slot);
+    req.raw_set(
+        "finish_body",
+        lua.create_function(move |_, ()| {
+            let cell = cell(&s, Api::ReqFinishBody)?;
+            require_permission(&cell, Api::ReqFinishBody, |granted| granted.body, "body")?;
+            let mut exchange = cell.exchange.lock();
+            let Some(body) = exchange.new_body.take() else {
+                return Err(mlua::Error::runtime("request body not initialized"));
+            };
+            exchange.request.body = Some(::bytes::Bytes::from(body));
+            exchange.changes.body = true;
+            Ok(())
+        })?,
+    )?;
+    let s = Arc::clone(slot);
+    req.raw_set(
+        "get_body_file",
+        lua.create_function(move |_, ()| {
+            let cell = cell(&s, Api::ReqGetBodyFile)?;
+            require_permission(&cell, Api::ReqGetBodyFile, |granted| granted.body, "body")?;
+            // Bodies are kept in memory, never in a file.
+            Ok(Value::Nil)
+        })?,
+    )?;
+    let s = Arc::clone(slot);
+    req.raw_set(
         "http_version",
         lua.create_function(move |_, ()| {
             exchange(&s, Api::ReqHttpVersion, |exchange| {

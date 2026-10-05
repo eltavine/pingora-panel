@@ -31,7 +31,7 @@ use tokio::{
 use tokio_rustls::{client::TlsStream, TlsConnector};
 
 /// lua-nginx-module's default for connecting, sending and reading.
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
+pub(super) const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 const DEFAULT_IDLE: Duration = Duration::from_secs(60);
 const DEFAULT_POOL_SIZE: usize = 30;
 /// The most a single receive holds, as the VM's memory limit does not see it.
@@ -182,7 +182,7 @@ fn tls(verify: bool) -> Result<Arc<ClientConfig>, String> {
 }
 
 /// An I/O error as lua-nginx-module words it.
-fn reason(error: &std::io::Error) -> String {
+pub(super) fn reason(error: &std::io::Error) -> String {
     use std::io::ErrorKind;
     match error.kind() {
         ErrorKind::ConnectionRefused => "connection refused".into(),
@@ -193,7 +193,7 @@ fn reason(error: &std::io::Error) -> String {
     }
 }
 
-async fn within<T>(
+pub(super) async fn within<T>(
     limit: Duration,
     work: impl Future<Output = std::io::Result<T>>,
 ) -> Result<T, String> {
@@ -204,7 +204,7 @@ async fn within<T>(
     }
 }
 
-fn failed(lua: &Lua, error: &str) -> mlua::Result<MultiValue> {
+pub(super) fn failed(lua: &Lua, error: &str) -> mlua::Result<MultiValue> {
     Ok(results([
         Value::Nil,
         Value::String(lua.create_string(error)?),
@@ -249,18 +249,8 @@ impl TcpSocket {
         }
     }
 
-    /// Checks the phase and the network permission.
     fn allowed(&self) -> mlua::Result<()> {
-        let cell = cell(&self.slot, Api::Socket)?;
-        require_permission(&cell, Api::Socket, |granted| granted.network, "network")?;
-        if self
-            .slot
-            .isolated
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
-            return Err(refused("connections are not opened in a test"));
-        }
-        Ok(())
+        allowed(&self.slot, Api::Socket)
     }
 
     /// Reads once more into the buffer; false at the end of the stream.
@@ -501,7 +491,7 @@ impl TcpSocket {
     }
 }
 
-fn milliseconds(value: Option<f64>) -> Option<Duration> {
+pub(super) fn milliseconds(value: Option<f64>) -> Option<Duration> {
     value
         .filter(|ms| ms.is_finite() && *ms >= 0.0)
         .map(|ms| match ms {
@@ -510,8 +500,18 @@ fn milliseconds(value: Option<f64>) -> Option<Duration> {
         })
 }
 
+/// Checks the phase and the network permission of a cosocket's call.
+pub(super) fn allowed(slot: &Slot, api: Api) -> mlua::Result<()> {
+    let cell = cell(slot, api)?;
+    require_permission(&cell, api, |granted| granted.network, "network")?;
+    if slot.isolated.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err(refused("connections are not opened in a test"));
+    }
+    Ok(())
+}
+
 /// What `send` takes: a string, a number, or an array of them.
-fn payload(value: Value) -> mlua::Result<Vec<u8>> {
+pub(super) fn payload(value: Value) -> mlua::Result<Vec<u8>> {
     let mut data = Vec::new();
     fn append(data: &mut Vec<u8>, value: &Value) -> mlua::Result<()> {
         match value {

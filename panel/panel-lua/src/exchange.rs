@@ -283,6 +283,9 @@ pub struct Exchange {
     /// The response header was sent by `ngx.say`, `ngx.flush` or
     /// `ngx.send_headers`.
     pub(crate) headers_sent: bool,
+    /// The body `ngx.req.init_body` started and `ngx.req.finish_body`
+    /// will make the request's.
+    pub(crate) new_body: Option<Vec<u8>>,
 }
 
 impl Exchange {
@@ -300,6 +303,7 @@ impl Exchange {
             changes: Changes::default(),
             exit: None,
             headers_sent: false,
+            new_body: None,
         }
     }
 

@@ -83,11 +83,17 @@ later on the VM that created it, detached from the request, under the
 limits and permissions of the run that created it, with lua-nginx-module's
 default caps of 1024 pending and 256 running timers per VM; when a
 configuration replaces the one that created them, pending timers run at
-once with `premature` true, as on a worker's exit. Modules OpenResty scripts commonly load are built in:
+once with `premature` true, as on a worker's exit. `ngx.socket.udp`
+sends and receives datagrams of at most 8192 bytes under the same network
+permission, `ngx.socket.stream` is the TCP cosocket, and
+`ngx.req.init_body`, `append_body` and `finish_body` build a new request
+body in memory. Modules OpenResty scripts commonly load are built in:
 `cjson` and `cjson.safe`, `bit` with LuaJIT BitOp semantics, `table.new`,
 `table.clear`, `table.nkeys`, `resty.core`, `resty.string`, `resty.md5`,
-`resty.sha1`, `resty.sha256`, `resty.random`, `ngx.re` and
-`ngx.balancer`. Every `ngx` function either follows its documentation or
+`resty.sha1`, `resty.sha256`, `resty.random`, `ngx.re`, `ngx.balancer`
+and `ngx.semaphore`, whose semaphores the threads, timers and requests of
+one VM share. Errors the runtime's functions raise reach `pcall` as
+strings, as a C function's do. Every `ngx` function either follows its documentation or
 raises an error naming it, and checking the configuration lists each place a
 script uses a function this gateway does not provide.
 
@@ -97,7 +103,8 @@ are not available; `lua_package_path`, `lua_package_cpath` and
 `lua_code_cache off` are refused. `sslhandshake` verifies the server's
 certificate with the system's trusted roots unless the script passes
 `ssl_verify` false, where lua-nginx-module verifies nothing by default.
-UDP and stream sockets and subrequests are not available yet.
+Subrequests (`ngx.location.capture`), internal redirects (`ngx.exec`),
+the request's own socket and body files are not available.
 
 **Native API.** Next to `ngx`, `require("panel.v1")` returns the
 capabilities the specification names — `req`, `resp`, `ctx`, `upstream`,

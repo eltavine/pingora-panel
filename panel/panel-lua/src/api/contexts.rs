@@ -62,10 +62,16 @@ pub(crate) enum Api {
     Socket,
     Thread,
     Timer,
+    Udp,
+    SemaphoreWait,
+    ReqInitBody,
+    ReqAppendBody,
+    ReqFinishBody,
+    ReqGetBodyFile,
 }
 
 impl Api {
-    const ALL: [Api; 36] = [
+    const ALL: [Api; 42] = [
         Api::Arg,
         Api::Ctx,
         Api::Eof,
@@ -102,6 +108,12 @@ impl Api {
         Api::Socket,
         Api::Thread,
         Api::Timer,
+        Api::Udp,
+        Api::SemaphoreWait,
+        Api::ReqInitBody,
+        Api::ReqAppendBody,
+        Api::ReqFinishBody,
+        Api::ReqGetBodyFile,
     ];
 
     /// The function a path such as `ngx.var.host` or `ngx.req.get_headers`
@@ -110,6 +122,10 @@ impl Api {
         let path = match path.strip_prefix("ngx.print") {
             Some(rest) if rest.is_empty() || rest.starts_with('.') => "ngx.say",
             _ => path,
+        };
+        let path = match path {
+            "ngx.socket.connect" | "ngx.socket.stream" => "ngx.socket.tcp",
+            path => path,
         };
         Self::ALL
             .into_iter()
@@ -158,6 +174,12 @@ impl Api {
             Api::Socket => "ngx.socket.tcp",
             Api::Thread => "ngx.thread",
             Api::Timer => "ngx.timer",
+            Api::Udp => "ngx.socket.udp",
+            Api::SemaphoreWait => "ngx.semaphore.wait",
+            Api::ReqInitBody => "ngx.req.init_body",
+            Api::ReqAppendBody => "ngx.req.append_body",
+            Api::ReqFinishBody => "ngx.req.finish_body",
+            Api::ReqGetBodyFile => "ngx.req.get_body_file",
         }
     }
 
@@ -187,7 +209,10 @@ impl Api {
             Api::ReqSetMethod => bits(&[RW, AC, CT, HF]),
             Api::RespGetHeaders => REQUEST,
             Api::Balancer => bits(&[BL]),
-            Api::Socket | Api::Thread => bits(&[RW, AC, CT, TM]),
+            Api::Socket | Api::Thread | Api::Udp | Api::SemaphoreWait => bits(&[RW, AC, CT, TM]),
+            Api::ReqInitBody | Api::ReqAppendBody | Api::ReqFinishBody | Api::ReqGetBodyFile => {
+                bits(&[RW, AC, CT])
+            }
         }
     }
 

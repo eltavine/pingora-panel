@@ -1422,7 +1422,9 @@ unless a script passes `ssl_verify` false. Light threads
 ends once they have all ended. Timers (`ngx.timer.at`, `ngx.timer.every`)
 run later under the limits and permissions of the run that created them;
 when a new configuration takes over, pending ones run at once with
-`premature` true. UDP sockets and subrequests are not available.
+`premature` true. `ngx.socket.udp` sends datagrams under the same
+permission, and `ngx.semaphore` coordinates the threads, timers and
+requests of a VM. Subrequests and internal redirects are not available.
 
 Reading the configuration compiles every script with the gateway's
 compiler and reports, at their lines, scripts that do not compile, modules
