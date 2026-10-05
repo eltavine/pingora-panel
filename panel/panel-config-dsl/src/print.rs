@@ -2,19 +2,19 @@
 //! service stores and formats, with defaults left out.
 
 use crate::{
-    lower::{print_access, print_policy, print_rate, DEFAULT_REALM},
+    lower::{print_access, print_policy, print_rate, CODINGS, DEFAULT_REALM},
     values::{print_bool, print_duration_ms, print_size},
     variables::{escape, print_hash_key},
     LANGUAGE_VERSION,
 };
 use panel_config_model::{
-    Action, ConfigModel, Listener, Route, RouteCondition, SecurityPolicy, Site, TlsProfile,
-    Upstream, UpstreamNode, ValueTest,
+    Action, ConfigModel, FieldChanges, HttpPolicy, Listener, Route, RouteCondition, SecurityPolicy,
+    Site, TlsProfile, Upstream, UpstreamNode, ValueTest,
 };
 use panel_dsl::{Directive, Document, Trivia};
 use panel_ir::{
     HealthCheckProtocol, ListenerProtocols, LoadBalancingPolicy, RateLimitKey, RealIpHeader,
-    WwwRedirect,
+    ServerHeader, WwwRedirect,
 };
 
 /// The whole model as `main.conf`.
@@ -27,6 +27,7 @@ pub fn document(model: &ConfigModel) -> Document {
     let settings = http.len();
     http.extend(model.tls_profiles.iter().map(tls_profile));
     http.extend(model.security_policies.iter().map(security_policy));
+    http.extend(model.http_policies.iter().map(http_policy));
     http.extend(
         model
             .listeners
@@ -94,6 +95,83 @@ pub fn tls_profile(profile: &TlsProfile) -> Directive {
         body.push(Directive::simple("alpn", profile.alpn.iter().cloned()));
     }
     Directive::with_block("tls_profile", [profile.id.clone()], body)
+}
+
+pub fn http_policy(policy: &HttpPolicy) -> Directive {
+    let mut body = Vec::new();
+    let mut changes = |name: &str, changes: &FieldChanges| {
+        if !changes.remove.is_empty() {
+            body.push(Directive::simple(
+                name,
+                std::iter::once("remove".to_owned()).chain(changes.remove.iter().cloned()),
+            ));
+        }
+        for (operation, fields) in [("set", &changes.set), ("add", &changes.add)] {
+            for field in fields {
+                body.push(Directive::simple(
+                    name,
+                    [
+                        operation.to_owned(),
+                        field.name.clone(),
+                        field.value.clone(),
+                    ],
+                ));
+            }
+        }
+    };
+    changes("request_header", &policy.request);
+    changes("response_header", &policy.response);
+    match &policy.server {
+        ServerHeader::Keep => {}
+        ServerHeader::Remove => body.push(Directive::simple("server_header", ["remove"])),
+        ServerHeader::Replace { value } => body.push(Directive::simple(
+            "server_header",
+            ["replace".to_owned(), expanded(value)],
+        )),
+    }
+    if let Some(cors) = &policy.cors {
+        let mut cors_body = Vec::new();
+        for (name, values) in [
+            ("origins", &cors.allowed_origins),
+            ("methods", &cors.allowed_methods),
+            ("headers", &cors.allowed_headers),
+            ("expose", &cors.exposed_headers),
+        ] {
+            if !values.is_empty() {
+                cors_body.push(Directive::simple(
+                    name,
+                    values.iter().map(|value| expanded(value)),
+                ));
+            }
+        }
+        if cors.allow_credentials {
+            cors_body.push(Directive::simple("credentials", ["on"]));
+        }
+        if let Some(seconds) = cors.max_age_seconds {
+            cors_body.push(Directive::simple(
+                "max_age",
+                [print_duration_ms(u64::from(seconds) * 1_000)],
+            ));
+        }
+        body.push(Directive::with_block(
+            "cors",
+            Vec::<String>::new(),
+            cors_body,
+        ));
+    }
+    if let Some(compression) = &policy.compression {
+        let mut args: Vec<String> = CODINGS
+            .iter()
+            .filter(|(_, algorithm)| compression.algorithms.contains(algorithm))
+            .map(|(name, _)| (*name).to_owned())
+            .collect();
+        args.push(format!("types={}", expanded(&compression.types.join(","))));
+        if compression.min_bytes > 0 {
+            args.push(format!("min_size={}", print_size(compression.min_bytes)));
+        }
+        body.push(Directive::simple("compress", args));
+    }
+    Directive::with_block("http_policy", [policy.id.clone()], body)
 }
 
 pub fn security_policy(policy: &SecurityPolicy) -> Directive {
@@ -505,6 +583,9 @@ fn route(route: &Route, model: &ConfigModel) -> Directive {
     if let Some(policy) = &route.security_policy_id {
         body.push(Directive::simple("security_policy", [policy.clone()]));
     }
+    if let Some(policy) = &route.http_policy_id {
+        body.push(Directive::simple("http_policy", [policy.clone()]));
+    }
     body.extend(print_access(&route.access_log));
     body.push(action(&route.action, model));
     Directive::with_block("route", route.name.clone(), body)
@@ -581,6 +662,9 @@ pub fn server(site: &Site, model: &ConfigModel) -> Directive {
     }
     if let Some(policy) = &site.security_policy_id {
         body.push(Directive::simple("security_policy", [policy.clone()]));
+    }
+    if let Some(policy) = &site.http_policy_id {
+        body.push(Directive::simple("http_policy", [policy.clone()]));
     }
     body.extend(print_access(&site.access_log));
     match site.www_redirect {

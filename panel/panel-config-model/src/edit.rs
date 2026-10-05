@@ -3,6 +3,7 @@
 //! as a whole.
 
 use crate::{
+    http::HttpPolicy,
     model::{
         Action, ConfigModel, Domain, Listener, Route, RouteMatch, Site, TlsProfile, Upstream,
         UpstreamNode,
@@ -57,6 +58,9 @@ pub struct SiteInput {
     /// Restrictions every request to the site passes first.
     #[serde(default)]
     pub security_policy_id: Option<String>,
+    /// Field changes, CORS and compression for the site's requests.
+    #[serde(default)]
+    pub http_policy_id: Option<String>,
     /// How the site's requests are logged; absent keeps the current settings.
     #[serde(default)]
     pub access_log: Option<AccessLog>,
@@ -88,6 +92,9 @@ pub struct RouteInput {
     /// Restrictions the route's requests pass after the site's.
     #[serde(default)]
     pub security_policy_id: Option<String>,
+    /// Field changes, CORS and compression for the route's requests.
+    #[serde(default)]
+    pub http_policy_id: Option<String>,
     /// How the route's requests are logged; absent keeps the current settings.
     #[serde(default)]
     pub access_log: Option<AccessLog>,
@@ -205,6 +212,7 @@ fn routes_from(inputs: Vec<RouteInput>, existing: &[Route]) -> Vec<Route> {
                 matcher: input.matcher,
                 action: input.action,
                 security_policy_id: input.security_policy_id,
+                http_policy_id: input.http_policy_id,
                 access_log: input.access_log.unwrap_or_else(|| {
                     kept.map(|route| route.access_log.clone())
                         .unwrap_or_default()
@@ -279,6 +287,7 @@ impl ConfigModel {
             tls_profile_id: input.tls_profile_id,
             hsts: input.hsts,
             security_policy_id: input.security_policy_id,
+            http_policy_id: input.http_policy_id,
             access_log: input.access_log.unwrap_or_default(),
             group: input.group,
             tags: input.tags,
@@ -307,6 +316,7 @@ impl ConfigModel {
             tls_profile_id: input.tls_profile_id,
             hsts: input.hsts,
             security_policy_id: input.security_policy_id,
+            http_policy_id: input.http_policy_id,
             access_log: input.access_log.unwrap_or_else(|| site.access_log.clone()),
             group: input.group,
             tags: input.tags,
@@ -490,6 +500,7 @@ impl ConfigModel {
             matcher: input.matcher,
             action: input.action,
             security_policy_id: input.security_policy_id,
+            http_policy_id: input.http_policy_id,
             access_log,
         };
         Ok(())
@@ -751,6 +762,44 @@ impl ConfigModel {
         Ok(())
     }
 
+    /// Creates or replaces an HTTP policy; returns whether it was created.
+    pub fn put_http_policy(&mut self, policy: HttpPolicy) -> bool {
+        match self
+            .http_policies
+            .iter_mut()
+            .find(|item| item.id == policy.id)
+        {
+            Some(slot) => {
+                *slot = policy;
+                false
+            }
+            None => {
+                self.http_policies.push(policy);
+                true
+            }
+        }
+    }
+
+    pub fn delete_http_policy(&mut self, id: &str) -> Result<()> {
+        if !self.http_policies.iter().any(|policy| policy.id == id) {
+            return Err(not_found("HTTP policy", id));
+        }
+        let used = self.sites.iter().any(|site| {
+            site.http_policy_id.as_deref() == Some(id)
+                || site
+                    .routes
+                    .iter()
+                    .any(|route| route.http_policy_id.as_deref() == Some(id))
+        });
+        if used {
+            return Err(PanelError::conflict(format!(
+                "HTTP policy {id} is still in use"
+            )));
+        }
+        self.http_policies.retain(|policy| policy.id != id);
+        Ok(())
+    }
+
     pub fn delete_tls_profile(&mut self, id: &str) -> Result<()> {
         if !self.tls_profiles.iter().any(|profile| profile.id == id) {
             return Err(not_found("TLS profile", id));
@@ -935,6 +984,7 @@ mod tests {
             note: None,
             favorite: false,
             security_policy_id: Default::default(),
+            http_policy_id: None,
             access_log: None,
         }
     }
@@ -995,6 +1045,7 @@ mod tests {
             },
             action: maintenance(),
             security_policy_id: None,
+            http_policy_id: None,
             access_log: Some(AccessLog {
                 format: Some(panel_ir::AccessLogFormat::Combined),
                 ..AccessLog::default()
@@ -1014,6 +1065,7 @@ mod tests {
             matcher: route.matcher.clone(),
             action: route.action.clone(),
             security_policy_id: None,
+            http_policy_id: None,
             access_log: None,
         });
         model.replace_site(id, replaced, now).unwrap();
@@ -1106,6 +1158,7 @@ mod tests {
             },
             action: maintenance(),
             security_policy_id: Default::default(),
+            http_policy_id: None,
             access_log: None,
         };
         let first = model.create_route(site, route("/a"), now).unwrap();

@@ -303,6 +303,14 @@ impl<'a> Explainer<'a> {
                     self.security_policy(&policy.id),
                 )
             }
+            ["http-policies", id] => {
+                let policy = model.http_policies.iter().find(|p| p.id == *id)?;
+                (
+                    Context::HttpPolicy,
+                    Some(policy.id.clone()),
+                    self.http_policy(&policy.id),
+                )
+            }
             _ => return None,
         })
     }
@@ -564,6 +572,20 @@ impl<'a> Explainer<'a> {
             Context::SecurityPolicy,
             "limited_response",
             "429",
+        );
+        self.constants(&mut settings, &resource);
+        settings
+    }
+
+    fn http_policy(&self, id: &str) -> Vec<Setting> {
+        let resource = format!("http-policies/{id}");
+        let mut settings = self.own(&resource, Context::HttpPolicy, &[]);
+        self.or_default(
+            &mut settings,
+            &resource,
+            Context::HttpPolicy,
+            "server_header",
+            "keep",
         );
         self.constants(&mut settings, &resource);
         settings

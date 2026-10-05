@@ -363,6 +363,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             security_policy_id: Default::default(),
+            http_policy_id: None,
             access_log: Default::default(),
         }
     }

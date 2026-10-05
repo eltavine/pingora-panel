@@ -25,6 +25,12 @@ pub(crate) fn blocks(model: &ConfigModel) -> Vec<(String, Directive)> {
             print::security_policy(policy),
         )
     }));
+    blocks.extend(model.http_policies.iter().map(|policy| {
+        (
+            format!("http-policies/{}", policy.id),
+            print::http_policy(policy),
+        )
+    }));
     blocks.extend(model.listeners.iter().map(|listener| {
         (
             format!("listeners/{}", listener.id),

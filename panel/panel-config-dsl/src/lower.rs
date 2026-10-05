@@ -11,7 +11,8 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use panel_config_model::{
-    validate, Action, ConfigModel, Listener, Route, SecurityPolicy, Site, TlsProfile, Upstream,
+    validate, Action, ConfigModel, HttpPolicy, Listener, Route, SecurityPolicy, Site, TlsProfile,
+    Upstream,
 };
 use panel_domain::NormalizedHost;
 use panel_dsl::{Argument, Body, Directive, Document, LineIndex, Span};
@@ -23,6 +24,7 @@ use std::{
 use uuid::Uuid;
 
 mod conditions;
+mod http;
 mod listener;
 mod logging;
 mod route;
@@ -31,6 +33,7 @@ mod server;
 mod tls;
 mod upstream;
 
+pub(crate) use http::CODINGS;
 pub(crate) use logging::{print_access, print_policy};
 pub(crate) use security::{print_rate, DEFAULT_REALM};
 
@@ -184,6 +187,7 @@ struct Lowerer<'a> {
     scopes: Vec<Scope>,
     profiles: Vec<(TlsProfile, Origin)>,
     policies: Vec<(SecurityPolicy, Origin)>,
+    http_policies: Vec<(HttpPolicy, Origin)>,
     listeners: Vec<ListenerDraft>,
     upstreams: Vec<(Upstream, Origin)>,
     servers: Vec<ServerDraft>,
@@ -213,6 +217,7 @@ impl<'a> Lowerer<'a> {
             }],
             profiles: Vec::new(),
             policies: Vec::new(),
+            http_policies: Vec::new(),
             listeners: Vec::new(),
             upstreams: Vec::new(),
             servers: Vec::new(),
@@ -726,6 +731,7 @@ impl<'a> Lowerer<'a> {
                 &mut |lowerer, file, directive, spec, depth| match spec.name {
                     "tls_profile" => lowerer.tls_profile(file, directive, depth),
                     "security_policy" => lowerer.security_policy(file, directive, depth),
+                    "http_policy" => lowerer.http_policy(file, directive, depth),
                     "listener" => lowerer.listener(file, directive, depth),
                     "upstream" => lowerer.upstream(file, directive, depth),
                     "server" => lowerer.server(file, directive, depth),
@@ -938,6 +944,10 @@ impl<'a> Lowerer<'a> {
                 .map(|(profile, _)| profile)
                 .collect(),
             security_policies: std::mem::take(&mut self.policies)
+                .into_iter()
+                .map(|(policy, _)| policy)
+                .collect(),
+            http_policies: std::mem::take(&mut self.http_policies)
                 .into_iter()
                 .map(|(policy, _)| policy)
                 .collect(),

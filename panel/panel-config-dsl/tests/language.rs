@@ -547,6 +547,144 @@ http {
 }
 
 #[test]
+fn http_policies_read_print_and_refuse_mistakes() {
+    let text = r#"language_version 1;
+http {
+    set $brand shop;
+    http_policy site {
+        response_header set Strict-Transport-Security "max-age=63072000; includeSubDomains";
+        response_header remove X-Powered-By;
+        server_header replace $brand;
+    }
+    http_policy api {
+        request_header remove X-Internal X-Debug;
+        request_header set X-Tenant $host;
+        request_header add X-Hop "via $$edge";
+        response_header add Link "</app.css>; rel=preload";
+        cors {
+            origins https://*.shop.example https://admin.shop.example;
+            methods PUT DELETE;
+            headers X-Api-Key;
+            expose X-Request-Id;
+            credentials on;
+            max_age 10m;
+        }
+        compress gzip br zstd types=text/*,application/json min_size=1k;
+    }
+    server shop {
+        server_name shop.example;
+        http_policy site;
+        respond 200 "body=ok";
+        route {
+            match prefix /api;
+            http_policy api;
+            respond 200 "body=api";
+        }
+    }
+}
+"#;
+    let lowered = read(text);
+    assert!(
+        lowered.errors().next().is_none(),
+        "{:#?}",
+        lowered.diagnostics
+    );
+    let [site_policy, api] = lowered.model.http_policies.as_slice() else {
+        panic!("{:#?}", lowered.model.http_policies);
+    };
+    assert_eq!(site_policy.response.remove, ["X-Powered-By"]);
+    assert_eq!(
+        site_policy.response.set[0].value,
+        "max-age=63072000; includeSubDomains"
+    );
+    assert_eq!(
+        site_policy.server,
+        panel_ir::ServerHeader::Replace {
+            value: "shop".into()
+        }
+    );
+    assert_eq!(api.request.remove, ["X-Internal", "X-Debug"]);
+    assert_eq!(api.request.set[0].value, "$host");
+    assert_eq!(api.request.add[0].value, "via $$edge");
+    let cors = api.cors.as_ref().unwrap();
+    assert_eq!(cors.allowed_origins.len(), 2);
+    assert!(cors.allow_credentials);
+    assert_eq!(cors.max_age_seconds, Some(600));
+    let compression = api.compression.as_ref().unwrap();
+    assert_eq!(compression.algorithms.len(), 3);
+    assert_eq!(compression.types, ["text/*", "application/json"]);
+    assert_eq!(compression.min_bytes, 1024);
+    let site = &lowered.model.sites[0];
+    assert_eq!(site.http_policy_id.as_deref(), Some("site"));
+    assert_eq!(site.routes[0].http_policy_id.as_deref(), Some("api"));
+
+    let printed = print(&lowered.model);
+    for line in [
+        "        response_header set Strict-Transport-Security \"max-age=63072000; includeSubDomains\";\n",
+        "        response_header remove X-Powered-By;\n",
+        "        server_header replace shop;\n",
+        "        request_header remove X-Internal X-Debug;\n",
+        "        request_header set X-Tenant $host;\n",
+        "        request_header add X-Hop \"via $$edge\";\n",
+        "            origins https://*.shop.example https://admin.shop.example;\n",
+        "            credentials on;\n",
+        "            max_age 10m;\n",
+        "        compress gzip br zstd types=text/*,application/json min_size=1k;\n",
+        "        http_policy site;\n",
+        "            http_policy api;\n",
+    ] {
+        assert!(printed.contains(line), "{line}{printed}");
+    }
+    assert!(same_configuration(&lowered.model, &read(&printed).model));
+
+    for (from, to, message) in [
+        (
+            "request_header set X-Tenant $host;",
+            "request_header set X-Tenant;",
+            "takes remove <name> ..., set <name> <value> or add <name> <value>",
+        ),
+        (
+            "request_header set X-Tenant $host;",
+            "request_header set X-Tenant $nothing;",
+            "nothing",
+        ),
+        (
+            "request_header set X-Tenant",
+            "request_header set Host",
+            "changes the request field host, which the gateway keeps",
+        ),
+        (
+            "server_header replace $brand;",
+            "server_header hide;",
+            "server_header is keep, remove or replace <value>",
+        ),
+        (
+            "origins https://*.shop.example",
+            "origins *",
+            "allows credentials for every origin",
+        ),
+        ("max_age 10m;", "max_age 1500ms;", "whole number of seconds"),
+        ("gzip br zstd", "gzip deflate", "is not a content coding"),
+        (
+            " types=text/*,application/json",
+            "",
+            "compress names the media types it compresses",
+        ),
+        ("min_size=1k", "min_size=lots", "is not a size"),
+        ("http_policy api;", "http_policy missing;", "does not exist"),
+    ] {
+        let lowered = read(&text.replace(from, to));
+        assert!(
+            lowered
+                .errors()
+                .any(|diagnostic| diagnostic.message.contains(message)),
+            "{message}: {:#?}",
+            lowered.diagnostics
+        );
+    }
+}
+
+#[test]
 fn unverified_tls_nodes_are_warned_about() {
     let text = "language_version 1;\nhttp {\n    upstream app {\n        server 10.0.0.1:443 tls;\n        tls verify=off;\n    }\n    server s {\n        server_name s.example;\n        proxy app;\n    }\n}\n";
     let lowered = read(text);

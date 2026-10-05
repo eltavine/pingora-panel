@@ -24,6 +24,7 @@ pub const RESOURCE_KINDS: &[&str] = &[
     "listeners",
     "tls-profiles",
     "security-policies",
+    "http-policies",
 ];
 /// Changes to these kinds are high-risk, as are removals.
 const HIGH_RISK_KINDS: &[&str] = &["listeners", "tls-profiles", "security-policies"];

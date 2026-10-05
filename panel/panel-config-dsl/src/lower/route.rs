@@ -31,6 +31,7 @@ impl<'a> Lowerer<'a> {
                 },
                 action: placeholder_action(),
                 security_policy_id: None,
+                http_policy_id: None,
                 access_log: Default::default(),
             },
             priority_set: false,
@@ -161,6 +162,7 @@ impl<'a> Lowerer<'a> {
                             "security_policy" => {
                                 draft.route.security_policy_id = arg.map(Self::literal)
                             }
+                            "http_policy" => draft.route.http_policy_id = arg.map(Self::literal),
                             name if super::conditions::CONDITIONS.contains(&name) => {
                                 if let Some(condition) =
                                     lowerer.condition(file, directive, depth + 1)

@@ -5,7 +5,7 @@ use crate::{
     model::{ConfigModel, Domain, Listener, Route, Site, SiteKind, Upstream},
     query::{serves_https, site_status, SiteStatus},
 };
-use crate::{SecurityPolicy, TlsProfile};
+use crate::{HttpPolicy, SecurityPolicy, TlsProfile};
 use panel_domain::NormalizedHost;
 use panel_errors::Diagnostic;
 use serde::{Deserialize, Serialize};
@@ -219,6 +219,40 @@ impl SecurityPolicyView {
                         .routes
                         .iter()
                         .any(|route| route.security_policy_id.as_deref() == id)
+            })
+            .map(|site| site.id)
+            .collect();
+        Self {
+            etag: crate::entity_tag(policy),
+            policy: policy.clone(),
+            used_by,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct HttpPolicyView {
+    #[serde(flatten)]
+    pub policy: HttpPolicy,
+    /// Live sites that apply the policy to some of their requests.
+    pub used_by: Vec<Uuid>,
+    pub etag: String,
+}
+
+impl HttpPolicyView {
+    pub fn new(model: &ConfigModel, policy: &HttpPolicy) -> Self {
+        let id = Some(policy.id.as_str());
+        let used_by = model
+            .sites
+            .iter()
+            .filter(|site| !site.is_deleted())
+            .filter(|site| {
+                site.http_policy_id.as_deref() == id
+                    || site
+                        .routes
+                        .iter()
+                        .any(|route| route.http_policy_id.as_deref() == id)
             })
             .map(|site| site.id)
             .collect();

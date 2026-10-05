@@ -1,5 +1,6 @@
 //! The editable configuration document.
 
+use crate::http::HttpPolicy;
 use crate::security::SecurityPolicy;
 use chrono::{DateTime, Utc};
 use panel_domain::{CertificateId, ContentHash, NormalizedHost};
@@ -35,6 +36,8 @@ pub struct ConfigModel {
     pub tls_profiles: Vec<TlsProfile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub security_policies: Vec<SecurityPolicy>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub http_policies: Vec<HttpPolicy>,
     #[serde(default)]
     pub upstreams: Vec<Upstream>,
     #[serde(default)]
@@ -225,6 +228,10 @@ pub struct Site {
     /// Restrictions every request to the site passes first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub security_policy_id: Option<String>,
+    /// Field changes, CORS and compression for the site's requests, before
+    /// their route's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_policy_id: Option<String>,
     /// How the site's requests are logged, over the settings for every site.
     #[serde(default, skip_serializing_if = "AccessLog::is_unset")]
     pub access_log: AccessLog,
@@ -303,6 +310,10 @@ pub struct Route {
     /// Restrictions the route's requests pass after the site's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub security_policy_id: Option<String>,
+    /// Field changes, CORS and compression for the route's requests, after
+    /// the site's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_policy_id: Option<String>,
     /// How the route's requests are logged, over its site's settings.
     #[serde(default, skip_serializing_if = "AccessLog::is_unset")]
     pub access_log: AccessLog,

@@ -13,7 +13,7 @@ use panel_ir::tls::{HSTS_CAPABILITY, TLS_SETTINGS_CAPABILITY};
 use panel_ir::{
     CapabilityRequirement, DomainSpec, ListenerRef, LoadBalancingPolicy, RetryPolicy, RouteAction,
     RouteMatcher, RouteSpec, RuntimeSnapshot, SiteSpec, StaticContentPolicy, UpstreamEndpoint,
-    UpstreamPoolSpec, WwwRedirect,
+    UpstreamPoolSpec, WwwRedirect, HTTP_POLICIES_CAPABILITY,
 };
 use panel_ir::{
     REQUEST_HEAD_TIMEOUT_CAPABILITY, REQUEST_SECURITY_CAPABILITY, ROUTE_CONDITIONS_CAPABILITY,
@@ -88,6 +88,25 @@ pub fn compile(
         .collect();
     if !policies.is_empty() {
         compiler.capabilities.insert(REQUEST_SECURITY_CAPABILITY);
+    }
+    let http_policies: BTreeSet<&str> = live
+        .iter()
+        .flat_map(|site| {
+            site.http_policy_id.as_deref().into_iter().chain(
+                site.routes
+                    .iter()
+                    .filter_map(|route| route.http_policy_id.as_deref()),
+            )
+        })
+        .collect();
+    compiler.snapshot.header_policies = model
+        .http_policies
+        .iter()
+        .filter(|policy| http_policies.contains(policy.id.as_str()))
+        .map(crate::HttpPolicy::compile)
+        .collect();
+    if !http_policies.is_empty() {
+        compiler.capabilities.insert(HTTP_POLICIES_CAPABILITY);
     }
     for site in live {
         compiler.site(site);
@@ -236,6 +255,7 @@ impl Compiler {
         compiled
             .security_policy_id
             .clone_from(&site.security_policy_id);
+        compiled.header_policy_id.clone_from(&site.http_policy_id);
         compiled.access_log.clone_from(&site.access_log);
         if !site.access_log.is_unset() {
             self.capabilities.insert(LOGGING_CAPABILITY);
@@ -327,6 +347,7 @@ impl Compiler {
         compiled
             .security_policy_id
             .clone_from(&route.security_policy_id);
+        compiled.header_policy_id.clone_from(&route.http_policy_id);
         compiled.access_log.clone_from(&route.access_log);
         if !route.access_log.is_unset() {
             self.capabilities.insert(LOGGING_CAPABILITY);
@@ -541,6 +562,7 @@ mod tests {
                     spa_fallback: false,
                 },
                 security_policy_id: Default::default(),
+                http_policy_id: None,
                 access_log: Default::default(),
             }],
             listener_ids: BTreeSet::new(),
@@ -556,6 +578,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             security_policy_id: Default::default(),
+            http_policy_id: None,
             access_log: Default::default(),
         };
         let site_id = site.id;
@@ -576,6 +599,7 @@ mod tests {
             upstreams: vec![upstream],
             sites: vec![site],
             security_policies: Default::default(),
+            http_policies: Default::default(),
             logging: Default::default(),
         };
         (model, site_id)
@@ -691,6 +715,74 @@ mod tests {
             snapshot.sites[0].hsts.unwrap().header_value(),
             "max-age=63072000; includeSubDomains; preload"
         );
+    }
+
+    #[test]
+    fn http_policies_reach_the_snapshot_through_their_users() {
+        let (mut model, _) = model();
+        let field = |name: &str, value: &str| panel_ir::HeaderField {
+            name: name.into(),
+            value: value.into(),
+        };
+        assert!(model.put_http_policy(crate::HttpPolicy {
+            id: "site".into(),
+            response: crate::FieldChanges {
+                set: vec![field("X-Frame-Options", "DENY")],
+                ..crate::FieldChanges::default()
+            },
+            server: panel_ir::ServerHeader::Remove,
+            ..crate::HttpPolicy::default()
+        }));
+        assert!(model.put_http_policy(crate::HttpPolicy {
+            id: "api".into(),
+            request: crate::FieldChanges {
+                set: vec![field("X-Tenant", "$host")],
+                ..crate::FieldChanges::default()
+            },
+            ..crate::HttpPolicy::default()
+        }));
+        assert!(model.put_http_policy(crate::HttpPolicy {
+            id: "unused".into(),
+            ..crate::HttpPolicy::default()
+        }));
+        model.sites[0].http_policy_id = Some("site".into());
+        model.sites[0].routes[0].http_policy_id = Some("api".into());
+
+        let snapshot = compile(&model, RevisionId::new(10)).unwrap();
+        assert!(snapshot
+            .required_capabilities
+            .iter()
+            .any(|capability| capability.name == HTTP_POLICIES_CAPABILITY));
+        let ids: Vec<_> = snapshot
+            .header_policies
+            .iter()
+            .map(|policy| policy.id.as_str())
+            .collect();
+        assert_eq!(ids, ["site", "api"]);
+        assert_eq!(
+            snapshot.header_policies[0].response_set["x-frame-options"],
+            "DENY"
+        );
+        assert_eq!(snapshot.sites[0].header_policy_id.as_deref(), Some("site"));
+        assert_eq!(snapshot.routes[0].header_policy_id.as_deref(), Some("api"));
+        assert!(model.clone().delete_http_policy("api").is_err());
+        assert!(model.clone().delete_http_policy("unused").is_ok());
+
+        model.sites[0].routes[0].http_policy_id = Some("missing".into());
+        model.http_policies[1].request.set.push(field("Host", "x"));
+        let messages: Vec<String> = crate::validate(&model)
+            .into_iter()
+            .map(|diagnostic| diagnostic.message)
+            .collect();
+        for expected in [
+            "HTTP policy missing does not exist",
+            "the policy changes the request field host, which the gateway keeps",
+        ] {
+            assert!(
+                messages.iter().any(|message| message == expected),
+                "{expected}: {messages:?}"
+            );
+        }
     }
 
     #[test]

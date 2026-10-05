@@ -50,6 +50,7 @@ impl<'a> Lowerer<'a> {
                 created_at: now,
                 updated_at: now,
                 security_policy_id: None,
+                http_policy_id: None,
                 access_log: Default::default(),
             },
             action: None,
@@ -220,6 +221,7 @@ impl<'a> Lowerer<'a> {
                 .extend(directive.args.iter().map(Self::literal)),
             "tls_profile" => draft.site.tls_profile_id = arg.map(Self::literal),
             "security_policy" => draft.site.security_policy_id = arg.map(Self::literal),
+            "http_policy" => draft.site.http_policy_id = arg.map(Self::literal),
             "https_redirect" => {
                 draft.site.https_redirect = arg
                     .and_then(|arg| self.bool_arg(file, arg))

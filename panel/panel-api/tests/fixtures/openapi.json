@@ -77814,6 +77814,8 @@
           "http",
           "tls_profile",
           "security_policy",
+          "http_policy",
+          "cors",
           "listener",
           "upstream",
           "server",
@@ -82394,6 +82396,13 @@
           "enabled": {
             "type": "boolean"
           },
+          "http_policy_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Field changes, CORS and compression for the route's requests, after\nthe site's."
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -82708,6 +82717,13 @@
           },
           "enabled": {
             "type": "boolean"
+          },
+          "http_policy_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Field changes, CORS and compression for the route's requests."
           },
           "id": {
             "type": [
@@ -83462,6 +83478,13 @@
               }
             ]
           },
+          "http_policy_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Field changes, CORS and compression for the site's requests, before\ntheir route's."
+          },
           "https_redirect": {
             "type": "boolean"
           },
@@ -83691,6 +83714,13 @@
                 "description": "Sent with HTTPS responses for the site's hosts."
               }
             ]
+          },
+          "http_policy_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Field changes, CORS and compression for the site's requests."
           },
           "https_redirect": {
             "type": "boolean"

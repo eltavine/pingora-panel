@@ -8,6 +8,7 @@ use std::collections::BTreeSet;
 pub const HTTP_POLICIES_CAPABILITY: &str = "http.policies";
 
 /// A field line, its value a template of request variables.
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HeaderField {
@@ -16,6 +17,7 @@ pub struct HeaderField {
 }
 
 /// What becomes of the upstream's `Server` field (RFC 9110 §10.2.4).
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ServerHeader {
@@ -34,6 +36,7 @@ impl ServerHeader {
 }
 
 /// The Fetch Standard's CORS protocol for the origins listed.
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CorsPolicy {
@@ -59,6 +62,7 @@ pub struct CorsPolicy {
 }
 
 /// A content coding responses may be compressed with.
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CompressionAlgorithm {
@@ -68,6 +72,7 @@ pub enum CompressionAlgorithm {
 }
 
 /// Which responses are compressed, with the codings the client accepts.
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CompressionPolicy {

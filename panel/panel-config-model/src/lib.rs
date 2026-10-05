@@ -10,6 +10,7 @@
 mod approvals;
 mod compile;
 mod edit;
+mod http;
 mod model;
 mod query;
 mod revisions;
@@ -25,6 +26,7 @@ pub use approvals::{
 };
 pub use compile::compile;
 pub use edit::{checked, NodeInput, RouteInput, SiteBundle, SiteInput, UpstreamInput};
+pub use http::{FieldChanges, HttpPolicy};
 pub use model::{
     entity_tag, Action, ConfigModel, Domain, Listener, MatchKind, Route, RouteCondition,
     RouteMatch, Site, SiteKind, TlsProfile, TlsProfileInput, Upstream, UpstreamNode, ValueTest,
@@ -40,8 +42,9 @@ pub use revisions::{Revision, RevisionDetail, RevisionList, RevisionOutcome};
 pub use security::{SecurityPolicy, MAX_BODY_TIMEOUT_SECONDS, MAX_RATE_PERIOD_SECONDS};
 pub use validate::{validate, MAX_HEAD_TIMEOUT_SECONDS};
 pub use views::{
-    BatchAction, BatchRequest, DomainCheck, DomainOwner, DomainView, ListenerView, RouteView,
-    SecurityPolicyView, SiteList, SiteView, TlsProfileView, UpstreamView, ValidationResult,
+    BatchAction, BatchRequest, DomainCheck, DomainOwner, DomainView, HttpPolicyView, ListenerView,
+    RouteView, SecurityPolicyView, SiteList, SiteView, TlsProfileView, UpstreamView,
+    ValidationResult,
 };
 
 /// Identifies the document format in storage, exports and imports.

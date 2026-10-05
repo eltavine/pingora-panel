@@ -182,6 +182,57 @@ fn renaming_an_upstream_reprints_what_refers_to_it() {
 }
 
 #[test]
+fn http_policies_join_and_leave_the_text() {
+    let (sources, lowered) = stored();
+    let mut next = lowered.model.clone();
+    next.put_http_policy(panel_config_model::HttpPolicy {
+        id: "headers".into(),
+        response: panel_config_model::FieldChanges {
+            set: vec![panel_ir::HeaderField {
+                name: "X-Frame-Options".into(),
+                value: "DENY".into(),
+            }],
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    let shop = next
+        .sites
+        .iter_mut()
+        .find(|site| site.name == "shop")
+        .unwrap();
+    shop.http_policy_id = Some("headers".into());
+    let edited = reconcile(&sources, &lowered, &next);
+    let text = edited.get("main.conf").unwrap();
+    assert!(
+        text.contains(
+            "    http_policy headers {\n        response_header set X-Frame-Options DENY;\n    }\n"
+        ),
+        "{text}"
+    );
+    assert!(text.contains("        http_policy headers;\n"), "{text}");
+    let again = read(&edited);
+    assert!(again.is_valid(), "{:#?}\n{text}", again.diagnostics);
+    assert_eq!(again.model.http_policies, next.http_policies);
+    assert!(
+        plan(&lowered.model, &again.model)
+            .iter()
+            .any(|change| change.resource == "http-policies/headers"
+                && change.change == Change::Added)
+    );
+
+    let mut back = again.model.clone();
+    back.sites
+        .iter_mut()
+        .for_each(|site| site.http_policy_id = None);
+    back.delete_http_policy("headers").unwrap();
+    let removed = reconcile(&edited, &again, &back);
+    let text = removed.get("main.conf").unwrap();
+    assert!(!text.contains("http_policy"), "{text}");
+    assert!(read(&removed).is_valid());
+}
+
+#[test]
 fn security_policies_join_and_leave_the_text() {
     let (sources, lowered) = stored();
     let mut next = lowered.model.clone();

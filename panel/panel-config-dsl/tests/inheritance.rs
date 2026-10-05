@@ -275,6 +275,24 @@ fn servers_and_upstreams_explain_their_own_values() {
 }
 
 #[test]
+fn http_policies_explain_their_settings() {
+    let text = "language_version 1;\nhttp {\n    http_policy headers {\n        response_header set X-Frame-Options DENY;\n    }\n    server s {\n        server_name s.example;\n        http_policy headers;\n        respond 200;\n    }\n}\n";
+    let (sources, lowered) = read(text);
+    let (line, column) = position(text, "response_header set");
+    let explained = explain(&sources, &lowered, "main.conf", line, column).unwrap();
+    assert_eq!(explained.block, Context::HttpPolicy);
+    assert_eq!(
+        setting(&explained.settings, "response_header", None).value,
+        "set X-Frame-Options DENY"
+    );
+    let server = setting(&explained.settings, "server_header", None);
+    assert_eq!(
+        (server.value.as_str(), server.source),
+        ("keep", SettingSource::Default)
+    );
+}
+
+#[test]
 fn settings_without_effect_are_reported_where_they_are_written() {
     let text = r#"language_version 1;
 http {

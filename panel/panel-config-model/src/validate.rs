@@ -35,6 +35,7 @@ pub fn validate(model: &ConfigModel) -> Vec<Diagnostic> {
     let mut report = Report(Vec::new());
     let tls_profiles = validate_tls_profiles(model, &mut report);
     let policies = validate_security_policies(model, &mut report);
+    let http_policies = validate_http_policies(model, &mut report);
     let upstreams = validate_upstreams(model, &mut report);
     let live_sites: BTreeSet<Uuid> = model
         .sites
@@ -123,6 +124,13 @@ pub fn validate(model: &ConfigModel) -> Vec<Diagnostic> {
                 format!("security policy {policy} does not exist"),
             );
         }
+        if let Some(policy) = site
+            .http_policy_id
+            .as_deref()
+            .filter(|policy| !http_policies.contains(policy))
+        {
+            report.error(&resource, format!("HTTP policy {policy} does not exist"));
+        }
         validate_domains(site, &resource, &tls_profiles, &mut hosts, &mut report);
         if site.hsts.is_some_and(|hsts| {
             hsts.preload && (!hsts.include_subdomains || hsts.max_age_seconds < PRELOAD_MAX_AGE)
@@ -149,6 +157,16 @@ pub fn validate(model: &ConfigModel) -> Vec<Diagnostic> {
                 report.error(
                     format!("{resource}/routes/{}", route.id),
                     format!("security policy {policy} does not exist"),
+                );
+            }
+            if let Some(policy) = route
+                .http_policy_id
+                .as_deref()
+                .filter(|policy| !http_policies.contains(policy))
+            {
+                report.error(
+                    format!("{resource}/routes/{}", route.id),
+                    format!("HTTP policy {policy} does not exist"),
                 );
             }
         }
@@ -217,6 +235,23 @@ fn validate_security_policies<'a>(
                     "security policy id {:?} is invalid or duplicated",
                     policy.id
                 ),
+            );
+        }
+        for problem in policy.problems() {
+            report.error(&resource, problem);
+        }
+    }
+    ids
+}
+
+fn validate_http_policies<'a>(model: &'a ConfigModel, report: &mut Report) -> BTreeSet<&'a str> {
+    let mut ids = BTreeSet::new();
+    for policy in &model.http_policies {
+        let resource = format!("http-policies/{}", policy.id);
+        if !is_token(&policy.id) || !ids.insert(policy.id.as_str()) {
+            report.error(
+                &resource,
+                format!("HTTP policy id {:?} is invalid or duplicated", policy.id),
             );
         }
         for problem in policy.problems() {
@@ -656,6 +691,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             security_policy_id: Default::default(),
+            http_policy_id: None,
             access_log: Default::default(),
         }
     }
@@ -956,6 +992,7 @@ mod tests {
                 spa_fallback: false,
             },
             security_policy_id: Default::default(),
+            http_policy_id: None,
             access_log: Default::default(),
         });
         model.sites.push(shop);
