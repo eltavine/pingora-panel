@@ -266,6 +266,32 @@ async fn api(
             "id": "b2", "name": "shop-web-1", "container": null
         }))
         .into_response(),
+        ("GET", "/api/v1/container-engines/docker/networks") => Json(json!({
+            "observed_at": "2027-01-15T08:00:10Z",
+            "networks": [
+                {"id": "n3", "name": "shop_default", "driver": "bridge", "scope": "local",
+                 "created": null, "internal": false, "ipv6": false,
+                 "subnets": [{"subnet": "172.18.0.0/16", "gateway": "172.18.0.1"}],
+                 "containers": 2, "compose_project": "shop", "labels": {}},
+                {"id": "n2", "name": "host", "driver": "host", "scope": "local",
+                 "created": null, "internal": false, "ipv6": false, "subnets": [],
+                 "containers": 0, "compose_project": null, "labels": {}}
+            ]
+        }))
+        .into_response(),
+        ("GET", "/api/v1/container-engines/docker/volumes") => Json(json!({
+            "observed_at": "2027-01-15T08:00:10Z",
+            "volumes": [
+                {"name": "shop_html", "driver": "local", "scope": "local", "created": null,
+                 "mountpoint": "/var/lib/docker/volumes/shop_html/_data", "containers": 1,
+                 "compose_project": "shop", "labels": {}}
+            ]
+        }))
+        .into_response(),
+        ("GET", "/api/v1/container-engines/podman/volumes") => Json(json!({
+            "observed_at": "2027-01-15T08:00:10Z", "volumes": []
+        }))
+        .into_response(),
         ("GET", "/api/v1/container-engines/docker/images") => Json(json!({
             "observed_at": "2027-01-15T08:00:10Z",
             "images": [
@@ -2700,4 +2726,27 @@ fn images_from_the_command_line() {
     );
     let escaping = stub.ppanel(&["image", "inspect", "../containers/b2"]);
     assert_eq!(escaping.status.code(), Some(2));
+}
+
+#[test]
+fn networks_and_volumes_from_the_command_line() {
+    let stub = Stub::start();
+    let networks = stub.ppanel(&["network", "list"]);
+    assert!(networks.status.success(), "{}", stderr(&networks));
+    let printed = stdout(&networks);
+    assert!(
+        printed.contains("172.18.0.0/16 via 172.18.0.1"),
+        "{printed}"
+    );
+    let host = printed
+        .lines()
+        .find(|line| line.starts_with("host"))
+        .unwrap();
+    assert!(host.contains(" - "), "{host}");
+
+    let volumes = stub.ppanel(&["volume", "list"]);
+    assert!(stdout(&volumes).contains("/var/lib/docker/volumes/shop_html/_data"));
+    let none = stub.ppanel(&["volume", "list", "--engine", "podman"]);
+    assert!(none.status.success());
+    assert!(stderr(&none).contains("the engine has no volumes"));
 }

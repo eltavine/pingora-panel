@@ -163,6 +163,12 @@ enum Command {
     /// The images on the Docker and Podman engines the host agent reaches.
     #[command(subcommand)]
     Image(commands::images::ImageCommand),
+    /// The networks of the Docker and Podman engines the host agent reaches.
+    #[command(subcommand)]
+    Network(commands::engine_resources::NetworkCommand),
+    /// The volumes of the Docker and Podman engines the host agent reaches.
+    #[command(subcommand)]
+    Volume(commands::engine_resources::VolumeCommand),
     /// The running gateway.
     #[command(subcommand)]
     Gateway(commands::gateway::GatewayCommand),
@@ -263,6 +269,12 @@ async fn main() -> ExitCode {
             Command::Host(args) => commands::host::run(&api, &output, args).await,
             Command::Container(command) => commands::containers::run(&api, &output, command).await,
             Command::Image(command) => commands::images::run(&api, &output, command).await,
+            Command::Network(command) => {
+                commands::engine_resources::networks(&api, &output, command).await
+            }
+            Command::Volume(command) => {
+                commands::engine_resources::volumes(&api, &output, command).await
+            }
             Command::Gateway(command) => commands::gateway::gateway(&api, &output, command).await,
             Command::Completion { .. } => Ok(()),
         }
