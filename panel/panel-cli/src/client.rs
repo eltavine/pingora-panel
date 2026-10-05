@@ -193,7 +193,27 @@ impl Api {
             .await
     }
 
-    /// A change, with the identity, deadline and idempotency key the API requires.
+    /// A command lasting at most `lasting`, with the identity, deadline and
+    /// idempotency key the API requires.
+    fn command(&self, method: Method, path: &str, lasting: Duration) -> reqwest::RequestBuilder {
+        let deadline = Utc::now()
+            + chrono::Duration::from_std(lasting.min(LONGEST_DEADLINE))
+                .unwrap_or(chrono::Duration::seconds(30));
+        let key = self
+            .idempotency_key
+            .clone()
+            .unwrap_or_else(|| Uuid::now_v7().to_string());
+        self.http
+            .request(method, format!("{}{path}", self.base))
+            .header("x-request-id", Uuid::now_v7().to_string())
+            .header(
+                "x-deadline",
+                deadline.to_rfc3339_opts(SecondsFormat::Secs, true),
+            )
+            .header("idempotency-key", key)
+    }
+
+    /// A change.
     pub async fn change(
         &self,
         method: Method,
@@ -201,22 +221,7 @@ impl Api {
         body: Option<&Value>,
         if_match: Option<&str>,
     ) -> Result<Reply> {
-        let deadline = Utc::now()
-            + chrono::Duration::from_std(self.timeout.min(LONGEST_DEADLINE))
-                .unwrap_or(chrono::Duration::seconds(30));
-        let key = self
-            .idempotency_key
-            .clone()
-            .unwrap_or_else(|| Uuid::now_v7().to_string());
-        let mut request = self
-            .http
-            .request(method, format!("{}{path}", self.base))
-            .header("x-request-id", Uuid::now_v7().to_string())
-            .header(
-                "x-deadline",
-                deadline.to_rfc3339_opts(SecondsFormat::Secs, true),
-            )
-            .header("idempotency-key", key);
+        let mut request = self.command(method, path, self.timeout);
         if let Some(body) = body {
             request = request.json(body);
         }
@@ -239,6 +244,31 @@ impl Api {
             .query(query)
             .timeout(timeout)
             .header("x-request-id", Uuid::now_v7().to_string());
+        let response = self
+            .authorized(request)
+            .send()
+            .await
+            .map_err(CliError::transport)?;
+        if response.status().is_success() {
+            Ok(response)
+        } else {
+            Err(refused(response).await)
+        }
+    }
+
+    /// A change the API answers as server-sent events, read as they arrive
+    /// for at most `lasting`.
+    pub async fn change_events(
+        &self,
+        path: &str,
+        body: &Value,
+        lasting: Duration,
+    ) -> Result<reqwest::Response> {
+        let request = self
+            .command(Method::POST, path, lasting)
+            .timeout(lasting)
+            .header(header::ACCEPT, "text/event-stream")
+            .json(body);
         let response = self
             .authorized(request)
             .send()

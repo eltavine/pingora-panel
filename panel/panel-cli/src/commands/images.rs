@@ -6,7 +6,11 @@ use crate::{
 };
 use clap::Subcommand;
 use reqwest::Method;
-use serde_json::Value;
+use serde_json::{json, Value};
+use std::{collections::HashMap, io::Read, time::Duration};
+
+/// The longest a pull may take: the host agent's limit, and a margin.
+const PULL_LASTING: Duration = Duration::from_secs(35 * 60);
 
 #[derive(Subcommand)]
 pub(crate) enum ImageCommand {
@@ -35,6 +39,28 @@ pub(crate) enum ImageCommand {
         /// Confirms that the image is removed.
         #[arg(long)]
         yes: bool,
+    },
+    /// Pulls an image from its registry, saying on standard error how far
+    /// each layer got and printing what was pulled. Interrupting leaves the
+    /// pull going on.
+    Pull {
+        /// Such as `nginx:1.27` or `ghcr.io/example/app@sha256:…`; a name
+        /// alone is its `latest` tag.
+        #[arg(value_parser = reference)]
+        image: String,
+        /// `docker` or `podman`.
+        #[arg(long, default_value = "docker")]
+        engine: String,
+        /// Such as `linux/arm64`; the engine's own by default.
+        #[arg(long)]
+        platform: Option<String>,
+        /// Signs in to the registry as this user, with the password or
+        /// access token from `--password-stdin`; used for this pull only.
+        #[arg(long, requires = "password_stdin")]
+        username: Option<String>,
+        /// Reads the registry password or access token from standard input.
+        #[arg(long, requires = "username")]
+        password_stdin: bool,
     },
 }
 
@@ -174,6 +200,116 @@ pub async fn run(api: &Api, output: &Output, command: ImageCommand) -> Result<()
                 }
             }
         }
+        ImageCommand::Pull {
+            image,
+            engine,
+            platform,
+            username,
+            password_stdin: _,
+        } => {
+            let mut body = json!({ "reference": image });
+            if let Some(platform) = platform {
+                body["platform"] = platform.into();
+            }
+            if let Some(username) = username {
+                let mut password = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut password)
+                    .map_err(|error| {
+                        CliError::Usage(format!("cannot read the password: {error}"))
+                    })?;
+                let password = password.trim_end_matches(['\r', '\n']);
+                if password.is_empty() {
+                    return Err(CliError::Usage("--password-stdin read no password".into()));
+                }
+                body["credentials"] = json!({ "username": username, "password": password });
+            }
+            pull(api, output, &engine, &image, &body).await?;
+        }
     }
     Ok(())
+}
+
+/// What a layer's state reads as, as `docker pull` writes it.
+fn layer_state(state: &str) -> &str {
+    match state {
+        "waiting" => "Waiting",
+        "downloading" => "Downloading",
+        "downloaded" => "Download complete",
+        "extracting" => "Extracting",
+        "complete" => "Pull complete",
+        "exists" => "Already exists",
+        other => other,
+    }
+}
+
+/// Follows a pull's server-sent events to its end: each layer's change on
+/// standard error, or each message as a JSON line.
+async fn pull(api: &Api, output: &Output, engine: &str, image: &str, body: &Value) -> Result<()> {
+    let path = format!("/api/v1/container-engines/{engine}/image-pulls");
+    let mut response = api.change_events(&path, body, PULL_LASTING).await?;
+    let mut buffer: Vec<u8> = Vec::new();
+    let mut states: HashMap<String, String> = HashMap::new();
+    while let Some(chunk) = response.chunk().await.map_err(CliError::transport)? {
+        buffer.extend(chunk.iter().filter(|byte| **byte != b'\r'));
+        while let Some(end) = buffer.windows(2).position(|pair| pair == b"\n\n") {
+            let event: Vec<u8> = buffer.drain(..end + 2).collect();
+            let event = String::from_utf8_lossy(&event);
+            let data: Vec<&str> = event
+                .lines()
+                .filter_map(|line| line.strip_prefix("data:"))
+                .map(str::trim_start)
+                .collect();
+            if data.is_empty() {
+                continue;
+            }
+            let message: Value = serde_json::from_str(&data.join("\n"))
+                .map_err(|error| CliError::Transport(format!("an unreadable event: {error}")))?;
+            if output.format == Format::Json && !output.quiet {
+                println!("{message}");
+            }
+            match message["kind"].as_str() {
+                Some("pulled") => {
+                    if output.format == Format::Table && !output.quiet {
+                        let reference = message["image"]["tags"]
+                            .get(0)
+                            .and_then(Value::as_str)
+                            .unwrap_or(image);
+                        if let Some(digest) = message["digest"].as_str() {
+                            eprintln!("Digest: {digest}");
+                        }
+                        eprintln!(
+                            "Status: {} for {reference}",
+                            if message["updated"] == true {
+                                "Downloaded newer image"
+                            } else {
+                                "Image is up to date"
+                            }
+                        );
+                        println!("{reference}");
+                    }
+                    return Ok(());
+                }
+                Some("failed") => {
+                    return Err(CliError::Ended {
+                        code: text(&message["error"]["code"]),
+                        message: text(&message["error"]["message"]),
+                    });
+                }
+                _ => {}
+            }
+            if output.format == Format::Table && !output.quiet {
+                for layer in message["layers"].as_array().into_iter().flatten() {
+                    let (id, state) = (text(&layer["id"]), text(&layer["state"]));
+                    if states.get(&id) != Some(&state) {
+                        eprintln!("{id}: {}", layer_state(&state));
+                        states.insert(id, state);
+                    }
+                }
+            }
+        }
+    }
+    Err(CliError::Transport(
+        "the API ended the pull without saying how it went".into(),
+    ))
 }

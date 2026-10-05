@@ -284,6 +284,43 @@ async fn api(
             "reclaimed_bytes": 1_024
         }))
         .into_response(),
+        ("POST", "/api/v1/container-engines/docker/image-pulls") => {
+            let layer = |id: &str, state: &str, current: u64| {
+                json!({"id": id, "state": state, "current_bytes": current, "total_bytes": 4096})
+            };
+            let events = match body["reference"].as_str() {
+                Some("missing:1") => {
+                    return (
+                        StatusCode::NOT_FOUND,
+                        Json(json!({"type": "about:blank", "title": "Not found", "status": 404,
+                                    "code": "NOT_FOUND", "detail": "no missing:1"})),
+                    )
+                        .into_response()
+                }
+                Some("busybox:1.37") => vec![
+                    json!({"kind": "progress", "layers": [layer("1f2a3b4c5d6e", "exists", 0),
+                                                          layer("9c0abc9c5bd3", "downloading", 1024)]}),
+                    json!({"kind": "progress", "layers": [layer("1f2a3b4c5d6e", "exists", 0),
+                                                          layer("9c0abc9c5bd3", "downloading", 2048)]}),
+                    json!({"kind": "progress", "layers": [layer("1f2a3b4c5d6e", "exists", 0),
+                                                          layer("9c0abc9c5bd3", "complete", 4096)]}),
+                    json!({"kind": "pulled", "digest": "sha256:d2", "updated": true,
+                           "image": {"id": "sha256:dd", "tags": ["busybox:1.37"], "digests": [],
+                                     "created": null, "size_bytes": 4096, "containers": 0,
+                                     "labels": {}}}),
+                ],
+                _ => vec![
+                    json!({"kind": "progress", "layers": [layer("9c0abc9c5bd3", "waiting", 0)]}),
+                    json!({"kind": "failed",
+                           "error": {"code": "UNAVAILABLE", "message": "connection reset"}}),
+                ],
+            };
+            let body: String = events
+                .iter()
+                .map(|event| format!("data: {event}\n\n"))
+                .collect();
+            ([("content-type", "text/event-stream")], body).into_response()
+        }
         ("GET", "/api/v1/container-engines/docker/compose-projects") => Json(json!({
             "observed_at": "2027-01-15T08:00:10Z",
             "projects": [
@@ -2934,4 +2971,69 @@ fn compose_projects_from_the_command_line() {
     assert!(
         stderr(&config).contains("cannot read /srv/shop/compose.override.yaml: it cannot be read")
     );
+}
+
+#[test]
+fn images_are_pulled_from_the_command_line() {
+    let stub = Stub::start();
+    let pulled = stub.ppanel(&["image", "pull", "busybox:1.37", "--platform", "linux/arm64"]);
+    assert!(pulled.status.success(), "{}", stderr(&pulled));
+    assert_eq!(stdout(&pulled), "busybox:1.37\n");
+    assert_eq!(
+        stderr(&pulled),
+        "1f2a3b4c5d6e: Already exists\n9c0abc9c5bd3: Downloading\n9c0abc9c5bd3: Pull complete\n\
+         Digest: sha256:d2\nStatus: Downloaded newer image for busybox:1.37\n"
+    );
+    let path = "/api/v1/container-engines/docker/image-pulls";
+    assert_eq!(
+        stub.requests("POST", path)[0].body,
+        json!({"reference": "busybox:1.37", "platform": "linux/arm64"})
+    );
+
+    let signed_in = stub.ppanel_with_input(
+        &[
+            "image",
+            "pull",
+            "busybox:1.37",
+            "--username",
+            "ci",
+            "--password-stdin",
+        ],
+        "hunter2\n",
+    );
+    assert!(signed_in.status.success(), "{}", stderr(&signed_in));
+    assert_eq!(
+        stub.requests("POST", path)[1].body["credentials"],
+        json!({"username": "ci", "password": "hunter2"})
+    );
+    let without = stub.ppanel(&["image", "pull", "busybox:1.37", "--username", "ci"]);
+    assert_eq!(
+        without.status.code(),
+        Some(2),
+        "a password only from standard input"
+    );
+
+    let missing = stub.ppanel(&["image", "pull", "missing:1"]);
+    assert!(!missing.status.success());
+    assert!(
+        stderr(&missing).contains("no missing:1"),
+        "{}",
+        stderr(&missing)
+    );
+    let broken = stub.ppanel(&["image", "pull", "flaky:1"]);
+    assert!(!broken.status.success());
+    assert!(
+        stderr(&broken).contains("connection reset"),
+        "{}",
+        stderr(&broken)
+    );
+
+    let lines = stub.ppanel(&["-o", "json", "image", "pull", "busybox:1.37"]);
+    assert!(lines.status.success());
+    let messages: Vec<Value> = stdout(&lines)
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(messages.len(), 4);
+    assert_eq!(messages[3]["kind"], "pulled");
 }
