@@ -1,7 +1,7 @@
 use super::{read_json, route_match, ActionFlags, ActionOptions};
 use crate::{
     client::{Api, CliError, Result},
-    output::{text, Column, Output},
+    output::{text, Column, Format, Output},
 };
 use clap::Subcommand;
 use reqwest::Method;
@@ -32,6 +32,8 @@ pub(crate) enum RouteCommand {
         #[arg(long)]
         security_policy: Option<String>,
         #[command(flatten)]
+        conditions: Box<ConditionFlags>,
+        #[command(flatten)]
         action: ActionFlags,
         #[command(flatten)]
         options: ActionOptions,
@@ -54,7 +56,106 @@ pub(crate) enum RouteCommand {
         #[arg(required = true)]
         ids: Vec<String>,
     },
+    /// Which route of the draft a request takes, and why each route tried
+    /// before it does not.
+    Test {
+        /// The host the request names.
+        #[arg(long)]
+        host: String,
+        /// The request target, such as /api/items?tag=new.
+        #[arg(long, default_value = "/")]
+        target: String,
+        #[arg(long, default_value = "GET")]
+        method: String,
+        /// A header line, NAME: VALUE; repeat it for more.
+        #[arg(long = "header", short = 'H', value_name = "NAME: VALUE")]
+        headers: Vec<String>,
+        /// The client's address, after trusted proxies.
+        #[arg(long)]
+        client: Option<String>,
+        /// The listener the request arrives on.
+        #[arg(long)]
+        listener: Option<String>,
+    },
 }
+
+/// Conditions every request the route takes meets.
+#[derive(clap::Args, Default)]
+pub(crate) struct ConditionFlags {
+    /// Takes only these methods, such as GET,HEAD.
+    #[arg(long, value_delimiter = ',')]
+    method: Vec<String>,
+    /// Takes only requests with this header: NAME=VALUE, or NAME for any
+    /// value.
+    #[arg(long, value_name = "NAME[=VALUE]")]
+    header: Vec<String>,
+    /// Takes only requests with this query parameter: NAME=VALUE, or NAME.
+    #[arg(long, value_name = "NAME[=VALUE]")]
+    query: Vec<String>,
+    /// Takes only requests with this cookie: NAME=VALUE, or NAME.
+    #[arg(long, value_name = "NAME[=VALUE]")]
+    cookie: Vec<String>,
+    /// Takes only clients in these networks or addresses, after trusted
+    /// proxies.
+    #[arg(long, value_delimiter = ',')]
+    client: Vec<String>,
+    /// Takes only these media types, such as application/json or text/*.
+    #[arg(long, value_delimiter = ',')]
+    content_type: Vec<String>,
+    /// Any other condition, as its JSON document.
+    #[arg(long, value_name = "JSON")]
+    condition: Vec<String>,
+}
+
+impl ConditionFlags {
+    fn to_json(&self) -> Result<Vec<Value>> {
+        let field = |kind: &str, flag: &str| match flag.split_once('=') {
+            Some((name, value)) => json!({
+                "kind": kind, "name": name, "test": { "op": "equals", "value": value },
+            }),
+            None => json!({ "kind": kind, "name": flag, "test": { "op": "present" } }),
+        };
+        let mut conditions = Vec::new();
+        if !self.method.is_empty() {
+            conditions.push(json!({ "kind": "method", "methods": self.method }));
+        }
+        conditions.extend(self.header.iter().map(|flag| field("header", flag)));
+        conditions.extend(self.query.iter().map(|flag| field("query", flag)));
+        conditions.extend(self.cookie.iter().map(|flag| field("cookie", flag)));
+        if !self.client.is_empty() {
+            conditions.push(json!({ "kind": "client", "networks": self.client }));
+        }
+        if !self.content_type.is_empty() {
+            conditions.push(json!({ "kind": "content_type", "types": self.content_type }));
+        }
+        for condition in &self.condition {
+            conditions.push(serde_json::from_str(condition).map_err(|error| {
+                CliError::Usage(format!("--condition {condition:?} is not JSON: {error}"))
+            })?);
+        }
+        Ok(conditions)
+    }
+}
+
+const TRIALS: &[Column] = &[
+    ("ROUTE", |trial| {
+        let name = text(&trial["name"]);
+        if name.is_empty() {
+            text(&trial["route_id"])
+        } else {
+            name
+        }
+    }),
+    ("TAKES", |trial| {
+        if trial["matched"] == true {
+            "yes"
+        } else {
+            "no"
+        }
+        .to_owned()
+    }),
+    ("WHY NOT", |trial| text(&trial["reason"])),
+];
 
 const COLUMNS: &[Column] = &[
     ("ID", |route| text(&route["id"])),
@@ -106,6 +207,7 @@ pub async fn run(api: &Api, output: &Output, command: RouteCommand) -> Result<()
             name,
             disabled,
             security_policy,
+            conditions,
             action,
             options,
         } => {
@@ -115,11 +217,16 @@ pub async fn run(api: &Api, output: &Output, command: RouteCommand) -> Result<()
                         .into(),
                 ));
             }
+            let mut matched = route_match(&matcher, host.as_deref())?;
+            let conditions = conditions.to_json()?;
+            if !conditions.is_empty() {
+                matched["conditions"] = json!(conditions);
+            }
             let body = json!({
                 "name": name,
                 "enabled": !disabled,
                 "priority": priority,
-                "match": route_match(&matcher, host.as_deref())?,
+                "match": matched,
                 "action": action.to_json(&options)?,
                 "security_policy_id": security_policy,
             });
@@ -174,6 +281,62 @@ pub async fn run(api: &Api, output: &Output, command: RouteCommand) -> Result<()
                 .await?
                 .body;
             output.list(&routes, COLUMNS);
+        }
+        RouteCommand::Test {
+            host,
+            target,
+            method,
+            headers,
+            client,
+            listener,
+        } => {
+            let lines = headers
+                .iter()
+                .map(|line| {
+                    let (name, value) = line.split_once(':').ok_or_else(|| {
+                        CliError::Usage(format!("{line:?} is not a header line NAME: VALUE"))
+                    })?;
+                    Ok(json!({ "name": name.trim(), "value": value.trim() }))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let body = json!({
+                "method": method, "host": host, "target": target, "headers": lines,
+                "client": client, "listener": listener,
+            });
+            let result = api
+                .post_read("/api/v1/config/route-test", &body)
+                .await?
+                .body;
+            if output.format == Format::Json {
+                output.json(&result);
+                return Ok(());
+            }
+            if result["routes"]
+                .as_array()
+                .is_some_and(|routes| !routes.is_empty())
+            {
+                output.list(&result["routes"], TRIALS);
+            }
+            if !output.quiet {
+                let place = format!("{}{}", text(&result["host"]), text(&result["path"]));
+                match result["outcome"].as_str() {
+                    Some("routed") => println!(
+                        "{place} is taken by route {} of site {}{}",
+                        text(&result["route_id"]),
+                        text(&result["site_id"]),
+                        if result["default_site"] == true {
+                            ", the listener's default"
+                        } else {
+                            ""
+                        }
+                    ),
+                    Some("no_route") => println!(
+                        "site {} has no route for {place}; the gateway answers 404",
+                        text(&result["site_id"])
+                    ),
+                    _ => println!("no site serves {place}; the gateway answers 421"),
+                }
+            }
         }
     }
     Ok(())

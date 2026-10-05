@@ -90,6 +90,21 @@ async fn api(
             ]
         }))
         .into_response(),
+        ("POST", "/api/v1/sites/shop/routes") => {
+            let mut route = body.clone();
+            route["id"] = json!("r-1");
+            (StatusCode::CREATED, Json(route)).into_response()
+        }
+        ("POST", "/api/v1/config/route-test") => Json(json!({
+            "outcome": "routed", "draft_version": 9, "host": "shop.example", "path": "/api/items",
+            "site_id": "shop", "default_site": false, "route_id": "r-2",
+            "routes": [
+                { "route_id": "r-1", "name": "canary", "matched": false,
+                  "reason": "header x-canary = \"1\" (the request has no x-canary) does not hold" },
+                { "route_id": "r-2", "matched": true },
+            ],
+        }))
+        .into_response(),
         ("GET", "/api/v1/backups") => Json(json!({ "backups": [backup("completed")] })).into_response(),
         ("POST", "/api/v1/backups") => {
             let mut created = backup("pending");
@@ -1200,6 +1215,80 @@ fn configuration_files_round_trip_through_a_directory() {
     assert_eq!(
         saved[0].body,
         json!({"files": {"main.conf": MAIN, "sites/shop.conf": SHOP}})
+    );
+}
+
+#[test]
+fn routes_take_conditions_and_the_route_a_request_takes_is_explained() {
+    let stub = Stub::start();
+    let added = stub.ppanel(&[
+        "route",
+        "add",
+        "shop",
+        "--match",
+        "prefix:/api",
+        "--respond",
+        "204",
+        "--method",
+        "GET,HEAD",
+        "--header",
+        "x-canary=1",
+        "--cookie",
+        "beta",
+        "--client",
+        "10.0.0.0/8",
+        "--condition",
+        r#"{"kind":"not","condition":{"kind":"query","name":"debug","test":{"op":"present"}}}"#,
+    ]);
+    assert!(added.status.success(), "{}", stderr(&added));
+    let posted = &stub.requests("POST", "/api/v1/sites/shop/routes")[0].body;
+    assert_eq!(
+        posted["match"]["conditions"],
+        json!([
+            { "kind": "method", "methods": ["GET", "HEAD"] },
+            { "kind": "header", "name": "x-canary", "test": { "op": "equals", "value": "1" } },
+            { "kind": "cookie", "name": "beta", "test": { "op": "present" } },
+            { "kind": "client", "networks": ["10.0.0.0/8"] },
+            { "kind": "not", "condition": { "kind": "query", "name": "debug", "test": { "op": "present" } } },
+        ])
+    );
+    let unparsed = stub.ppanel(&[
+        "route",
+        "add",
+        "shop",
+        "--match",
+        "prefix:/",
+        "--respond",
+        "204",
+        "--condition",
+        "{",
+    ]);
+    assert_eq!(unparsed.status.code(), Some(2));
+
+    let tested = stub.ppanel(&[
+        "route",
+        "test",
+        "--host",
+        "shop.example",
+        "--target",
+        "/api/items",
+        "-H",
+        "Accept: application/json",
+    ]);
+    assert!(tested.status.success(), "{}", stderr(&tested));
+    let printed = stdout(&tested);
+    assert!(printed.contains("canary"), "{printed}");
+    assert!(
+        printed.contains("(the request has no x-canary) does not hold"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains("shop.example/api/items is taken by route r-2 of site shop"),
+        "{printed}"
+    );
+    assert_eq!(
+        stub.requests("POST", "/api/v1/config/route-test")[0].body["headers"],
+        json!([{ "name": "Accept", "value": "application/json" }])
     );
 }
 
