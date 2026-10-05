@@ -1136,3 +1136,26 @@ async fn isolated_runtimes_run_no_timers_and_open_no_connections() {
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert!(runs.lock().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn errors_of_host_functions_reach_pcall_as_strings() {
+    let lua = start(
+        1,
+        handlers(&[r#"
+        local cjson = require("cjson")
+        local ok, err = pcall(cjson.decode, "{")
+        assert(not ok and type(err) == "string", type(err))
+        local _, handled = xpcall(cjson.decode, function(e) return "handled: " .. e end, "[")
+        assert(type(handled) == "string" and handled:find("^handled: "), handled)
+        local _, own = pcall(error, { code = 7 })
+        assert(own.code == 7)
+        local _, raised = pcall(error, "plain")
+        ngx.say(err:sub(1, 8), "|", raised)
+        "#]),
+    );
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = run(&mut scripts, handler(lua.handlers[0], Phase::Content)).await;
+    assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+    let body = String::from_utf8(scripts.exchange().response.body.clone()).unwrap();
+    assert!(body.ends_with("|plain\n"), "{body}");
+}

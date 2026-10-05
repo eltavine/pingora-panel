@@ -46,12 +46,56 @@ pub(crate) fn install(lua: &Lua, globals: &Table, context: &Context) -> mlua::Re
     for removed in ["getfenv", "setfenv"] {
         globals.raw_set(removed, Value::Nil)?;
     }
+    protected_calls(lua, globals)?;
     let ngx = ngx::table(lua, context)?;
     globals.raw_set("ngx", ngx.clone())?;
     globals.raw_set("print", ngx.raw_get::<Value>("print_global")?)?;
     ngx.raw_set("print_global", Value::Nil)?;
     globals.raw_set("require", modules::require(lua, context, &ngx)?)?;
     freeze(&ngx);
+    Ok(())
+}
+
+/// `pcall` and `xpcall` that hand scripts the message of an error raised by
+/// a host function as a string, as a C function's error is in
+/// lua-nginx-module, rather than the error object the VM carries it in.
+fn protected_calls(lua: &Lua, globals: &Table) -> mlua::Result<()> {
+    let text = lua.create_function(|lua, error: Value| match error {
+        Value::Error(error) => Ok(Value::String(
+            lua.create_string(crate::runtime::failure(&error).message)?,
+        )),
+        other => Ok(other),
+    })?;
+    let wrap: mlua::Function = lua
+        .load(
+            r#"
+            local raw_pcall, raw_xpcall, text = ...
+            local function settle(ok, ...)
+                if ok then
+                    return true, ...
+                end
+                return false, text((...))
+            end
+            local function pcall(f, ...)
+                return settle(raw_pcall(f, ...))
+            end
+            local function xpcall(f, handler, ...)
+                return raw_xpcall(f, function(error)
+                    return handler(text(error))
+                end, ...)
+            end
+            return pcall, xpcall
+            "#,
+        )
+        .set_name("=pcall")
+        .into_function()?;
+    let (pcall, xpcall): (mlua::Function, mlua::Function) = wrap.call((
+        globals.raw_get::<mlua::Function>("pcall")?,
+        globals.raw_get::<mlua::Function>("xpcall")?,
+        text,
+    ))?;
+    globals.raw_set("pcall", pcall)?;
+    globals.raw_set("xpcall", xpcall)?;
     Ok(())
 }
 
