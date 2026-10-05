@@ -543,6 +543,8 @@ ppanel container logs shop-web-1 --follow
 ppanel container stats
 ppanel image list --search nginx
 ppanel image remove ghcr.io/example/app:2.3 --yes
+ppanel image pull nginx:1.27 --platform linux/arm64
+ppanel image pull ghcr.io/example/app:2.3 --username ci --password-stdin < token
 ppanel network list
 ppanel volume list
 ppanel container engine df docker
@@ -602,6 +604,22 @@ a prefix of it, or a reference with its slashes percent-encoded, and the
 agent refuses a reference that would leave the engine's image paths. An
 image the installation's own containers use is never removed, and each
 removal is audited as `container.image.removed`, refused or not.
+`POST /api/v1/container-engines/{engine}/image-pulls` needs
+`containers.manage` and pulls a reference, checked against the
+distribution grammar; a name alone is its `latest` tag, never every tag.
+A platform can be named, and a registry that wants a sign-in gets a
+username and password or token for that pull only, never kept, recorded
+or printed. The API answers with server-sent events, each a JSON
+message: how far each layer got, at most four times a second and at
+least every ten seconds, then what was pulled, its digest and whether a
+newer image was downloaded, or why the pull failed. A refusal before
+anything is pulled answers as a problem like any other, so a registry's
+refusal never reads as the session ending. The agent pulls at most four
+images at once, each for at most 30 minutes; a pull goes on to its end
+when its client leaves, and is audited then as `container.image.pulled`,
+refused or not. `ppanel image pull` writes each layer's change to
+standard error as `docker pull` does and the reference pulled to
+standard output, and reads a password only from standard input.
 `GET /api/v1/container-engines/{engine}/networks` lists an engine's
 networks with their driver, scope, subnets and gateways, and
 `.../volumes` its volumes with where their data lives on the host; each
@@ -659,8 +677,8 @@ before anything but a start. Its logs can be filtered by output and
 text, followed from the last line read and saved as a file. The table
 shows each running container's CPU and memory, and the details show
 everything it uses. An Images tab lists the engine's images, opens one's
-configuration and removes one after confirming, and Networks and
-Volumes tabs list those. A Projects tab lists the engine's Compose
+configuration, removes one after confirming and pulls one, showing each
+layer's state and how far it got; Networks and Volumes tabs list those. A Projects tab lists the engine's Compose
 projects, brings one up, or restarts or takes it down after confirming,
 and opens its merged logs, filtered by service, and its Compose files. A
 reachable engine's card opens its disk use, where operators see what
