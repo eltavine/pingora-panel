@@ -1,7 +1,7 @@
 use crate::{
     access, acme,
     admission::{admit, Admission},
-    alerts, approvals, audit, certificates, configuration as config, containers,
+    alerts, approvals, audit, certificates, configuration as config, containers, engine_resources,
     gateway_runtime as runtime, grants, host, host_agent, identity, images, language, logs,
     middleware, routes, sign_in, tls_checks, traffic, workload, ApiConfig, ApiState,
 };
@@ -274,6 +274,14 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         .route(
             "/api/v1/container-engines/{engine}/images",
             get(images::list_images::<U>),
+        )
+        .route(
+            "/api/v1/container-engines/{engine}/networks",
+            get(engine_resources::list_networks::<U>),
+        )
+        .route(
+            "/api/v1/container-engines/{engine}/volumes",
+            get(engine_resources::list_volumes::<U>),
         )
         .route(
             "/api/v1/container-engines/{engine}/images/{image}",

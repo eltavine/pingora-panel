@@ -22,6 +22,7 @@ mod alerts;
 mod certificates;
 mod conditional;
 mod containers;
+mod engine_resources;
 mod host;
 mod host_agent;
 mod images;

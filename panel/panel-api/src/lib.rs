@@ -18,6 +18,7 @@ mod config;
 mod configuration;
 mod containers;
 mod contract;
+mod engine_resources;
 mod error;
 mod error_contract;
 mod gateway_runtime;

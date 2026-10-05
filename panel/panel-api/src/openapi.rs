@@ -59,6 +59,8 @@ mod tests;
         crate::images::list_images,
         crate::images::inspect_image,
         crate::images::remove_image,
+        crate::engine_resources::list_networks,
+        crate::engine_resources::list_volumes,
         crate::alerts::list_alert_rules, crate::alerts::put_alert_rule,
         crate::alerts::delete_alert_rule, crate::alerts::list_alert_channels,
         crate::alerts::create_alert_channel, crate::alerts::rotate_alert_channel,

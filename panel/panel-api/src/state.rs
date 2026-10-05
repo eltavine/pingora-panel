@@ -3,8 +3,9 @@ use crate::{
     sign_in::ProviderAccess,
 };
 use panel_application::{
-    AlertsPort, AuditPort, ContainersPort, GatewayRuntimePort, HostAgentPort, HostPort, ImagesPort,
-    LogsPort, NoContainers, NoHostAgent, NoImages, TlsProbe, TrafficPort,
+    AlertsPort, AuditPort, ContainersPort, EngineResourcesPort, GatewayRuntimePort, HostAgentPort,
+    HostPort, ImagesPort, LogsPort, NoContainers, NoEngineResources, NoHostAgent, NoImages,
+    TlsProbe, TrafficPort,
 };
 use panel_certificate_api::CertificatePort;
 use panel_config_api::ConfigurationPort;
@@ -29,6 +30,7 @@ pub struct ApiState<U> {
     pub(crate) host_agent: Arc<dyn HostAgentPort>,
     pub(crate) containers: Arc<dyn ContainersPort>,
     pub(crate) images: Arc<dyn ImagesPort>,
+    pub(crate) resources: Arc<dyn EngineResourcesPort>,
     pub(crate) identity: Option<Arc<Gate>>,
     pub(crate) providers: Option<Arc<ProviderAccess>>,
     pub(crate) workloads: Option<Arc<WorkloadIdentity>>,
@@ -53,6 +55,7 @@ impl<U> Clone for ApiState<U> {
             host_agent: Arc::clone(&self.host_agent),
             containers: Arc::clone(&self.containers),
             images: Arc::clone(&self.images),
+            resources: Arc::clone(&self.resources),
             identity: self.identity.clone(),
             providers: self.providers.clone(),
             workloads: self.workloads.clone(),
@@ -79,6 +82,7 @@ impl<U> ApiState<U> {
             host_agent: Arc::new(NoHostAgent),
             containers: Arc::new(NoContainers),
             images: Arc::new(NoImages),
+            resources: Arc::new(NoEngineResources),
             identity: None,
             providers: None,
             workloads: None,
@@ -171,6 +175,14 @@ impl<U> ApiState<U> {
     /// say so.
     pub fn with_images(mut self, images: Arc<dyn ImagesPort>) -> Self {
         self.images = images;
+        self
+    }
+
+    /// Serves the engines' networks and volumes under
+    /// `/api/v1/container-engines/{engine}/{networks,volumes}`; without them
+    /// those paths say so.
+    pub fn with_engine_resources(mut self, resources: Arc<dyn EngineResourcesPort>) -> Self {
+        self.resources = resources;
         self
     }
 

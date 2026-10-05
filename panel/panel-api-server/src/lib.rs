@@ -216,6 +216,7 @@ pub fn process(
     let recorded_images = agent
         .clone()
         .map(|agent| RecordedImages::new(Arc::new(agent), operations.clone()));
+    let resources = agent.clone();
     let store = Arc::new(SqliteIdentityStore::new(process.database(), events));
     let roles = roles::BuiltInRoles::new(Arc::clone(&store), bootstrap.is_some());
     let oidc = Arc::new(OidcClient::new(PROVIDER_TIMEOUT)?);
@@ -282,6 +283,10 @@ pub fn process(
             };
             let state = match recorded_images {
                 Some(images) => state.with_images(Arc::new(images)),
+                None => state,
+            };
+            let state = match resources {
+                Some(resources) => state.with_engine_resources(Arc::new(resources)),
                 None => state,
             };
             let state = match providers {
