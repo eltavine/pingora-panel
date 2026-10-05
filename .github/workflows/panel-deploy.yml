@@ -250,6 +250,15 @@ jobs:
           if docker inspect panel-ci-throwaway >/dev/null 2>&1; then
             exit 1
           fi
+          # Pruning lists a container that never ran and nothing the
+          # installation made, then removes what it listed.
+          docker create --name panel-ci-prunable "$nats_image" >/dev/null
+          ppanel -o json container engine prune docker \
+            | python3 -c "import json, sys; names = [i['name'] for i in json.load(sys.stdin)['items']]; assert 'panel-ci-prunable' in names and not any(n.startswith('pingora-panel') for n in names), names"
+          ppanel container engine prune docker --yes
+          if docker inspect panel-ci-prunable >/dev/null 2>&1; then
+            exit 1
+          fi
           # The installation's own containers are only ever started.
           if ppanel container stop pingora-panel-control-1 --yes; then
             exit 1
@@ -257,7 +266,7 @@ jobs:
           test "$(docker inspect --format '{{.State.Status}}' pingora-panel-control-1)" = running
           for type in container.engine.disabled container.engine.enabled container.stopped \
             container.killed container.removed container.image.removed \
-            container.operation.refused; do
+            container.engine.pruned container.operation.refused; do
             for _ in $(seq 1 30); do
               if ppanel -o json audit list --type "$type" --actor-id ci \
                 | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"; then
