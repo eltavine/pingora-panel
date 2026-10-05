@@ -217,7 +217,8 @@ test('configuration files are checked as they are edited, saved and applied', as
   await page.getByRole('tab', { name: 'Outline' }).click()
   await page.getByRole('button', { name: /upstream\s+app/ }).click()
   const download = page.waitForEvent('download')
-  await page.getByRole('button', { name: 'Download IR' }).click()
+  await page.getByRole('button', { name: 'Import and export' }).click()
+  await page.getByRole('menuitem', { name: 'Download IR' }).click()
   expect((await download).suggestedFilename()).toBe('config-ir-v4.json')
   await page.getByRole('tab', { name: /Problems/ }).click()
 
@@ -390,7 +391,8 @@ test('NGINX configuration is converted and loaded into the editor', async ({ pag
   })
 
   await page.goto('/config')
-  await page.getByRole('button', { name: 'Import NGINX' }).click()
+  await page.getByRole('button', { name: 'Import and export' }).click()
+  await page.getByRole('menuitem', { name: 'Import NGINX' }).click()
   const sheet = page.getByRole('dialog')
   await sheet.getByLabel('NGINX configuration').fill('http {\n    gzip on;\n}\n')
   await sheet.getByRole('button', { name: 'Convert' }).click()
@@ -408,6 +410,87 @@ test('NGINX configuration is converted and loaded into the editor', async ({ pag
   await expect(
     page.getByRole('list', { name: 'Files' }).getByRole('img', { name: 'Unsaved' }),
   ).toBeVisible()
+})
+
+test('the whole configuration is exported and imported as one file', async ({ page }) => {
+  await mockDraft(page)
+  let draft = { version: 4, files: { 'main.conf': MAIN } as Record<string, string> }
+  await page.route('**/api/v1/config/source', (route) =>
+    route.fulfill({
+      json: {
+        language_version: 1,
+        version: draft.version,
+        etag: `"draft-${draft.version}"`,
+        files: draft.files,
+        diagnostics: [],
+      },
+    }),
+  )
+  await page.route('**/api/v1/config/check', (route) =>
+    route.fulfill({ json: { valid: true, diagnostics: [] } }),
+  )
+  const imports: Request[] = []
+  await page.route('**/api/v1/config/bundle', (route) => {
+    if (route.request().method() === 'GET') {
+      return route.fulfill({
+        json: { format: 'pingora-panel-configuration', language_version: 1, files: draft.files },
+      })
+    }
+    imports.push(route.request())
+    draft = { version: draft.version + 1, files: route.request().postDataJSON().files }
+    return route.fulfill({
+      json: {
+        language_version: 1,
+        version: draft.version,
+        etag: `"draft-${draft.version}"`,
+        files: draft.files,
+        diagnostics: [],
+      },
+    })
+  })
+
+  await page.goto('/config')
+  await expect(page.getByRole('textbox', { name: 'Contents of main.conf' })).toContainText(
+    'include sites/*.conf;',
+  )
+  const download = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Import and export' }).click()
+  await page.getByRole('menuitem', { name: 'Export the configuration' }).click()
+  expect((await download).suggestedFilename()).toBe('configuration-v4.json')
+  await expect(page.getByText('Exported 1 file')).toBeVisible()
+
+  const chooser = page.waitForEvent('filechooser')
+  await page.getByRole('button', { name: 'Import and export' }).click()
+  await page.getByRole('menuitem', { name: 'Import a configuration' }).click()
+  const bundle = {
+    format: 'pingora-panel-configuration',
+    language_version: 1,
+    files: { 'main.conf': MAIN, 'sites/shop.conf': SHOP },
+  }
+  await (
+    await chooser
+  ).setFiles({
+    name: 'configuration-v9.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(bundle)),
+  })
+  await expect(page.getByText('Imported 2 files into the draft')).toBeVisible()
+  expect(imports[0]!.postDataJSON()).toEqual(bundle)
+  expect(imports[0]!.headers()['if-match']).toBe('"draft-4"')
+  const files = page.getByRole('list', { name: 'Files' })
+  await expect(files.getByRole('button', { name: 'sites/shop.conf', exact: true })).toBeVisible()
+
+  const refused = page.waitForEvent('filechooser')
+  await page.getByRole('button', { name: 'Import and export' }).click()
+  await page.getByRole('menuitem', { name: 'Import a configuration' }).click()
+  await (
+    await refused
+  ).setFiles({ name: 'notes.json', mimeType: 'application/json', buffer: Buffer.from('notes') })
+  await expect(
+    page.getByText('The file is not a configuration exported from a panel'),
+  ).toBeVisible()
+  expect(imports).toHaveLength(1)
+  await expectNoHorizontalOverflow(page)
 })
 
 test('the values that apply at the cursor show where they come from', async ({ page }) => {

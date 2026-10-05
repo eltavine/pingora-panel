@@ -5,11 +5,14 @@ import { lintGutter, linter } from '@codemirror/lint'
 import { keymap } from '@codemirror/view'
 import { useEventListener, watchDebounced } from '@vueuse/core'
 import {
+  ArrowDownUp,
   Check,
   CircleCheck,
   FileCode2,
+  FileDown,
   FileInput,
   FileJson2,
+  FileUp,
   FilePlus2,
   Layers,
   ListTree,
@@ -28,7 +31,9 @@ import { onBeforeRouteLeave } from 'vue-router'
 import { toast } from 'vue-sonner'
 import {
   ast,
+  bundle,
   explain,
+  importBundle,
   ir,
   type DiagnosticDetails,
   type Explanation,
@@ -46,6 +51,13 @@ import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/u
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
@@ -76,6 +88,7 @@ const cursor = ref<Place>()
 const explanation = ref<Explanation>()
 let explaining = 0
 const exporting = ref(false)
+const bundleInput = useTemplateRef<HTMLInputElement>('bundleInput')
 const newPath = ref('')
 
 const text = computed({
@@ -221,6 +234,44 @@ async function exportSnapshot() {
   }
 }
 
+async function exportBundle() {
+  exporting.value = true
+  try {
+    const { data } = await bundle({ throwOnError: true })
+    downloadJson(`configuration-v${config.version.value ?? 0}.json`, data)
+    toast.success(t('studio.bundleExported', Object.keys(data.files).length))
+  } catch (error) {
+    notifyFailure(error, t('studio.bundleExportFailed'))
+  } finally {
+    exporting.value = false
+  }
+}
+
+/** Replaces the draft with the bundle chosen in the file picker. */
+async function importChosenBundle(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || config.etag.value === undefined) {
+    return
+  }
+  exporting.value = true
+  try {
+    const body = JSON.parse(await file.text())
+    await importBundle({ body, headers: changeHeaders(config.etag.value), throwOnError: true })
+    await config.reload()
+    void refresh()
+    toast.success(t('studio.bundleImported', Object.keys(config.files.value).length))
+  } catch (error) {
+    notifyFailure(
+      error instanceof SyntaxError ? new Error(t('studio.notABundle')) : error,
+      t('studio.bundleImportFailed'),
+    )
+  } finally {
+    exporting.value = false
+  }
+}
+
 /** Opens the file of a `file:line.column` span and selects the span. */
 async function revealSpan(value: string | null | undefined) {
   const span = parseSpan(value)
@@ -283,15 +334,39 @@ useEventListener(window, 'beforeunload', (event: BeforeUnloadEvent) => {
           <WandSparkles v-else data-icon="inline-start" aria-hidden="true" />
           {{ t('studio.format') }}
         </Button>
-        <Button variant="outline" size="sm" @click="importing = true">
-          <FileInput data-icon="inline-start" aria-hidden="true" />
-          {{ t('studio.importNginx') }}
-        </Button>
-        <Button variant="outline" size="sm" :disabled="exporting" @click="exportSnapshot">
-          <Spinner v-if="exporting" data-icon="inline-start" />
-          <FileJson2 v-else data-icon="inline-start" aria-hidden="true" />
-          {{ t('studio.downloadIr') }}
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger as-child>
+            <Button variant="outline" size="sm" :disabled="exporting">
+              <Spinner v-if="exporting" data-icon="inline-start" />
+              <ArrowDownUp v-else data-icon="inline-start" aria-hidden="true" />
+              {{ t('studio.transfer') }}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" class="w-60">
+            <DropdownMenuItem @select="exportBundle">
+              <FileDown aria-hidden="true" />{{ t('studio.exportBundle') }}
+            </DropdownMenuItem>
+            <DropdownMenuItem :disabled="config.dirty.value" @select="bundleInput?.click()">
+              <FileUp aria-hidden="true" />{{ t('studio.importBundle') }}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem @select="importing = true">
+              <FileInput aria-hidden="true" />{{ t('studio.importNginx') }}
+            </DropdownMenuItem>
+            <DropdownMenuItem @select="exportSnapshot">
+              <FileJson2 aria-hidden="true" />{{ t('studio.downloadIr') }}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <input
+          ref="bundleInput"
+          type="file"
+          accept=".json,application/json"
+          class="sr-only"
+          tabindex="-1"
+          aria-hidden="true"
+          @change="importChosenBundle"
+        />
         <Button variant="outline" size="sm" :disabled="!config.dirty.value" @click="config.revert">
           <Undo2 data-icon="inline-start" aria-hidden="true" />
           {{ t('studio.revert') }}
