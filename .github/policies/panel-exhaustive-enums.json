@@ -29,7 +29,7 @@
       "package": "panel-dsl",
       "name": "Body",
       "owner": "pingora-panel-platform",
-      "reason": "A directive ends with ';', a block, or neither when it is malformed; the syntax has no other form, and the formatter and the language must handle each one."
+      "reason": "A directive ends with ';', a block, the Lua code of a *_by_lua_block directive, or neither when it is malformed; the syntax has no other form, and the formatter and the language must handle each one."
     },
     {
       "package": "panel-dsl",

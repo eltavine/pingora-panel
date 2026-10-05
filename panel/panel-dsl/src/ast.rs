@@ -27,7 +27,15 @@ impl Directive {
     pub fn block(&self) -> Option<&Block> {
         match &self.body {
             Body::Block(block) => Some(block),
-            Body::Semicolon | Body::Missing => None,
+            Body::Semicolon | Body::Missing | Body::Lua(_) => None,
+        }
+    }
+
+    /// The code of a `*_by_lua_block` directive.
+    pub fn lua(&self) -> Option<&LuaBlock> {
+        match &self.body {
+            Body::Lua(lua) => Some(lua),
+            _ => None,
         }
     }
 
@@ -48,8 +56,19 @@ impl Directive {
 pub enum Body {
     Semicolon,
     Block(Block),
+    /// The Lua code of a `*_by_lua_block` directive.
+    Lua(LuaBlock),
     /// Neither `;` nor a block followed; reported as an error.
     Missing,
+}
+
+/// Lua code between braces, kept as it is written.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LuaBlock {
+    /// The text between the braces.
+    pub code: String,
+    /// From the `{` through the `}`.
+    pub span: Span,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

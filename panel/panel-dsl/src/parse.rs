@@ -2,7 +2,7 @@
 //! reports every syntax error.
 
 use crate::{
-    ast::{Argument, Block, Body, Comment, Directive, Document, Trivia},
+    ast::{Argument, Block, Body, Comment, Directive, Document, LuaBlock, Trivia},
     lexer::{lex, Token, TokenKind},
     span::{LineIndex, Span},
     SYNTAX_ERROR,
@@ -142,6 +142,10 @@ impl Parser {
                     self.error(token.span, "a directive name cannot be quoted");
                     self.recover();
                 }
+                TokenKind::Lua => {
+                    self.next();
+                    self.error(token.span, "expected a directive name before the Lua code");
+                }
                 TokenKind::Word => {
                     if let Some(directive) = self.directive(leading) {
                         directives.push(directive);
@@ -203,6 +207,21 @@ impl Parser {
                 TokenKind::Comment => {
                     // A comment inside a directive's arguments does not end it.
                     self.next();
+                }
+                TokenKind::Lua => {
+                    self.next();
+                    let comment = self.same_line_comment();
+                    return Some(Directive {
+                        leading,
+                        span: name.span.join(token.span),
+                        name,
+                        args,
+                        body: Body::Lua(LuaBlock {
+                            code: token.value,
+                            span: token.span,
+                        }),
+                        comment,
+                    });
                 }
                 TokenKind::Semicolon => {
                     self.next();
@@ -351,6 +370,27 @@ http {
         let server = parsed.document.directives.last().unwrap();
         assert_eq!(server.name.value, "server");
         assert_eq!(server.block().unwrap().directives[0].name.value, "root");
+    }
+
+    #[test]
+    fn lua_blocks_become_bodies_kept_as_written() {
+        let text = "server s {\n  access_by_lua_block {\n        if ngx.var.arg_x then return ngx.exit(403) end\n  } # check\n  listen   80;\n}\n";
+        let parsed = parse("main.conf", text);
+        assert!(parsed.is_valid(), "{:?}", parsed.diagnostics);
+        let server = parsed.document.directives[0].block().unwrap();
+        let access = &server.directives[0];
+        let lua = access.lua().expect("a Lua body");
+        assert_eq!(
+            lua.code,
+            "\n        if ngx.var.arg_x then return ngx.exit(403) end\n  "
+        );
+        assert_eq!(access.comment.as_ref().unwrap().text, " check");
+        assert!(access.block().is_none());
+        assert_eq!(server.directives[1].name.value, "listen");
+        assert_eq!(
+            crate::format(&parsed.document),
+            "server s {\n    access_by_lua_block {\n        if ngx.var.arg_x then return ngx.exit(403) end\n  } # check\n    listen 80;\n}\n"
+        );
     }
 
     #[test]

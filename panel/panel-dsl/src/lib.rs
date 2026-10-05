@@ -13,7 +13,7 @@ mod lexer;
 mod parse;
 mod span;
 
-pub use ast::{Argument, Block, Body, Comment, Directive, Document, Trivia};
+pub use ast::{Argument, Block, Body, Comment, Directive, Document, LuaBlock, Trivia};
 pub use format::{format, format_directive, quote};
 pub use parse::{parse, Parsed};
 pub use span::{LineIndex, Span};

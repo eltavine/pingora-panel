@@ -130,6 +130,11 @@ fn write_directive(out: &mut String, directive: &Directive, depth: usize, first:
     match &directive.body {
         Body::Semicolon | Body::Missing => out.push(';'),
         Body::Block(_) => out.push_str(" {"),
+        Body::Lua(lua) => {
+            out.push_str(" {");
+            out.push_str(&lua.code);
+            out.push('}');
+        }
     }
     if let Some(comment) = &directive.comment {
         out.push_str(" #");
