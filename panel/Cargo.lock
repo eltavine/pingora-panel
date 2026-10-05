@@ -3563,11 +3563,16 @@ dependencies = [
 name = "panel-lua-ir"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "bytes",
+ "http",
  "panel-domain",
  "panel-engine",
  "panel-errors",
  "panel-ir",
  "panel-lua",
+ "panel-routing",
+ "percent-encoding",
  "tokio",
 ]
 

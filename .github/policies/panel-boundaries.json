@@ -157,7 +157,8 @@
         "panel-engine",
         "panel-errors",
         "panel-ir",
-        "panel-lua"
+        "panel-lua",
+        "panel-routing"
       ]
     },
     "gateway-proto-codec": {

@@ -12,6 +12,12 @@ use panel_lua::{
 };
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
+mod trial;
+
+pub use trial::{
+    try_request, RunOutcome, Trial, TrialRequest, TrialResponse, TrialRun, TrialScript,
+};
+
 /// What a handler may take when its terms leave the limit to the runtime.
 pub const DEFAULT_TIME: Duration = Duration::from_millis(100);
 pub const DEFAULT_WORK: u64 = 10_000_000;
@@ -186,34 +192,8 @@ pub fn compile(snapshot: &RuntimeSnapshot, vms: usize) -> Result<Option<Compiled
     if !panel_engine::uses_lua(snapshot) {
         return Ok(None);
     }
-    let mut compiler = Compiler {
-        snapshot,
-        builder: Program::builder(),
-        handlers: HashMap::new(),
-    };
-    for script in &snapshot.lua.scripts {
-        if let Some(module) = &script.module {
-            compiler.builder.module(
-                module.clone(),
-                &Source::new(script.file.clone(), script.source.clone(), script.line),
-            );
-        }
-    }
+    let mut compiler = Compiler::new(snapshot)?;
     let mut index = HookIndex::default();
-    for (phase, handler) in [
-        (Phase::Init, &snapshot.lua.init),
-        (Phase::InitWorker, &snapshot.lua.init_worker),
-    ] {
-        if let Some(handler) = handler {
-            let hook = compiler.hook(handler, phase)?;
-            let limits = hook.handler.limits;
-            match phase {
-                Phase::Init => compiler.builder.init(hook.handler.id),
-                _ => compiler.builder.init_worker(hook.handler.id),
-            };
-            compiler.builder.init_limits(limits);
-        }
-    }
     for site in &snapshot.sites {
         if !site.lua.is_empty() {
             index
@@ -238,37 +218,107 @@ pub fn compile(snapshot: &RuntimeSnapshot, vms: usize) -> Result<Option<Compiled
             index.balancers.insert(pool.id.as_str().into(), hook);
         }
     }
-    for dict in &snapshot.lua.shared_dicts {
-        compiler.builder.shared_dict(
-            dict.name.clone(),
-            usize::try_from(dict.capacity_bytes).unwrap_or(usize::MAX),
-        );
-    }
-    let program = compiler.builder.build().map_err(|diagnostics| {
-        PanelError::new(ErrorCode::VALIDATION_FAILED, "Lua scripts do not compile")
-            .with_diagnostics(
-                diagnostics
-                    .into_iter()
-                    .map(|diagnostic| {
-                        Diagnostic::error(ErrorCode::VALIDATION_FAILED, diagnostic.to_string())
-                            .with_resource(format!("lua:{}", diagnostic.source))
-                    })
-                    .collect(),
-            )
-    })?;
-    let settings = Settings {
-        vms: vms.max(1),
-        memory: match snapshot.lua.memory_limit_bytes {
-            0 => DEFAULT_MEMORY,
-            bytes => usize::try_from(bytes).unwrap_or(usize::MAX),
+    compiler.finish(index, vms).map(Some)
+}
+
+/// Compiles `source` alone as a handler of `phase` on `terms`, with the
+/// modules, `init` and shared dictionaries of `snapshot`, which needs no
+/// scripts of its own.
+pub fn compile_script(
+    snapshot: &RuntimeSnapshot,
+    source: &Source,
+    terms: &LuaHandler,
+    phase: Phase,
+) -> Result<(Compiled, Hook)> {
+    let mut compiler = Compiler::new(snapshot)?;
+    let id = compiler.builder.handler(source);
+    let hook = Hook {
+        handler: handler(id, terms, phase),
+        fallback: terms.on_error,
+        slow: match terms.slow_threshold_ms {
+            0 => DEFAULT_SLOW,
+            millis => Duration::from_millis(millis),
         },
+        debug: terms.debug,
+        script: Arc::from(source.name.as_str()),
     };
-    Ok(Some(Compiled {
-        program,
-        settings,
-        index,
-        disabled: snapshot.lua.disabled,
-    }))
+    Ok((compiler.finish(HookIndex::default(), 1)?, hook))
+}
+
+impl<'a> Compiler<'a> {
+    /// A compiler with the snapshot's modules, `init` and dictionaries.
+    fn new(snapshot: &'a RuntimeSnapshot) -> Result<Self> {
+        let mut compiler = Compiler {
+            snapshot,
+            builder: Program::builder(),
+            handlers: HashMap::new(),
+        };
+        compiler.program()?;
+        Ok(compiler)
+    }
+
+    fn program(&mut self) -> Result<()> {
+        let snapshot = self.snapshot;
+        let compiler = self;
+        for script in &snapshot.lua.scripts {
+            if let Some(module) = &script.module {
+                compiler.builder.module(
+                    module.clone(),
+                    &Source::new(script.file.clone(), script.source.clone(), script.line),
+                );
+            }
+        }
+        for (phase, handler) in [
+            (Phase::Init, &snapshot.lua.init),
+            (Phase::InitWorker, &snapshot.lua.init_worker),
+        ] {
+            if let Some(handler) = handler {
+                let hook = compiler.hook(handler, phase)?;
+                let limits = hook.handler.limits;
+                match phase {
+                    Phase::Init => compiler.builder.init(hook.handler.id),
+                    _ => compiler.builder.init_worker(hook.handler.id),
+                };
+                compiler.builder.init_limits(limits);
+            }
+        }
+        for dict in &snapshot.lua.shared_dicts {
+            compiler.builder.shared_dict(
+                dict.name.clone(),
+                usize::try_from(dict.capacity_bytes).unwrap_or(usize::MAX),
+            );
+        }
+        Ok(())
+    }
+
+    fn finish(self, index: HookIndex, vms: usize) -> Result<Compiled> {
+        let snapshot = self.snapshot;
+        let program = self.builder.build().map_err(|diagnostics| {
+            PanelError::new(ErrorCode::VALIDATION_FAILED, "Lua scripts do not compile")
+                .with_diagnostics(
+                    diagnostics
+                        .into_iter()
+                        .map(|diagnostic| {
+                            Diagnostic::error(ErrorCode::VALIDATION_FAILED, diagnostic.to_string())
+                                .with_resource(format!("lua:{}", diagnostic.source))
+                        })
+                        .collect(),
+                )
+        })?;
+        let settings = Settings {
+            vms: vms.max(1),
+            memory: match snapshot.lua.memory_limit_bytes {
+                0 => DEFAULT_MEMORY,
+                bytes => usize::try_from(bytes).unwrap_or(usize::MAX),
+            },
+        };
+        Ok(Compiled {
+            program,
+            settings,
+            index,
+            disabled: snapshot.lua.disabled,
+        })
+    }
 }
 
 #[cfg(test)]
