@@ -218,6 +218,20 @@ jobs:
           ppanel -o json container stats \
             | python3 -c "import json, sys; names = [s['name'] for s in json.load(sys.stdin)['stats']]; assert {'panel-ci-throwaway', 'pingora-panel-control-1'} <= set(names), names"
           ppanel container stats
+          # Images: listed with the containers made from them, inspected, and
+          # removed unless the installation uses them.
+          nats_image="$(docker compose config --images | grep '/nats:')"
+          ppanel -o json image list --search nats \
+            | python3 -c "import json, sys; images = json.load(sys.stdin)['images']; assert any(i['containers'] >= 2 for i in images), images"
+          ppanel -o json image inspect "$nats_image" \
+            | python3 -c "import json, sys; d = json.load(sys.stdin); assert d['os'] == 'linux' and d['layers'] >= 1, d"
+          if ppanel image remove "$nats_image" --force --yes; then
+            exit 1
+          fi
+          docker commit panel-ci-throwaway panel-ci/committed:1 >/dev/null
+          ppanel -o json image remove panel-ci/committed:1 --yes \
+            | python3 -c "import json, sys; r = json.load(sys.stdin); assert r['untagged'] == ['panel-ci/committed:1'] and r['deleted'], r"
+          ppanel image list
           ppanel container kill panel-ci-throwaway --yes
           test "$(status)" = exited
           ppanel container remove panel-ci-throwaway --yes
@@ -230,7 +244,8 @@ jobs:
           fi
           test "$(docker inspect --format '{{.State.Status}}' pingora-panel-control-1)" = running
           for type in container.engine.disabled container.engine.enabled container.stopped \
-            container.killed container.removed container.operation.refused; do
+            container.killed container.removed container.image.removed \
+            container.operation.refused; do
             for _ in $(seq 1 30); do
               if ppanel -o json audit list --type "$type" --actor-id ci \
                 | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"; then
