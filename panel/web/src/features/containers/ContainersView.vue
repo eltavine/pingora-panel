@@ -4,7 +4,9 @@ import { useQuery } from '@tanstack/vue-query'
 import { watchDebounced } from '@vueuse/core'
 import {
   Boxes,
+  CircleDashed,
   Container,
+  Globe,
   HardDrive,
   Layers,
   Network,
@@ -14,11 +16,12 @@ import {
   SquareStack,
 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
   listContainerStatsOptions,
   listContainersOptions,
   listEnginesOptions,
+  siteLinksOptions,
 } from '@/api/generated/@tanstack/vue-query.gen'
 import ApiFailureAlert from '@/components/ApiFailureAlert.vue'
 import PageHeader from '@/components/PageHeader.vue'
@@ -57,6 +60,8 @@ import ContainerImages from './ContainerImages.vue'
 import ContainerNetworks from './ContainerNetworks.vue'
 import ContainerVolumes from './ContainerVolumes.vue'
 import ContainerLogsSheet from './ContainerLogsSheet.vue'
+import ContainerSiteSheet from './ContainerSiteSheet.vue'
+import { linkedSites, linksByContainer } from '@/lib/containerSites'
 import {
   CONTAINER_STATES,
   chosenEngine,
@@ -193,6 +198,29 @@ const listed = computed(() => {
   })
 })
 
+const links = useQuery(
+  computed(() => ({
+    ...siteLinksOptions({ path: { engine: engineId.value ?? '' } }),
+    enabled: Boolean(engine.value?.enabled && engine.value.reachable && can('config.read')),
+    refetchInterval: REFRESH_INTERVAL_MS,
+  })),
+)
+const sitesOf = computed(() => linksByContainer(links.data.value?.links ?? []))
+const unservedOf = computed(
+  () =>
+    new Map(
+      (links.data.value?.unserved ?? []).map((unserved) => [unserved.container_id, unserved]),
+    ),
+)
+
+const fronting = ref<ContainerView>()
+const siteOpen = ref(false)
+function putSite(container: ContainerView) {
+  fronting.value = container
+  siteOpen.value = true
+}
+const sitesWritable = computed(() => can('config.write'))
+
 const inspecting = ref<ContainerView>()
 const detailOpen = ref(false)
 function inspect(container: ContainerView) {
@@ -207,7 +235,9 @@ function readLogs(container: ContainerView) {
   reading.value = container
   logsOpen.value = true
 }
-const actionable = computed(() => can('containers.inspect') || can('containers.manage'))
+const actionable = computed(
+  () => can('containers.inspect') || can('containers.manage') || can('config.write'),
+)
 
 const updatedAt = computed(() =>
   engines.dataUpdatedAt.value > 0 ? d(new Date(engines.dataUpdatedAt.value), 'time') : null,
@@ -401,6 +431,26 @@ function refresh() {
                                 t('containers.list.project', { project: container.compose_project })
                               }}
                             </Badge>
+                            <Badge
+                              v-for="site in linkedSites(sitesOf.get(container.id) ?? [])"
+                              :key="site.id"
+                              variant="outline"
+                              as-child
+                            >
+                              <RouterLink
+                                :to="`/sites/${site.id}`"
+                                :aria-label="t('containers.site.linked', { site: site.name })"
+                              >
+                                <Globe aria-hidden="true" />{{ site.name }}
+                              </RouterLink>
+                            </Badge>
+                            <Badge v-if="unservedOf.get(container.id)" variant="outline">
+                              <CircleDashed aria-hidden="true" />{{
+                                t('containers.site.declares', {
+                                  hosts: unservedOf.get(container.id)?.domains.join(', '),
+                                })
+                              }}
+                            </Badge>
                           </span>
                         </div>
                       </TableCell>
@@ -461,6 +511,19 @@ function refresh() {
                           >
                             <ScrollText aria-hidden="true" />
                           </Button>
+                          <Button
+                            v-if="sitesWritable && container.endpoints.length"
+                            variant="ghost"
+                            size="icon-sm"
+                            :aria-label="
+                              t('containers.site.action', {
+                                name: container.names[0] ?? container.id,
+                              })
+                            "
+                            @click="putSite(container)"
+                          >
+                            <Globe aria-hidden="true" />
+                          </Button>
                           <ContainerActions
                             v-if="can('containers.manage')"
                             :engine="engineId"
@@ -505,6 +568,12 @@ function refresh() {
         :engine="engineId"
         :container="inspecting"
         @logs="readLogs(inspecting)"
+      />
+      <ContainerSiteSheet
+        v-if="fronting && engineId"
+        v-model:open="siteOpen"
+        :engine="engineId"
+        :container="fronting"
       />
       <ContainerLogsSheet
         v-if="reading && engineId"

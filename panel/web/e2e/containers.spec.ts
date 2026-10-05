@@ -53,8 +53,31 @@ const containers = [
       { private_port: 80, public_port: 8081, host_ip: '127.0.0.1', protocol: 'tcp' },
       { private_port: 443, public_port: null, host_ip: '', protocol: 'tcp' },
     ],
-    labels: { 'com.docker.compose.project': 'shop' },
+    labels: {
+      'com.docker.compose.project': 'shop',
+      'pingora-panel.site.domains': 'shop.example,api.shop.example',
+      'pingora-panel.site.port': '80',
+    },
     compose_project: 'shop',
+    addresses: [{ network: 'shop_default', ipv4: '172.18.0.2', ipv6: null }],
+    endpoints: [
+      { host: '127.0.0.1', port: 8081, container_port: 80, route: 'published', network: null },
+      {
+        host: '172.18.0.2',
+        port: 80,
+        container_port: 80,
+        route: 'network',
+        network: 'shop_default',
+      },
+      {
+        host: '172.18.0.2',
+        port: 443,
+        container_port: 443,
+        route: 'network',
+        network: 'shop_default',
+      },
+    ],
+    declared_site: { name: null, domains: ['shop.example', 'api.shop.example'], port: 80 },
   },
   {
     id: 'e5d8b3a2f6c19d07',
@@ -67,6 +90,8 @@ const containers = [
     ports: [],
     labels: {},
     compose_project: null,
+    addresses: [],
+    endpoints: [],
   },
 ]
 
@@ -372,6 +397,54 @@ async function setUp(
   await page.route(/\/api\/v1\/container-engines\/docker\/containers\/[\w.-]+\/stats$/, (route) =>
     route.fulfill({ json: usage }),
   )
+  await page.route(/\/api\/v1\/container-engines\/docker\/site-links$/, (route) =>
+    route.fulfill({
+      json: {
+        observed_at: '2026-10-04T10:00:00Z',
+        links: [
+          {
+            container_id: '4f1c2a9be03d71aa',
+            container: 'shop-web-1',
+            site_id: '0b9d6c52-2f47-4d0e-9a1b-6f3c2d1e0a01',
+            site: 'Shop',
+            upstream_id: '7e1f0c3a-5b2d-4c8e-9f60-1a2b3c4d5e6f',
+            upstream: 'shop-backend',
+            node: '127.0.0.1:8081',
+            route: 'published',
+          },
+        ],
+        unserved: [
+          {
+            container_id: '4f1c2a9be03d71aa',
+            container: 'shop-web-1',
+            domains: ['api.shop.example'],
+            port: 80,
+          },
+        ],
+      },
+    }),
+  )
+  await page.route(/\/api\/v1\/container-engines\/docker\/containers\/[\w.-]+\/sites$/, (route) => {
+    const asked = route.request().postDataJSON() as {
+      name: string
+      domains: string[]
+      endpoint: { host: string; port: number }
+    }
+    seen.changes.push(
+      `POST site ${asked.name} ${asked.domains.join(',')} ${asked.endpoint.host}:${asked.endpoint.port}`,
+    )
+    return route.fulfill({
+      status: 201,
+      json: {
+        site_id: '0190b5b6-3f43-7a52-8a56-2f8b7a7d5a01',
+        site: asked.name,
+        upstream: asked.name,
+        node: `${asked.endpoint.host}:${asked.endpoint.port}`,
+        domains: asked.domains,
+        draft_version: 5,
+      },
+    })
+  })
   await page.route(/\/api\/v1\/container-engines\/docker\/image-pulls$/, (route) => {
     const asked = route.request().postDataJSON() as {
       reference: string
@@ -974,4 +1047,51 @@ test('a pull says why it was refused or broke off', async ({ page }) => {
   await reference.fill('flaky:1')
   await sheet.getByRole('button', { name: 'Pull', exact: true }).click()
   await expect(sheet.getByRole('status')).toHaveText('read: connection reset by peer')
+})
+
+test('containers show the sites in front of them and get one added to the draft', async ({
+  page,
+}) => {
+  const seen = await setUp(page)
+  await page.goto('/containers')
+  const web = page.getByRole('row').filter({ hasText: 'shop-web-1' })
+  await expect(web.getByRole('link', { name: 'Site Shop' })).toHaveAttribute(
+    'href',
+    '/sites/0b9d6c52-2f47-4d0e-9a1b-6f3c2d1e0a01',
+  )
+  await expect(web).toContainText('Declares api.shop.example')
+  await expect(
+    page
+      .getByRole('row')
+      .filter({ hasText: 'nightly-report' })
+      .getByRole('button', {
+        name: /^Put a site in front/,
+      }),
+  ).toHaveCount(0)
+
+  await web.getByRole('button', { name: 'Put a site in front of shop-web-1' }).click()
+  const sheet = page.getByRole('dialog', { name: 'Put a site in front of shop-web-1' })
+  await expect(sheet.getByLabel('Site name')).toHaveValue('shop-web-1')
+  await expect(sheet.getByLabel('Hosts')).toHaveValue('shop.example\napi.shop.example')
+  await expect(sheet.getByRole('combobox', { name: 'Endpoint' })).toContainText('127.0.0.1:8081')
+  await sheet.getByRole('combobox', { name: 'Endpoint' }).click()
+  await page.getByRole('option', { name: /172\.18\.0\.2:80 / }).click()
+  await expect(sheet).toContainText('A network address changes when the container is recreated')
+  await sheet.getByLabel('Site name').fill('shop')
+  await sheet.getByLabel('Hosts').fill('shop.example')
+  await sheet.getByRole('button', { name: 'Add to the draft' }).click()
+  await expect(page.getByText('Added shop to the draft')).toBeVisible()
+  expect(seen.changes).toEqual(['POST site shop shop.example 172.18.0.2:80'])
+})
+
+test('readers who may not change sites are not offered one for a container', async ({ page }) => {
+  await setUp(
+    page,
+    undefined,
+    ALL_PERMISSIONS.filter((permission) => permission !== 'config.write'),
+  )
+  await page.goto('/containers')
+  const web = page.getByRole('row').filter({ hasText: 'shop-web-1' })
+  await expect(web.getByRole('link', { name: 'Site Shop' })).toBeVisible()
+  await expect(web.getByRole('button', { name: /^Put a site in front/ })).toHaveCount(0)
 })

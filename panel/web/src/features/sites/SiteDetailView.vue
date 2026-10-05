@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import {
   ArrowLeft,
+  Container,
   Copy,
   Download,
   Globe,
@@ -24,10 +25,20 @@ import PageHeader from '@/components/PageHeader.vue'
 import StatusIndicator from '@/components/StatusIndicator.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle, CardAction } from '@/components/ui/card'
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useRefreshConfiguration } from '@/lib/configuration'
+import { useSiteContainers } from '@/lib/containerSites'
+import { engineName } from '@/lib/containers'
+import { useSession } from '@/lib/session'
 import DomainsPanel from './DomainsPanel.vue'
 import RoutesPanel from './RoutesPanel.vue'
 import SiteFormSheet from './SiteFormSheet.vue'
@@ -46,6 +57,12 @@ const client = useQueryClient()
 const refresh = useRefreshConfiguration()
 const commands = useSiteCommands()
 const site = useQuery(computed(() => getSiteOptions({ path: { id: props.id } })))
+const { can } = useSession()
+/** The containers its upstreams point at (ADR 0033). */
+const containers = useSiteContainers(
+  () => props.id,
+  () => can('containers.read'),
+)
 
 const tab = computed<Tab>({
   get: () => {
@@ -183,7 +200,7 @@ const facts = computed(() => {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="settings" class="pt-4">
+        <TabsContent value="settings" class="flex flex-col gap-4 pt-4">
           <Card>
             <CardHeader>
               <CardTitle>{{ t('sites.tabs.settings') }}</CardTitle>
@@ -212,6 +229,46 @@ const facts = computed(() => {
                   </dd>
                 </div>
               </dl>
+            </CardContent>
+          </Card>
+          <Card v-if="containers.length">
+            <CardHeader>
+              <CardTitle class="flex items-center gap-2">
+                <Container class="size-4" aria-hidden="true" />
+                {{ t('sites.containers.title') }}
+              </CardTitle>
+              <CardDescription>{{ t('sites.containers.description') }}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ul class="flex flex-col divide-y">
+                <li
+                  v-for="link in containers"
+                  :key="`${link.engine}/${link.container_id}/${link.upstream_id}/${link.node}`"
+                  class="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm first:pt-0 last:pb-0"
+                >
+                  <RouterLink
+                    :to="{
+                      path: '/containers',
+                      query: { engine: link.engine, search: link.container },
+                    }"
+                    class="font-medium hover:underline"
+                  >
+                    {{ link.container }}
+                  </RouterLink>
+                  <span class="text-muted-foreground text-xs">{{ engineName(link.engine) }}</span>
+                  <span class="font-mono text-xs">{{ link.node }}</span>
+                  <Badge variant="outline">
+                    {{
+                      link.route === 'published'
+                        ? t('sites.containers.published')
+                        : t('sites.containers.network')
+                    }}
+                  </Badge>
+                  <span class="text-muted-foreground text-xs">
+                    {{ t('sites.containers.through', { upstream: link.upstream }) }}
+                  </span>
+                </li>
+              </ul>
             </CardContent>
           </Card>
         </TabsContent>

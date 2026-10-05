@@ -221,6 +221,13 @@ const en: Messages = {
       tagsHint: 'Separate with commas.',
       note: 'Note',
     },
+    containers: {
+      title: 'Containers',
+      description: "The containers its upstreams' nodes point at.",
+      published: 'Published port',
+      network: 'Network address',
+      through: 'through {upstream}',
+    },
     tabs: {
       settings: 'Settings',
       domains: 'Domains',
@@ -330,6 +337,12 @@ const en: Messages = {
       consistent_hash: 'Consistent hash',
     },
     node: {
+      fromContainer: 'From a container',
+      fromContainerHint:
+        'Fills in the host and port of a running container; a published port stays when it is recreated.',
+      pickContainer: 'Choose a container',
+      published: '{engine}, published port {port}',
+      network: 'port {port} on {network}',
       add: 'Add node',
       edit: 'Edit node',
       address: 'Address',
@@ -1158,6 +1171,27 @@ const en: Messages = {
       removeDetail: 'Its tags go, and the image with them once nothing else names it.',
       force: 'Remove it even if stopped containers use it or several tags name it',
       removed: '{image} removed',
+    },
+    site: {
+      action: 'Put a site in front of {name}',
+      title: 'Put a site in front of {name}',
+      description:
+        'Adds an upstream with one of its endpoints and a reverse-proxy site to the draft.',
+      name: 'Site name',
+      hosts: 'Hosts',
+      hostsHint: "One per line; what the container's labels declare comes first.",
+      endpoint: 'Endpoint',
+      published: 'published port {port}',
+      network: 'port {port} on {network}',
+      networkWarning:
+        'A network address changes when the container is recreated; a published port stays.',
+      draft: 'The site joins the draft; apply the draft to serve it.',
+      submit: 'Add to the draft',
+      added: 'Added {site} to the draft',
+      apply: 'Apply the draft to serve it.',
+      open: 'Open site',
+      linked: 'Site {site}',
+      declares: 'Declares {hosts}',
     },
     pull: {
       open: 'Pull image',

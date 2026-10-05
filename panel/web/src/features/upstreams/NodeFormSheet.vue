@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useMutation } from '@tanstack/vue-query'
-import { Save } from '@lucide/vue'
+import { Container, Save } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import type { UpstreamNode, UpstreamView } from '@/api/generated'
@@ -10,6 +10,13 @@ import FormField from '@/components/FormField.vue'
 import SwitchField from '@/components/SwitchField.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   Sheet,
   SheetContent,
@@ -20,6 +27,9 @@ import {
 } from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
 import { changeHeaders, notifyFailure, plainHeaders } from '@/lib/configuration'
+import { endpointAddress, useContainerEndpoints } from '@/lib/containerSites'
+import { engineName } from '@/lib/containers'
+import { useSession } from '@/lib/session'
 import { nodeForm, nodeInput, type NodeForm } from './forms'
 
 const open = defineModel<boolean>('open', { required: true })
@@ -35,6 +45,21 @@ const form = reactive<NodeForm>(nodeForm())
 watch(open, (isOpen) => {
   if (isOpen) {
     Object.assign(form, nodeForm(props.node))
+    picked.value = ''
+  }
+})
+
+const { can } = useSession()
+/** The endpoints of running containers, offered while the sheet is open (ADR 0033). */
+const discovered = useContainerEndpoints(() => open.value && can('containers.read'))
+const key = (endpoint: { engine: string; container: string; host: string; port: number }) =>
+  `${endpoint.engine}/${endpoint.container}/${endpointAddress(endpoint)}`
+const picked = ref('')
+watch(picked, (value) => {
+  const endpoint = discovered.value.find((candidate) => key(candidate) === value)
+  if (endpoint) {
+    form.host = endpoint.host
+    form.port = endpoint.port
   }
 })
 
@@ -73,6 +98,43 @@ function submit() {
           <SheetDescription>{{ upstream.name }}</SheetDescription>
         </SheetHeader>
         <div class="flex flex-col gap-4 px-4">
+          <FormField
+            v-if="discovered.length"
+            id="node-container"
+            :label="t('upstreams.node.fromContainer')"
+            :hint="t('upstreams.node.fromContainerHint')"
+          >
+            <Select v-model="picked">
+              <SelectTrigger id="node-container" class="w-full">
+                <Container class="size-4" aria-hidden="true" />
+                <SelectValue :placeholder="t('upstreams.node.pickContainer')" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem
+                  v-for="endpoint in discovered"
+                  :key="key(endpoint)"
+                  :value="key(endpoint)"
+                >
+                  <span>{{ endpoint.container }}</span>
+                  <span class="font-mono text-xs">{{ ` ${endpointAddress(endpoint)}` }}</span>
+                  <span class="text-muted-foreground text-xs">
+                    {{
+                      ' · ' +
+                      (endpoint.route === 'published'
+                        ? t('upstreams.node.published', {
+                            engine: engineName(endpoint.engine),
+                            port: endpoint.containerPort,
+                          })
+                        : t('upstreams.node.network', {
+                            network: endpoint.network ?? '',
+                            port: endpoint.containerPort,
+                          }))
+                    }}
+                  </span>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </FormField>
           <div class="grid gap-4 sm:grid-cols-[1fr_7rem]">
             <FormField id="node-host" :label="t('upstreams.node.host')">
               <Input

@@ -84,6 +84,78 @@ async function mockConfiguration(page: Page, pending = false) {
   await page.route('**/api/v1/tls-profiles', (route) => route.fulfill({ json: [] }))
 }
 
+/** Docker running shop-web-1, published on 8081, which the Shop site points at. */
+async function mockContainers(page: Page) {
+  await page.route(/\/api\/v1\/container-engines$/, (route) =>
+    route.fulfill({
+      json: {
+        engines: [
+          {
+            id: 'docker',
+            socket: '/run/docker.sock',
+            enabled: true,
+            reachable: true,
+            detail: null,
+            version: null,
+            info: null,
+          },
+        ],
+      },
+    }),
+  )
+  await page.route(/\/api\/v1\/container-engines\/docker\/containers\?/, (route) =>
+    route.fulfill({
+      json: {
+        observed_at: '2026-10-04T10:00:00Z',
+        containers: [
+          {
+            id: '4f1c2a9be03d71aa',
+            names: ['shop-web-1'],
+            image: 'nginx:1.27',
+            image_id: 'sha256:4f1c',
+            created: null,
+            state: 'running',
+            status: 'Up 26 hours',
+            ports: [],
+            labels: {},
+            compose_project: null,
+            addresses: [],
+            endpoints: [
+              {
+                host: '127.0.0.1',
+                port: 8081,
+                container_port: 80,
+                route: 'published',
+                network: null,
+              },
+            ],
+          },
+        ],
+      },
+    }),
+  )
+  await page.route(/\/api\/v1\/container-engines\/docker\/site-links$/, (route) =>
+    route.fulfill({
+      json: {
+        observed_at: '2026-10-04T10:00:00Z',
+        links: [
+          {
+            container_id: '4f1c2a9be03d71aa',
+            container: 'shop-web-1',
+            site_id: SITE_ID,
+            site: 'Shop',
+            upstream_id: UPSTREAM_ID,
+            upstream: 'shop-backend',
+            node: '127.0.0.1:8081',
+            route: 'published',
+          },
+        ],
+        unserved: [],
+      },
+    }),
+  )
+}
+
 test.beforeEach(async ({ page }) => {
   await signIn(page)
   await useEnglish(page)
@@ -241,4 +313,37 @@ test('listeners start from explanatory empty states', async ({ page }) => {
   await expect(page.getByText('No listeners yet')).toBeVisible()
   await expect(page.getByText('No TLS profiles yet')).toBeVisible()
   await expectNoHorizontalOverflow(page)
+})
+
+test('a node is pointed at a running container', async ({ page }) => {
+  await mockConfiguration(page)
+  await mockContainers(page)
+  await page.route(`**/api/v1/upstreams/${UPSTREAM_ID}`, (route) =>
+    route.fulfill({ json: upstream }),
+  )
+  await page.route('**/api/v1/upstreams/health', (route) =>
+    route.fulfill({ json: { upstreams: [] } }),
+  )
+  await page.goto(`/upstreams/${UPSTREAM_ID}`)
+  await page.getByRole('button', { name: 'Add node' }).click()
+  const sheet = page.getByRole('dialog', { name: 'Add node' })
+  await sheet.getByRole('combobox', { name: 'From a container' }).click()
+  await page.getByRole('option', { name: /shop-web-1/ }).click()
+  await expect(sheet.getByLabel('Host')).toHaveValue('127.0.0.1')
+  await expect(sheet.getByLabel('Port')).toHaveValue('8081')
+})
+
+test('a site lists the containers behind it', async ({ page }) => {
+  await mockConfiguration(page)
+  await mockContainers(page)
+  await page.route(`**/api/v1/sites/${SITE_ID}`, (route) => route.fulfill({ json: site }))
+  await page.goto(`/sites/${SITE_ID}`)
+  const card = page.locator('[data-slot="card"]').filter({ hasText: 'Containers' })
+  await expect(card.getByRole('link', { name: 'shop-web-1' })).toHaveAttribute(
+    'href',
+    '/containers?engine=docker&search=shop-web-1',
+  )
+  await expect(card).toContainText('127.0.0.1:8081')
+  await expect(card).toContainText('Published port')
+  await expect(card).toContainText('through shop-backend')
 })

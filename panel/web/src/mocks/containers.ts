@@ -9,6 +9,9 @@ import type {
   ContainerLogLineView,
   ContainerLogsView,
   ContainerLogTailMessage,
+  ContainerSiteBody,
+  ContainerSiteView,
+  SiteLinksView,
   ContainerStatsListView,
   ContainerStatsView,
   ContainerView,
@@ -721,6 +724,47 @@ export function containerHandlers(): AnyHandler[] {
           },
         })
         return new HttpResponse(stream, { headers: { 'content-type': 'text/event-stream' } })
+      },
+    ),
+    http.get('*/api/v1/container-engines/:engine/site-links', () =>
+      HttpResponse.json({
+        observed_at: new Date().toISOString(),
+        links: [],
+        unserved: containers.flatMap((container) =>
+          container.declared_site && container.state === 'running'
+            ? [
+                {
+                  container_id: container.id,
+                  container: container.names[0] ?? container.id,
+                  domains: container.declared_site.domains,
+                  port: container.declared_site.port,
+                },
+              ]
+            : [],
+        ),
+      } satisfies SiteLinksView),
+    ),
+    http.post<{ engine: string; container: string }, ContainerSiteBody>(
+      '*/api/v1/container-engines/:engine/containers/:container/sites',
+      async ({ params, request }) => {
+        const found = containers.find((container) => container.id === params.container)
+        if (!found) {
+          return missing(params.container)
+        }
+        const body = await request.json()
+        const endpoint = body.endpoint ?? found.endpoints[0]
+        const name = body.name ?? found.names[0] ?? found.id
+        return HttpResponse.json(
+          {
+            site_id: crypto.randomUUID(),
+            site: name,
+            upstream: name,
+            node: endpoint ? `${endpoint.host}:${endpoint.port}` : '',
+            domains: body.domains ?? [],
+            draft_version: 5,
+          } satisfies ContainerSiteView,
+          { status: 201 },
+        )
       },
     ),
     http.get('*/api/v1/container-engines/:engine/stats', () =>
