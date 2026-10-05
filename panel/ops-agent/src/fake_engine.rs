@@ -85,6 +85,14 @@ fn removed_image(found: &Value, force: bool) -> Answer {
     }
 }
 
+/// Whether labels answer a label filter: each `key` or `key=value` holds.
+fn labelled(labels: &Value, filters: &[String]) -> bool {
+    filters.iter().all(|filter| match filter.split_once('=') {
+        Some((key, value)) => labels[key] == value,
+        None => !labels[filter.as_str()].is_null(),
+    })
+}
+
 /// What the fake engine was asked to do, such as `stop b2`.
 pub(crate) type Calls = Arc<Mutex<Vec<String>>>;
 
@@ -258,6 +266,7 @@ pub(crate) async fn engine_with(directory: &Path, calls: Calls) -> PathBuf {
                     .unwrap_or_default();
                 let ids = filters.remove("id").unwrap_or_default();
                 let statuses = filters.remove("status").unwrap_or_default();
+                let labels = filters.remove("label").unwrap_or_default();
                 let every = json!([
                     {"Id": "b2", "Names": ["/shop-web-1"], "Image": "nginx:1.27",
                      "ImageID": "sha256:aa", "Created": 1_800_000_000, "State": "running",
@@ -265,14 +274,20 @@ pub(crate) async fn engine_with(directory: &Path, calls: Calls) -> PathBuf {
                      "Status": "Up 3 hours (healthy)",
                      "Ports": [{"IP": "0.0.0.0", "PrivatePort": 80, "PublicPort": 8081,
                                 "Type": "tcp"}],
-                     "Labels": {"com.docker.compose.project": "shop"},
+                     "Labels": {"com.docker.compose.project": "shop",
+                                "com.docker.compose.service": "web",
+                                "com.docker.compose.project.working_dir": "/srv/shop",
+                                "com.docker.compose.project.config_files":
+                                    "/srv/shop/compose.yaml"},
                      "NetworkSettings": {"Networks": {"shop_default": {}}},
                      "Mounts": [{"Type": "volume", "Name": "shop_html",
                                  "Destination": "/usr/share/nginx/html"},
                                 {"Type": "bind", "Source": "/srv/shop", "Destination": "/srv"}]},
                     {"Id": "a1", "Names": ["/cache"], "Image": "redis:7", "SizeRw": 1_024,
                      "ImageID": "sha256:bb", "Created": 1_800_000_100, "State": "exited",
-                     "Status": "Exited (0) 2 days ago", "Ports": [], "Labels": {}}
+                     "Status": "Exited (0) 2 days ago", "Ports": [],
+                     "Labels": {"com.docker.compose.project": "cache",
+                                "com.docker.compose.service": "redis"}}
                 ]);
                 let listed: Vec<Value> = every
                     .as_array()
@@ -287,6 +302,7 @@ pub(crate) async fn engine_with(directory: &Path, calls: Calls) -> PathBuf {
                                 .iter()
                                 .any(|state| container["State"] == state.as_str())
                     })
+                    .filter(|container| labelled(&container["Labels"], &labels))
                     .cloned()
                     .collect();
                 Json(listed)
@@ -327,8 +343,15 @@ pub(crate) async fn engine_with(directory: &Path, calls: Calls) -> PathBuf {
     let router = router
         .route(
             "/networks",
-            get(|| async {
-                Json(json!([
+            get(|Query(query): Query<HashMap<String, String>>| async move {
+                let labels = query
+                    .get("filters")
+                    .and_then(|filters| {
+                        serde_json::from_str::<HashMap<String, Vec<String>>>(filters).ok()
+                    })
+                    .and_then(|mut filters| filters.remove("label"))
+                    .unwrap_or_default();
+                let every = json!([
                     {"Name": "shop_default", "Id": "n3", "Created": "2027-01-15T08:00:00Z",
                      "Scope": "local", "Driver": "bridge", "Internal": false,
                      "Options": {"com.docker.network.enable_ipv6": "true"},
@@ -340,7 +363,15 @@ pub(crate) async fn engine_with(directory: &Path, calls: Calls) -> PathBuf {
                      "IPAM": {"Config": []}, "Labels": {}},
                     {"Name": "stale_net", "Id": "n4", "Scope": "local", "Driver": "bridge",
                      "IPAM": {"Config": []}, "Labels": {}}
-                ]))
+                ]);
+                let listed: Vec<Value> = every
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|network| labelled(&network["Labels"], &labels))
+                    .cloned()
+                    .collect();
+                Json(listed)
             }),
         )
         .route(

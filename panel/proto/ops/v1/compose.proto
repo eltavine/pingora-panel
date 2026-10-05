@@ -1,0 +1,137 @@
+syntax = "proto3";
+
+package pingora.panel.ops.v1;
+
+import "common/v1/common.proto";
+import "google/protobuf/timestamp.proto";
+import "ops/v1/containers.proto";
+
+// The Compose projects on the engines the agent reaches, known by the
+// labels Compose puts on their containers (ADR 0031). Recreating a project
+// from a changed file stays with Compose.
+service ComposeProjects {
+  rpc List(ComposeProjectsListRequest) returns (ComposeProjectsListResponse);
+  // Brings a project's containers up, down or restarts them. The panel's
+  // own installation is only ever brought up.
+  rpc Act(ComposeProjectsActRequest) returns (ComposeProjectsActResponse);
+  // The last lines a project's containers printed, merged by time. What
+  // containers print can hold secrets.
+  rpc Logs(ComposeProjectsLogsRequest) returns (ComposeProjectsLogsResponse);
+  // The Compose files a project's labels name, read only when each lies in
+  // the project's working directory, ends in `.yml` or `.yaml`, is a
+  // regular file and is at most 256 KiB. They can hold secrets.
+  rpc Files(ComposeProjectsFilesRequest) returns (ComposeProjectsFilesResponse);
+}
+
+message ComposeService {
+  string name = 1;
+  uint32 containers = 2;
+  uint32 running = 3;
+}
+
+message ComposeProject {
+  string name = 1;
+  // Where Compose ran, on the host.
+  string working_directory = 2;
+  // The files Compose read, on the host.
+  repeated string config_files = 3;
+  // By name.
+  repeated ComposeService services = 4;
+  uint32 containers = 5;
+  uint32 running = 6;
+  // The panel's own installation, which is only ever brought up.
+  bool installation = 7;
+}
+
+message ComposeProjectsListRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string engine = 2;
+}
+
+message ComposeProjectsListResponse {
+  google.protobuf.Timestamp observed_at = 1;
+  // By name.
+  repeated ComposeProject projects = 2;
+  .pingora.panel.common.v1.Error error = 3;
+}
+
+enum ComposeAction {
+  COMPOSE_ACTION_UNSPECIFIED = 0;
+  // Starts the containers that are not running.
+  COMPOSE_ACTION_UP = 1;
+  // Stops and removes the containers and the project's networks, and keeps
+  // its volumes.
+  COMPOSE_ACTION_DOWN = 2;
+  COMPOSE_ACTION_RESTART = 3;
+}
+
+message ComposeProjectsActRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string engine = 2;
+  string project = 3;
+  ComposeAction action = 4;
+}
+
+message ComposeFailure {
+  // A container's or network's name.
+  string name = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message ComposeProjectsActResponse {
+  // The project afterwards; unset once it is down.
+  ComposeProject project = 1;
+  // How many containers the action changed.
+  uint32 changed = 2;
+  // What the engine refused, when it refused only some.
+  repeated ComposeFailure failures = 3;
+  .pingora.panel.common.v1.Error error = 4;
+}
+
+message ComposeLogLine {
+  string service = 1;
+  // Without the leading slash.
+  string container = 2;
+  ContainerLogLine line = 3;
+}
+
+message ComposeProjectsLogsRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string engine = 2;
+  string project = 3;
+  // The last this many lines of all its containers together, at most 5000;
+  // 200 when 0.
+  uint32 lines = 4;
+  // Only lines at or after this time.
+  google.protobuf.Timestamp since = 5;
+}
+
+message ComposeProjectsLogsResponse {
+  google.protobuf.Timestamp observed_at = 1;
+  // Oldest first.
+  repeated ComposeLogLine lines = 2;
+  // Older lines were left out to keep the answer within 2 MiB.
+  bool truncated = 3;
+  .pingora.panel.common.v1.Error error = 4;
+}
+
+message ComposeFile {
+  // On the host.
+  string path = 1;
+  // Unset when it could not be read.
+  string content = 2;
+  // Why it could not be read.
+  .pingora.panel.common.v1.Error error = 3;
+}
+
+message ComposeProjectsFilesRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string engine = 2;
+  string project = 3;
+}
+
+message ComposeProjectsFilesResponse {
+  // In the order Compose read them.
+  repeated ComposeFile files = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}

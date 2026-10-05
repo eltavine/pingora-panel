@@ -6,6 +6,7 @@
 //! only, one service per capability, each bounded by this configuration.
 
 mod agent;
+mod compose;
 pub mod config;
 mod container_logs;
 mod container_stats;
@@ -26,6 +27,7 @@ pub use config::AgentConfig;
 use panel_context::ServiceName;
 use panel_contracts::ops::v1::{
     agent_server::{self, AgentServer},
+    compose_projects_server::{self, ComposeProjectsServer},
     containers_server::{self, ContainersServer},
     directories_server::{self, DirectoriesServer},
     engine_resources_server::{self, EngineResourcesServer},
@@ -65,14 +67,15 @@ pub async fn serve(config: AgentConfig, shutdown: impl Future<Output = ()> + Sen
         containers::capability(&config.engines),
         gateway_service::capability(&config.engines),
     ]);
-    let (container_service, image_service, resource_service, gateway_service) =
+    let (container_service, image_service, resource_service, compose_service, gateway_service) =
         if config.engines.is_empty() {
-            (None, None, None, None)
+            (None, None, None, None, None)
         } else {
             policy = policy
                 .allow(containers_server::SERVICE_NAME, panel_api.clone())
                 .allow(images_server::SERVICE_NAME, panel_api.clone())
                 .allow(engine_resources_server::SERVICE_NAME, panel_api.clone())
+                .allow(compose_projects_server::SERVICE_NAME, panel_api.clone())
                 .allow(gateway_service_server::SERVICE_NAME, panel_api.clone());
             let engines = Arc::new(containers::Engines::load(
                 config.engines.clone(),
@@ -93,6 +96,10 @@ pub async fn serve(config: AgentConfig, shutdown: impl Future<Output = ()> + Sen
                         config.installation_project.clone(),
                     ),
                 )),
+                Some(ComposeProjectsServer::new(compose::ComposeService::new(
+                    Arc::clone(&engines),
+                    config.installation_project.clone(),
+                ))),
                 Some(GatewayServiceServer::new(
                     gateway_service::GatewayService::new(
                         engines,
@@ -147,6 +154,7 @@ pub async fn serve(config: AgentConfig, shutdown: impl Future<Output = ()> + Sen
         .add_optional_service(container_service)
         .add_optional_service(image_service)
         .add_optional_service(resource_service)
+        .add_optional_service(compose_service)
         .add_optional_service(gateway_service);
     #[cfg(target_os = "linux")]
     let router = router.add_optional_service(listener_service);

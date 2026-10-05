@@ -25,6 +25,7 @@ fn main() {
                 "../proto/observability/v1/logs.proto",
                 "../proto/observability/v1/traffic.proto",
                 "../proto/ops/v1/agent.proto",
+                "../proto/ops/v1/compose.proto",
                 "../proto/ops/v1/containers.proto",
                 "../proto/ops/v1/directories.proto",
                 "../proto/ops/v1/engine_resources.proto",
