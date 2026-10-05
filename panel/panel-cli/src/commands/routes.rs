@@ -31,6 +31,10 @@ pub(crate) enum RouteCommand {
         /// The route's requests pass this security policy after the site's.
         #[arg(long)]
         security_policy: Option<String>,
+        /// The route's requests and responses go through this HTTP policy
+        /// after the site's.
+        #[arg(long)]
+        http_policy: Option<String>,
         #[command(flatten)]
         conditions: Box<ConditionFlags>,
         #[command(flatten)]
@@ -207,6 +211,7 @@ pub async fn run(api: &Api, output: &Output, command: RouteCommand) -> Result<()
             name,
             disabled,
             security_policy,
+            http_policy,
             conditions,
             action,
             options,
@@ -229,6 +234,7 @@ pub async fn run(api: &Api, output: &Output, command: RouteCommand) -> Result<()
                 "match": matched,
                 "action": action.to_json(&options)?,
                 "security_policy_id": security_policy,
+                "http_policy_id": http_policy,
             });
             let route = api
                 .change(

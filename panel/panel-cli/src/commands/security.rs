@@ -125,7 +125,7 @@ fn restrictions(policy: &Value) -> String {
 }
 
 /// A size in bytes, with an optional k, m or g suffix.
-fn size(value: &str) -> std::result::Result<u64, String> {
+pub(crate) fn size(value: &str) -> std::result::Result<u64, String> {
     let lower = value.to_ascii_lowercase();
     let (digits, factor) = match lower.char_indices().last() {
         Some((index, 'k')) => (&lower[..index], 1 << 10),

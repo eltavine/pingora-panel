@@ -121,6 +121,10 @@ enum Command {
     /// Restrictions requests pass before sites and routes act on them.
     #[command(subcommand, name = "security-policy")]
     SecurityPolicy(commands::security::SecurityPolicyCommand),
+    /// Field changes, the Server field, CORS and compression for sites and
+    /// routes.
+    #[command(subcommand, name = "http-policy")]
+    HttpPolicy(commands::http_policies::HttpPolicyCommand),
     /// Certificates the panel keeps and delivers to the gateway.
     #[command(subcommand)]
     Certificate(commands::certificates::CertificateCommand),
@@ -263,6 +267,9 @@ async fn main() -> ExitCode {
             }
             Command::SecurityPolicy(command) => {
                 commands::security::run(&api, &output, command).await
+            }
+            Command::HttpPolicy(command) => {
+                commands::http_policies::run(&api, &output, command).await
             }
             Command::Config(command) => commands::config::run(&api, &output, command).await,
             Command::Approval(command) => {

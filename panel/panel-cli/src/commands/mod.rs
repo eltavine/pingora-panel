@@ -14,6 +14,7 @@ pub mod engine_resources;
 pub mod files;
 pub mod gateway;
 pub mod host;
+pub mod http_policies;
 pub mod identity;
 pub mod images;
 pub mod logs;

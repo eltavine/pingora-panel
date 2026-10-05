@@ -835,6 +835,13 @@ async fn api(
         }
         ("PUT", "/api/v1/tls-profiles/edge") => Json(body.clone()).into_response(),
         ("PUT", "/api/v1/security-policies/office") => Json(body.clone()).into_response(),
+        ("PUT", "/api/v1/http-policies/headers") => Json(body.clone()).into_response(),
+        ("GET", "/api/v1/http-policies") => Json(json!([
+            {"id": "headers", "response": {"set": [{"name": "X-Frame-Options", "value": "DENY"}]},
+             "compression": {"algorithms": ["gzip"], "types": ["text/*"]},
+             "used_by": ["0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"], "etag": "\"h1\""}
+        ]))
+        .into_response(),
         ("PUT", "/api/v1/identity-providers/corp") => Json(body.clone()).into_response(),
         ("PUT", "/api/v1/sign-in-policy") => Json(body.clone()).into_response(),
         ("GET", "/api/v1/sign-in-policy") => {
@@ -1239,9 +1246,12 @@ fn routes_take_conditions_and_the_route_a_request_takes_is_explained() {
         "10.0.0.0/8",
         "--condition",
         r#"{"kind":"not","condition":{"kind":"query","name":"debug","test":{"op":"present"}}}"#,
+        "--http-policy",
+        "api",
     ]);
     assert!(added.status.success(), "{}", stderr(&added));
     let posted = &stub.requests("POST", "/api/v1/sites/shop/routes")[0].body;
+    assert_eq!(posted["http_policy_id"], "api");
     assert_eq!(
         posted["match"]["conditions"],
         json!([
@@ -2504,6 +2514,78 @@ fn tls_profiles_narrow_handshakes() {
     );
     assert_eq!(body["session_resumption"], false);
     assert_eq!(body["ocsp_stapling"], false);
+}
+
+#[test]
+fn http_policies_are_set_from_flags_and_listed() {
+    let stub = Stub::start();
+    let saved = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "http-policy",
+        "set",
+        "headers",
+        "--request-set",
+        "X-Tenant: $host",
+        "--request-remove",
+        "X-Internal",
+        "--response-add",
+        "Link: </app.css>; rel=preload",
+        "--remove-server",
+        "--cors-origin",
+        "https://*.shop.example",
+        "--cors-method",
+        "PUT",
+        "--cors-credentials",
+        "--cors-max-age",
+        "600",
+        "--compress",
+        "gzip",
+        "--compress",
+        "br",
+        "--compress-type",
+        "text/*",
+        "--compress-min-size",
+        "1k",
+    ]);
+    assert!(saved.status.success(), "{}", stderr(&saved));
+    let body = &stub.requests("PUT", "/api/v1/http-policies/headers")[0].body;
+    assert_eq!(
+        body["request"]["set"],
+        json!([{"name": "X-Tenant", "value": "$host"}])
+    );
+    assert_eq!(body["request"]["remove"], json!(["X-Internal"]));
+    assert_eq!(
+        body["response"]["add"][0]["value"],
+        "</app.css>; rel=preload"
+    );
+    assert_eq!(body["server"], json!({"mode": "remove"}));
+    assert_eq!(
+        body["cors"],
+        json!({"allowed_origins": ["https://*.shop.example"], "allowed_methods": ["PUT"],
+               "allowed_headers": [], "exposed_headers": [], "allow_credentials": true,
+               "max_age_seconds": 600})
+    );
+    assert_eq!(
+        body["compression"],
+        json!({"algorithms": ["gzip", "brotli"], "types": ["text/*"], "min_bytes": 1024})
+    );
+
+    let listed = stub.ppanel(&["--token", "ppat_admin", "http-policy", "list"]);
+    assert!(listed.status.success(), "{}", stderr(&listed));
+    let table = String::from_utf8_lossy(&listed.stdout);
+    assert!(table.contains("response fields, compression"), "{table}");
+
+    let refused = stub.ppanel(&[
+        "--token",
+        "ppat_admin",
+        "http-policy",
+        "set",
+        "headers",
+        "--request-set",
+        "X-Tenant",
+    ]);
+    assert!(!refused.status.success());
 }
 
 #[test]

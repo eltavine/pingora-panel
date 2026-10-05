@@ -129,6 +129,9 @@ pub(crate) struct CreateSite {
     /// Requests to the site pass this security policy first.
     #[arg(long)]
     security_policy: Option<String>,
+    /// Requests and responses of the site go through this HTTP policy.
+    #[arg(long)]
+    http_policy: Option<String>,
     /// Create the site stopped.
     #[arg(long)]
     disabled: bool,
@@ -329,6 +332,7 @@ pub async fn run(api: &Api, output: &Output, command: SiteCommand) -> Result<()>
                 hsts_include_subdomains,
                 hsts_preload,
                 security_policy,
+                http_policy,
                 disabled,
             } = *create;
             let body = match file {
@@ -349,6 +353,7 @@ pub async fn run(api: &Api, output: &Output, command: SiteCommand) -> Result<()>
                         "preload": hsts_preload,
                     })),
                     "security_policy_id": security_policy,
+                    "http_policy_id": http_policy,
                 }),
             };
             let site = api
