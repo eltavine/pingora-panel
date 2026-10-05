@@ -70,6 +70,27 @@ const containers = [
   },
 ]
 
+const images = [
+  {
+    id: 'sha256:4f1c2a9be03d71aa6d2c',
+    tags: ['nginx:1.27'],
+    digests: ['nginx@sha256:9a8b'],
+    created: '2026-09-04T08:00:00Z',
+    size_bytes: 192 * 1024 ** 2,
+    containers: 1,
+    labels: { maintainer: 'NGINX' },
+  },
+  {
+    id: 'sha256:0f9e8d7c6b5a49382716',
+    tags: [],
+    digests: [],
+    created: '2026-08-04T08:00:00Z',
+    size_bytes: 88 * 1024 ** 2,
+    containers: 0,
+    labels: {},
+  },
+]
+
 const usage = {
   id: '4f1c2a9be03d71aa',
   name: 'shop-web-1',
@@ -203,6 +224,42 @@ async function setUp(
       })
     },
   )
+  await page.route(/\/api\/v1\/container-engines\/docker\/images(\?.*)?$/, (route) => {
+    const search = new URL(route.request().url()).searchParams.get('search') ?? ''
+    seen.queries.push(new URL(route.request().url()).searchParams)
+    route.fulfill({
+      json: {
+        observed_at: '2026-10-04T10:00:00Z',
+        images: images.filter((image) => image.tags.some((tag) => tag.includes(search)) || !search),
+      },
+    })
+  })
+  await page.route(/\/api\/v1\/container-engines\/docker\/images\/[^/?]+(\?.*)?$/, (route) => {
+    const request = route.request()
+    const url = new URL(request.url())
+    if (request.method() === 'DELETE') {
+      seen.changes.push(`DELETE ${url.pathname}${url.search}`)
+      return route.fulfill({
+        json: { id: images[1]!.id, untagged: [], deleted: [images[1]!.id] },
+      })
+    }
+    return route.fulfill({
+      json: {
+        image: images[0],
+        architecture: 'amd64',
+        variant: null,
+        os: 'linux',
+        author: 'NGINX Docker Maintainers',
+        comment: null,
+        user: null,
+        working_directory: '/',
+        exposed_ports: ['80/tcp'],
+        volumes: [],
+        stop_signal: 'SIGQUIT',
+        layers: 7,
+      },
+    })
+  })
   await page.route(/\/api\/v1\/container-engines\/docker\/stats$/, (route) =>
     route.fulfill({ json: { observed_at: '2026-10-04T10:00:00Z', stats: [usage] } }),
   )
@@ -457,4 +514,52 @@ test('logs are offered from a container and only to accounts that may read them'
   await page.goto('/containers')
   await expect(page.getByRole('row').filter({ hasText: 'shop-web-1' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Logs of shop-web-1' })).toHaveCount(0)
+})
+
+test('images are listed, inspected and removed after confirming', async ({ page }) => {
+  const seen = await setUp(page)
+  await page.goto('/containers')
+  await page.getByRole('tab', { name: 'Images' }).click()
+  await expect(page).toHaveURL(/view=images/)
+  const nginx = page.getByRole('row').filter({ hasText: 'nginx:1.27' })
+  await expect(nginx).toContainText('192 MiB')
+  await expect(nginx).toContainText('1 container')
+  const dangling = page.getByRole('row').filter({ hasText: 'Nothing names it' })
+  await expect(dangling).toContainText('0 containers')
+
+  await nginx.getByRole('button', { name: 'nginx:1.27', exact: true }).click()
+  const sheet = page.getByRole('dialog', { name: 'nginx:1.27' })
+  await expect(sheet).toContainText('linux/amd64')
+  await expect(sheet).toContainText('80/tcp')
+  await expect(sheet).toContainText('NGINX Docker Maintainers')
+  await page.keyboard.press('Escape')
+
+  await page.getByRole('button', { name: 'Remove 0f9e8d7c6b5a' }).click()
+  const dialog = page.getByRole('alertdialog', { name: 'Remove 0f9e8d7c6b5a?' })
+  await dialog
+    .getByRole('checkbox', {
+      name: 'Remove it even if stopped containers use it or several tags name it',
+    })
+    .check()
+  await dialog.getByRole('button', { name: 'Remove' }).click()
+  await expect(page.getByText('0f9e8d7c6b5a removed')).toBeVisible()
+  expect(seen.changes).toEqual([
+    'DELETE /api/v1/container-engines/docker/images/sha256%3A0f9e8d7c6b5a49382716?force=true',
+  ])
+
+  await page.getByRole('searchbox', { name: 'Search images' }).fill('nginx')
+  await expect.poll(() => seen.queries.at(-1)?.get('search')).toBe('nginx')
+  await page.reload()
+  await expect(page.getByRole('tab', { name: 'Images', selected: true })).toBeVisible()
+})
+
+test('readers see images without removing them', async ({ page }) => {
+  await setUp(
+    page,
+    undefined,
+    ALL_PERMISSIONS.filter((permission) => permission !== 'containers.manage'),
+  )
+  await page.goto('/containers?view=images')
+  await expect(page.getByRole('row').filter({ hasText: 'nginx:1.27' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Remove / })).toHaveCount(0)
 })

@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { watchDebounced } from '@vueuse/core'
-import { Boxes, Container, RefreshCw, ScrollText, Search } from '@lucide/vue'
+import { Boxes, Container, Layers, RefreshCw, ScrollText, Search } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -15,7 +15,7 @@ import PageHeader from '@/components/PageHeader.vue'
 import StatusIndicator from '@/components/StatusIndicator.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
 import {
@@ -26,6 +26,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Table,
   TableBody,
@@ -41,6 +42,7 @@ import type { ContainerView } from '@/api/generated'
 import ContainerActions from './ContainerActions.vue'
 import ContainerDetailSheet from './ContainerDetailSheet.vue'
 import ContainerEngines from './ContainerEngines.vue'
+import ContainerImages from './ContainerImages.vue'
 import ContainerLogsSheet from './ContainerLogsSheet.vue'
 import {
   CONTAINER_STATES,
@@ -118,6 +120,25 @@ const state = computed({
   set: (value: string) => (draft.value.state = value === ALL ? '' : value),
 })
 const filtered = computed(() => Boolean(queried('search') || queried('state')))
+
+/** Which of the engine's things the page shows; the address keeps it. */
+const view = computed({
+  get: () => (route.query.view === 'images' ? 'images' : 'containers'),
+  set: (value: string) =>
+    void router.replace({
+      query: { ...route.query, view: value === 'images' ? value : undefined },
+    }),
+})
+/** Why the engine's things are not shown, if they are not. */
+const notice = computed(() => {
+  if (engine.value && !engine.value.enabled) {
+    return t('containers.list.engineDisabled', { engine: engineName(engine.value.id) })
+  }
+  if (engine.value && !engine.value.reachable) {
+    return t('containers.list.engineUnreachable', { engine: engineName(engine.value.id) })
+  }
+  return ''
+})
 
 const containers = useQuery(
   computed(() => ({
@@ -242,13 +263,16 @@ function refresh() {
       <ContainerEngines :engines="engineList" />
 
       <Card class="min-w-0">
-        <CardHeader>
-          <CardTitle class="flex items-center gap-2">
-            <Boxes class="size-4" aria-hidden="true" />{{ t('containers.list.title') }}
-          </CardTitle>
-        </CardHeader>
-        <CardContent class="flex flex-col gap-4">
-          <div class="flex flex-wrap items-center gap-2">
+        <Tabs v-model="view" class="gap-0">
+          <CardHeader class="flex flex-wrap items-center justify-between gap-2">
+            <TabsList>
+              <TabsTrigger value="containers">
+                <Boxes aria-hidden="true" />{{ t('containers.list.title') }}
+              </TabsTrigger>
+              <TabsTrigger value="images">
+                <Layers aria-hidden="true" />{{ t('containers.images.title') }}
+              </TabsTrigger>
+            </TabsList>
             <Select v-if="engineList.length > 1" v-model="selectedEngine">
               <SelectTrigger class="w-36" :aria-label="t('containers.list.engine')">
                 <SelectValue />
@@ -259,169 +283,179 @@ function refresh() {
                 </SelectItem>
               </SelectContent>
             </Select>
-            <div class="relative min-w-56 flex-1">
-              <Search
-                class="text-muted-foreground absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
-                aria-hidden="true"
-              />
-              <Input
-                v-model="draft.search"
-                type="search"
-                class="pl-8"
-                :placeholder="t('containers.list.searchPlaceholder')"
-                :aria-label="t('common.search')"
-              />
-            </div>
-            <Select v-model="state">
-              <SelectTrigger class="w-40" :aria-label="t('containers.list.state')">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem :value="ALL">{{ t('containers.list.allStates') }}</SelectItem>
-                <SelectItem v-for="option in CONTAINER_STATES" :key="option" :value="option">
-                  {{ t(`containers.states.${option}`) }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          </CardHeader>
+          <CardContent class="flex flex-col gap-4 pt-4">
+            <p v-if="notice" class="text-muted-foreground text-sm">{{ notice }}</p>
+            <TabsContent v-else value="containers" class="flex flex-col gap-4">
+              <div class="flex flex-wrap items-center gap-2">
+                <div class="relative min-w-56 flex-1">
+                  <Search
+                    class="text-muted-foreground absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
+                    aria-hidden="true"
+                  />
+                  <Input
+                    v-model="draft.search"
+                    type="search"
+                    class="pl-8"
+                    :placeholder="t('containers.list.searchPlaceholder')"
+                    :aria-label="t('common.search')"
+                  />
+                </div>
+                <Select v-model="state">
+                  <SelectTrigger class="w-40" :aria-label="t('containers.list.state')">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem :value="ALL">{{ t('containers.list.allStates') }}</SelectItem>
+                    <SelectItem v-for="option in CONTAINER_STATES" :key="option" :value="option">
+                      {{ t(`containers.states.${option}`) }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-          <p v-if="engine && !engine.enabled" class="text-muted-foreground text-sm">
-            {{ t('containers.list.engineDisabled', { engine: engineName(engine.id) }) }}
-          </p>
-          <p v-else-if="engine && !engine.reachable" class="text-muted-foreground text-sm">
-            {{ t('containers.list.engineUnreachable', { engine: engineName(engine.id) }) }}
-          </p>
-          <ApiFailureAlert
-            v-else-if="containers.isError.value && !containers.data.value"
-            :error="containers.error.value"
-            retryable
-            @retry="containers.refetch()"
-          />
-          <Skeleton
-            v-else-if="containers.isPending.value"
-            class="h-24 rounded-lg"
-            aria-busy="true"
-            :aria-label="t('state.loading')"
-          />
-          <div v-else-if="rows.length" class="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{{ t('containers.list.name') }}</TableHead>
-                  <TableHead>{{ t('containers.list.image') }}</TableHead>
-                  <TableHead>{{ t('containers.list.state') }}</TableHead>
-                  <TableHead>{{ t('containers.list.cpu') }}</TableHead>
-                  <TableHead>{{ t('containers.list.memory') }}</TableHead>
-                  <TableHead>{{ t('containers.list.ports') }}</TableHead>
-                  <TableHead class="hidden 2xl:table-cell">
-                    {{ t('containers.list.created') }}
-                  </TableHead>
-                  <TableHead v-if="actionable">
-                    <span class="sr-only">{{ t('common.actions') }}</span>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow v-for="{ container, usage: used } in listed" :key="container.id">
-                  <TableCell>
-                    <div class="flex flex-col gap-1">
-                      <Button
-                        v-if="can('containers.inspect')"
-                        variant="link"
-                        class="h-auto justify-start p-0 text-left font-medium break-all whitespace-normal"
-                        @click="inspect(container)"
+              <ApiFailureAlert
+                v-if="containers.isError.value && !containers.data.value"
+                :error="containers.error.value"
+                retryable
+                @retry="containers.refetch()"
+              />
+              <Skeleton
+                v-else-if="containers.isPending.value"
+                class="h-24 rounded-lg"
+                aria-busy="true"
+                :aria-label="t('state.loading')"
+              />
+              <div v-else-if="rows.length" class="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{{ t('containers.list.name') }}</TableHead>
+                      <TableHead>{{ t('containers.list.image') }}</TableHead>
+                      <TableHead>{{ t('containers.list.state') }}</TableHead>
+                      <TableHead>{{ t('containers.list.cpu') }}</TableHead>
+                      <TableHead>{{ t('containers.list.memory') }}</TableHead>
+                      <TableHead>{{ t('containers.list.ports') }}</TableHead>
+                      <TableHead class="hidden 2xl:table-cell">
+                        {{ t('containers.list.created') }}
+                      </TableHead>
+                      <TableHead v-if="actionable">
+                        <span class="sr-only">{{ t('common.actions') }}</span>
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow v-for="{ container, usage: used } in listed" :key="container.id">
+                      <TableCell>
+                        <div class="flex flex-col gap-1">
+                          <Button
+                            v-if="can('containers.inspect')"
+                            variant="link"
+                            class="h-auto justify-start p-0 text-left font-medium break-all whitespace-normal"
+                            @click="inspect(container)"
+                          >
+                            {{ container.names[0] ?? container.id }}
+                          </Button>
+                          <span v-else class="font-medium break-all">{{
+                            container.names[0] ?? container.id
+                          }}</span>
+                          <span class="flex flex-wrap items-center gap-1">
+                            <span class="text-muted-foreground font-mono text-xs">
+                              {{ container.id.slice(0, 12) }}
+                            </span>
+                            <Badge v-if="container.compose_project" variant="secondary">
+                              {{
+                                t('containers.list.project', { project: container.compose_project })
+                              }}
+                            </Badge>
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell class="font-mono text-xs break-all">{{
+                        container.image
+                      }}</TableCell>
+                      <TableCell>
+                        <div class="flex flex-col gap-1">
+                          <StatusIndicator
+                            :tone="stateTone(container.state)"
+                            :label="t(`containers.states.${container.state}`)"
+                          />
+                          <span class="text-muted-foreground text-xs">{{ container.status }}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell class="text-sm whitespace-nowrap tabular-nums">
+                        <span v-if="used">{{ used.cpu }}</span>
+                        <span v-else class="text-muted-foreground">—</span>
+                      </TableCell>
+                      <TableCell class="text-sm whitespace-nowrap tabular-nums">
+                        <div v-if="used" class="flex flex-col">
+                          <span>{{ used.memory }}</span>
+                          <span v-if="used.share" class="text-muted-foreground text-xs">
+                            {{ used.share }}
+                          </span>
+                        </div>
+                        <span v-else class="text-muted-foreground">—</span>
+                      </TableCell>
+                      <TableCell>
+                        <ul v-if="container.ports.length" class="flex flex-col gap-0.5">
+                          <li
+                            v-for="port in container.ports"
+                            :key="portLabel(port)"
+                            class="font-mono text-xs whitespace-nowrap"
+                          >
+                            {{ portLabel(port) }}
+                          </li>
+                        </ul>
+                        <span v-else class="text-muted-foreground text-sm">—</span>
+                      </TableCell>
+                      <TableCell
+                        class="text-muted-foreground hidden text-sm whitespace-nowrap 2xl:table-cell"
                       >
-                        {{ container.names[0] ?? container.id }}
-                      </Button>
-                      <span v-else class="font-medium break-all">{{
-                        container.names[0] ?? container.id
-                      }}</span>
-                      <span class="flex flex-wrap items-center gap-1">
-                        <span class="text-muted-foreground font-mono text-xs">
-                          {{ container.id.slice(0, 12) }}
-                        </span>
-                        <Badge v-if="container.compose_project" variant="secondary">
-                          {{ t('containers.list.project', { project: container.compose_project }) }}
-                        </Badge>
-                      </span>
-                    </div>
-                  </TableCell>
-                  <TableCell class="font-mono text-xs break-all">{{ container.image }}</TableCell>
-                  <TableCell>
-                    <div class="flex flex-col gap-1">
-                      <StatusIndicator
-                        :tone="stateTone(container.state)"
-                        :label="t(`containers.states.${container.state}`)"
-                      />
-                      <span class="text-muted-foreground text-xs">{{ container.status }}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell class="text-sm whitespace-nowrap tabular-nums">
-                    <span v-if="used">{{ used.cpu }}</span>
-                    <span v-else class="text-muted-foreground">—</span>
-                  </TableCell>
-                  <TableCell class="text-sm whitespace-nowrap tabular-nums">
-                    <div v-if="used" class="flex flex-col">
-                      <span>{{ used.memory }}</span>
-                      <span v-if="used.share" class="text-muted-foreground text-xs">
-                        {{ used.share }}
-                      </span>
-                    </div>
-                    <span v-else class="text-muted-foreground">—</span>
-                  </TableCell>
-                  <TableCell>
-                    <ul v-if="container.ports.length" class="flex flex-col gap-0.5">
-                      <li
-                        v-for="port in container.ports"
-                        :key="portLabel(port)"
-                        class="font-mono text-xs whitespace-nowrap"
-                      >
-                        {{ portLabel(port) }}
-                      </li>
-                    </ul>
-                    <span v-else class="text-muted-foreground text-sm">—</span>
-                  </TableCell>
-                  <TableCell
-                    class="text-muted-foreground hidden text-sm whitespace-nowrap 2xl:table-cell"
-                  >
-                    {{ container.created ? d(new Date(container.created), 'datetime') : '—' }}
-                  </TableCell>
-                  <TableCell v-if="actionable && engineId">
-                    <div class="flex items-center justify-end gap-1">
-                      <Button
-                        v-if="can('containers.inspect')"
-                        variant="ghost"
-                        size="icon-sm"
-                        :aria-label="
-                          t('containers.logs.open', { name: container.names[0] ?? container.id })
-                        "
-                        @click="readLogs(container)"
-                      >
-                        <ScrollText aria-hidden="true" />
-                      </Button>
-                      <ContainerActions
-                        v-if="can('containers.manage')"
-                        :engine="engineId"
-                        :container="container"
-                      />
-                    </div>
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-          </div>
-          <Empty v-else class="border border-dashed">
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                <Search v-if="filtered" aria-hidden="true" />
-                <Boxes v-else aria-hidden="true" />
-              </EmptyMedia>
-              <EmptyTitle>
-                {{ filtered ? t('containers.list.noMatch') : t('containers.list.empty') }}
-              </EmptyTitle>
-            </EmptyHeader>
-          </Empty>
-        </CardContent>
+                        {{ container.created ? d(new Date(container.created), 'datetime') : '—' }}
+                      </TableCell>
+                      <TableCell v-if="actionable && engineId">
+                        <div class="flex items-center justify-end gap-1">
+                          <Button
+                            v-if="can('containers.inspect')"
+                            variant="ghost"
+                            size="icon-sm"
+                            :aria-label="
+                              t('containers.logs.open', {
+                                name: container.names[0] ?? container.id,
+                              })
+                            "
+                            @click="readLogs(container)"
+                          >
+                            <ScrollText aria-hidden="true" />
+                          </Button>
+                          <ContainerActions
+                            v-if="can('containers.manage')"
+                            :engine="engineId"
+                            :container="container"
+                          />
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </div>
+              <Empty v-else class="border border-dashed">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <Search v-if="filtered" aria-hidden="true" />
+                    <Boxes v-else aria-hidden="true" />
+                  </EmptyMedia>
+                  <EmptyTitle>
+                    {{ filtered ? t('containers.list.noMatch') : t('containers.list.empty') }}
+                  </EmptyTitle>
+                </EmptyHeader>
+              </Empty>
+            </TabsContent>
+            <TabsContent v-if="!notice && engineId" value="images">
+              <ContainerImages :engine="engineId" />
+            </TabsContent>
+          </CardContent>
+        </Tabs>
       </Card>
       <ContainerDetailSheet
         v-if="inspecting && engineId"

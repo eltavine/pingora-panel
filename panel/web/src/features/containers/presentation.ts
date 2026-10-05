@@ -4,6 +4,7 @@ import type {
   ContainerLogStreamName,
   ContainerStateName,
   ContainerStatsView,
+  ImageView,
   PortMappingView,
 } from '@/api/generated'
 import type { StatusTone } from '@/components/StatusIndicator.vue'
@@ -131,4 +132,14 @@ export function logTailUrl(
 /** The share of its memory limit a container uses; none without a limit. */
 export function memoryShare(stats: ContainerStatsView): number | undefined {
   return stats.memory_limit_bytes > 0 ? stats.memory_bytes / stats.memory_limit_bytes : undefined
+}
+
+/** An image's ID as `docker images` shortens it: twelve digits without `sha256:`. */
+export function shortId(id: string): string {
+  return id.replace(/^sha256:/, '').slice(0, 12)
+}
+
+/** An image by its first tag, or its short ID when nothing names it. */
+export function imageName(image: Pick<ImageView, 'id' | 'tags'>): string {
+  return image.tags[0] ?? shortId(image.id)
 }

@@ -7,6 +7,9 @@ import type {
   ContainerStatsListView,
   ContainerStatsView,
   ContainerView,
+  ImageDetailView,
+  ImageListView,
+  ImageView,
 } from '@/api/generated'
 
 const GIB = 1024 ** 3
@@ -157,6 +160,36 @@ export function containerHandlers(): AnyHandler[] {
     }
   }
 
+  const images: ImageView[] = [
+    {
+      id: 'sha256:4f1c2a9be03d71aa6d2c1e8f4b7a9c3d',
+      tags: ['nginx:1.27'],
+      digests: ['nginx@sha256:9a8b7c6d5e4f'],
+      created: hoursAgo(24 * 30),
+      size_bytes: 192 * 1024 ** 2,
+      containers: 1,
+      labels: { maintainer: 'NGINX Docker Maintainers' },
+    },
+    {
+      id: 'sha256:a1b2c3d4e5f60718293a4b5c6d7e8f90',
+      tags: ['redis:7.4', 'redis:7'],
+      digests: [],
+      created: hoursAgo(24 * 12),
+      size_bytes: 117 * 1024 ** 2,
+      containers: 1,
+      labels: {},
+    },
+    {
+      id: 'sha256:0f9e8d7c6b5a49382716051f2e3d4c5b',
+      tags: [],
+      digests: [],
+      created: hoursAgo(24 * 60),
+      size_bytes: 88 * 1024 ** 2,
+      containers: 0,
+      labels: {},
+    },
+  ]
+
   const tail = ws.link(/\/api\/v1\/container-engines\/[^/]+\/containers\/[^/]+\/logs\/tail/)
 
   function missing(container: string) {
@@ -233,6 +266,67 @@ export function containerHandlers(): AnyHandler[] {
             },
           ],
         })
+      },
+    ),
+    http.get('*/api/v1/container-engines/:engine/images', ({ request }) => {
+      const search = (new URL(request.url).searchParams.get('search') ?? '').toLowerCase()
+      return HttpResponse.json({
+        observed_at: new Date().toISOString(),
+        images: images.filter(
+          (image) =>
+            !search ||
+            image.id.includes(search) ||
+            image.tags.some((tag) => tag.toLowerCase().includes(search)),
+        ),
+      } satisfies ImageListView)
+    }),
+    http.get<{ engine: string; image: string }>(
+      '*/api/v1/container-engines/:engine/images/:image',
+      ({ params }) => {
+        const found = images.find(
+          (image) => image.id === params.image || image.tags.includes(params.image),
+        )
+        if (!found) {
+          return missing(params.image)
+        }
+        return HttpResponse.json({
+          image: found,
+          architecture: 'amd64',
+          variant: null,
+          os: 'linux',
+          author: found.labels.maintainer ?? null,
+          comment: null,
+          user: null,
+          working_directory: '/',
+          exposed_ports: found.tags[0]?.startsWith('nginx') ? ['80/tcp'] : [],
+          volumes: [],
+          stop_signal: 'SIGQUIT',
+          layers: 7,
+        } satisfies ImageDetailView)
+      },
+    ),
+    http.delete<{ engine: string; image: string }>(
+      '*/api/v1/container-engines/:engine/images/:image',
+      ({ params }) => {
+        const index = images.findIndex((image) => image.id === params.image)
+        const found = images[index]
+        if (!found) {
+          return missing(params.image)
+        }
+        if (found.containers > 0) {
+          return HttpResponse.json(
+            {
+              type: 'about:blank',
+              title: 'Conflict',
+              status: 409,
+              code: 'CONFLICT',
+              detail: `unable to delete ${found.id} - image is being used by a container`,
+            },
+            { status: 409, headers: { 'content-type': 'application/problem+json' } },
+          )
+        }
+        images.splice(index, 1)
+        return HttpResponse.json({ id: found.id, untagged: found.tags, deleted: [found.id] })
       },
     ),
     http.get('*/api/v1/container-engines/:engine/stats', () =>
