@@ -289,6 +289,7 @@ fn an_empty_configuration_gains_an_http_block() {
     let lowered = read(&empty);
     let mut next = lowered.model.clone();
     next.upstreams.push(Upstream {
+        balancer: Default::default(),
         id: Uuid::now_v7(),
         name: "app".into(),
         nodes: Vec::new(),

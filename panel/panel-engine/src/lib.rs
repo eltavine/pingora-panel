@@ -20,8 +20,9 @@ pub use events::*;
 pub use fake::FakeGatewayEngine;
 pub use http::{problems as http_policy_problems, MOST_PREFLIGHT_SECONDS};
 pub use lua::{
-    problems as lua_problems, uses_lua, LEAST_LUA_MEMORY_BYTES, MOST_LUA_DICT_BYTES,
-    MOST_LUA_MEMORY_BYTES, MOST_LUA_SCRIPT_BYTES, MOST_LUA_TIME_MS, MOST_LUA_WORK,
+    problems as lua_problems, uses_lua, LEAST_LUA_DICT_BYTES, LEAST_LUA_MEMORY_BYTES,
+    MOST_LUA_DICT_BYTES, MOST_LUA_MEMORY_BYTES, MOST_LUA_SCRIPT_BYTES, MOST_LUA_TIME_MS,
+    MOST_LUA_WORK,
 };
 pub use ports::*;
 pub use resilience::{

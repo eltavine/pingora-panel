@@ -11,6 +11,7 @@ mod approvals;
 mod compile;
 mod edit;
 mod http;
+mod lua;
 mod model;
 mod query;
 mod revisions;
@@ -27,6 +28,10 @@ pub use approvals::{
 pub use compile::compile;
 pub use edit::{checked, NodeInput, RouteInput, SiteBundle, SiteInput, UpstreamInput};
 pub use http::{FieldChanges, HttpPolicy};
+pub use lua::{
+    lua_handlers, module_name, LuaCode, LuaConfig, LuaFallback, LuaLogLevel, LuaPermissions,
+    LuaScope, LuaSharedDict, LUA_DIRECTORY,
+};
 pub use model::{
     entity_tag, Action, ConfigModel, Domain, Listener, MatchKind, Route, RouteCondition,
     RouteMatch, Site, SiteKind, TlsProfile, TlsProfileInput, Upstream, UpstreamNode, UpstreamRetry,

@@ -35,6 +35,7 @@ impl<'a> Lowerer<'a> {
         let id = self.identity(file, directive, depth);
         let now = self.options.now;
         let mut upstream = Upstream {
+            balancer: Default::default(),
             id,
             name,
             nodes: Vec::new(),

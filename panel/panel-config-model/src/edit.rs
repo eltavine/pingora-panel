@@ -214,6 +214,7 @@ fn routes_from(inputs: Vec<RouteInput>, existing: &[Route]) -> Vec<Route> {
                 .id
                 .and_then(|id| existing.iter().find(|route| route.id == id));
             Route {
+                lua: kept.map(|route| route.lua.clone()).unwrap_or_default(),
                 id: kept.map_or_else(Uuid::now_v7, |route| route.id),
                 name: input.name,
                 enabled: input.enabled,
@@ -284,6 +285,7 @@ impl ConfigModel {
     pub fn create_site(&mut self, input: SiteInput, now: DateTime<Utc>) -> Uuid {
         let id = Uuid::now_v7();
         self.sites.push(Site {
+            lua: Default::default(),
             id,
             name: input.name,
             action: input.action,
@@ -313,6 +315,7 @@ impl ConfigModel {
         let site = self.live_site_mut(id, now)?;
         let routes = routes_from(input.routes, &site.routes);
         *site = Site {
+            lua: std::mem::take(&mut site.lua),
             id,
             name: input.name,
             action: input.action,
@@ -502,6 +505,7 @@ impl ConfigModel {
             .expect("route_site found the route");
         let access_log = input.access_log.unwrap_or_else(|| slot.access_log.clone());
         *slot = Route {
+            lua: std::mem::take(&mut slot.lua),
             id: route,
             name: input.name,
             enabled: input.enabled,
@@ -566,6 +570,7 @@ impl ConfigModel {
     pub fn create_upstream(&mut self, input: UpstreamInput, now: DateTime<Utc>) -> Uuid {
         let id = Uuid::now_v7();
         self.upstreams.push(Upstream {
+            balancer: Default::default(),
             id,
             name: input.name,
             nodes: nodes_from(input.nodes, &[]),
@@ -595,6 +600,7 @@ impl ConfigModel {
         let upstream = self.upstream_mut(id, now)?;
         let nodes = nodes_from(input.nodes, &upstream.nodes);
         *upstream = Upstream {
+            balancer: upstream.balancer.take(),
             id,
             name: input.name,
             nodes,
@@ -1006,6 +1012,20 @@ mod tests {
         }
     }
 
+    fn replaced_route(route: &Route) -> RouteInput {
+        RouteInput {
+            id: Some(route.id),
+            name: route.name.clone(),
+            enabled: route.enabled,
+            priority: route.priority,
+            matcher: route.matcher.clone(),
+            action: route.action.clone(),
+            security_policy_id: None,
+            http_policy_id: None,
+            access_log: None,
+        }
+    }
+
     fn maintenance() -> Action {
         Action::Respond {
             status: 503,
@@ -1045,7 +1065,7 @@ mod tests {
     }
 
     #[test]
-    fn edits_without_logging_settings_keep_them() {
+    fn form_edits_keep_logging_and_lua_settings() {
         let now = Utc::now();
         let mut model = ConfigModel::default();
         let mut created = input("shop", &["shop.example.com"], maintenance());
@@ -1073,6 +1093,11 @@ mod tests {
             }),
         });
         let id = model.create_site(created, now);
+        {
+            let site = model.sites.iter_mut().find(|site| site.id == id).unwrap();
+            site.lua.access = Some(crate::LuaCode::inline("ngx.exit(403)"));
+            site.routes[0].lua.debug = Some(true);
+        }
         let site = model.site(id).unwrap().clone();
         assert_eq!(site.access_log.enabled, Some(false));
 
@@ -1093,6 +1118,13 @@ mod tests {
         let kept = model.site(id).unwrap();
         assert_eq!(kept.access_log, site.access_log);
         assert_eq!(kept.routes[0].access_log, route.access_log);
+        assert_eq!(kept.lua, site.lua);
+        assert_eq!(kept.routes[0].lua, route.lua);
+        let route_id = route.id;
+        let mut route_input = replaced_route(&kept.routes[0]);
+        route_input.name = Some("api-2".into());
+        model.replace_route(route_id, route_input, now).unwrap();
+        assert_eq!(model.site(id).unwrap().routes[0].lua, route.lua);
 
         let mut cleared = input("shop", &["shop.example.com"], maintenance());
         cleared.access_log = Some(AccessLog::default());

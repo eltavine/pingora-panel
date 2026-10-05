@@ -17,7 +17,8 @@ pub const MOST_LUA_SCRIPT_BYTES: usize = 1 << 20;
 /// The least and most memory a VM may be given.
 pub const LEAST_LUA_MEMORY_BYTES: u64 = 1 << 20;
 pub const MOST_LUA_MEMORY_BYTES: u64 = 4 << 30;
-/// The largest shared dictionary.
+/// The smallest and largest shared dictionary.
+pub const LEAST_LUA_DICT_BYTES: u64 = 8 << 10;
 pub const MOST_LUA_DICT_BYTES: u64 = 4 << 30;
 
 /// Whether `snapshot` carries scripts.
@@ -189,7 +190,7 @@ pub fn problems(snapshot: &RuntimeSnapshot) -> Vec<(String, String)> {
                 format!("shared dictionary {} is declared twice", dict.name),
             ));
         }
-        if dict.capacity_bytes < 8 << 10 || dict.capacity_bytes > MOST_LUA_DICT_BYTES {
+        if dict.capacity_bytes < LEAST_LUA_DICT_BYTES || dict.capacity_bytes > MOST_LUA_DICT_BYTES {
             found.push((
                 "lua".into(),
                 format!(

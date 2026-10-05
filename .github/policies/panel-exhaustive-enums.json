@@ -171,6 +171,12 @@
     },
     {
       "package": "panel-config-model",
+      "name": "LuaCode",
+      "owner": "pingora-panel-platform",
+      "reason": "A handler's code is written where it is declared or kept in a file of the configuration; there is no third place, and compiling, validating and printing must handle both."
+    },
+    {
+      "package": "panel-config-model",
       "name": "RouteCondition",
       "owner": "pingora-panel-platform",
       "reason": "Compiling to the IR, validating and printing in the configuration language handle each condition; a new kind must fail to compile there rather than being dropped from a route or its files."

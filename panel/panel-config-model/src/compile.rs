@@ -1,5 +1,6 @@
 //! Compiles the editable model into an engine-neutral runtime snapshot.
 
+use crate::lua::{self, LuaConfig, LuaScope, Scripts};
 use crate::model::{
     Action, ConfigModel, MatchKind, Route, RouteCondition, Site, TlsProfile, ValueTest,
 };
@@ -11,9 +12,9 @@ use panel_ir::logging::LOGGING_CAPABILITY;
 use panel_ir::template::{uses_variables, TEMPLATE_CAPABILITY};
 use panel_ir::tls::{HSTS_CAPABILITY, TLS_SETTINGS_CAPABILITY};
 use panel_ir::{
-    CapabilityRequirement, DomainSpec, ListenerRef, LoadBalancingPolicy, RouteAction, RouteMatcher,
-    RouteSpec, RuntimeSnapshot, SiteSpec, StaticContentPolicy, UpstreamEndpoint, UpstreamPoolSpec,
-    WwwRedirect, HTTP_POLICIES_CAPABILITY,
+    CapabilityRequirement, DomainSpec, ListenerRef, LoadBalancingPolicy, LuaProgram, RouteAction,
+    RouteMatcher, RouteSpec, RuntimeSnapshot, SiteSpec, StaticContentPolicy, UpstreamEndpoint,
+    UpstreamPoolSpec, WwwRedirect, HTTP_POLICIES_CAPABILITY, LUA_SCRIPTS_CAPABILITY,
 };
 use panel_ir::{
     REQUEST_HEAD_TIMEOUT_CAPABILITY, REQUEST_SECURITY_CAPABILITY, ROUTE_CONDITIONS_CAPABILITY,
@@ -39,6 +40,8 @@ pub fn compile(
         snapshot: RuntimeSnapshot::empty(revision),
         capabilities: BTreeSet::new(),
         diagnostics: Vec::new(),
+        lua: &model.lua,
+        scripts: Scripts::default(),
     };
     let live: Vec<&Site> = model
         .sites
@@ -115,6 +118,7 @@ pub fn compile(
     if !model.logging.is_default() {
         compiler.capabilities.insert(LOGGING_CAPABILITY);
     }
+    compiler.lua_program();
     if !compiler.diagnostics.is_empty() {
         return Err(compiler.diagnostics);
     }
@@ -128,13 +132,15 @@ pub fn compile(
     Ok(snapshot)
 }
 
-struct Compiler {
+struct Compiler<'m> {
     snapshot: RuntimeSnapshot,
     capabilities: BTreeSet<&'static str>,
     diagnostics: Vec<Diagnostic>,
+    lua: &'m LuaConfig,
+    scripts: Scripts,
 }
 
-impl Compiler {
+impl Compiler<'_> {
     fn fail(&mut self, resource: String, message: String) {
         self.diagnostics
             .push(Diagnostic::error(ErrorCode::VALIDATION_FAILED, message).with_resource(resource));
@@ -230,6 +236,10 @@ impl Compiler {
         pool.circuit_breaker = resilience.circuit_breaker;
         pool.max_requests = resilience.max_requests;
         pool.queue = resilience.queue;
+        pool.balancer = upstream.balancer.as_ref().map(|code| {
+            let id = self.scripts.add(code, &self.lua.files);
+            lua::handler(id, &self.lua.http)
+        });
         if panel_engine::uses_resilience(&pool) {
             self.capabilities.insert(UPSTREAM_RESILIENCE_CAPABILITY);
         }
@@ -276,12 +286,14 @@ impl Compiler {
         {
             self.capabilities.insert("site.redirect");
         }
+        let scope = site.lua.over(&self.lua.http);
+        compiled.lua = lua::handlers(&scope, &mut self.scripts, &self.lua.files, false);
         self.snapshot.sites.push(compiled);
 
         for route in &site.routes {
-            self.route(site, route);
+            self.route(site, route, &scope);
         }
-        let action = self.action(&site.action, &format!("{}-site", site.id));
+        let action = self.action(&site.action, &format!("{}-site", site.id), &scope);
         let mut fallback = RouteSpec::new(
             route_id(&format!("{}-site", site.id)),
             id,
@@ -292,10 +304,11 @@ impl Compiler {
             action,
         );
         fallback.name = Some("site".into());
+        fallback.lua = lua::handlers(&scope, &mut self.scripts, &self.lua.files, true);
         self.snapshot.routes.push(fallback);
     }
 
-    fn route(&mut self, site: &Site, route: &Route) {
+    fn route(&mut self, site: &Site, route: &Route, site_scope: &LuaScope) {
         let resource = format!("sites/{}/routes/{}", site.id, route.id);
         let matcher = match route.matcher.kind {
             MatchKind::Exact => {
@@ -337,7 +350,8 @@ impl Compiler {
                 }
             }
         };
-        let action = self.action(&route.action, &route.id.to_string());
+        let scope = route.lua.over(site_scope);
+        let action = self.action(&route.action, &route.id.to_string(), &scope);
         let mut compiled = RouteSpec::new(
             route_id(&route.id.to_string()),
             site_id(site.id),
@@ -359,10 +373,38 @@ impl Compiler {
         if !route.access_log.is_unset() {
             self.capabilities.insert(LOGGING_CAPABILITY);
         }
+        compiled.lua = lua::handlers(&scope, &mut self.scripts, &self.lua.files, true);
         self.snapshot.routes.push(compiled);
     }
 
-    fn action(&mut self, action: &Action, owner: &str) -> RouteAction {
+    /// The scripts the handlers use and the modules they may load, once
+    /// any handler is compiled.
+    fn lua_program(&mut self) {
+        let config = self.lua;
+        let mut program = LuaProgram {
+            disabled: config.disabled,
+            init: config
+                .init
+                .as_ref()
+                .map(|code| lua::handler(self.scripts.add(code, &config.files), &config.http)),
+            init_worker: config
+                .init_worker
+                .as_ref()
+                .map(|code| lua::handler(self.scripts.add(code, &config.files), &config.http)),
+            ..LuaProgram::default()
+        };
+        if self.scripts.is_empty() {
+            return;
+        }
+        self.scripts.modules(&config.files);
+        program.scripts = std::mem::take(&mut self.scripts).into_scripts();
+        program.shared_dicts.clone_from(&config.shared_dicts);
+        program.memory_limit_bytes = config.memory_limit_bytes.unwrap_or(0);
+        self.snapshot.lua = program;
+        self.capabilities.insert(LUA_SCRIPTS_CAPABILITY);
+    }
+
+    fn action(&mut self, action: &Action, owner: &str, scope: &LuaScope) -> RouteAction {
         match action {
             Action::Proxy { upstream_id } => RouteAction::Proxy {
                 upstream_pool_id: pool_id(*upstream_id),
@@ -414,6 +456,9 @@ impl Compiler {
                     retry_after_seconds: *retry_after_seconds,
                 }
             }
+            Action::Lua { code } => RouteAction::Lua {
+                handler: lua::handler(self.scripts.add(code, &self.lua.files), scope),
+            },
         }
     }
 }
@@ -514,6 +559,7 @@ mod tests {
 
     fn model() -> (ConfigModel, Uuid) {
         let upstream = Upstream {
+            balancer: Default::default(),
             id: Uuid::now_v7(),
             name: "app".into(),
             nodes: vec![UpstreamNode {
@@ -543,6 +589,7 @@ mod tests {
             updated_at: Utc::now(),
         };
         let site = Site {
+            lua: Default::default(),
             id: Uuid::now_v7(),
             name: "shop".into(),
             action: Action::Proxy {
@@ -557,6 +604,7 @@ mod tests {
                 tls_profile_id: None,
             }],
             routes: vec![Route {
+                lua: Default::default(),
                 id: Uuid::now_v7(),
                 name: Some("assets".into()),
                 enabled: true,
@@ -594,6 +642,7 @@ mod tests {
         };
         let site_id = site.id;
         let model = ConfigModel {
+            lua: Default::default(),
             listeners: vec![Listener {
                 id: "http".into(),
                 address: "0.0.0.0:80".into(),
@@ -640,6 +689,113 @@ mod tests {
             .iter()
             .any(|capability| capability.name == LOGGING_CAPABILITY));
         assert!(snapshot.has_valid_content_hash());
+    }
+
+    #[test]
+    fn lua_handlers_are_inherited_from_http_through_sites_to_routes() {
+        use crate::lua::{LuaCode, LuaPermissions, LuaScope, LuaSharedDict};
+        let (mut model, _) = model();
+        let unused = plain_route_count(&compile(&model, RevisionId::new(1)).unwrap());
+        assert!(unused > 0);
+        model.lua.files.insert(
+            "lua/auth.lua".into(),
+            "return { check = function() end }".into(),
+        );
+        model
+            .lua
+            .files
+            .insert("lua/pick/init.lua".into(), "return 1".into());
+        model.lua.init = Some(LuaCode::inline("cache = {}"));
+        model.lua.shared_dicts.push(LuaSharedDict {
+            name: "hits".into(),
+            capacity_bytes: 1 << 20,
+        });
+        model.lua.http = LuaScope {
+            access: Some(LuaCode::Inline {
+                code: "require('auth').check()".into(),
+                file: Some("main.conf".into()),
+                line: 4,
+            }),
+            log: Some(LuaCode::inline("local n = 1")),
+            time_limit_ms: Some(50),
+            allow: Some(LuaPermissions {
+                upstream: true,
+                ..LuaPermissions::default()
+            }),
+            ..LuaScope::default()
+        };
+        model.sites[0].lua = LuaScope {
+            server_rewrite: Some(LuaCode::inline("ngx.req.set_uri('/x')")),
+            time_limit_ms: Some(20),
+            ..LuaScope::default()
+        };
+        model.sites[0].routes[0].lua = LuaScope {
+            access: Some(LuaCode::file("lua/auth.lua")),
+            debug: Some(true),
+            ..LuaScope::default()
+        };
+        model.sites[0].routes[0].action = Action::Lua {
+            code: LuaCode::inline("ngx.say('hi')"),
+        };
+        model.upstreams[0].balancer = Some(LuaCode::file("lua/pick/init.lua"));
+        let snapshot = compile(&model, RevisionId::new(2)).unwrap();
+
+        let site = &snapshot.sites[0].lua;
+        assert_eq!(site.server_rewrite.as_ref().unwrap().time_limit_ms, 20);
+        assert_eq!(site.access.as_ref().unwrap().script_id, "main.conf:4");
+        let route = snapshot
+            .routes
+            .iter()
+            .find(|route| route.name.as_deref() == Some("assets"))
+            .unwrap();
+        let access = route.lua.access.as_ref().unwrap();
+        assert_eq!(access.script_id, "lua/auth.lua");
+        assert_eq!(access.time_limit_ms, 20);
+        assert!(access.debug && access.allow.upstream);
+        assert!(route.lua.server_rewrite.is_none());
+        assert!(route.lua.log.is_some());
+        let RouteAction::Lua { handler } = &route.action else {
+            panic!("the route answers with Lua");
+        };
+        assert!(handler.debug);
+        let fallback = snapshot
+            .routes
+            .iter()
+            .find(|route| route.name.as_deref() == Some("site"))
+            .unwrap();
+        assert_eq!(
+            fallback.lua.access.as_ref().unwrap().script_id,
+            "main.conf:4"
+        );
+        assert!(fallback.lua.server_rewrite.is_none());
+        let balancer = snapshot.upstream_pools[0].balancer.as_ref().unwrap();
+        assert_eq!(balancer.script_id, "lua/pick/init.lua");
+        assert_eq!(balancer.time_limit_ms, 50);
+
+        let program = &snapshot.lua;
+        assert!(program.init.is_some());
+        assert_eq!(program.shared_dicts.len(), 1);
+        let modules: Vec<_> = program
+            .scripts
+            .iter()
+            .filter_map(|script| script.module.as_deref())
+            .collect();
+        assert_eq!(modules, ["auth", "pick"]);
+        assert!(snapshot
+            .required_capabilities
+            .iter()
+            .any(|capability| capability.name == LUA_SCRIPTS_CAPABILITY));
+        assert_eq!(panel_engine::lua_problems(&snapshot), Vec::new());
+        assert!(snapshot.has_valid_content_hash());
+    }
+
+    fn plain_route_count(snapshot: &RuntimeSnapshot) -> usize {
+        assert!(snapshot.lua.is_empty());
+        assert!(!snapshot
+            .required_capabilities
+            .iter()
+            .any(|capability| capability.name == LUA_SCRIPTS_CAPABILITY));
+        snapshot.routes.len()
     }
 
     #[test]

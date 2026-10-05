@@ -19,6 +19,7 @@ impl<'a> Lowerer<'a> {
         let id = self.identity(file, directive, depth);
         let mut draft = RouteDraft {
             route: Route {
+                lua: Default::default(),
                 id,
                 name: None,
                 enabled: true,

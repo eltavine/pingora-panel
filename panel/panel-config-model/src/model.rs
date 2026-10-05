@@ -1,6 +1,7 @@
 //! The editable configuration document.
 
 use crate::http::HttpPolicy;
+use crate::lua::{LuaCode, LuaConfig, LuaScope};
 use crate::security::SecurityPolicy;
 use chrono::{DateTime, Utc};
 use panel_domain::{CertificateId, ContentHash, NormalizedHost};
@@ -46,6 +47,9 @@ pub struct ConfigModel {
     /// Logging for every site, and what is never logged.
     #[serde(default, skip_serializing_if = "LoggingPolicy::is_default")]
     pub logging: LoggingPolicy,
+    /// Lua scripts and what every site runs.
+    #[serde(default, skip_serializing_if = "LuaConfig::is_default")]
+    pub lua: LuaConfig,
 }
 
 /// A certificate and the TLS settings listeners and hosts serve it with.
@@ -236,6 +240,10 @@ pub struct Site {
     /// How the site's requests are logged, over the settings for every site.
     #[serde(default, skip_serializing_if = "AccessLog::is_unset")]
     pub access_log: AccessLog,
+    /// The Lua handlers and terms of the site's requests, over those for
+    /// every site.
+    #[serde(default, skip_serializing_if = "LuaScope::is_empty")]
+    pub lua: LuaScope,
     #[serde(default)]
     pub group: Option<String>,
     #[serde(default)]
@@ -258,6 +266,7 @@ impl Site {
             Action::Static { .. } => SiteKind::Static,
             Action::Redirect { .. } => SiteKind::Redirect,
             Action::Respond { .. } => SiteKind::Maintenance,
+            Action::Lua { .. } => SiteKind::Script,
         }
     }
 
@@ -275,6 +284,8 @@ pub enum SiteKind {
     Static,
     Redirect,
     Maintenance,
+    /// Answered by a Lua script.
+    Script,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -318,6 +329,9 @@ pub struct Route {
     /// How the route's requests are logged, over its site's settings.
     #[serde(default, skip_serializing_if = "AccessLog::is_unset")]
     pub access_log: AccessLog,
+    /// The Lua handlers and terms of the route's requests, over its site's.
+    #[serde(default, skip_serializing_if = "LuaScope::is_empty")]
+    pub lua: LuaScope,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -478,6 +492,10 @@ pub enum Action {
         #[serde(default)]
         retry_after_seconds: Option<u32>,
     },
+    /// Answers with a Lua script, as `content_by_lua` does.
+    Lua {
+        code: LuaCode,
+    },
 }
 
 fn default_index_files() -> Vec<String> {
@@ -525,6 +543,10 @@ pub struct Upstream {
     /// Where requests over `max_requests` wait instead of getting 503.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue: Option<UpstreamQueue>,
+    /// Chooses the endpoint of each attempt, as `balancer_by_lua` does; it
+    /// runs on the terms set for every site.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub balancer: Option<LuaCode>,
     #[serde(default)]
     pub note: Option<String>,
     pub created_at: DateTime<Utc>,

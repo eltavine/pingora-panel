@@ -2,6 +2,7 @@
 //! value syntax. Engine-neutral IR validation still runs on the compiled
 //! snapshot; this layer exists so problems point at the resource to fix.
 
+use crate::lua::{lua_handlers, module_name, LuaCode, LuaFallback, LuaScope};
 use crate::model::{Action, ConfigModel, MatchKind, Route, Site};
 use panel_domain::{EndpointAddress, IpNetwork};
 use panel_errors::{Diagnostic, ErrorCode};
@@ -44,6 +45,7 @@ pub fn validate(model: &ConfigModel) -> Vec<Diagnostic> {
         .map(|site| site.id)
         .collect();
     let listeners = validate_listeners(model, &tls_profiles, &live_sites, &mut report);
+    validate_lua(model, &mut report);
 
     let mut names = BTreeMap::new();
     let mut hosts = BTreeMap::new();
@@ -496,6 +498,171 @@ fn validate_route(
     check_action(&route.action, &resource, upstreams, report);
 }
 
+fn validate_lua(model: &ConfigModel, report: &mut Report) {
+    let lua = &model.lua;
+    let mut modules = BTreeMap::new();
+    for (path, source) in &lua.files {
+        match module_name(path) {
+            None => report.error(
+                path,
+                format!(
+                    "{path:?} is not a Lua file name: files are lua/<name>.lua, with directories \
+                     and names of letters, digits, '_' and '-'"
+                ),
+            ),
+            Some(name) => {
+                if let Some(other) = modules.insert(name.clone(), path) {
+                    report.error(path, format!("{other} and {path} are both module {name}"));
+                }
+            }
+        }
+        if source.len() > panel_engine::MOST_LUA_SCRIPT_BYTES {
+            report.error(path, format!("{path} is larger than 1 MiB"));
+        }
+    }
+    for (resource, phase, code) in lua_handlers(model) {
+        match code {
+            LuaCode::File { path } if !lua.files.contains_key(path) => report.error(
+                &resource,
+                format!(
+                    "the {phase} handler runs {path}, which is not a Lua file of the configuration"
+                ),
+            ),
+            LuaCode::Inline { code, line, .. } => {
+                if code.len() > panel_engine::MOST_LUA_SCRIPT_BYTES {
+                    report.error(
+                        &resource,
+                        format!("the {phase} handler is larger than 1 MiB"),
+                    );
+                }
+                if *line == 0 {
+                    report.error(
+                        &resource,
+                        format!("the {phase} handler starts on line 0; lines count from 1"),
+                    );
+                }
+            }
+            LuaCode::File { .. } => {}
+        }
+    }
+    check_lua_scope(&lua.http, "lua", false, report);
+    for site in model.sites.iter().filter(|site| !site.is_deleted()) {
+        let resource = format!("sites/{}", site.id);
+        check_lua_scope(&site.lua, &resource, false, report);
+        for route in &site.routes {
+            check_lua_scope(
+                &route.lua,
+                &format!("{resource}/routes/{}", route.id),
+                true,
+                report,
+            );
+        }
+    }
+    if let Some(bytes) = lua.memory_limit_bytes {
+        let range = panel_engine::LEAST_LUA_MEMORY_BYTES..=panel_engine::MOST_LUA_MEMORY_BYTES;
+        if !range.contains(&bytes) {
+            report.error(
+                "lua",
+                format!("a VM's memory limit of {bytes} bytes is not 1 MiB to 4 GiB"),
+            );
+        }
+    }
+    let mut dicts = BTreeSet::new();
+    for dict in &lua.shared_dicts {
+        let valid = !dict.name.is_empty()
+            && dict.name.len() <= 64
+            && dict
+                .name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_');
+        if !valid {
+            report.error(
+                "lua",
+                format!(
+                    "{:?} is not a shared dictionary name: use up to 64 letters, digits and '_'",
+                    dict.name
+                ),
+            );
+        } else if !dicts.insert(dict.name.as_str()) {
+            report.error(
+                "lua",
+                format!("shared dictionary {} is declared twice", dict.name),
+            );
+        }
+        let range = panel_engine::LEAST_LUA_DICT_BYTES..=panel_engine::MOST_LUA_DICT_BYTES;
+        if !range.contains(&dict.capacity_bytes) {
+            report.error(
+                "lua",
+                format!(
+                    "shared dictionary {} holds {} bytes, not 8 KiB to 4 GiB",
+                    dict.name, dict.capacity_bytes
+                ),
+            );
+        }
+    }
+    let upstream_allowed = lua.http.allow.is_some_and(|allow| allow.upstream);
+    for upstream in &model.upstreams {
+        if upstream.balancer.is_some() && !upstream_allowed {
+            report.error(
+                format!("upstreams/{}", upstream.id),
+                format!(
+                    "upstream {} chooses its endpoints with a Lua balancer, which needs the \
+                     upstream permission for every site (lua_allow upstream in http)",
+                    upstream.name
+                ),
+            );
+        }
+    }
+}
+
+fn check_lua_scope(scope: &LuaScope, resource: &str, route: bool, report: &mut Report) {
+    if route && scope.server_rewrite.is_some() {
+        report.error(
+            resource,
+            "server_rewrite handlers run before the route is chosen, so a route cannot have one",
+        );
+    }
+    for (term, value, most) in [
+        (
+            "time limit",
+            scope.time_limit_ms,
+            panel_engine::MOST_LUA_TIME_MS,
+        ),
+        (
+            "slow threshold",
+            scope.slow_threshold_ms,
+            panel_engine::MOST_LUA_TIME_MS,
+        ),
+    ] {
+        if value.is_some_and(|ms| ms == 0 || ms > most) {
+            report.error(
+                resource,
+                format!("the Lua {term} must be 1 ms to {most} ms"),
+            );
+        }
+    }
+    if scope
+        .work_limit
+        .is_some_and(|work| work == 0 || work > panel_engine::MOST_LUA_WORK)
+    {
+        report.error(
+            resource,
+            format!(
+                "the Lua work limit must be 1 to {}",
+                panel_engine::MOST_LUA_WORK
+            ),
+        );
+    }
+    if let Some(LuaFallback::Status { status }) = scope.on_error {
+        if !(200..=599).contains(&status) {
+            report.error(
+                resource,
+                format!("a Lua failure cannot answer {status}; use 200 to 599"),
+            );
+        }
+    }
+}
+
 fn check_action(action: &Action, resource: &str, upstreams: &BTreeSet<Uuid>, report: &mut Report) {
     match action {
         Action::Proxy { upstream_id } if !upstreams.contains(upstream_id) => {
@@ -562,7 +729,7 @@ fn check_action(action: &Action, resource: &str, upstreams: &BTreeSet<Uuid>, rep
                 report.error(resource, format!("the response body is invalid: {error}"));
             }
         }
-        Action::Proxy { .. } => {}
+        Action::Proxy { .. } | Action::Lua { .. } => {}
     }
 }
 
@@ -666,6 +833,7 @@ mod tests {
 
     pub(crate) fn site(name: &str, hosts: &[&str], action: Action) -> Site {
         Site {
+            lua: Default::default(),
             id: Uuid::now_v7(),
             name: name.into(),
             action,
@@ -701,6 +869,7 @@ mod tests {
 
     fn upstream() -> Upstream {
         Upstream {
+            balancer: Default::default(),
             id: Uuid::now_v7(),
             name: "app".into(),
             nodes: vec![UpstreamNode {
@@ -750,6 +919,79 @@ mod tests {
             },
         ));
         model.upstreams.push(upstream);
+        assert!(validate(&model).is_empty(), "{:?}", messages(&model));
+    }
+
+    #[test]
+    fn lua_problems_name_the_level_that_has_them() {
+        use crate::lua::{LuaCode, LuaFallback, LuaScope, LuaSharedDict};
+        let mut upstream = upstream();
+        upstream.balancer = Some(LuaCode::file("lua/pick.lua"));
+        let mut model = ConfigModel::default();
+        let mut shop = site(
+            "shop",
+            &["shop.example.com"],
+            Action::Proxy {
+                upstream_id: upstream.id,
+            },
+        );
+        shop.lua.time_limit_ms = Some(0);
+        model.sites.push(shop);
+        model.upstreams.push(upstream);
+        for (path, text) in [
+            ("lua/pick.lua", "return 1"),
+            ("lua/a.lua", ""),
+            ("lua/a/init.lua", ""),
+            ("lua/bad name.lua", ""),
+        ] {
+            model.lua.files.insert(path.into(), text.into());
+        }
+        model.lua.http = LuaScope {
+            access: Some(LuaCode::file("lua/missing.lua")),
+            on_error: Some(LuaFallback::Status { status: 700 }),
+            ..LuaScope::default()
+        };
+        model.lua.shared_dicts = vec![
+            LuaSharedDict {
+                name: "bad-name".into(),
+                capacity_bytes: 1 << 20,
+            },
+            LuaSharedDict {
+                name: "tiny".into(),
+                capacity_bytes: 1,
+            },
+        ];
+        model.lua.memory_limit_bytes = Some(1);
+        let found = messages(&model);
+        for expected in [
+            "lua/a.lua and lua/a/init.lua are both module a",
+            "\"lua/bad name.lua\" is not a Lua file name",
+            "runs lua/missing.lua, which is not a Lua file of the configuration",
+            "cannot answer 700",
+            "the Lua time limit must be 1 ms",
+            "\"bad-name\" is not a shared dictionary name",
+            "shared dictionary tiny holds 1 bytes",
+            "memory limit of 1 bytes",
+            "needs the upstream permission",
+        ] {
+            assert!(
+                found.iter().any(|message| message.contains(expected)),
+                "{expected}: {found:?}"
+            );
+        }
+
+        let mut model = ConfigModel::default();
+        let mut shop = site(
+            "shop",
+            &["shop.example.com"],
+            Action::Lua {
+                code: LuaCode::inline("ngx.say('hi')"),
+            },
+        );
+        if let Some(route) = shop.routes.first_mut() {
+            route.lua.server_rewrite = Some(LuaCode::inline(""));
+        }
+        model.sites.push(shop);
         assert!(validate(&model).is_empty(), "{:?}", messages(&model));
     }
 
@@ -983,6 +1225,7 @@ mod tests {
         shop.domains[0].primary = true;
         shop.domains[1].redirect = true;
         shop.routes.push(Route {
+            lua: Default::default(),
             id: Uuid::now_v7(),
             name: None,
             enabled: true,

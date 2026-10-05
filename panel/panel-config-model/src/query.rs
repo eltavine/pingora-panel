@@ -98,6 +98,8 @@ pub struct SiteSummary {
     pub static_sites: usize,
     pub redirect: usize,
     pub maintenance: usize,
+    /// Sites a Lua script answers.
+    pub script: usize,
     pub deleted: usize,
 }
 
@@ -122,6 +124,7 @@ pub fn summarize(model: &ConfigModel, abnormal: &BTreeSet<Uuid>) -> SiteSummary 
             SiteKind::Static => summary.static_sites += 1,
             SiteKind::Redirect => summary.redirect += 1,
             SiteKind::Maintenance => summary.maintenance += 1,
+            SiteKind::Script => summary.script += 1,
         }
     }
     summary
@@ -338,6 +341,7 @@ mod tests {
 
     fn site(name: &str, host: &str, action: Action) -> Site {
         Site {
+            lua: Default::default(),
             id: Uuid::now_v7(),
             name: name.into(),
             action,
@@ -370,6 +374,7 @@ mod tests {
 
     fn fixture() -> ConfigModel {
         let upstream = Upstream {
+            balancer: Default::default(),
             id: Uuid::now_v7(),
             name: "app".into(),
             nodes: vec![UpstreamNode {
@@ -467,6 +472,7 @@ mod tests {
         assert_eq!(
             summary,
             SiteSummary {
+                script: Default::default(),
                 total: 3,
                 running: 1,
                 stopped: 1,

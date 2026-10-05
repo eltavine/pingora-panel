@@ -31,6 +31,7 @@ impl<'a> Lowerer<'a> {
         let now = self.options.now;
         let mut draft = ServerDraft {
             site: Site {
+                lua: Default::default(),
                 id,
                 name,
                 action: placeholder_action(),

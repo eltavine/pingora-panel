@@ -76293,6 +76293,25 @@
                 ]
               }
             }
+          },
+          {
+            "type": "object",
+            "description": "Answers with a Lua script, as `content_by_lua` does.",
+            "required": [
+              "code",
+              "type"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/LuaCode"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "lua"
+                ]
+              }
+            }
           }
         ]
       },
@@ -82461,6 +82480,286 @@
         ],
         "description": "A new session."
       },
+      "LuaCode": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Code written where the handler is declared.",
+            "required": [
+              "code",
+              "kind"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "file": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The configuration file it is written in, for messages."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "inline"
+                ]
+              },
+              "line": {
+                "type": "integer",
+                "format": "int32",
+                "description": "The line of `file` the code starts on.",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A file of the configuration under `lua/`.",
+            "required": [
+              "path",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "file"
+                ]
+              },
+              "path": {
+                "type": "string"
+              }
+            }
+          }
+        ],
+        "description": "A handler's code."
+      },
+      "LuaFallback": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Answers 500, or 502 in the balancer, as OpenResty does.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "fail"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Goes on as if the handler had not run.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "continue"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Answers with this status.",
+            "required": [
+              "status",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "status"
+                ]
+              },
+              "status": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              }
+            }
+          }
+        ],
+        "description": "What a handler's failure does: an error, a timeout or a limit reached."
+      },
+      "LuaLogLevel": {
+        "type": "string",
+        "description": "`ngx.log` levels, most severe first: messages less severe than a\nhandler's level are dropped.",
+        "enum": [
+          "stderr",
+          "emerg",
+          "alert",
+          "crit",
+          "error",
+          "warn",
+          "notice",
+          "info",
+          "debug"
+        ]
+      },
+      "LuaPermissions": {
+        "type": "object",
+        "description": "What scripts may do beyond reading and changing the request and\nresponse.",
+        "properties": {
+          "body": {
+            "type": "boolean",
+            "description": "Read and replace request and response bodies."
+          },
+          "network": {
+            "type": "boolean",
+            "description": "Open sockets."
+          },
+          "upstream": {
+            "type": "boolean",
+            "description": "Choose upstream endpoints."
+          }
+        },
+        "additionalProperties": false
+      },
+      "LuaScope": {
+        "type": "object",
+        "description": "What one level runs and the terms its handlers run on; what it leaves\nunset comes from the level around it.",
+        "properties": {
+          "access": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LuaCode",
+                "description": "After security policies."
+              }
+            ]
+          },
+          "allow": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LuaPermissions"
+              }
+            ]
+          },
+          "body_filter": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LuaCode"
+              }
+            ]
+          },
+          "debug": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Logs the start, end, duration and outcome of every run."
+          },
+          "header_filter": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LuaCode"
+              }
+            ]
+          },
+          "log": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LuaCode"
+              }
+            ]
+          },
+          "log_level": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LuaLogLevel"
+              }
+            ]
+          },
+          "on_error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LuaFallback"
+              }
+            ]
+          },
+          "rewrite": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LuaCode",
+                "description": "After the route is chosen, before security policies."
+              }
+            ]
+          },
+          "server_rewrite": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LuaCode",
+                "description": "Before the route is chosen; `http` and sites only."
+              }
+            ]
+          },
+          "slow_threshold_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Runs longer than this many milliseconds are logged and counted as\nslow.",
+            "minimum": 0
+          },
+          "time_limit_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Wall-clock milliseconds a run may take, waits included.",
+            "minimum": 0
+          },
+          "work_limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Function calls and loop iterations a run may make.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "MatchKind": {
         "type": "string",
         "description": "Explicit matcher kinds; there is no implicit precedence between them\nbeyond the documented tie-break for equal priorities.",
@@ -84006,6 +84305,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "lua": {
+            "$ref": "#/components/schemas/LuaScope",
+            "description": "The Lua handlers and terms of the route's requests, over its site's."
+          },
           "match": {
             "$ref": "#/components/schemas/RouteMatch"
           },
@@ -85150,6 +85453,10 @@
             "description": "Listeners serving the site; empty means all of them.",
             "uniqueItems": true
           },
+          "lua": {
+            "$ref": "#/components/schemas/LuaScope",
+            "description": "The Lua handlers and terms of the site's requests, over those for\nevery site."
+          },
           "name": {
             "type": "string"
           },
@@ -85429,7 +85736,8 @@
           "reverse_proxy",
           "static",
           "redirect",
-          "maintenance"
+          "maintenance",
+          "script"
         ]
       },
       "SiteLinkView": {
@@ -85585,6 +85893,7 @@
           "static",
           "redirect",
           "maintenance",
+          "script",
           "deleted"
         ],
         "properties": {
@@ -85614,6 +85923,11 @@
           },
           "running": {
             "type": "integer",
+            "minimum": 0
+          },
+          "script": {
+            "type": "integer",
+            "description": "Sites a Lua script answers.",
             "minimum": 0
           },
           "static": {
@@ -86397,6 +86711,17 @@
           "updated_at"
         ],
         "properties": {
+          "balancer": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LuaCode",
+                "description": "Chooses the endpoint of each attempt, as `balancer_by_lua` does; it\nruns on the terms set for every site."
+              }
+            ]
+          },
           "balancing": {
             "$ref": "#/components/schemas/LoadBalancingPolicy"
           },
