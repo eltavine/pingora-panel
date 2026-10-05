@@ -4,8 +4,8 @@ use ops_grpc_client::OpsAgentClient;
 use panel_application::{
     AgentCapability, CommandContext, ContainerAction, ContainerLogQuery, ContainerLogStart,
     ContainerLogStream, ContainerNetworkStats, ContainerState, ContainersPort, DirectoryKind,
-    GatewayServiceAction, HostAgentPort, IdempotencyKey, ImagesPort, RequestDeadline, RequestId,
-    RequestScope,
+    EngineResourcesPort, GatewayServiceAction, HostAgentPort, IdempotencyKey, ImagesPort,
+    RequestDeadline, RequestId, RequestScope,
 };
 use panel_contracts::{
     common::v1 as common,
@@ -14,6 +14,7 @@ use panel_contracts::{
         agent_server::{Agent, AgentServer},
         containers_server::{Containers, ContainersServer},
         directories_server::{Directories, DirectoriesServer},
+        engine_resources_server::{EngineResources, EngineResourcesServer},
         gateway_service_server::{GatewayService, GatewayServiceServer},
         gateway_service_status::Supervisor,
         images_server::{Images, ImagesServer},
@@ -179,6 +180,49 @@ impl GatewayService for FakeGateway {
                 )),
                 error: None,
             },
+        }))
+    }
+}
+
+/// One network and one volume, each used by one container.
+struct FakeResources;
+
+#[tonic::async_trait]
+impl EngineResources for FakeResources {
+    async fn list_networks(
+        &self,
+        _: Request<wire::EngineResourcesListNetworksRequest>,
+    ) -> Result<Response<wire::EngineResourcesListNetworksResponse>, Status> {
+        Ok(Response::new(wire::EngineResourcesListNetworksResponse {
+            observed_at: Some(at(10).into()),
+            networks: vec![wire::EngineNetwork {
+                id: "n3".into(),
+                name: "shop_default".into(),
+                driver: "bridge".into(),
+                subnets: vec![wire::EngineSubnet {
+                    subnet: "172.18.0.0/16".into(),
+                    gateway: String::new(),
+                }],
+                containers: 1,
+                compose_project: "shop".into(),
+                ..wire::EngineNetwork::default()
+            }],
+            error: None,
+        }))
+    }
+
+    async fn list_volumes(
+        &self,
+        _: Request<wire::EngineResourcesListVolumesRequest>,
+    ) -> Result<Response<wire::EngineResourcesListVolumesResponse>, Status> {
+        Ok(Response::new(wire::EngineResourcesListVolumesResponse {
+            observed_at: Some(at(10).into()),
+            volumes: vec![wire::EngineVolume {
+                name: "orphan".into(),
+                driver: "local".into(),
+                ..wire::EngineVolume::default()
+            }],
+            error: None,
         }))
     }
 }
@@ -426,6 +470,7 @@ async fn client(fail: bool) -> OpsAgentClient {
             .add_service(GatewayServiceServer::new(FakeGateway))
             .add_service(ContainersServer::new(FakeContainers))
             .add_service(ImagesServer::new(FakeImages))
+            .add_service(EngineResourcesServer::new(FakeResources))
             .serve_with_incoming(TcpListenerStream::new(listener)),
     );
     OpsAgentClient::from_channel(
@@ -668,4 +713,19 @@ async fn images_are_listed_inspected_and_refused_removal() {
         .await
         .unwrap_err();
     assert_eq!(refused.code.as_str(), "CONFLICT");
+}
+
+#[tokio::test]
+async fn networks_and_volumes_reach_the_application() {
+    let client = client(false).await;
+    let networks = client.networks(scope(), "docker".into()).await.unwrap();
+    assert_eq!(networks.observed_at, Some(at(10)));
+    let shop = &networks.networks[0];
+    assert_eq!((shop.name.as_str(), shop.containers), ("shop_default", 1));
+    assert_eq!(shop.compose_project.as_deref(), Some("shop"));
+    assert_eq!(shop.subnets[0].gateway, None, "an empty gateway is none");
+    let volumes = client.volumes(scope(), "docker".into()).await.unwrap();
+    assert_eq!(volumes.volumes[0].name, "orphan");
+    assert_eq!(volumes.volumes[0].compose_project, None);
+    assert_eq!(volumes.volumes[0].created, None);
 }

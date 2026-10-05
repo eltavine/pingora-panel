@@ -48,6 +48,7 @@ mod alerts;
 mod audit;
 mod containers;
 mod context;
+mod engine_resources;
 mod gateway;
 mod host;
 mod host_agent;
@@ -76,6 +77,10 @@ pub use containers::{
 pub use context::{
     Actor, CommandContext, IdempotencyKey, RequestDeadline, RequestId, RequestScope, SiteAccess,
     SiteScope, TraceContext,
+};
+pub use engine_resources::{
+    EngineNetwork, EngineNetworkList, EngineResourcesPort, EngineSubnet, EngineVolume,
+    EngineVolumeList, NoEngineResources,
 };
 pub use gateway::{
     AbortOutcome, ActivatedDeployment, ConfigCompiler, ConfigDocument, DeploymentOutcome,

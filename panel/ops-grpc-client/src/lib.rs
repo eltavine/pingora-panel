@@ -10,16 +10,17 @@ use panel_application::{
     ContainerList, ContainerLogLine, ContainerLogQuery, ContainerLogStart, ContainerLogStream,
     ContainerLogTail, ContainerLogs, ContainerMount, ContainerNetwork, ContainerNetworkStats,
     ContainerState, ContainerStats, ContainerStatsList, ContainerSummary, ContainersPort,
-    DirectoriesReport, DirectoryKind, DirectoryUsage, EngineInfo, EngineVersion, GatewayContainer,
-    GatewayServiceAction, GatewayServiceStatus, HostAgentPort, Image, ImageDetail, ImageList,
-    ImageRemoval, ImagesPort, ListenersReport, ListeningProcess, PortListener, PortMapping,
-    RequestScope,
+    DirectoriesReport, DirectoryKind, DirectoryUsage, EngineInfo, EngineNetwork, EngineNetworkList,
+    EngineResourcesPort, EngineSubnet, EngineVersion, EngineVolume, EngineVolumeList,
+    GatewayContainer, GatewayServiceAction, GatewayServiceStatus, HostAgentPort, Image,
+    ImageDetail, ImageList, ImageRemoval, ImagesPort, ListenersReport, ListeningProcess,
+    PortListener, PortMapping, RequestScope,
 };
 use panel_contracts::ops::v1::{
     self as wire, agent_client::AgentClient, containers_client::ContainersClient,
-    directories_client::DirectoriesClient, gateway_service_client::GatewayServiceClient,
-    gateway_service_status::Supervisor, images_client::ImagesClient,
-    listeners_client::ListenersClient,
+    directories_client::DirectoriesClient, engine_resources_client::EngineResourcesClient,
+    gateway_service_client::GatewayServiceClient, gateway_service_status::Supervisor,
+    images_client::ImagesClient, listeners_client::ListenersClient,
 };
 use panel_errors::{PanelError, Result};
 use panel_service::{
@@ -738,6 +739,84 @@ impl ImagesPort for OpsAgentClient {
             id: response.id,
             untagged: response.untagged,
             deleted: response.deleted,
+        })
+    }
+}
+
+/// An empty value the agent sends for one it does not know.
+fn label(value: String) -> Option<String> {
+    (!value.is_empty()).then_some(value)
+}
+
+#[async_trait]
+impl EngineResourcesPort for OpsAgentClient {
+    async fn networks(&self, scope: RequestScope, engine_id: String) -> Result<EngineNetworkList> {
+        let message = wire::EngineResourcesListNetworksRequest {
+            context: Some(request_context(&scope)),
+            engine: engine_id,
+        };
+        let response = EngineResourcesClient::new(self.channel.clone())
+            .list_networks(self.request(message, &scope))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        Ok(EngineNetworkList {
+            observed_at: time(response.observed_at),
+            networks: response
+                .networks
+                .into_iter()
+                .map(|network| EngineNetwork {
+                    id: network.id,
+                    name: network.name,
+                    driver: network.driver,
+                    scope: network.scope,
+                    created: time(network.created),
+                    internal: network.internal,
+                    ipv6: network.ipv6,
+                    subnets: network
+                        .subnets
+                        .into_iter()
+                        .map(|subnet| EngineSubnet {
+                            subnet: subnet.subnet,
+                            gateway: label(subnet.gateway),
+                        })
+                        .collect(),
+                    containers: network.containers,
+                    compose_project: label(network.compose_project),
+                    labels: network.labels.into_iter().collect(),
+                })
+                .collect(),
+        })
+    }
+
+    async fn volumes(&self, scope: RequestScope, engine_id: String) -> Result<EngineVolumeList> {
+        let message = wire::EngineResourcesListVolumesRequest {
+            context: Some(request_context(&scope)),
+            engine: engine_id,
+        };
+        let response = EngineResourcesClient::new(self.channel.clone())
+            .list_volumes(self.request(message, &scope))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        Ok(EngineVolumeList {
+            observed_at: time(response.observed_at),
+            volumes: response
+                .volumes
+                .into_iter()
+                .map(|volume| EngineVolume {
+                    name: volume.name,
+                    driver: volume.driver,
+                    mountpoint: volume.mountpoint,
+                    created: time(volume.created),
+                    scope: volume.scope,
+                    containers: volume.containers,
+                    compose_project: label(volume.compose_project),
+                    labels: volume.labels.into_iter().collect(),
+                })
+                .collect(),
         })
     }
 }
