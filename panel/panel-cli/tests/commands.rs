@@ -105,6 +105,15 @@ async fn api(
             "removed": if query.contains("recursive=true") { 3 } else { 1 }
         }))
         .into_response(),
+        ("GET", "/api/v1/config/bundle") => with_etag(
+            "draft-4",
+            json!({"format": "pingora-panel-configuration", "language_version": 1,
+                "files": {"main.conf": MAIN, "sites/shop.conf": SHOP}}),
+        ),
+        ("PUT", "/api/v1/config/bundle") => with_etag(
+            "draft-5",
+            json!({"language_version": 1, "files": body["files"], "diagnostics": []}),
+        ),
         ("GET", "/api/v1/config/source") => with_etag(
             "draft-4",
             json!({"language_version": 1, "files": {"main.conf": MAIN, "sites/shop.conf": SHOP}, "diagnostics": []}),
@@ -1144,6 +1153,48 @@ fn configuration_files_round_trip_through_a_directory() {
         saved[0].body,
         json!({"files": {"main.conf": MAIN, "sites/shop.conf": SHOP}})
     );
+}
+
+#[test]
+fn the_configuration_moves_between_installations_as_a_bundle() {
+    let stub = Stub::start();
+    let directory = tempfile::tempdir().unwrap();
+    let bundle = directory.path().join("configuration.json");
+
+    let exported = stub.ppanel(&["config", "export", "--bundle", bundle.to_str().unwrap()]);
+    assert!(exported.status.success(), "{}", stderr(&exported));
+    assert_eq!(
+        stdout(&exported).trim(),
+        format!("Wrote 2 files to {} as a bundle", bundle.display())
+    );
+    let written: Value = serde_json::from_slice(&std::fs::read(&bundle).unwrap()).unwrap();
+    assert_eq!(written["format"], "pingora-panel-configuration");
+    let printed = stub.ppanel(&["config", "export", "--bundle", "-"]);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&printed.stdout).unwrap(),
+        written
+    );
+
+    let imported = stub.ppanel(&[
+        "config",
+        "import",
+        bundle.to_str().unwrap(),
+        "--expected-version",
+        "4",
+    ]);
+    assert!(imported.status.success(), "{}", stderr(&imported));
+    assert_eq!(stdout(&imported).trim(), "Saved 2 files as draft 5");
+    let piped = stub.ppanel_with_input(
+        &["config", "import", "-"],
+        &String::from_utf8_lossy(&printed.stdout),
+    );
+    assert!(piped.status.success(), "{}", stderr(&piped));
+    let saved = stub.requests("PUT", "/api/v1/config/bundle");
+    assert_eq!(saved[0].if_match.as_deref(), Some("\"draft-4\""));
+    assert_eq!(saved[0].body, written);
+    assert_eq!(saved[1].if_match, None);
+    assert_eq!(saved[1].body, written);
+    assert!(stub.requests("PUT", "/api/v1/config/source").is_empty());
 }
 
 #[test]

@@ -29,12 +29,17 @@ pub(crate) enum ConfigCommand {
     /// Writes the draft's files to a directory, or prints `main.conf`.
     Export {
         /// Directory to write the files to; created when missing.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "bundle")]
         dir: Option<PathBuf>,
+        /// Write the whole configuration to this file as a bundle that
+        /// another installation imports; `-` prints it.
+        #[arg(long)]
+        bundle: Option<PathBuf>,
     },
-    /// Replaces the draft with configuration files.
+    /// Replaces the draft with configuration files or a bundle.
     Import {
-        /// A file read as `main.conf`, or a directory of `.conf` files.
+        /// A bundle, `-` for a bundle on standard input, a file read as
+        /// `main.conf`, or a directory of `.conf` files.
         path: PathBuf,
         /// Refuse if the draft changed since this version.
         #[arg(long)]
@@ -131,6 +136,26 @@ pub(crate) enum ConfigCommand {
 
 /// Configuration files by their path relative to `path`, which is either the
 /// entry file itself or a directory holding it.
+/// A configuration bundle at `path`, when the file is one; `-` reads one
+/// from standard input.
+fn bundle(path: &Path) -> Result<Option<Value>> {
+    let stdin = path.as_os_str() == "-";
+    if !stdin && (!path.is_file() || path.extension().is_none_or(|extension| extension != "json")) {
+        return Ok(None);
+    }
+    let unreadable =
+        |error: String| CliError::Usage(format!("cannot read {}: {error}", path.display()));
+    let text = if stdin {
+        std::io::read_to_string(std::io::stdin())
+    } else {
+        std::fs::read_to_string(path)
+    }
+    .map_err(|error| unreadable(error.to_string()))?;
+    let bundle: Value =
+        serde_json::from_str(&text).map_err(|error| unreadable(error.to_string()))?;
+    Ok(Some(bundle))
+}
+
 pub(crate) fn read_files(path: &Path) -> Result<Map<String, Value>> {
     let unreadable =
         |error: std::io::Error| CliError::Usage(format!("cannot read {}: {error}", path.display()));
@@ -396,7 +421,34 @@ pub async fn run(api: &Api, output: &Output, command: ConfigCommand) -> Result<(
             }
             output.done("The configuration is valid", &result);
         }
-        ConfigCommand::Export { dir } => {
+        ConfigCommand::Export {
+            bundle: Some(bundle),
+            ..
+        } => {
+            let exported = api.get("/api/v1/config/bundle", &[]).await?.body;
+            let text = format!(
+                "{}\n",
+                serde_json::to_string_pretty(&exported).expect("JSON values serialize")
+            );
+            if bundle.as_os_str() == "-" {
+                if !output.quiet {
+                    print!("{text}");
+                }
+            } else {
+                std::fs::write(&bundle, text).map_err(|error| {
+                    CliError::Usage(format!("cannot write {}: {error}", bundle.display()))
+                })?;
+                output.done(
+                    &format!(
+                        "Wrote {} files to {} as a bundle",
+                        exported["files"].as_object().map_or(0, Map::len),
+                        bundle.display()
+                    ),
+                    &exported,
+                );
+            }
+        }
+        ConfigCommand::Export { dir, .. } => {
             let source = api.get("/api/v1/config/source", &[]).await?.body;
             let files = source["files"].as_object().cloned().unwrap_or_default();
             match dir {
@@ -425,21 +477,23 @@ pub async fn run(api: &Api, output: &Output, command: ConfigCommand) -> Result<(
             path,
             expected_version,
         } => {
-            let files = read_files(&path)?;
             let if_match = expected_version.map(|version| format!("\"draft-{version}\""));
-            let saved = api
-                .change(
-                    Method::PUT,
+            let (route, body) = match bundle(&path)? {
+                Some(bundle) => ("/api/v1/config/bundle", bundle),
+                None => (
                     "/api/v1/config/source",
-                    Some(&json!({ "files": files })),
-                    if_match.as_deref(),
-                )
+                    json!({ "files": read_files(&path)? }),
+                ),
+            };
+            let files = body["files"].as_object().map_or(0, Map::len);
+            let saved = api
+                .change(Method::PUT, route, Some(&body), if_match.as_deref())
                 .await?;
             print_diagnostics(&saved.body["diagnostics"]);
             output.done(
                 &format!(
                     "Saved {} files as draft {}",
-                    files.len(),
+                    files,
                     saved
                         .etag
                         .as_deref()
