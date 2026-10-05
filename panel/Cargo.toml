@@ -62,6 +62,7 @@ members = [
     "ops-agent",
     "ops-grpc-client",
     "site-files-local",
+    "panel-backup",
     "panel-bootstrap",
     "panel-api-server",
     "panel-control",
@@ -100,6 +101,7 @@ observability-grpc-client = { version = "=0.1.0", path = "observability-grpc-cli
 observability-service = { version = "=0.1.0", path = "observability-service" }
 ops-grpc-client = { version = "=0.1.0", path = "ops-grpc-client" }
 site-files-local = { version = "=0.1.0", path = "site-files-local" }
+panel-backup = { version = "=0.1.0", path = "panel-backup" }
 config-grpc-client = { version = "=0.2.0", path = "config-grpc-client" }
 config-proto-codec = { version = "=0.2.0", path = "config-proto-codec" }
 config-service = { version = "=0.2.0", path = "config-service" }
@@ -195,6 +197,7 @@ sha2 = "=0.11.0"
 subtle = "=2.6.1"
 similar = "=3.2.0"
 snapshot-store-fs = { version = "=0.2.0", path = "snapshot-store-fs" }
+tar = { version = "=0.4.46", default-features = false }
 tls-probe-rustls = { version = "=0.1.0", path = "tls-probe-rustls" }
 socket2 = { version = "=0.6.5", features = ["all"] }
 standardwebhooks = "=1.0.1"
@@ -230,6 +233,7 @@ uuid = { version = "=1.18.1", features = ["serde", "v4", "v7"] }
 walkdir = "=2.5.0"
 x509-parser = "=0.16.0"
 zeroize = "=1.9.0"
+zstd = "=0.14.0"
 zxcvbn = { version = "=3.1.1", default-features = false }
 libc = "=0.2.189"
 tracing = "=0.1.44"

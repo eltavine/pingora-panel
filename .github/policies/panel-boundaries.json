@@ -213,6 +213,12 @@
         "panel-errors"
       ]
     },
+    "panel-backup": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-errors"
+      ]
+    },
     "observability-service": {
       "catalog": true,
       "allowed_workspace_dependencies": [
