@@ -60,10 +60,11 @@ pub(crate) enum Api {
     RespGetHeaders,
     Balancer,
     Socket,
+    Thread,
 }
 
 impl Api {
-    const ALL: [Api; 34] = [
+    const ALL: [Api; 35] = [
         Api::Arg,
         Api::Ctx,
         Api::Eof,
@@ -98,6 +99,7 @@ impl Api {
         Api::RespGetHeaders,
         Api::Balancer,
         Api::Socket,
+        Api::Thread,
     ];
 
     /// The function a path such as `ngx.var.host` or `ngx.req.get_headers`
@@ -152,6 +154,7 @@ impl Api {
             Api::RespGetHeaders => "ngx.resp.get_headers",
             Api::Balancer => "ngx.balancer",
             Api::Socket => "ngx.socket.tcp",
+            Api::Thread => "ngx.thread",
         }
     }
 
@@ -181,7 +184,7 @@ impl Api {
             Api::ReqSetMethod => bits(&[RW, AC, CT, HF]),
             Api::RespGetHeaders => REQUEST,
             Api::Balancer => bits(&[BL]),
-            Api::Socket => bits(&[RW, AC, CT, TM]),
+            Api::Socket | Api::Thread => bits(&[RW, AC, CT, TM]),
         }
     }
 

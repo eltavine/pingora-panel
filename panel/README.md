@@ -1417,8 +1417,10 @@ loading; globals are read-only and a request's writes stay with it. A run
 that keeps the CPU for more than a millisecond yields its thread. A failed
 run leaves the request as it was before it. TCP cosockets
 (`ngx.socket.tcp`) verify certificates with the system's trusted roots
-unless a script passes `ssl_verify` false; UDP sockets, timers, light
-threads and subrequests are not available.
+unless a script passes `ssl_verify` false. Light threads
+(`ngx.thread.spawn`) share the budget of the run that spawned them, which
+ends once they have all ended. UDP sockets, timers and subrequests are not
+available.
 
 Reading the configuration compiles every script with the gateway's
 compiler and reports, at their lines, scripts that do not compile, modules

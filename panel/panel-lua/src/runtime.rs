@@ -7,10 +7,11 @@ use crate::{
     },
     program::{HandlerId, Program},
     shared::SharedStore,
-    vm::{Cell, Exceeded, HostCall, HostReply, Refused, Vm},
+    vm::{Cell, Exceeded, HostCall, HostReply, Refused, Slot, ThreadState, Vm},
 };
 use async_trait::async_trait;
 use bytes::Bytes;
+use mlua::MultiValue;
 use parking_lot::{Mutex, MutexGuard};
 use std::{
     future::{poll_fn, Future},
@@ -19,7 +20,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    task::Poll,
+    task::{Context, Poll},
 };
 
 /// How a runtime's VMs are set up.
@@ -189,9 +190,13 @@ impl Scripts {
         };
         let key = thread.to_pointer() as usize;
         vm.slot.entries.lock().insert(key, Arc::clone(&cell));
-        let result =
-            tokio::time::timeout(handler.limits.time, Self::drive(&thread, &cell, host)).await;
+        let result = tokio::time::timeout(
+            handler.limits.time,
+            drive(&vm.slot, &thread, &cell, host, MultiValue::new()),
+        )
+        .await;
         vm.slot.entries.lock().remove(&key);
+        end_threads(&vm.slot, &cell);
         {
             let mut current = vm.slot.current.lock();
             if current
@@ -245,46 +250,133 @@ impl Scripts {
         };
         vm.entry(handler, &env)
     }
+}
 
-    async fn drive(
-        thread: &mlua::Thread,
-        cell: &Arc<Cell>,
-        host: &mut (dyn Host + Send),
-    ) -> mlua::Result<()> {
-        let mut running = pin!(thread.clone().into_async::<()>(())?);
-        loop {
-            let step = poll_fn(|context| match running.as_mut().poll(context) {
-                Poll::Ready(result) => Poll::Ready(Step::Done(result)),
-                Poll::Pending => {
-                    if cell.exchange.lock().exit.is_some() {
-                        return Poll::Ready(Step::Exited);
-                    }
-                    let mut run = cell.run.lock();
-                    if let Some((call, reply)) = run.call.take() {
-                        return Poll::Ready(Step::Serve(call, reply));
-                    }
-                    if std::mem::take(&mut run.sliced) {
-                        return Poll::Ready(Step::Sliced);
-                    }
-                    Poll::Pending
+/// Drives a run's entry thread and the light threads it spawns until they
+/// have all ended, a thread exits or the entry thread fails, serving the
+/// host calls they make.
+pub(crate) async fn drive(
+    slot: &Slot,
+    thread: &mlua::Thread,
+    cell: &Arc<Cell>,
+    host: &mut (dyn Host + Send),
+    args: MultiValue,
+) -> mlua::Result<()> {
+    let mut running = pin!(thread.clone().into_async::<()>(args)?);
+    let mut entry: Option<mlua::Result<()>> = None;
+    loop {
+        let step = poll_fn(|context| {
+            if entry.is_none() {
+                if let Poll::Ready(result) = running.as_mut().poll(context) {
+                    entry = Some(result);
                 }
-            })
-            .await;
-            match step {
-                Step::Done(result) => return result,
-                Step::Exited => return Ok(()),
-                Step::Sliced => tokio::task::yield_now().await,
-                Step::Serve(call, reply) => {
-                    let answer = match call {
-                        HostCall::ReadBody { limit } => {
-                            HostReply::Body(host.read_body(limit).await)
-                        }
-                    };
-                    let _ = reply.send(answer);
-                }
+            }
+            if matches!(entry, Some(Err(_))) {
+                return Poll::Ready(Step::Done(entry.take().unwrap_or(Ok(()))));
+            }
+            let ended = poll_threads(slot, cell, context);
+            if cell.exchange.lock().exit.is_some() {
+                return Poll::Ready(Step::Exited);
+            }
+            if entry.is_some() && cell.threads.lock().waiting.is_empty() {
+                return Poll::Ready(Step::Done(Ok(())));
+            }
+            if ended {
+                // Threads waiting on the ones that ended go on.
+                context.waker().wake_by_ref();
+            }
+            let mut run = cell.run.lock();
+            if let Some((call, reply)) = run.call.take() {
+                return Poll::Ready(Step::Serve(call, reply));
+            }
+            if std::mem::take(&mut run.sliced) {
+                return Poll::Ready(Step::Sliced);
+            }
+            Poll::Pending
+        })
+        .await;
+        match step {
+            Step::Done(result) => return result,
+            Step::Exited => return Ok(()),
+            Step::Sliced => tokio::task::yield_now().await,
+            Step::Serve(call, reply) => {
+                let answer = match call {
+                    HostCall::ReadBody { limit } => HostReply::Body(host.read_body(limit).await),
+                };
+                let _ = reply.send(answer);
             }
         }
     }
+}
+
+/// Polls the light threads that wait. Returns whether one ended.
+fn poll_threads(slot: &Slot, cell: &Arc<Cell>, context: &mut Context<'_>) -> bool {
+    let mut waiting = std::mem::take(&mut cell.threads.lock().waiting);
+    if waiting.is_empty() {
+        return false;
+    }
+    let mut ended = false;
+    let mut index = 0;
+    while index < waiting.len() {
+        let (key, future) = &mut waiting[index];
+        let key = *key;
+        if !is_running(cell, key) {
+            drop(waiting.swap_remove(index));
+            slot.entries.lock().remove(&key);
+            continue;
+        }
+        match future.as_mut().poll(context) {
+            Poll::Ready(result) => {
+                drop(waiting.swap_remove(index));
+                thread_ended(slot, cell, key, result);
+                ended = true;
+            }
+            Poll::Pending => index += 1,
+        }
+    }
+    // Threads killed while these were polled, and the ones spawned.
+    waiting.retain(|(key, _)| is_running(cell, *key));
+    let mut threads = cell.threads.lock();
+    waiting.append(&mut threads.waiting);
+    threads.waiting = waiting;
+    ended
+}
+
+fn is_running(cell: &Cell, key: usize) -> bool {
+    cell.threads
+        .lock()
+        .spawned
+        .get(&key)
+        .is_some_and(|thread| matches!(thread.state, ThreadState::Running))
+}
+
+/// Records how a light thread ended; one that failed is logged, as
+/// lua-nginx-module does, and the run goes on.
+pub(crate) fn thread_ended(slot: &Slot, cell: &Cell, key: usize, result: mlua::Result<MultiValue>) {
+    slot.entries.lock().remove(&key);
+    let result = result.map_err(|error| {
+        let message = failure(&error).message;
+        cell.exchange
+            .lock()
+            .log(LogLevel::Err, format!("lua user thread aborted: {message}"));
+        message
+    });
+    if let Some(thread) = cell.threads.lock().spawned.get_mut(&key) {
+        if matches!(thread.state, ThreadState::Running) {
+            thread.state = ThreadState::Ended(result);
+        }
+    }
+}
+
+/// Drops the light threads a run left behind once it is over.
+fn end_threads(slot: &Slot, cell: &Cell) {
+    let threads = std::mem::take(&mut *cell.threads.lock());
+    let mut entries = slot.entries.lock();
+    for key in threads.spawned.keys() {
+        entries.remove(key);
+    }
+    drop(entries);
+    drop(threads);
 }
 
 fn exceeded_failure(exceeded: Exceeded) -> Failure {

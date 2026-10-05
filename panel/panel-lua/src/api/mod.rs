@@ -12,6 +12,7 @@ mod req;
 mod resp;
 mod shared;
 mod socket;
+mod thread;
 mod time;
 mod var;
 

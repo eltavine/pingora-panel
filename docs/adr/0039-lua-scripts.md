@@ -75,7 +75,10 @@ functions, `ngx.sleep`, `ngx.get_phase`, `ngx.worker`, `ngx.config`,
 `ngx.socket.connect` (`connect`, `sslhandshake`, `send`, `receive`,
 `receiveany`, `receiveuntil`, `settimeout`, `settimeouts`, `setkeepalive`,
 `getreusedtimes` and `close`), whose idle connections each VM keeps for
-its later requests. Modules OpenResty scripts commonly load are built in:
+its later requests, and the light threads of `ngx.thread.spawn`, `wait`
+and `kill`, which run on the budget of the run that spawned them; a run
+ends once its entry thread and its light threads have ended, or as soon as
+one of them exits. Modules OpenResty scripts commonly load are built in:
 `cjson` and `cjson.safe`, `bit` with LuaJIT BitOp semantics, `table.new`,
 `table.clear`, `table.nkeys`, `resty.core`, `resty.string`, `resty.md5`,
 `resty.sha1`, `resty.sha256`, `resty.random`, `ngx.re` and
@@ -89,8 +92,7 @@ are not available; `lua_package_path`, `lua_package_cpath` and
 `lua_code_cache off` are refused. `sslhandshake` verifies the server's
 certificate with the system's trusted roots unless the script passes
 `ssl_verify` false, where lua-nginx-module verifies nothing by default.
-UDP and stream sockets, timers, light threads and subrequests are not
-available yet.
+UDP and stream sockets, timers and subrequests are not available yet.
 
 **Native API.** Next to `ngx`, `require("panel.v1")` returns the
 capabilities the specification names — `req`, `resp`, `ctx`, `upstream`,

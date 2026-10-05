@@ -10,13 +10,14 @@ use crate::{
 use bytes::Bytes;
 use mlua::{
     chunk::ChunkMode,
-    thread::{ThreadEvent, ThreadTriggers},
-    Function, Lua, LuaOptions, StdLib, Table, Thread, VmState,
+    thread::{AsyncThread, ThreadEvent, ThreadTriggers},
+    Function, Lua, LuaOptions, MultiValue, StdLib, Table, Thread, VmState,
 };
 use parking_lot::Mutex;
 use std::{
     collections::HashMap,
     fmt,
+    pin::Pin,
     sync::{
         atomic::{AtomicI64, AtomicU64, AtomicUsize, Ordering::Relaxed},
         Arc,
@@ -98,6 +99,7 @@ pub(crate) struct Cell {
     pub env: Mutex<Option<Table>>,
     pub ctx: Mutex<Option<Table>>,
     pub run: Mutex<Run>,
+    pub threads: Mutex<Threads>,
 }
 
 impl Cell {
@@ -107,8 +109,45 @@ impl Cell {
             env: Mutex::new(None),
             ctx: Mutex::new(None),
             run: Mutex::new(Run::default()),
+            threads: Mutex::new(Threads::default()),
         }
     }
+}
+
+/// The light threads of the run under way, by the address of their
+/// coroutine.
+#[derive(Default)]
+pub(crate) struct Threads {
+    /// Threads that wait, for the run's driver to poll.
+    pub waiting: Vec<(usize, Pin<Box<AsyncThread<MultiValue>>>)>,
+    pub spawned: HashMap<usize, LightThread>,
+}
+
+impl fmt::Debug for Threads {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Threads")
+            .field("waiting", &self.waiting.len())
+            .field("spawned", &self.spawned.len())
+            .finish()
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct LightThread {
+    /// The coroutine that spawned it, the only one that may wait on it or
+    /// kill it.
+    pub parent: usize,
+    pub state: ThreadState,
+}
+
+#[derive(Debug)]
+pub(crate) enum ThreadState {
+    Running,
+    /// Ended, with what it returned or why it failed, not yet waited on.
+    Ended(Result<MultiValue, String>),
+    /// Waited on or killed.
+    Dead,
 }
 
 /// What the VM knows of the run whose code is executing. The interrupt
@@ -152,8 +191,13 @@ impl Slot {
         self.current.lock().clone()
     }
 
-    /// Makes `cell` the request whose code executes, with its budget.
+    /// Makes `cell` the request whose code executes, with its budget. What
+    /// the code that executed before used is kept first, since a light
+    /// thread resumed from within its parent does not yield it.
     pub fn enter(&self, key: usize, cell: &Arc<Cell>) {
+        if let Some(previous) = self.current.lock().as_ref() {
+            previous.run.lock().work_left = self.work_left.load(Relaxed);
+        }
         {
             let run = cell.run.lock();
             self.entry.store(key, Relaxed);

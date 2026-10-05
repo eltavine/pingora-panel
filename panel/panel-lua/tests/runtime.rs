@@ -900,3 +900,92 @@ async fn cosockets_verify_certificates_unless_told_not_to() {
         assert!(body.starts_with(expected), "{body}");
     }
 }
+
+#[tokio::test]
+async fn light_threads_run_together_and_the_run_waits_for_them() {
+    let lua = start(
+        1,
+        handlers(&[
+            r#"
+            local order = {}
+            local function work(name, seconds)
+                ngx.sleep(seconds)
+                return name, seconds
+            end
+            ngx.thread.spawn(function()
+                order[#order + 1] = "child"
+                ngx.sleep(0.01)
+                ngx.log(ngx.NOTICE, "unwaited thread ended")
+            end)
+            order[#order + 1] = "parent"
+            local started = ngx.now()
+            local slow = ngx.thread.spawn(work, "slow", 0.2)
+            local fast = ngx.thread.spawn(work, "fast", 0.1)
+            local ok, name = ngx.thread.wait(slow, fast)
+            assert(ok and name == "fast", name)
+            local ok2, name2, seconds = ngx.thread.wait(slow)
+            assert(ok2 and name2 == "slow" and seconds == 0.2)
+            local again, err = ngx.thread.wait(fast)
+            assert(again == nil and err == "already waited or killed", err)
+
+            local bad = ngx.thread.spawn(function() error("boom") end)
+            local failed, why = ngx.thread.wait(bad)
+            assert(failed == false and why:find("boom"), why)
+
+            local sleeper = ngx.thread.spawn(function() ngx.sleep(30) end)
+            assert(ngx.thread.kill(sleeper))
+            local killed, kill_err = ngx.thread.kill(sleeper)
+            assert(killed == nil and kill_err == "already waited or killed")
+            ngx.say(table.concat(order, ","), " ", ngx.now() - started < 0.35)
+            "#,
+            "ngx.thread.spawn(function() ngx.sleep(0.01) ngx.exit(204) end) ngx.sleep(30)",
+            "ngx.thread.spawn(function() end)",
+        ]),
+    );
+    let mut threads = handler(lua.handlers[0], Phase::Content);
+    threads.limits.time = Duration::from_secs(2);
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = run(&mut scripts, threads).await;
+    {
+        let exchange = scripts.exchange();
+        assert_eq!(outcome, Outcome::Respond, "{:?}", exchange.logs);
+        assert_eq!(exchange.response.body, b"child,parent true\n");
+        let messages: Vec<&str> = exchange
+            .logs
+            .iter()
+            .map(|log| log.message.as_str())
+            .collect();
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("lua user thread aborted")
+                    && message.contains("boom")),
+            "{messages:?}"
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.ends_with("unwaited thread ended")),
+            "{messages:?}"
+        );
+    }
+
+    let mut exiting = handler(lua.handlers[1], Phase::Content);
+    exiting.limits.time = Duration::from_secs(2);
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let started = std::time::Instant::now();
+    assert_eq!(run(&mut scripts, exiting).await, Outcome::Respond);
+    assert!(started.elapsed() < Duration::from_secs(1));
+    assert_eq!(scripts.exchange().response.status, 204);
+
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let refused = run(&mut scripts, handler(lua.handlers[2], Phase::HeaderFilter)).await;
+    let Outcome::Failed(failure) = refused else {
+        panic!("{refused:?}");
+    };
+    assert!(
+        failure.message.contains("header_filter_by_lua"),
+        "{}",
+        failure.message
+    );
+}
