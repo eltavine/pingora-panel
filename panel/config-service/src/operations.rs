@@ -4,8 +4,9 @@ use chrono::{DateTime, Utc};
 use panel_config_api::{ModelChange, ModelQuery};
 use panel_config_model::{
     abnormal_sites, checked, entity_tag, query_sites, summarize, validate, BatchAction,
-    ConfigModel, DomainCheck, DomainView, ListenerView, Route, RouteView, SecurityPolicyView,
-    SiteList, SiteView, TlsProfile, TlsProfileView, UpstreamView, ValidationResult,
+    ConfigModel, DomainCheck, DomainView, HttpPolicyView, ListenerView, Route, RouteView,
+    SecurityPolicyView, SiteList, SiteView, TlsProfile, TlsProfileView, UpstreamView,
+    ValidationResult,
 };
 use panel_errors::{Diagnostic, PanelError, Result};
 use serde::Serialize;
@@ -13,6 +14,7 @@ use std::collections::BTreeSet;
 use uuid::Uuid;
 
 const POLICY: &str = "security policy";
+const HTTP_POLICY: &str = "HTTP policy";
 
 /// A JSON result and, for single resources, its entity tag.
 #[derive(Debug)]
@@ -191,6 +193,18 @@ pub fn read(model: &ConfigModel, query: &ModelQuery) -> Result<Output> {
         }
         ModelQuery::SecurityPolicy { id } => {
             let policy = named(&model.security_policies, id, |item| &item.id, POLICY)?;
+            Ok(Output::tagged(policy, entity_tag(policy)))
+        }
+        ModelQuery::HttpPolicies => {
+            let views: Vec<HttpPolicyView> = model
+                .http_policies
+                .iter()
+                .map(|policy| HttpPolicyView::new(model, policy))
+                .collect();
+            Ok(Output::json(&views))
+        }
+        ModelQuery::HttpPolicy { id } => {
+            let policy = named(&model.http_policies, id, |item| &item.id, HTTP_POLICY)?;
             Ok(Output::tagged(policy, entity_tag(policy)))
         }
         ModelQuery::Validate { site_ids } => {
@@ -439,6 +453,29 @@ pub fn change(
                 )?),
             )?;
             let (next, ()) = checked(model, |model| model.delete_security_policy(&id))?;
+            Ok((next, deleted()))
+        }
+        ModelChange::PutHttpPolicy { policy } => {
+            let id = policy.id.clone();
+            if let Ok(existing) = named(&model.http_policies, &id, |item| &item.id, HTTP_POLICY) {
+                precondition(if_match, &entity_tag(existing))?;
+            }
+            let (next, _) = checked(model, |model| Ok(model.put_http_policy(policy)))?;
+            let policy = named(&next.http_policies, &id, |item| &item.id, HTTP_POLICY)?.clone();
+            let etag = entity_tag(&policy);
+            Ok((next, Output::tagged(&policy, etag)))
+        }
+        ModelChange::DeleteHttpPolicy { id } => {
+            precondition(
+                if_match,
+                &entity_tag(named(
+                    &model.http_policies,
+                    &id,
+                    |item| &item.id,
+                    HTTP_POLICY,
+                )?),
+            )?;
+            let (next, ()) = checked(model, |model| model.delete_http_policy(&id))?;
             Ok((next, deleted()))
         }
     }

@@ -29,6 +29,7 @@ async fn gateway() -> SocketAddr {
         [
             "action.respond",
             "activation.cas",
+            "http.policies",
             "listener.http",
             "listener.http2",
             "request.security",
@@ -705,11 +706,75 @@ async fn sites_are_edited_validated_and_applied_through_the_api() {
         .await
         .unwrap();
     assert_eq!(in_use.status(), StatusCode::CONFLICT);
+
+    // HTTP policies change fields, answer CORS and compress for the sites
+    // and routes that name them.
+    let (http_policy, headers) = api
+        .json(
+            api.mutate(Method::PUT, "/api/v1/http-policies/headers", "http-policy")
+                .json(&json!({
+                    "id": "headers",
+                    "response": {"set": [{"name": "X-Frame-Options", "value": "DENY"}]},
+                    "server": {"mode": "remove"},
+                    "cors": {"allowed_origins": ["https://*.example.com"], "allowed_methods": ["put"]},
+                    "compression": {"algorithms": ["gzip", "brotli"], "types": ["text/*"], "min_bytes": 512}
+                })),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(http_policy["server"]["mode"], "remove");
+    let http_policy_etag = headers["etag"].to_str().unwrap().to_owned();
+    let refused = api
+        .mutate(
+            Method::PUT,
+            "/api/v1/http-policies/framing",
+            "http-policy-bad",
+        )
+        .json(&json!({
+            "id": "framing",
+            "request": {"set": [{"name": "Host", "value": "elsewhere"}]}
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+    let (styled, _) = api
+        .json(
+            api.mutate(Method::POST, "/api/v1/sites", "styled-site")
+                .json(&json!({
+                    "name": "Docs",
+                    "action": {"type": "respond", "status": 204},
+                    "domains": [{"host": "docs.example.com", "primary": true}],
+                    "http_policy_id": "headers"
+                })),
+            StatusCode::CREATED,
+        )
+        .await;
+    assert_eq!(styled["http_policy_id"], "headers");
+    let (http_policies, _) = api
+        .json(api.get("/api/v1/http-policies"), StatusCode::OK)
+        .await;
+    assert_eq!(http_policies[0]["used_by"][0], styled["id"]);
+    let in_use = api
+        .mutate(
+            Method::DELETE,
+            "/api/v1/http-policies/headers",
+            "http-policy-delete",
+        )
+        .header("if-match", &http_policy_etag)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(in_use.status(), StatusCode::CONFLICT);
     let (source, _) = api
         .json(api.get("/api/v1/config/source"), StatusCode::OK)
         .await;
     assert!(
         source.to_string().contains("security_policy office {"),
+        "{source}"
+    );
+    assert!(
+        source.to_string().contains("http_policy headers {"),
         "{source}"
     );
     let (draft, _) = api

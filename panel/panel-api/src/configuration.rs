@@ -22,10 +22,10 @@ use panel_config_api::{
     ConfigurationPort, ConfigurationQuery, DraftInfo, ModelChange, ModelQuery,
 };
 use panel_config_model::{
-    ApprovalRequest, BatchRequest, Domain, DomainCheck, DomainView, Listener, ListenerView,
-    NodeInput, RouteInput, RouteView, SecurityPolicy, SecurityPolicyView, SiteBundle, SiteInput,
-    SiteList, SiteQuery, SiteSummary, SiteView, TlsProfile, TlsProfileInput, TlsProfileView,
-    UpstreamInput, UpstreamView, ValidationResult,
+    ApprovalRequest, BatchRequest, Domain, DomainCheck, DomainView, HttpPolicy, HttpPolicyView,
+    Listener, ListenerView, NodeInput, RouteInput, RouteView, SecurityPolicy, SecurityPolicyView,
+    SiteBundle, SiteInput, SiteList, SiteQuery, SiteSummary, SiteView, TlsProfile, TlsProfileInput,
+    TlsProfileView, UpstreamInput, UpstreamView, ValidationResult,
 };
 use panel_domain::NormalizedHost;
 use panel_errors::PanelError;
@@ -376,6 +376,13 @@ read_route!(
     ModelQuery::SecurityPolicies,
     Vec<SecurityPolicyView>,
     "Lists security policies with the sites that use them."
+);
+read_route!(
+    list_http_policies,
+    "/api/v1/http-policies",
+    ModelQuery::HttpPolicies,
+    Vec<HttpPolicyView>,
+    "Lists HTTP policies with the sites that use them."
 );
 read_route!(
     site_summary,
@@ -1031,6 +1038,17 @@ named_resource!(
     SecurityPolicy,
     PutSecurityPolicy { policy },
     DeleteSecurityPolicy
+);
+named_resource!(
+    get_http_policy,
+    put_http_policy,
+    delete_http_policy,
+    "/api/v1/http-policies/{id}",
+    HttpPolicy,
+    HttpPolicy,
+    HttpPolicy,
+    PutHttpPolicy { policy },
+    DeleteHttpPolicy
 );
 
 /// The draft's version and whether the gateway runs it.

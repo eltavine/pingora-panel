@@ -1,8 +1,8 @@
 use crate::Files;
 use panel_application::operations;
 use panel_config_model::{
-    ApprovalPolicyInput, BatchRequest, Domain, Listener, NodeInput, RouteInput, SecurityPolicy,
-    SiteBundle, SiteInput, TlsProfileInput, UpstreamInput,
+    ApprovalPolicyInput, BatchRequest, Domain, HttpPolicy, Listener, NodeInput, RouteInput,
+    SecurityPolicy, SiteBundle, SiteInput, TlsProfileInput, UpstreamInput,
 };
 use panel_domain::NormalizedHost;
 use serde::{Deserialize, Serialize};
@@ -48,6 +48,9 @@ operations! {
         /// Creates or replaces the security policy of the policy's ID.
         "security_policies.put" => PutSecurityPolicy { policy: SecurityPolicy },
         "security_policies.delete" => DeleteSecurityPolicy { id: String },
+        /// Creates or replaces the HTTP policy of the policy's ID.
+        "http_policies.put" => PutHttpPolicy { policy: HttpPolicy },
+        "http_policies.delete" => DeleteHttpPolicy { id: String },
     }
 }
 
@@ -119,6 +122,8 @@ impl ModelChange {
             Self::DeleteTlsProfile { id } => format!("tls-profiles/{id}"),
             Self::PutSecurityPolicy { policy } => format!("security-policies/{}", policy.id),
             Self::DeleteSecurityPolicy { id } => format!("security-policies/{id}"),
+            Self::PutHttpPolicy { policy } => format!("http-policies/{}", policy.id),
+            Self::DeleteHttpPolicy { id } => format!("http-policies/{id}"),
         }
     }
 }

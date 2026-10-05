@@ -144,6 +144,16 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
                 .put(config::put_security_policy::<U>)
                 .delete(config::delete_security_policy::<U>),
         )
+        .route(
+            "/api/v1/http-policies",
+            get(config::list_http_policies::<U>),
+        )
+        .route(
+            "/api/v1/http-policies/{id}",
+            get(config::get_http_policy::<U>)
+                .put(config::put_http_policy::<U>)
+                .delete(config::delete_http_policy::<U>),
+        )
         .route("/api/v1/config/draft", get(config::draft::<U>))
         .route("/api/v1/config/validation", get(config::validation::<U>))
         .route("/api/v1/config/apply", post(config::apply::<U>))

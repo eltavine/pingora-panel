@@ -33,6 +33,8 @@ operations! {
         "tls_profiles.get" => TlsProfile { id: String },
         "security_policies.list" => SecurityPolicies,
         "security_policies.get" => SecurityPolicy { id: String },
+        "http_policies.list" => HttpPolicies,
+        "http_policies.get" => HttpPolicy { id: String },
         /// The draft's diagnostics, of the sites named when any are.
         "config.validate" => Validate { site_ids: Vec<Uuid> },
     }
