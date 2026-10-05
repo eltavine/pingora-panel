@@ -266,3 +266,115 @@ fn turning_access_logs_off_carries_over_and_log_files_are_reported() {
     assert!(site.access_log.is_unset(), "{text}");
     assert_eq!(site.routes[0].access_log.enabled, Some(false), "{text}");
 }
+
+#[test]
+fn openresty_handlers_carry_over_with_their_files() {
+    let nginx = r#"
+http {
+    lua_package_path "/usr/local/openresty/lualib/?.lua;;";
+    lua_shared_dict limits 10m;
+    lua_code_cache on;
+    init_by_lua_block {
+        local cjson = require "cjson"
+    }
+
+    upstream app {
+        server 10.0.0.11:8080;
+        balancer_by_lua_file /usr/local/openresty/nginx/lua/pick.lua;
+    }
+
+    server {
+        listen 80;
+        server_name api.example;
+        access_by_lua_file lua/auth.lua;
+
+        location /hello {
+            set_by_lua_block $x { return 1 }
+            header_filter_by_lua 'ngx.header["X-Hello"] = "1"';
+            content_by_lua_block {
+                ngx.say("hello, ", ngx.var.arg_name or "world") -- }
+            }
+        }
+
+        location / {
+            proxy_pass http://app;
+        }
+    }
+}
+"#;
+    let files: BTreeMap<String, String> = [
+        ("nginx.conf", nginx),
+        (
+            "lua/auth.lua",
+            "if not ngx.var.http_x_key then return ngx.exit(401) end\n",
+        ),
+        (
+            "lua/pick.lua",
+            "require(\"ngx.balancer\").set_current_peer(\"10.0.0.12\", 8080)\n",
+        ),
+    ]
+    .into_iter()
+    .map(|(path, text)| (path.to_owned(), text.to_owned()))
+    .collect();
+    let imported = import_nginx(&files, "nginx.conf").unwrap();
+    let main = imported.sources.get("main.conf").unwrap();
+    for expected in [
+        "    lua_shared_dict limits 10m;\n    init_by_lua_block {\n        local cjson = require \"cjson\"\n    }\n",
+        "        balancer_by_lua_file lua/pick.lua;\n",
+        "        access_by_lua_file lua/auth.lua;\n",
+        "            header_filter_by_lua_block { ngx.header[\"X-Hello\"] = \"1\" }\n",
+        "            content_by_lua_block {\n                ngx.say(\"hello, \", ngx.var.arg_name or \"world\") -- }\n            }\n",
+    ] {
+        assert!(main.contains(expected), "{expected}\n{main}");
+    }
+    assert_eq!(
+        imported.sources.get("lua/auth.lua"),
+        files.get("lua/auth.lua").map(String::as_str)
+    );
+    let reported: Vec<_> = imported
+        .report
+        .iter()
+        .map(|diagnostic| (diagnostic.code.as_str(), diagnostic.message.as_str()))
+        .collect();
+    for (code, message) in [
+        (
+            codes::UNSUPPORTED,
+            "'lua_package_path' is not carried over: require loads",
+        ),
+        (
+            codes::UNSUPPORTED,
+            "'set_by_lua_block' is not carried over: set variables with ngx.var",
+        ),
+        (
+            codes::CHANGED,
+            "/usr/local/openresty/nginx/lua/pick.lua is read from lua/pick.lua",
+        ),
+    ] {
+        assert!(
+            reported
+                .iter()
+                .any(|(found, text)| *found == code && text.starts_with(message)),
+            "{message}: {reported:#?}"
+        );
+    }
+
+    let lowered = lower(
+        &imported.sources,
+        &LowerOptions {
+            environment: &BTreeMap::new(),
+            previous: None,
+            now: Utc::now(),
+        },
+    );
+    let errors: Vec<_> = lowered
+        .errors()
+        .map(|diagnostic| &diagnostic.message)
+        .collect();
+    assert_eq!(
+        errors,
+        ["upstream app chooses its endpoints with a Lua balancer, which needs the upstream permission for every site (lua_allow upstream in http)"]
+    );
+    let route = &lowered.model.sites[0].routes[0];
+    assert!(matches!(route.action, Action::Lua { .. }));
+    assert!(route.lua.header_filter.is_some());
+}

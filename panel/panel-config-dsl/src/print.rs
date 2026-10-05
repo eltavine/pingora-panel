@@ -3,16 +3,17 @@
 
 use crate::{
     lower::{
-        print_access, print_breaker, print_policy, print_queue, print_rate, print_retry, CODINGS,
-        DEFAULT_REALM,
+        print_access, print_breaker, print_lua_terms, print_policy, print_queue, print_rate,
+        print_retry, CODINGS, DEFAULT_REALM,
     },
+    source::{Sources, ENTRY},
     values::{print_bool, print_duration_ms, print_size},
     variables::{escape, print_hash_key},
     LANGUAGE_VERSION,
 };
 use panel_config_model::{
-    Action, ConfigModel, FieldChanges, HttpPolicy, Listener, Route, RouteCondition, SecurityPolicy,
-    Site, TlsProfile, Upstream, UpstreamNode, ValueTest,
+    Action, ConfigModel, FieldChanges, HttpPolicy, Listener, LuaCode, LuaConfig, LuaScope, Route,
+    RouteCondition, SecurityPolicy, Site, TlsProfile, Upstream, UpstreamNode, ValueTest,
 };
 use panel_dsl::{Directive, Document, Trivia};
 use panel_ir::{
@@ -25,8 +26,20 @@ pub fn print(model: &ConfigModel) -> String {
     panel_dsl::format(&document(model))
 }
 
+/// The whole model as files: `main.conf` and the Lua files under `lua/`.
+pub fn print_sources(model: &ConfigModel) -> Sources {
+    let mut sources = Sources::single(print(model));
+    for (path, text) in &model.lua.files {
+        if path != ENTRY {
+            sources.insert(path.clone(), text.clone());
+        }
+    }
+    sources
+}
+
 pub fn document(model: &ConfigModel) -> Document {
     let mut http = print_policy(&model.logging);
+    http.extend(lua_http(&model.lua));
     let settings = http.len();
     http.extend(model.tls_profiles.iter().map(tls_profile));
     http.extend(model.security_policies.iter().map(security_policy));
@@ -63,6 +76,59 @@ pub fn document(model: &ConfigModel) -> Document {
 
 fn expanded(value: &str) -> String {
     escape(value).into_owned()
+}
+
+/// The directive that runs `code` in `phase`.
+fn lua_handler(phase: &str, code: &LuaCode) -> Directive {
+    match code {
+        LuaCode::Inline { code, .. } => {
+            Directive::with_lua(&format!("{phase}_by_lua_block"), code.clone())
+        }
+        LuaCode::File { path } => {
+            Directive::simple(&format!("{phase}_by_lua_file"), [expanded(path)])
+        }
+    }
+}
+
+/// The terms a level sets, then its handlers.
+fn lua_scope(scope: &LuaScope) -> Vec<Directive> {
+    let mut body: Vec<Directive> = print_lua_terms(scope)
+        .into_iter()
+        .map(|(name, args)| Directive::simple(name, args))
+        .collect();
+    body.extend(
+        scope
+            .handlers()
+            .map(|(phase, code)| lua_handler(phase, code)),
+    );
+    body
+}
+
+fn lua_http(lua: &LuaConfig) -> Vec<Directive> {
+    let mut body = Vec::new();
+    if lua.disabled {
+        body.push(Directive::simple("lua", ["off"]));
+    }
+    if let Some(bytes) = lua.memory_limit_bytes {
+        body.push(Directive::simple("lua_memory_limit", [print_size(bytes)]));
+    }
+    for dict in &lua.shared_dicts {
+        body.push(Directive::simple(
+            "lua_shared_dict",
+            [dict.name.clone(), print_size(dict.capacity_bytes)],
+        ));
+    }
+    let mut scope = lua_scope(&lua.http);
+    let handlers = scope.split_off(print_lua_terms(&lua.http).len());
+    body.extend(scope);
+    if let Some(code) = &lua.init {
+        body.push(lua_handler("init", code));
+    }
+    if let Some(code) = &lua.init_worker {
+        body.push(lua_handler("init_worker", code));
+    }
+    body.extend(handlers);
+    body
 }
 
 pub fn tls_profile(profile: &TlsProfile) -> Directive {
@@ -442,6 +508,9 @@ pub fn upstream(upstream: &Upstream) -> Directive {
     if let Some(queue) = &upstream.queue {
         body.push(Directive::simple("queue", print_queue(queue)));
     }
+    if let Some(code) = &upstream.balancer {
+        body.push(lua_handler("balancer", code));
+    }
     if let Some(note) = &upstream.note {
         body.push(Directive::simple("note", [note.clone()]));
     }
@@ -504,6 +573,7 @@ fn action(action: &Action, model: &ConfigModel) -> Directive {
             }
             Directive::simple("respond", args)
         }
+        Action::Lua { code } => lua_handler("content", code),
         _ => Directive::simple("respond", ["503"]),
     }
 }
@@ -605,6 +675,7 @@ fn route(route: &Route, model: &ConfigModel) -> Directive {
         body.push(Directive::simple("http_policy", [policy.clone()]));
     }
     body.extend(print_access(&route.access_log));
+    body.extend(lua_scope(&route.lua));
     body.push(action(&route.action, model));
     Directive::with_block("route", route.name.clone(), body)
 }
@@ -702,6 +773,7 @@ pub fn server(site: &Site, model: &ConfigModel) -> Directive {
     if let Some(note) = &site.note {
         body.push(Directive::simple("note", [note.clone()]));
     }
+    body.extend(lua_scope(&site.lua));
     body.push(action(&site.action, model));
     for item in &site.routes {
         let mut directive = route(item, model);

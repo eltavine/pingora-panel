@@ -3,10 +3,10 @@
 
 use chrono::{DateTime, Utc};
 use panel_config_dsl::{
-    lower, print, reconcile, variables::ENVIRONMENT_PREFIX, write_identifiers, LowerOptions,
-    Lowered, Sources,
+    lower, print_sources, reconcile, variables::ENVIRONMENT_PREFIX, write_identifiers,
+    LowerOptions, Lowered, Sources,
 };
-use panel_config_model::{validate, ConfigModel};
+use panel_config_model::{lua_codes_mut, validate, ConfigModel, LuaCode};
 use panel_domain::ContentHash;
 use panel_errors::{Diagnostic, DiagnosticSeverity, ErrorCode, PanelError, Result};
 use std::{
@@ -42,13 +42,19 @@ pub(crate) fn read(
 
 /// The files of a draft stored before the language existed.
 pub(crate) fn printed(model: &ConfigModel) -> Sources {
-    Sources::single(print(model))
+    print_sources(model)
 }
 
-/// What the language expresses of a model: timestamps aside, and domains in
-/// a stable order.
+/// What the language expresses of a model: timestamps aside, domains in a
+/// stable order, and inline Lua code without the place it is written at.
 fn configuration(model: &ConfigModel) -> ConfigModel {
     let mut model = model.clone();
+    for code in lua_codes_mut(&mut model) {
+        if let LuaCode::Inline { file, line, .. } = code {
+            *file = None;
+            *line = 1;
+        }
+    }
     for site in &mut model.sites {
         site.created_at = DateTime::UNIX_EPOCH;
         site.updated_at = DateTime::UNIX_EPOCH;
@@ -183,6 +189,27 @@ mod tests {
             text.contains("    # the pool\n") && text.contains("note primary;"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn edits_keep_lua_code_and_files_as_written() {
+        let text = "language_version 1;\nhttp {\n    # the pool\n    upstream app {\n        server 10.0.0.1:80;\n    }\n\n    server shop {\n        server_name shop.example;\n        access_by_lua_file lua/auth.lua;\n        header_filter_by_lua_block {\n            ngx.header.x_shop = \"1\" -- }\n        }\n        proxy app;\n    }\n}\n";
+        let mut sources = Sources::single(text);
+        sources.insert("lua/auth.lua", "return ngx.exit(403)\n");
+        let (model, written, _) = replace(&sources, &ConfigModel::default()).unwrap();
+        let mut next = model.clone();
+        next.upstreams[0].note = Some("primary".into());
+        let followed = follow(&written, &model, &next);
+        let text = followed.get("main.conf").unwrap();
+        assert!(
+            text.contains("    # the pool\n")
+                && text.contains("note primary;")
+                && text.contains("            ngx.header.x_shop = \"1\" -- }\n        }\n"),
+            "{text}"
+        );
+        assert_eq!(followed.get("lua/auth.lua"), Some("return ngx.exit(403)\n"));
+        let printed = printed(&next);
+        assert_eq!(printed.get("lua/auth.lua"), Some("return ngx.exit(403)\n"));
     }
 
     #[test]

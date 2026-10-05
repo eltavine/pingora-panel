@@ -1,10 +1,14 @@
 //! Converts a documented subset of NGINX configuration into the language.
 //! `server`, `listen`, `server_name`, `location` with its modifiers,
 //! `proxy_pass`, `root`, `index`, `try_files`, `return` and `upstream` are
-//! carried over; every other directive is reported at its position rather
-//! than dropped silently.
+//! carried over, and so are OpenResty's `*_by_lua*` handlers and
+//! `lua_shared_dict`, with the Lua files moved under `lua/`; every other
+//! directive is reported at its position rather than dropped silently.
 
-use crate::{Sources, LANGUAGE_VERSION};
+use crate::{
+    schema::{self, Context},
+    Sources, LANGUAGE_VERSION,
+};
 use globset::GlobBuilder;
 use panel_dsl::{Body, Directive, Document, LineIndex};
 use panel_errors::Diagnostic;
@@ -60,6 +64,10 @@ struct Located {
 
 #[derive(Default)]
 struct Converted {
+    /// The Lua directives of `http`.
+    http: Vec<Directive>,
+    /// Lua files by their path under `lua/`.
+    lua_files: BTreeMap<String, String>,
     listeners: BTreeMap<String, (String, Vec<Directive>)>,
     upstreams: Vec<Directive>,
     upstream_names: BTreeSet<String>,
@@ -98,6 +106,9 @@ pub fn import_nginx(files: &BTreeMap<String, String>, entry: &str) -> Result<Ngi
         report: Vec::new(),
         out: Converted::default(),
     };
+    for (path, text) in files.iter().filter(|(path, _)| path.ends_with(".lua")) {
+        importer.out.lua_files.insert(lua_path(path), text.clone());
+    }
     let top = importer.parse(entry, text, &mut Vec::new());
     for located in top {
         match located.directive.name.value.as_str() {
@@ -123,19 +134,19 @@ pub fn import_nginx(files: &BTreeMap<String, String>, entry: &str) -> Result<Ngi
         ));
     }
     let Converted {
+        http: lua,
+        lua_files,
         listeners,
         upstreams,
         servers,
         ..
     } = importer.out;
-    let mut http: Vec<Directive> = listeners
-        .into_iter()
-        .map(|(id, (address, extra))| {
-            let mut children = vec![Directive::simple("address", [address])];
-            children.extend(extra);
-            Directive::with_block("listener", [id], children)
-        })
-        .collect();
+    let mut http = lua;
+    http.extend(listeners.into_iter().map(|(id, (address, extra))| {
+        let mut children = vec![Directive::simple("address", [address])];
+        children.extend(extra);
+        Directive::with_block("listener", [id], children)
+    }));
     http.extend(upstreams);
     http.extend(servers);
     let document = Document {
@@ -145,10 +156,29 @@ pub fn import_nginx(files: &BTreeMap<String, String>, entry: &str) -> Result<Ngi
         ],
         trailing: Vec::new(),
     };
+    let mut sources = Sources::single(panel_dsl::format(&document));
+    for (path, text) in lua_files {
+        sources.insert(path, text);
+    }
     Ok(NginxImport {
-        sources: Sources::single(panel_dsl::format(&document)),
+        sources,
         report: importer.report,
     })
+}
+
+/// Where a Lua file of NGINX goes: below its last `lua/` directory, or
+/// directly under `lua/`.
+fn lua_path(path: &str) -> String {
+    let relative = match path.rfind("lua/") {
+        Some(at) if at == 0 || path[..at].ends_with('/') => &path[at + 4..],
+        _ => path.rsplit('/').next().unwrap_or(path),
+    };
+    format!("lua/{relative}")
+}
+
+/// Whether `name` is an OpenResty directive.
+fn is_lua(name: &str) -> bool {
+    name.contains("_by_lua") || name.starts_with("lua_")
 }
 
 fn children(directive: &Directive) -> &[Directive] {
@@ -319,8 +349,73 @@ impl<'a> Importer<'a> {
             match located.directive.name.value.as_str() {
                 "upstream" => self.upstream(&located),
                 "server" => self.server(&located),
+                name if is_lua(name) => {
+                    if let Some(directive) = self.lua(&located, Context::Http) {
+                        self.out.http.push(directive);
+                    }
+                }
                 name => self.unsupported(&located, format!("'{name}' is not supported")),
             }
+        }
+    }
+
+    /// An OpenResty directive in the language, in a block of `context`:
+    /// handlers keep their code, string forms become blocks, and files move
+    /// under `lua/`.
+    fn lua(&mut self, located: &Located, context: Context) -> Option<Directive> {
+        let directive = &located.directive;
+        let name = directive.name.value.as_str();
+        let block = format!("{name}_block");
+        let (written, code) = if name.ends_with("_by_lua") {
+            (
+                block.as_str(),
+                directive.args.first().map(|arg| arg.value.clone()),
+            )
+        } else {
+            (name, None)
+        };
+        if schema::lookup(written, context).is_none() {
+            let reason = schema::refusal(written).or_else(|| schema::refusal(name));
+            let message = match (reason, schema::contexts_of(written).is_empty()) {
+                (Some(reason), _) => format!("'{name}' is not carried over: {reason}"),
+                (None, false) => format!("'{name}' is not supported in {}", context.name()),
+                (None, true) => format!("'{name}' is not supported"),
+            };
+            self.unsupported(located, message);
+            return None;
+        }
+        if let Some(code) = code {
+            return Some(Directive::with_lua(written, format!(" {code} ")));
+        }
+        match name {
+            _ if name.ends_with("_by_lua_block") => Some(Directive {
+                leading: Vec::new(),
+                comment: None,
+                ..directive.clone()
+            }),
+            _ if name.ends_with("_by_lua_file") => {
+                let path = args(directive).first().copied().unwrap_or_default();
+                let target = lua_path(path);
+                if !self.out.lua_files.contains_key(&target) {
+                    self.changed(
+                        located,
+                        format!("{path} was not provided; add it to the configuration as {target}"),
+                    );
+                } else if target != path {
+                    self.changed(located, format!("{path} is read from {target}"));
+                }
+                Some(Directive::simple(name, [target]))
+            }
+            "lua_code_cache" if args(directive).as_slice() == ["off"] => {
+                self.unsupported(
+                    located,
+                    "'lua_code_cache off' is not carried over: scripts are compiled once per activation"
+                        .into(),
+                );
+                None
+            }
+            "lua_code_cache" => None,
+            _ => Some(Directive::simple(name, args(directive))),
         }
     }
 
@@ -401,6 +496,11 @@ impl<'a> Importer<'a> {
                         "'keepalive' turns connection reuse on; its pool size is not carried over"
                             .into(),
                     );
+                }
+                name if is_lua(name) => {
+                    if let Some(directive) = self.lua(&inner, Context::Upstream) {
+                        converted.push(directive);
+                    }
                 }
                 name => {
                     self.unsupported(&inner, format!("'{name}' is not supported in an upstream"))
@@ -576,6 +676,11 @@ impl<'a> Importer<'a> {
                 },
                 "root" | "index" | "try_files" => {}
                 "access_log" => body.extend(self.access_log(inner)),
+                name if is_lua(name) => {
+                    if let Some(directive) = self.lua(inner, Context::Server) {
+                        body.push(directive);
+                    }
+                }
                 name if name.starts_with("ssl_") => self.unsupported(
                     inner,
                     format!("'{name}' is not carried over; certificates are set in TLS profiles"),
@@ -814,6 +919,7 @@ impl<'a> Importer<'a> {
         };
         let mut action = None;
         let mut logging = Vec::new();
+        let mut lua = Vec::new();
         let mut static_files = inherited.cloned();
         // A location whose proxy or return cannot be carried over is left
         // out rather than serving files in its place.
@@ -837,6 +943,17 @@ impl<'a> Importer<'a> {
                 },
                 "root" | "index" | "try_files" => self.static_files(&inner, &mut static_files),
                 "access_log" => logging.extend(self.access_log(&inner)),
+                name if is_lua(name) => {
+                    let content = name.starts_with("content_by_lua");
+                    if let Some(directive) = self.lua(&inner, Context::Route) {
+                        if content {
+                            directed = true;
+                            action = Some(vec![directive]);
+                        } else {
+                            lua.push(directive);
+                        }
+                    }
+                }
                 "location" => self.unsupported(&inner, "nested locations are not supported".into()),
                 "alias" => self.unsupported(&inner, "'alias' is not supported; use 'root'".into()),
                 name => {
@@ -856,12 +973,18 @@ impl<'a> Importer<'a> {
             );
             return None;
         };
-        if kind == "prefix" && path == "/" && rank.0 == 3 && server_action.is_none() {
+        if kind == "prefix"
+            && path == "/"
+            && rank.0 == 3
+            && server_action.is_none()
+            && lua.is_empty()
+        {
             *server_action = Some(action);
             return None;
         }
         let mut directives = vec![Directive::simple("match", [kind.to_owned(), path])];
         directives.extend(logging);
+        directives.extend(lua);
         directives.extend(action);
         Some(Route { rank, directives })
     }

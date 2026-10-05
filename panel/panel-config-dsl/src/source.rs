@@ -51,6 +51,10 @@ impl Sources {
         self.files.insert(path.into(), text.into());
     }
 
+    pub fn remove(&mut self, path: &str) -> Option<String> {
+        self.files.remove(path)
+    }
+
     pub fn has_entry(&self) -> bool {
         self.files.contains_key(ENTRY)
     }
@@ -91,6 +95,12 @@ fn valid_path(path: &str) -> bool {
         && path
             .split('/')
             .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
+}
+
+/// Whether `path` is Lua code, which the configuration runs rather than
+/// reads.
+pub fn is_lua(path: &str) -> bool {
+    path.ends_with(".lua")
 }
 
 pub(crate) fn is_glob(pattern: &str) -> bool {

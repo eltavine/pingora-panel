@@ -143,6 +143,19 @@ pub fn reconcile(sources: &Sources, lowered: &Lowered, next: &ConfigModel) -> So
         let main = files.get(ENTRY).unwrap_or_default().to_owned();
         files.insert(ENTRY, append(&main, &appended));
     }
+    for (path, _) in sources
+        .files()
+        .filter(|(path, _)| crate::source::is_lua(path))
+    {
+        if !next.lua.files.contains_key(path) {
+            files.remove(path);
+        }
+    }
+    for (path, text) in &next.lua.files {
+        if files.get(path) != Some(text.as_str()) {
+            files.insert(path.clone(), text.clone());
+        }
+    }
     files
 }
 
@@ -196,7 +209,10 @@ fn append(text: &str, blocks: &[&Directive]) -> String {
 pub fn format_files(sources: &Sources) -> (Sources, Vec<panel_errors::Diagnostic>) {
     let mut formatted = sources.clone();
     let mut diagnostics = Vec::new();
-    for (path, text) in sources.files() {
+    for (path, text) in sources
+        .files()
+        .filter(|(path, _)| !crate::source::is_lua(path))
+    {
         let parsed = panel_dsl::parse(path, text);
         if parsed.is_valid() {
             formatted.insert(path, panel_dsl::format(&parsed.document));

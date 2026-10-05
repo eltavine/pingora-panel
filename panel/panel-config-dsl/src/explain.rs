@@ -3,6 +3,7 @@
 //! listener serving it, or a default. The rules are the schema's.
 
 use crate::{
+    lower::{lua_runs as runs, LUA_DEFAULTS, LUA_GROUPS},
     schema::{self, Context},
     Lowered, Sources, Written,
 };
@@ -180,9 +181,18 @@ impl<'a> Explainer<'a> {
             .find(|written| written.directive == directive)
     }
 
-    /// What `written` says after its name.
+    /// What `written` says after its name; Lua code is shown as its size.
     fn arguments(&self, written: &Written) -> String {
         let text = self.sources.get(&written.file).unwrap_or_default();
+        if written.directive.ends_with("_by_lua_block") {
+            let lines = text
+                .get(written.span.range())
+                .map_or(0, |directive| directive.lines().count());
+            return format!(
+                "{{ {lines} line{} of Lua }}",
+                if lines == 1 { "" } else { "s" }
+            );
+        }
         text.get(written.span.range())
             .and_then(|directive| directive.strip_prefix(written.directive))
             .unwrap_or_default()
@@ -330,6 +340,15 @@ impl<'a> Explainer<'a> {
         ] {
             self.or_default(&mut settings, &resource, Context::Server, directive, value);
         }
+        let http = &self.lowered.model.lua.http;
+        let scope = site.lua.over(http);
+        self.lua(
+            &mut settings,
+            &resource,
+            Context::Server,
+            &[("http".into(), "http".into())],
+            runs(&scope, &site.action),
+        );
         self.certificates(&mut settings, site, None);
         self.constants(&mut settings, &resource);
         settings
@@ -383,9 +402,60 @@ impl<'a> Explainer<'a> {
                     .inherited(),
             );
         }
+        let http = &self.lowered.model.lua.http;
+        let scope = route.lua.over(&site.lua.over(http));
+        self.lua(
+            &mut settings,
+            &resource,
+            Context::Route,
+            &[
+                (server.clone(), from.clone()),
+                ("http".into(), "http".into()),
+            ],
+            runs(&scope, &route.action),
+        );
         self.certificates(&mut settings, site, Some(route));
         self.constants(&mut settings, &resource);
         settings
+    }
+
+    /// The Lua handlers and terms a block takes over from the blocks around
+    /// it, innermost first, and the defaults of the terms where a handler
+    /// runs.
+    fn lua(
+        &self,
+        settings: &mut Vec<Setting>,
+        resource: &str,
+        context: Context,
+        outer: &[(String, String)],
+        runs: bool,
+    ) {
+        for names in LUA_GROUPS {
+            if context == Context::Route && names[0].starts_with("server_rewrite") {
+                continue;
+            }
+            if names
+                .iter()
+                .any(|name| self.first(resource, name).is_some())
+            {
+                continue;
+            }
+            let found = outer.iter().find_map(|(block, label)| {
+                names
+                    .iter()
+                    .find_map(|name| self.first(block, name))
+                    .map(|written| (written, label))
+            });
+            if let Some((written, label)) = found {
+                settings.push(self.here(written, context).from(label.clone()).inherited());
+            } else if let Some((name, value)) = LUA_DEFAULTS
+                .iter()
+                .find(|(name, _)| runs && *name == names[0])
+            {
+                settings
+                    .push(Setting::new(*name, *value, SettingSource::Default).rule(name, context));
+            }
+        }
     }
 
     /// The certificate of each host the server, or one of its routes,

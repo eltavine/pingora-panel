@@ -141,6 +141,19 @@ impl LuaScope {
         .filter_map(|(phase, code)| code.as_ref().map(|code| (phase, code)))
     }
 
+    fn handlers_mut(&mut self) -> impl Iterator<Item = &mut LuaCode> {
+        [
+            &mut self.server_rewrite,
+            &mut self.rewrite,
+            &mut self.access,
+            &mut self.header_filter,
+            &mut self.body_filter,
+            &mut self.log,
+        ]
+        .into_iter()
+        .flatten()
+    }
+
     /// Whether it sets any term, as opposed to only handlers.
     pub fn has_terms(&self) -> bool {
         self.time_limit_ms.is_some()
@@ -229,6 +242,36 @@ pub fn lua_handlers(model: &ConfigModel) -> Vec<(String, &'static str, &LuaCode)
             );
             if let Action::Lua { code } = &route.action {
                 found.push((resource, "content", code));
+            }
+        }
+    }
+    found
+}
+
+/// Every handler's code in `model`, deleted sites included.
+pub fn lua_codes_mut(model: &mut ConfigModel) -> Vec<&mut LuaCode> {
+    let lua = &mut model.lua;
+    let mut found: Vec<&mut LuaCode> = lua
+        .init
+        .iter_mut()
+        .chain(lua.init_worker.iter_mut())
+        .collect();
+    found.extend(lua.http.handlers_mut());
+    found.extend(
+        model
+            .upstreams
+            .iter_mut()
+            .filter_map(|upstream| upstream.balancer.as_mut()),
+    );
+    for site in &mut model.sites {
+        found.extend(site.lua.handlers_mut());
+        if let Action::Lua { code } = &mut site.action {
+            found.push(code);
+        }
+        for route in &mut site.routes {
+            found.extend(route.lua.handlers_mut());
+            if let Action::Lua { code } = &mut route.action {
+                found.push(code);
             }
         }
     }

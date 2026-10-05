@@ -52,7 +52,7 @@ inheritance, where a directive in an inner block replaces the outer one:
 | `server_rewrite_by_lua_block`, `_file` | before the route is chosen; may change the URI and host it is chosen by | `http`, `server` |
 | `rewrite_by_lua_block`, `_file` | after the route is chosen, before security policies | `http`, `server`, `route` |
 | `access_by_lua_block`, `_file` | after security policies | `http`, `server`, `route` |
-| `content_by_lua_block`, `_file` | as the route's action, instead of proxying or serving files | `route` |
+| `content_by_lua_block`, `_file` | as the action of a server or route, instead of proxying or serving files | `server`, `route` |
 | `balancer_by_lua_block`, `_file` | each time an upstream endpoint is chosen, retries included | `upstream` |
 | `header_filter_by_lua_block`, `_file` | on the response header, before it is sent | `http`, `server`, `route` |
 | `body_filter_by_lua_block`, `_file` | on each chunk of the response body | `http`, `server`, `route` |

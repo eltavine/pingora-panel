@@ -2,7 +2,12 @@
 //! would take them over sets its own, or nothing that uses them inherits
 //! them.
 
-use crate::{checks::label, codes, Origin, Written};
+use crate::{
+    checks::label,
+    codes,
+    lower::{lua_runs, LUA_TERMS},
+    Origin, Written,
+};
 use panel_config_model::ConfigModel;
 use panel_dsl::Span;
 use panel_errors::Diagnostic;
@@ -37,6 +42,50 @@ pub(crate) fn check(
         findings.push((written.file.clone(), written.span, diagnostic));
     };
     let mut at_origin = Vec::new();
+    let mut lua_terms = |resource: &str, owner: &str| {
+        for term in LUA_TERMS {
+            if let Some(at) = written(written_in, resource, term) {
+                at_written(
+                    at,
+                    no_effect(
+                        format!("{term} has no effect: no Lua handler runs for {owner}"),
+                        "add a handler where it should apply, or remove this",
+                    ),
+                );
+            }
+        }
+    };
+    let http = &model.lua.http;
+    let mut any = model.lua.init.is_some()
+        || model.lua.init_worker.is_some()
+        || model
+            .upstreams
+            .iter()
+            .any(|upstream| upstream.balancer.is_some());
+    for site in model.sites.iter().filter(|site| !site.is_deleted()) {
+        let scope = site.lua.over(http);
+        let mut site_runs = lua_runs(&scope, &site.action);
+        for route in &site.routes {
+            let route_runs = lua_runs(&route.lua.over(&scope), &route.action);
+            if !route_runs {
+                lua_terms(
+                    &format!("sites/{}/routes/{}", site.id, route.id),
+                    &format!("route {}", label(route)),
+                );
+            }
+            site_runs |= route_runs;
+        }
+        if !site_runs {
+            lua_terms(
+                &format!("sites/{}", site.id),
+                &format!("server {:?}", site.name),
+            );
+        }
+        any |= site_runs;
+    }
+    if !any {
+        lua_terms("http", "any request");
+    }
 
     for site in model.sites.iter().filter(|site| !site.is_deleted()) {
         let resource = format!("sites/{}", site.id);

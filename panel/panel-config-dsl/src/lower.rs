@@ -11,8 +11,8 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use panel_config_model::{
-    validate, Action, ConfigModel, HttpPolicy, Listener, Route, SecurityPolicy, Site, TlsProfile,
-    Upstream,
+    validate, Action, ConfigModel, HttpPolicy, Listener, LuaConfig, Route, SecurityPolicy, Site,
+    TlsProfile, Upstream,
 };
 use panel_domain::NormalizedHost;
 use panel_dsl::{Argument, Body, Directive, Document, LineIndex, Span};
@@ -27,6 +27,7 @@ mod conditions;
 mod http;
 mod listener;
 mod logging;
+mod lua;
 mod resilience;
 mod route;
 mod security;
@@ -36,6 +37,10 @@ mod upstream;
 
 pub(crate) use http::CODINGS;
 pub(crate) use logging::{print_access, print_policy};
+pub(crate) use lua::{
+    print_terms as print_lua_terms, runs as lua_runs, DEFAULTS as LUA_DEFAULTS,
+    GROUPS as LUA_GROUPS, TERMS as LUA_TERMS,
+};
 pub(crate) use resilience::{print_breaker, print_queue, print_retry};
 pub(crate) use security::{print_rate, DEFAULT_REALM};
 
@@ -195,6 +200,8 @@ struct Lowerer<'a> {
     servers: Vec<ServerDraft>,
     /// The logging directives of `http`.
     logging: panel_ir::LoggingPolicy,
+    /// The Lua directives of `http` and the configuration's Lua files.
+    lua: LuaConfig,
     origins: BTreeMap<String, Origin>,
     insertions: Vec<Insertion>,
     written: BTreeMap<String, Vec<Written>>,
@@ -224,20 +231,24 @@ impl<'a> Lowerer<'a> {
             upstreams: Vec::new(),
             servers: Vec::new(),
             logging: panel_ir::LoggingPolicy::default(),
+            lua: LuaConfig::default(),
             origins: BTreeMap::new(),
             insertions: Vec::new(),
             written: BTreeMap::new(),
             constants: BTreeMap::new(),
         };
         for (path, text) in sources.files() {
+            lowerer
+                .indexes
+                .insert(path.to_owned(), LineIndex::new(text));
+            if source::is_lua(path) {
+                continue;
+            }
             let parsed = panel_dsl::parse(path, text);
             lowerer.diagnostics.extend(parsed.diagnostics);
             lowerer
                 .documents
                 .insert(path.to_owned(), Rc::new(parsed.document));
-            lowerer
-                .indexes
-                .insert(path.to_owned(), LineIndex::new(text));
         }
         lowerer
     }
@@ -429,7 +440,13 @@ impl<'a> Lowerer<'a> {
                 codes::UNKNOWN_DIRECTIVE,
                 format!("unknown directive '{name}'"),
             );
-            if let Some(suggestion) = schema::suggestion(name, context) {
+            if let Some(reason) = schema::refusal(name) {
+                diagnostic = Diagnostic::error(
+                    codes::UNKNOWN_DIRECTIVE,
+                    format!("'{name}' is not available"),
+                )
+                .with_help(reason);
+            } else if let Some(suggestion) = schema::suggestion(name, context) {
                 diagnostic = diagnostic.with_help(format!("did you mean '{suggestion}'?"));
             }
             self.report(diagnostic, file, directive.name.span);
@@ -471,6 +488,18 @@ impl<'a> Lowerer<'a> {
             return;
         }
         for path in matches {
+            if source::is_lua(&path) {
+                if !source::is_glob(&pattern.value) {
+                    self.error_with_help(
+                        file,
+                        pattern.span,
+                        codes::INCLUDE,
+                        format!("{path} is Lua code, not configuration"),
+                        "run it with a *_by_lua_file directive",
+                    );
+                }
+                continue;
+            }
             if let Some(position) = self.includes.iter().position(|open| *open == path) {
                 let mut chain = self.includes[position..].to_vec();
                 chain.push(path.clone());
@@ -739,6 +768,16 @@ impl<'a> Lowerer<'a> {
                     "server" => lowerer.server(file, directive, depth),
                     "access_log" | "log_field" | "log_redact_query" | "log_redact_headers"
                     | "log_files" => lowerer.logging(file, directive),
+                    name if lua::HTTP.contains(&name) => lowerer.lua_http(file, directive, depth),
+                    name if lua::SCOPE.contains(&name) => {
+                        lowerer
+                            .origins
+                            .entry("lua".into())
+                            .or_insert_with(|| Self::origin(file, directive, depth));
+                        let mut scope = std::mem::take(&mut lowerer.lua.http);
+                        lowerer.lua_scope(file, directive, &mut scope, "http");
+                        lowerer.lua.http = scope;
+                    }
                     _ => unreachable!("the schema allows nothing else in http"),
                 },
             );
@@ -929,6 +968,7 @@ impl<'a> Lowerer<'a> {
     }
 
     fn finish(mut self) -> Lowered {
+        self.lua_files();
         let upstream_ids: BTreeMap<String, Uuid> = self
             .upstreams
             .iter()
@@ -958,6 +998,7 @@ impl<'a> Lowerer<'a> {
                 .map(|(upstream, _)| upstream)
                 .collect(),
             logging: std::mem::take(&mut self.logging),
+            lua: std::mem::take(&mut self.lua),
             ..ConfigModel::default()
         };
         for mut draft in std::mem::take(&mut self.listeners) {

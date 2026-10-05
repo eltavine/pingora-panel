@@ -174,6 +174,12 @@ impl<'a> Lowerer<'a> {
                             "access_log" => {
                                 lowerer.access_log(file, directive, &mut draft.route.access_log)
                             }
+                            name if super::lua::SCOPE.contains(&name) => lowerer.lua_scope(
+                                file,
+                                directive,
+                                &mut draft.route.lua,
+                                "the route",
+                            ),
                             "log_field" => {
                                 lowerer.log_field(file, directive, &mut draft.route.access_log)
                             }
@@ -213,7 +219,7 @@ impl<'a> Lowerer<'a> {
                 directive.span,
                 codes::ARGUMENTS,
                 "the route has no action",
-                "add one of proxy, root, return or respond",
+                "add one of proxy, root, return, respond or content_by_lua_block",
             );
         }
         self.origins.insert(
@@ -366,6 +372,11 @@ impl<'a> Lowerer<'a> {
                     body,
                     content_type,
                     retry_after_seconds,
+                }))
+            }
+            "content_by_lua_block" | "content_by_lua_file" => {
+                Some(ActionDraft::Ready(Action::Lua {
+                    code: self.lua_code(file, directive)?,
                 }))
             }
             _ => unreachable!("the schema has no other actions"),

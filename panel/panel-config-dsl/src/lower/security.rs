@@ -275,7 +275,7 @@ impl Lowerer<'_> {
         self.expand(file, arg, value, super::Expansion::Text)
     }
 
-    fn size(&mut self, file: &str, arg: &Argument) -> Option<u64> {
+    pub(super) fn size(&mut self, file: &str, arg: &Argument) -> Option<u64> {
         let value = self.value(file, arg)?;
         let parsed = values::parse_size(&value).filter(|bytes| *bytes > 0);
         if parsed.is_none() {

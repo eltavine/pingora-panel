@@ -74,6 +74,7 @@ pub struct DirectiveSpec {
 use Context::*;
 
 const ACTION_CONTEXTS: &[Context] = &[Server, Route];
+const LUA_CONTEXTS: &[Context] = &[Http, Server, Route];
 const CONDITION_CONTEXTS: &[Context] = &[Route, Conditions];
 
 macro_rules! spec {
@@ -370,6 +371,89 @@ pub static DIRECTIVES: &[DirectiveSpec] = &[
     spec!("priority" in &[Route], None, 1..Some(1), false,
         "priority <n>;", "Lower priorities are evaluated first.",
         inherits "Without it, routes take 10, 20, 30 and so on in the order they are written."),
+    spec!("lua" in &[Http], None, 1..Some(1), false,
+        "lua on|off;", "Whether scripts run; off keeps them in the configuration, checked, without running any.",
+        inherits "On when not written."),
+    spec!("lua_shared_dict" in &[Http], None, 2..Some(2), true,
+        "lua_shared_dict <name> <size>;", "A dictionary every VM of the gateway shares, as ngx.shared.<name>; it keeps its data across activations while its name and size stay."),
+    spec!("lua_memory_limit" in &[Http], None, 1..Some(1), false,
+        "lua_memory_limit <size>;", "The memory each VM may allocate; an allocation over it fails the run that made it.",
+        inherits "64m when not written."),
+    spec!("init_by_lua_block" in &[Http], None, 0..Some(0), false,
+        "init_by_lua_block { ... }", "Runs once in each VM when the configuration is activated; the globals it sets are read-only to requests."),
+    spec!("init_by_lua_file" in &[Http], None, 1..Some(1), false,
+        "init_by_lua_file lua/<file>.lua;", "Runs a file once in each VM when the configuration is activated."),
+    spec!("init_worker_by_lua_block" in &[Http], None, 0..Some(0), false,
+        "init_worker_by_lua_block { ... }", "Runs once in each VM after init_by_lua."),
+    spec!("init_worker_by_lua_file" in &[Http], None, 1..Some(1), false,
+        "init_worker_by_lua_file lua/<file>.lua;", "Runs a file once in each VM after init_by_lua."),
+    spec!("server_rewrite_by_lua_block" in &[Http, Server], None, 0..Some(0), false,
+        "server_rewrite_by_lua_block { ... }", "Runs before the route is chosen, and may change the URI and arguments it is chosen by.",
+        inherits "A server's replaces the one in http."),
+    spec!("server_rewrite_by_lua_file" in &[Http, Server], None, 1..Some(1), false,
+        "server_rewrite_by_lua_file lua/<file>.lua;", "Runs a file before the route is chosen.",
+        inherits "A server's replaces the one in http."),
+    spec!("rewrite_by_lua_block" in LUA_CONTEXTS, None, 0..Some(0), false,
+        "rewrite_by_lua_block { ... }", "Runs after the route is chosen, before security policies; ngx.req.set_uri(uri, true) chooses the route again.",
+        inherits "A route's replaces its server's, and a server's the one in http."),
+    spec!("rewrite_by_lua_file" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "rewrite_by_lua_file lua/<file>.lua;", "Runs a file after the route is chosen, before security policies.",
+        inherits "A route's replaces its server's, and a server's the one in http."),
+    spec!("access_by_lua_block" in LUA_CONTEXTS, None, 0..Some(0), false,
+        "access_by_lua_block { ... }", "Runs after security policies; ngx.exit answers in place of the action.",
+        inherits "A route's replaces its server's, and a server's the one in http."),
+    spec!("access_by_lua_file" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "access_by_lua_file lua/<file>.lua;", "Runs a file after security policies.",
+        inherits "A route's replaces its server's, and a server's the one in http."),
+    spec!("content_by_lua_block" in ACTION_CONTEXTS, None, 0..Some(0), false,
+        "content_by_lua_block { ... }", "Answers requests with a script, in place of proxying or serving files."),
+    spec!("content_by_lua_file" in ACTION_CONTEXTS, None, 1..Some(1), false,
+        "content_by_lua_file lua/<file>.lua;", "Answers requests with a file's script."),
+    spec!("balancer_by_lua_block" in &[Upstream], None, 0..Some(0), false,
+        "balancer_by_lua_block { ... }", "Chooses the endpoint of each attempt, retries included, with ngx.balancer; runs on the terms set in http, which must include lua_allow upstream."),
+    spec!("balancer_by_lua_file" in &[Upstream], None, 1..Some(1), false,
+        "balancer_by_lua_file lua/<file>.lua;", "Chooses the endpoint of each attempt with a file's script."),
+    spec!("header_filter_by_lua_block" in LUA_CONTEXTS, None, 0..Some(0), false,
+        "header_filter_by_lua_block { ... }", "Runs on the response header before it is sent, for every response.",
+        inherits "A route's replaces its server's, and a server's the one in http."),
+    spec!("header_filter_by_lua_file" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "header_filter_by_lua_file lua/<file>.lua;", "Runs a file on the response header before it is sent.",
+        inherits "A route's replaces its server's, and a server's the one in http."),
+    spec!("body_filter_by_lua_block" in LUA_CONTEXTS, None, 0..Some(0), false,
+        "body_filter_by_lua_block { ... }", "Runs on each chunk of the response body, as ngx.arg[1] and ngx.arg[2]; needs lua_allow body.",
+        inherits "A route's replaces its server's, and a server's the one in http."),
+    spec!("body_filter_by_lua_file" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "body_filter_by_lua_file lua/<file>.lua;", "Runs a file on each chunk of the response body.",
+        inherits "A route's replaces its server's, and a server's the one in http."),
+    spec!("log_by_lua_block" in LUA_CONTEXTS, None, 0..Some(0), false,
+        "log_by_lua_block { ... }", "Runs after the response is sent.",
+        inherits "A route's replaces its server's, and a server's the one in http."),
+    spec!("log_by_lua_file" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "log_by_lua_file lua/<file>.lua;", "Runs a file after the response is sent.",
+        inherits "A route's replaces its server's, and a server's the one in http."),
+    spec!("lua_time_limit" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "lua_time_limit <duration>;", "The wall-clock time a run may take, waits included; a run over it fails.",
+        inherits "100ms when not written; a route's replaces its server's, and a server's the one in http. Balancers and init take the one in http."),
+    spec!("lua_work_limit" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "lua_work_limit <n>;", "The function calls and loop iterations a run may make; a run over it fails.",
+        inherits "10000000 when not written; a route's replaces its server's, and a server's the one in http."),
+    spec!("lua_allow" in LUA_CONTEXTS, None, 1..Some(3), false,
+        "lua_allow body|upstream|network ...|none;", "What scripts may do besides reading and changing requests and responses: bodies, choosing upstream endpoints, sockets.",
+        inherits "none when not written; a route's replaces its server's, and a server's the one in http."),
+    spec!("lua_on_error" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "lua_on_error fail|continue|<status>;", "What a run that fails does: answer 500 (502 in a balancer), go on as if it had not run, or answer a status.",
+        inherits "fail when not written; a route's replaces its server's, and a server's the one in http."),
+    spec!("lua_log_level" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "lua_log_level stderr|emerg|alert|crit|error|warn|notice|info|debug;", "The least severe ngx.log messages kept.",
+        inherits "notice when not written; a route's replaces its server's, and a server's the one in http."),
+    spec!("lua_slow_threshold" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "lua_slow_threshold <duration>;", "Runs longer than this are logged with their duration and counted as slow.",
+        inherits "10ms when not written; a route's replaces its server's, and a server's the one in http."),
+    spec!("lua_debug" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "lua_debug on|off;", "Logs the start, end, duration and outcome of every run.",
+        inherits "off when not written; a route's replaces its server's, and a server's the one in http."),
+    spec!("lua_code_cache" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "lua_code_cache on;", "Accepted from OpenResty: scripts are compiled once per activation, so off is refused."),
     DirectiveSpec {
         deprecated: Some(Deprecation {
             replacement: "route",
@@ -387,6 +471,39 @@ pub static DIRECTIVES: &[DirectiveSpec] = &[
             "proxy_pass http://<upstream>;", "Accepted from NGINX and formatted as proxy.")
     },
 ];
+
+/// Why the language does not take `name`, an OpenResty directive.
+pub fn refusal(name: &str) -> Option<String> {
+    if let Some(block) = DIRECTIVES
+        .iter()
+        .find(|spec| spec.name.strip_suffix("_block") == Some(name))
+    {
+        return Some(format!(
+            "write the code in braces, as {} {{ ... }}",
+            block.name
+        ));
+    }
+    let reason = match name {
+        "lua_package_path" | "lua_package_cpath" => {
+            "require loads the built-in modules and the files under lua/, and nothing else"
+        }
+        "set_by_lua" | "set_by_lua_block" | "set_by_lua_file" => {
+            "set variables with ngx.var in rewrite_by_lua_block"
+        }
+        "exit_worker_by_lua_block" | "exit_worker_by_lua_file" => {
+            "VMs run no script when they stop"
+        }
+        "lua_need_request_body" => "ngx.req.read_body() reads the body where a script needs it",
+        _ if name.starts_with("ssl_") && name.contains("_by_lua") => {
+            "TLS handshakes run no script; certificates come from TLS profiles"
+        }
+        _ if name.starts_with("lua_socket_") || name.starts_with("lua_ssl_") => {
+            "scripts do not open sockets, so there is nothing to set"
+        }
+        _ => return None,
+    };
+    Some(reason.to_owned())
+}
 
 /// The directive named `name` in `context`, if any.
 pub fn lookup(name: &str, context: Context) -> Option<&'static DirectiveSpec> {
@@ -444,6 +561,19 @@ mod tests {
         assert_eq!(suggestion("server_nmae", Server), Some("server_name"));
         assert_eq!(suggestion("upsteam", Http), Some("upstream"));
         assert_eq!(suggestion("zzzzzz", Http), None);
+    }
+
+    #[test]
+    fn openresty_directives_say_why_they_are_not_taken() {
+        assert_eq!(
+            refusal("access_by_lua").as_deref(),
+            Some("write the code in braces, as access_by_lua_block { ... }")
+        );
+        assert!(refusal("lua_package_path").unwrap().contains("lua/"));
+        assert!(refusal("ssl_certificate_by_lua_block").is_some());
+        assert!(refusal("lua_socket_connect_timeout").is_some());
+        assert!(refusal("access_by_lua_block").is_none());
+        assert!(refusal("proxy_buffering").is_none());
     }
 
     #[test]

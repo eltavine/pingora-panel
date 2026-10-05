@@ -23,8 +23,8 @@ pub use edit::{format_files, reconcile, write_identifiers};
 pub use explain::{explain, Explanation};
 pub use lower::{lower, Constant, Insertion, LowerOptions, Lowered, Origin, Written};
 pub use nginx::{import_nginx, NginxImport};
-pub use print::print;
-pub use source::{Sources, ENTRY};
+pub use print::{print, print_sources};
+pub use source::{is_lua, Sources, ENTRY};
 pub use syntax::{syntax_tree, SyntaxNode, SyntaxTree};
 
 /// The language version this release reads and writes.

@@ -50,6 +50,17 @@ impl Directive {
     }
 
     /// A `name args { ... }` directive built rather than parsed.
+    /// A `*_by_lua_block` directive whose braces hold `code` as it is.
+    pub fn with_lua(name: &str, code: impl Into<String>) -> Self {
+        Self {
+            body: Body::Lua(LuaBlock {
+                code: code.into(),
+                span: Span::default(),
+            }),
+            ..Self::simple(name, Vec::<String>::new())
+        }
+    }
+
     pub fn with_block<I, A>(name: &str, args: I, directives: Vec<Directive>) -> Self
     where
         I: IntoIterator<Item = A>,

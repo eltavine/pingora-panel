@@ -98,7 +98,7 @@ impl<'a> Lowerer<'a> {
                 directive.span,
                 codes::ARGUMENTS,
                 format!("server {:?} has no action", draft.site.name),
-                "add one of proxy, root, return or respond",
+                "add one of proxy, root, return, respond or content_by_lua_block",
             );
         }
         self.origins
@@ -261,6 +261,9 @@ impl<'a> Lowerer<'a> {
                 if let Some(route) = self.route(file, directive, depth, &draft.site) {
                     draft.routes.push(route);
                 }
+            }
+            name if super::lua::SCOPE.contains(&name) => {
+                self.lua_scope(file, directive, &mut draft.site.lua, "the server");
             }
             action => {
                 let Some(found) = self.action(file, directive, action) else {

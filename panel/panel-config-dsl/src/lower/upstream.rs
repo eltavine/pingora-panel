@@ -91,6 +91,18 @@ impl<'a> Lowerer<'a> {
         };
         match spec.name {
             "id" => {}
+            "balancer_by_lua_block" | "balancer_by_lua_file" => {
+                if upstream.balancer.is_some() {
+                    self.error(
+                        file,
+                        directive.name.span,
+                        codes::DUPLICATE,
+                        "the upstream already has balancer_by_lua",
+                    );
+                } else {
+                    upstream.balancer = self.lua_code(file, directive);
+                }
+            }
             "server" => {
                 if let Some(node) = self.node(file, directive) {
                     if upstream.nodes.iter().any(|other| other.id == node.id) {
