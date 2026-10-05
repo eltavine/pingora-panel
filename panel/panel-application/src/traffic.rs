@@ -5,7 +5,10 @@ use crate::RequestScope;
 use async_trait::async_trait;
 use panel_domain::{RouteId, SiteId};
 use panel_errors::Result;
-use std::time::{Duration, SystemTime};
+use std::{
+    collections::BTreeMap,
+    time::{Duration, SystemTime},
+};
 
 /// Which requests to read, over which window.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -79,6 +82,36 @@ pub struct DomainTraffic {
     pub requests: f64,
 }
 
+/// Runs of the Lua handlers one site or route runs in one phase.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LuaHandlerTraffic {
+    pub site: String,
+    pub route: String,
+    /// Such as `access` or `header_filter`.
+    pub phase: String,
+    pub runs: f64,
+    /// Runs that failed: an error, a timeout or a limit.
+    pub failures: f64,
+    /// Runs longer than their slow threshold.
+    pub slow_runs: f64,
+    pub p95: Option<Duration>,
+}
+
+/// Runs of Lua handlers (ADR 0039).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LuaTraffic {
+    pub runs: f64,
+    /// Failed runs by why they failed: `error`, `timeout`, `work`,
+    /// `memory` or `refused`.
+    pub failures: BTreeMap<String, f64>,
+    pub slow_runs: f64,
+    pub latency: Latency,
+    /// Most failures first, then most runs.
+    pub handlers: Vec<LuaHandlerTraffic>,
+    /// Bytes the Lua VMs of the active configuration hold.
+    pub memory_bytes: f64,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TrafficSummary {
     pub observed_at: Option<SystemTime>,
@@ -104,6 +137,7 @@ pub struct TrafficSummary {
     /// The revision of the gateway's active configuration.
     pub revision: Option<u64>,
     pub activated_at: Option<SystemTime>,
+    pub lua: LuaTraffic,
 }
 
 /// The traffic at one moment, averaged over one step.

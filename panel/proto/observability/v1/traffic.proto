@@ -90,6 +90,35 @@ message DomainTraffic {
   double requests = 3;
 }
 
+// Runs of the Lua handlers one site or route runs in one phase.
+message LuaHandlerTraffic {
+  string site = 1;
+  string route = 2;
+  // Such as `access` or `header_filter`.
+  string phase = 3;
+  double runs = 4;
+  // Runs that failed: an error, a timeout or a limit.
+  double failures = 5;
+  // Runs longer than their slow threshold.
+  double slow_runs = 6;
+  // Seconds; absent when no run was measured.
+  optional double p95 = 7;
+}
+
+// Runs of Lua handlers (ADR 0039).
+message LuaTraffic {
+  double runs = 1;
+  // Failed runs by why they failed: error, timeout, work, memory or
+  // refused.
+  map<string, double> failures = 2;
+  double slow_runs = 3;
+  Latency latency = 4;
+  // Most failures first, then most runs, at most 20.
+  repeated LuaHandlerTraffic handlers = 5;
+  // Bytes the Lua VMs of the active configuration hold.
+  double memory_bytes = 6;
+}
+
 message Summary {
   google.protobuf.Timestamp observed_at = 1;
   google.protobuf.Duration window = 2;
@@ -115,6 +144,7 @@ message Summary {
   repeated DomainTraffic domains = 15;
   // Most first, at most 20, of every upstream whatever the scope.
   repeated UpstreamFailure upstream_failures = 16;
+  LuaTraffic lua = 17;
 }
 
 message SummaryResponse {

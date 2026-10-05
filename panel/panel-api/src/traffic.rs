@@ -15,13 +15,14 @@ use axum::{
 };
 use chrono::{DateTime, SecondsFormat, Utc};
 use panel_application::{
-    DomainTraffic, Latency, RouteTraffic, StatusClasses, TrafficPoint, TrafficPort, TrafficQuery,
-    TrafficSummary, UpstreamFailure, UpstreamTraffic,
+    DomainTraffic, Latency, LuaHandlerTraffic, LuaTraffic, RouteTraffic, StatusClasses,
+    TrafficPoint, TrafficPort, TrafficQuery, TrafficSummary, UpstreamFailure, UpstreamTraffic,
 };
 use panel_domain::{RouteId, SiteId};
 use panel_errors::PanelError;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeMap,
     sync::Arc,
     time::{Duration, SystemTime},
 };
@@ -176,6 +177,65 @@ impl From<DomainTraffic> for DomainTrafficItem {
     }
 }
 
+/// Runs of the Lua handlers one site or route runs in one phase.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct LuaHandlerItem {
+    pub site: String,
+    pub route: String,
+    /// Such as `access` or `header_filter`.
+    pub phase: String,
+    pub runs: f64,
+    /// Runs that failed: an error, a timeout or a limit.
+    pub failures: f64,
+    /// Runs longer than their slow threshold.
+    pub slow_runs: f64,
+    /// Seconds; absent when no run was measured.
+    pub p95: Option<f64>,
+}
+
+impl From<LuaHandlerTraffic> for LuaHandlerItem {
+    fn from(value: LuaHandlerTraffic) -> Self {
+        Self {
+            site: value.site,
+            route: value.route,
+            phase: value.phase,
+            runs: value.runs,
+            failures: value.failures,
+            slow_runs: value.slow_runs,
+            p95: seconds(value.p95),
+        }
+    }
+}
+
+/// Runs of Lua handlers over the window.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct LuaTrafficItem {
+    pub runs: f64,
+    /// Failed runs by why they failed: `error`, `timeout`, `work`, `memory`
+    /// or `refused`.
+    pub failures: BTreeMap<String, f64>,
+    /// Runs longer than their slow threshold.
+    pub slow_runs: f64,
+    pub latency: LatencyQuantiles,
+    /// Most failures first, then most runs, at most 20.
+    pub handlers: Vec<LuaHandlerItem>,
+    /// Bytes the Lua VMs of the active configuration hold.
+    pub memory_bytes: f64,
+}
+
+impl From<LuaTraffic> for LuaTrafficItem {
+    fn from(value: LuaTraffic) -> Self {
+        Self {
+            runs: value.runs,
+            failures: value.failures,
+            slow_runs: value.slow_runs,
+            latency: value.latency.into(),
+            handlers: value.handlers.into_iter().map(Into::into).collect(),
+            memory_bytes: value.memory_bytes,
+        }
+    }
+}
+
 /// What the gateway served over a window.
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct TrafficSummaryResponse {
@@ -207,6 +267,8 @@ pub struct TrafficSummaryResponse {
     pub revision: Option<u64>,
     /// When that configuration was activated, RFC 3339.
     pub activated_at: Option<String>,
+    /// Runs of Lua handlers.
+    pub lua: LuaTrafficItem,
 }
 
 impl From<TrafficSummary> for TrafficSummaryResponse {
@@ -232,6 +294,7 @@ impl From<TrafficSummary> for TrafficSummaryResponse {
                 .collect(),
             revision: value.revision,
             activated_at: value.activated_at.map(rfc3339),
+            lua: value.lua.into(),
         }
     }
 }

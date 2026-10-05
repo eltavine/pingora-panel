@@ -33,6 +33,9 @@ const REQUEST_BUCKETS: &str = "http_server_request_duration_seconds_bucket";
 const UPSTREAM_REQUESTS: &str = "http_client_request_duration_seconds_count";
 const UPSTREAM_BUCKETS: &str = "http_client_request_duration_seconds_bucket";
 const DOMAIN_REQUESTS: &str = "pingora_panel_gateway_domain_requests_total";
+const LUA_RUNS: &str = "pingora_panel_gateway_lua_runs_total";
+const LUA_BUCKETS: &str = "pingora_panel_gateway_lua_run_duration_seconds_bucket";
+const LUA_SLOW: &str = "pingora_panel_gateway_lua_slow_runs_total";
 
 /// Which requests a query reads.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -232,6 +235,68 @@ impl Queries {
         )
     }
 
+    /// Lua handler runs; with `failed`, only those that failed, by
+    /// `outcome`.
+    pub fn lua_runs(&self, failed: bool) -> String {
+        if failed {
+            format!(
+                "sum by (outcome) (increase({LUA_RUNS}{}[{}]))",
+                self.scope.selector(&["outcome!=\"ok\""]),
+                self.range
+            )
+        } else {
+            format!(
+                "sum(increase({LUA_RUNS}{}[{}]))",
+                self.scope.selector(&[]),
+                self.range
+            )
+        }
+    }
+
+    pub fn lua_slow_runs(&self) -> String {
+        format!(
+            "sum(increase({LUA_SLOW}{}[{}]))",
+            self.scope.selector(&[]),
+            self.range
+        )
+    }
+
+    pub fn lua_latency(&self, quantile: f64) -> String {
+        format!(
+            "histogram_quantile({quantile}, sum by (le) (rate({LUA_BUCKETS}{}[{}])))",
+            self.scope.selector(&[]),
+            self.range
+        )
+    }
+
+    /// The handlers with the most runs, or with `failed` the most failed
+    /// runs, as `site`, `route` and `phase`.
+    pub fn lua_handlers(&self, limit: usize, failed: bool) -> String {
+        let extra: &[&str] = if failed { &["outcome!=\"ok\""] } else { &[] };
+        format!(
+            "topk({limit}, sum by (site, route, phase) (increase({LUA_RUNS}{}[{}])))",
+            self.scope.selector(extra),
+            self.range
+        )
+    }
+
+    /// Slow runs by `site`, `route` and `phase`.
+    pub fn lua_handler_slow_runs(&self) -> String {
+        format!(
+            "sum by (site, route, phase) (increase({LUA_SLOW}{}[{}]))",
+            self.scope.selector(&[]),
+            self.range
+        )
+    }
+
+    pub fn lua_handler_latency(&self, quantile: f64) -> String {
+        format!(
+            "histogram_quantile({quantile}, sum by (site, route, phase, le) (rate({LUA_BUCKETS}{}[{}])))",
+            self.scope.selector(&[]),
+            self.range
+        )
+    }
+
     pub fn upstream_latency(&self, quantile: f64) -> String {
         format!(
             "histogram_quantile({quantile}, sum by (upstream, le) (rate({UPSTREAM_BUCKETS}[{}])))",
@@ -243,6 +308,7 @@ impl Queries {
 pub const OPEN_CONNECTIONS: &str = "sum(pingora_panel_gateway_open_connections)";
 pub const REVISION: &str = "max(pingora_panel_gateway_config_revision)";
 pub const ACTIVATED_AT: &str = "max(pingora_panel_gateway_config_activated_timestamp_seconds)";
+pub const LUA_MEMORY: &str = "sum(pingora_panel_gateway_lua_memory_bytes)";
 
 #[cfg(test)]
 mod tests {
@@ -289,6 +355,21 @@ mod tests {
             queries.domains(20),
             "topk(20, sum by (site, domain) \
              (increase(pingora_panel_gateway_domain_requests_total{site=\"shop\"}[3600s])))"
+        );
+        assert_eq!(
+            queries.lua_runs(true),
+            "sum by (outcome) (increase(pingora_panel_gateway_lua_runs_total\
+             {site=\"shop\",route=\"checkout\",outcome!=\"ok\"}[3600s]))"
+        );
+        assert_eq!(
+            everything.lua_handler_latency(0.95),
+            "histogram_quantile(0.95, sum by (site, route, phase, le) \
+             (rate(pingora_panel_gateway_lua_run_duration_seconds_bucket[300s])))"
+        );
+        assert_eq!(
+            everything.lua_handlers(20, false),
+            "topk(20, sum by (site, route, phase) \
+             (increase(pingora_panel_gateway_lua_runs_total[300s])))"
         );
     }
 

@@ -276,7 +276,12 @@ async fn api(
             "domains": [{"site": "shop", "domain": "*.shop.example", "requests": 45}],
             "upstream_failures": [{"upstream": "app", "address": "10.0.0.7", "port": 8080,
                                    "error_type": "connect_refused", "failures": 4}],
-            "revision": 7, "activated_at": "2026-10-04T09:00:00Z"
+            "revision": 7, "activated_at": "2026-10-04T09:00:00Z",
+            "lua": {"runs": 340, "failures": {"timeout": 2, "error": 1}, "slow_runs": 5,
+                    "latency": {"p50": 0.0004, "p90": null, "p95": 0.003, "p99": 0.02},
+                    "memory_bytes": 3_145_728,
+                    "handlers": [{"site": "shop", "route": "checkout", "phase": "access",
+                                  "runs": 120, "failures": 3, "slow_runs": 5, "p95": 0.012}]}
         }))
         .into_response(),
         ("GET", "/api/v1/traffic/series") => Json(json!({
@@ -1746,6 +1751,11 @@ fn traffic_is_summarized_and_charted() {
         "10.0.0.7:8080",
         "connect_refused",
         "87.5%",
+        "Lua runs",
+        "1 error, 2 timeout",
+        "0 ms / 3 ms / 20 ms",
+        "3.0 MiB",
+        "access",
     ] {
         assert!(printed.contains(expected), "{expected} in\n{printed}");
     }

@@ -1,7 +1,7 @@
 //! `pingora.panel.observability.v1.Traffic` over Prometheus (ADR 0022).
 
 use crate::promql::{
-    self, unavailable, Queries, Scope, Values, ACTIVATED_AT, OPEN_CONNECTIONS, REVISION,
+    self, unavailable, Queries, Scope, Values, ACTIVATED_AT, LUA_MEMORY, OPEN_CONNECTIONS, REVISION,
 };
 use panel_contracts::observability::v1::{self as wire, traffic_server::Traffic};
 use panel_errors::{PanelError, Result};
@@ -22,6 +22,7 @@ const MAX_POINTS: u32 = 720;
 const ROUTES: usize = 20;
 const DOMAINS: usize = 20;
 const UPSTREAM_FAILURES: usize = 20;
+const LUA_HANDLERS: usize = 20;
 const QUANTILES: [f64; 4] = [0.5, 0.9, 0.95, 0.99];
 
 pub struct TrafficService {
@@ -138,6 +139,76 @@ impl TrafficService {
         Ok(failures)
     }
 
+    /// Values by the site, route and phase of their labels.
+    async fn by_handler(&self, query: String) -> Result<BTreeMap<(String, String, String), f64>> {
+        Ok(self
+            .instant(query)
+            .await?
+            .into_iter()
+            .filter(|(_, value)| value.is_finite())
+            .map(|(mut labels, value)| {
+                let mut take = |name: &str| labels.remove(name).unwrap_or_default();
+                ((take("site"), take("route"), take("phase")), value)
+            })
+            .collect())
+    }
+
+    /// Lua handler runs: how many, how they failed, how long they took and
+    /// which handlers fail and run most.
+    async fn lua(&self, queries: &Queries) -> Result<wire::LuaTraffic> {
+        let [p50, p90, p95, p99] =
+            QUANTILES.map(|quantile| self.value(queries.lua_latency(quantile)));
+        let (runs, failures, slow_runs, p50, p90, p95, p99, memory_bytes) = tokio::try_join!(
+            self.value(queries.lua_runs(false)),
+            self.by(queries.lua_runs(true), "outcome"),
+            self.value(queries.lua_slow_runs()),
+            p50,
+            p90,
+            p95,
+            p99,
+            self.value(LUA_MEMORY.to_owned()),
+        )?;
+        let (busiest, failing, slow, latency) = tokio::try_join!(
+            self.by_handler(queries.lua_handlers(LUA_HANDLERS, false)),
+            self.by_handler(queries.lua_handlers(LUA_HANDLERS, true)),
+            self.by_handler(queries.lua_handler_slow_runs()),
+            self.by_handler(queries.lua_handler_latency(0.95)),
+        )?;
+        let mut handlers: Vec<wire::LuaHandlerTraffic> = busiest
+            .keys()
+            .chain(failing.keys())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .map(|key| wire::LuaHandlerTraffic {
+                site: key.0.clone(),
+                route: key.1.clone(),
+                phase: key.2.clone(),
+                runs: busiest.get(key).copied().unwrap_or_default(),
+                failures: failing.get(key).copied().unwrap_or_default(),
+                slow_runs: slow.get(key).copied().unwrap_or_default(),
+                p95: latency.get(key).copied(),
+            })
+            .collect();
+        handlers.sort_by(|left, right| {
+            right
+                .failures
+                .total_cmp(&left.failures)
+                .then(right.runs.total_cmp(&left.runs))
+        });
+        handlers.truncate(LUA_HANDLERS);
+        Ok(wire::LuaTraffic {
+            runs: runs.unwrap_or_default(),
+            failures: failures
+                .into_iter()
+                .filter(|(_, failed)| *failed > 0.0)
+                .collect(),
+            slow_runs: slow_runs.unwrap_or_default(),
+            latency: Some(wire::Latency { p50, p90, p95, p99 }),
+            handlers,
+            memory_bytes: memory_bytes.unwrap_or_default(),
+        })
+    }
+
     pub async fn summarize(&self, scope: Scope, window: Duration) -> Result<wire::Summary> {
         let queries = Queries::new(scope, window);
         let (
@@ -167,11 +238,12 @@ impl TrafficService {
             self.routes(&queries),
             self.domains(&queries),
         )?;
-        let (revision, activated_at, connections, reused) = tokio::try_join!(
+        let (revision, activated_at, connections, reused, lua) = tokio::try_join!(
             self.value(REVISION.to_owned()),
             self.value(ACTIVATED_AT.to_owned()),
             self.by(queries.upstream_connections(false), "upstream"),
             self.by(queries.upstream_connections(true), "upstream"),
+            self.lua(&queries),
         )?;
         let class = |digit: &str| classes.get(digit).copied().unwrap_or_default();
         let mut upstreams: Vec<wire::UpstreamTraffic> = attempts
@@ -219,6 +291,7 @@ impl TrafficService {
                 (revision >= 0.0 && revision <= u64::MAX as f64).then_some(revision as u64)
             }),
             activated_at: activated_at.map(seconds_since_epoch),
+            lua: Some(lua),
         })
     }
 

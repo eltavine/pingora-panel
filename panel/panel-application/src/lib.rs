@@ -136,6 +136,6 @@ pub use site_files::{
 };
 pub use tls_probe::{TlsProbe, TlsProbeReport, TlsProbeTarget};
 pub use traffic::{
-    DomainTraffic, Latency, RouteTraffic, StatusClasses, TrafficPoint, TrafficPort, TrafficQuery,
-    TrafficSummary, UpstreamFailure, UpstreamTraffic,
+    DomainTraffic, Latency, LuaHandlerTraffic, LuaTraffic, RouteTraffic, StatusClasses,
+    TrafficPoint, TrafficPort, TrafficQuery, TrafficSummary, UpstreamFailure, UpstreamTraffic,
 };

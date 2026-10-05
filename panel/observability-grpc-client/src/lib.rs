@@ -9,8 +9,9 @@ mod logs;
 
 use async_trait::async_trait;
 use panel_application::{
-    DomainTraffic, Latency, RequestScope, RouteTraffic, StatusClasses, TrafficPoint, TrafficPort,
-    TrafficQuery, TrafficSummary, UpstreamFailure, UpstreamTraffic,
+    DomainTraffic, Latency, LuaHandlerTraffic, LuaTraffic, RequestScope, RouteTraffic,
+    StatusClasses, TrafficPoint, TrafficPort, TrafficQuery, TrafficSummary, UpstreamFailure,
+    UpstreamTraffic,
 };
 use panel_contracts::observability::v1::{self as wire, traffic_client::TrafficClient};
 use panel_errors::Result;
@@ -173,6 +174,30 @@ fn summary(value: wire::Summary) -> TrafficSummary {
             .collect(),
         revision: value.revision,
         activated_at: time(value.activated_at),
+        lua: lua(value.lua.unwrap_or_default()),
+    }
+}
+
+fn lua(value: wire::LuaTraffic) -> LuaTraffic {
+    LuaTraffic {
+        runs: value.runs,
+        failures: value.failures.into_iter().collect(),
+        slow_runs: value.slow_runs,
+        latency: latency(value.latency),
+        handlers: value
+            .handlers
+            .into_iter()
+            .map(|handler| LuaHandlerTraffic {
+                site: handler.site,
+                route: handler.route,
+                phase: handler.phase,
+                runs: handler.runs,
+                failures: handler.failures,
+                slow_runs: handler.slow_runs,
+                p95: seconds(handler.p95),
+            })
+            .collect(),
+        memory_bytes: value.memory_bytes,
     }
 }
 

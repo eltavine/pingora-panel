@@ -83281,6 +83281,52 @@
         ],
         "description": "What a handler's failure does: an error, a timeout or a limit reached."
       },
+      "LuaHandlerItem": {
+        "type": "object",
+        "description": "Runs of the Lua handlers one site or route runs in one phase.",
+        "required": [
+          "site",
+          "route",
+          "phase",
+          "runs",
+          "failures",
+          "slow_runs"
+        ],
+        "properties": {
+          "failures": {
+            "type": "number",
+            "format": "double",
+            "description": "Runs that failed: an error, a timeout or a limit."
+          },
+          "p95": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Seconds; absent when no run was measured."
+          },
+          "phase": {
+            "type": "string",
+            "description": "Such as `access` or `header_filter`."
+          },
+          "route": {
+            "type": "string"
+          },
+          "runs": {
+            "type": "number",
+            "format": "double"
+          },
+          "site": {
+            "type": "string"
+          },
+          "slow_runs": {
+            "type": "number",
+            "format": "double",
+            "description": "Runs longer than their slow threshold."
+          }
+        }
+      },
       "LuaLibraryResponse": {
         "type": "object",
         "description": "The Lua of the draft or of a revision.",
@@ -83965,6 +84011,55 @@
           }
         },
         "additionalProperties": false
+      },
+      "LuaTrafficItem": {
+        "type": "object",
+        "description": "Runs of Lua handlers over the window.",
+        "required": [
+          "runs",
+          "failures",
+          "slow_runs",
+          "latency",
+          "handlers",
+          "memory_bytes"
+        ],
+        "properties": {
+          "failures": {
+            "type": "object",
+            "description": "Failed runs by why they failed: `error`, `timeout`, `work`, `memory`\nor `refused`.",
+            "additionalProperties": {
+              "type": "number",
+              "format": "double"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "handlers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LuaHandlerItem"
+            },
+            "description": "Most failures first, then most runs, at most 20."
+          },
+          "latency": {
+            "$ref": "#/components/schemas/LatencyQuantiles"
+          },
+          "memory_bytes": {
+            "type": "number",
+            "format": "double",
+            "description": "Bytes the Lua VMs of the active configuration hold."
+          },
+          "runs": {
+            "type": "number",
+            "format": "double"
+          },
+          "slow_runs": {
+            "type": "number",
+            "format": "double",
+            "description": "Runs longer than their slow threshold."
+          }
+        }
       },
       "LuaUse": {
         "type": "object",
@@ -87795,7 +87890,8 @@
           "upstreams",
           "routes",
           "domains",
-          "upstream_failures"
+          "upstream_failures",
+          "lua"
         ],
         "properties": {
           "activated_at": {
@@ -87824,6 +87920,10 @@
           },
           "latency": {
             "$ref": "#/components/schemas/LatencyQuantiles"
+          },
+          "lua": {
+            "$ref": "#/components/schemas/LuaTrafficItem",
+            "description": "Runs of Lua handlers."
           },
           "observed_at": {
             "type": [

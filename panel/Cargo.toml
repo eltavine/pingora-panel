@@ -167,7 +167,7 @@ panel-certificate-api = { version = "=0.1.0", path = "panel-certificate-api" }
 panel-dsl = { version = "=0.2.0", path = "panel-dsl" }
 panel-config-dsl = { version = "=0.1.0", path = "panel-config-dsl" }
 panel-api = { version = "=0.3.0", path = "panel-api" }
-panel-application = { version = "=0.3.0", path = "panel-application" }
+panel-application = { version = "=0.4.0", path = "panel-application" }
 panel-environment = { version = "=0.1.0", path = "panel-environment" }
 panel-identity = { version = "=0.1.0", path = "panel-identity" }
 identity-sqlite = { version = "=0.1.0", path = "identity-sqlite" }

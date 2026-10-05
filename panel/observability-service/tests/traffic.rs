@@ -23,7 +23,40 @@ fn sample(labels: &[(&str, &str)], value: &str) -> serde_json::Value {
 /// What Prometheus would answer, by what the query asks.
 fn answer(query: &str) -> Vec<serde_json::Value> {
     let one = |value| vec![sample(&[], value)];
-    if query.contains("label_replace") {
+    let handler = |route, phase| [("site", "shop"), ("route", route), ("phase", phase)];
+    if query.contains("pingora_panel_gateway_lua_runs_total") && query.contains("outcome!=") {
+        if query.starts_with("topk") {
+            vec![sample(&handler("checkout", "access"), "3")]
+        } else {
+            vec![
+                sample(&[("outcome", "timeout")], "2"),
+                sample(&[("outcome", "error")], "1"),
+            ]
+        }
+    } else if query.contains("pingora_panel_gateway_lua_runs_total") {
+        if query.starts_with("topk") {
+            vec![
+                sample(&handler("home", "log"), "80"),
+                sample(&handler("checkout", "access"), "20"),
+            ]
+        } else {
+            one("100")
+        }
+    } else if query.contains("pingora_panel_gateway_lua_slow_runs_total") {
+        if query.contains("by (site") {
+            vec![sample(&handler("checkout", "access"), "4")]
+        } else {
+            one("4")
+        }
+    } else if query.contains("pingora_panel_gateway_lua_run_duration_seconds_bucket") {
+        if query.contains("by (site") {
+            vec![sample(&handler("checkout", "access"), "0.012")]
+        } else {
+            one("0.003")
+        }
+    } else if query.contains("pingora_panel_gateway_lua_memory_bytes") {
+        one("1048576")
+    } else if query.contains("label_replace") {
         vec![
             sample(&[("class", "2")], "90"),
             sample(&[("class", "5")], "10"),
@@ -201,6 +234,27 @@ async fn summaries_gather_every_figure_of_a_scope() {
     assert_eq!(upstream.connection_reuse_ratio, Some(0.75));
     assert_eq!(summary.revision, Some(42));
     assert_eq!(summary.activated_at.unwrap().seconds, 1_700_000_000);
+    let lua = summary.lua.unwrap();
+    assert_eq!(
+        (lua.runs, lua.slow_runs, lua.memory_bytes),
+        (100.0, 4.0, 1_048_576.0)
+    );
+    assert_eq!((lua.failures["timeout"], lua.failures["error"]), (2.0, 1.0));
+    assert_eq!(lua.latency.unwrap().p50, Some(0.003));
+    let failing = &lua.handlers[0];
+    assert_eq!(
+        (
+            failing.route.as_str(),
+            failing.phase.as_str(),
+            failing.failures,
+            failing.runs,
+            failing.slow_runs,
+            failing.p95
+        ),
+        ("checkout", "access", 3.0, 20.0, 4.0, Some(0.012)),
+        "most failures first"
+    );
+    assert_eq!(lua.handlers[1].route, "home");
 
     let seen = seen.lock().unwrap();
     assert!(seen.contains(

@@ -166,6 +166,44 @@ const DOMAINS: &[Column] = &[
     ("REQUESTS", |domain| count(&domain["requests"])),
 ];
 
+const LUA: &[Column] = &[
+    ("Lua runs", |lua| count(&lua["runs"])),
+    ("Failed", |lua| {
+        let failures: Vec<String> = lua["failures"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .map(|(kind, failed)| format!("{} {kind}", count(failed)))
+            .collect();
+        if failures.is_empty() {
+            "0".into()
+        } else {
+            failures.join(", ")
+        }
+    }),
+    ("Slow runs", |lua| count(&lua["slow_runs"])),
+    ("Run time p50 / p95 / p99", |lua| {
+        let latency = &lua["latency"];
+        format!(
+            "{} / {} / {}",
+            seconds(&latency["p50"]),
+            seconds(&latency["p95"]),
+            seconds(&latency["p99"])
+        )
+    }),
+    ("VM memory", |lua| bytes(&lua["memory_bytes"])),
+];
+
+const LUA_HANDLERS: &[Column] = &[
+    ("SITE", |handler| text(&handler["site"])),
+    ("ROUTE", |handler| text(&handler["route"])),
+    ("PHASE", |handler| text(&handler["phase"])),
+    ("RUNS", |handler| count(&handler["runs"])),
+    ("FAILED", |handler| count(&handler["failures"])),
+    ("SLOW", |handler| count(&handler["slow_runs"])),
+    ("P95", |handler| seconds(&handler["p95"])),
+];
+
 const POINTS: &[Column] = &[
     ("TIME", |point| text(&point["at"])),
     ("REQ/S", |point| rate(&point["requests_per_second"])),
@@ -208,6 +246,18 @@ pub async fn run(api: &Api, output: &Output, command: TrafficCommand) -> Result<
                 {
                     println!();
                     output.list(&summary["domains"], DOMAINS);
+                }
+                let lua = &summary["lua"];
+                if lua["runs"].as_f64().is_some_and(|runs| runs > 0.0) {
+                    println!();
+                    output.item(lua, LUA);
+                    if lua["handlers"]
+                        .as_array()
+                        .is_some_and(|items| !items.is_empty())
+                    {
+                        println!();
+                        output.list(&lua["handlers"], LUA_HANDLERS);
+                    }
                 }
             }
         }
