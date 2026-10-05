@@ -10,11 +10,11 @@ use panel_application::{
     ContainerList, ContainerLogLine, ContainerLogQuery, ContainerLogStart, ContainerLogStream,
     ContainerLogTail, ContainerLogs, ContainerMount, ContainerNetwork, ContainerNetworkStats,
     ContainerState, ContainerStats, ContainerStatsList, ContainerSummary, ContainersPort,
-    DirectoriesReport, DirectoryKind, DirectoryUsage, EngineInfo, EngineNetwork, EngineNetworkList,
-    EngineResourcesPort, EngineSubnet, EngineVersion, EngineVolume, EngineVolumeList,
-    GatewayContainer, GatewayServiceAction, GatewayServiceStatus, HostAgentPort, Image,
-    ImageDetail, ImageList, ImageRemoval, ImagesPort, ListenersReport, ListeningProcess,
-    PortListener, PortMapping, RequestScope,
+    DirectoriesReport, DirectoryKind, DirectoryUsage, EngineDiskUsage, EngineDiskUse, EngineInfo,
+    EngineNetwork, EngineNetworkList, EngineResourcesPort, EngineSubnet, EngineVersion,
+    EngineVolume, EngineVolumeList, GatewayContainer, GatewayServiceAction, GatewayServiceStatus,
+    HostAgentPort, Image, ImageDetail, ImageList, ImageRemoval, ImagesPort, ListenersReport,
+    ListeningProcess, PortListener, PortMapping, RequestScope,
 };
 use panel_contracts::ops::v1::{
     self as wire, agent_client::AgentClient, containers_client::ContainersClient,
@@ -35,6 +35,8 @@ use tonic::transport::Channel;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// Longer than the agent waits for the engine to stop the gateway.
 const CHANGE_TIMEOUT: Duration = Duration::from_secs(150);
+/// Longer than the agent gives an engine to add up its disk use.
+const USAGE_TIMEOUT: Duration = Duration::from_secs(75);
 
 #[derive(Clone)]
 pub struct OpsAgentClient {
@@ -817,6 +819,37 @@ impl EngineResourcesPort for OpsAgentClient {
                     labels: volume.labels.into_iter().collect(),
                 })
                 .collect(),
+        })
+    }
+
+    async fn disk_usage(&self, scope: RequestScope, engine_id: String) -> Result<EngineDiskUsage> {
+        let message = wire::EngineResourcesDiskUsageRequest {
+            context: Some(request_context(&scope)),
+            engine: engine_id,
+        };
+        let mut request = self.request(message, &scope);
+        request.set_timeout(USAGE_TIMEOUT);
+        let response = EngineResourcesClient::new(self.channel.clone())
+            .disk_usage(request)
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        let use_of = |value: Option<wire::EngineDiskUse>| {
+            let value = value.unwrap_or_default();
+            EngineDiskUse {
+                total: value.total,
+                active: value.active,
+                size_bytes: value.size_bytes,
+                reclaimable_bytes: value.reclaimable_bytes,
+            }
+        };
+        Ok(EngineDiskUsage {
+            observed_at: time(response.observed_at),
+            images: use_of(response.images),
+            containers: use_of(response.containers),
+            volumes: use_of(response.volumes),
+            build_cache: use_of(response.build_cache),
         })
     }
 }

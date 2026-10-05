@@ -1,7 +1,7 @@
 use super::*;
 use panel_application::{
-    EngineNetwork, EngineNetworkList, EngineResourcesPort, EngineSubnet, EngineVolume,
-    EngineVolumeList, RequestScope,
+    EngineDiskUsage, EngineDiskUse, EngineNetwork, EngineNetworkList, EngineResourcesPort,
+    EngineSubnet, EngineVolume, EngineVolumeList, RequestScope,
 };
 use serde_json::Value;
 use std::time::{Duration, UNIX_EPOCH};
@@ -46,6 +46,25 @@ impl EngineResourcesPort for Resources {
                 containers: 1,
                 ..EngineVolume::default()
             }],
+        })
+    }
+
+    async fn disk_usage(&self, _: RequestScope, _: String) -> Result<EngineDiskUsage> {
+        Ok(EngineDiskUsage {
+            observed_at: Some(UNIX_EPOCH + Duration::from_secs(1_800_000_010)),
+            images: EngineDiskUse {
+                total: 5,
+                active: 2,
+                size_bytes: 1_000_000_000,
+                reclaimable_bytes: 300_000_000,
+            },
+            build_cache: EngineDiskUse {
+                total: 3,
+                active: 1,
+                size_bytes: 785,
+                reclaimable_bytes: 700,
+            },
+            ..EngineDiskUsage::default()
         })
     }
 }

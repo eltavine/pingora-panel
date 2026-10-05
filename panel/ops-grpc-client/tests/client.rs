@@ -215,7 +215,22 @@ impl EngineResources for FakeResources {
         &self,
         _: Request<wire::EngineResourcesDiskUsageRequest>,
     ) -> Result<Response<wire::EngineResourcesDiskUsageResponse>, Status> {
-        Err(Status::unimplemented("disk usage"))
+        Ok(Response::new(wire::EngineResourcesDiskUsageResponse {
+            observed_at: Some(at(10).into()),
+            images: Some(wire::EngineDiskUse {
+                total: 5,
+                active: 2,
+                size_bytes: 1_000,
+                reclaimable_bytes: 300,
+            }),
+            containers: None,
+            volumes: Some(wire::EngineDiskUse {
+                total: 1,
+                ..wire::EngineDiskUse::default()
+            }),
+            build_cache: None,
+            error: None,
+        }))
     }
 
     async fn list_volumes(
@@ -731,6 +746,18 @@ async fn networks_and_volumes_reach_the_application() {
     assert_eq!((shop.name.as_str(), shop.containers), ("shop_default", 1));
     assert_eq!(shop.compose_project.as_deref(), Some("shop"));
     assert_eq!(shop.subnets[0].gateway, None, "an empty gateway is none");
+    let usage = client.disk_usage(scope(), "docker".into()).await.unwrap();
+    assert_eq!(usage.observed_at, Some(at(10)));
+    assert_eq!(
+        (usage.images.total, usage.images.reclaimable_bytes),
+        (5, 300)
+    );
+    assert_eq!(
+        usage.containers,
+        Default::default(),
+        "a kind the agent leaves out is empty"
+    );
+    assert_eq!(usage.volumes.total, 1);
     let volumes = client.volumes(scope(), "docker".into()).await.unwrap();
     assert_eq!(volumes.volumes[0].name, "orphan");
     assert_eq!(volumes.volumes[0].compose_project, None);

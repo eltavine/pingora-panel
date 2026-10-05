@@ -79,8 +79,8 @@ pub use context::{
     SiteScope, TraceContext,
 };
 pub use engine_resources::{
-    EngineNetwork, EngineNetworkList, EngineResourcesPort, EngineSubnet, EngineVolume,
-    EngineVolumeList, NoEngineResources,
+    EngineDiskUsage, EngineDiskUse, EngineNetwork, EngineNetworkList, EngineResourcesPort,
+    EngineSubnet, EngineVolume, EngineVolumeList, NoEngineResources,
 };
 pub use gateway::{
     AbortOutcome, ActivatedDeployment, ConfigCompiler, ConfigDocument, DeploymentOutcome,

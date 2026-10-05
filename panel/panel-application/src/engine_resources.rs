@@ -64,11 +64,36 @@ pub struct EngineVolumeList {
     pub volumes: Vec<EngineVolume>,
 }
 
+/// One kind of thing an engine keeps on disk.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct EngineDiskUse {
+    pub total: u32,
+    /// In use: running containers, images and volumes a container uses, and
+    /// build cache in use.
+    pub active: u32,
+    pub size_bytes: u64,
+    /// What removing what is not in use would free.
+    pub reclaimable_bytes: u64,
+}
+
+/// The disk an engine takes, as `docker system df` reports it.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct EngineDiskUsage {
+    pub observed_at: Option<SystemTime>,
+    pub images: EngineDiskUse,
+    pub containers: EngineDiskUse,
+    /// Local volumes.
+    pub volumes: EngineDiskUse,
+    pub build_cache: EngineDiskUse,
+}
+
 #[async_trait]
 pub trait EngineResourcesPort: Send + Sync {
     async fn networks(&self, scope: RequestScope, engine: String) -> Result<EngineNetworkList>;
 
     async fn volumes(&self, scope: RequestScope, engine: String) -> Result<EngineVolumeList>;
+
+    async fn disk_usage(&self, scope: RequestScope, engine: String) -> Result<EngineDiskUsage>;
 }
 
 /// The port of an installation whose agent manages no engine.
@@ -87,6 +112,10 @@ impl EngineResourcesPort for NoEngineResources {
     }
 
     async fn volumes(&self, _: RequestScope, _: String) -> Result<EngineVolumeList> {
+        Err(Self::refusal())
+    }
+
+    async fn disk_usage(&self, _: RequestScope, _: String) -> Result<EngineDiskUsage> {
         Err(Self::refusal())
     }
 }
