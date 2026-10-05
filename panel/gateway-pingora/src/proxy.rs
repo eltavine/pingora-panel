@@ -10,6 +10,7 @@ use crate::{
     head_deadline::Connections,
     hosts::{self, HostError, RequestHost},
     hsts::{StrictTransport, StrictTransportBuilder},
+    http_policy::{self, FieldChange, HttpPolicy, HttpPolicyBuilder, HttpPolicyModule},
     log_files::{Destination, Logs},
     request_identity, responses,
     routing::{RouteTarget, SiteRoutes},
@@ -136,6 +137,10 @@ pub(crate) struct RequestContext {
     trusted_peer: bool,
     /// What security policies left the request to keep to.
     admission: Admission,
+    /// Request field changes of its HTTP policies, rendered for it.
+    http_request: Vec<FieldChange>,
+    /// The HTTP policy whose compression applies to its responses.
+    compression: Option<usize>,
     body_seen: u64,
     started: Instant,
     /// Counts the request as active while it is measured.
@@ -193,8 +198,9 @@ impl ProxyHttp for PanelProxy {
     type CTX = RequestContext;
 
     fn init_downstream_modules(&self, modules: &mut HttpModules) {
-        modules.add_module(ResponseCompressionBuilder::enable(0));
+        modules.add_module(ResponseCompressionBuilder::enable(1));
         modules.add_module(Box::new(StrictTransportBuilder));
+        modules.add_module(Box::new(HttpPolicyBuilder));
     }
 
     fn new_ctx(&self) -> RequestContext {
@@ -214,6 +220,8 @@ impl ProxyHttp for PanelProxy {
             client: None,
             trusted_peer: false,
             admission: Admission::default(),
+            http_request: Vec::new(),
+            compression: None,
             body_seen: 0,
             started: Instant::now(),
             active: None,
@@ -225,6 +233,7 @@ impl ProxyHttp for PanelProxy {
         session: &mut Session,
         ctx: &mut RequestContext,
     ) -> pingora_core::Result<bool> {
+        http_policy::disable_compression(session);
         request_identity::ensure_request_id(session.req_header_mut());
         if let Some(metrics) = &self.listener.metrics {
             ctx.active = Some(
@@ -371,13 +380,60 @@ impl ProxyHttp for PanelProxy {
             }
             ctx.admission = admission;
         }
+        let http: Vec<&HttpPolicy> = site
+            .http
+            .into_iter()
+            .chain(route.http)
+            .map(|index| &snapshot.http[index])
+            .collect();
+        if !http.is_empty() {
+            if let Some(answer) = http
+                .iter()
+                .rev()
+                .find_map(|policy| policy.cors.as_ref())
+                .and_then(|cors| cors.preflight(session.req_header()))
+            {
+                let headers: Vec<(header::HeaderName, &str)> = answer
+                    .iter()
+                    .filter_map(|(name, value)| Some((name.clone(), value.to_str().ok()?)))
+                    .collect();
+                responses::send(session, 204, &headers, bytes::Bytes::new()).await?;
+                return Ok(true);
+            }
+            let facts = facts(session, host_name, &path, self.listener.tls);
+            for policy in &http {
+                policy.request_changes(&facts, &mut ctx.http_request);
+            }
+            let mut module = HttpPolicyModule::default();
+            module.prepare(&http, &facts, session.req_header());
+            if let Some(slot) = session.downstream_modules_ctx.get_mut::<HttpPolicyModule>() {
+                *slot = module;
+            }
+            ctx.compression = site
+                .http
+                .into_iter()
+                .chain(route.http)
+                .rev()
+                .find(|index| snapshot.http[*index].compression.is_some())
+                .filter(|_| matches!(route.target, RouteTarget::Proxy(_) | RouteTarget::Static(_)));
+            if let Some(compression) = ctx
+                .compression
+                .and_then(|index| snapshot.http[index].compression.as_ref())
+            {
+                compression.prepare(session);
+            }
+        }
         match &route.target {
             RouteTarget::Proxy(pool) => {
                 ctx.pool = Some(*pool);
                 Ok(false)
             }
             RouteTarget::Static(content) => {
-                static_files::serve(session, &snapshot.statics[*content], &path).await?;
+                let compression = ctx
+                    .compression
+                    .and_then(|index| snapshot.http[index].compression.as_ref());
+                static_files::serve(session, &snapshot.statics[*content], &path, compression)
+                    .await?;
                 Ok(true)
             }
             RouteTarget::Redirect {
@@ -484,6 +540,23 @@ impl ProxyHttp for PanelProxy {
         )?;
         if let Some(client) = ctx.client {
             upstream_request.insert_header(X_REAL_IP.clone(), client.to_string())?;
+        }
+        http_policy::apply_to_request(upstream_request, &ctx.http_request)
+    }
+
+    async fn response_filter(
+        &self,
+        session: &mut Session,
+        upstream_response: &mut ResponseHeader,
+        ctx: &mut RequestContext,
+    ) -> pingora_core::Result<()> {
+        let snapshot = ctx.snapshot.clone();
+        if let Some(compression) = snapshot
+            .as_ref()
+            .zip(ctx.compression)
+            .and_then(|(snapshot, index)| snapshot.http[index].compression.as_ref())
+        {
+            compression.decide(session, upstream_response)?;
         }
         Ok(())
     }
@@ -618,6 +691,7 @@ impl ProxyHttp for PanelProxy {
         error: &Error,
         _ctx: &mut RequestContext,
     ) -> FailToProxy {
+        http_policy::disable_compression(session);
         let code = match (error.etype(), error.esource()) {
             (ErrorType::HTTPStatus(code), _) => *code,
             (ErrorType::ReadTimedout, ErrorSource::Downstream) => 408,

@@ -3,6 +3,7 @@ use crate::{
     acme::ChallengeDirectory,
     certificates::CertificateIndex,
     file_checks::{self, FileChecks},
+    http_policy::HttpPolicy,
     listeners::{self, ListenerPlan, SocketKey},
     routing::{RoutingTable, Targets},
     secrets::{NoSecrets, SecretSource},
@@ -40,6 +41,7 @@ const CAPABILITIES: &[&str] = &[
     "action.respond",
     "action.static",
     "action.template",
+    "http.policies",
     "activation.cas",
     "listener.http",
     "listener.http2",
@@ -138,6 +140,8 @@ pub struct PreparedPingoraSnapshot {
     pub(crate) statics: Vec<StaticContent>,
     /// Compiled security policies, by the indexes sites and routes hold.
     pub(crate) policies: Vec<SecurityGate>,
+    /// Compiled HTTP policies, by the indexes sites and routes hold.
+    pub(crate) http: Vec<HttpPolicy>,
     /// Replaced when the certificate files change, without a new snapshot.
     pub(crate) certificates: ArcSwap<CertificateIndex>,
     pub(crate) listeners: Vec<ListenerPlan>,
@@ -308,9 +312,6 @@ impl PingoraGatewayAdapter {
 
     fn validate_supported_ir(snapshot: &RuntimeSnapshot) -> Result<()> {
         let mut unsupported = Vec::new();
-        if !snapshot.header_policies.is_empty() {
-            unsupported.push("header_policies");
-        }
         if !snapshot.cache_policies.is_empty() {
             unsupported.push("cache_policies");
         }
@@ -326,7 +327,6 @@ impl PingoraGatewayAdapter {
         }
         for route in &snapshot.routes {
             if route.retry_policy.is_some()
-                || route.header_policy_id.is_some()
                 || route.cache_policy_id.is_some()
                 || route.lua_policy_id.is_some()
             {
@@ -409,12 +409,24 @@ impl PingoraGatewayAdapter {
             .enumerate()
             .map(|(index, policy)| (policy.id.as_str(), index))
             .collect();
+        let http = snapshot
+            .header_policies
+            .iter()
+            .map(HttpPolicy::compile)
+            .collect::<Result<Vec<_>>>()?;
+        let http_indexes: HashMap<&str, usize> = snapshot
+            .header_policies
+            .iter()
+            .enumerate()
+            .map(|(index, policy)| (policy.id.as_str(), index))
+            .collect();
         let routing = RoutingTable::compile(
             &snapshot,
             &Targets {
                 pools: &pool_indexes,
                 statics: &static_indexes,
                 policies: &policy_indexes,
+                http: &http_indexes,
             },
         )?;
         let labels = SnapshotLabels::new(&routing, &pools);
@@ -425,6 +437,7 @@ impl PingoraGatewayAdapter {
             pools,
             statics,
             policies,
+            http,
             certificates: ArcSwap::from_pointee(certificates),
             listeners,
             labels,

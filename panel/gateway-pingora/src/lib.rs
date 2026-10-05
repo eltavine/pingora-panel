@@ -15,6 +15,7 @@ mod forwarding;
 mod head_deadline;
 mod hosts;
 mod hsts;
+mod http_policy;
 mod listeners;
 mod log_files;
 mod proxy;

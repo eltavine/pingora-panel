@@ -33,6 +33,9 @@ pub(crate) struct SiteRoutes {
     pub hsts: Option<HeaderValue>,
     /// The security policy every request for the site passes.
     pub security: Option<usize>,
+    /// The HTTP policy every request for the site passes, before its
+    /// route's.
+    pub http: Option<usize>,
     /// How requests the site takes without a route are logged.
     pub access: AccessPlan,
     www: HashMap<String, String>,
@@ -46,6 +49,8 @@ pub(crate) struct CompiledRoute {
     pub target: RouteTarget,
     /// The security policy the route's requests pass after the site's.
     pub security: Option<usize>,
+    /// The HTTP policy the route's requests pass after the site's.
+    pub http: Option<usize>,
     pub access: AccessPlan,
 }
 
@@ -70,6 +75,20 @@ pub(crate) struct Targets<'a> {
     pub pools: &'a HashMap<&'a str, usize>,
     pub statics: &'a HashMap<&'a str, usize>,
     pub policies: &'a HashMap<&'a str, usize>,
+    pub http: &'a HashMap<&'a str, usize>,
+}
+
+fn http_policy(
+    targets: &Targets<'_>,
+    owner: &dyn std::fmt::Display,
+    id: Option<&String>,
+) -> Result<Option<usize>> {
+    id.map(|id| {
+        targets.http.get(id.as_str()).copied().ok_or_else(|| {
+            PanelError::validation_failed(format!("{owner} names an unknown HTTP policy {id}"))
+        })
+    })
+    .transpose()
 }
 
 fn policy(
@@ -141,6 +160,11 @@ impl RoutingTable {
                             &format!("route {}", route.id),
                             route.security_policy_id.as_ref(),
                         )?,
+                        http: http_policy(
+                            targets,
+                            &format!("route {}", route.id),
+                            route.header_policy_id.as_ref(),
+                        )?,
                         access: AccessPlan::resolve(&[
                             &snapshot.logging.access,
                             &site.access_log,
@@ -171,6 +195,11 @@ impl RoutingTable {
                     targets,
                     &format!("site {}", site.id),
                     site.security_policy_id.as_ref(),
+                )?,
+                http: http_policy(
+                    targets,
+                    &format!("site {}", site.id),
+                    site.header_policy_id.as_ref(),
                 )?,
                 access: AccessPlan::resolve(&[&snapshot.logging.access, &site.access_log])?,
                 www,
@@ -312,12 +341,14 @@ mod tests {
         let pools = HashMap::from([("pool", 0)]);
         let statics = HashMap::from([("static", 0)]);
         let policies = HashMap::new();
+        let http = HashMap::new();
         RoutingTable::compile(
             snapshot,
             &Targets {
                 pools: &pools,
                 statics: &statics,
                 policies: &policies,
+                http: &http,
             },
         )
     }

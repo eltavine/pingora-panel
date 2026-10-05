@@ -110,6 +110,7 @@ pub(crate) async fn serve(
     session: &mut Session,
     content: &StaticContent,
     path: &str,
+    compression: Option<&crate::http_policy::Compression>,
 ) -> pingora_core::Result<()> {
     let method = session.req_header().method.clone();
     if method != Method::GET && method != Method::HEAD {
@@ -147,7 +148,14 @@ pub(crate) async fn serve(
             }
         }
     };
-    send_file(session, &file, &metadata, method == Method::HEAD).await
+    send_file(
+        session,
+        &file,
+        &metadata,
+        method == Method::HEAD,
+        compression,
+    )
+    .await
 }
 
 async fn send_file(
@@ -155,6 +163,7 @@ async fn send_file(
     file: &Path,
     metadata: &Metadata,
     head: bool,
+    compression: Option<&crate::http_policy::Compression>,
 ) -> pingora_core::Result<()> {
     let length = metadata.len();
     let modified = metadata.modified().ok().map(truncate_to_seconds);
@@ -240,6 +249,13 @@ async fn send_file(
     };
     if start > 0 && handle.seek(std::io::SeekFrom::Start(start)).await.is_err() {
         return responses::plain(session, 500, "read failed", &[]).await;
+    }
+    if let Some(compression) = compression {
+        if start == 0 && end == length {
+            compression.decide(session, &mut response)?;
+        } else {
+            crate::http_policy::disable_compression(session);
+        }
     }
     session
         .write_response_header(Box::new(response), false)

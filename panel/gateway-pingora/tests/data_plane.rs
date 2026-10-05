@@ -1652,3 +1652,157 @@ async fn route_conditions_pick_the_route_a_request_takes() {
     assert_eq!(body(plain), "stable");
     gateway.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn http_policies_change_headers_answer_cors_and_compress() {
+    use panel_ir::{
+        CompressionAlgorithm, CompressionPolicy, CorsPolicy, HeaderField, HeaderPolicy,
+        ServerHeader, HTTP_POLICIES_CAPABILITY,
+    };
+
+    let upstream = echo_upstream().await;
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    let mut shop = site(&["shop.test"]);
+    shop.header_policy_id = Some("site-headers".into());
+    snapshot.sites.push(shop);
+    snapshot.upstream_pools.push(pool("app", &[upstream]));
+    let mut api = route("api", 1, prefix("/api"), proxy("app"));
+    api.header_policy_id = Some("api".into());
+    snapshot.routes = vec![api, route("all", 10, prefix("/"), proxy("app"))];
+    snapshot
+        .required_capabilities
+        .push(CapabilityRequirement::new(HTTP_POLICIES_CAPABILITY, "1"));
+    snapshot.header_policies = vec![
+        HeaderPolicy {
+            id: "site-headers".into(),
+            request_set: [("x-from-site".to_owned(), "site".to_owned())].into(),
+            response_add: vec![HeaderField {
+                name: "x-site".into(),
+                value: "yes".into(),
+            }],
+            server: ServerHeader::Replace {
+                value: "shop".into(),
+            },
+            ..HeaderPolicy::default()
+        },
+        HeaderPolicy {
+            id: "api".into(),
+            request_add: vec![HeaderField {
+                name: "x-tenant".into(),
+                value: "$host".into(),
+            }],
+            request_remove: ["x-internal".to_owned()].into(),
+            cors: Some(CorsPolicy {
+                allowed_origins: vec!["https://*.shop.test".into()],
+                allowed_methods: vec!["PUT".into()],
+                allowed_headers: vec!["x-api-key".into()],
+                exposed_headers: vec!["x-request-id".into()],
+                allow_credentials: true,
+                max_age_seconds: Some(600),
+            }),
+            compression: Some(CompressionPolicy {
+                algorithms: [CompressionAlgorithm::Gzip].into(),
+                types: vec!["text/*".into()],
+                min_bytes: 16,
+            }),
+            ..HeaderPolicy::default()
+        },
+    ];
+    let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
+    wait_for(listen).await;
+
+    let request = |line: &str, extra: &str| {
+        format!("{line} HTTP/1.1\r\nhost: shop.test\r\n{extra}connection: close\r\n\r\n")
+    };
+    let forwarded = send(listen, &request("GET /api/items", "x-internal: secret\r\n")).await;
+    let head = String::from_utf8_lossy(&forwarded.body).to_ascii_lowercase();
+    assert!(head.contains("x-from-site: site"), "{head}");
+    assert!(head.contains("x-tenant: shop.test"), "{head}");
+    assert!(!head.contains("x-internal"), "{head}");
+    assert_eq!(forwarded.headers["server"], "shop");
+    assert_eq!(forwarded.headers["x-site"], "yes");
+
+    let preflight = send(
+        listen,
+        &request(
+            "OPTIONS /api/items",
+            "origin: https://app.shop.test\r\naccess-control-request-method: PUT\r\naccess-control-request-headers: X-Api-Key\r\n",
+        ),
+    )
+    .await;
+    assert_eq!(preflight.status, 204);
+    assert_eq!(
+        preflight.headers["access-control-allow-origin"],
+        "https://app.shop.test"
+    );
+    assert_eq!(preflight.headers["access-control-allow-methods"], "PUT");
+    assert_eq!(
+        preflight.headers["access-control-allow-headers"],
+        "x-api-key"
+    );
+    assert_eq!(
+        preflight.headers["access-control-allow-credentials"],
+        "true"
+    );
+    assert_eq!(preflight.headers["access-control-max-age"], "600");
+    let foreign = send(
+        listen,
+        &request(
+            "OPTIONS /api/items",
+            "origin: https://evil.test\r\naccess-control-request-method: PUT\r\n",
+        ),
+    )
+    .await;
+    assert_eq!(foreign.status, 204);
+    assert!(!foreign.headers.contains_key("access-control-allow-origin"));
+
+    let cross = send(
+        listen,
+        &request("GET /api/items", "origin: https://app.shop.test\r\n"),
+    )
+    .await;
+    assert_eq!(
+        cross.headers["access-control-allow-origin"],
+        "https://app.shop.test"
+    );
+    assert_eq!(
+        cross.headers["access-control-expose-headers"],
+        "x-request-id"
+    );
+    assert!(
+        cross.headers["vary"].contains("Origin"),
+        "{:?}",
+        cross.headers
+    );
+
+    let compressed = send(
+        listen,
+        &request("GET /api/items", "accept-encoding: gzip\r\n"),
+    )
+    .await;
+    assert_eq!(
+        compressed
+            .headers
+            .get("content-encoding")
+            .map(String::as_str),
+        Some("gzip")
+    );
+    assert!(compressed.headers["vary"].contains("Accept-Encoding"));
+    let elsewhere = send(listen, &request("GET /home", "accept-encoding: gzip\r\n")).await;
+    assert!(
+        !elsewhere.headers.contains_key("content-encoding"),
+        "only the route compresses"
+    );
+    assert!(!elsewhere
+        .headers
+        .contains_key("access-control-allow-origin"));
+    assert_eq!(
+        elsewhere.headers["server"], "shop",
+        "the site's policy still applies"
+    );
+    gateway.stop().await;
+}
