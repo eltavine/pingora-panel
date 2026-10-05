@@ -12,6 +12,8 @@ fn main() {
         // Ordered attributes keep encoded CloudEvents byte-stable for storage
         // fixtures and content hashes.
         .btree_map(".io.cloudevents.v1.CloudEvent.attributes")
+        // Debug for these is written by hand, without their secrets.
+        .skip_debug([".pingora.panel.ops.v1.RegistryCredentials"])
         .compile_protos(
             &[
                 "../proto/audit/v1/audit.proto",

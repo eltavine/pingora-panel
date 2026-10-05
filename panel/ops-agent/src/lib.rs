@@ -18,6 +18,7 @@ mod engine_resources;
 #[cfg(test)]
 mod fake_engine;
 mod gateway_service;
+mod image_pull;
 mod images;
 mod listeners;
 mod socket;

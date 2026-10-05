@@ -61,6 +61,15 @@ pub use pingora::panel::{
     audit, automation, common, config, gateway, observability, ops, platform,
 };
 
+impl std::fmt::Debug for ops::v1::RegistryCredentials {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RegistryCredentials")
+            .field("username", &self.username)
+            .finish_non_exhaustive()
+    }
+}
+
 /// The CloudEvents Protobuf format, generated from the vendored official schema.
 pub mod cloudevents {
     pub mod v1 {
@@ -303,5 +312,20 @@ mod tests {
         let wire = common::v1::Error::from(&error);
         assert_eq!(wire.code, panel_errors::ErrorCode::CONFLICT);
         assert_eq!(wire.diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn registry_passwords_never_print() {
+        let request = ops::v1::ImagesPullRequest {
+            reference: "ghcr.io/example/app:2.3".into(),
+            credentials: Some(ops::v1::RegistryCredentials {
+                username: "ci".into(),
+                password: "hunter2".into(),
+            }),
+            ..ops::v1::ImagesPullRequest::default()
+        };
+        let printed = format!("{request:?}");
+        assert!(printed.contains("\"ci\""), "{printed}");
+        assert!(!printed.contains("hunter2"), "{printed}");
     }
 }

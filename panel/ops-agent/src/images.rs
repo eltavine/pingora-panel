@@ -2,7 +2,10 @@
 //! inspected without their environment or command line, and removed unless
 //! the panel's own installation uses them.
 
-use crate::containers::{answer, failure, time, Engines, ACTION_TIMEOUT, COMPOSE_PROJECT};
+use crate::{
+    containers::{answer, failure, time, Engines, ACTION_TIMEOUT, COMPOSE_PROJECT},
+    image_pull,
+};
 use bollard::{
     models::{ImageInspect, ImageSummary},
     query_parameters::{
@@ -10,6 +13,7 @@ use bollard::{
     },
     Docker,
 };
+use futures_util::{future::ready, stream::BoxStream, StreamExt};
 use panel_contracts::ops::v1::{self as wire, images_server::Images};
 use panel_errors::PanelError;
 use std::{
@@ -17,6 +21,7 @@ use std::{
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+use tokio::sync::Semaphore;
 use tonic::{Request, Response, Status};
 
 /// An image's ID, a prefix of one, or a reference, by the characters
@@ -114,11 +119,61 @@ fn matches(image: &wire::Image, search: &str) -> bool {
             .any(|tag| tag.to_lowercase().contains(&search))
 }
 
+/// How many containers, running or not, each image has, and the images
+/// containers of the installation's project use.
+async fn uses(
+    client: &Docker,
+    installation_project: &str,
+) -> Result<(HashMap<String, u32>, Vec<String>), PanelError> {
+    let options = ListContainersOptionsBuilder::default().all(true).build();
+    let mut counts = HashMap::new();
+    let mut installation = Vec::new();
+    for container in client
+        .list_containers(Some(options))
+        .await
+        .map_err(|error| failure(&error))?
+    {
+        let Some(image) = container.image_id else {
+            continue;
+        };
+        let project = container
+            .labels
+            .as_ref()
+            .and_then(|labels| labels.get(COMPOSE_PROJECT));
+        if project.is_some_and(|project| project == installation_project) {
+            installation.push(image.clone());
+        }
+        *counts.entry(image).or_insert(0) += 1;
+    }
+    Ok((counts, installation))
+}
+
+/// An image the engine has under `reference`, as listing shows it.
+pub(crate) async fn listed(
+    client: &Docker,
+    reference: &str,
+    installation: &str,
+) -> Result<wire::Image, PanelError> {
+    let inspected = client
+        .inspect_image(reference)
+        .await
+        .map_err(|error| failure(&error))?;
+    let (used, _) = uses(client, installation).await?;
+    let containers = inspected
+        .id
+        .as_ref()
+        .and_then(|id| used.get(id))
+        .copied()
+        .unwrap_or(0);
+    Ok(detail(inspected, containers).image.unwrap_or_default())
+}
+
 /// The images to panel-api.
 pub(crate) struct ImageService {
     engines: Arc<Engines>,
     /// The Compose project of the panel's own installation.
     installation: String,
+    pulls: Arc<Semaphore>,
 }
 
 impl ImageService {
@@ -126,36 +181,39 @@ impl ImageService {
         Self {
             engines,
             installation,
+            pulls: Arc::new(Semaphore::new(image_pull::PULLS)),
         }
     }
 
-    /// How many containers, running or not, each image has, and whether the
-    /// installation's use it.
+    fn pulling(
+        &self,
+        request: &wire::ImagesPullRequest,
+    ) -> Result<BoxStream<'static, wire::ImagesPullResponse>, PanelError> {
+        let wanted = image_pull::pullable(&request.reference)?;
+        let platform = image_pull::platform(&request.platform)?.to_owned();
+        let client = self
+            .engines
+            .enabled(&request.engine)?
+            .with_timeout(ACTION_TIMEOUT);
+        let permit = Arc::clone(&self.pulls).try_acquire_owned().map_err(|_| {
+            PanelError::unavailable("too many images are being pulled; try again later")
+        })?;
+        let credentials = image_pull::credentials(&wanted, request.credentials.clone());
+        Ok(image_pull::pull(
+            client,
+            wanted,
+            platform,
+            credentials,
+            self.installation.clone(),
+            permit,
+        ))
+    }
+
     async fn uses(
         &self,
         client: &Docker,
     ) -> Result<(HashMap<String, u32>, Vec<String>), PanelError> {
-        let options = ListContainersOptionsBuilder::default().all(true).build();
-        let mut counts = HashMap::new();
-        let mut installation = Vec::new();
-        for container in client
-            .list_containers(Some(options))
-            .await
-            .map_err(|error| failure(&error))?
-        {
-            let Some(image) = container.image_id else {
-                continue;
-            };
-            let project = container
-                .labels
-                .as_ref()
-                .and_then(|labels| labels.get(COMPOSE_PROJECT));
-            if project == Some(&self.installation) {
-                installation.push(image.clone());
-            }
-            *counts.entry(image).or_insert(0) += 1;
-        }
-        Ok((counts, installation))
+        uses(client, &self.installation).await
     }
 
     async fn listed(
@@ -252,6 +310,8 @@ impl ImageService {
 
 #[tonic::async_trait]
 impl Images for ImageService {
+    type PullStream = BoxStream<'static, Result<wire::ImagesPullResponse, Status>>;
+
     async fn list(
         &self,
         request: Request<wire::ImagesListRequest>,
@@ -307,6 +367,27 @@ impl Images for ImageService {
                 }
             }
         }))
+    }
+
+    async fn pull(
+        &self,
+        request: Request<wire::ImagesPullRequest>,
+    ) -> Result<Response<Self::PullStream>, Status> {
+        let request = request.into_inner();
+        let responses = self.pulling(&request).unwrap_or_else(|error| {
+            tracing::warn!(
+                event = "image_pull_refused",
+                engine = %request.engine,
+                image = %request.reference,
+                error_code = %error.code,
+            );
+            futures_util::stream::once(ready(wire::ImagesPullResponse {
+                error: Some((&error).into()),
+                ..wire::ImagesPullResponse::default()
+            }))
+            .boxed()
+        });
+        Ok(Response::new(responses.map(Ok).boxed()))
     }
 }
 
@@ -473,5 +554,143 @@ mod tests {
         ] {
             assert!(reference(invalid).is_err(), "{invalid}");
         }
+    }
+
+    async fn pull(
+        service: &ImageService,
+        reference: &str,
+        credentials: Option<(&str, &str)>,
+    ) -> Vec<wire::ImagesPullResponse> {
+        service
+            .pull(Request::new(wire::ImagesPullRequest {
+                context: None,
+                engine: "docker".into(),
+                reference: reference.into(),
+                platform: String::new(),
+                credentials: credentials.map(|(username, password)| wire::RegistryCredentials {
+                    username: username.into(),
+                    password: password.into(),
+                }),
+            }))
+            .await
+            .unwrap()
+            .into_inner()
+            .map(Result::unwrap)
+            .collect()
+            .await
+    }
+
+    fn pulls(calls: &Calls) -> Vec<String> {
+        calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|call| call.starts_with("pull "))
+            .cloned()
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn images_are_pulled_layer_by_layer() {
+        let directory = tempfile::tempdir().unwrap();
+        let calls = Calls::default();
+        let service = service(
+            engine_with(directory.path(), calls.clone()).await,
+            "pingora-panel",
+        );
+        let messages = pull(&service, "busybox:1.37", None).await;
+        let last = messages.last().unwrap();
+        assert!(last.error.is_none(), "{:?}", last.error);
+        let pulled = last.pulled.as_ref().unwrap();
+        assert_eq!(pulled.image.as_ref().unwrap().id, "sha256:dd");
+        assert_eq!(pulled.digest, "sha256:d2");
+        assert!(pulled.updated);
+        let layers: Vec<_> = last
+            .layers
+            .iter()
+            .map(|layer| (layer.id.as_str(), layer.state, layer.current_bytes))
+            .collect();
+        assert_eq!(
+            layers,
+            [
+                ("1f2a3b4c5d6e", wire::ImageLayerState::Exists.into(), 0),
+                (
+                    "9c0abc9c5bd3",
+                    wire::ImageLayerState::Complete.into(),
+                    4_096
+                ),
+            ]
+        );
+
+        let current = pull(&service, "nginx:1.27", None).await;
+        let pulled = current.last().unwrap().pulled.as_ref().unwrap();
+        assert!(!pulled.updated);
+        assert_eq!(pulled.image.as_ref().unwrap().containers, 1);
+        pull(&service, "nginx", None).await;
+        assert_eq!(
+            pulls(&calls),
+            [
+                "pull busybox 1.37 platform= user=-",
+                "pull nginx 1.27 platform= user=-",
+                "pull nginx latest platform= user=-"
+            ],
+            "a name alone is its latest tag, never every tag"
+        );
+    }
+
+    #[tokio::test]
+    async fn pulls_sign_in_when_asked_and_say_why_they_fail() {
+        let directory = tempfile::tempdir().unwrap();
+        let calls = Calls::default();
+        let service = service(
+            engine_with(directory.path(), calls.clone()).await,
+            "pingora-panel",
+        );
+        let code = |messages: &[wire::ImagesPullResponse]| {
+            messages
+                .last()
+                .unwrap()
+                .error
+                .as_ref()
+                .unwrap()
+                .code
+                .clone()
+        };
+        let private = "ghcr.io/example/private:2.3";
+        assert_eq!(
+            code(&pull(&service, private, None).await),
+            "PERMISSION_DENIED"
+        );
+        let signed_in = pull(&service, private, Some(("ci", "hunter2"))).await;
+        let pulled = signed_in.last().unwrap().pulled.as_ref().unwrap();
+        assert_eq!(pulled.image.as_ref().unwrap().id, "sha256:ee");
+        assert_eq!(code(&pull(&service, "missing:1", None).await), "NOT_FOUND");
+        let broken = pull(&service, "flaky:1", None).await;
+        assert_eq!(code(&broken), "UNAVAILABLE");
+        assert_eq!(broken.last().unwrap().layers.len(), 1);
+        for invalid in ["../etc", "nginx:1.27 --all-tags", "Nginx"] {
+            assert_eq!(
+                code(&pull(&service, invalid, None).await),
+                "INVALID_ARGUMENT"
+            );
+        }
+        assert_eq!(
+            pulls(&calls),
+            [
+                "pull ghcr.io/example/private 2.3 platform= user=-",
+                "pull ghcr.io/example/private 2.3 platform= user=ci",
+                "pull missing 1 platform= user=-",
+                "pull flaky 1 platform= user=-"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn pulls_are_limited() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut service = service(engine(directory.path()).await, "pingora-panel");
+        service.pulls = Arc::new(Semaphore::new(0));
+        let refused = pull(&service, "busybox:1.37", None).await;
+        assert_eq!(refused[0].error.as_ref().unwrap().code, "UNAVAILABLE");
     }
 }

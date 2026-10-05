@@ -27,6 +27,19 @@ fn image(reference: &str) -> Option<Value> {
             1_800_000_000,
         ),
         "sha256:bb" | "redis:7" => ("sha256:bb", json!(["redis:7"]), json!([]), 1_799_000_000),
+        // What pulling gives it.
+        "sha256:dd" | "busybox:1.37" => (
+            "sha256:dd",
+            json!(["busybox:1.37"]),
+            json!(["busybox@sha256:d2"]),
+            1_801_000_000,
+        ),
+        "sha256:ee" | "ghcr.io/example/private:2.3" => (
+            "sha256:ee",
+            json!(["ghcr.io/example/private:2.3"]),
+            json!([]),
+            1_801_000_000,
+        ),
         "sha256:cc" => (
             "sha256:cc",
             json!(["<none>:<none>"]),
@@ -83,6 +96,60 @@ fn removed_image(found: &Value, force: bool) -> Answer {
         }
         (None, _) => refusal(StatusCode::NOT_FOUND, "No such image"),
     }
+}
+
+/// What pulling `name` at `tag` answers, as the engine streams it: busybox
+/// downloads one layer and has another, nginx is up to date, the private
+/// image wants `ci` signed in, missing does not exist and flaky breaks off.
+fn pulled(name: &str, tag: &str, user: Option<&str>) -> Answer {
+    let layers = |status: &str| {
+        vec![
+            json!({"status": format!("Pulling from {name}"), "id": tag}),
+            json!({"status": "Already exists", "progressDetail": {}, "id": "1f2a3b4c5d6e"}),
+            json!({"status": "Pulling fs layer", "progressDetail": {}, "id": "9c0abc9c5bd3"}),
+            json!({"status": "Downloading", "progressDetail": {"current": 1024, "total": 4096},
+                   "id": "9c0abc9c5bd3"}),
+            json!({"status": "Download complete", "progressDetail": {}, "id": "9c0abc9c5bd3"}),
+            json!({"status": "Extracting", "progressDetail": {"current": 4096, "total": 4096},
+                   "id": "9c0abc9c5bd3"}),
+            json!({"status": "Pull complete", "progressDetail": {}, "id": "9c0abc9c5bd3"}),
+            json!({"status": "Digest: sha256:d2"}),
+            json!({"status": format!("Status: {status} for {name}:{tag}")}),
+        ]
+    };
+    let messages = match (name, tag) {
+        ("busybox", "1.37") => layers("Downloaded newer image"),
+        ("ghcr.io/example/private", "2.3") if user == Some("ci") => {
+            layers("Downloaded newer image")
+        }
+        ("ghcr.io/example/private", _) => {
+            return refusal(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Head \"https://ghcr.io/v2/example/private/manifests/2.3\": unauthorized",
+            )
+        }
+        ("nginx", "1.27") => vec![
+            json!({"status": "Pulling from library/nginx", "id": "1.27"}),
+            json!({"status": "Digest: sha256:d1"}),
+            json!({"status": "Status: Image is up to date for nginx:1.27"}),
+        ],
+        ("flaky", _) => vec![
+            json!({"status": "Pulling fs layer", "progressDetail": {}, "id": "9c0abc9c5bd3"}),
+            json!({"errorDetail": {"message": "read: connection reset by peer"},
+                   "error": "read: connection reset by peer"}),
+        ],
+        _ => {
+            return refusal(
+                StatusCode::NOT_FOUND,
+                &format!("pull access denied for {name}, repository does not exist"),
+            )
+        }
+    };
+    let body: String = messages
+        .iter()
+        .map(|message| format!("{message}\r\n"))
+        .collect();
+    ([("content-type", "application/json")], body).into_response()
 }
 
 /// Whether labels answer a label filter: each `key` or `key=value` holds.
@@ -460,7 +527,7 @@ pub(crate) async fn engine_with(directory: &Path, calls: Calls) -> PathBuf {
                 },
             ),
         );
-    let removing = calls.clone();
+    let (removing, pulling) = (calls.clone(), calls.clone());
     let router = router.route(
         "/images/{*rest}",
         get(|Segments(rest): Segments<String>| async move {
@@ -488,6 +555,34 @@ pub(crate) async fn engine_with(directory: &Path, calls: Calls) -> PathBuf {
                     .unwrap()
                     .push(format!("remove-image {name} force={force}"));
                 removed_image(&found, force)
+            },
+        )
+        .post(
+            move |Segments(rest): Segments<String>,
+                  Query(query): Query<HashMap<String, String>>,
+                  headers: axum::http::HeaderMap| async move {
+                if rest != "create" {
+                    return refusal(StatusCode::NOT_FOUND, "unrouted");
+                }
+                use base64::Engine as _;
+                let user = headers
+                    .get("x-registry-auth")
+                    .and_then(|value| {
+                        base64::engine::general_purpose::STANDARD
+                            .decode(value.as_bytes())
+                            .ok()
+                    })
+                    .and_then(|json| serde_json::from_slice::<Value>(&json).ok())
+                    .filter(|auth| auth["password"] == "hunter2")
+                    .and_then(|auth| auth["username"].as_str().map(str::to_owned));
+                let field = |name: &str| query.get(name).cloned().unwrap_or_default();
+                let (name, tag) = (field("fromImage"), field("tag"));
+                pulling.lock().unwrap().push(format!(
+                    "pull {name} {tag} platform={} user={}",
+                    field("platform"),
+                    user.as_deref().unwrap_or("-")
+                ));
+                pulled(&name, &tag, user.as_deref())
             },
         ),
     );

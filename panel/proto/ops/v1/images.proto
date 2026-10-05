@@ -16,6 +16,10 @@ service Images {
   // Removes a reference to an image, and the image once nothing names it.
   // An image the panel's own installation uses is never removed.
   rpc Remove(ImagesRemoveRequest) returns (ImagesRemoveResponse);
+  // Pulls an image from its registry. Messages say how far its layers got,
+  // at most four times a second and at least every ten seconds; the last
+  // says what was pulled or why not. Closing the stream cancels the pull.
+  rpc Pull(ImagesPullRequest) returns (stream ImagesPullResponse);
 }
 
 message Image {
@@ -98,4 +102,63 @@ message ImagesRemoveResponse {
   // The images and layers deleted; none when other references remain.
   repeated string deleted = 3;
   .pingora.panel.common.v1.Error error = 4;
+}
+
+// For a registry that wants a sign-in. Used for one pull, never kept or
+// logged.
+message RegistryCredentials {
+  string username = 1;
+  // A password or an access token.
+  string password = 2;
+}
+
+message ImagesPullRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string engine = 2;
+  // Such as `nginx:1.27` or `ghcr.io/example/app@sha256:…`; a name alone,
+  // such as `nginx`, is `nginx:latest`.
+  string reference = 3;
+  // Such as `linux/arm64`; empty for the engine's own.
+  string platform = 4;
+  RegistryCredentials credentials = 5;
+}
+
+enum ImageLayerState {
+  IMAGE_LAYER_STATE_UNSPECIFIED = 0;
+  // Behind other layers, or about to be retried.
+  IMAGE_LAYER_STATE_WAITING = 1;
+  IMAGE_LAYER_STATE_DOWNLOADING = 2;
+  // Downloaded and checked against its digest.
+  IMAGE_LAYER_STATE_DOWNLOADED = 3;
+  IMAGE_LAYER_STATE_EXTRACTING = 4;
+  IMAGE_LAYER_STATE_COMPLETE = 5;
+  // The engine had it already.
+  IMAGE_LAYER_STATE_EXISTS = 6;
+}
+
+message ImageLayerProgress {
+  // Such as `a2abf6c4d29d`.
+  string id = 1;
+  ImageLayerState state = 2;
+  // How far downloading or extracting it got, of how much; 0 while unknown.
+  uint64 current_bytes = 3;
+  uint64 total_bytes = 4;
+}
+
+message ImagePulled {
+  // The image as listing it shows.
+  Image image = 1;
+  // Such as `sha256:…`: what the registry served.
+  string digest = 2;
+  // Whether the engine downloaded a newer image than it had.
+  bool updated = 3;
+}
+
+message ImagesPullResponse {
+  // In the order the engine first named them.
+  repeated ImageLayerProgress layers = 1;
+  // Only in the last message of a pull that succeeded.
+  ImagePulled pulled = 2;
+  // Only in the last message of a pull that failed.
+  .pingora.panel.common.v1.Error error = 3;
 }
