@@ -7,6 +7,8 @@ import type {
   ContainerStatsListView,
   ContainerStatsView,
   ContainerView,
+  EngineNetworkListView,
+  EngineVolumeListView,
   ImageDetailView,
   ImageListView,
   ImageView,
@@ -267,6 +269,56 @@ export function containerHandlers(): AnyHandler[] {
           ],
         })
       },
+    ),
+    http.get('*/api/v1/container-engines/:engine/networks', () =>
+      HttpResponse.json({
+        observed_at: new Date().toISOString(),
+        networks: [
+          {
+            id: 'n1',
+            name: 'bridge',
+            driver: 'bridge',
+            scope: 'local',
+            created: hoursAgo(24 * 90),
+            internal: false,
+            ipv6: false,
+            subnets: [{ subnet: '172.17.0.0/16', gateway: '172.17.0.1' }],
+            containers: 0,
+            compose_project: null,
+            labels: {},
+          },
+          {
+            id: 'n3',
+            name: 'shop_default',
+            driver: 'bridge',
+            scope: 'local',
+            created: hoursAgo(24 * 30),
+            internal: false,
+            ipv6: false,
+            subnets: [{ subnet: '172.18.0.0/16', gateway: '172.18.0.1' }],
+            containers: 2,
+            compose_project: 'shop',
+            labels: { 'com.docker.compose.project': 'shop' },
+          },
+        ],
+      } satisfies EngineNetworkListView),
+    ),
+    http.get('*/api/v1/container-engines/:engine/volumes', () =>
+      HttpResponse.json({
+        observed_at: new Date().toISOString(),
+        volumes: [
+          {
+            name: 'shop_data',
+            driver: 'local',
+            mountpoint: '/var/lib/docker/volumes/shop_data/_data',
+            created: hoursAgo(24 * 30),
+            scope: 'local',
+            containers: 1,
+            compose_project: 'shop',
+            labels: { 'com.docker.compose.project': 'shop' },
+          },
+        ],
+      } satisfies EngineVolumeListView),
     ),
     http.get('*/api/v1/container-engines/:engine/images', ({ request }) => {
       const search = (new URL(request.url).searchParams.get('search') ?? '').toLowerCase()

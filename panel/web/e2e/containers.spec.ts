@@ -260,6 +260,47 @@ async function setUp(
       },
     })
   })
+  await page.route(/\/api\/v1\/container-engines\/docker\/networks$/, (route) =>
+    route.fulfill({
+      json: {
+        observed_at: '2026-10-04T10:00:00Z',
+        networks: [
+          {
+            id: 'n3',
+            name: 'shop_default',
+            driver: 'bridge',
+            scope: 'local',
+            created: null,
+            internal: true,
+            ipv6: false,
+            subnets: [{ subnet: '172.18.0.0/16', gateway: '172.18.0.1' }],
+            containers: 2,
+            compose_project: 'shop',
+            labels: {},
+          },
+        ],
+      },
+    }),
+  )
+  await page.route(/\/api\/v1\/container-engines\/docker\/volumes$/, (route) =>
+    route.fulfill({
+      json: {
+        observed_at: '2026-10-04T10:00:00Z',
+        volumes: [
+          {
+            name: 'shop_html',
+            driver: 'local',
+            mountpoint: '/var/lib/docker/volumes/shop_html/_data',
+            created: null,
+            scope: 'local',
+            containers: 0,
+            compose_project: null,
+            labels: {},
+          },
+        ],
+      },
+    }),
+  )
   await page.route(/\/api\/v1\/container-engines\/docker\/stats$/, (route) =>
     route.fulfill({ json: { observed_at: '2026-10-04T10:00:00Z', stats: [usage] } }),
   )
@@ -562,4 +603,19 @@ test('readers see images without removing them', async ({ page }) => {
   await page.goto('/containers?view=images')
   await expect(page.getByRole('row').filter({ hasText: 'nginx:1.27' })).toBeVisible()
   await expect(page.getByRole('button', { name: /^Remove / })).toHaveCount(0)
+})
+
+test('networks and volumes show what uses them', async ({ page }) => {
+  await setUp(page)
+  await page.goto('/containers?view=networks')
+  const shop = page.getByRole('row').filter({ hasText: 'shop_default' })
+  await expect(shop).toContainText('172.18.0.0/16 via 172.18.0.1')
+  await expect(shop).toContainText('2 containers')
+  await expect(shop).toContainText('Compose: shop')
+  await expect(shop).toContainText('Internal')
+
+  await page.getByRole('tab', { name: 'Volumes' }).click()
+  await expect(page).toHaveURL(/view=volumes/)
+  const html = page.getByRole('row').filter({ hasText: 'shop_html' })
+  await expect(html).toContainText('0 containers')
 })

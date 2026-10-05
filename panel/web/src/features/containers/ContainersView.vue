@@ -2,7 +2,16 @@
 import { computed, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { watchDebounced } from '@vueuse/core'
-import { Boxes, Container, Layers, RefreshCw, ScrollText, Search } from '@lucide/vue'
+import {
+  Boxes,
+  Container,
+  HardDrive,
+  Layers,
+  Network,
+  RefreshCw,
+  ScrollText,
+  Search,
+} from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -43,6 +52,8 @@ import ContainerActions from './ContainerActions.vue'
 import ContainerDetailSheet from './ContainerDetailSheet.vue'
 import ContainerEngines from './ContainerEngines.vue'
 import ContainerImages from './ContainerImages.vue'
+import ContainerNetworks from './ContainerNetworks.vue'
+import ContainerVolumes from './ContainerVolumes.vue'
 import ContainerLogsSheet from './ContainerLogsSheet.vue'
 import {
   CONTAINER_STATES,
@@ -122,11 +133,12 @@ const state = computed({
 const filtered = computed(() => Boolean(queried('search') || queried('state')))
 
 /** Which of the engine's things the page shows; the address keeps it. */
+const VIEWS = ['containers', 'images', 'networks', 'volumes'] as const
 const view = computed({
-  get: () => (route.query.view === 'images' ? 'images' : 'containers'),
+  get: () => VIEWS.find((name) => name === route.query.view) ?? 'containers',
   set: (value: string) =>
     void router.replace({
-      query: { ...route.query, view: value === 'images' ? value : undefined },
+      query: { ...route.query, view: value === 'containers' ? undefined : value },
     }),
 })
 /** Why the engine's things are not shown, if they are not. */
@@ -267,10 +279,24 @@ function refresh() {
           <CardHeader class="flex flex-wrap items-center justify-between gap-2">
             <TabsList>
               <TabsTrigger value="containers">
-                <Boxes aria-hidden="true" />{{ t('containers.list.title') }}
+                <Boxes aria-hidden="true" /><span class="max-sm:sr-only">{{
+                  t('containers.list.title')
+                }}</span>
               </TabsTrigger>
               <TabsTrigger value="images">
-                <Layers aria-hidden="true" />{{ t('containers.images.title') }}
+                <Layers aria-hidden="true" /><span class="max-sm:sr-only">{{
+                  t('containers.images.title')
+                }}</span>
+              </TabsTrigger>
+              <TabsTrigger value="networks">
+                <Network aria-hidden="true" /><span class="max-sm:sr-only">{{
+                  t('containers.networks.title')
+                }}</span>
+              </TabsTrigger>
+              <TabsTrigger value="volumes">
+                <HardDrive aria-hidden="true" /><span class="max-sm:sr-only">{{
+                  t('containers.volumes.title')
+                }}</span>
               </TabsTrigger>
             </TabsList>
             <Select v-if="engineList.length > 1" v-model="selectedEngine">
@@ -453,6 +479,12 @@ function refresh() {
             </TabsContent>
             <TabsContent v-if="!notice && engineId" value="images">
               <ContainerImages :engine="engineId" />
+            </TabsContent>
+            <TabsContent v-if="!notice && engineId" value="networks">
+              <ContainerNetworks :engine="engineId" />
+            </TabsContent>
+            <TabsContent v-if="!notice && engineId" value="volumes">
+              <ContainerVolumes :engine="engineId" />
             </TabsContent>
           </CardContent>
         </Tabs>

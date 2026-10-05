@@ -1159,6 +1159,21 @@ const en: Messages = {
       force: 'Remove it even if stopped containers use it or several tags name it',
       removed: '{image} removed',
     },
+    networks: {
+      title: 'Networks',
+      name: 'Name',
+      driver: 'Driver',
+      subnets: 'Subnets',
+      via: '{subnet} via {gateway}',
+      scope: 'Scope',
+      internal: 'Internal',
+      empty: 'This engine has no networks',
+    },
+    volumes: {
+      title: 'Volumes',
+      mountpoint: 'Data on the host',
+      empty: 'This engine has no volumes',
+    },
     logs: {
       action: 'Logs',
       open: 'Logs of {name}',

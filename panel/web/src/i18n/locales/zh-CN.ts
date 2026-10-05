@@ -1120,6 +1120,21 @@ const zhCN = {
       force: '即使已停止的容器在用或有多个标签，也删除',
       removed: '已删除 {image}',
     },
+    networks: {
+      title: '网络',
+      name: '名称',
+      driver: '驱动',
+      subnets: '子网',
+      via: '{subnet}，网关 {gateway}',
+      scope: '范围',
+      internal: '内部',
+      empty: '此引擎没有网络',
+    },
+    volumes: {
+      title: '卷',
+      mountpoint: '宿主机上的数据',
+      empty: '此引擎没有卷',
+    },
     logs: {
       action: '日志',
       open: '{name} 的日志',
