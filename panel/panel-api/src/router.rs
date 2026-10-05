@@ -288,6 +288,14 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
             get(engine_resources::disk_usage::<U>),
         )
         .route(
+            "/api/v1/container-engines/{engine}/prune-preview",
+            get(engine_resources::prune_preview::<U>),
+        )
+        .route(
+            "/api/v1/container-engines/{engine}/prune",
+            post(engine_resources::prune::<U>),
+        )
+        .route(
             "/api/v1/container-engines/{engine}/images/{image}",
             get(images::inspect_image::<U>).delete(images::remove_image::<U>),
         )

@@ -203,3 +203,61 @@ async fn disk_use_is_read() {
     assert_eq!(usage["build_cache"]["active"], 1);
     assert_eq!(usage["containers"]["size_bytes"], 0);
 }
+
+#[tokio::test]
+async fn pruning_shows_first_then_removes_what_still_goes() {
+    let app = app(true);
+    let path = "/api/v1/container-engines/docker";
+    let (status, preview) = get(&app, &format!("{path}/prune-preview?named_volumes=true")).await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_eq!(preview["items"][0]["kind"], "container");
+    assert_eq!(preview["items"][1]["kind"], "volume");
+    assert_eq!(preview["reclaimable_bytes"], 3_072);
+    let (_, plain) = get(&app, &format!("{path}/prune-preview")).await;
+    assert_eq!(plain["items"].as_array().unwrap().len(), 1);
+
+    let prune = |body: Value| {
+        Request::post(format!("{path}/prune"))
+            .header("content-type", "application/json")
+            .header("x-actor", "ops")
+            .header("idempotency-key", "prune-1")
+            .header("x-deadline", "2099-01-01T00:00:00Z")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    };
+    let send = |request: Request<Body>| {
+        let app = app.clone();
+        async move {
+            let response = app.oneshot(request).await.unwrap();
+            let status = response.status();
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            (
+                status,
+                serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null),
+            )
+        }
+    };
+    let (status, report) = send(prune(serde_json::json!({
+        "named_volumes": true,
+        "items": preview["items"].clone()
+    })))
+    .await;
+    assert_eq!(status, StatusCode::OK, "{report}");
+    assert_eq!(report["reclaimed_bytes"], 1_024);
+    assert_eq!(report["outcomes"][0]["error"], Value::Null);
+    assert_eq!(
+        report["outcomes"][1]["error"]["code"],
+        "PRECONDITION_FAILED"
+    );
+
+    for body in [
+        serde_json::json!({"items": [{"kind": "volume", "id": "../etc", "name": "x", "size_bytes": 0}]}),
+        serde_json::json!({"items": [{"kind": "pod", "id": "x", "name": "x", "size_bytes": 0}]}),
+        serde_json::json!({"items": (0..1001).map(|n| serde_json::json!({"kind": "volume", "id": format!("v{n}"), "name": "", "size_bytes": 0})).collect::<Vec<_>>()}),
+    ] {
+        let (status, _) = send(prune(body)).await;
+        assert!(status.is_client_error(), "{status}");
+    }
+}

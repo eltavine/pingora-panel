@@ -527,6 +527,16 @@ pub(crate) static ROUTES: &[(&str, &str, Access)] = &[
     ),
     (
         "GET",
+        "/api/v1/container-engines/{engine}/prune-preview",
+        Requires(ContainersRead),
+    ),
+    (
+        "POST",
+        "/api/v1/container-engines/{engine}/prune",
+        Requires(ContainersManage),
+    ),
+    (
+        "GET",
         "/api/v1/container-engines/{engine}/images/{image}",
         Requires(ContainersRead),
     ),
