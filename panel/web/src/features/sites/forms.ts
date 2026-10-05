@@ -10,6 +10,7 @@ import type {
   SiteView,
   WwwRedirect,
 } from '@/api/generated'
+import { conditionForm, toCondition, type ConditionForm } from './conditions'
 import { parseHosts } from './presentation'
 import { optionalText, optionalNumber } from '@/lib/forms'
 
@@ -96,6 +97,7 @@ export interface RouteForm {
   kind: MatchKind
   path: string
   host: string
+  conditions: ConditionForm[]
   action: ActionForm
   securityPolicyId: string
   accessLog: AccessLogForm
@@ -287,6 +289,7 @@ export function routeForm(route: Route | undefined, priority: number): RouteForm
     kind: route?.match.kind ?? 'prefix',
     path: route?.match.path ?? '/',
     host: route?.match.host ?? '',
+    conditions: (route?.match.conditions ?? []).map(conditionForm),
     action: actionForm(route?.action),
     securityPolicyId: route?.security_policy_id ?? '',
     accessLog: accessLogForm(route?.access_log),
@@ -299,7 +302,12 @@ export function routeInput(form: RouteForm, id?: string): RouteInput {
     name: optionalText(form.name),
     enabled: form.enabled,
     priority: optionalNumber(form.priority) ?? 0,
-    match: { kind: form.kind, path: form.path.trim(), host: optionalText(form.host) },
+    match: {
+      kind: form.kind,
+      path: form.path.trim(),
+      host: optionalText(form.host),
+      conditions: form.conditions.map(toCondition),
+    },
     action: toAction(form.action),
     security_policy_id: optionalText(form.securityPolicyId),
     access_log: toAccessLog(form.accessLog),

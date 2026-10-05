@@ -1,6 +1,23 @@
 import type { Component } from 'vue'
-import { Construction, CornerUpRight, FolderOpen, MessageSquareText, Network } from '@lucide/vue'
-import type { Action, SiteKind, SiteStatus } from '@/api/generated'
+import {
+  ArrowRightLeft,
+  Ban,
+  Bot,
+  Construction,
+  Cookie,
+  CornerUpRight,
+  FileType,
+  FolderOpen,
+  Globe,
+  Heading,
+  Link,
+  ListChecks,
+  MessageSquareText,
+  Network,
+  Split,
+  Variable,
+} from '@lucide/vue'
+import type { Action, RouteCondition, SiteKind, SiteStatus } from '@/api/generated'
 import type { StatusTone } from '@/components/StatusIndicator.vue'
 
 export const kindIcons: Record<SiteKind, Component> = {
@@ -30,4 +47,19 @@ export function parseHosts(text: string): string[] {
     .split(/[\n,]/)
     .map((line) => line.split('#')[0]!.trim())
     .filter((line) => line.length > 0)
+}
+
+export const conditionIcons: Record<RouteCondition['kind'], Component> = {
+  method: ArrowRightLeft,
+  host: Globe,
+  header: Heading,
+  query: Variable,
+  cookie: Cookie,
+  client: Network,
+  user_agent: Bot,
+  referer: Link,
+  content_type: FileType,
+  any: Split,
+  all: ListChecks,
+  not: Ban,
 }

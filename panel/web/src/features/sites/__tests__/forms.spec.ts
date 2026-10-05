@@ -139,7 +139,7 @@ describe('route forms', () => {
     form.path = ' /v2/ '
     expect(routeInput(form, route.id)).toEqual({
       ...route,
-      match: { kind: 'prefix', path: '/v2/', host: null },
+      match: { kind: 'prefix', path: '/v2/', host: null, conditions: [] },
     })
   })
 

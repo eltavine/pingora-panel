@@ -36,6 +36,8 @@ import {
 import SecurityPolicySelect from '@/components/SecurityPolicySelect.vue'
 import AccessLogFields from './AccessLogFields.vue'
 import ActionFields from './ActionFields.vue'
+import { conditionProblem } from './conditions'
+import ConditionsEditor from './ConditionsEditor.vue'
 import {
   ACTION_TYPES,
   invalidFieldLines,
@@ -56,6 +58,7 @@ const refresh = useRefreshConfiguration()
 const create = useMutation(createRouteMutation())
 const replace = useMutation(replaceRouteMutation())
 const busy = computed(() => create.isPending.value || replace.isPending.value)
+const unfinished = computed(() => form.conditions.some((condition) => conditionProblem(condition)))
 
 const form = reactive<RouteForm>(routeForm(undefined, 10))
 watch(open, (isOpen) => {
@@ -170,6 +173,12 @@ function submit() {
             </Select>
           </FormField>
 
+          <fieldset class="flex flex-col gap-2">
+            <legend class="text-sm font-medium">{{ t('routes.conditions.title') }}</legend>
+            <p class="text-muted-foreground text-xs">{{ t('routes.conditions.description') }}</p>
+            <ConditionsEditor v-model="form.conditions" id-prefix="route-condition" />
+          </fieldset>
+
           <SecurityPolicySelect
             id="route-security-policy"
             v-model="form.securityPolicyId"
@@ -194,7 +203,7 @@ function submit() {
         <SheetFooter>
           <Button
             type="submit"
-            :disabled="busy || invalidFieldLines(form.accessLog.fields).length > 0"
+            :disabled="busy || unfinished || invalidFieldLines(form.accessLog.fields).length > 0"
           >
             <Save data-icon="inline-start" aria-hidden="true" />
             {{ route ? t('common.save') : t('common.create') }}

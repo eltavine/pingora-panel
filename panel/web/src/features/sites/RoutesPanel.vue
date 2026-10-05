@@ -5,6 +5,8 @@ import { moveArrayElement, useSortable } from '@vueuse/integrations/useSortable'
 import {
   ChevronDown,
   ChevronUp,
+  Filter,
+  FlaskConical,
   GripVertical,
   Pencil,
   Plus,
@@ -44,7 +46,9 @@ import {
   useRefreshConfiguration,
 } from '@/lib/configuration'
 import { nextPriority, routeInputOf } from './forms'
+import { describeCondition } from './conditions'
 import RouteFormSheet from './RouteFormSheet.vue'
+import RouteTesterSheet from './RouteTesterSheet.vue'
 import { actionIcons } from './presentation'
 
 const props = defineProps<{ site: SiteView }>()
@@ -58,6 +62,7 @@ const replace = useMutation(replaceRouteMutation())
 const remove = useMutation(deleteRouteMutation())
 
 const order = ref<RouteView[]>([])
+const testerOpen = ref(false)
 watch(
   () => routes.data.value,
   (value) => (order.value = [...(value ?? [])]),
@@ -180,10 +185,16 @@ function target(route: RouteView): string {
   <div class="flex flex-col gap-4">
     <div class="flex flex-wrap items-center justify-between gap-2">
       <p class="text-muted-foreground text-sm">{{ t('routes.order') }}</p>
-      <Button size="sm" @click="openForm()">
-        <Plus data-icon="inline-start" aria-hidden="true" />
-        {{ t('routes.add') }}
-      </Button>
+      <div class="flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" @click="testerOpen = true">
+          <FlaskConical data-icon="inline-start" aria-hidden="true" />
+          {{ t('routes.tester.open') }}
+        </Button>
+        <Button size="sm" @click="openForm()">
+          <Plus data-icon="inline-start" aria-hidden="true" />
+          {{ t('routes.add') }}
+        </Button>
+      </div>
     </div>
 
     <ApiFailureAlert
@@ -266,6 +277,14 @@ function target(route: RouteView): string {
                 {{ route.match.host }}
               </span>
               <span
+                v-if="route.match.conditions?.length"
+                class="text-muted-foreground inline-flex items-center gap-1 text-xs"
+                :title="route.match.conditions.map(describeCondition).join('\n')"
+              >
+                <Filter class="size-3.5" aria-hidden="true" />
+                {{ t('routes.conditions.summary', route.match.conditions.length) }}
+              </span>
+              <span
                 v-if="route.security_policy_id"
                 class="text-muted-foreground inline-flex items-center gap-1 font-mono text-xs"
                 :title="t('security.select.label')"
@@ -320,6 +339,8 @@ function target(route: RouteView): string {
         </tbody>
       </Table>
     </div>
+
+    <RouteTesterSheet v-model:open="testerOpen" :site="site" :routes="order" />
 
     <RouteFormSheet
       v-model:open="formOpen"
