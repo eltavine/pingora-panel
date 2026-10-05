@@ -1,7 +1,8 @@
 # 0031: Containers
 
 Status: accepted. Builds on [ADR 0028](0028-host-and-container-operations.md)
-and [ADR 0030](0030-ops-agent.md).
+and [ADR 0030](0030-ops-agent.md). [ADR 0033](0033-sites-in-front-of-containers.md)
+decides how sites are put in front of containers.
 
 ## Context
 
