@@ -31,6 +31,7 @@
         "dns-rfc2136",
         "panel-acme",
         "panel-application",
+        "panel-backup",
         "panel-certificate-api",
         "panel-certificates",
         "panel-context",

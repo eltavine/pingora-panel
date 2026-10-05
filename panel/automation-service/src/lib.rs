@@ -12,6 +12,8 @@
 //! CloudEvent through the transactional outbox.
 
 mod acme;
+mod backup_transport;
+mod backups;
 mod certificate_api;
 mod certificates;
 mod delivery;
@@ -24,6 +26,11 @@ pub use acme::{
     renewal_schedule, AcmeAccount, AcmeAutomation, AutomaticCertificate, IssuanceState,
     IssueHandler, LastError, RenewalCheckHandler, ISSUE_JOB, RENEWAL_CHECK_JOB,
 };
+pub use backup_transport::BackupsTransport;
+pub use backups::{
+    Backup, BackupContent, BackupRequest, BackupState, Backups, TakeHandler, DEFAULT_KEPT,
+    KEPT_ENV, MOST_MEMBER_BYTES, SITES_ROOT_ENV, TAKE_JOB,
+};
 pub use certificate_api::CertificateService;
 pub use certificates::{Cause, CertificateInventory};
 pub use delivery::{Delivery, SecretDirectory};
@@ -33,9 +40,12 @@ pub use transport::CertificatesTransport;
 
 use chrono::Utc;
 use panel_acme::AcmeClient;
-use panel_contracts::{automation::v1::certificates_server, AUTOMATION_V1};
+use panel_contracts::{
+    automation::v1::{backups_server, certificates_server},
+    AUTOMATION_V1,
+};
 use panel_control_runtime::{ControlPlaneProcess, DefaultAddresses, ProcessSettings};
-use panel_errors::Result;
+use panel_errors::{PanelError, Result};
 use panel_jobs::{
     run_scheduler, JobHandler, JobKind, JobStore, ScheduleStore, Worker, WorkerOptions,
 };
@@ -44,7 +54,7 @@ use panel_platform_codec::protocol_range;
 use panel_secrets::{EnvelopeVault, SecretVault};
 use panel_service::Environment;
 use panel_sqlite::{EventLog, SchemaMigration};
-use std::{future::Future, net::SocketAddr, sync::Arc, time::Duration};
+use std::{future::Future, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio_util::sync::CancellationToken;
 
 pub const SERVICE: &str = "automation-service";
@@ -58,6 +68,9 @@ pub const GATEWAY_SECRET_DIR_ENV: &str = "PINGORA_PANEL_GATEWAY_SECRET_DIR";
 const SCHEDULER_INTERVAL: Duration = Duration::from_secs(5);
 /// How often delivered certificates are compared with the inventory.
 const RECONCILE_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Backup messages carry attachments and members of up to 16 MiB each.
+const MOST_BACKUP_MESSAGE_BYTES: usize = 40 * 1024 * 1024;
 
 pub const MIGRATIONS: &[SchemaMigration] = &[
     SchemaMigration::new(
@@ -74,6 +87,11 @@ pub const MIGRATIONS: &[SchemaMigration] = &[
         10_200,
         "DNS providers, ACME accounts and automatic certificates",
         include_str!("../migrations/10200_acme.sql"),
+    ),
+    SchemaMigration::new(
+        10_300,
+        "backups",
+        include_str!("../migrations/10300_backups.sql"),
     ),
 ];
 
@@ -113,6 +131,20 @@ pub fn process(
     let directory = env
         .string(GATEWAY_SECRET_DIR_ENV)?
         .map(SecretDirectory::new);
+    let sites = env.string(SITES_ROOT_ENV)?.map(PathBuf::from);
+    let kept = env
+        .string(KEPT_ENV)?
+        .map(|kept| {
+            kept.parse::<usize>()
+                .ok()
+                .filter(|&kept| kept > 0)
+                .ok_or_else(|| {
+                    PanelError::invalid_argument(format!("{KEPT_ENV} must be a positive number"))
+                })
+        })
+        .transpose()?
+        .unwrap_or(DEFAULT_KEPT);
+    let data_directory = settings.data_directory().to_owned();
     let service = ServiceName::new(SERVICE)?;
     let process =
         ControlPlaneProcess::new(service.clone(), env!("CARGO_PKG_VERSION"), settings, MODULE)?;
@@ -139,7 +171,19 @@ pub fn process(
         AcmeClient::default(),
         secret_directory.as_deref(),
     );
-    let handlers = handlers(&acme)?;
+    let backups = Backups::new(
+        process.database().clone(),
+        Arc::clone(&store) as Arc<dyn JobStore>,
+        &data_directory,
+        sites,
+        kept,
+        env!("CARGO_PKG_VERSION"),
+    );
+    let mut handlers = handlers(&acme)?;
+    handlers.push((
+        JobKind::new(TAKE_JOB)?,
+        Arc::new(TakeHandler(backups.clone())),
+    ));
     Ok(process
         .with_migrations(MIGRATIONS)
         .with_protocol(protocol_range(AUTOMATION_V1))
@@ -147,6 +191,16 @@ pub fn process(
         .with_peer_access(
             certificates_server::SERVICE_NAME,
             [ServiceName::new("panel-api")?],
+        )
+        .with_capability(Capability::new("backups", "1")?)
+        .with_peer_access(
+            backups_server::SERVICE_NAME,
+            [ServiceName::new("panel-api")?],
+        )
+        .with_grpc_service(
+            backups_server::BackupsServer::new(BackupsTransport::new(backups))
+                .max_decoding_message_size(MOST_BACKUP_MESSAGE_BYTES)
+                .max_encoding_message_size(MOST_BACKUP_MESSAGE_BYTES),
         )
         .with_grpc_service(certificates_server::CertificatesServer::new(
             CertificatesTransport::new(Arc::new(CertificateService::new(

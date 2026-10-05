@@ -11,8 +11,11 @@ publish.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 dns-rfc2136.workspace = true
+futures-util.workspace = true
+hex.workspace = true
 panel-acme.workspace = true
 panel-application.workspace = true
+panel-backup.workspace = true
 panel-certificate-api.workspace = true
 panel-certificates.workspace = true
 panel-contracts.workspace = true
@@ -28,13 +31,15 @@ panel-secrets.workspace = true
 panel-service.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 sqlx.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
-tokio-util.workspace = true
+tokio-util = { workspace = true, features = ["io"] }
 tonic.workspace = true
 tracing.workspace = true
 uuid.workspace = true
+walkdir.workspace = true
 zeroize = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]

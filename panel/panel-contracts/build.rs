@@ -14,9 +14,11 @@ fn main() {
         .btree_map(".io.cloudevents.v1.CloudEvent.attributes")
         // Debug for these is written by hand, without their secrets.
         .skip_debug([".pingora.panel.ops.v1.RegistryCredentials"])
+        .boxed(".pingora.panel.automation.v1.BackupsDownloadResponse.message.backup")
         .compile_protos(
             &[
                 "../proto/audit/v1/audit.proto",
+                "../proto/automation/v1/backups.proto",
                 "../proto/automation/v1/certificates.proto",
                 "../proto/common/v1/common.proto",
                 "../proto/config/v1/config.proto",

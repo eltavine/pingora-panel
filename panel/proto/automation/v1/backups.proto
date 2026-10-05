@@ -1,0 +1,159 @@
+syntax = "proto3";
+
+package pingora.panel.automation.v1;
+
+import "common/v1/common.proto";
+import "google/protobuf/timestamp.proto";
+
+// Takes, keeps and restores backups (ADR 0035): archives holding consistent
+// copies of the control plane's databases, the sites' directory, or both,
+// each checked against the manifest it begins with. Archives never hold the
+// master keys, the password pepper or the bootstrap token.
+service Backups {
+  rpc List(BackupsListRequest) returns (BackupsListResponse);
+  rpc Get(BackupsGetRequest) returns (BackupsGetResponse);
+  // Takes a backup in the background; it is listed at once, pending.
+  rpc Create(BackupsCreateRequest) returns (BackupsCreateResponse);
+  // Removes a backup and its archive; a backup being taken is refused.
+  rpc Delete(BackupsDeleteRequest) returns (BackupsDeleteResponse);
+  // The archive's bytes in order. The first message describes the backup.
+  rpc Download(BackupsDownloadRequest) returns (stream BackupsDownloadResponse);
+  // One member of an archive of at most 16 MiB, such as the configuration
+  // as a bundle, checked against the manifest.
+  rpc Member(BackupsMemberRequest) returns (BackupsMemberResponse);
+  // Replaces a directory of the sites with the archive's copy: unpacked
+  // beside it and renamed into place, so its files are never a mix of both.
+  rpc RestoreSites(BackupsRestoreSitesRequest) returns (BackupsRestoreSitesResponse);
+}
+
+enum BackupContent {
+  BACKUP_CONTENT_UNSPECIFIED = 0;
+  // The configuration's database, with the draft and the active revision
+  // as configuration bundles when the caller attaches them.
+  BACKUP_CONTENT_CONFIGURATION = 1;
+  // The automation module's database: certificates with their keys sealed,
+  // ACME accounts and DNS providers.
+  BACKUP_CONTENT_CERTIFICATES = 2;
+  // Every module's database.
+  BACKUP_CONTENT_DATABASES = 3;
+  // The sites' directory, or one directory below it.
+  BACKUP_CONTENT_SITES = 4;
+}
+
+enum BackupState {
+  BACKUP_STATE_UNSPECIFIED = 0;
+  BACKUP_STATE_PENDING = 1;
+  BACKUP_STATE_RUNNING = 2;
+  BACKUP_STATE_COMPLETED = 3;
+  BACKUP_STATE_FAILED = 4;
+}
+
+message Backup {
+  string id = 1;
+  repeated BackupContent contents = 2;
+  // The directory below the sites' directory it holds; empty for all of it.
+  string site_path = 3;
+  BackupState state = 4;
+  string requested_by = 5;
+  google.protobuf.Timestamp requested_at = 6;
+  google.protobuf.Timestamp finished_at = 7;
+  // The archive's size, once taken.
+  uint64 size_bytes = 8;
+  // SHA-256 of the archive, in lowercase hexadecimal, once taken.
+  string sha256 = 9;
+  // The files in the archive.
+  uint64 files = 10;
+  // Why it failed.
+  .pingora.panel.common.v1.Error failure = 11;
+  // The version of the product that took it.
+  string product_version = 12;
+}
+
+// A member written into the archive as given.
+message BackupAttachment {
+  // Below `configuration/`, such as `configuration/draft.json`.
+  string path = 1;
+  bytes content = 2;
+}
+
+message BackupsListRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+}
+
+message BackupsListResponse {
+  // Newest first.
+  repeated Backup backups = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message BackupsGetRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string id = 2;
+}
+
+message BackupsGetResponse {
+  Backup backup = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message BackupsCreateRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  repeated BackupContent contents = 2;
+  // With sites, the directory below the sites' directory to hold; empty for
+  // all of it.
+  string site_path = 3;
+  repeated BackupAttachment attachments = 4;
+}
+
+message BackupsCreateResponse {
+  Backup backup = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message BackupsDeleteRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string id = 2;
+}
+
+message BackupsDeleteResponse {
+  .pingora.panel.common.v1.Error error = 1;
+}
+
+message BackupsDownloadRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string id = 2;
+}
+
+message BackupsDownloadResponse {
+  oneof message {
+    Backup backup = 1;
+    bytes chunk = 2;
+    .pingora.panel.common.v1.Error error = 3;
+  }
+}
+
+message BackupsMemberRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string id = 2;
+  string path = 3;
+}
+
+message BackupsMemberResponse {
+  bytes content = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message BackupsRestoreSitesRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string id = 2;
+  // The directory below the sites' directory to restore, such as `shop`;
+  // it must be in the archive.
+  string site_path = 3;
+}
+
+message BackupsRestoreSitesResponse {
+  // The files restored and their bytes.
+  uint64 files = 1;
+  uint64 bytes = 2;
+  .pingora.panel.common.v1.Error error = 3;
+}
