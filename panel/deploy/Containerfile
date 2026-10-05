@@ -37,7 +37,7 @@ RUN for directory in control gateway-secrets pki credentials/panel-api \
         mkdir -p "/out/state/$directory"; \
     done \
  && chmod 700 /out/state/control \
- && mkdir -p /out/gateway \
+ && mkdir -p /out/gateway /out/sites \
  && chmod 700 /out/gateway
 
 FROM gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
@@ -48,4 +48,6 @@ COPY --from=build /out/bin/ /usr/local/bin/
 COPY --from=web /panel/web/dist/ /usr/share/pingora-panel/web/
 COPY --from=build --chown=65532:65532 /out/state/ /var/lib/pingora-panel/
 COPY --from=build /out/gateway/ /var/lib/pingora-panel/gateway/
+# The static sites, which the control plane writes and the gateway serves.
+COPY --from=build --chown=65532:65532 /out/sites/ /srv/pingora-panel/sites/
 USER 65532:65532

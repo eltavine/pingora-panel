@@ -200,6 +200,8 @@ services:
       PINGORA_PANEL_CREDENTIALS_DIR: /var/lib/pingora-panel/credentials
       PINGORA_PANEL_HTTP_ADDR: 127.0.0.1:8080
       PINGORA_PANEL_WEB_ROOT: /usr/share/pingora-panel/web
+      # The static sites the gateway serves, whose files the panel manages.
+      PINGORA_PANEL_SITES_ROOT: /srv/pingora-panel/sites
       PINGORA_PANEL_GATEWAY_URL: https://127.0.0.1:50051
       PINGORA_PANEL_GATEWAY_SECRET_DIR: /var/lib/pingora-panel/gateway-secrets
       PINGORA_PANEL_PROMETHEUS_URL: http://127.0.0.1:9090
@@ -215,6 +217,7 @@ services:
     volumes:
       - control-data:/var/lib/pingora-panel/control
       - gateway-secrets:/var/lib/pingora-panel/gateway-secrets
+      - sites:/srv/pingora-panel/sites
       - credentials-panel-api:/var/lib/pingora-panel/credentials/panel-api:ro
       - credentials-config-service:/var/lib/pingora-panel/credentials/config-service:ro
       - credentials-automation-service:/var/lib/pingora-panel/credentials/automation-service:ro

@@ -545,6 +545,15 @@ pub(crate) static ROUTES: &[(&str, &str, Access)] = &[
         "/api/v1/container-engines/{engine}/site-links",
         Requires(ContainersRead),
     ),
+    ("GET", "/api/v1/site-files", Requires(FilesRead)),
+    ("DELETE", "/api/v1/site-files", Requires(FilesWrite)),
+    ("GET", "/api/v1/site-files/content", Requires(FilesRead)),
+    ("PUT", "/api/v1/site-files/content", Requires(FilesWrite)),
+    (
+        "POST",
+        "/api/v1/site-files/directories",
+        Requires(FilesWrite),
+    ),
     (
         "POST",
         "/api/v1/container-engines/{engine}/containers/{container}/sites",

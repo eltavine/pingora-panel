@@ -23,6 +23,8 @@ export const ALL_PERMISSIONS = [
   'containers.read',
   'containers.inspect',
   'containers.manage',
+  'files.read',
+  'files.write',
   'platform.read',
   'identity.read',
   'identity.manage',

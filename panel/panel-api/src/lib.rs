@@ -37,6 +37,7 @@ mod request_context;
 mod router;
 mod routes;
 mod sign_in;
+mod site_files;
 mod state;
 mod tail;
 mod time;

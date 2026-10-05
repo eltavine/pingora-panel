@@ -5,7 +5,7 @@ use crate::{
 use panel_application::{
     AlertsPort, AuditPort, ComposePort, ContainersPort, EngineResourcesPort, GatewayRuntimePort,
     HostAgentPort, HostPort, ImagesPort, LogsPort, NoCompose, NoContainers, NoEngineResources,
-    NoHostAgent, NoImages, TlsProbe, TrafficPort,
+    NoHostAgent, NoImages, NoSiteFiles, SiteFilesPort, TlsProbe, TrafficPort,
 };
 use panel_certificate_api::CertificatePort;
 use panel_config_api::ConfigurationPort;
@@ -32,6 +32,7 @@ pub struct ApiState<U> {
     pub(crate) images: Arc<dyn ImagesPort>,
     pub(crate) resources: Arc<dyn EngineResourcesPort>,
     pub(crate) compose: Arc<dyn ComposePort>,
+    pub(crate) site_files: Arc<dyn SiteFilesPort>,
     pub(crate) identity: Option<Arc<Gate>>,
     pub(crate) providers: Option<Arc<ProviderAccess>>,
     pub(crate) workloads: Option<Arc<WorkloadIdentity>>,
@@ -58,6 +59,7 @@ impl<U> Clone for ApiState<U> {
             images: Arc::clone(&self.images),
             resources: Arc::clone(&self.resources),
             compose: Arc::clone(&self.compose),
+            site_files: Arc::clone(&self.site_files),
             identity: self.identity.clone(),
             providers: self.providers.clone(),
             workloads: self.workloads.clone(),
@@ -86,6 +88,7 @@ impl<U> ApiState<U> {
             images: Arc::new(NoImages),
             resources: Arc::new(NoEngineResources),
             compose: Arc::new(NoCompose),
+            site_files: Arc::new(NoSiteFiles),
             identity: None,
             providers: None,
             workloads: None,
@@ -194,6 +197,13 @@ impl<U> ApiState<U> {
     /// those paths say so.
     pub fn with_compose(mut self, compose: Arc<dyn ComposePort>) -> Self {
         self.compose = compose;
+        self
+    }
+
+    /// Serves the static sites' files under `/api/v1/site-files`; without
+    /// them those paths say so.
+    pub fn with_site_files(mut self, site_files: Arc<dyn SiteFilesPort>) -> Self {
+        self.site_files = site_files;
         self
     }
 

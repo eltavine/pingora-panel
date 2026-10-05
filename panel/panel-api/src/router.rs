@@ -3,11 +3,12 @@ use crate::{
     admission::{admit, Admission},
     alerts, approvals, audit, certificates, compose, configuration as config, container_sites,
     containers, engine_resources, gateway_runtime as runtime, grants, host, host_agent, identity,
-    images, language, logs, middleware, routes, sign_in, tls_checks, traffic, workload, ApiConfig,
-    ApiState,
+    images, language, logs, middleware, routes, sign_in, site_files, tls_checks, traffic, workload,
+    ApiConfig, ApiState,
 };
 use axum::{
     extract::DefaultBodyLimit,
+    handler::Handler,
     middleware::{from_fn, from_fn_with_state},
     routing::{delete, get, post, put},
     Router,
@@ -303,6 +304,21 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         .route(
             "/api/v1/container-engines/{engine}/site-links",
             get(container_sites::site_links::<U>),
+        )
+        .route(
+            "/api/v1/site-files",
+            get(site_files::list_directory::<U>).delete(site_files::remove_entry::<U>),
+        )
+        .route(
+            "/api/v1/site-files/content",
+            get(site_files::read_file::<U>).put(
+                site_files::write_file::<U>
+                    .layer(DefaultBodyLimit::max(site_files::MOST_WRITE_BYTES)),
+            ),
+        )
+        .route(
+            "/api/v1/site-files/directories",
+            post(site_files::create_directory::<U>),
         )
         .route(
             "/api/v1/container-engines/{engine}/containers/{container}/sites",

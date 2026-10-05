@@ -285,6 +285,7 @@
         "panel-service",
         "panel-sqlite",
         "panel-tls",
+        "site-files-local",
         "tls-probe-rustls"
       ]
     },

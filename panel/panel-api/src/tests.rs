@@ -31,6 +31,7 @@ mod logs;
 mod platform;
 mod request_identity;
 mod runtime;
+mod site_files;
 mod tls_checks;
 mod traffic;
 

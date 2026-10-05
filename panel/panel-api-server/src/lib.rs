@@ -28,7 +28,7 @@ use ops_grpc_client::OpsAgentClient;
 use panel_api::{router_with_config, AccessSettings, ApiConfig, ApiState};
 use panel_application::{
     RecordedCompose, RecordedContainers, RecordedEngineResources, RecordedHostAgent,
-    RecordedImages, RecordedLogs, RecordedRuntime,
+    RecordedImages, RecordedLogs, RecordedRuntime, RecordedSiteFiles,
 };
 use panel_control_runtime::{ControlPlaneProcess, DefaultAddresses, ProcessSettings};
 use panel_errors::{PanelError, Result};
@@ -42,6 +42,7 @@ use panel_platform::ServiceName;
 use panel_secrets::{EnvelopeVault, SecretVault};
 use panel_service::{measured, Environment};
 use panel_sqlite::EventLog;
+use site_files_local::LocalSiteFiles;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tls_probe_rustls::RustlsProbe;
 use tokio::time::MissedTickBehavior;
@@ -66,6 +67,9 @@ pub const GATEWAY_URL_ENV: &str = "PINGORA_PANEL_GATEWAY_URL";
 pub const OPS_AGENT_SOCKET_ENV: &str = "PINGORA_PANEL_OPS_AGENT_SOCKET";
 /// Directory holding the built web console; the API is served without it.
 pub const WEB_ROOT_ENV: &str = "PINGORA_PANEL_WEB_ROOT";
+/// The directory the gateway serves static sites from, managed read-write
+/// (ADR 0034); without it the sites' files are not offered.
+pub const SITES_ROOT_ENV: &str = "PINGORA_PANEL_SITES_ROOT";
 /// The one-time token that creates the first account; `_FILE` names a file
 /// holding it.
 pub const BOOTSTRAP_TOKEN_ENV: &str = "PINGORA_PANEL_BOOTSTRAP_TOKEN";
@@ -128,6 +132,7 @@ pub fn process(
         .string(OBSERVABILITY_URL_ENV)?
         .unwrap_or_else(|| DEFAULT_OBSERVABILITY_URL.into());
     let agent_socket = env.string(OPS_AGENT_SOCKET_ENV)?.map(PathBuf::from);
+    let sites_root = env.string(SITES_ROOT_ENV)?.map(PathBuf::from);
     let web_root = PathBuf::from(
         env.string(WEB_ROOT_ENV)?
             .unwrap_or_else(|| DEFAULT_WEB_ROOT.into()),
@@ -223,6 +228,18 @@ pub fn process(
     let compose = agent
         .clone()
         .map(|agent| RecordedCompose::new(Arc::new(agent), operations.clone()));
+    let site_files = sites_root
+        .map(|root| {
+            LocalSiteFiles::open(&root)
+                .map(|files| RecordedSiteFiles::new(Arc::new(files), operations.clone()))
+                .map_err(|error| {
+                    PanelError::invalid_argument(format!(
+                        "{SITES_ROOT_ENV} {} cannot be opened: {error}",
+                        root.display()
+                    ))
+                })
+        })
+        .transpose()?;
     let store = Arc::new(SqliteIdentityStore::new(process.database(), events));
     let roles = roles::BuiltInRoles::new(Arc::clone(&store), bootstrap.is_some());
     let oidc = Arc::new(OidcClient::new(PROVIDER_TIMEOUT)?);
@@ -297,6 +314,10 @@ pub fn process(
             };
             let state = match compose {
                 Some(compose) => state.with_compose(Arc::new(compose)),
+                None => state,
+            };
+            let state = match site_files {
+                Some(site_files) => state.with_site_files(Arc::new(site_files)),
                 None => state,
             };
             let state = match providers {

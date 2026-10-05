@@ -30,6 +30,8 @@ pub enum Permission {
     ContainersRead,
     ContainersInspect,
     ContainersManage,
+    FilesRead,
+    FilesWrite,
     PlatformRead,
     IdentityRead,
     IdentityManage,
@@ -141,6 +143,16 @@ const CATALOG: &[(Permission, &str, &str)] = &[
         Permission::ContainersManage,
         "containers.manage",
         "Enable engines and start, stop, remove and prune what runs on them.",
+    ),
+    (
+        Permission::FilesRead,
+        "files.read",
+        "List and download the files below the static sites' directory.",
+    ),
+    (
+        Permission::FilesWrite,
+        "files.write",
+        "Upload, edit and remove the files below the static sites' directory.",
     ),
     (
         Permission::PlatformRead,
@@ -291,7 +303,7 @@ pub fn built_in_roles() -> Vec<Role> {
         role(
             "operator",
             "Operator",
-            "Changes and applies configuration, decides on others' changes, manages certificates, operates the gateway, keeps its logs and its alerts.",
+            "Changes and applies configuration, decides on others' changes, manages certificates and the sites' files, operates the gateway, keeps its logs and its alerts.",
             [
                 GatewayRead,
                 GatewayOperate,
@@ -309,6 +321,8 @@ pub fn built_in_roles() -> Vec<Role> {
                 ContainersRead,
                 ContainersInspect,
                 ContainersManage,
+                FilesRead,
+                FilesWrite,
                 PlatformRead,
             ]
             .into_iter()
@@ -317,7 +331,7 @@ pub fn built_in_roles() -> Vec<Role> {
         role(
             "viewer",
             "Viewer",
-            "Reads configuration, certificates, the gateway's state, its logs and its alerts.",
+            "Reads configuration, certificates, the sites' files, the gateway's state, its logs and its alerts.",
             [
                 GatewayRead,
                 ConfigRead,
@@ -326,6 +340,7 @@ pub fn built_in_roles() -> Vec<Role> {
                 AlertsRead,
                 HostRead,
                 ContainersRead,
+                FilesRead,
                 PlatformRead,
             ]
             .into_iter()

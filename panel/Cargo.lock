@@ -2953,6 +2953,7 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "serde_json",
+ "site-files-local",
  "tempfile",
  "tls-probe-rustls",
  "tokio",
