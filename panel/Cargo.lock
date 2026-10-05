@@ -3080,6 +3080,7 @@ name = "panel-cli"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "chrono",
  "clap",
  "clap_complete",
@@ -3090,6 +3091,7 @@ dependencies = [
  "rpassword",
  "rustls",
  "serde_json",
+ "sha2 0.11.0",
  "tempfile",
  "tokio",
  "tokio-rustls",

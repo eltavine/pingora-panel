@@ -221,7 +221,22 @@ impl Api {
         body: Option<&Value>,
         if_match: Option<&str>,
     ) -> Result<Reply> {
-        let mut request = self.command(method, path, self.timeout);
+        self.change_lasting(method, path, body, if_match, self.timeout)
+            .await
+    }
+
+    /// A change that may take as long as `lasting`, such as a restore.
+    pub async fn change_lasting(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<&Value>,
+        if_match: Option<&str>,
+        lasting: Duration,
+    ) -> Result<Reply> {
+        let mut request = self
+            .command(method, path, lasting)
+            .timeout(lasting.max(self.timeout));
         if let Some(body) = body {
             request = request.json(body);
         }

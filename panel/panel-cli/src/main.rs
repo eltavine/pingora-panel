@@ -176,6 +176,9 @@ enum Command {
     /// The files below the static sites' directory.
     #[command(subcommand)]
     Files(commands::files::FilesCommand),
+    /// Backups of the databases and the sites' directory.
+    #[command(subcommand)]
+    Backup(commands::backups::BackupCommand),
     /// The running gateway.
     #[command(subcommand)]
     Gateway(commands::gateway::GatewayCommand),
@@ -284,6 +287,7 @@ async fn main() -> ExitCode {
             }
             Command::Compose(command) => commands::compose::run(&api, &output, command).await,
             Command::Files(command) => commands::files::run(&api, &output, command).await,
+            Command::Backup(command) => commands::backups::run(&api, &output, command).await,
             Command::Gateway(command) => commands::gateway::gateway(&api, &output, command).await,
             Command::Completion { .. } => Ok(()),
         }

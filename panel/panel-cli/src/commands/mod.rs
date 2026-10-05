@@ -4,6 +4,7 @@ pub mod acme;
 pub mod alerts;
 pub mod approvals;
 pub mod audit;
+pub mod backups;
 pub mod certificates;
 pub mod compose;
 pub mod config;

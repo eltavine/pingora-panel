@@ -13,7 +13,9 @@ use axum::{
     routing::{any, get},
     Json, Router,
 };
+use base64::Engine;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::{
     io::Write,
     process::{Output, Stdio},
@@ -88,6 +90,41 @@ async fn api(
             ]
         }))
         .into_response(),
+        ("GET", "/api/v1/backups") => Json(json!({ "backups": [backup("completed")] })).into_response(),
+        ("POST", "/api/v1/backups") => {
+            let mut created = backup("pending");
+            created["contents"] = body["contents"].clone();
+            (
+                StatusCode::ACCEPTED,
+                [("location", "/api/v1/backups/b-1")],
+                Json(created),
+            )
+                .into_response()
+        }
+        ("GET", "/api/v1/backups/b-1") => Json(backup("completed")).into_response(),
+        ("GET", "/api/v1/backups/b-1/archive" | "/api/v1/backups/b-2/archive") => {
+            let vouched: &[u8] = if uri.path().contains("b-1") {
+                ARCHIVE
+            } else {
+                b"another archive"
+            };
+            let digest = base64::engine::general_purpose::STANDARD.encode(Sha256::digest(vouched));
+            (
+                [
+                    ("content-type", "application/zstd".to_owned()),
+                    ("repr-digest", format!("sha-256=:{digest}:")),
+                ],
+                ARCHIVE,
+            )
+                .into_response()
+        }
+        ("POST", "/api/v1/backups/b-1/restores") => Json(if body["target"] == "sites" {
+            json!({ "target": "sites", "site_path": body["site_path"], "files": 2, "bytes": 30 })
+        } else {
+            json!({ "target": "configuration", "draft_version": 7 })
+        })
+        .into_response(),
+        ("DELETE", "/api/v1/backups/b-1") => StatusCode::NO_CONTENT.into_response(),
         ("GET", "/api/v1/site-files/content") => (
             [("content-type", "application/octet-stream"), ("etag", "\"t1\"")],
             "<h1>Shop</h1>",
@@ -1108,6 +1145,17 @@ impl Stub {
     }
 }
 
+const ARCHIVE: &[u8] = b"an archive";
+
+fn backup(state: &str) -> Value {
+    json!({
+        "id": "b-1", "contents": ["configuration", "sites"], "state": state,
+        "requested_by": "ops", "requested_at": "2027-01-15T08:00:00Z",
+        "size_bytes": ARCHIVE.len(), "sha256": "ab".repeat(32), "files": 4,
+        "product_version": "1.2.3",
+    })
+}
+
 fn stdout(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
@@ -1153,6 +1201,93 @@ fn configuration_files_round_trip_through_a_directory() {
         saved[0].body,
         json!({"files": {"main.conf": MAIN, "sites/shop.conf": SHOP}})
     );
+}
+
+#[test]
+fn backups_are_taken_downloaded_checked_restored_and_removed() {
+    let stub = Stub::start();
+    let listed = stub.ppanel(&["backup", "list"]);
+    assert!(listed.status.success(), "{}", stderr(&listed));
+    assert!(
+        stdout(&listed).contains("configuration,sites"),
+        "{}",
+        stdout(&listed)
+    );
+
+    let created = stub.ppanel(&[
+        "backup",
+        "create",
+        "--with",
+        "configuration,sites",
+        "--site",
+        "shop",
+        "--wait",
+    ]);
+    assert!(created.status.success(), "{}", stderr(&created));
+    assert!(
+        stdout(&created).starts_with("Took backup b-1: 4 files"),
+        "{}",
+        stdout(&created)
+    );
+    assert_eq!(
+        stub.requests("POST", "/api/v1/backups")[0].body,
+        json!({ "contents": ["configuration", "sites"], "site_path": "shop" })
+    );
+
+    let directory = tempfile::tempdir().unwrap();
+    let archive = directory.path().join("backup.tar.zst");
+    let downloaded = stub.ppanel(&[
+        "backup",
+        "download",
+        "b-1",
+        "--to",
+        archive.to_str().unwrap(),
+    ]);
+    assert!(downloaded.status.success(), "{}", stderr(&downloaded));
+    assert_eq!(std::fs::read(&archive).unwrap(), ARCHIVE);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&archive).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "an archive is read by its owner only");
+    }
+    let tampered = directory.path().join("tampered.tar.zst");
+    let refused = stub.ppanel(&[
+        "backup",
+        "download",
+        "b-2",
+        "--to",
+        tampered.to_str().unwrap(),
+    ]);
+    assert!(!refused.status.success());
+    assert!(
+        stderr(&refused).contains("not the one the API vouched for"),
+        "{}",
+        stderr(&refused)
+    );
+    assert!(!tampered.exists(), "bytes that do not match are not kept");
+
+    let sites = stub.ppanel(&["backup", "restore", "b-1", "--sites", "shop"]);
+    assert!(sites.status.success(), "{}", stderr(&sites));
+    assert!(stdout(&sites).starts_with("Restored shop from backup b-1: 2 files"));
+    let configuration = stub.ppanel(&[
+        "backup",
+        "restore",
+        "b-1",
+        "--configuration",
+        "--expected-version",
+        "6",
+    ]);
+    assert!(configuration.status.success(), "{}", stderr(&configuration));
+    assert!(stdout(&configuration).contains("as draft 7"));
+    let restores = stub.requests("POST", "/api/v1/backups/b-1/restores");
+    assert_eq!(restores[1].if_match.as_deref(), Some("\"draft-6\""));
+    assert_eq!(restores[1].body, json!({ "target": "configuration" }));
+
+    let unconfirmed = stub.ppanel(&["backup", "rm", "b-1"]);
+    assert_eq!(unconfirmed.status.code(), Some(2));
+    let removed = stub.ppanel(&["backup", "rm", "b-1", "--yes"]);
+    assert!(removed.status.success(), "{}", stderr(&removed));
 }
 
 #[test]
