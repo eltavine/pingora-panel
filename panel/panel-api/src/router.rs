@@ -185,6 +185,10 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
             "/api/v1/config/source",
             get(language::source::<U>).put(language::replace_source::<U>),
         )
+        .route(
+            "/api/v1/config/bundle",
+            get(language::bundle::<U>).put(language::import_bundle::<U>),
+        )
         .route("/api/v1/config/check", post(language::check::<U>))
         .route("/api/v1/config/format", post(language::format::<U>))
         .route("/api/v1/config/schema", get(language::schema::<U>))

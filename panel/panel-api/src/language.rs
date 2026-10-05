@@ -5,13 +5,13 @@ use crate::{
     configuration::{change, insert_draft, json, port, read, DraftResponse, Precondition},
     contract::DiagnosticDetails,
     error::ApiError,
-    request_context::{command_context, MutationHeaders, QueryHeaders},
+    request_context::{command_context, request_scope, MutationHeaders, QueryHeaders},
     ApiState,
 };
 use axum::{
     body::Bytes,
     extract::{rejection::JsonRejection, Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -20,7 +20,9 @@ use panel_config_api::{
     ApplyOutcome, ApplyRequest as Apply, LanguageChange, LanguageQuery, RevisionChange,
     RevisionQuery,
 };
-use panel_config_dsl::{plan::Changes, schema::DirectiveSpec, Explanation, SyntaxTree};
+use panel_config_dsl::{
+    plan::Changes, schema::DirectiveSpec, Explanation, SyntaxTree, LANGUAGE_VERSION,
+};
 use panel_config_model::{Revision, RevisionDetail, RevisionList};
 use panel_errors::PanelError;
 use serde::{Deserialize, Serialize};
@@ -179,6 +181,101 @@ pub(crate) async fn replace_source<U: GatewayUseCases>(
         &headers,
         LanguageChange::ReplaceSource {
             files: json::<ConfigFiles>(&headers, &body)?.files,
+        },
+        Precondition::Optional,
+        StatusCode::OK,
+    )
+    .await
+}
+
+/// What a configuration bundle's `format` says.
+pub(crate) const BUNDLE_FORMAT: &str = "pingora-panel-configuration";
+
+/// The whole configuration as one file, which another installation imports.
+/// Certificates are not in it; TLS profiles name them.
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct ConfigBundle {
+    /// Always `pingora-panel-configuration`.
+    pub format: String,
+    /// The language version the files are written in.
+    pub language_version: u32,
+    pub files: BTreeMap<String, String>,
+}
+
+/// The draft as a configuration bundle, sent as an attachment.
+#[utoipa::path(get, path = "/api/v1/config/bundle", params(QueryHeaders),
+    responses((status = 200, body = ConfigBundle,
+        headers(("ETag" = String), ("Content-Disposition" = String)))), tag = "configuration")]
+pub(crate) async fn bundle<U: GatewayUseCases>(
+    State(state): State<ApiState<U>>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    #[derive(Deserialize)]
+    struct Source {
+        language_version: u32,
+        version: u64,
+        files: BTreeMap<String, String>,
+    }
+    let output = port(&state)?
+        .read(request_scope(&headers)?, LanguageQuery::Source.into())
+        .await?;
+    let source: Source = serde_json::from_slice(&output.content).map_err(|_| {
+        ApiError::new(PanelError::corrupt_state(
+            "the draft's files are unreadable",
+        ))
+    })?;
+    let mut response = Json(ConfigBundle {
+        format: BUNDLE_FORMAT.to_owned(),
+        language_version: source.language_version,
+        files: source.files,
+    })
+    .into_response();
+    let headers = response.headers_mut();
+    if let Some(etag) = output
+        .etag
+        .and_then(|etag| HeaderValue::from_str(&etag).ok())
+    {
+        headers.insert(header::ETAG, etag);
+    }
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::from_str(&format!(
+            "attachment; filename=\"configuration-v{}.json\"",
+            source.version
+        ))
+        .expect("the file name is ASCII"),
+    );
+    insert_draft(headers, &output.draft);
+    Ok(response)
+}
+
+/// Replaces the draft with a configuration bundle's files. Bundles written
+/// in a newer language version than this installation's are refused.
+#[utoipa::path(put, path = "/api/v1/config/bundle", request_body = ConfigBundle,
+    params(MutationHeaders, ("If-Match" = Option<String>, Header, description = "ETag of the draft that was read")),
+    responses((status = 200, body = ConfigSource, headers(("ETag" = String)))), tag = "configuration")]
+pub(crate) async fn import_bundle<U: GatewayUseCases>(
+    State(state): State<ApiState<U>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, ApiError> {
+    let bundle = json::<ConfigBundle>(&headers, &body)?;
+    if bundle.format != BUNDLE_FORMAT {
+        return Err(ApiError::new(PanelError::invalid_argument(format!(
+            "this is not a configuration bundle; its format must be {BUNDLE_FORMAT}"
+        ))));
+    }
+    if bundle.language_version > LANGUAGE_VERSION {
+        return Err(ApiError::new(PanelError::validation_failed(format!(
+            "the bundle is written in language version {}, newer than this installation's {LANGUAGE_VERSION}",
+            bundle.language_version
+        ))));
+    }
+    change(
+        &state,
+        &headers,
+        LanguageChange::ReplaceSource {
+            files: bundle.files,
         },
         Precondition::Optional,
         StatusCode::OK,

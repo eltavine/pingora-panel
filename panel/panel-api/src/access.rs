@@ -341,6 +341,8 @@ pub(crate) static ROUTES: &[(&str, &str, Access)] = &[
     ),
     ("GET", "/api/v1/config/source", Requires(ConfigRead)),
     ("PUT", "/api/v1/config/source", Requires(ConfigWrite)),
+    ("GET", "/api/v1/config/bundle", Requires(ConfigRead)),
+    ("PUT", "/api/v1/config/bundle", Requires(ConfigWrite)),
     ("POST", "/api/v1/config/check", Requires(ConfigRead)),
     ("POST", "/api/v1/config/format", Requires(ConfigRead)),
     ("GET", "/api/v1/config/schema", Requires(ConfigRead)),

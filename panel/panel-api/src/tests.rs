@@ -22,6 +22,7 @@ mod alerts;
 mod certificates;
 mod compose;
 mod conditional;
+mod config_bundle;
 mod containers;
 mod engine_resources;
 mod host;
