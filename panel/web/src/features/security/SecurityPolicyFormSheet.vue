@@ -45,11 +45,11 @@ import {
   plainHeaders,
   useRefreshConfiguration,
 } from '@/lib/configuration'
+import { parseSize } from '@/lib/forms'
 import {
   KEY_KINDS,
   METHODS,
   PERIODS,
-  parseSize,
   policyBody,
   policyForm,
   rateLimitForm,

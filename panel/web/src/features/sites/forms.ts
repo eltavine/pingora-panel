@@ -84,6 +84,7 @@ export interface SiteForm {
   listenerIds: string[]
   tlsProfileId: string
   securityPolicyId: string
+  httpPolicyId: string
   group: string
   tags: string
   note: string
@@ -100,6 +101,7 @@ export interface RouteForm {
   conditions: ConditionForm[]
   action: ActionForm
   securityPolicyId: string
+  httpPolicyId: string
   accessLog: AccessLogForm
 }
 
@@ -227,6 +229,7 @@ export function siteForm(site?: SiteView): SiteForm {
     listenerIds: [...(site?.listener_ids ?? [])],
     tlsProfileId: site?.tls_profile_id ?? '',
     securityPolicyId: site?.security_policy_id ?? '',
+    httpPolicyId: site?.http_policy_id ?? '',
     group: site?.group ?? '',
     tags: (site?.tags ?? []).join(', '),
     note: site?.note ?? '',
@@ -261,6 +264,7 @@ export function siteInput(form: SiteForm, site?: SiteView): SiteInput {
     listener_ids: form.listenerIds,
     tls_profile_id: optionalText(form.tlsProfileId),
     security_policy_id: optionalText(form.securityPolicyId),
+    http_policy_id: optionalText(form.httpPolicyId),
     group: optionalText(form.group),
     tags: splitList(form.tags),
     note: optionalText(form.note),
@@ -277,6 +281,7 @@ export function routeInputOf(route: Route): RouteInput {
     match: route.match,
     action: route.action,
     security_policy_id: route.security_policy_id ?? null,
+    http_policy_id: route.http_policy_id ?? null,
     access_log: route.access_log ?? null,
   }
 }
@@ -292,6 +297,7 @@ export function routeForm(route: Route | undefined, priority: number): RouteForm
     conditions: (route?.match.conditions ?? []).map(conditionForm),
     action: actionForm(route?.action),
     securityPolicyId: route?.security_policy_id ?? '',
+    httpPolicyId: route?.http_policy_id ?? '',
     accessLog: accessLogForm(route?.access_log),
   }
 }
@@ -310,6 +316,7 @@ export function routeInput(form: RouteForm, id?: string): RouteInput {
     },
     action: toAction(form.action),
     security_policy_id: optionalText(form.securityPolicyId),
+    http_policy_id: optionalText(form.httpPolicyId),
     access_log: toAccessLog(form.accessLog),
   }
 }

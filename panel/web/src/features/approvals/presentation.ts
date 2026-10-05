@@ -15,6 +15,7 @@ export const RESOURCE_KINDS = [
   'listeners',
   'tls-profiles',
   'security-policies',
+  'http-policies',
 ] as const
 
 /** Approvals that still count at `now`. */

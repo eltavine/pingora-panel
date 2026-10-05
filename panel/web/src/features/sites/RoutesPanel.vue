@@ -3,6 +3,7 @@ import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import { useMutation, useQuery } from '@tanstack/vue-query'
 import { moveArrayElement, useSortable } from '@vueuse/integrations/useSortable'
 import {
+  ArrowLeftRight,
   ChevronDown,
   ChevronUp,
   Filter,
@@ -291,6 +292,14 @@ function target(route: RouteView): string {
               >
                 <ShieldBan class="size-3.5" aria-hidden="true" />
                 {{ route.security_policy_id }}
+              </span>
+              <span
+                v-if="route.http_policy_id"
+                class="text-muted-foreground inline-flex items-center gap-1 font-mono text-xs"
+                :title="t('httpPolicies.select.label')"
+              >
+                <ArrowLeftRight class="size-3.5" aria-hidden="true" />
+                {{ route.http_policy_id }}
               </span>
             </TableCell>
             <TableCell class="max-w-64">

@@ -7,6 +7,7 @@ import { configStudioFeature } from './config-studio'
 import { containersFeature } from './containers'
 import { gatewayFeature } from './gateway'
 import { hostFeature } from './host'
+import { httpPoliciesFeature } from './http-policies'
 import { identityFeature } from './identity'
 import { listenersFeature } from './listeners'
 import { logsFeature } from './logs'
@@ -37,6 +38,7 @@ export const features: readonly FeatureModule[] = [
   upstreamsFeature,
   listenersFeature,
   securityFeature,
+  httpPoliciesFeature,
   certificatesFeature,
   configStudioFeature,
   siteFilesFeature,

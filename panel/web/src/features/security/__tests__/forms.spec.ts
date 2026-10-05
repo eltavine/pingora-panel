@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { SecurityPolicyView } from '@/api/generated'
-import { parseSize, policyBody, policyForm, printSize, rateLimitForm, restrictions } from '../forms'
+import { parseSize, printSize } from '@/lib/forms'
+import { policyBody, policyForm, rateLimitForm, restrictions } from '../forms'
 
 const policy: SecurityPolicyView = {
   id: 'office',

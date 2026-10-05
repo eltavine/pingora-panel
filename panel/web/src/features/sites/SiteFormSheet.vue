@@ -40,6 +40,7 @@ import {
   plainHeaders,
   useRefreshConfiguration,
 } from '@/lib/configuration'
+import HttpPolicySelect from '@/components/HttpPolicySelect.vue'
 import SecurityPolicySelect from '@/components/SecurityPolicySelect.vue'
 import AccessLogFields from './AccessLogFields.vue'
 import ActionFields from './ActionFields.vue'
@@ -250,6 +251,12 @@ function submit() {
             id="site-security-policy"
             v-model="form.securityPolicyId"
             :hint="t('security.select.siteHint')"
+          />
+
+          <HttpPolicySelect
+            id="site-http-policy"
+            v-model="form.httpPolicyId"
+            :hint="t('httpPolicies.select.siteHint')"
           />
 
           <AccessLogFields v-model="form.accessLog" id-prefix="site-access-log" scope="site" />

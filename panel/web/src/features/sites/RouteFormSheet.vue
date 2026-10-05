@@ -33,6 +33,7 @@ import {
   plainHeaders,
   useRefreshConfiguration,
 } from '@/lib/configuration'
+import HttpPolicySelect from '@/components/HttpPolicySelect.vue'
 import SecurityPolicySelect from '@/components/SecurityPolicySelect.vue'
 import AccessLogFields from './AccessLogFields.vue'
 import ActionFields from './ActionFields.vue'
@@ -183,6 +184,12 @@ function submit() {
             id="route-security-policy"
             v-model="form.securityPolicyId"
             :hint="t('security.select.routeHint')"
+          />
+
+          <HttpPolicySelect
+            id="route-http-policy"
+            v-model="form.httpPolicyId"
+            :hint="t('httpPolicies.select.routeHint')"
           />
 
           <SwitchField id="route-enabled" v-model="form.enabled" :label="t('common.enabled')" />
