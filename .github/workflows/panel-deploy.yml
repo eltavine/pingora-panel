@@ -584,6 +584,55 @@ jobs:
             | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"
           ppanel audit verify
 
+      - name: Back up the installation and restore from the backups
+        run: |
+          ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
+          taken() {
+            ppanel -o json backup create --with "$1" --wait \
+              | python3 -c "import json, sys; b = json.load(sys.stdin); assert b['state'] == 'completed', b; print(b['id'])"
+          }
+          printf '<h1>Kept</h1>\n' | ppanel files put - ci-backup/index.html
+          id=$(taken configuration,certificates,sites)
+          ppanel backup list
+          # The archive arrives intact, its manifest first, holding what was asked.
+          ppanel backup download "$id" --to - > backup.tar.zst
+          zstd --decompress --stdout backup.tar.zst | tar --list --file - > members
+          test "$(head -n 1 members)" = manifest.json
+          for member in databases/config.db databases/automation.db configuration/active.json \
+            configuration/draft.json sites/ci-backup/index.html; do
+            grep -qx "$member" members
+          done
+          # A site's directory comes back as it was, and the configuration as
+          # the draft.
+          printf '<h1>Changed</h1>\n' | ppanel files put - ci-backup/index.html
+          ppanel backup restore "$id" --sites ci-backup
+          test "$(ppanel files cat ci-backup/index.html)" = '<h1>Kept</h1>'
+          ppanel -o json backup restore "$id" --configuration \
+            | python3 -c "import json, sys; assert json.load(sys.stdin)['draft_version'] > 0"
+          for type in backup.archive.requested backup.sites.restored backup.configuration.restored; do
+            for _ in $(seq 1 30); do
+              if ppanel -o json audit list --type "$type" --actor-id ci \
+                | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"; then
+                break
+              fi
+              sleep 1
+            done
+            ppanel -o json audit list --type "$type" --actor-id ci \
+              | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"
+          done
+          ppanel backup rm "$id" --yes
+          ppanel files rm ci-backup --recursive --yes
+          # Every database comes back with the control plane stopped, and the
+          # control plane starts on them with its audit chain whole.
+          databases=$(taken databases)
+          docker compose stop control
+          docker compose run --rm --no-deps control /usr/local/bin/panel-control restore \
+            "/var/lib/pingora-panel/control/backups/$databases.tar.zst"
+          docker compose up --detach --wait control
+          ppanel config draft
+          ppanel audit verify
+          rm backup.tar.zst members
+
       - name: Show service logs
         if: failure()
         run: |
