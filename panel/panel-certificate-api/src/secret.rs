@@ -36,10 +36,10 @@ mod tests {
 
     #[test]
     fn secrets_travel_as_text_and_never_print() {
-        let secret = Secret::new("-----BEGIN PRIVATE KEY-----");
+        let secret = Secret::new("sealed key material");
         assert_eq!(format!("{secret:?}"), "[redacted]");
         let encoded = serde_json::to_string(&secret).unwrap();
-        assert_eq!(encoded, "\"-----BEGIN PRIVATE KEY-----\"");
+        assert_eq!(encoded, "\"sealed key material\"");
         assert_eq!(serde_json::from_str::<Secret>(&encoded).unwrap(), secret);
     }
 }

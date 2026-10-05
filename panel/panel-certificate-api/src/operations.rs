@@ -96,16 +96,16 @@ mod tests {
         let upload = CertificateCommand::Upload {
             id: id("example.com"),
             chain: "-----BEGIN CERTIFICATE-----".into(),
-            key: Secret::new("-----BEGIN PRIVATE KEY-----"),
+            key: Secret::new("sealed key material"),
         };
         assert_eq!(
             (upload.operation(), upload.resource().as_str()),
             ("certificates.upload", "certificates")
         );
-        assert!(!format!("{upload:?}").contains("PRIVATE KEY"));
+        assert!(!format!("{upload:?}").contains("sealed key material"));
         let encoded = serde_json::to_value(&upload).unwrap();
         assert_eq!(encoded["operation"], "certificates.upload");
-        assert_eq!(encoded["parameters"]["key"], "-----BEGIN PRIVATE KEY-----");
+        assert_eq!(encoded["parameters"]["key"], "sealed key material");
         assert_eq!(
             serde_json::from_value::<CertificateCommand>(encoded).unwrap(),
             upload
