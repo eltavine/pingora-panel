@@ -144,6 +144,10 @@
         "panel-ir"
       ]
     },
+    "panel-lua": {
+      "catalog": true,
+      "allowed_workspace_dependencies": []
+    },
     "gateway-proto-codec": {
       "catalog": true,
       "allowed_workspace_dependencies": [
@@ -690,6 +694,7 @@
       "panel-health",
       "panel-ir",
       "panel-jobs",
+      "panel-lua",
       "panel-outbox",
       "panel-platform",
       "panel-schedule"

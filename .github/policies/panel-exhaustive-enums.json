@@ -324,6 +324,24 @@
       "name": "TsigAlgorithm",
       "owner": "pingora-panel-platform",
       "reason": "The TSIG algorithms (RFC 8945) a provider signs updates with. Each maps onto the DNS client's, so a new one must fail to compile where it is not mapped yet."
+    },
+    {
+      "package": "panel-lua",
+      "name": "LogLevel",
+      "owner": "pingora-panel-platform",
+      "reason": "The nine levels are nginx's, which lua-nginx-module's ngx.STDERR to ngx.DEBUG constants mirror; scripts and log filters rely on the full set and it does not grow."
+    },
+    {
+      "package": "panel-lua",
+      "name": "Outcome",
+      "owner": "pingora-panel-platform",
+      "reason": "Every outcome of a handler run changes what the data plane does with the request; a new outcome must fail to compile in each adapter until the adapter acts on it."
+    },
+    {
+      "package": "panel-lua",
+      "name": "Phase",
+      "owner": "pingora-panel-platform",
+      "reason": "Each phase is a point of the data plane where handlers run; a new phase must fail to compile wherever phases are mapped to the engine and to the configuration language."
     }
   ]
 }

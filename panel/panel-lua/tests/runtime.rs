@@ -1,0 +1,643 @@
+#![forbid(unsafe_code)]
+
+//! Handlers run against requests described here, through the same runtime
+//! the gateway uses.
+
+use async_trait::async_trait;
+use bytes::Bytes;
+use http::{HeaderMap, HeaderValue};
+use panel_lua::{
+    Connection, Exchange, FailureKind, Handler, HandlerId, Host, Limits, LogLevel, NoHost, Outcome,
+    Permissions, Phase, Program, ProgramBuilder, Request, Runtime, Scripts, Settings, SharedStore,
+    Source,
+};
+use std::time::{Duration, Instant};
+
+struct Lua {
+    runtime: Runtime,
+    handlers: Vec<HandlerId>,
+}
+
+fn source(text: &str) -> Source {
+    Source::new("main.conf", text, 1)
+}
+
+fn program(build: impl FnOnce(&mut ProgramBuilder) -> Vec<HandlerId>) -> (Program, Vec<HandlerId>) {
+    let mut builder = Program::builder();
+    let handlers = build(&mut builder);
+    (builder.build().expect("scripts compile"), handlers)
+}
+
+fn start(vms: usize, build: impl FnOnce(&mut ProgramBuilder) -> Vec<HandlerId>) -> Lua {
+    let (program, handlers) = program(build);
+    let settings = Settings {
+        vms,
+        memory: 16 << 20,
+    };
+    let (runtime, _) =
+        Runtime::start(&program, &settings, &SharedStore::default()).expect("starts");
+    Lua { runtime, handlers }
+}
+
+fn handlers(texts: &[&str]) -> impl FnOnce(&mut ProgramBuilder) -> Vec<HandlerId> {
+    let texts: Vec<String> = texts.iter().map(|text| (*text).to_owned()).collect();
+    move |builder| {
+        texts
+            .iter()
+            .map(|text| builder.handler(&source(text)))
+            .collect()
+    }
+}
+
+fn request(method: &str, uri: &str, headers: &[(&str, &str)]) -> Exchange {
+    let (path, args) = match uri.split_once('?') {
+        Some((path, args)) => (path, Some(args.to_owned())),
+        None => (uri, None),
+    };
+    let mut map = HeaderMap::new();
+    for (name, value) in headers {
+        map.append(
+            http::HeaderName::from_bytes(name.as_bytes()).unwrap(),
+            HeaderValue::from_str(value).unwrap(),
+        );
+    }
+    Exchange::new(
+        Request {
+            method: method.into(),
+            uri: path.into(),
+            request_uri: uri.into(),
+            args,
+            headers: map,
+            ..Request::default()
+        },
+        Connection {
+            client: Some("192.0.2.7:51000".parse().unwrap()),
+            server: Some("198.51.100.1:443".parse().unwrap()),
+            tls: true,
+            server_name: "shop.example".into(),
+            request_id: "0b1d0c8e9f2a4b6c".into(),
+            ..Connection::default()
+        },
+    )
+}
+
+fn handler(id: HandlerId, phase: Phase) -> Handler {
+    Handler {
+        id,
+        phase,
+        limits: Limits::default(),
+        permissions: Permissions::default(),
+        log_level: LogLevel::Debug,
+    }
+}
+
+async fn run(scripts: &mut Scripts, handler: Handler) -> Outcome {
+    scripts.run(handler, &mut NoHost).await
+}
+
+fn kind(outcome: &Outcome) -> Option<FailureKind> {
+    match outcome {
+        Outcome::Failed(failure) => Some(failure.kind),
+        _ => None,
+    }
+}
+
+#[tokio::test]
+async fn access_handlers_read_and_change_the_request() {
+    let lua = start(
+        1,
+        handlers(&[r#"
+        local h = ngx.req.get_headers()
+        assert(h["x-user"] == "ann" and h.x_user == "ann" and h["X-User"] == "ann")
+        local args = ngx.req.get_uri_args()
+        assert(args.page == "2" and args.flag == true and args.tag[2] == "b")
+        assert(ngx.var.arg_page == "2" and ngx.var.host == "shop.example")
+        assert(ngx.var.remote_addr == "192.0.2.7" and ngx.var.scheme == "https")
+        assert(ngx.req.get_method() == "GET" and ngx.var.request_uri == "/cart?page=2&flag&tag=a&tag=b")
+        ngx.req.set_header("X-Checked", {"yes", "twice"})
+        ngx.req.clear_header("X-User")
+        ngx.req.set_uri_args({ page = 3 })
+        ngx.var.cart_owner = "ann"
+    "#]),
+    );
+    let mut scripts = lua.runtime.scripts(request(
+        "GET",
+        "/cart?page=2&flag&tag=a&tag=b",
+        &[("x-user", "ann"), ("host", "shop.example")],
+    ));
+    let outcome = run(&mut scripts, handler(lua.handlers[0], Phase::Access)).await;
+    assert_eq!(outcome, Outcome::Continue, "{:?}", scripts.exchange().logs);
+    let exchange = scripts.exchange();
+    let changes = exchange.changes();
+    assert!(changes.headers && changes.args && !changes.status);
+    let checked: Vec<_> = exchange
+        .request
+        .headers
+        .get_all("x-checked")
+        .iter()
+        .collect();
+    assert_eq!(checked, ["yes", "twice"]);
+    assert!(exchange.request.headers.get("x-user").is_none());
+    assert_eq!(exchange.request.args.as_deref(), Some("page=3"));
+    assert_eq!(exchange.variables["cart_owner"], "ann");
+}
+
+#[tokio::test]
+async fn handlers_answer_with_exit_say_and_redirect() {
+    let lua = start(
+        1,
+        handlers(&[
+            r#"ngx.header["X-Reason"] = "closed"; ngx.exit(ngx.HTTP_FORBIDDEN); error("not reached")"#,
+            r#"ngx.status = 201; ngx.header.content_type = "text/plain"; ngx.say("made ", 1, " ", true); ngx.print({"a", {"b"}})"#,
+            r#"return ngx.redirect("/login", 303)"#,
+            r#"ngx.exit(ngx.OK)"#,
+        ]),
+    );
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    assert_eq!(
+        run(&mut scripts, handler(lua.handlers[0], Phase::Access)).await,
+        Outcome::Respond
+    );
+    assert_eq!(scripts.exchange().response.status, 403);
+    assert_eq!(scripts.exchange().response.headers["x-reason"], "closed");
+
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    assert_eq!(
+        run(&mut scripts, handler(lua.handlers[1], Phase::Content)).await,
+        Outcome::Respond
+    );
+    {
+        let exchange = scripts.exchange();
+        assert_eq!(exchange.response.status, 201);
+        assert_eq!(exchange.response.body, b"made 1 true\nab");
+        assert_eq!(exchange.response.headers["content-type"], "text/plain");
+    }
+
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    assert_eq!(
+        run(&mut scripts, handler(lua.handlers[2], Phase::Rewrite)).await,
+        Outcome::Respond
+    );
+    assert_eq!(scripts.exchange().response.status, 303);
+    assert_eq!(scripts.exchange().response.headers["location"], "/login");
+
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    assert_eq!(
+        run(&mut scripts, handler(lua.handlers[3], Phase::Access)).await,
+        Outcome::Continue
+    );
+}
+
+#[tokio::test]
+async fn failed_handlers_leave_the_request_as_it_was() {
+    let lua = start(1, handlers(&[
+        "ngx.req.set_header('X-Half', 'done')\nngx.log(ngx.WARN, 'about to fail')\nlocal t = nil\nreturn t.field",
+    ]));
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = run(&mut scripts, handler(lua.handlers[0], Phase::Access)).await;
+    let Outcome::Failed(failure) = outcome else {
+        panic!("{outcome:?}");
+    };
+    assert_eq!(failure.kind, FailureKind::Error);
+    assert!(
+        failure.message.starts_with("main.conf:4:"),
+        "{}",
+        failure.message
+    );
+    let exchange = scripts.exchange();
+    assert!(exchange.request.headers.get("x-half").is_none());
+    assert!(!exchange.changes().any());
+    assert_eq!(exchange.logs.len(), 1);
+    assert!(exchange.logs[0].message.contains("about to fail"));
+    assert!(
+        exchange.logs[0].message.starts_with("main.conf:2: "),
+        "{:?}",
+        exchange.logs
+    );
+}
+
+#[tokio::test]
+async fn work_time_and_memory_limits_end_runs_that_catch_errors() {
+    let lua = start(
+        1,
+        handlers(&[
+            "while true do pcall(function() while true do end end) end",
+            "local t = {} for i = 1, 1e9 do t[i] = string.rep('x', 1024) .. i end",
+            "ngx.say('still serving')",
+        ]),
+    );
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let mut bounded = handler(lua.handlers[0], Phase::Access);
+    bounded.limits = Limits {
+        time: Duration::from_secs(10),
+        work: 100_000,
+    };
+    assert_eq!(
+        kind(&run(&mut scripts, bounded).await),
+        Some(FailureKind::Work)
+    );
+
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    bounded.limits = Limits {
+        time: Duration::from_millis(50),
+        work: u64::MAX / 2,
+    };
+    let started = Instant::now();
+    assert_eq!(
+        kind(&run(&mut scripts, bounded).await),
+        Some(FailureKind::Timeout)
+    );
+    assert!(started.elapsed() < Duration::from_secs(2));
+
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let mut hungry = handler(lua.handlers[1], Phase::Access);
+    hungry.limits.time = Duration::from_secs(10);
+    assert_eq!(
+        kind(&run(&mut scripts, hungry).await),
+        Some(FailureKind::Memory)
+    );
+
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    assert_eq!(
+        run(&mut scripts, handler(lua.handlers[2], Phase::Content)).await,
+        Outcome::Respond
+    );
+    assert_eq!(scripts.exchange().response.body, b"still serving\n");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn busy_scripts_let_other_requests_on_their_thread_go_first() {
+    let lua = start(
+        1,
+        handlers(&[
+            "local deadline = os.clock() + 0.3 while os.clock() < deadline do end",
+            "ngx.say('quick')",
+        ]),
+    );
+    let mut busy = lua.runtime.scripts(request("GET", "/", &[]));
+    let mut quick = lua.runtime.scripts(request("GET", "/", &[]));
+    let mut slow = handler(lua.handlers[0], Phase::Access);
+    slow.limits.time = Duration::from_secs(5);
+    let started = Instant::now();
+    let quick_handler = handler(lua.handlers[1], Phase::Content);
+    let (_, answered) = tokio::join!(run(&mut busy, slow), async {
+        tokio::task::yield_now().await;
+        let outcome = run(&mut quick, quick_handler).await;
+        (outcome, started.elapsed())
+    });
+    assert_eq!(answered.0, Outcome::Respond);
+    assert!(answered.1 < Duration::from_millis(200), "{:?}", answered.1);
+}
+
+#[tokio::test]
+async fn requests_keep_their_globals_and_share_modules_and_ctx() {
+    let (program, ids) = program(|builder| {
+        builder.module(
+            "counter",
+            &Source::new("lua/counter.lua", "local M = { n = 0 } leaked = true function M.next() M.n = M.n + 1 return M.n end return M", 1),
+        );
+        vec![
+            builder.handler(&source("assert(mine == nil) mine = ngx.var.arg_who ngx.ctx.who = mine ngx.ctx.n = require('counter').next()")),
+            builder.handler(&source("assert(leaked == nil) ngx.say(mine, ' ', ngx.ctx.who, ' ', ngx.ctx.n)")),
+        ]
+    });
+    let (runtime, _) = Runtime::start(
+        &program,
+        &Settings {
+            vms: 1,
+            memory: 16 << 20,
+        },
+        &SharedStore::default(),
+    )
+    .unwrap();
+    let mut first = runtime.scripts(request("GET", "/?who=ann", &[]));
+    let mut second = runtime.scripts(request("GET", "/?who=bob", &[]));
+    assert_eq!(
+        run(&mut first, handler(ids[0], Phase::Access)).await,
+        Outcome::Continue
+    );
+    assert_eq!(
+        run(&mut second, handler(ids[0], Phase::Access)).await,
+        Outcome::Continue
+    );
+    assert_eq!(
+        run(&mut second, handler(ids[1], Phase::Content)).await,
+        Outcome::Respond
+    );
+    assert_eq!(second.exchange().response.body, b"bob bob 2\n");
+    assert_eq!(
+        run(&mut first, handler(ids[1], Phase::Content)).await,
+        Outcome::Respond
+    );
+    assert_eq!(first.exchange().response.body, b"ann ann 1\n");
+}
+
+#[tokio::test]
+async fn init_defines_globals_every_request_reads_but_cannot_change() {
+    let (program, ids) = program(|builder| {
+        let init = builder.handler(&source(
+            "greeting = 'hello' settings = { level = 1 } ngx.log(ngx.NOTICE, 'ready')",
+        ));
+        builder.init(init);
+        vec![
+            builder.handler(&source("ngx.say(greeting, ' ', settings.level)")),
+            builder.handler(&source("settings.level = 2")),
+            builder.handler(&source("string.upper = nil")),
+        ]
+    });
+    let (runtime, logs) = Runtime::start(
+        &program,
+        &Settings {
+            vms: 1,
+            memory: 16 << 20,
+        },
+        &SharedStore::default(),
+    )
+    .unwrap();
+    assert!(
+        logs.iter().any(|entry| entry.message.ends_with("ready")),
+        "{logs:?}"
+    );
+    let mut scripts = runtime.scripts(request("GET", "/", &[]));
+    assert_eq!(
+        run(&mut scripts, handler(ids[0], Phase::Content)).await,
+        Outcome::Respond
+    );
+    assert_eq!(scripts.exchange().response.body, b"hello 1\n");
+    for changing in [ids[1], ids[2]] {
+        let mut scripts = runtime.scripts(request("GET", "/", &[]));
+        let outcome = run(&mut scripts, handler(changing, Phase::Access)).await;
+        let Outcome::Failed(failure) = outcome else {
+            panic!("{outcome:?}");
+        };
+        assert!(failure.message.contains("readonly"), "{}", failure.message);
+    }
+}
+
+#[tokio::test]
+async fn the_sandbox_has_no_host_access() {
+    let lua = start(
+        1,
+        handlers(&[r#"
+        assert(io == nil and os.execute == nil and os.exit == nil and os.getenv == nil)
+        assert(getfenv == nil and setfenv == nil and dofile == nil and loadfile == nil)
+        assert(not pcall(require, "ffi") and not pcall(require, "jit") and not pcall(require, "os"))
+        assert(package.loadlib == nil and debug.getregistry == nil)
+        assert(type(os.time()) == "number" and type(os.clock()) == "number")
+        ngx.say("sealed")
+    "#]),
+    );
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = run(&mut scripts, handler(lua.handlers[0], Phase::Content)).await;
+    assert_eq!(outcome, Outcome::Respond, "{outcome:?}");
+}
+
+#[tokio::test]
+async fn phases_and_permissions_refuse_what_they_do_not_allow() {
+    let lua = start(
+        1,
+        handlers(&[
+            "ngx.say('late')",
+            "ngx.req.read_body()",
+            "require('ngx.balancer').set_current_peer('10.0.0.5', 8080)",
+            "ngx.location.capture('/sub')",
+        ]),
+    );
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = run(&mut scripts, handler(lua.handlers[0], Phase::HeaderFilter)).await;
+    let Outcome::Failed(failure) = outcome else {
+        panic!("{outcome:?}");
+    };
+    assert_eq!(failure.kind, FailureKind::Refused);
+    assert!(failure
+        .message
+        .contains("API disabled in the context of header_filter_by_lua*"));
+
+    let mut scripts = lua.runtime.scripts(request("POST", "/", &[]));
+    assert_eq!(
+        kind(&run(&mut scripts, handler(lua.handlers[1], Phase::Access)).await),
+        Some(FailureKind::Refused)
+    );
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    assert_eq!(
+        kind(&run(&mut scripts, handler(lua.handlers[2], Phase::Balancer)).await),
+        Some(FailureKind::Refused)
+    );
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = run(&mut scripts, handler(lua.handlers[3], Phase::Content)).await;
+    let Outcome::Failed(failure) = outcome else {
+        panic!("{outcome:?}");
+    };
+    assert!(
+        failure
+            .message
+            .contains("ngx.location.capture is not available"),
+        "{}",
+        failure.message
+    );
+}
+
+struct Body(&'static str);
+
+#[async_trait]
+impl Host for Body {
+    async fn read_body(&mut self, limit: usize) -> Result<Bytes, String> {
+        tokio::task::yield_now().await;
+        if self.0.len() > limit {
+            return Err("too large".into());
+        }
+        Ok(Bytes::from_static(self.0.as_bytes()))
+    }
+}
+
+#[tokio::test]
+async fn granted_scripts_read_bodies_and_choose_peers() {
+    let lua = start(1, handlers(&[
+        "ngx.req.read_body() local args = ngx.req.get_post_args() ngx.say(args.name, ' ', ngx.req.get_body_data())",
+        "local b = require('ngx.balancer') assert(b.set_current_peer('10.0.0.5', 8080)) b.set_more_tries(2) b.set_timeouts(1, 2, 3)",
+        "ngx.arg[1] = string.upper(ngx.arg[1]) if ngx.arg[2] then ngx.arg[1] = ngx.arg[1] .. '!' end",
+    ]));
+    let mut granted = handler(lua.handlers[0], Phase::Content);
+    granted.permissions.body = true;
+    let mut scripts = lua.runtime.scripts(request("POST", "/", &[]));
+    assert_eq!(
+        scripts.run(granted, &mut Body("name=ann&x=1")).await,
+        Outcome::Respond
+    );
+    assert_eq!(scripts.exchange().response.body, b"ann name=ann&x=1\n");
+
+    let mut balancer = handler(lua.handlers[1], Phase::Balancer);
+    balancer.permissions.upstream = true;
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    assert_eq!(run(&mut scripts, balancer).await, Outcome::Continue);
+    {
+        let exchange = scripts.exchange();
+        let peer = exchange.balancer.peer.as_ref().unwrap();
+        assert_eq!((peer.host.as_str(), peer.port), ("10.0.0.5", 8080));
+        assert_eq!(exchange.balancer.more_tries, Some(2));
+        assert_eq!(
+            exchange.balancer.timeouts.read,
+            Some(Duration::from_secs(3))
+        );
+    }
+
+    let mut filter = handler(lua.handlers[2], Phase::BodyFilter);
+    filter.permissions.body = true;
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    {
+        let mut exchange = scripts.exchange();
+        exchange.chunk.data = Bytes::from_static(b"hello");
+        exchange.chunk.eof = true;
+    }
+    assert_eq!(run(&mut scripts, filter).await, Outcome::Continue);
+    assert_eq!(&scripts.exchange().chunk.data[..], b"HELLO!");
+}
+
+#[tokio::test]
+async fn regular_expressions_json_bits_and_codecs_follow_openresty() {
+    let lua = start(
+        1,
+        handlers(&[r#"
+        local m = ngx.re.match("hello, 1234", "([0-9])(?<rest>[0-9]+)", "jo")
+        assert(m[0] == "1234" and m[1] == "1" and m.rest == "234")
+        local miss = ngx.re.match("hello, world", "(world)|(hello)|(?<named>howdy)")
+        assert(miss[1] == false and miss[2] == "hello" and miss.named == false)
+        local ctx = { pos = 2 }
+        local from, to = ngx.re.find("a1b22c333", "[0-9]+", "jo", ctx)
+        assert(from == 2 and to == 2 and ctx.pos == 3)
+        local s, n = ngx.re.gsub("hello, 1234", "([0-9])[0-9]", "[$0][${1}]$$")
+        assert(s == "hello, [12][1]$[34][3]$" and n == 2, s)
+        local up = ngx.re.gsub("a-b-c", "[a-z]", function(m) return string.upper(m[0]) end)
+        assert(up == "A-B-C")
+        local parts = require("ngx.re").split("a,b,c,d", "(,)")
+        assert(#parts == 7 and parts[2] == ",")
+        local limited = ngx.re.split("a,b,c,d", ",", nil, nil, 3)
+        assert(#limited == 3 and limited[3] == "c,d")
+        local seen = {}
+        for word in ngx.re.gmatch("one two three", "\\w+") do seen[#seen + 1] = word[0] end
+        assert(#seen == 3 and seen[3] == "three")
+        assert(ngx.re.match("ABC", "abc", "i") and not ngx.re.match("xABC", "abc", "ai"))
+
+        local cjson = require "cjson"
+        assert(cjson.encode({}) == "{}" and cjson.encode(cjson.empty_array) == "[]")
+        assert(cjson.encode({1, 2, "a/b"}) == '[1,2,"a\\/b"]')
+        assert(cjson.encode({ok = true, n = 1.5}) == '{"ok":true,"n":1.5}' or cjson.encode({ok = true, n = 1.5}) == '{"n":1.5,"ok":true}')
+        local decoded = cjson.decode('{"a":[1,2,{"b":null}]}')
+        assert(decoded.a[2] == 2 and decoded.a[3].b == cjson.null)
+        assert(not pcall(cjson.decode, "{bad"))
+        local value, err = require("cjson.safe").decode("{bad")
+        assert(value == nil and err)
+
+        local bit = require "bit"
+        assert(bit.band(0xff, 0x0f) == 15 and bit.bxor(1, 3) == 2 and bit.tobit(0xffffffff) == -1)
+        assert(bit.lshift(1, 31) == -2147483648 and bit.rshift(-1, 28) == 15 and bit.tohex(255, 4) == "00ff")
+
+        assert(ngx.escape_uri("a b/c") == "a%20b%2Fc" and ngx.unescape_uri("b%20r56+7") == "b r56 7")
+        assert(ngx.encode_args({b = 2, a = {"x", "y"}, c = true}) == "a=x&a=y&b=2&c")
+        assert(ngx.decode_base64(ngx.encode_base64("hi")) == "hi" and ngx.md5("") == "d41d8cd98f00b204e9800998ecf8427e")
+        assert(require("resty.string").to_hex(require("resty.sha256"):new() and ngx.sha1_bin("abc")) == "a9993e364706816aba3e25717850c26c9cd0d89d")
+        local sha = require("resty.sha256").new() sha:update("abc")
+        assert(require("resty.string").to_hex(sha:final()) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        assert(ngx.quote_sql_str("a'b") == "'a\\'b'" and ngx.crc32_long("hello") == 907060870)
+        assert(ngx.http_time(1290079655) == "Thu, 18 Nov 2010 11:27:35 GMT" and ngx.parse_http_time("Thu, 18 Nov 2010 11:27:35 GMT") == 1290079655)
+        local t = require("table.new")(4, 0) t[1] = 1 require("table.clear")(t) assert(next(t) == nil)
+        assert(require("table.nkeys")({a = 1, b = 2, 3}) == 3)
+        assert(ngx.get_phase() == "content" and ngx.worker.count() == 1)
+        ngx.say("ok")
+    "#]),
+    );
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = run(&mut scripts, handler(lua.handlers[0], Phase::Content)).await;
+    assert_eq!(outcome, Outcome::Respond, "{outcome:?}");
+}
+
+#[tokio::test]
+async fn shared_dictionaries_are_one_for_every_vm() {
+    let (program, ids) = program(|builder| {
+        builder.shared_dict("hits", 1 << 20);
+        vec![builder.handler(&source(
+            "local hits = ngx.shared.hits local n = hits:incr('n', 1, 0) hits:set('last', ngx.var.arg_who, 60) ngx.say(n, ' ', hits:get('last'))",
+        ))]
+    });
+    let store = SharedStore::default();
+    let (runtime, _) = Runtime::start(
+        &program,
+        &Settings {
+            vms: 2,
+            memory: 16 << 20,
+        },
+        &store,
+    )
+    .unwrap();
+    for (who, expected) in [("ann", "1 ann\n"), ("bob", "2 bob\n"), ("cy", "3 cy\n")] {
+        let mut scripts = runtime.scripts(request("GET", &format!("/?who={who}"), &[]));
+        assert_eq!(
+            run(&mut scripts, handler(ids[0], Phase::Content)).await,
+            Outcome::Respond
+        );
+        assert_eq!(scripts.exchange().response.body, expected.as_bytes());
+    }
+    let (restarted, _) = Runtime::start(
+        &program,
+        &Settings {
+            vms: 1,
+            memory: 16 << 20,
+        },
+        &store,
+    )
+    .unwrap();
+    let mut scripts = restarted.scripts(request("GET", "/?who=dee", &[]));
+    assert_eq!(
+        run(&mut scripts, handler(ids[0], Phase::Content)).await,
+        Outcome::Respond
+    );
+    assert_eq!(scripts.exchange().response.body, b"4 dee\n");
+}
+
+#[tokio::test]
+async fn sleeping_waits_without_holding_the_thread() {
+    let lua = start(1, handlers(&["ngx.sleep(0.05) ngx.say('rested')"]));
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let started = Instant::now();
+    assert_eq!(
+        run(&mut scripts, handler(lua.handlers[0], Phase::Content)).await,
+        Outcome::Respond
+    );
+    assert!(started.elapsed() >= Duration::from_millis(50));
+}
+
+#[tokio::test]
+async fn logs_below_the_level_are_dropped() {
+    let lua = start(
+        1,
+        handlers(&[
+            "ngx.log(ngx.INFO, 'chatty') ngx.log(ngx.ERR, 'bad ', nil, ' ', 3) print('noted')",
+        ]),
+    );
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let mut quiet = handler(lua.handlers[0], Phase::Access);
+    quiet.log_level = LogLevel::Notice;
+    assert_eq!(run(&mut scripts, quiet).await, Outcome::Continue);
+    let exchange = scripts.exchange();
+    let messages: Vec<_> = exchange
+        .logs
+        .iter()
+        .map(|entry| (entry.level, entry.message.as_str()))
+        .collect();
+    assert_eq!(
+        messages,
+        [
+            (LogLevel::Err, "main.conf:1: bad nil 3"),
+            (LogLevel::Notice, "main.conf:1: noted"),
+        ]
+    );
+}
+
+#[test]
+fn syntax_errors_point_at_their_line_in_the_file() {
+    let mut builder = Program::builder();
+    builder.handler(&Source::new("main.conf", "local x = 1\nif x then\n", 12));
+    let diagnostics = builder.build().unwrap_err();
+    assert_eq!(diagnostics[0].source, "main.conf");
+    assert_eq!(diagnostics[0].line, Some(14));
+}

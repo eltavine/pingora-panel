@@ -1,0 +1,33 @@
+[package]
+name = "panel-lua"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+base64.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+crc32fast.workspace = true
+getrandom.workspace = true
+hex.workspace = true
+hmac.workspace = true
+http.workspace = true
+httpdate.workspace = true
+lru.workspace = true
+md-5.workspace = true
+mlua.workspace = true
+parking_lot.workspace = true
+pcre2.workspace = true
+serde_json.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
