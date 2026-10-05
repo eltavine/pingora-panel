@@ -18,6 +18,8 @@ pub enum Context {
     Upstream,
     Server,
     Route,
+    /// Inside `any`, `all` and `not`.
+    Conditions,
 }
 
 impl Context {
@@ -31,6 +33,7 @@ impl Context {
             Self::Upstream => "upstream",
             Self::Server => "server",
             Self::Route => "route",
+            Self::Conditions => "any, all or not",
         }
     }
 }
@@ -66,6 +69,7 @@ pub struct DirectiveSpec {
 use Context::*;
 
 const ACTION_CONTEXTS: &[Context] = &[Server, Route];
+const CONDITION_CONTEXTS: &[Context] = &[Route, Conditions];
 
 macro_rules! spec {
     ($name:literal in $contexts:expr, $block:expr, $min:literal..$max:expr, $repeat:literal,
@@ -278,6 +282,33 @@ pub static DIRECTIVES: &[DirectiveSpec] = &[
         "route [<name>] { ... }", "Sends matching requests to their own action."),
     spec!("match" in &[Route], None, 2..Some(3), false,
         "match exact|prefix|glob|regex <path> [host=<host>];", "The requests the route takes."),
+    spec!("method" in CONDITION_CONTEXTS, None, 1..None, true,
+        "method <method> ...;", "Takes requests with one of the methods, compared case-sensitively."),
+    spec!("host" in CONDITION_CONTEXTS, None, 1..None, true,
+        "host <host> ...;", "Takes requests for one of the hosts, or for *.parent wildcards of one label."),
+    spec!("header" in CONDITION_CONTEXTS, None, 2..Some(4), true,
+        "header <name> present|absent|<op> <value> [ignore_case];",
+        "Takes requests whose header, by its case-insensitive name, passes a test: =, ^=, $=, *=, ~ or ~*."),
+    spec!("query" in CONDITION_CONTEXTS, None, 2..Some(4), true,
+        "query <name> present|absent|<op> <value> [ignore_case];",
+        "Takes requests whose query parameter passes a test; a repeated parameter passes when any value does."),
+    spec!("cookie" in CONDITION_CONTEXTS, None, 2..Some(4), true,
+        "cookie <name> present|absent|<op> <value> [ignore_case];",
+        "Takes requests whose cookie passes a test."),
+    spec!("client" in CONDITION_CONTEXTS, None, 1..None, true,
+        "client <address or network> ...;", "Takes requests from clients, after trusted proxies, in one of the networks."),
+    spec!("user_agent" in CONDITION_CONTEXTS, None, 1..Some(3), true,
+        "user_agent present|absent|<op> <value> [ignore_case];", "Takes requests whose User-Agent passes a test."),
+    spec!("referer" in CONDITION_CONTEXTS, None, 1..Some(3), true,
+        "referer present|absent|<op> <value> [ignore_case];", "Takes requests whose Referer passes a test."),
+    spec!("content_type" in CONDITION_CONTEXTS, None, 1..None, true,
+        "content_type <type> ...;", "Takes requests of one of the media types, such as application/json or text/*."),
+    spec!("any" in CONDITION_CONTEXTS, Some(Conditions), 0..Some(0), true,
+        "any { ... }", "Takes requests that meet at least one of the conditions inside."),
+    spec!("all" in CONDITION_CONTEXTS, Some(Conditions), 0..Some(0), true,
+        "all { ... }", "Takes requests that meet every condition inside."),
+    spec!("not" in CONDITION_CONTEXTS, Some(Conditions), 0..Some(0), true,
+        "not { ... }", "Takes requests that do not meet the conditions inside."),
     spec!("priority" in &[Route], None, 1..Some(1), false,
         "priority <n>;", "Lower priorities are evaluated first.",
         inherits "Without it, routes take 10, 20, 30 and so on in the order they are written."),

@@ -435,6 +435,11 @@ fn validate_route(
             );
         }
     }
+    for problem in
+        panel_engine::condition_problems(&crate::compile::conditions(&route.matcher.conditions))
+    {
+        report.error(&resource, format!("the route {problem}"));
+    }
     if let Some(host) = &route.matcher.host {
         if route.matcher.kind != MatchKind::Prefix {
             report.error(&resource, "a host restriction needs a prefix match");
@@ -943,6 +948,7 @@ mod tests {
                 kind: MatchKind::Exact,
                 path: "relative".into(),
                 host: Some(NormalizedHost::new("other.example").unwrap()),
+                conditions: Vec::new(),
             },
             action: Action::Static {
                 root: "../escape".into(),

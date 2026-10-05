@@ -27,6 +27,7 @@ impl<'a> Lowerer<'a> {
                     kind: MatchKind::Prefix,
                     path: "/".into(),
                     host: None,
+                    conditions: Vec::new(),
                 },
                 action: placeholder_action(),
                 security_policy_id: None,
@@ -37,6 +38,7 @@ impl<'a> Lowerer<'a> {
             origin: Self::origin(file, directive, depth),
         };
         let mut matched = false;
+        let mut conditions = Vec::new();
         if location {
             let (modifier, path) = match directive.args.as_slice() {
                 [path] => (None, path),
@@ -63,6 +65,7 @@ impl<'a> Lowerer<'a> {
                 kind,
                 path: format!("{prefix}{}", path.value),
                 host: None,
+                conditions: Vec::new(),
             };
             matched = true;
         } else if let Some(name) = directive.args.first() {
@@ -132,7 +135,12 @@ impl<'a> Lowerer<'a> {
                                     }
                                     None => None,
                                 };
-                                draft.route.matcher = RouteMatch { kind, path, host };
+                                draft.route.matcher = RouteMatch {
+                                    kind,
+                                    path,
+                                    host,
+                                    conditions: Vec::new(),
+                                };
                                 matched = true;
                             }
                             "priority" => {
@@ -152,6 +160,13 @@ impl<'a> Lowerer<'a> {
                             }
                             "security_policy" => {
                                 draft.route.security_policy_id = arg.map(Self::literal)
+                            }
+                            name if super::conditions::CONDITIONS.contains(&name) => {
+                                if let Some(condition) =
+                                    lowerer.condition(file, directive, depth + 1)
+                                {
+                                    conditions.push(condition);
+                                }
                             }
                             "access_log" => {
                                 lowerer.access_log(file, directive, &mut draft.route.access_log)
@@ -179,6 +194,7 @@ impl<'a> Lowerer<'a> {
                 );
             },
         );
+        draft.route.matcher.conditions = conditions;
         if !matched {
             self.error_with_help(
                 file,

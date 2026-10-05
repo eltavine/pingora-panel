@@ -16,7 +16,7 @@ const MOST_PATTERN_BYTES: usize = 1024;
 const MOST_NAME_BYTES: usize = 256;
 
 /// What is wrong with `conditions`, one line each.
-pub(crate) fn problems(conditions: &[RouteCondition]) -> Vec<String> {
+pub fn problems(conditions: &[RouteCondition]) -> Vec<String> {
     let mut found = Vec::new();
     let mut count = 0;
     for condition in conditions {

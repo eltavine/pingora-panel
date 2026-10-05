@@ -318,6 +318,106 @@ pub struct RouteMatch {
     /// Restricts a prefix route to one of the site's hosts.
     #[serde(default)]
     pub host: Option<NormalizedHost>,
+    /// Every one holds for the requests the route takes (ADR 0036).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conditions: Vec<RouteCondition>,
+}
+
+/// A condition on a request, beyond its path.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RouteCondition {
+    /// One of the methods, compared case-sensitively (RFC 9110 §9.1).
+    Method {
+        methods: Vec<String>,
+    },
+    /// One of the hosts, or `*.parent` wildcards of one label.
+    Host {
+        hosts: Vec<NormalizedHost>,
+    },
+    /// A header field by its case-insensitive name, tested as the combined
+    /// value of its field lines.
+    Header {
+        name: String,
+        test: ValueTest,
+    },
+    /// A query parameter, decoded as `application/x-www-form-urlencoded`;
+    /// a repeated parameter holds when any of its values does.
+    Query {
+        name: String,
+        test: ValueTest,
+    },
+    /// A cookie among the pairs of every `Cookie` field.
+    Cookie {
+        name: String,
+        test: ValueTest,
+    },
+    /// The client's address, after trusted proxies, in one of the networks,
+    /// such as `10.0.0.0/8`, or one of the addresses.
+    Client {
+        networks: Vec<String>,
+    },
+    UserAgent {
+        test: ValueTest,
+    },
+    Referer {
+        test: ValueTest,
+    },
+    /// The media type without parameters, ignoring case, against types such
+    /// as `application/json` or ranges such as `text/*`.
+    ContentType {
+        types: Vec<String>,
+    },
+    /// Every one of the conditions.
+    All {
+        #[cfg_attr(feature = "openapi", schema(no_recursion))]
+        conditions: Vec<RouteCondition>,
+    },
+    /// At least one of the conditions.
+    Any {
+        #[cfg_attr(feature = "openapi", schema(no_recursion))]
+        conditions: Vec<RouteCondition>,
+    },
+    /// Not the condition.
+    Not {
+        #[cfg_attr(feature = "openapi", schema(no_recursion))]
+        condition: Box<RouteCondition>,
+    },
+}
+
+/// A test of a field, parameter or cookie.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ValueTest {
+    Present,
+    Absent,
+    Equals {
+        value: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        ignore_case: bool,
+    },
+    Prefix {
+        value: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        ignore_case: bool,
+    },
+    Suffix {
+        value: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        ignore_case: bool,
+    },
+    Contains {
+        value: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        ignore_case: bool,
+    },
+    Regex {
+        pattern: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        ignore_case: bool,
+    },
 }
 
 /// Explicit matcher kinds; there is no implicit precedence between them

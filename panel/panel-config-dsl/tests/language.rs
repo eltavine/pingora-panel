@@ -977,3 +977,131 @@ fn logging_directives_read_and_print() {
         );
     }
 }
+
+const CONDITIONED: &str = r#"language_version 1;
+
+http {
+    upstream app {
+        server 10.0.0.11:8080;
+    }
+
+    server shop {
+        server_name shop.example *.shop.example;
+
+        route canary {
+            match prefix /api/;
+            method GET HEAD;
+            host *.shop.example;
+            header x-env = staging ignore_case;
+            query tag ^= "new arrivals";
+            cookie beta ~ "^on$";
+            client 10.0.0.0/8 2001:db8::1;
+            user_agent ~* bot;
+            referer $= /cart;
+            content_type application/json text/*;
+            any {
+                header x-canary present;
+                cookie canary *= 1;
+            }
+            not {
+                client 192.0.2.0/24;
+                query debug absent;
+            }
+            proxy app;
+        }
+
+        proxy app;
+    }
+}
+"#;
+
+#[test]
+fn route_conditions_read_into_the_model_and_print_back() {
+    use panel_config_model::{RouteCondition, ValueTest};
+
+    let first = read(CONDITIONED);
+    assert!(first.is_valid(), "{:#?}", first.diagnostics);
+    let conditions = &first.model.sites[0].routes[0].matcher.conditions;
+    assert_eq!(conditions.len(), 11);
+    assert_eq!(
+        conditions[0],
+        RouteCondition::Method {
+            methods: vec!["GET".into(), "HEAD".into()]
+        }
+    );
+    assert_eq!(
+        conditions[2],
+        RouteCondition::Header {
+            name: "x-env".into(),
+            test: ValueTest::Equals {
+                value: "staging".into(),
+                ignore_case: true
+            }
+        }
+    );
+    assert_eq!(
+        conditions[3],
+        RouteCondition::Query {
+            name: "tag".into(),
+            test: ValueTest::Prefix {
+                value: "new arrivals".into(),
+                ignore_case: false
+            }
+        }
+    );
+    assert_eq!(
+        conditions[6],
+        RouteCondition::UserAgent {
+            test: ValueTest::Regex {
+                pattern: "bot".into(),
+                ignore_case: true
+            }
+        }
+    );
+    let RouteCondition::Not { condition } = &conditions[10] else {
+        panic!("the last condition negates two");
+    };
+    assert!(
+        matches!(condition.as_ref(), RouteCondition::All { conditions } if conditions.len() == 2)
+    );
+
+    let printed = print(&first.model);
+    let second = read(&printed);
+    assert!(second.is_valid(), "{:#?}\n{printed}", second.diagnostics);
+    assert!(same_configuration(&first.model, &second.model), "{printed}");
+    assert_eq!(print(&second.model), printed);
+    for line in [
+        "            method GET HEAD;\n",
+        "            header x-env = staging ignore_case;\n",
+        "            query tag ^= \"new arrivals\";\n",
+        "            user_agent ~* bot;\n",
+        "            any {\n                header x-canary present;\n",
+        "            not {\n                client 192.0.2.0/24;\n                query debug absent;\n",
+    ] {
+        assert!(printed.contains(line), "{line:?} in\n{printed}");
+    }
+}
+
+#[test]
+fn malformed_conditions_are_reported_where_they_are_written() {
+    let text = "language_version 1;\nhttp {\n    upstream app {\n        server 10.0.0.1:80;\n    }\n    server s {\n        server_name s.example;\n        route {\n            match prefix /;\n            method \"GET POST\";\n            client 10.0.0.0/33;\n            header x-env equals staging;\n            cookie beta ~ \"(\";\n            content_type json;\n            any {\n            }\n            proxy app;\n        }\n        proxy app;\n    }\n}\n";
+    let lowered = read(text);
+    let found = messages(&lowered);
+    let positions: Vec<&str> = found.iter().map(|(_, span, _)| span.as_str()).collect();
+    assert_eq!(
+        positions,
+        [
+            "main.conf:10.20-29",
+            "main.conf:11.20-30",
+            "main.conf:12.26-31",
+            "main.conf:13.27-29",
+            "main.conf:14.26-29",
+            "main.conf:15.13-16.13",
+        ],
+        "{found:#?}"
+    );
+    assert!(
+        found[2].2.contains("expected present, absent"),
+        "{found:#?}"
+    );
+}

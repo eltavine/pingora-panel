@@ -1,6 +1,8 @@
 //! Compiles the editable model into an engine-neutral runtime snapshot.
 
-use crate::model::{Action, ConfigModel, MatchKind, Route, Site, TlsProfile};
+use crate::model::{
+    Action, ConfigModel, MatchKind, Route, RouteCondition, Site, TlsProfile, ValueTest,
+};
 use panel_domain::{
     EndpointAddress, EndpointId, PathPrefix, RevisionId, RouteId, SiteId, UpstreamPoolId,
 };
@@ -14,7 +16,8 @@ use panel_ir::{
     UpstreamPoolSpec, WwwRedirect,
 };
 use panel_ir::{
-    REQUEST_HEAD_TIMEOUT_CAPABILITY, REQUEST_SECURITY_CAPABILITY, TRUSTED_PROXIES_CAPABILITY,
+    REQUEST_HEAD_TIMEOUT_CAPABILITY, REQUEST_SECURITY_CAPABILITY, ROUTE_CONDITIONS_CAPABILITY,
+    TRUSTED_PROXIES_CAPABILITY,
 };
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -316,6 +319,10 @@ impl Compiler {
             action,
         );
         compiled.enabled = route.enabled;
+        compiled.conditions = conditions(&route.matcher.conditions);
+        if !compiled.conditions.is_empty() {
+            self.capabilities.insert(ROUTE_CONDITIONS_CAPABILITY);
+        }
         compiled.name.clone_from(&route.name);
         compiled
             .security_policy_id
@@ -400,6 +407,75 @@ fn endpoint_id(id: Uuid) -> EndpointId {
     EndpointId::new(id.to_string()).expect("UUIDs are valid endpoint ids")
 }
 
+/// A route's conditions as the IR carries them.
+pub(crate) fn conditions(conditions: &[RouteCondition]) -> Vec<panel_ir::RouteCondition> {
+    conditions.iter().map(condition).collect()
+}
+
+fn condition(value: &RouteCondition) -> panel_ir::RouteCondition {
+    use panel_ir::RouteCondition as Ir;
+    match value {
+        RouteCondition::Method { methods } => Ir::Method {
+            methods: methods.clone(),
+        },
+        RouteCondition::Host { hosts } => Ir::Host {
+            hosts: hosts.clone(),
+        },
+        RouteCondition::Header { name, test } => Ir::Header {
+            name: name.clone(),
+            test: value_test(test),
+        },
+        RouteCondition::Query { name, test } => Ir::Query {
+            name: name.clone(),
+            test: value_test(test),
+        },
+        RouteCondition::Cookie { name, test } => Ir::Cookie {
+            name: name.clone(),
+            test: value_test(test),
+        },
+        RouteCondition::Client { networks } => Ir::Client {
+            networks: networks.clone(),
+        },
+        RouteCondition::UserAgent { test } => Ir::UserAgent {
+            test: value_test(test),
+        },
+        RouteCondition::Referer { test } => Ir::Referer {
+            test: value_test(test),
+        },
+        RouteCondition::ContentType { types } => Ir::ContentType {
+            types: types.clone(),
+        },
+        RouteCondition::All { conditions: all } => Ir::All {
+            conditions: conditions(all),
+        },
+        RouteCondition::Any { conditions: any } => Ir::Any {
+            conditions: conditions(any),
+        },
+        RouteCondition::Not { condition: inner } => Ir::Not {
+            condition: Box::new(condition(inner)),
+        },
+    }
+}
+
+fn value_test(test: &ValueTest) -> panel_ir::ValueTest {
+    use panel_ir::ValueTest as Ir;
+    match test.clone() {
+        ValueTest::Present => Ir::Present,
+        ValueTest::Absent => Ir::Absent,
+        ValueTest::Equals { value, ignore_case } => Ir::Equals { value, ignore_case },
+        ValueTest::Prefix { value, ignore_case } => Ir::Prefix { value, ignore_case },
+        ValueTest::Suffix { value, ignore_case } => Ir::Suffix { value, ignore_case },
+        ValueTest::Contains { value, ignore_case } => Ir::Contains { value, ignore_case },
+        ValueTest::Regex {
+            pattern,
+            ignore_case,
+        } => Ir::Regex {
+            pattern,
+            ignore_case,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -457,6 +533,7 @@ mod tests {
                     kind: MatchKind::Prefix,
                     path: "/assets".into(),
                     host: None,
+                    conditions: Vec::new(),
                 },
                 action: Action::Static {
                     root: "shop".into(),
@@ -711,6 +788,48 @@ mod tests {
         assert!(snapshot.sites.is_empty());
         assert!(snapshot.upstream_pools.is_empty());
         assert!(snapshot.listeners[0].default_site_id.is_none());
+    }
+
+    #[test]
+    fn route_conditions_reach_the_snapshot_and_require_their_capability() {
+        let (mut model, _) = model();
+        model.sites[0].routes[0].matcher.conditions = vec![
+            RouteCondition::Method {
+                methods: vec!["GET".into()],
+            },
+            RouteCondition::Not {
+                condition: Box::new(RouteCondition::Client {
+                    networks: vec!["192.0.2.0/24".into()],
+                }),
+            },
+        ];
+        let snapshot = compile(&model, RevisionId::new(3)).unwrap();
+        let route = snapshot
+            .routes
+            .iter()
+            .find(|route| !route.conditions.is_empty())
+            .unwrap();
+        assert_eq!(
+            route.conditions[0],
+            panel_ir::RouteCondition::Method {
+                methods: vec!["GET".into()]
+            }
+        );
+        assert!(snapshot
+            .required_capabilities
+            .iter()
+            .any(|capability| capability.name == ROUTE_CONDITIONS_CAPABILITY));
+
+        model.sites[0].routes[0].matcher.conditions = vec![RouteCondition::Client {
+            networks: vec!["10.0.0.0/33".into()],
+        }];
+        let diagnostics = compile(&model, RevisionId::new(4)).unwrap_err();
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("is not a network")),
+            "{diagnostics:?}"
+        );
     }
 
     #[test]

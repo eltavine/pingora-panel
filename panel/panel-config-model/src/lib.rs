@@ -26,9 +26,12 @@ pub use approvals::{
 pub use compile::compile;
 pub use edit::{checked, NodeInput, RouteInput, SiteBundle, SiteInput, UpstreamInput};
 pub use model::{
-    entity_tag, Action, ConfigModel, Domain, Listener, MatchKind, Route, RouteMatch, Site,
-    SiteKind, TlsProfile, TlsProfileInput, Upstream, UpstreamNode,
+    entity_tag, Action, ConfigModel, Domain, Listener, MatchKind, Route, RouteCondition,
+    RouteMatch, Site, SiteKind, TlsProfile, TlsProfileInput, Upstream, UpstreamNode, ValueTest,
 };
+/// Whether a value is an RFC 9110 token, and why a route regular expression
+/// would not compile, as the gateway judges them.
+pub use panel_engine::{route_regex_error, token};
 pub use query::{
     abnormal_sites, query_sites, serves_https, site_status, summarize, SitePage, SiteQuery,
     SiteSort, SiteStatus, SiteSummary, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE,

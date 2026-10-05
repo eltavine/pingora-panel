@@ -217,6 +217,7 @@ mod tests {
                 kind,
                 path: path.into(),
                 host: host.map(|host| NormalizedHost::new(host).unwrap()),
+                conditions: Vec::new(),
             },
             action: Action::Respond {
                 status: 204,

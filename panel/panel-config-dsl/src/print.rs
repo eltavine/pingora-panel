@@ -8,7 +8,8 @@ use crate::{
     LANGUAGE_VERSION,
 };
 use panel_config_model::{
-    Action, ConfigModel, Listener, Route, SecurityPolicy, Site, TlsProfile, Upstream, UpstreamNode,
+    Action, ConfigModel, Listener, Route, RouteCondition, SecurityPolicy, Site, TlsProfile,
+    Upstream, UpstreamNode, ValueTest,
 };
 use panel_dsl::{Directive, Document, Trivia};
 use panel_ir::{
@@ -411,6 +412,71 @@ fn action(action: &Action, model: &ConfigModel) -> Directive {
     }
 }
 
+/// A route condition as the directive that writes it.
+fn condition(condition: &RouteCondition) -> Directive {
+    let test = |test: &ValueTest| -> Vec<String> {
+        let compared = |operator: &str, value: &str, ignore_case: bool| {
+            let mut args = vec![operator.to_owned(), expanded(value)];
+            if ignore_case {
+                args.push("ignore_case".to_owned());
+            }
+            args
+        };
+        match test {
+            ValueTest::Present => vec!["present".to_owned()],
+            ValueTest::Absent => vec!["absent".to_owned()],
+            ValueTest::Equals { value, ignore_case } => compared("=", value, *ignore_case),
+            ValueTest::Prefix { value, ignore_case } => compared("^=", value, *ignore_case),
+            ValueTest::Suffix { value, ignore_case } => compared("$=", value, *ignore_case),
+            ValueTest::Contains { value, ignore_case } => compared("*=", value, *ignore_case),
+            ValueTest::Regex {
+                pattern,
+                ignore_case,
+            } => vec![
+                if *ignore_case { "~*" } else { "~" }.to_owned(),
+                pattern.clone(),
+            ],
+        }
+    };
+    let named = |name: &str, value: &ValueTest| {
+        std::iter::once(expanded(name))
+            .chain(test(value))
+            .collect::<Vec<_>>()
+    };
+    let group = |name: &str, conditions: &[RouteCondition]| {
+        Directive::with_block(
+            name,
+            Vec::<String>::new(),
+            conditions.iter().map(self::condition).collect(),
+        )
+    };
+    match condition {
+        RouteCondition::Method { methods } => {
+            Directive::simple("method", methods.iter().map(|method| expanded(method)))
+        }
+        RouteCondition::Host { hosts } => {
+            Directive::simple("host", hosts.iter().map(ToString::to_string))
+        }
+        RouteCondition::Header { name, test } => Directive::simple("header", named(name, test)),
+        RouteCondition::Query { name, test } => Directive::simple("query", named(name, test)),
+        RouteCondition::Cookie { name, test } => Directive::simple("cookie", named(name, test)),
+        RouteCondition::Client { networks } => {
+            Directive::simple("client", networks.iter().map(|network| expanded(network)))
+        }
+        RouteCondition::UserAgent { test: value } => Directive::simple("user_agent", test(value)),
+        RouteCondition::Referer { test: value } => Directive::simple("referer", test(value)),
+        RouteCondition::ContentType { types } => {
+            Directive::simple("content_type", types.iter().map(|media| expanded(media)))
+        }
+        RouteCondition::All { conditions } => group("all", conditions),
+        RouteCondition::Any { conditions } => group("any", conditions),
+        RouteCondition::Not { condition: inner } => match inner.as_ref() {
+            RouteCondition::All { conditions } if conditions.len() != 1 => group("not", conditions),
+            other => group("not", std::slice::from_ref(other)),
+        },
+    }
+}
+
 fn route(route: &Route, model: &ConfigModel) -> Directive {
     let mut body = vec![Directive::simple("id", [route.id.to_string()])];
     let matcher = &route.matcher;
@@ -431,6 +497,7 @@ fn route(route: &Route, model: &ConfigModel) -> Directive {
         args.push(format!("host={host}"));
     }
     body.push(Directive::simple("match", args));
+    body.extend(matcher.conditions.iter().map(condition));
     body.push(Directive::simple("priority", [route.priority.to_string()]));
     if !route.enabled {
         body.push(Directive::simple("enabled", ["off"]));

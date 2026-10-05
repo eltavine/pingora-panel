@@ -77486,7 +77486,8 @@
           "listener",
           "upstream",
           "server",
-          "route"
+          "route",
+          "conditions"
         ]
       },
       "CreatedToken": {
@@ -82074,6 +82075,267 @@
         },
         "additionalProperties": false
       },
+      "RouteCondition": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "One of the methods, compared case-sensitively (RFC 9110 §9.1).",
+            "required": [
+              "methods",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "method"
+                ]
+              },
+              "methods": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "One of the hosts, or `*.parent` wildcards of one label.",
+            "required": [
+              "hosts",
+              "kind"
+            ],
+            "properties": {
+              "hosts": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/NormalizedHost"
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "host"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A header field by its case-insensitive name, tested as the combined\nvalue of its field lines.",
+            "required": [
+              "name",
+              "test",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "header"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "test": {
+                "$ref": "#/components/schemas/ValueTest"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A query parameter, decoded as `application/x-www-form-urlencoded`;\na repeated parameter holds when any of its values does.",
+            "required": [
+              "name",
+              "test",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "query"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "test": {
+                "$ref": "#/components/schemas/ValueTest"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A cookie among the pairs of every `Cookie` field.",
+            "required": [
+              "name",
+              "test",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "cookie"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "test": {
+                "$ref": "#/components/schemas/ValueTest"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The client's address, after trusted proxies, in one of the networks,\nsuch as `10.0.0.0/8`, or one of the addresses.",
+            "required": [
+              "networks",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "client"
+                ]
+              },
+              "networks": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "test",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "user_agent"
+                ]
+              },
+              "test": {
+                "$ref": "#/components/schemas/ValueTest"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "test",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "referer"
+                ]
+              },
+              "test": {
+                "$ref": "#/components/schemas/ValueTest"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The media type without parameters, ignoring case, against types such\nas `application/json` or ranges such as `text/*`.",
+            "required": [
+              "types",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "content_type"
+                ]
+              },
+              "types": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Every one of the conditions.",
+            "required": [
+              "conditions",
+              "kind"
+            ],
+            "properties": {
+              "conditions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RouteCondition"
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "all"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "At least one of the conditions.",
+            "required": [
+              "conditions",
+              "kind"
+            ],
+            "properties": {
+              "conditions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RouteCondition"
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "any"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Not the condition.",
+            "required": [
+              "condition",
+              "kind"
+            ],
+            "properties": {
+              "condition": {
+                "$ref": "#/components/schemas/RouteCondition"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "not"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "A condition on a request, beyond its path."
+      },
       "RouteInput": {
         "type": "object",
         "required": [
@@ -82138,6 +82400,13 @@
           "path"
         ],
         "properties": {
+          "conditions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteCondition"
+            },
+            "description": "Every one holds for the requests the route takes (ADR 0036)."
+          },
           "host": {
             "oneOf": [
               {
@@ -84414,6 +84683,144 @@
             "type": "boolean"
           }
         }
+      },
+      "ValueTest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "op"
+            ],
+            "properties": {
+              "op": {
+                "type": "string",
+                "enum": [
+                  "present"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "op"
+            ],
+            "properties": {
+              "op": {
+                "type": "string",
+                "enum": [
+                  "absent"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "value",
+              "op"
+            ],
+            "properties": {
+              "ignore_case": {
+                "type": "boolean"
+              },
+              "op": {
+                "type": "string",
+                "enum": [
+                  "equals"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "value",
+              "op"
+            ],
+            "properties": {
+              "ignore_case": {
+                "type": "boolean"
+              },
+              "op": {
+                "type": "string",
+                "enum": [
+                  "prefix"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "value",
+              "op"
+            ],
+            "properties": {
+              "ignore_case": {
+                "type": "boolean"
+              },
+              "op": {
+                "type": "string",
+                "enum": [
+                  "suffix"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "value",
+              "op"
+            ],
+            "properties": {
+              "ignore_case": {
+                "type": "boolean"
+              },
+              "op": {
+                "type": "string",
+                "enum": [
+                  "contains"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "pattern",
+              "op"
+            ],
+            "properties": {
+              "ignore_case": {
+                "type": "boolean"
+              },
+              "op": {
+                "type": "string",
+                "enum": [
+                  "regex"
+                ]
+              },
+              "pattern": {
+                "type": "string"
+              }
+            }
+          }
+        ],
+        "description": "A test of a field, parameter or cookie."
       },
       "VersionAcceptance": {
         "type": "object",

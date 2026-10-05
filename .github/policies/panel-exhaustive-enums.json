@@ -170,6 +170,18 @@
       "reason": "A pull reports progress and then what it pulled; the audit records a pull when it ends, so a new kind of event must fail to compile wherever pulls are relayed and recorded, rather than ending one unrecorded."
     },
     {
+      "package": "panel-config-model",
+      "name": "RouteCondition",
+      "owner": "pingora-panel-platform",
+      "reason": "Compiling to the IR, validating and printing in the configuration language handle each condition; a new kind must fail to compile there rather than being dropped from a route or its files."
+    },
+    {
+      "package": "panel-config-model",
+      "name": "ValueTest",
+      "owner": "pingora-panel-platform",
+      "reason": "Compiling to the IR and printing in the configuration language handle each test; a new test must fail to compile there rather than being dropped."
+    },
+    {
       "package": "panel-ir",
       "name": "RouteCondition",
       "owner": "pingora-panel-platform",

@@ -10,7 +10,9 @@ pub mod ports;
 mod traffic;
 mod validation;
 
-pub use conditions::{token, MOST_CONDITIONS, MOST_CONDITION_DEPTH};
+pub use conditions::{
+    problems as condition_problems, token, MOST_CONDITIONS, MOST_CONDITION_DEPTH,
+};
 pub use events::*;
 pub use fake::FakeGatewayEngine;
 pub use ports::*;
