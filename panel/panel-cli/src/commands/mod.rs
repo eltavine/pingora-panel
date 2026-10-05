@@ -5,6 +5,7 @@ pub mod alerts;
 pub mod approvals;
 pub mod audit;
 pub mod certificates;
+pub mod compose;
 pub mod config;
 pub mod containers;
 pub mod domains;

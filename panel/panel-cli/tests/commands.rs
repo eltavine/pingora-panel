@@ -284,6 +284,55 @@ async fn api(
             "reclaimed_bytes": 1_024
         }))
         .into_response(),
+        ("GET", "/api/v1/container-engines/docker/compose-projects") => Json(json!({
+            "observed_at": "2027-01-15T08:00:10Z",
+            "projects": [
+                {"name": "pingora-panel", "working_directory": "/opt/pingora-panel",
+                 "config_files": ["/opt/pingora-panel/compose.yaml"],
+                 "services": [{"name": "panel", "containers": 1, "running": 1}],
+                 "containers": 1, "running": 1, "installation": true},
+                {"name": "shop", "working_directory": "/srv/shop",
+                 "config_files": ["/srv/shop/compose.yaml"],
+                 "services": [{"name": "web", "containers": 2, "running": 1},
+                              {"name": "worker", "containers": 1, "running": 0}],
+                 "containers": 3, "running": 1, "installation": false}
+            ]
+        }))
+        .into_response(),
+        ("POST", "/api/v1/container-engines/docker/compose-projects/shop/up") => Json(json!({
+            "project": {"name": "shop", "working_directory": "/srv/shop", "config_files": [],
+                        "services": [{"name": "web", "containers": 2, "running": 2},
+                                     {"name": "worker", "containers": 1, "running": 0}],
+                        "containers": 3, "running": 2, "installation": false},
+            "changed": 1,
+            "failures": [{"name": "shop-worker-1",
+                          "error": {"code": "PRECONDITION_FAILED", "message": "port 8080 is taken"}}]
+        }))
+        .into_response(),
+        ("POST", "/api/v1/container-engines/docker/compose-projects/shop/down") => Json(json!({
+            "project": null, "changed": 3, "failures": []
+        }))
+        .into_response(),
+        ("GET", "/api/v1/container-engines/docker/compose-projects/shop/logs") => Json(json!({
+            "observed_at": "2027-01-15T08:00:10Z",
+            "lines": [
+                {"service": "web", "container": "shop-web-1",
+                 "line": {"time": "2027-01-15T08:00:00Z", "stream": "stdout", "text": "listening"}},
+                {"service": "worker", "container": "shop-worker-1",
+                 "line": {"time": "2027-01-15T08:00:01Z", "stream": "stderr", "text": "crashed"}}
+            ],
+            "truncated": false
+        }))
+        .into_response(),
+        ("GET", "/api/v1/container-engines/docker/compose-projects/shop/files") => Json(json!({
+            "files": [
+                {"path": "/srv/shop/compose.yaml",
+                 "content": "services:\n  web:\n    image: nginx\n", "error": null},
+                {"path": "/srv/shop/compose.override.yaml", "content": null,
+                 "error": {"code": "PERMISSION_DENIED", "message": "it cannot be read"}}
+            ]
+        }))
+        .into_response(),
         ("GET", "/api/v1/container-engines/docker/disk-usage") => Json(json!({
             "observed_at": "2027-01-15T08:00:10Z",
             "images": {"total": 5, "active": 2, "size_bytes": 1_073_741_824,
@@ -2827,5 +2876,62 @@ fn pruning_from_the_command_line_shows_first() {
     assert_eq!(
         stub.requests("GET", "/api/v1/container-engines/docker/prune-preview")[1].query,
         "tagged_images=false&named_volumes=true"
+    );
+}
+
+#[test]
+fn compose_projects_from_the_command_line() {
+    let stub = Stub::start();
+    let list = stub.ppanel(&["compose", "list"]);
+    assert!(list.status.success(), "{}", stderr(&list));
+    let printed = stdout(&list);
+    let panel = printed
+        .lines()
+        .find(|line| line.starts_with("pingora-panel"))
+        .unwrap();
+    assert!(panel.contains(" * "), "{panel}");
+    assert!(printed.contains("web 1/2, worker 0/1"), "{printed}");
+
+    let unconfirmed = stub.ppanel(&["compose", "down", "shop"]);
+    assert_eq!(unconfirmed.status.code(), Some(2));
+    assert!(stub
+        .requests(
+            "POST",
+            "/api/v1/container-engines/docker/compose-projects/shop/down"
+        )
+        .is_empty());
+    let down = stub.ppanel(&["compose", "down", "shop", "--yes"]);
+    assert!(down.status.success(), "{}", stderr(&down));
+    assert_eq!(stdout(&down), "shop is down; 3 containers removed\n");
+    let up = stub.ppanel(&["compose", "up", "shop"]);
+    assert!(!up.status.success());
+    assert!(stdout(&up).contains("web 2/2"), "{}", stdout(&up));
+    assert!(
+        stderr(&up).contains("shop-worker-1: port 8080 is taken"),
+        "{}",
+        stderr(&up)
+    );
+
+    let logs = stub.ppanel(&["compose", "logs", "shop", "-n", "50"]);
+    assert!(logs.status.success(), "{}", stderr(&logs));
+    assert_eq!(stdout(&logs), "shop-web-1    | listening\n");
+    assert!(stderr(&logs).contains("shop-worker-1 | crashed"));
+    assert_eq!(
+        stub.requests(
+            "GET",
+            "/api/v1/container-engines/docker/compose-projects/shop/logs"
+        )[0]
+        .query,
+        "lines=50"
+    );
+
+    let config = stub.ppanel(&["compose", "config", "shop"]);
+    assert!(!config.status.success());
+    assert_eq!(
+        stdout(&config),
+        "# /srv/shop/compose.yaml\nservices:\n  web:\n    image: nginx\n"
+    );
+    assert!(
+        stderr(&config).contains("cannot read /srv/shop/compose.override.yaml: it cannot be read")
     );
 }

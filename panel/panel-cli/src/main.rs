@@ -169,6 +169,10 @@ enum Command {
     /// The volumes of the Docker and Podman engines the host agent reaches.
     #[command(subcommand)]
     Volume(commands::engine_resources::VolumeCommand),
+    /// The Compose projects on the Docker and Podman engines the host agent
+    /// reaches.
+    #[command(subcommand)]
+    Compose(commands::compose::ComposeCommand),
     /// The running gateway.
     #[command(subcommand)]
     Gateway(commands::gateway::GatewayCommand),
@@ -275,6 +279,7 @@ async fn main() -> ExitCode {
             Command::Volume(command) => {
                 commands::engine_resources::volumes(&api, &output, command).await
             }
+            Command::Compose(command) => commands::compose::run(&api, &output, command).await,
             Command::Gateway(command) => commands::gateway::gateway(&api, &output, command).await,
             Command::Completion { .. } => Ok(()),
         }
