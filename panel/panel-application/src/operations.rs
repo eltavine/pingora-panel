@@ -5,7 +5,7 @@ use crate::{
     CommandContext, ComposeAction, ComposeChange, ContainerAction, ContainerChange,
     ContainerEngine, DataPlaneState, FileChecks, GatewayRuntimePort, GatewayServiceAction,
     GatewayServiceStatus, ImagePulled, ImageRemoval, LogDeletion, PruneReport, RequestScope,
-    UpstreamHealth, UpstreamHealthReport,
+    SiteFileChange, SitePath, UpstreamHealth, UpstreamHealthReport,
 };
 use async_trait::async_trait;
 use panel_errors::{PanelError, Result};
@@ -56,6 +56,11 @@ pub enum Operation<'a> {
         image: &'a str,
         force: bool,
         result: std::result::Result<&'a ImageRemoval, &'a PanelError>,
+    },
+    /// A file or directory of the static sites was asked to change.
+    SiteFile {
+        path: &'a SitePath,
+        change: SiteFileChange<'a>,
     },
     /// The host agent was asked to pull an image.
     ImagePull {
@@ -280,6 +285,20 @@ mod tests {
                 Operation::ImageRemoval { image, result, .. } => {
                     ("image-remove".to_owned(), result.map(|_| image.to_owned()))
                 }
+                Operation::SiteFile { path, change } => match change {
+                    SiteFileChange::Written(result) => (
+                        "file-write".to_owned(),
+                        result.map(|written| written.size_bytes.to_string()),
+                    ),
+                    SiteFileChange::DirectoryCreated(result) => (
+                        "directory-create".to_owned(),
+                        result.map(|()| path.to_string()),
+                    ),
+                    SiteFileChange::Removed { result, .. } => (
+                        "file-remove".to_owned(),
+                        result.map(|removal| removal.removed.to_string()),
+                    ),
+                },
                 Operation::ImagePull {
                     reference, result, ..
                 } => (

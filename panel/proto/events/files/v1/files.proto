@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+// The data of events about the static sites' files (ADR 0034). Each message
+// is the data of one event type, named in its comment; events carry it as
+// JSON in the proto3 JSON mapping, with the field names below. A file's
+// content is never recorded.
+package pingora.panel.events.files.v1;
+
+// `files.file.written`
+message FileWritten {
+  // Below the sites' directory, such as `/shop/index.html`.
+  string path = 1;
+  uint64 size_bytes = 2;
+  // The content's SHA-256, in hexadecimal.
+  string sha256 = 3;
+  // Whether the file was new.
+  bool created = 4;
+}
+
+// `files.directory.created`
+message DirectoryCreated {
+  string path = 1;
+}
+
+// `files.entry.removed`
+message EntryRemoved {
+  string path = 1;
+  // `file`, `directory`, `link` or `other`.
+  string kind = 2;
+  bool recursive = 3;
+  // The files and directories removed, the entry itself included.
+  uint64 removed = 4;
+}
+
+// `files.operation.refused`
+message OperationRefused {
+  // `file.write`, `directory.create` or `entry.remove`.
+  string operation = 1;
+  string path = 2;
+  string code = 3;
+  string message = 4;
+}

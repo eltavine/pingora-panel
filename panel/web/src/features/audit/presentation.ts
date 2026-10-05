@@ -65,6 +65,10 @@ export const KNOWN_TYPES = [
   'host.gateway_service.stopped',
   'host.gateway_service.restarted',
   'host.operation.refused',
+  'files.file.written',
+  'files.directory.created',
+  'files.entry.removed',
+  'files.operation.refused',
   'container.engine.enabled',
   'container.engine.disabled',
   'container.started',
@@ -142,6 +146,30 @@ export function summaryOf(event: AuditEvent, t: Translate): string {
     case 'gateway.operation.refused':
     case 'host.operation.refused':
       return [data.operation, data.code, data.message].map(text).filter(Boolean).join(' · ')
+    case 'files.file.written':
+      return [
+        text(data.path),
+        data.created === true && t('audit.summary.created'),
+        typeof data.sha256 === 'string' && data.sha256.slice(0, 12),
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    case 'files.directory.created':
+      return text(data.path)
+    case 'files.entry.removed': {
+      const removed = Number(data.removed ?? 1)
+      return [
+        text(data.path),
+        removed > 1 && t('audit.summary.entries', { count: removed }, removed),
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    }
+    case 'files.operation.refused':
+      return [`${text(data.operation)} ${text(data.path)}`, data.code, data.message]
+        .map(text)
+        .filter(Boolean)
+        .join(' · ')
     case 'config.revision.noted':
       return `#${text(data.revision)}${note}`
     case 'gateway.snapshot.prepared':

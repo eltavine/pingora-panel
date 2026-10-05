@@ -170,6 +170,12 @@
       "reason": "A pull reports progress and then what it pulled; the audit records a pull when it ends, so a new kind of event must fail to compile wherever pulls are relayed and recorded, rather than ending one unrecorded."
     },
     {
+      "package": "panel-application",
+      "name": "SiteFileChange",
+      "owner": "pingora-panel-platform",
+      "reason": "Each change of the sites' files is an audit event of its own; a new kind of change must fail to compile where changes are recorded, rather than going unrecorded."
+    },
+    {
       "package": "panel-config-api",
       "name": "ConfigurationQuery",
       "owner": "pingora-panel-platform",

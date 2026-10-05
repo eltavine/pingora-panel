@@ -60,6 +60,7 @@ mod logs;
 mod operations;
 mod persistence;
 mod runtime;
+mod site_files;
 mod tls_probe;
 mod traffic;
 
@@ -122,6 +123,11 @@ pub use persistence::{
 pub use runtime::{
     DataPlaneListener, DataPlaneState, EndpointHealth, EscapingLink, FileChecks,
     GatewayRuntimePort, PrivateKeyCheck, StaticRootCheck, UpstreamHealth, UpstreamHealthReport,
+};
+pub use site_files::{
+    NoSiteFiles, RecordedSiteFiles, SiteDirectory, SiteEntry, SiteEntryKind, SiteFile,
+    SiteFileChange, SiteFileWritten, SiteFilesPort, SitePath, SiteRemoval, WriteCondition,
+    MOST_FILE_BYTES,
 };
 pub use tls_probe::{TlsProbe, TlsProbeReport, TlsProbeTarget};
 pub use traffic::{

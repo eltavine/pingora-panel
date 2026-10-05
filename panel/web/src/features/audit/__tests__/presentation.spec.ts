@@ -141,6 +141,23 @@ describe('audit presentation', () => {
     ).toBe('docker · nginx:1.27 · audit.summary.upToDate')
     expect(
       summaryOf(
+        event('files.file.written', {
+          path: '/shop/index.html',
+          size_bytes: 512,
+          sha256: 'ab'.repeat(32),
+          created: true,
+        }),
+        t,
+      ),
+    ).toBe(`/shop/index.html · audit.summary.created · ${'ab'.repeat(6)}`)
+    expect(
+      summaryOf(
+        event('files.entry.removed', { path: '/shop/old', kind: 'directory', removed: 3 }),
+        t,
+      ),
+    ).toBe('/shop/old · audit.summary.entries{"count":3}')
+    expect(
+      summaryOf(
         event('container.engine.pruned', {
           engine: 'docker',
           removed: ['container cache', 'image sha256:cc'],

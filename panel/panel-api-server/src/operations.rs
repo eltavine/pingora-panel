@@ -5,11 +5,11 @@ use async_trait::async_trait;
 use panel_api::{AccessAudit, Refusal};
 use panel_application::{
     CommandContext, ComposeAction, ContainerAction, DataPlaneState, GatewayServiceAction,
-    Operation, OperationLog, RequestScope,
+    Operation, OperationLog, RequestScope, SiteFileChange,
 };
 use panel_errors::PanelError;
 use panel_event_contracts::{
-    containers::v1 as containers, gateway::v1 as gateway, host::v1 as host,
+    containers::v1 as containers, files::v1 as files, gateway::v1 as gateway, host::v1 as host,
     identity::v1 as identity,
 };
 use panel_events::EventData;
@@ -25,6 +25,8 @@ const ENGINE: &str = "container_engine";
 const CONTAINER: &str = "container";
 const IMAGE: &str = "container_image";
 const PROJECT: &str = "compose_project";
+/// The aggregate type of events about the static sites' files, by path.
+const SITE_FILE: &str = "site_file";
 
 pub struct OutboxOperations(pub EventLog);
 
@@ -367,6 +369,60 @@ impl OperationLog for OutboxOperations {
                     }
                 }
             }
+            Operation::SiteFile { path, change } => {
+                let (scope, actor) = (context.scope(), context.actor());
+                let target_id = path.to_string();
+                let target = (SITE_FILE, target_id.as_str());
+                let refused = |operation: &str, error: &PanelError| files::OperationRefused {
+                    operation: operation.to_owned(),
+                    path: target_id.clone(),
+                    code: error.code.as_str().to_owned(),
+                    message: error.message.clone(),
+                };
+                match change {
+                    SiteFileChange::Written(Ok(written)) => {
+                        let data = files::FileWritten {
+                            path: target_id.clone(),
+                            size_bytes: written.size_bytes,
+                            sha256: written.sha256.clone(),
+                            created: written.created,
+                        };
+                        self.0.record(target, &scope, actor, &data).await;
+                    }
+                    SiteFileChange::Written(Err(error)) => {
+                        let data = refused("file.write", error);
+                        self.0.record(target, &scope, actor, &data).await;
+                    }
+                    SiteFileChange::DirectoryCreated(Ok(())) => {
+                        let data = files::DirectoryCreated {
+                            path: target_id.clone(),
+                        };
+                        self.0.record(target, &scope, actor, &data).await;
+                    }
+                    SiteFileChange::DirectoryCreated(Err(error)) => {
+                        let data = refused("directory.create", error);
+                        self.0.record(target, &scope, actor, &data).await;
+                    }
+                    SiteFileChange::Removed {
+                        recursive,
+                        result: Ok(removal),
+                    } => {
+                        let data = files::EntryRemoved {
+                            path: target_id.clone(),
+                            kind: removal.kind.as_str().to_owned(),
+                            recursive,
+                            removed: removal.removed,
+                        };
+                        self.0.record(target, &scope, actor, &data).await;
+                    }
+                    SiteFileChange::Removed {
+                        result: Err(error), ..
+                    } => {
+                        let data = refused("entry.remove", error);
+                        self.0.record(target, &scope, actor, &data).await;
+                    }
+                }
+            }
             Operation::ImagePull {
                 engine,
                 reference,
@@ -437,6 +493,7 @@ mod tests {
             CONTAINER,
             IMAGE,
             PROJECT,
+            SITE_FILE,
             "upstream",
             "gateway",
             "site",
