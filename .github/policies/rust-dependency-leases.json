@@ -143,6 +143,16 @@
           "expires_on": "2027-03-01"
         },
         {
+          "crate": "io-lifetimes",
+          "versions": [
+            "2.0.4",
+            "3.0.1"
+          ],
+          "owner": "pingora-panel-platform",
+          "reason": "cap-std 4.0, which confines the sites' files to their directory, is on io-lifetimes 3 while its fs-set-times 0.20 dependency is still on io-lifetimes 2. 2.0.4 via fs-set-times; 3.0.1 via cap-std, cap-primitives and io-extras.",
+          "expires_on": "2027-03-01"
+        },
+        {
           "crate": "openssl-probe",
           "versions": [
             "0.1.6",

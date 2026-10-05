@@ -206,6 +206,13 @@
         "panel-service"
       ]
     },
+    "site-files-local": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-application",
+        "panel-errors"
+      ]
+    },
     "observability-service": {
       "catalog": true,
       "allowed_workspace_dependencies": [
