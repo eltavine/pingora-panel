@@ -159,6 +159,8 @@ Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交
 
 0.5 全量配置包按 ADR 0035 实现：配置包是一个自描述的 JSON 文件，`format` 为 `pingora-panel-configuration`，带配置语言版本与草稿的全部配置语言文件，覆盖站点、上游、监听、TLS 配置与安全策略；证书不在其中，TLS 配置按名称引用。`GET /api/v1/config/bundle`（`config.read`）以附件导出草稿，带草稿的实体标签；`PUT /api/v1/config/bundle`（`config.write`）把配置包作为一次草稿修改导入，照常校验、审计并可携带 `If-Match`，不是配置包的文件与以更新语言版本写成的配置包在改动任何内容前被拒绝。`ppanel config export --bundle FILE|-` 与 `ppanel config import FILE.json|-`（`-` 读取标准输入，可在两套安装之间直接管道传输）以及配置文件页“导入与导出”菜单提供同样的操作；控制台只在草稿没有未保存修改时导入，并在发送前拒绝无法解析的文件。CI 的 Compose 检查导出配置包，按草稿版本经标准输入导入修改后的副本，确认更新语言版本的配置包被拒绝，再导入原包并取回完全相同的配置。
 
+0.5 备份与恢复按 ADR 0035 实现：备份是一个 Zstandard 压缩的 tar 归档，第一个成员 `manifest.json` 列出格式、产品版本、时间、所含内容、每个目录以及每个文件的大小与 SHA-256，只归档文件与目录，读取时整体按清单校验，未列出、缺失、大小或内容不符、路径不安全的成员一律拒绝，损坏的归档不会解出任何内容（`panel-backup`）。自动化模块经 `automation.v1.Backups` 提供备份：请求后立即以“等待中”列出，由持久作业在后台完成，数据库以 SQLite `VACUUM INTO` 取得一致快照（配置备份为配置库，证书备份为保存密钥已封装证书、ACME 账户与 DNS 服务商的自动化库，数据库备份为全部模块库），网站目录或其下一个目录按文件与目录复制，不含链接与正在写入的文件；包含配置库的备份还由 API 经配置模块附带草稿与当前生效修订的配置包，任何模块都不读取其他模块的表。归档以仅属主可读的方式写入控制面数据目录的 `backups` 目录，按 `PINGORA_PANEL_BACKUPS_KEPT`（默认 10）保留已完成的备份，失败原因随备份保存；主密钥、口令 pepper 与引导令牌从不进入归档。`/api/v1/backups` 列出与发起备份（202 并给出 `Location`），归档以 `application/zstd` 下载，`ETag` 与 `Repr-Digest`（RFC 9530）给出其 SHA-256 且不缓存；`/restores` 以“在旁解包、校验后改名就位”的方式原位恢复网站目录（网关只会提供旧文件或新文件），或把归档中的当前生效修订按配置包检查后保存为草稿（另需 `config.write`，可携带 `If-Match`，之后照常审阅与应用）。`backups.read` 列出备份，`backups.manage` 发起、下载、恢复与删除，操作员两者皆有；每次请求、删除与恢复无论成功与否都以 `backup.archive.requested`、`backup.archive.deleted`、`backup.sites.restored`、`backup.configuration.restored` 或 `backup.operation.refused` 写入审计。`ppanel backup list|show|create --with … [--site] [--wait]|download|restore --sites|--configuration|rm --yes`（下载只在字节与 `Repr-Digest` 相符时保留文件）与控制台的“备份”页提供同样的操作。全部数据库在控制面停止时由 `panel-control restore ARCHIVE` 恢复：控制面仍在应答时拒绝，整体校验归档并对每个数据库运行 SQLite 完整性检查，拒绝本版本未运行的模块与更高的 schema，然后把现有文件连同其预写日志保留在旁并装入副本，下次启动时迁移到当前版本。CI 的 Compose 检查创建配置、证书与网站的备份，下载后用 zstd 与 tar 列出并确认清单在首位且内容齐全，原位恢复被修改的网站目录与配置草稿并核对审计，再创建全部数据库的备份，在停止控制面后恢复并以完整的审计链重新启动。
+
 ### 3.2 目标仓库边界
 
 Pingora 上游 crates 继续保留在根 workspace，以便固定版本、审计源码、紧急打补丁和进行兼容测试。产品代码统一进入 `panel/` 边界。只有 `panel/gateway-pingora` 可以在 `Cargo.toml` 中依赖 `pingora-*`；其他产品 crate 只能依赖稳定的 `GatewayEngine` port 与 Engine-neutral IR。
@@ -1256,12 +1258,12 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | BACKUP-002 | 510 | 简单文件编辑器，仅限 DSL/Lua/静态站点目录 | 0.5 | A/C/G/I | Operator | automation-service | 执行“简单文件编辑器，仅限 DSL/Lua/静态站点目录”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | BACKUP-003 | 511 | 文件上传，仅限网站目录 | 0.5 | A/C/G/I | Operator | automation-service | 执行“文件上传，仅限网站目录”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | BACKUP-004 | 512 | 文件下载，仅限网站目录 | 0.5 | A/C/G/I | Viewer | automation-service | 查询“文件下载，仅限网站目录”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
-| BACKUP-005 | 513 | 网站目录压缩备份 | 0.5 | A/C/G/I | Operator | automation-service | 执行“网站目录压缩备份”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| BACKUP-006 | 514 | 网站目录恢复 | 0.5 | A/C/G/I | Operator | automation-service | 执行“网站目录恢复”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| BACKUP-007 | 515 | 配置备份 | 0.5 | A/C/G/I | Operator | automation-service | 执行“配置备份”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| BACKUP-008 | 516 | 配置恢复 | 0.5 | A/C/G/I | Operator | automation-service | 执行“配置恢复”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| BACKUP-009 | 517 | 证书备份 | 0.5 | A/C/G/I | Operator | automation-service | 执行“证书备份”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| BACKUP-010 | 518 | SQLite 数据库备份 | 0.5 | A/C/G/I | Operator | automation-service | 执行“SQLite 数据库备份”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| BACKUP-005 | 513 | 网站目录压缩备份 | 0.5 | A/C/G/I | Operator | automation-service | 执行“网站目录压缩备份”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| BACKUP-006 | 514 | 网站目录恢复 | 0.5 | A/C/G/I | Operator | automation-service | 执行“网站目录恢复”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| BACKUP-007 | 515 | 配置备份 | 0.5 | A/C/G/I | Operator | automation-service | 执行“配置备份”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| BACKUP-008 | 516 | 配置恢复 | 0.5 | A/C/G/I | Operator | automation-service | 执行“配置恢复”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| BACKUP-009 | 517 | 证书备份 | 0.5 | A/C/G/I | Operator | automation-service | 执行“证书备份”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| BACKUP-010 | 518 | SQLite 数据库备份 | 0.5 | A/C/G/I | Operator | automation-service | 执行“SQLite 数据库备份”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | BACKUP-011 | 519 | 全量配置包导出 | 0.5 | A/C/G/I | Operator | config-service | 执行“全量配置包导出”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | BACKUP-012 | 520 | 全量配置包导入 | 0.5 | A/C/G/I | Operator | config-service | 执行“全量配置包导入”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | CLI-001 | 521 | CLI `panel status` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'panel status'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
@@ -1438,7 +1440,7 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | 新增团队/平台需求 | 105 |
 | 总 Feature ID | 685 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
-| 当前 `Implemented` | 436（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-006`；身份：`IAM-001`～`IAM-038`；证书：`TLS-001`～`TLS-033`；安全：`SEC-001`～`SEC-035`；可观测：`OBS-001`～`OBS-044`、`OBS-047`～`OBS-053`；主机：`HOST-001`～`HOST-018`；容器：`CTR-001`～`CTR-038`；文件与备份：`BACKUP-001`～`BACKUP-004`、`BACKUP-011`、`BACKUP-012`） |
+| 当前 `Implemented` | 442（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-006`；身份：`IAM-001`～`IAM-038`；证书：`TLS-001`～`TLS-033`；安全：`SEC-001`～`SEC-035`；可观测：`OBS-001`～`OBS-044`、`OBS-047`～`OBS-053`；主机：`HOST-001`～`HOST-018`；容器：`CTR-001`～`CTR-038`；文件与备份：`BACKUP-001`～`BACKUP-012`） |
 | 1.0 要求 `Verified` | 685 |
 
 分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 47、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。

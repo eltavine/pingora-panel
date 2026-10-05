@@ -766,6 +766,53 @@ to 1 MiB on the entity tag they were read with, so a file changed meanwhile
 is not overwritten, and uploads files picked or dropped on it. The
 configuration's own files stay in the configuration language's editor.
 
+## Backups
+
+A backup is one archive, a Zstandard-compressed tar archive whose first
+member, `manifest.json`, lists every directory and each file with its size
+and SHA-256 ([decision](../docs/adr/0035-backups.md)). It holds any of the
+configuration's database, with the draft and the active revision as
+configuration bundles; the certificates, ACME accounts and DNS providers,
+their keys sealed; every module's database; and the sites' directory or one
+directory below it. Databases are copied with SQLite's `VACUUM INTO`, a
+consistent snapshot taken while the control plane keeps running. The master
+keys, the password pepper and the bootstrap token are never in an archive,
+so restoring sealed values needs the installation's master keys.
+
+`POST /api/v1/backups` lists a backup as pending and takes it in the
+background; archives are kept in the control plane's data directory, owner
+only, and `PINGORA_PANEL_BACKUPS_KEPT` (10 by default) finished backups are
+kept. `GET /api/v1/backups/{id}/archive` downloads one as
+`application/zstd` with its SHA-256 as `ETag` and `Repr-Digest`
+(RFC 9530). `POST /api/v1/backups/{id}/restores` replaces a directory of the
+sites with the archive's copy, unpacked beside it and renamed into place, or
+saves the archive's active revision as the draft to review and apply. Every
+archive is checked whole against its manifest before anything is restored
+from it. `backups.read` lists backups and `backups.manage` does the rest;
+each request, removal and restore is audited, refused or not. The console's
+Backups page does the same.
+
+```sh
+ppanel backup create --with configuration,certificates,sites --wait
+ppanel backup download 6f1c7a52-2b8e-4d6b-9a33-0d3c58f1e2a4
+ppanel backup restore 6f1c7a52-2b8e-4d6b-9a33-0d3c58f1e2a4 --sites shop
+ppanel backup restore 6f1c7a52-2b8e-4d6b-9a33-0d3c58f1e2a4 --configuration
+```
+
+Every database is restored with the control plane stopped, from an archive
+in its data directory or anywhere else: `panel-control restore` refuses to
+run while the control plane answers, checks the archive and each database's
+integrity, refuses databases at a schema newer than the release reaches, and
+keeps the files it replaces beside the new ones. The next start migrates
+them forward.
+
+```sh
+docker compose stop control
+docker compose run --rm --no-deps control /usr/local/bin/panel-control restore \
+  /var/lib/pingora-panel/control/backups/6f1c7a52-2b8e-4d6b-9a33-0d3c58f1e2a4.tar.zst
+docker compose up --detach --wait control
+```
+
 ## Alerts
 
 `observability-service` evaluates alert rules
