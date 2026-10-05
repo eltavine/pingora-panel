@@ -85,3 +85,19 @@ fn published_openapi_matches_the_reviewed_contract() {
         "Review the API change and regenerate with the export_openapi example"
     );
 }
+
+#[test]
+fn every_operation_has_an_id_of_its_own() {
+    let doc = document();
+    let mut seen = std::collections::BTreeMap::new();
+    for (path, operations) in doc["paths"].as_object().unwrap() {
+        for (method, operation) in operations.as_object().unwrap() {
+            let Some(id) = operation["operationId"].as_str() else {
+                continue;
+            };
+            if let Some(other) = seen.insert(id.to_owned(), format!("{method} {path}")) {
+                panic!("{id} names both {other} and {method} {path}");
+            }
+        }
+    }
+}

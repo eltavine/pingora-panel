@@ -29066,6 +29066,381 @@
         }
       }
     },
+    "/api/v1/container-engines/{engine}/containers/{container}/sites": {
+      "parameters": [
+        {
+          "name": "x-request-id",
+          "in": "header",
+          "description": "Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1
+          }
+        },
+        {
+          "name": "traceparent",
+          "in": "header",
+          "description": "W3C Trace Context parent of the caller's trace. Invalid values are ignored.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 55
+          }
+        },
+        {
+          "name": "tracestate",
+          "in": "header",
+          "description": "W3C Trace Context vendor state, propagated with a valid traceparent.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      ],
+      "post": {
+        "tags": [
+          "containers"
+        ],
+        "summary": "Puts a reverse-proxy site in front of a container: an upstream with one\nof its endpoints as its node, named as the site, and the site, added to\nthe draft as one change, both or neither. What the container's labels\ndeclare fills in what the request leaves out. Applying the draft is a\nstep of its own.",
+        "operationId": "create_container_site",
+        "parameters": [
+          {
+            "name": "engine",
+            "in": "path",
+            "description": "docker or podman",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "container",
+            "in": "path",
+            "description": "Its ID, a unique prefix of its ID or its name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-deadline",
+            "in": "header",
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          },
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContainerSiteBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContainerSiteView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/container-engines/{engine}/containers/{container}/stats": {
       "parameters": [
         {
@@ -72196,6 +72571,81 @@
           }
         }
       },
+      "ContainerSiteBody": {
+        "type": "object",
+        "description": "A site to put in front of a container.",
+        "properties": {
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The site's hosts; what its labels declare by default."
+          },
+          "endpoint": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/EndpointBody",
+                "description": "One of the container's endpoints; by default its first for the port\nits labels declare, or for its only TCP port, published first."
+              }
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The site's name, and its upstream's; what the container's labels\ndeclare, or its name, by default.",
+            "maxLength": 128
+          }
+        },
+        "additionalProperties": false
+      },
+      "ContainerSiteView": {
+        "type": "object",
+        "description": "What creating a site for a container added to the draft.",
+        "required": [
+          "site_id",
+          "site",
+          "upstream",
+          "node",
+          "domains",
+          "draft_version"
+        ],
+        "properties": {
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Normalized."
+          },
+          "draft_version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The draft's version with the site; applying it is a step of its own.",
+            "minimum": 0
+          },
+          "node": {
+            "type": "string",
+            "description": "Such as `127.0.0.1:8081`."
+          },
+          "site": {
+            "type": "string"
+          },
+          "site_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "upstream": {
+            "type": "string",
+            "description": "The upstream proxied to, named as the site."
+          }
+        }
+      },
       "ContainerStateName": {
         "type": "string",
         "enum": [
@@ -73191,6 +73641,26 @@
             "minimum": 0
           }
         }
+      },
+      "EndpointBody": {
+        "type": "object",
+        "description": "One of a container's endpoints, as a request names it.",
+        "required": [
+          "host",
+          "port"
+        ],
+        "properties": {
+          "host": {
+            "type": "string",
+            "description": "Such as `127.0.0.1` or `172.18.0.2`."
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "EndpointHealthResponse": {
         "type": "object",

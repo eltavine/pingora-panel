@@ -62,7 +62,7 @@ pub(crate) fn engine(name: String) -> Result<String, ApiError> {
 
 /// A container as a path names it: its ID, a unique prefix of its ID or its
 /// name, by the characters the engines allow in either.
-fn container(reference: String) -> Result<String, ApiError> {
+pub(crate) fn container(reference: String) -> Result<String, ApiError> {
     let valid = !reference.is_empty()
         && reference.len() <= 128
         && reference.starts_with(|c: char| c.is_ascii_alphanumeric())

@@ -305,6 +305,10 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
             get(container_sites::site_links::<U>),
         )
         .route(
+            "/api/v1/container-engines/{engine}/containers/{container}/sites",
+            post(container_sites::create_container_site::<U>),
+        )
+        .route(
             "/api/v1/container-engines/{engine}/compose-projects",
             get(compose::list_projects::<U>),
         )

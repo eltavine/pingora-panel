@@ -770,3 +770,142 @@ async fn the_sites_that_point_at_containers_are_listed() {
     .await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{problem}");
 }
+
+/// A draft that records the sites imported into it.
+#[derive(Default)]
+struct Draft(std::sync::Mutex<Vec<panel_config_model::SiteBundle>>);
+
+#[async_trait]
+impl panel_config_api::ConfigurationPort for Draft {
+    async fn read(
+        &self,
+        _: RequestScope,
+        _: panel_config_api::ConfigurationQuery,
+    ) -> Result<panel_config_api::ConfigurationOutput> {
+        Err(PanelError::unavailable("write only"))
+    }
+
+    async fn change(
+        &self,
+        context: CommandContext,
+        change: panel_config_api::ConfigurationChange,
+    ) -> Result<panel_config_api::ConfigurationOutput> {
+        assert_eq!(context.actor(), "ops");
+        let panel_config_api::ConfigurationCommand::Model(model) = change.command else {
+            return Err(PanelError::unavailable("only the model changes here"));
+        };
+        let panel_config_api::ModelChange::ImportSites { bundle } = *model else {
+            return Err(PanelError::unavailable("only imports here"));
+        };
+        let created: Vec<uuid::Uuid> = bundle.sites.iter().map(|_| uuid::Uuid::nil()).collect();
+        self.0.lock().unwrap().push(bundle);
+        Ok(panel_config_api::ConfigurationOutput {
+            content: serde_json::to_vec(&serde_json::json!({ "created": created })).unwrap(),
+            etag: None,
+            draft: panel_config_api::DraftInfo {
+                version: 7,
+                ..panel_config_api::DraftInfo::default()
+            },
+        })
+    }
+
+    async fn apply(
+        &self,
+        _: CommandContext,
+        _: panel_config_api::ApplyRequest,
+    ) -> Result<panel_config_api::ApplyOutcome> {
+        Err(PanelError::unavailable("not applied here"))
+    }
+}
+
+#[tokio::test]
+async fn a_site_is_put_in_front_of_a_container_as_one_change() {
+    let draft = Arc::new(Draft::default());
+    let app = router(
+        ApiState::new(Arc::new(GatewayService::new(
+            Arc::new(FakeGateway),
+            Arc::new(IdentityCompiler),
+        )))
+        .with_containers(Arc::new(Engines))
+        .with_configuration(draft.clone()),
+    );
+    let create = |body: Value| {
+        let app = app.clone();
+        async move {
+            let request =
+                Request::post("/api/v1/container-engines/docker/containers/shop-web-1/sites")
+                    .header("content-type", "application/json")
+                    .header("x-actor", "ops")
+                    .header("idempotency-key", "site-1")
+                    .header("x-deadline", "2099-01-01T00:00:00Z")
+                    .body(Body::from(body.to_string()))
+                    .unwrap();
+            let response = app.oneshot(request).await.unwrap();
+            let (status, location) = (
+                response.status(),
+                response
+                    .headers()
+                    .get("location")
+                    .map(|value| value.to_str().unwrap().to_owned()),
+            );
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            (
+                status,
+                location,
+                serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null),
+            )
+        }
+    };
+    let (status, location, created) = create(serde_json::json!({})).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(
+        location.as_deref(),
+        Some("/api/v1/sites/00000000-0000-0000-0000-000000000000")
+    );
+    assert_eq!(created["site"], "shop-web-1");
+    assert_eq!(
+        created["node"], "127.0.0.1:8081",
+        "the declared port, published"
+    );
+    assert_eq!(created["domains"], serde_json::json!(["shop.example"]));
+    assert_eq!(created["draft_version"], 7);
+    {
+        let imported = draft.0.lock().unwrap();
+        let bundle = &imported[0];
+        let (site, upstream) = (&bundle.sites[0], &bundle.upstreams[0]);
+        assert_eq!(
+            site.action,
+            panel_config_model::Action::Proxy {
+                upstream_id: upstream.id
+            }
+        );
+        assert_eq!(site.domains[0].host.as_str(), "shop.example");
+        assert_eq!(upstream.name, "shop-web-1");
+        assert_eq!(
+            (upstream.nodes[0].host.as_str(), upstream.nodes[0].port),
+            ("127.0.0.1", 8081)
+        );
+    }
+
+    let (status, _, created) = create(serde_json::json!({
+        "name": "shop",
+        "domains": ["Shop.Example", "www.shop.example"],
+        "endpoint": {"host": "172.18.0.2", "port": 80}
+    }))
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["node"], "172.18.0.2:80");
+    assert_eq!(created["domains"][1], "www.shop.example");
+
+    for body in [
+        serde_json::json!({"endpoint": {"host": "10.0.0.9", "port": 80}}),
+        serde_json::json!({"domains": ["bad host"]}),
+        serde_json::json!({"upstream": "elsewhere"}),
+    ] {
+        let (status, _, problem) = create(body.clone()).await;
+        assert!(status.is_client_error(), "{body} {status} {problem}");
+    }
+    assert_eq!(draft.0.lock().unwrap().len(), 2, "refusals change nothing");
+}

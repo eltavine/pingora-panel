@@ -3,15 +3,15 @@
 
 use crate::{
     access::site_scope,
-    configuration::port,
-    containers::{engine, EndpointRouteName},
+    configuration::port as port_of,
+    containers::{container, engine, EndpointRouteName},
     error::ApiError,
-    request_context::{request_scope, QueryHeaders},
+    request_context::{command_context, request_scope, MutationHeaders, QueryHeaders},
     ApiState,
 };
 use axum::{
     extract::{Path, State},
-    http::HeaderMap,
+    http::{header, HeaderMap, StatusCode},
     Extension, Json,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -19,11 +19,12 @@ use panel_application::{
     declared_site, endpoints, same_host, ContainerFilter, ContainerSummary, EndpointRoute,
     RequestScope,
 };
-use panel_config_api::ModelQuery;
-use panel_config_model::{Action, SiteBundle};
+use panel_config_api::{ConfigurationChange, ModelChange, ModelQuery};
+use panel_config_model::{Action, SiteBundle, MODEL_VERSION};
+use panel_domain::NormalizedHost;
 use panel_errors::PanelError;
 use panel_identity::{Access as HeldAccess, Permission};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -203,7 +204,7 @@ pub(crate) async fn site_links<U>(
         .containers
         .containers(scope, engine(id)?, ContainerFilter::default())
         .await?;
-    let output = port(&state)?
+    let output = port_of(&state)?
         .read(
             configuration,
             ModelQuery::ExportSites { ids: Vec::new() }.into(),
@@ -222,6 +223,251 @@ pub(crate) async fn site_links<U>(
         links,
         unserved,
     }))
+}
+
+/// One of a container's endpoints, as a request names it.
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EndpointBody {
+    /// Such as `127.0.0.1` or `172.18.0.2`.
+    pub host: String,
+    pub port: u16,
+}
+
+/// A site to put in front of a container.
+#[derive(Default, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ContainerSiteBody {
+    /// The site's name, and its upstream's; what the container's labels
+    /// declare, or its name, by default.
+    #[schema(max_length = 128)]
+    pub name: Option<String>,
+    /// The site's hosts; what its labels declare by default.
+    #[serde(default)]
+    pub domains: Vec<String>,
+    /// One of the container's endpoints; by default its first for the port
+    /// its labels declare, or for its only TCP port, published first.
+    pub endpoint: Option<EndpointBody>,
+}
+
+/// What creating a site for a container added to the draft.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct ContainerSiteView {
+    pub site_id: Uuid,
+    pub site: String,
+    /// The upstream proxied to, named as the site.
+    pub upstream: String,
+    /// Such as `127.0.0.1:8081`.
+    pub node: String,
+    /// Normalized.
+    pub domains: Vec<String>,
+    /// The draft's version with the site; applying it is a step of its own.
+    pub draft_version: u64,
+}
+
+fn refused(message: impl Into<String>) -> ApiError {
+    ApiError::new(PanelError::invalid_argument(message))
+}
+
+/// The container `reference` names among `listed`: its name, its ID, or a
+/// prefix of one ID only.
+fn named(listed: Vec<ContainerSummary>, reference: &str) -> Result<ContainerSummary, ApiError> {
+    let exact = |container: &ContainerSummary| {
+        container.id == reference || container.names.iter().any(|name| name == reference)
+    };
+    if let Some(found) = listed.iter().find(|container| exact(container)) {
+        return Ok(found.clone());
+    }
+    let mut prefixed = listed
+        .into_iter()
+        .filter(|container| container.id.starts_with(reference));
+    match (prefixed.next(), prefixed.next()) {
+        (Some(found), None) => Ok(found),
+        (Some(_), Some(_)) => Err(refused(format!(
+            "`{reference}` is the start of more than one container's ID"
+        ))),
+        (None, _) => Err(ApiError::new(PanelError::not_found(format!(
+            "no container is named {reference}"
+        )))),
+    }
+}
+
+/// The endpoint a new site proxies to: the one asked for, which must be
+/// one of the container's, or the first for its declared or only port.
+fn chosen(
+    container: &ContainerSummary,
+    asked: Option<EndpointBody>,
+    declared: Option<u16>,
+) -> Result<(String, u16), ApiError> {
+    let reachable = endpoints(container);
+    if reachable.is_empty() {
+        return Err(ApiError::new(PanelError::precondition_failed(
+            "the container is not running, or the engine reports no TCP port the gateway can reach",
+        )));
+    }
+    if let Some(asked) = asked {
+        let host = asked.host.trim().to_owned();
+        return reachable
+            .iter()
+            .any(|endpoint| endpoint.port == asked.port && same_host(&host, endpoint.address))
+            .then_some((host, asked.port))
+            .ok_or_else(|| refused("that is not one of the container's endpoints"));
+    }
+    let ports: BTreeSet<u16> = reachable
+        .iter()
+        .map(|endpoint| endpoint.container_port)
+        .collect();
+    let port = match (declared, ports.len()) {
+        (Some(port), _) => port,
+        (None, 1) => *ports.first().unwrap_or(&0),
+        (None, _) => {
+            return Err(refused(
+                "the container has several ports; name the endpoint to proxy to",
+            ))
+        }
+    };
+    let endpoint = reachable
+        .into_iter()
+        .find(|endpoint| endpoint.container_port == port)
+        .ok_or_else(|| {
+            refused(format!(
+                "the gateway cannot reach the container's port {port}"
+            ))
+        })?;
+    Ok((endpoint.address.to_string(), endpoint.port))
+}
+
+/// Puts a reverse-proxy site in front of a container: an upstream with one
+/// of its endpoints as its node, named as the site, and the site, added to
+/// the draft as one change, both or neither. What the container's labels
+/// declare fills in what the request leaves out. Applying the draft is a
+/// step of its own.
+#[utoipa::path(post, path = "/api/v1/container-engines/{engine}/containers/{container}/sites",
+    params(
+        ("engine" = String, Path, description = "docker or podman"),
+        ("container" = String, Path, description = "Its ID, a unique prefix of its ID or its name"),
+        MutationHeaders,
+    ),
+    request_body = ContainerSiteBody,
+    responses((status = 201, body = ContainerSiteView)), tag = "containers")]
+pub(crate) async fn create_container_site<U>(
+    State(state): State<ApiState<U>>,
+    Path((id, reference)): Path<(String, String)>,
+    held: Option<Extension<HeldAccess>>,
+    headers: HeaderMap,
+    Json(body): Json<ContainerSiteBody>,
+) -> Result<
+    (
+        StatusCode,
+        [(header::HeaderName, String); 1],
+        Json<ContainerSiteView>,
+    ),
+    ApiError,
+> {
+    if held
+        .as_ref()
+        .is_some_and(|Extension(held)| !held.holds(Permission::ContainersRead))
+    {
+        return Err(ApiError::new(PanelError::permission_denied(
+            "a site for a container needs the containers.read permission to read it",
+        )));
+    }
+    let context = command_context(&headers)?;
+    let reference = container(reference)?;
+    let listed = state
+        .containers
+        .containers(
+            request_scope(&headers)?,
+            engine(id)?,
+            ContainerFilter::default(),
+        )
+        .await?;
+    let found = named(listed.containers, &reference)?;
+    let declared = declared_site(&found.labels).unwrap_or_default();
+    let domains: Vec<NormalizedHost> = if body.domains.is_empty() {
+        declared.domains
+    } else {
+        body.domains
+            .iter()
+            .map(|host| {
+                NormalizedHost::new(host.trim())
+                    .map_err(|error| refused(format!("`{host}` is not a host: {error}")))
+            })
+            .collect::<Result<_, _>>()?
+    };
+    if domains.is_empty() {
+        return Err(refused(
+            "name at least one host; the container's labels declare none",
+        ));
+    }
+    let name = body
+        .name
+        .map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty())
+        .or(declared.name)
+        .unwrap_or_else(|| self::name(&found));
+    let (host, port) = chosen(&found, body.endpoint, declared.port)?;
+    let (site_id, upstream_id) = (Uuid::now_v7(), Uuid::now_v7());
+    let now = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+    let bundle: SiteBundle = serde_json::from_value(serde_json::json!({
+        "format": MODEL_VERSION,
+        "sites": [{
+            "id": site_id,
+            "name": name,
+            "action": {"type": "proxy", "upstream_id": upstream_id},
+            "domains": domains.iter().map(|host| serde_json::json!({"host": host.as_str()})).collect::<Vec<_>>(),
+            "note": format!("In front of the container {} on {}", self::name(&found), host),
+            "created_at": now,
+            "updated_at": now,
+        }],
+        "upstreams": [{
+            "id": upstream_id,
+            "name": name,
+            "nodes": [{"id": Uuid::now_v7(), "host": host, "port": port}],
+            "created_at": now,
+            "updated_at": now,
+        }],
+    }))
+    .map_err(|error| ApiError::new(PanelError::internal(format!("a site bundle: {error}"))))?;
+    let output = port_of(&state)?
+        .change(
+            context,
+            ConfigurationChange {
+                command: ModelChange::ImportSites { bundle }.into(),
+                if_match: None,
+            },
+        )
+        .await?;
+    #[derive(Deserialize)]
+    struct Created {
+        created: Vec<Uuid>,
+    }
+    let created: Created = serde_json::from_slice(&output.content).map_err(|error| {
+        ApiError::new(PanelError::internal(format!(
+            "the configuration answered an import it cannot read: {error}"
+        )))
+    })?;
+    let site_id = created.created.first().copied().unwrap_or(site_id);
+    let node = if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    };
+    Ok((
+        StatusCode::CREATED,
+        [(header::LOCATION, format!("/api/v1/sites/{site_id}"))],
+        Json(ContainerSiteView {
+            site_id,
+            site: name.clone(),
+            upstream: name,
+            node,
+            domains: domains
+                .iter()
+                .map(|host| host.as_str().to_owned())
+                .collect(),
+            draft_version: output.draft.version,
+        }),
+    ))
 }
 
 #[cfg(test)]
@@ -373,5 +619,66 @@ pub(crate) mod tests {
         assert!(!site_scope.everywhere("config.read"));
         assert!(site_scope.covers("config.read", "any-site", Some("shop")));
         assert!(!site_scope.covers("config.read", "any-site", Some("blog")));
+    }
+
+    #[test]
+    fn containers_are_named_by_name_id_or_one_ids_prefix() {
+        let other = ContainerSummary {
+            id: "b3".into(),
+            names: vec!["shop-web-2".into()],
+            ..shop_web()
+        };
+        let listed = || vec![shop_web(), other.clone()];
+        assert_eq!(named(listed(), "shop-web-1").ok().unwrap().id, "b2");
+        assert_eq!(named(listed(), "b3").ok().unwrap().id, "b3");
+        assert!(named(listed(), "b").is_err(), "the start of two IDs");
+        assert!(named(listed(), "c").is_err());
+    }
+
+    #[test]
+    fn sites_proxy_to_an_endpoint_of_the_container() {
+        let web = shop_web();
+        let endpoint = |host: &str, port| {
+            Some(EndpointBody {
+                host: host.into(),
+                port,
+            })
+        };
+        assert_eq!(
+            chosen(&web, None, None).ok().unwrap(),
+            ("127.0.0.1".to_owned(), 8081),
+            "its only port, published first"
+        );
+        assert_eq!(
+            chosen(&web, endpoint("localhost", 8081), None)
+                .ok()
+                .unwrap(),
+            ("localhost".to_owned(), 8081)
+        );
+        assert_eq!(
+            chosen(&web, endpoint("172.18.0.2", 80), None).ok().unwrap(),
+            ("172.18.0.2".to_owned(), 80)
+        );
+        assert!(chosen(&web, endpoint("10.0.0.9", 80), None).is_err());
+        assert!(
+            chosen(&web, None, Some(443)).is_err(),
+            "a port it does not have"
+        );
+
+        let mut several = shop_web();
+        several.ports.push(PortMapping {
+            private_port: 9000,
+            public_port: None,
+            host_ip: String::new(),
+            protocol: "tcp".into(),
+        });
+        assert!(chosen(&several, None, None).is_err());
+        assert_eq!(
+            chosen(&several, None, Some(9000)).ok().unwrap(),
+            ("172.18.0.2".to_owned(), 9000)
+        );
+        let mut stopped = shop_web();
+        stopped.state = ContainerState::Exited;
+        assert!(chosen(&stopped, None, None).is_err());
     }
 }
