@@ -32,6 +32,7 @@ mod images;
 mod logs;
 mod platform;
 mod request_identity;
+mod route_test;
 mod runtime;
 mod site_files;
 mod tls_checks;

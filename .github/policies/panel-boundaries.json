@@ -259,6 +259,7 @@
         "panel-errors",
         "panel-health",
         "panel-identity",
+        "panel-routing",
         "panel-ir",
         "panel-platform",
         "panel-schedule"

@@ -3,8 +3,8 @@ use crate::{
     admission::{admit, Admission},
     alerts, approvals, audit, backups, certificates, compose, configuration as config,
     container_sites, containers, engine_resources, gateway_runtime as runtime, grants, host,
-    host_agent, identity, images, language, logs, middleware, routes, sign_in, site_files,
-    tls_checks, traffic, workload, ApiConfig, ApiState,
+    host_agent, identity, images, language, logs, middleware, route_test, routes, sign_in,
+    site_files, tls_checks, traffic, workload, ApiConfig, ApiState,
 };
 use axum::{
     extract::DefaultBodyLimit,
@@ -206,6 +206,10 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
             get(language::bundle::<U>).put(language::import_bundle::<U>),
         )
         .route("/api/v1/config/check", post(language::check::<U>))
+        .route(
+            "/api/v1/config/route-test",
+            post(route_test::test_route::<U>),
+        )
         .route("/api/v1/config/format", post(language::format::<U>))
         .route("/api/v1/config/schema", get(language::schema::<U>))
         .route("/api/v1/config/ast", post(language::ast::<U>))

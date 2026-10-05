@@ -34,7 +34,7 @@ mod tests;
         crate::configuration::delete_security_policy, crate::configuration::draft, crate::configuration::validation,
         crate::configuration::apply,
         crate::language::source, crate::language::replace_source, crate::language::bundle,
-        crate::language::import_bundle, crate::language::check,
+        crate::language::import_bundle, crate::language::check, crate::route_test::test_route,
         crate::backups::list_backups, crate::backups::create_backup, crate::backups::get_backup,
         crate::backups::delete_backup, crate::backups::download_backup,
         crate::backups::restore_backup,

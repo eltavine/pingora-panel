@@ -35,6 +35,7 @@ mod logs;
 mod middleware;
 mod openapi;
 mod request_context;
+mod route_test;
 mod router;
 mod routes;
 mod sign_in;

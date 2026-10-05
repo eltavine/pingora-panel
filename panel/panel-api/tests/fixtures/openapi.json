@@ -26957,6 +26957,337 @@
         }
       }
     },
+    "/api/v1/config/route-test": {
+      "parameters": [
+        {
+          "name": "x-request-id",
+          "in": "header",
+          "description": "Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1
+          }
+        },
+        {
+          "name": "traceparent",
+          "in": "header",
+          "description": "W3C Trace Context parent of the caller's trace. Invalid values are ignored.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 55
+          }
+        },
+        {
+          "name": "tracestate",
+          "in": "header",
+          "description": "W3C Trace Context vendor state, propagated with a valid traceparent.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      ],
+      "post": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "Which site and route of the draft would take a request: the routes\ntried in order, each with the first part that did not hold, until one\ntakes it. The draft is compiled as an apply would, and judged by the\nmatcher the gateway serves requests with.",
+        "operationId": "test_route",
+        "parameters": [
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouteTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteTestResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/config/schema": {
       "parameters": [
         {
@@ -79200,6 +79531,23 @@
         },
         "additionalProperties": false
       },
+      "HeaderLine": {
+        "type": "object",
+        "description": "A header field line of a simulated request.",
+        "required": [
+          "name",
+          "value"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "HealthCheckProtocol": {
         "type": "string",
         "x-extensible-enum": [
@@ -82445,6 +82793,117 @@
           }
         }
       },
+      "RouteTestOutcome": {
+        "type": "string",
+        "description": "What became of a simulated request.",
+        "enum": [
+          "routed",
+          "no_site",
+          "no_route"
+        ]
+      },
+      "RouteTestRequest": {
+        "type": "object",
+        "description": "A request to try against the draft's routes.",
+        "required": [
+          "host"
+        ],
+        "properties": {
+          "client": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The client's address, after trusted proxies."
+          },
+          "headers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HeaderLine"
+            },
+            "description": "Header field lines in order; a repeated name is a line of its own."
+          },
+          "host": {
+            "type": "string",
+            "description": "The host the request names, with or without its port."
+          },
+          "listener": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The listener the request arrives on, which may serve only some sites\nand name a default one."
+          },
+          "method": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Such as `GET`; `GET` when absent."
+          },
+          "target": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The request target, such as `/api/items?tag=new`; `/` when absent."
+          }
+        },
+        "additionalProperties": false
+      },
+      "RouteTestResult": {
+        "type": "object",
+        "description": "Which site and route of the draft would take a request, and why.",
+        "required": [
+          "outcome",
+          "draft_version",
+          "host",
+          "path",
+          "default_site",
+          "routes"
+        ],
+        "properties": {
+          "default_site": {
+            "type": "boolean",
+            "description": "Whether the site is the listener's default for hosts no site names."
+          },
+          "draft_version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The draft version tested.",
+            "minimum": 0
+          },
+          "host": {
+            "type": "string",
+            "description": "The host and path as routing compares them, normalized."
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/RouteTestOutcome"
+          },
+          "path": {
+            "type": "string"
+          },
+          "route_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteTrial"
+            },
+            "description": "The routes tried until one took the request."
+          },
+          "site_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "RouteTrafficItem": {
         "type": "object",
         "description": "Requests one route served.",
@@ -82462,6 +82921,35 @@
             "type": "string"
           },
           "site": {
+            "type": "string"
+          }
+        }
+      },
+      "RouteTrial": {
+        "type": "object",
+        "description": "A route the request was tried against, in the order they are tried.",
+        "required": [
+          "route_id",
+          "matched"
+        ],
+        "properties": {
+          "matched": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The first part that did not hold, for a route that did not match."
+          },
+          "route_id": {
             "type": "string"
           }
         }
