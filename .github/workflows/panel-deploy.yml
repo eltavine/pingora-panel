@@ -473,6 +473,38 @@ jobs:
               | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"
           done
 
+      - name: Route requests by method, header and client
+        run: |
+          ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
+          site=$(ppanel -o json site create --name ci-routes --domain routes.test \
+            --respond 200 --body stable \
+            | python3 -c "import json, sys; print(json.load(sys.stdin)['id'])")
+          ppanel route add "$site" --name canary --match prefix:/api --respond 200 --body canary \
+            --method GET --header x-canary=1 \
+            --condition '{"kind":"not","condition":{"kind":"client","networks":["192.0.2.0/24"]}}'
+          # The draft says which route a request takes before it is applied.
+          ppanel -o json route test --host routes.test --target /api/items -H 'X-Canary: 1' \
+            | python3 -c "import json, sys; r = json.load(sys.stdin); assert r['outcome'] == 'routed' and r['routes'][0]['name'] == 'canary' and r['routes'][0]['matched'], r"
+          ppanel -o json route test --host routes.test --target /api/items \
+            | python3 -c "import json, sys; r = json.load(sys.stdin); assert not r['routes'][0]['matched'] and 'x-canary' in r['routes'][0]['reason'], r"
+          ppanel route test --host routes.test --target /api/items
+          ppanel config apply
+          served() {
+            curl --fail --silent --show-error --header 'Host: routes.test' "$@" \
+              http://127.0.0.1:18080/api/items
+          }
+          for _ in $(seq 1 30); do
+            if served --header 'X-Canary: 1' 2>/dev/null | grep -qx canary; then
+              break
+            fi
+            sleep 1
+          done
+          test "$(served --header 'X-Canary: 1')" = canary
+          test "$(served)" = stable
+          test "$(served --request POST --header 'X-Canary: 1')" = stable
+          ppanel site delete "$site" --permanent
+          ppanel config apply
+
       - name: Move the configuration between installations as a bundle
         run: |
           ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
