@@ -430,6 +430,49 @@ jobs:
           fi
           docker rm --force panel-ci-web >/dev/null
 
+      - name: Serve a static site from files the panel writes
+        run: |
+          ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
+          sha=$(printf '<h1>From the panel</h1>\n' \
+            | ppanel -o json files put - ci-static/index.html --new \
+            | python3 -c "import json, sys; w = json.load(sys.stdin); assert w['created'], w; print(w['sha256'])")
+          ppanel files ls ci-static
+          test "$(ppanel files cat ci-static/index.html)" = '<h1>From the panel</h1>'
+          ppanel site create --name ci-static --domain static.test --static ci-static
+          ppanel config apply
+          served() { curl --fail --silent --show-error --header 'Host: static.test' http://127.0.0.1:18080/; }
+          for _ in $(seq 1 30); do
+            if served 2>/dev/null | grep -q 'From the panel'; then
+              break
+            fi
+            sleep 1
+          done
+          served | grep -q 'From the panel'
+          # A write is served at once, with no draft to apply, and only over
+          # the content it was read with.
+          printf '<h1>Changed</h1>\n' | ppanel files put - ci-static/index.html --if-match "\"$sha\""
+          served | grep -q 'Changed'
+          if printf 'stale\n' | ppanel files put - ci-static/index.html --if-match "\"$sha\""; then
+            exit 1
+          fi
+          served | grep -q 'Changed'
+          # Nothing outside the sites' directory is reached.
+          if ppanel files cat ../etc/passwd; then
+            exit 1
+          fi
+          ppanel files rm ci-static --recursive --yes
+          for type in files.file.written files.entry.removed files.operation.refused; do
+            for _ in $(seq 1 30); do
+              if ppanel -o json audit list --type "$type" --actor-id ci \
+                | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"; then
+                break
+              fi
+              sleep 1
+            done
+            ppanel -o json audit list --type "$type" --actor-id ci \
+              | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"
+          done
+
       - name: Serve the site over HTTPS with a certificate the panel keeps
         run: |
           ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
