@@ -122,6 +122,7 @@ pub(super) fn decode_site(value: wire::SiteSpec) -> Result<SiteSpec> {
         }),
         security_policy_id: optional_string(value.security_policy_id),
         access_log: logging::decode_access_log(value.access_log)?,
+        header_policy_id: optional_string(value.header_policy_id),
     })
 }
 
@@ -156,6 +157,7 @@ pub(super) fn encode_site(value: &SiteSpec) -> wire::SiteSpec {
         }),
         security_policy_id: value.security_policy_id.clone().unwrap_or_default(),
         access_log: logging::encode_access_log(&value.access_log),
+        header_policy_id: value.header_policy_id.clone().unwrap_or_default(),
     }
 }
 

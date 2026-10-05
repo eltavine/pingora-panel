@@ -183,6 +183,18 @@
     },
     {
       "package": "panel-ir",
+      "name": "CompressionAlgorithm",
+      "owner": "pingora-panel-platform",
+      "reason": "Every codec and gateway handles each coding; a new coding must fail to compile where codings are encoded and negotiated, rather than being dropped or sent to clients that never asked for it."
+    },
+    {
+      "package": "panel-ir",
+      "name": "ServerHeader",
+      "owner": "pingora-panel-platform",
+      "reason": "Every codec and gateway handles each way of treating the Server field; a new one must fail to compile there rather than silently keeping the upstream's field."
+    },
+    {
+      "package": "panel-ir",
       "name": "RouteCondition",
       "owner": "pingora-panel-platform",
       "reason": "Every codec, validator and evaluator of route conditions must handle each kind; a new kind must fail to compile where conditions are encoded or evaluated, rather than being dropped and widening what a route takes."

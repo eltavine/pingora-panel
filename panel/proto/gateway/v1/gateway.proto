@@ -89,6 +89,9 @@ message SiteSpec {
   // Every request for the site passes this policy first.
   string security_policy_id = 9;
   AccessLog access_log = 10;
+  // Every request for the site passes this HTTP policy before its route's
+  // (ADR 0037).
+  string header_policy_id = 11;
 }
 
 // An HTTP Strict Transport Security policy (RFC 6797 §6.1).
@@ -387,6 +390,8 @@ message TlsProfile {
   bool session_resumption_disabled = 8;
 }
 
+// An HTTP policy (ADR 0037); values are templates of request variables. A
+// gateway refuses codings and Server modes it does not know.
 message HeaderPolicy {
   string id = 1;
   map<string, string> set = 2;
@@ -395,6 +400,57 @@ message HeaderPolicy {
   repeated string request_remove = 5;
   map<string, string> response_set = 6;
   repeated string response_remove = 7;
+  // Field lines appended, in order.
+  repeated HeaderField request_add = 8;
+  repeated HeaderField response_add = 9;
+  reserved 10;
+  ServerHeader server = 11;
+  CorsPolicy cors = 12;
+  CompressionPolicy compression = 13;
+}
+
+message HeaderField {
+  string name = 1;
+  string value = 2;
+}
+
+// What becomes of the upstream's Server field; unspecified keeps it.
+message ServerHeader {
+  ServerHeaderMode mode = 1;
+  // With REPLACE, the value sent instead.
+  string value = 2;
+}
+
+enum ServerHeaderMode {
+  SERVER_HEADER_MODE_UNSPECIFIED = 0;
+  SERVER_HEADER_MODE_KEEP = 1;
+  SERVER_HEADER_MODE_REMOVE = 2;
+  SERVER_HEADER_MODE_REPLACE = 3;
+}
+
+// The Fetch Standard's CORS protocol for the origins listed.
+message CorsPolicy {
+  repeated string allowed_origins = 1;
+  repeated string allowed_methods = 2;
+  repeated string allowed_headers = 3;
+  repeated string exposed_headers = 4;
+  bool allow_credentials = 5;
+  optional uint32 max_age_seconds = 6;
+}
+
+// Which responses are compressed, with the codings the client accepts.
+message CompressionPolicy {
+  repeated CompressionAlgorithm algorithms = 1;
+  // Media types such as text/html, or ranges such as text/*.
+  repeated string types = 2;
+  uint64 min_bytes = 3;
+}
+
+enum CompressionAlgorithm {
+  COMPRESSION_ALGORITHM_UNSPECIFIED = 0;
+  COMPRESSION_ALGORITHM_GZIP = 1;
+  COMPRESSION_ALGORITHM_BROTLI = 2;
+  COMPRESSION_ALGORITHM_ZSTD = 3;
 }
 
 message StaticContentPolicy {

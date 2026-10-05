@@ -173,6 +173,7 @@ fn populated_snapshot_round_trips_additive_v1_fields() {
         request_remove: ["x-remove".into()].into_iter().collect(),
         response_set: [("x-response".into(), "1".into())].into_iter().collect(),
         response_remove: ["server".into()].into_iter().collect(),
+        ..HeaderPolicy::default()
     });
     snapshot.static_content.push(StaticContentPolicy {
         id: "static".into(),
@@ -410,6 +411,61 @@ fn route_conditions_round_trip_and_unknown_kinds_are_refused() {
 
     let mut unknown = wire;
     unknown.routes[0].conditions[0].kind = None;
+    let refused = decode_snapshot(unknown).unwrap_err();
+    assert!(refused.message.contains("does not know"), "{refused}");
+}
+
+#[test]
+fn http_policies_round_trip_and_unknown_codings_are_refused() {
+    use panel_ir::{
+        CompressionAlgorithm, CompressionPolicy, CorsPolicy, HeaderField, ServerHeader,
+    };
+
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(11));
+    let mut site = SiteSpec::new(SiteId::new("site").unwrap(), "site", Vec::new());
+    site.header_policy_id = Some("api".into());
+    snapshot.sites.push(site);
+    snapshot.header_policies.push(HeaderPolicy {
+        id: "api".into(),
+        request_add: vec![HeaderField {
+            name: "x-tenant".into(),
+            value: "$host".into(),
+        }],
+        response_add: vec![HeaderField {
+            name: "link".into(),
+            value: "</app.css>; rel=preload".into(),
+        }],
+        server: ServerHeader::Replace {
+            value: "shop".into(),
+        },
+        cors: Some(CorsPolicy {
+            allowed_origins: vec!["https://*.shop.example".into()],
+            allowed_methods: vec!["PUT".into()],
+            allowed_headers: vec!["x-api-key".into()],
+            exposed_headers: vec!["x-request-id".into()],
+            allow_credentials: true,
+            max_age_seconds: Some(600),
+        }),
+        compression: Some(CompressionPolicy {
+            algorithms: [CompressionAlgorithm::Gzip, CompressionAlgorithm::Brotli]
+                .into_iter()
+                .collect(),
+            types: vec!["text/*".into(), "application/json".into()],
+            min_bytes: 1024,
+        }),
+        ..HeaderPolicy::default()
+    });
+    snapshot.refresh_content_hash();
+    let wire = encode_snapshot(&snapshot);
+    assert_eq!(decode_snapshot(wire.clone()).unwrap(), snapshot);
+
+    let mut unknown = wire;
+    unknown.header_policies[0]
+        .compression
+        .as_mut()
+        .unwrap()
+        .algorithms
+        .push(42);
     let refused = decode_snapshot(unknown).unwrap_err();
     assert!(refused.message.contains("does not know"), "{refused}");
 }

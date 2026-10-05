@@ -4,8 +4,9 @@ use crate::optional_string;
 use panel_contracts::gateway::v1 as wire;
 use panel_errors::{PanelError, Result};
 use panel_ir::{
-    BasicAuth, CachePolicy, HeaderPolicy, LimitedResponse, LuaPolicy, RateLimit, RateLimitKey,
-    RefererRule, SecurityPolicy, StaticContentPolicy, TlsProfile,
+    BasicAuth, CachePolicy, CompressionAlgorithm, CompressionPolicy, CorsPolicy, HeaderField,
+    HeaderPolicy, LimitedResponse, LuaPolicy, RateLimit, RateLimitKey, RefererRule, SecurityPolicy,
+    ServerHeader, StaticContentPolicy, TlsProfile,
 };
 use std::collections::BTreeMap;
 
@@ -35,7 +36,7 @@ pub(super) fn encode_tls(value: &TlsProfile) -> wire::TlsProfile {
     }
 }
 
-pub(super) fn decode_header_policy(value: wire::HeaderPolicy) -> HeaderPolicy {
+pub(super) fn decode_header_policy(value: wire::HeaderPolicy) -> Result<HeaderPolicy> {
     let request_set = if value.request_set.is_empty() {
         value.set.into_iter().collect()
     } else {
@@ -46,16 +47,90 @@ pub(super) fn decode_header_policy(value: wire::HeaderPolicy) -> HeaderPolicy {
     } else {
         value.request_remove.into_iter().collect()
     };
-    HeaderPolicy {
-        id: value.id,
+    let fields = |fields: Vec<wire::HeaderField>| {
+        fields
+            .into_iter()
+            .map(|field| HeaderField {
+                name: field.name,
+                value: field.value,
+            })
+            .collect()
+    };
+    let server = match value.server {
+        None => ServerHeader::Keep,
+        Some(server) => match wire::ServerHeaderMode::try_from(server.mode) {
+            Ok(wire::ServerHeaderMode::Unspecified | wire::ServerHeaderMode::Keep) => {
+                ServerHeader::Keep
+            }
+            Ok(wire::ServerHeaderMode::Remove) => ServerHeader::Remove,
+            Ok(wire::ServerHeaderMode::Replace) => ServerHeader::Replace {
+                value: server.value,
+            },
+            Err(_) => {
+                return Err(PanelError::invalid_argument(format!(
+                    "HTTP policy {} uses a Server mode this gateway does not know",
+                    value.id
+                )))
+            }
+        },
+    };
+    let compression = value
+        .compression
+        .map(|compression| {
+            Ok::<_, PanelError>(CompressionPolicy {
+                algorithms: compression
+                    .algorithms
+                    .into_iter()
+                    .map(
+                        |algorithm| match wire::CompressionAlgorithm::try_from(algorithm) {
+                            Ok(wire::CompressionAlgorithm::Gzip) => Ok(CompressionAlgorithm::Gzip),
+                            Ok(wire::CompressionAlgorithm::Brotli) => {
+                                Ok(CompressionAlgorithm::Brotli)
+                            }
+                            Ok(wire::CompressionAlgorithm::Zstd) => Ok(CompressionAlgorithm::Zstd),
+                            _ => Err(PanelError::invalid_argument(format!(
+                                "HTTP policy {} uses a coding this gateway does not know",
+                                value.id
+                            ))),
+                        },
+                    )
+                    .collect::<Result<_>>()?,
+                types: compression.types,
+                min_bytes: compression.min_bytes,
+            })
+        })
+        .transpose()?;
+    Ok(HeaderPolicy {
         request_set,
         request_remove,
         response_set: value.response_set.into_iter().collect(),
         response_remove: value.response_remove.into_iter().collect(),
-    }
+        request_add: fields(value.request_add),
+        response_add: fields(value.response_add),
+        server,
+        cors: value.cors.map(|cors| CorsPolicy {
+            allowed_origins: cors.allowed_origins,
+            allowed_methods: cors.allowed_methods,
+            allowed_headers: cors.allowed_headers,
+            exposed_headers: cors.exposed_headers,
+            allow_credentials: cors.allow_credentials,
+            max_age_seconds: cors.max_age_seconds,
+        }),
+        compression,
+        id: value.id,
+    })
 }
 
 pub(super) fn encode_header_policy(value: &HeaderPolicy) -> wire::HeaderPolicy {
+    let fields = |fields: &[HeaderField]| {
+        fields
+            .iter()
+            .map(|field| wire::HeaderField {
+                name: field.name.clone(),
+                value: field.value.clone(),
+            })
+            .collect()
+    };
     wire::HeaderPolicy {
         id: value.id.clone(),
         set: BTreeMap::new().into_iter().collect(),
@@ -64,6 +139,45 @@ pub(super) fn encode_header_policy(value: &HeaderPolicy) -> wire::HeaderPolicy {
         request_remove: value.request_remove.iter().cloned().collect(),
         response_set: value.response_set.clone().into_iter().collect(),
         response_remove: value.response_remove.iter().cloned().collect(),
+        request_add: fields(&value.request_add),
+        response_add: fields(&value.response_add),
+        server: match &value.server {
+            ServerHeader::Keep => None,
+            ServerHeader::Remove => Some(wire::ServerHeader {
+                mode: wire::ServerHeaderMode::Remove as i32,
+                value: String::new(),
+            }),
+            ServerHeader::Replace { value } => Some(wire::ServerHeader {
+                mode: wire::ServerHeaderMode::Replace as i32,
+                value: value.clone(),
+            }),
+        },
+        cors: value.cors.as_ref().map(|cors| wire::CorsPolicy {
+            allowed_origins: cors.allowed_origins.clone(),
+            allowed_methods: cors.allowed_methods.clone(),
+            allowed_headers: cors.allowed_headers.clone(),
+            exposed_headers: cors.exposed_headers.clone(),
+            allow_credentials: cors.allow_credentials,
+            max_age_seconds: cors.max_age_seconds,
+        }),
+        compression: value
+            .compression
+            .as_ref()
+            .map(|compression| wire::CompressionPolicy {
+                algorithms: compression
+                    .algorithms
+                    .iter()
+                    .map(|algorithm| {
+                        (match algorithm {
+                            CompressionAlgorithm::Gzip => wire::CompressionAlgorithm::Gzip,
+                            CompressionAlgorithm::Brotli => wire::CompressionAlgorithm::Brotli,
+                            CompressionAlgorithm::Zstd => wire::CompressionAlgorithm::Zstd,
+                        }) as i32
+                    })
+                    .collect(),
+                types: compression.types.clone(),
+                min_bytes: compression.min_bytes,
+            }),
     }
 }
 

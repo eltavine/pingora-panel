@@ -24,6 +24,7 @@ pub fn validate_engine_ir(
     validate_references(snapshot, &mut diagnostics);
     crate::traffic::validate_traffic(snapshot, &mut diagnostics);
     crate::logging::validate_logging(snapshot, &mut diagnostics);
+    crate::http::validate_http(snapshot, &mut diagnostics);
 
     let unsupported: Vec<_> = snapshot
         .required_capabilities()

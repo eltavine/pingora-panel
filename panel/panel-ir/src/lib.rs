@@ -13,6 +13,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub use conditions::{RouteCondition, ValueTest, ROUTE_CONDITIONS_CAPABILITY};
+pub use http::{
+    CompressionAlgorithm, CompressionPolicy, CorsPolicy, HeaderField, ServerHeader,
+    HTTP_POLICIES_CAPABILITY,
+};
 pub use logging::{AccessLog, AccessLogFormat, LogFiles, LoggingPolicy};
 pub use security::{
     BasicAuth, LimitedResponse, RateLimit, RateLimitKey, RealIpHeader, RefererRule, SecurityPolicy,
@@ -20,6 +24,7 @@ pub use security::{
 };
 
 pub mod conditions;
+pub mod http;
 pub mod logging;
 pub mod security;
 pub mod template;
@@ -286,6 +291,10 @@ pub struct SiteSpec {
     pub security_policy_id: Option<String>,
     #[serde(default, skip_serializing_if = "AccessLog::is_unset")]
     pub access_log: AccessLog,
+    /// The HTTP policy every request for the site passes, before its
+    /// route's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header_policy_id: Option<String>,
 }
 
 /// An HTTP Strict Transport Security policy (RFC 6797 §6.1).
@@ -329,6 +338,7 @@ impl SiteSpec {
             hsts: None,
             security_policy_id: None,
             access_log: AccessLog::default(),
+            header_policy_id: None,
         }
     }
 }
@@ -719,7 +729,10 @@ impl RetryPolicy {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+/// An HTTP policy (ADR 0037): field changes of requests and responses,
+/// the `Server` field, CORS and compression. Values are templates of
+/// request variables.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HeaderPolicy {
     pub id: String,
@@ -727,6 +740,18 @@ pub struct HeaderPolicy {
     pub request_remove: BTreeSet<String>,
     pub response_set: BTreeMap<String, String>,
     pub response_remove: BTreeSet<String>,
+    /// Request field lines appended, in order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub request_add: Vec<HeaderField>,
+    /// Response field lines appended, in order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub response_add: Vec<HeaderField>,
+    #[serde(default, skip_serializing_if = "ServerHeader::is_keep")]
+    pub server: ServerHeader,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cors: Option<CorsPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compression: Option<CompressionPolicy>,
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
