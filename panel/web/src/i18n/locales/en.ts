@@ -2127,6 +2127,7 @@ const en: Messages = {
       forced: 'though stopped containers used it',
       pruned: '{count} item removed | {count} items removed',
       kept: '{count} kept | {count} kept',
+      failed: '{count} refused | {count} refused',
     },
     types: {
       config_draft_changed: 'Changed the draft',
@@ -2200,6 +2201,9 @@ const en: Messages = {
       container_removed: 'Removed a container',
       container_image_removed: 'Removed an image',
       container_engine_pruned: 'Pruned an engine',
+      container_compose_up: 'Brought a Compose project up',
+      container_compose_down: 'Took a Compose project down',
+      container_compose_restarted: 'Restarted a Compose project',
       container_operation_refused: 'Refused a container operation',
     },
   },

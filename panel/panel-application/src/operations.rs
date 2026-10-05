@@ -2,9 +2,10 @@
 //! such as calls to the gateway, for the audit trail.
 
 use crate::{
-    CommandContext, ContainerAction, ContainerChange, ContainerEngine, DataPlaneState, FileChecks,
-    GatewayRuntimePort, GatewayServiceAction, GatewayServiceStatus, ImageRemoval, LogDeletion,
-    PruneReport, RequestScope, UpstreamHealth, UpstreamHealthReport,
+    CommandContext, ComposeAction, ComposeChange, ContainerAction, ContainerChange,
+    ContainerEngine, DataPlaneState, FileChecks, GatewayRuntimePort, GatewayServiceAction,
+    GatewayServiceStatus, ImageRemoval, LogDeletion, PruneReport, RequestScope, UpstreamHealth,
+    UpstreamHealthReport,
 };
 use async_trait::async_trait;
 use panel_errors::{PanelError, Result};
@@ -60,6 +61,15 @@ pub enum Operation<'a> {
     EnginePrune {
         engine: &'a str,
         result: std::result::Result<&'a PruneReport, &'a PanelError>,
+    },
+    /// The host agent was asked to bring a Compose project up, down or
+    /// restart it.
+    ComposeProject {
+        engine: &'a str,
+        /// The project as the request named it.
+        project: &'a str,
+        action: ComposeAction,
+        result: std::result::Result<&'a ComposeChange, &'a PanelError>,
     },
 }
 
@@ -266,6 +276,15 @@ mod tests {
                 Operation::EnginePrune { engine, result } => (
                     format!("prune-{engine}"),
                     result.map(|report| report.reclaimed_bytes.to_string()),
+                ),
+                Operation::ComposeProject {
+                    project,
+                    action,
+                    result,
+                    ..
+                } => (
+                    format!("compose-{}", action.as_str()),
+                    result.map(|_| project.to_owned()),
                 ),
             };
             self.0

@@ -4,8 +4,8 @@
 use async_trait::async_trait;
 use panel_api::{AccessAudit, Refusal};
 use panel_application::{
-    CommandContext, ContainerAction, DataPlaneState, GatewayServiceAction, Operation, OperationLog,
-    RequestScope,
+    CommandContext, ComposeAction, ContainerAction, DataPlaneState, GatewayServiceAction,
+    Operation, OperationLog, RequestScope,
 };
 use panel_errors::PanelError;
 use panel_event_contracts::{
@@ -24,6 +24,7 @@ const GATEWAY_SERVICE: (&str, &str) = ("host", "gateway-service");
 const ENGINE: &str = "container_engine";
 const CONTAINER: &str = "container";
 const IMAGE: &str = "container_image";
+const PROJECT: &str = "compose_project";
 
 pub struct OutboxOperations(pub EventLog);
 
@@ -232,6 +233,67 @@ impl OperationLog for OutboxOperations {
                     }
                 }
             }
+            Operation::ComposeProject {
+                engine,
+                project,
+                action,
+                result,
+            } => {
+                let (scope, actor) = (context.scope(), context.actor());
+                let target_id = format!("{engine}/{project}");
+                let target = (PROJECT, target_id.as_str());
+                match result {
+                    Ok(change) => {
+                        let (engine, project) = (engine.to_owned(), project.to_owned());
+                        let failed: Vec<String> = change
+                            .failures
+                            .iter()
+                            .map(|failure| failure.name.clone())
+                            .collect();
+                        let changed = change.changed;
+                        match action {
+                            ComposeAction::Up => {
+                                let data = containers::ComposeUp {
+                                    engine,
+                                    project,
+                                    changed,
+                                    failed,
+                                };
+                                self.0.record(target, &scope, actor, &data).await;
+                            }
+                            ComposeAction::Down => {
+                                let data = containers::ComposeDown {
+                                    engine,
+                                    project,
+                                    changed,
+                                    failed,
+                                };
+                                self.0.record(target, &scope, actor, &data).await;
+                            }
+                            ComposeAction::Restart => {
+                                let data = containers::ComposeRestarted {
+                                    engine,
+                                    project,
+                                    changed,
+                                    failed,
+                                };
+                                self.0.record(target, &scope, actor, &data).await;
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        let refused = containers::OperationRefused {
+                            engine: engine.to_owned(),
+                            operation: format!("compose.{}", action.as_str()),
+                            code: error.code.as_str().to_owned(),
+                            message: error.message.clone(),
+                            project: project.to_owned(),
+                            ..containers::OperationRefused::default()
+                        };
+                        self.0.record(target, &scope, actor, &refused).await;
+                    }
+                }
+            }
             Operation::EnginePrune { engine, result } => {
                 let (scope, actor) = (context.scope(), context.actor());
                 let target = (ENGINE, engine);
@@ -342,6 +404,7 @@ mod tests {
             ENGINE,
             CONTAINER,
             IMAGE,
+            PROJECT,
             "upstream",
             "gateway",
             "site",

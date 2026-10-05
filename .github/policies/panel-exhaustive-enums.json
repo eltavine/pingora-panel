@@ -158,6 +158,12 @@
       "reason": "Each kind is a different removal on the engine and a line of the audit trail; a new kind must fail to compile in every adapter until it removes it, rather than being removed as another kind."
     },
     {
+      "package": "panel-application",
+      "name": "ComposeAction",
+      "owner": "pingora-panel-platform",
+      "reason": "Each action is a set of calls on the engine and an audit event of its own; a new action must fail to compile in every adapter until it maps it, rather than doing something else to a project."
+    },
+    {
       "package": "panel-config-api",
       "name": "ConfigurationQuery",
       "owner": "pingora-panel-platform",

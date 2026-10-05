@@ -141,6 +141,17 @@ describe('audit presentation', () => {
     ).toBe('docker · audit.summary.pruned{"count":2} · audit.summary.kept{"count":1}')
     expect(
       summaryOf(
+        event('container.compose.up', {
+          engine: 'docker',
+          project: 'shop',
+          changed: 1,
+          failed: ['shop-worker-1'],
+        }),
+        t,
+      ),
+    ).toBe('docker · shop · audit.summary.failed{"count":1}')
+    expect(
+      summaryOf(
         event('container.operation.refused', {
           engine: 'docker',
           operation: 'image.remove',

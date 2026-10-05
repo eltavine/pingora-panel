@@ -46,6 +46,7 @@ macro_rules! operations {
 
 mod alerts;
 mod audit;
+mod compose;
 mod containers;
 mod context;
 mod engine_resources;
@@ -67,6 +68,10 @@ pub use alerts::{
     AlertRule, AlertRuleSpec, AlertSeverity, AlertState, AlertTest, AlertsPort, NewAlertChannel,
 };
 pub use audit::{AuditFilter, AuditPage, AuditPort, AuditRecord, AuditVerification};
+pub use compose::{
+    ComposeAction, ComposeChange, ComposeFailure, ComposeFile, ComposeLogLine, ComposeLogs,
+    ComposePort, ComposeProject, ComposeProjectList, NoCompose, ProjectService, RecordedCompose,
+};
 pub use containers::{
     ContainerAction, ContainerChange, ContainerDetail, ContainerEngine, ContainerFilter,
     ContainerList, ContainerLogLine, ContainerLogQuery, ContainerLogStart, ContainerLogStream,

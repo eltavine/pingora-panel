@@ -2041,6 +2041,7 @@ const zhCN = {
       forced: '强制删除，尽管有已停止的容器在用',
       pruned: '删除 {count} 项',
       kept: '保留 {count} 项',
+      failed: '{count} 项被拒绝',
     },
     types: {
       config_draft_changed: '修改草稿',
@@ -2114,6 +2115,9 @@ const zhCN = {
       container_removed: '删除了容器',
       container_image_removed: '删除了镜像',
       container_engine_pruned: '清理了引擎',
+      container_compose_up: '启动了 Compose 项目',
+      container_compose_down: '停止并删除了 Compose 项目',
+      container_compose_restarted: '重启了 Compose 项目',
       container_operation_refused: '拒绝了容器操作',
     },
   },

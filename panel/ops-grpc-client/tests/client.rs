@@ -2,16 +2,18 @@
 
 use ops_grpc_client::OpsAgentClient;
 use panel_application::{
-    AgentCapability, CommandContext, ContainerAction, ContainerLogQuery, ContainerLogStart,
-    ContainerLogStream, ContainerNetworkStats, ContainerState, ContainersPort, DirectoryKind,
-    EngineResourcesPort, GatewayServiceAction, HostAgentPort, IdempotencyKey, ImagesPort,
-    PruneChoices, PruneItem, PruneKind, RequestDeadline, RequestId, RequestScope,
+    AgentCapability, CommandContext, ComposeAction, ComposePort, ContainerAction,
+    ContainerLogQuery, ContainerLogStart, ContainerLogStream, ContainerNetworkStats,
+    ContainerState, ContainersPort, DirectoryKind, EngineResourcesPort, GatewayServiceAction,
+    HostAgentPort, IdempotencyKey, ImagesPort, PruneChoices, PruneItem, PruneKind, RequestDeadline,
+    RequestId, RequestScope,
 };
 use panel_contracts::{
     common::v1 as common,
     ops::v1::{
         self as wire,
         agent_server::{Agent, AgentServer},
+        compose_projects_server::{ComposeProjects, ComposeProjectsServer},
         containers_server::{Containers, ContainersServer},
         directories_server::{Directories, DirectoriesServer},
         engine_resources_server::{EngineResources, EngineResourcesServer},
@@ -181,6 +183,104 @@ impl GatewayService for FakeGateway {
                 error: None,
             },
         }))
+    }
+}
+
+/// The shop project, whose worker will not start and whose file is out of
+/// reach.
+struct FakeCompose;
+
+#[tonic::async_trait]
+impl ComposeProjects for FakeCompose {
+    async fn list(
+        &self,
+        _: Request<wire::ComposeProjectsListRequest>,
+    ) -> Result<Response<wire::ComposeProjectsListResponse>, Status> {
+        Ok(Response::new(wire::ComposeProjectsListResponse {
+            observed_at: Some(at(10).into()),
+            projects: vec![shop()],
+            error: None,
+        }))
+    }
+
+    async fn act(
+        &self,
+        request: Request<wire::ComposeProjectsActRequest>,
+    ) -> Result<Response<wire::ComposeProjectsActResponse>, Status> {
+        let request = request.into_inner();
+        assert_eq!(request.action, i32::from(wire::ComposeAction::Up));
+        Ok(Response::new(wire::ComposeProjectsActResponse {
+            project: Some(shop()),
+            changed: 1,
+            failures: vec![wire::ComposeFailure {
+                name: "shop-worker-1".into(),
+                error: Some(common::Error {
+                    code: "CONFLICT".into(),
+                    message: "port is already allocated".into(),
+                    retryable: false,
+                    diagnostics: Vec::new(),
+                }),
+            }],
+            error: None,
+        }))
+    }
+
+    async fn logs(
+        &self,
+        _: Request<wire::ComposeProjectsLogsRequest>,
+    ) -> Result<Response<wire::ComposeProjectsLogsResponse>, Status> {
+        Ok(Response::new(wire::ComposeProjectsLogsResponse {
+            observed_at: Some(at(10).into()),
+            lines: vec![wire::ComposeLogLine {
+                service: "web".into(),
+                container: "shop-web-1".into(),
+                line: Some(line(1, wire::ContainerLogStream::Stdout, "GET / 200")),
+            }],
+            truncated: false,
+            error: None,
+        }))
+    }
+
+    async fn files(
+        &self,
+        _: Request<wire::ComposeProjectsFilesRequest>,
+    ) -> Result<Response<wire::ComposeProjectsFilesResponse>, Status> {
+        Ok(Response::new(wire::ComposeProjectsFilesResponse {
+            files: vec![
+                wire::ComposeFile {
+                    path: "/srv/shop/compose.yaml".into(),
+                    content: "services: {}\n".into(),
+                    error: None,
+                },
+                wire::ComposeFile {
+                    path: "/home/ops/override.yaml".into(),
+                    content: String::new(),
+                    error: Some(common::Error {
+                        code: "PRECONDITION_FAILED".into(),
+                        message: "outside the working directory".into(),
+                        retryable: false,
+                        diagnostics: Vec::new(),
+                    }),
+                },
+            ],
+            error: None,
+        }))
+    }
+}
+
+fn shop() -> wire::ComposeProject {
+    wire::ComposeProject {
+        name: "shop".into(),
+        working_directory: "/srv/shop".into(),
+        config_files: vec!["/srv/shop/compose.yaml".into()],
+        services: vec![wire::ComposeService {
+            name: "web".into(),
+            containers: 1,
+            running: 1,
+        }],
+        containers: 2,
+        running: 1,
+        installation: false,
     }
 }
 
@@ -540,6 +640,7 @@ async fn client(fail: bool) -> OpsAgentClient {
             .add_service(ContainersServer::new(FakeContainers))
             .add_service(ImagesServer::new(FakeImages))
             .add_service(EngineResourcesServer::new(FakeResources))
+            .add_service(ComposeProjectsServer::new(FakeCompose))
             .serve_with_incoming(TcpListenerStream::new(listener)),
     );
     OpsAgentClient::from_channel(
@@ -852,5 +953,54 @@ async fn pruning_reaches_the_application() {
     assert_eq!(
         report.outcomes[0].refusal.as_ref().unwrap().code.as_str(),
         "CONFLICT"
+    );
+}
+
+#[tokio::test]
+async fn compose_projects_reach_the_application() {
+    let client = client(false).await;
+    let listed = client.projects(scope(), "docker".into()).await.unwrap();
+    let shop = &listed.projects[0];
+    assert_eq!(shop.working_directory.as_deref(), Some("/srv/shop"));
+    assert_eq!(
+        (shop.services[0].name.as_str(), shop.containers),
+        ("web", 2)
+    );
+
+    let context = CommandContext::new(
+        RequestId::new("request-1").unwrap(),
+        RequestId::new("request-1").unwrap(),
+        "ops",
+        RequestDeadline::new("2099-01-01T00:00:00Z").unwrap(),
+        IdempotencyKey::new("key-1").unwrap(),
+    )
+    .unwrap();
+    let change = client
+        .act_on_project(context, "docker".into(), "shop".into(), ComposeAction::Up)
+        .await
+        .unwrap();
+    assert_eq!(change.changed, 1);
+    assert_eq!(change.failures[0].name, "shop-worker-1");
+    assert_eq!(change.failures[0].error.code.as_str(), "CONFLICT");
+
+    let logs = client
+        .project_logs(scope(), "docker".into(), "shop".into(), Default::default())
+        .await
+        .unwrap();
+    assert_eq!(
+        (
+            logs.lines[0].service.as_str(),
+            logs.lines[0].line.text.as_str()
+        ),
+        ("web", "GET / 200")
+    );
+    let files = client
+        .project_files(scope(), "docker".into(), "shop".into())
+        .await
+        .unwrap();
+    assert_eq!(files[0].content.as_deref().unwrap(), "services: {}\n");
+    assert_eq!(
+        files[1].content.as_ref().unwrap_err().code.as_str(),
+        "PRECONDITION_FAILED"
     );
 }

@@ -74,6 +74,9 @@ export const KNOWN_TYPES = [
   'container.removed',
   'container.image.removed',
   'container.engine.pruned',
+  'container.compose.up',
+  'container.compose.down',
+  'container.compose.restarted',
   'container.operation.refused',
 ] as const
 
@@ -270,6 +273,17 @@ export function summaryOf(event: AuditEvent, t: Translate): string {
         .filter(Boolean)
         .join(' · ')
     }
+    case 'container.compose.up':
+    case 'container.compose.down':
+    case 'container.compose.restarted': {
+      const failed = Array.isArray(data.failed) ? data.failed.length : 0
+      return [
+        `${text(data.engine)} · ${text(data.project)}`,
+        failed > 0 && t('audit.summary.failed', { count: failed }, failed),
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    }
     case 'container.image.removed':
       return [
         `${text(data.engine)} · ${text(data.image)}`,
@@ -280,7 +294,7 @@ export function summaryOf(event: AuditEvent, t: Translate): string {
     case 'container.operation.refused':
       return [
         `${text(data.operation)} ${text(data.engine)}`,
-        data.container || data.image,
+        data.container || data.image || data.project,
         data.code,
         data.message,
       ]

@@ -6,22 +6,25 @@
 use async_trait::async_trait;
 use panel_application::{
     AgentCapability, AgentDescription, CapabilityState, CapabilityStatus, CommandContext,
-    ContainerAction, ContainerChange, ContainerDetail, ContainerEngine, ContainerFilter,
-    ContainerList, ContainerLogLine, ContainerLogQuery, ContainerLogStart, ContainerLogStream,
-    ContainerLogTail, ContainerLogs, ContainerMount, ContainerNetwork, ContainerNetworkStats,
-    ContainerState, ContainerStats, ContainerStatsList, ContainerSummary, ContainersPort,
-    DirectoriesReport, DirectoryKind, DirectoryUsage, EngineDiskUsage, EngineDiskUse, EngineInfo,
-    EngineNetwork, EngineNetworkList, EngineResourcesPort, EngineSubnet, EngineVersion,
-    EngineVolume, EngineVolumeList, GatewayContainer, GatewayServiceAction, GatewayServiceStatus,
-    HostAgentPort, Image, ImageDetail, ImageList, ImageRemoval, ImagesPort, ListenersReport,
-    ListeningProcess, PortListener, PortMapping, PruneChoices, PruneItem, PruneKind, PruneOutcome,
+    ComposeAction, ComposeChange, ComposeFailure, ComposeFile, ComposeLogLine, ComposeLogs,
+    ComposePort, ComposeProject, ComposeProjectList, ContainerAction, ContainerChange,
+    ContainerDetail, ContainerEngine, ContainerFilter, ContainerList, ContainerLogLine,
+    ContainerLogQuery, ContainerLogStart, ContainerLogStream, ContainerLogTail, ContainerLogs,
+    ContainerMount, ContainerNetwork, ContainerNetworkStats, ContainerState, ContainerStats,
+    ContainerStatsList, ContainerSummary, ContainersPort, DirectoriesReport, DirectoryKind,
+    DirectoryUsage, EngineDiskUsage, EngineDiskUse, EngineInfo, EngineNetwork, EngineNetworkList,
+    EngineResourcesPort, EngineSubnet, EngineVersion, EngineVolume, EngineVolumeList,
+    GatewayContainer, GatewayServiceAction, GatewayServiceStatus, HostAgentPort, Image,
+    ImageDetail, ImageList, ImageRemoval, ImagesPort, ListenersReport, ListeningProcess,
+    PortListener, PortMapping, ProjectService, PruneChoices, PruneItem, PruneKind, PruneOutcome,
     PrunePreview, PruneReport, RequestScope,
 };
 use panel_contracts::ops::v1::{
-    self as wire, agent_client::AgentClient, containers_client::ContainersClient,
-    directories_client::DirectoriesClient, engine_resources_client::EngineResourcesClient,
-    gateway_service_client::GatewayServiceClient, gateway_service_status::Supervisor,
-    images_client::ImagesClient, listeners_client::ListenersClient,
+    self as wire, agent_client::AgentClient, compose_projects_client::ComposeProjectsClient,
+    containers_client::ContainersClient, directories_client::DirectoriesClient,
+    engine_resources_client::EngineResourcesClient, gateway_service_client::GatewayServiceClient,
+    gateway_service_status::Supervisor, images_client::ImagesClient,
+    listeners_client::ListenersClient,
 };
 use panel_errors::{PanelError, Result};
 use panel_service::{
@@ -959,6 +962,154 @@ fn prune_item(value: wire::EnginePruneItem) -> Option<PruneItem> {
         name: value.name,
         size_bytes: value.size_bytes,
     })
+}
+
+fn compose_project(value: wire::ComposeProject) -> ComposeProject {
+    ComposeProject {
+        name: value.name,
+        working_directory: known(value.working_directory),
+        config_files: value.config_files,
+        services: value
+            .services
+            .into_iter()
+            .map(|service| ProjectService {
+                name: service.name,
+                containers: service.containers,
+                running: service.running,
+            })
+            .collect(),
+        containers: value.containers,
+        running: value.running,
+        installation: value.installation,
+    }
+}
+
+#[async_trait]
+impl ComposePort for OpsAgentClient {
+    async fn projects(&self, scope: RequestScope, engine_id: String) -> Result<ComposeProjectList> {
+        let message = wire::ComposeProjectsListRequest {
+            context: Some(request_context(&scope)),
+            engine: engine_id,
+        };
+        let response = ComposeProjectsClient::new(self.channel.clone())
+            .list(self.request(message, &scope))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        Ok(ComposeProjectList {
+            observed_at: time(response.observed_at),
+            projects: response.projects.into_iter().map(compose_project).collect(),
+        })
+    }
+
+    async fn act_on_project(
+        &self,
+        context: CommandContext,
+        engine_id: String,
+        project: String,
+        action: ComposeAction,
+    ) -> Result<ComposeChange> {
+        let action = match action {
+            ComposeAction::Up => wire::ComposeAction::Up,
+            ComposeAction::Down => wire::ComposeAction::Down,
+            ComposeAction::Restart => wire::ComposeAction::Restart,
+        };
+        let message = wire::ComposeProjectsActRequest {
+            context: Some(command_context(&context)),
+            engine: engine_id,
+            project,
+            action: action.into(),
+        };
+        let mut request = self.request(message, &context.scope());
+        request.set_timeout(CHANGE_TIMEOUT);
+        let response = ComposeProjectsClient::new(self.channel.clone())
+            .act(request)
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        Ok(ComposeChange {
+            project: response.project.map(compose_project),
+            changed: response.changed,
+            failures: response
+                .failures
+                .into_iter()
+                .map(|failure| ComposeFailure {
+                    name: failure.name,
+                    error: failure.error.map_or_else(
+                        || PanelError::internal("the engine refused without saying why"),
+                        PanelError::from,
+                    ),
+                })
+                .collect(),
+        })
+    }
+
+    async fn project_logs(
+        &self,
+        scope: RequestScope,
+        engine_id: String,
+        project: String,
+        query: ContainerLogQuery,
+    ) -> Result<ComposeLogs> {
+        let message = wire::ComposeProjectsLogsRequest {
+            context: Some(request_context(&scope)),
+            engine: engine_id,
+            project,
+            lines: query.lines,
+            since: query.since.map(Into::into),
+        };
+        let response = ComposeProjectsClient::new(self.channel.clone())
+            .logs(self.request(message, &scope))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        Ok(ComposeLogs {
+            observed_at: time(response.observed_at),
+            lines: response
+                .lines
+                .into_iter()
+                .map(|line| ComposeLogLine {
+                    service: line.service,
+                    container: line.container,
+                    line: log_line(line.line.unwrap_or_default()),
+                })
+                .collect(),
+            truncated: response.truncated,
+        })
+    }
+
+    async fn project_files(
+        &self,
+        scope: RequestScope,
+        engine_id: String,
+        project: String,
+    ) -> Result<Vec<ComposeFile>> {
+        let message = wire::ComposeProjectsFilesRequest {
+            context: Some(request_context(&scope)),
+            engine: engine_id,
+            project,
+        };
+        let response = ComposeProjectsClient::new(self.channel.clone())
+            .files(self.request(message, &scope))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        Ok(response
+            .files
+            .into_iter()
+            .map(|file| ComposeFile {
+                path: file.path,
+                content: match file.error {
+                    Some(error) => Err(PanelError::from(error)),
+                    None => Ok(file.content),
+                },
+            })
+            .collect())
+    }
 }
 
 #[cfg(test)]

@@ -83,6 +83,34 @@ message EnginePruned {
   uint64 reclaimed_bytes = 4;
 }
 
+// `container.compose.up`
+message ComposeUp {
+  string engine = 1;
+  string project = 2;
+  // How many containers started.
+  uint32 changed = 3;
+  // The containers the engine would not start.
+  repeated string failed = 4;
+}
+
+// `container.compose.down`
+message ComposeDown {
+  string engine = 1;
+  string project = 2;
+  // How many containers were stopped and removed.
+  uint32 changed = 3;
+  // The containers and networks the engine would not remove.
+  repeated string failed = 4;
+}
+
+// `container.compose.restarted`
+message ComposeRestarted {
+  string engine = 1;
+  string project = 2;
+  uint32 changed = 3;
+  repeated string failed = 4;
+}
+
 // `container.operation.refused`: an operation on an engine that was refused
 // or failed, and changed nothing.
 message OperationRefused {
@@ -95,4 +123,6 @@ message OperationRefused {
   string container = 5;
   // The image as the operation named it, for operations on one.
   string image = 6;
+  // The Compose project as the operation named it, for operations on one.
+  string project = 7;
 }
