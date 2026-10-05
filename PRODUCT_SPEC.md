@@ -161,6 +161,8 @@ Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交
 
 0.5 备份与恢复按 ADR 0035 实现：备份是一个 Zstandard 压缩的 tar 归档，第一个成员 `manifest.json` 列出格式、产品版本、时间、所含内容、每个目录以及每个文件的大小与 SHA-256，只归档文件与目录，读取时整体按清单校验，未列出、缺失、大小或内容不符、路径不安全的成员一律拒绝，损坏的归档不会解出任何内容（`panel-backup`）。自动化模块经 `automation.v1.Backups` 提供备份：请求后立即以“等待中”列出，由持久作业在后台完成，数据库以 SQLite `VACUUM INTO` 取得一致快照（配置备份为配置库，证书备份为保存密钥已封装证书、ACME 账户与 DNS 服务商的自动化库，数据库备份为全部模块库），网站目录或其下一个目录按文件与目录复制，不含链接与正在写入的文件；包含配置库的备份还由 API 经配置模块附带草稿与当前生效修订的配置包，任何模块都不读取其他模块的表。归档以仅属主可读的方式写入控制面数据目录的 `backups` 目录，按 `PINGORA_PANEL_BACKUPS_KEPT`（默认 10）保留已完成的备份，失败原因随备份保存；主密钥、口令 pepper 与引导令牌从不进入归档。`/api/v1/backups` 列出与发起备份（202 并给出 `Location`），归档以 `application/zstd` 下载，`ETag` 与 `Repr-Digest`（RFC 9530）给出其 SHA-256 且不缓存；`/restores` 以“在旁解包、校验后改名就位”的方式原位恢复网站目录（网关只会提供旧文件或新文件），或把归档中的当前生效修订按配置包检查后保存为草稿（另需 `config.write`，可携带 `If-Match`，之后照常审阅与应用）。`backups.read` 列出备份，`backups.manage` 发起、下载、恢复与删除，操作员两者皆有；每次请求、删除与恢复无论成功与否都以 `backup.archive.requested`、`backup.archive.deleted`、`backup.sites.restored`、`backup.configuration.restored` 或 `backup.operation.refused` 写入审计。`ppanel backup list|show|create --with … [--site] [--wait]|download|restore --sites|--configuration|rm --yes`（下载只在字节与 `Repr-Digest` 相符时保留文件）与控制台的“备份”页提供同样的操作。全部数据库在控制面停止时由 `panel-control restore ARCHIVE` 恢复：控制面仍在应答时拒绝，整体校验归档并对每个数据库运行 SQLite 完整性检查，拒绝本版本未运行的模块与更高的 schema，然后把现有文件连同其预写日志保留在旁并装入副本，下次启动时迁移到当前版本。CI 的 Compose 检查创建配置、证书与网站的备份，下载后用 zstd 与 tar 列出并确认清单在首位且内容齐全，原位恢复被修改的网站目录与配置草稿并核对审计，再创建全部数据库的备份，在停止控制面后恢复并以完整的审计链重新启动。
 
+0.6 路由条件与路由命中测试（`ROUTE-010`～`ROUTE-025`）按 ADR 0036 实现：路由在路径之外可以要求方法（按 RFC 9110 §9.1 区分大小写）、主机（含一层 `*.parent` 通配）、请求头（名称不区分大小写，多行按 RFC 9110 §5.3 合并后判断）、查询参数（按 WHATWG URL 标准的 `application/x-www-form-urlencoded` 解码，重复参数任一值成立即可）、Cookie（取自每个 `Cookie` 字段，RFC 6265 §5.4）、客户端地址（经可信代理之后，网段或单个地址，IPv4 映射的 IPv6 按 IPv4 判断）、User-Agent、Referer 与内容类型（不含参数、不区分大小写，可写 `text/*`），取值判断有存在、不存在、等于、开头、结尾、包含与正则，并可忽略大小写；`any`、`all` 与 `not` 组合条件，最多 64 个、嵌套 8 层，正则受与路径相同的大小限制。匹配移入 `panel-routing`：它为主机找到网站、为网站的路由排序并判断路由是否接收请求，必要时说明原因；网关以它处理请求，控制面以它解释请求，二者因此一致。条件贯穿模型、配置语言（路由块内的 `method`、`host`、`header`、`query`、`cookie`、`client`、`user_agent`、`referer`、`content_type` 指令与 `any`、`all`、`not` 块，错误定位到参数，打印可往返）、IR 与网关 gRPC 契约；带条件的快照要求 `route.conditions` 能力，未知的条件种类会被网关拒绝而不是被忽略。`POST /api/v1/config/route-test` 按应用时的方式编译草稿，给出接收请求的网站与路由、是否为监听器的默认网站、比较所用的规范化主机与路径，以及之前尝试的每条路由及其第一个不成立的部分，或说明没有网站（网关返回 421）或没有路由（返回 404）。`ppanel route add` 以 `--method`、`--header`、`--query`、`--cookie`、`--client`、`--content-type` 与 `--condition` 写入条件，`ppanel route test` 测试请求；控制台的路由表单逐项编辑条件与分组，路由列表显示条件数量，“测试请求”面板展示命中的路由与原因。CI 的 Compose 检查添加只接收来自某网段之外、带 `X-Canary: 1` 的 GET 请求的路由，应用前用测试器确认去向，应用后确认网关只在条件全部成立时由该路由回答。
+
 ### 3.2 目标仓库边界
 
 Pingora 上游 crates 继续保留在根 workspace，以便固定版本、审计源码、紧急打补丁和进行兼容测试。产品代码统一进入 `panel/` 边界。只有 `panel/gateway-pingora` 可以在 `Cargo.toml` 中依赖 `pingora-*`；其他产品 crate 只能依赖稳定的 `GatewayEngine` port 与 Engine-neutral IR。
@@ -835,22 +837,22 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | ROUTE-007 | 87 | 路由启停 | 0.2 | A/C/G | Operator | config-service | 执行“路由启停”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | ROUTE-008 | 88 | 路由排序 | 0.2 | A/C/G | Operator | config-service | 执行“路由排序”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | ROUTE-009 | 89 | 路由拖拽调整优先级 | 0.2 | A/C/G | Operator | config-service | 执行“路由拖拽调整优先级”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
-| ROUTE-010 | 90 | Method 匹配 | 0.6 | A/C/G | Operator | config-service | 执行“Method 匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| ROUTE-011 | 91 | Host 匹配 | 0.6 | A/C/G | Operator | config-service | 执行“Host 匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| ROUTE-012 | 92 | Header 匹配 | 0.6 | A/C/G | Operator | config-service | 执行“Header 匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| ROUTE-013 | 93 | Query 匹配 | 0.6 | A/C/G | Operator | config-service | 执行“Query 匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| ROUTE-014 | 94 | Cookie 匹配 | 0.6 | A/C/G | Operator | config-service | 执行“Cookie 匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| ROUTE-015 | 95 | Client IP 匹配 | 0.6 | A/C/G | Operator | config-service | 执行“Client IP 匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| ROUTE-016 | 96 | CIDR 匹配 | 0.6 | A/C/G | Operator | config-service | 执行“CIDR 匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| ROUTE-017 | 97 | User-Agent 匹配 | 0.6 | A/C/G | Operator | config-service | 执行“User-Agent 匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| ROUTE-018 | 98 | Referer 匹配 | 0.6 | A/C/G | Operator | config-service | 执行“Referer 匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| ROUTE-019 | 99 | Content-Type 匹配 | 0.6 | A/C/G | Operator | config-service | 执行“Content-Type 匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| ROUTE-020 | 100 | 多条件 AND | 0.6 | A/C/G | Operator | config-service | 执行“多条件 AND”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| ROUTE-021 | 101 | 多条件 OR | 0.6 | A/C/G | Operator | config-service | 执行“多条件 OR”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| ROUTE-022 | 102 | 条件 NOT | 0.6 | A/C/G | Operator | config-service | 执行“条件 NOT”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| ROUTE-023 | 103 | 路由命中测试器 | 0.6 | A/C/G | Viewer | config-service | 查询“路由命中测试器”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| ROUTE-024 | 104 | 模拟请求匹配 | 0.6 | A/C/G | Operator | config-service | 执行“模拟请求匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| ROUTE-025 | 105 | 显示最终命中的 Route | 0.6 | A/C/G | Viewer | config-service | 查询“显示最终命中的 Route”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
+| ROUTE-010 | 90 | Method 匹配 | 0.6 | A/C/G | Operator | config-service | 执行“Method 匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| ROUTE-011 | 91 | Host 匹配 | 0.6 | A/C/G | Operator | config-service | 执行“Host 匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| ROUTE-012 | 92 | Header 匹配 | 0.6 | A/C/G | Operator | config-service | 执行“Header 匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| ROUTE-013 | 93 | Query 匹配 | 0.6 | A/C/G | Operator | config-service | 执行“Query 匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| ROUTE-014 | 94 | Cookie 匹配 | 0.6 | A/C/G | Operator | config-service | 执行“Cookie 匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| ROUTE-015 | 95 | Client IP 匹配 | 0.6 | A/C/G | Operator | config-service | 执行“Client IP 匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| ROUTE-016 | 96 | CIDR 匹配 | 0.6 | A/C/G | Operator | config-service | 执行“CIDR 匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| ROUTE-017 | 97 | User-Agent 匹配 | 0.6 | A/C/G | Operator | config-service | 执行“User-Agent 匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| ROUTE-018 | 98 | Referer 匹配 | 0.6 | A/C/G | Operator | config-service | 执行“Referer 匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| ROUTE-019 | 99 | Content-Type 匹配 | 0.6 | A/C/G | Operator | config-service | 执行“Content-Type 匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| ROUTE-020 | 100 | 多条件 AND | 0.6 | A/C/G | Operator | config-service | 执行“多条件 AND”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| ROUTE-021 | 101 | 多条件 OR | 0.6 | A/C/G | Operator | config-service | 执行“多条件 OR”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| ROUTE-022 | 102 | 条件 NOT | 0.6 | A/C/G | Operator | config-service | 执行“条件 NOT”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| ROUTE-023 | 103 | 路由命中测试器 | 0.6 | A/C/G | Viewer | config-service | 查询“路由命中测试器”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| ROUTE-024 | 104 | 模拟请求匹配 | 0.6 | A/C/G | Operator | config-service | 执行“模拟请求匹配”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| ROUTE-025 | 105 | 显示最终命中的 Route | 0.6 | A/C/G | Viewer | config-service | 查询“显示最终命中的 Route”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
 | UP-001 | 106 | 反向代理目标设置 | 0.2 | A/C/G | Operator | gatewayd | 执行“反向代理目标设置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | UP-002 | 107 | HTTP 上游 | 0.2 | A/C/G | Operator | gatewayd | 执行“HTTP 上游”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | UP-003 | 108 | HTTPS 上游 | 0.2 | A/C/G | Operator | gatewayd | 执行“HTTPS 上游”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
@@ -1440,7 +1442,7 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | 新增团队/平台需求 | 105 |
 | 总 Feature ID | 685 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
-| 当前 `Implemented` | 442（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-006`；身份：`IAM-001`～`IAM-038`；证书：`TLS-001`～`TLS-033`；安全：`SEC-001`～`SEC-035`；可观测：`OBS-001`～`OBS-044`、`OBS-047`～`OBS-053`；主机：`HOST-001`～`HOST-018`；容器：`CTR-001`～`CTR-038`；文件与备份：`BACKUP-001`～`BACKUP-012`） |
+| 当前 `Implemented` | 458（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-025`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-006`；身份：`IAM-001`～`IAM-038`；证书：`TLS-001`～`TLS-033`；安全：`SEC-001`～`SEC-035`；可观测：`OBS-001`～`OBS-044`、`OBS-047`～`OBS-053`；主机：`HOST-001`～`HOST-018`；容器：`CTR-001`～`CTR-038`；文件与备份：`BACKUP-001`～`BACKUP-012`） |
 | 1.0 要求 `Verified` | 685 |
 
 分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 47、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。

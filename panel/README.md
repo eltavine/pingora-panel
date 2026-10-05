@@ -255,6 +255,34 @@ ppanel config apply
 ppanel upstream health
 ```
 
+A route takes requests by path and, optionally, by conditions that must
+all hold ([decision](../docs/adr/0036-route-conditions.md)): methods,
+hosts, header fields, query parameters and cookies that are present,
+absent, equal to, start or end with or contain a value or match a regular
+expression, client networks after trusted proxies, user agents, referers
+and media types, grouped with `any`, `all` and `not`. The gateway and the
+route tester share one matcher, so `POST /api/v1/config/route-test`
+explains which route of the draft a request takes, and why each route
+before it does not, exactly as the gateway would decide:
+
+```sh
+ppanel route add <site-id> --match prefix:/api --proxy <canary-upstream-id> \
+  --method GET --header x-canary=1
+ppanel route test --host shop.example --target /api/items -H 'X-Canary: 1'
+```
+
+In the configuration language the same route reads:
+
+```nginx
+route canary {
+    match prefix /api;
+    method GET;
+    header x-canary = 1;
+    not { client 192.0.2.0/24; }
+    proxy canary;
+}
+```
+
 `-o json` prints machine-readable output and `completion <shell>` prints a
 completion script. Exit codes distinguish usage errors (2), missing resources
 (3), conflicts and failed preconditions (4), rejected changes (5), an
