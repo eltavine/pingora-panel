@@ -541,6 +541,8 @@ ppanel container inspect shop-web-1
 ppanel container logs shop-web-1 --lines 500 --since 1h --timestamps
 ppanel container logs shop-web-1 --follow
 ppanel container stats
+ppanel image list --search nginx
+ppanel image remove ghcr.io/example/app:2.3 --yes
 ppanel container restart shop-web-1 --yes
 ppanel container remove nightly-report --volumes --yes
 ```
@@ -578,6 +580,19 @@ cache the kernel can reclaim against its limit, network traffic summed
 over the container's interfaces with errors and drops, block I/O and
 processes, each with the time the engine read them. The agent reads at
 most 16 containers at once, and leaves out one that stops meanwhile.
+`GET /api/v1/container-engines/{engine}/images` lists an engine's images
+with their tags, digests, size and the containers made from each,
+searched by tag or ID, and `.../images/{image}` shows one's platform,
+author, user, working directory, exposed ports, volumes, stop signal,
+layers and labels, never its environment or command line; both need
+`containers.read`. `DELETE .../images/{image}` needs `containers.manage`
+and removes the reference it names, and the image once nothing else
+names it; `force` removes one stopped containers use, though the engine
+still refuses one a running container uses. An image is named by its ID,
+a prefix of it, or a reference with its slashes percent-encoded, and the
+agent refuses a reference that would leave the engine's image paths. An
+image the installation's own containers use is never removed, and each
+removal is audited as `container.image.removed`, refused or not.
 `POST /api/v1/container-engines/{engine}/{enable,disable}` needs
 `containers.manage`, as do
 `POST /api/v1/container-engines/{engine}/containers/{container}/{start,stop,restart,kill}`
@@ -592,7 +607,8 @@ the details or its row, and has a menu on each container that asks
 before anything but a start. Its logs can be filtered by output and
 text, followed from the last line read and saved as a file. The table
 shows each running container's CPU and memory, and the details show
-everything it uses.
+everything it uses. An Images tab lists the engine's images, opens one's
+configuration and removes one after confirming.
 
 ## Alerts
 
