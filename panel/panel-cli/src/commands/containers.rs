@@ -122,7 +122,57 @@ pub(crate) enum ContainerCommand {
         #[arg(long)]
         yes: bool,
     },
+    /// The sites of the draft that point at an engine's containers, and the
+    /// containers whose labels declare hosts no site serves.
+    Links {
+        /// `docker` or `podman`.
+        #[arg(long, default_value = "docker")]
+        engine: String,
+    },
+    /// Puts a reverse-proxy site in front of a container: adds an upstream
+    /// with one of its endpoints and a site for it to the draft, as one
+    /// change. What is left out comes from its labels. Apply the draft to
+    /// serve it.
+    Proxy {
+        #[command(flatten)]
+        target: Target,
+        /// The site's name, and its upstream's; what the labels declare, or
+        /// the container's name, by default.
+        #[arg(long)]
+        name: Option<String>,
+        /// A host the site serves; repeat for more. What the labels declare
+        /// by default.
+        #[arg(long = "domain", value_name = "HOST")]
+        domains: Vec<String>,
+        /// One of the container's endpoints, as `HOST:PORT`; by default the
+        /// first for its declared or only port, published first.
+        #[arg(long, value_parser = endpoint)]
+        endpoint: Option<(String, u16)>,
+    },
 }
+
+/// An endpoint as `HOST:PORT`, an IPv6 host in brackets.
+fn endpoint(value: &str) -> std::result::Result<(String, u16), String> {
+    let (host, port) = value
+        .rsplit_once(':')
+        .ok_or_else(|| "write it as HOST:PORT".to_owned())?;
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    let port: u16 = port
+        .parse()
+        .map_err(|_| format!("`{port}` is not a port"))?;
+    if host.is_empty() || port == 0 {
+        return Err("write it as HOST:PORT".into());
+    }
+    Ok((host.to_owned(), port))
+}
+
+const LINKS: &[Column] = &[
+    ("CONTAINER", |link| text(&link["container"])),
+    ("SITE", |link| text(&link["site"])),
+    ("UPSTREAM", |link| text(&link["upstream"])),
+    ("NODE", |link| text(&link["node"])),
+    ("ROUTE", |link| text(&link["route"])),
+];
 
 /// The container an action is taken on.
 #[derive(clap::Args)]
@@ -476,6 +526,59 @@ pub async fn run(api: &Api, output: &Output, command: ContainerCommand) -> Resul
                 output.json(&change);
             } else if !output.quiet {
                 println!("removed {}", text(&change["name"]));
+            }
+        }
+        ContainerCommand::Links { engine } => {
+            let path = format!("/api/v1/container-engines/{engine}/site-links");
+            let found = api.get(&path, &[]).await?.body;
+            if output.format == Format::Json {
+                output.json(&found);
+            } else if !output.quiet {
+                if found["links"].as_array().is_some_and(Vec::is_empty) {
+                    eprintln!("no site points at a container of the engine");
+                } else {
+                    output.list(&found["links"], LINKS);
+                }
+                for unserved in found["unserved"].as_array().into_iter().flatten() {
+                    eprintln!(
+                        "{} declares {}, which no site serves",
+                        text(&unserved["container"]),
+                        text(&unserved["domains"])
+                    );
+                }
+            }
+        }
+        ContainerCommand::Proxy {
+            target,
+            name,
+            domains,
+            endpoint,
+        } => {
+            let path = format!(
+                "/api/v1/container-engines/{}/containers/{}/sites",
+                target.engine, target.container
+            );
+            let mut body = serde_json::json!({ "domains": domains });
+            if let Some(name) = name {
+                body["name"] = name.into();
+            }
+            if let Some((host, port)) = endpoint {
+                body["endpoint"] = serde_json::json!({ "host": host, "port": port });
+            }
+            let created = api
+                .change(Method::POST, &path, Some(&body), None)
+                .await?
+                .body;
+            if output.format == Format::Json {
+                output.json(&created);
+            } else if !output.quiet {
+                println!(
+                    "added the site {} for {} to the draft, proxying to {}",
+                    text(&created["site"]),
+                    text(&created["domains"]),
+                    text(&created["node"])
+                );
+                eprintln!("apply the draft to serve it: ppanel config apply");
             }
         }
     }

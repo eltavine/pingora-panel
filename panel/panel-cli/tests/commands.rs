@@ -284,6 +284,27 @@ async fn api(
             "reclaimed_bytes": 1_024
         }))
         .into_response(),
+        ("GET", "/api/v1/container-engines/docker/site-links") => Json(json!({
+            "observed_at": "2027-01-15T08:00:10Z",
+            "links": [{"container_id": "b2", "container": "shop-web-1",
+                       "site_id": "0190b5b6-3f43-7a52-8a56-2f8b7a7d5a01", "site": "shop",
+                       "upstream_id": "0190b5b6-3f43-7a52-8a56-2f8b7a7d5a11", "upstream": "web",
+                       "node": "127.0.0.1:8081", "route": "published"}],
+            "unserved": [{"container_id": "c3", "container": "blog-1",
+                          "domains": ["blog.example"], "port": 80}]
+        }))
+        .into_response(),
+        ("POST", "/api/v1/container-engines/docker/containers/shop-web-1/sites") => (
+            StatusCode::CREATED,
+            Json(json!({
+                "site_id": "0190b5b6-3f43-7a52-8a56-2f8b7a7d5a01", "site": "shop",
+                "upstream": "shop", "node": body["endpoint"].get("host").map_or_else(
+                    || "127.0.0.1:8081".to_owned(),
+                    |host| format!("{}:{}", host.as_str().unwrap(), body["endpoint"]["port"])),
+                "domains": body["domains"], "draft_version": 7
+            })),
+        )
+            .into_response(),
         ("POST", "/api/v1/container-engines/docker/image-pulls") => {
             let layer = |id: &str, state: &str, current: u64| {
                 json!({"id": id, "state": state, "current_bytes": current, "total_bytes": 4096})
@@ -3036,4 +3057,65 @@ fn images_are_pulled_from_the_command_line() {
         .collect();
     assert_eq!(messages.len(), 4);
     assert_eq!(messages[3]["kind"], "pulled");
+}
+
+#[test]
+fn sites_go_in_front_of_containers_from_the_command_line() {
+    let stub = Stub::start();
+    let links = stub.ppanel(&["container", "links"]);
+    assert!(links.status.success(), "{}", stderr(&links));
+    let row = stdout(&links)
+        .lines()
+        .find(|line| line.starts_with("shop-web-1"))
+        .unwrap()
+        .to_owned();
+    assert!(
+        row.contains("127.0.0.1:8081") && row.contains("published"),
+        "{row}"
+    );
+    assert!(
+        stderr(&links).contains("blog-1 declares blog.example, which no site serves"),
+        "{}",
+        stderr(&links)
+    );
+
+    let proxied = stub.ppanel(&[
+        "container",
+        "proxy",
+        "shop-web-1",
+        "--name",
+        "shop",
+        "--domain",
+        "shop.example",
+        "--endpoint",
+        "172.18.0.2:80",
+    ]);
+    assert!(proxied.status.success(), "{}", stderr(&proxied));
+    assert_eq!(
+        stdout(&proxied),
+        "added the site shop for shop.example to the draft, proxying to 172.18.0.2:80\n"
+    );
+    assert!(stderr(&proxied).contains("ppanel config apply"));
+    let asked = stub.requests(
+        "POST",
+        "/api/v1/container-engines/docker/containers/shop-web-1/sites",
+    );
+    assert_eq!(
+        asked[0].body,
+        json!({"name": "shop", "domains": ["shop.example"],
+               "endpoint": {"host": "172.18.0.2", "port": 80}})
+    );
+    let declared = stub.ppanel(&["container", "proxy", "shop-web-1"]);
+    assert!(declared.status.success(), "{}", stderr(&declared));
+    assert_eq!(
+        stub.requests(
+            "POST",
+            "/api/v1/container-engines/docker/containers/shop-web-1/sites"
+        )[1]
+        .body,
+        json!({"domains": []}),
+        "what is left out comes from the labels"
+    );
+    let unparsed = stub.ppanel(&["container", "proxy", "shop-web-1", "--endpoint", "8081"]);
+    assert_eq!(unparsed.status.code(), Some(2));
 }
