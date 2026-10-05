@@ -641,3 +641,108 @@ fn syntax_errors_point_at_their_line_in_the_file() {
     assert_eq!(diagnostics[0].source, "main.conf");
     assert_eq!(diagnostics[0].line, Some(14));
 }
+
+#[tokio::test]
+async fn panel_v1_reads_and_answers_requests_without_ngx_quirks() {
+    let lua = start(
+        1,
+        handlers(&[
+            r#"
+            local panel = require("panel.v1")
+            assert(panel.version == 1)
+            local query = panel.req.query()
+            panel.ctx().seen = {
+                method = panel.req.method(),
+                path = panel.req.path(),
+                tags = #query.tag,
+                flag = panel.req.query_value("flag"),
+                accept = panel.req.header("ACCEPT"),
+                cookies = #panel.req.headers().cookie,
+                client = panel.req.client(),
+                id = panel.req.id(),
+            }
+            panel.req.set_header("X-Checked", "1")
+            panel.req.set_header("X-Drop", nil)
+            local ok = pcall(function() panel.req.extra = 1 end)
+            assert(not ok, "module tables are frozen")
+            "#,
+            r#"
+            local panel = require("panel.v1")
+            local seen = panel.ctx().seen
+            local digest = panel.crypto.sha256("abc")
+            local mac = panel.crypto.hmac_sha256("key", "The quick brown fox jumps over the lazy dog")
+            local body = panel.json.encode({
+                seen = seen,
+                digest = digest,
+                mac = mac,
+                same = panel.crypto.equal(mac, mac),
+                differ = panel.crypto.equal(mac, digest),
+                uuid = #panel.random.uuid(),
+                bytes = #panel.random.bytes(16),
+                round = panel.crypto.unbase64(panel.crypto.base64("hi")),
+                match = panel.re.match("item-42", [[(\d+)]])[1],
+                replaced = (panel.re.replace("a-b-c", "-", "+")),
+                http = panel.time.http(0),
+                rfc3339 = panel.time.rfc3339(0),
+                decoded = panel.json.decode('{"a":[1,2]}').a[2],
+            })
+            return panel.resp.send(201, body, { ["Content-Type"] = "application/json" })
+            "#,
+        ]),
+    );
+    let mut scripts = lua.runtime.scripts(request(
+        "GET",
+        "/items?tag=a&tag=b&flag",
+        &[
+            ("accept", "text/html"),
+            ("cookie", "a=1"),
+            ("cookie", "b=2"),
+            ("x-drop", "gone"),
+        ],
+    ));
+    let access = run(&mut scripts, handler(lua.handlers[0], Phase::Access)).await;
+    assert!(matches!(access, Outcome::Continue), "{access:?}");
+    {
+        let exchange = scripts.exchange();
+        assert_eq!(exchange.request.headers["x-checked"], "1");
+        assert!(!exchange.request.headers.contains_key("x-drop"));
+    }
+    let content = run(&mut scripts, handler(lua.handlers[1], Phase::Content)).await;
+    assert!(matches!(content, Outcome::Respond), "{content:?}");
+    let exchange = scripts.exchange();
+    assert_eq!(exchange.response.status, 201);
+    assert_eq!(
+        exchange.response.headers["content-type"],
+        "application/json"
+    );
+    let body: serde_json::Value = serde_json::from_slice(&exchange.response.body).unwrap();
+    assert_eq!(
+        body["seen"],
+        serde_json::json!({
+            "method": "GET", "path": "/items", "tags": 2, "flag": "", "accept": "text/html",
+            "cookies": 2, "client": "192.0.2.7", "id": "0b1d0c8e9f2a4b6c",
+        })
+    );
+    assert_eq!(
+        body["digest"],
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+    assert_eq!(
+        body["mac"],
+        "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8"
+    );
+    assert_eq!(
+        (body["same"].clone(), body["differ"].clone()),
+        (true.into(), false.into())
+    );
+    assert_eq!(
+        (body["uuid"].clone(), body["bytes"].clone()),
+        (36.into(), 16.into())
+    );
+    assert_eq!(body["round"], "hi");
+    assert_eq!(body["match"], "42");
+    assert_eq!(body["replaced"], "a+b+c");
+    assert_eq!(body["http"], "Thu, 01 Jan 1970 00:00:00 GMT");
+    assert_eq!(body["rfc3339"], "1970-01-01T00:00:00Z");
+    assert_eq!(body["decoded"], 2);
+}

@@ -68,6 +68,9 @@ fn load(
     module_meta: &Table,
     slot: &Arc<Slot>,
 ) -> mlua::Result<Value> {
+    if name == "panel.v1" {
+        return panel_v1(lua, module_meta);
+    }
     if let Some(module) = built_in(lua, name, ngx, globals, slot)? {
         return Ok(module);
     }
@@ -87,8 +90,116 @@ fn load(
         .call::<Value>(name)
 }
 
+/// `panel.v1`: the Lua of its façade over `ngx`, given the primitives it
+/// needs that `ngx` lacks.
+fn panel_v1(lua: &Lua, module_meta: &Table) -> mlua::Result<Value> {
+    fn hex_digest<D: Digest>(data: &[u8]) -> String {
+        hex::encode(D::digest(data))
+    }
+    fn hmac_sha256(key: &[u8], data: &[u8]) -> String {
+        use hmac::{KeyInit, Mac};
+        let mut mac =
+            hmac::Hmac::<Sha256>::new_from_slice(key).expect("HMAC takes keys of any length");
+        mac.update(data);
+        hex::encode(mac.finalize().into_bytes())
+    }
+    fn hmac_sha512(key: &[u8], data: &[u8]) -> String {
+        use hmac::{KeyInit, Mac};
+        let mut mac =
+            hmac::Hmac::<Sha512>::new_from_slice(key).expect("HMAC takes keys of any length");
+        mac.update(data);
+        hex::encode(mac.finalize().into_bytes())
+    }
+    let native = lua.create_table()?;
+    native.raw_set(
+        "sha256",
+        lua.create_function(|_, data: LuaString| Ok(hex_digest::<Sha256>(&data.as_bytes())))?,
+    )?;
+    native.raw_set(
+        "sha512",
+        lua.create_function(|_, data: LuaString| Ok(hex_digest::<Sha512>(&data.as_bytes())))?,
+    )?;
+    native.raw_set(
+        "hmac_sha256",
+        lua.create_function(|_, (key, data): (LuaString, LuaString)| {
+            Ok(hmac_sha256(&key.as_bytes(), &data.as_bytes()))
+        })?,
+    )?;
+    native.raw_set(
+        "hmac_sha512",
+        lua.create_function(|_, (key, data): (LuaString, LuaString)| {
+            Ok(hmac_sha512(&key.as_bytes(), &data.as_bytes()))
+        })?,
+    )?;
+    native.raw_set(
+        "equal",
+        lua.create_function(|_, (left, right): (LuaString, LuaString)| {
+            let (left, right) = (left.as_bytes(), right.as_bytes());
+            let differ = left
+                .iter()
+                .zip(right.iter())
+                .fold(left.len() ^ right.len(), |differ, (a, b)| {
+                    differ | usize::from(a ^ b)
+                });
+            Ok(differ == 0)
+        })?,
+    )?;
+    native.raw_set(
+        "random_bytes",
+        lua.create_function(|lua, length: usize| {
+            let mut buffer = vec![0u8; length.min(1 << 20)];
+            getrandom::fill(&mut buffer)
+                .map_err(|_| mlua::Error::runtime("no random source is available"))?;
+            lua.create_string(buffer)
+        })?,
+    )?;
+    native.raw_set(
+        "uuid",
+        lua.create_function(|_, ()| Ok(uuid::Uuid::new_v4().to_string()))?,
+    )?;
+    native.raw_set(
+        "base64",
+        lua.create_function(|_, data: LuaString| {
+            use base64::Engine;
+            Ok(base64::engine::general_purpose::STANDARD.encode(data.as_bytes()))
+        })?,
+    )?;
+    native.raw_set(
+        "unbase64",
+        lua.create_function(|lua, text: LuaString| {
+            use base64::Engine;
+            match base64::engine::general_purpose::STANDARD.decode(text.as_bytes()) {
+                Ok(bytes) => Ok(Value::String(lua.create_string(bytes)?)),
+                Err(_) => Ok(Value::Nil),
+            }
+        })?,
+    )?;
+    native.raw_set(
+        "base64url",
+        lua.create_function(|_, data: LuaString| Ok(encode_base64url(&data.as_bytes())))?,
+    )?;
+    native.raw_set(
+        "unbase64url",
+        lua.create_function(
+            |lua, text: LuaString| match decode_base64url(&text.as_bytes()) {
+                Some(bytes) => Ok(Value::String(lua.create_string(bytes)?)),
+                None => Ok(Value::Nil),
+            },
+        )?,
+    )?;
+    let env = lua.create_table()?;
+    env.set_metatable(Some(module_meta.clone()))?;
+    env.set_safeenv(true);
+    lua.load(include_str!("panel_v1.lua"))
+        .set_name("=panel.v1")
+        .set_environment(env)
+        .into_function()?
+        .call::<Value>(native)
+}
+
 /// The modules OpenResty scripts commonly load that come with the gateway.
-pub(crate) const BUILT_IN: [&str; 21] = [
+pub(crate) const BUILT_IN: [&str; 22] = [
+    "panel.v1",
     "cjson",
     "cjson.safe",
     "bit",

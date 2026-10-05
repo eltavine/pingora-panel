@@ -68,6 +68,7 @@ pub fn lint(source: &Source, role: Role, module: &dyn Fn(&str) -> bool) -> Lint 
         blocks: vec![Block::new(0, Vec::new())],
         depth: 0,
         pending: Vec::new(),
+        panel: BTreeSet::new(),
         lint: Lint::default(),
     };
     checker.run(module);
@@ -97,6 +98,32 @@ const KEYWORDS: [&str; 22] = [
 const SYMBOLS: [&str; 18] = [
     "...", "//=", "..=", "==", "~=", "<=", ">=", "..", "::", "+=", "-=", "*=", "/=", "%=", "^=",
     "//", "->", "=",
+];
+
+/// What each `panel.v1` function reaches of `ngx`, for its phases.
+const PANEL_V1: [(&str, Api); 22] = [
+    ("req.method", Api::ReqGetMethod),
+    ("req.path", Api::Var),
+    ("req.target", Api::Var),
+    ("req.host", Api::Var),
+    ("req.scheme", Api::Var),
+    ("req.client", Api::Var),
+    ("req.id", Api::Var),
+    ("req.query", Api::ReqGetUriArgs),
+    ("req.query_value", Api::ReqGetUriArgs),
+    ("req.headers", Api::ReqGetHeaders),
+    ("req.header", Api::ReqGetHeaders),
+    ("req.set_header", Api::ReqSetHeader),
+    ("req.body", Api::ReqReadBody),
+    ("req.set_body", Api::ReqSetBodyData),
+    ("req.set_path", Api::ReqSetUri),
+    ("req.set_query", Api::ReqSetUriArgs),
+    ("resp.status", Api::Status),
+    ("resp.set_status", Api::Status),
+    ("resp.header", Api::Header),
+    ("resp.set_header", Api::Header),
+    ("resp.send", Api::Output),
+    ("ctx", Api::Ctx),
 ];
 
 fn is_assignment(token: Option<&Token>) -> bool {
@@ -280,6 +307,8 @@ struct Checker<'t> {
     depth: usize,
     /// Loop variables, declared when the loop's block opens.
     pending: Vec<String>,
+    /// Locals `require("panel.v1")` was assigned to.
+    panel: BTreeSet<String>,
     lint: Lint,
 }
 
@@ -412,6 +441,10 @@ impl Checker<'_> {
                     index = self.ngx(index);
                     continue;
                 }
+                (Kind::Name, name) if !after_field && self.panel.contains(name) => {
+                    index = self.panel_v1(index);
+                    continue;
+                }
                 (Kind::Name, name)
                     if !after_field
                         && !KEYWORDS.contains(&name)
@@ -437,6 +470,13 @@ impl Checker<'_> {
                 self.declare(&name);
             }
             return index;
+        }
+        if self.is_name(index)
+            && self.is(index + 1, Kind::Symbol, "=")
+            && self.requires_panel(index + 2)
+        {
+            let name = self.tokens[index].text.clone();
+            self.panel.insert(name);
         }
         while self.is_name(index) {
             let name = self.tokens[index].text.clone();
@@ -506,6 +546,53 @@ impl Checker<'_> {
         }
         self.open(locals);
         index
+    }
+
+    /// Whether `require("panel.v1")` starts at `index`.
+    fn requires_panel(&self, index: usize) -> bool {
+        if !self.is(index, Kind::Name, "require") {
+            return false;
+        }
+        let argument = if self.is(index + 1, Kind::Symbol, "(") {
+            index + 2
+        } else {
+            index + 1
+        };
+        self.at(argument)
+            .is_some_and(|token| token.kind == Kind::String && token.text == "panel.v1")
+    }
+
+    /// `panel.cap.function`: whether the handler's phase allows what it reaches.
+    fn panel_v1(&mut self, index: usize) -> usize {
+        let line = self.tokens[index].line;
+        let mut path = String::new();
+        let mut next = index + 1;
+        while self.is(next, Kind::Symbol, ".")
+            && self
+                .at(next + 1)
+                .is_some_and(|token| token.kind == Kind::Name)
+        {
+            if !path.is_empty() {
+                path.push('.');
+            }
+            path.push_str(&self.tokens[next + 1].text);
+            next += 2;
+        }
+        let reached = PANEL_V1
+            .iter()
+            .find(|(name, _)| *name == path)
+            .map(|(_, api)| *api)
+            .or_else(|| path.starts_with("upstream.").then_some(Api::Balancer));
+        if let (Role::Handler(phase), Some(api)) = (self.role, reached) {
+            if !api.allows(phase) {
+                self.find(
+                    FindingKind::NotInPhase,
+                    line,
+                    format!("panel.v1 {path} is disabled in {}", context(phase)),
+                );
+            }
+        }
+        next
     }
 
     /// `require "name"`, `require("name")` or `require [[name]]`.
@@ -702,5 +789,36 @@ local s = "quoted = 1" .. [[long = 2]]
             "ngx.print is disabled in log_by_lua*"
         );
         assert!(found("ngx.req.set_uri('/', true)", Role::Module).is_empty());
+    }
+
+    #[test]
+    fn panel_v1_calls_are_checked_by_what_they_reach() {
+        let text = "local api = require('panel.v1')\napi.resp.send(403, 'no')\nlocal v = api.req.header('x')\napi.upstream.set_peer('10.0.0.1', 80)\n";
+        assert_eq!(
+            found(text, Role::Handler(Phase::HeaderFilter)),
+            [
+                (
+                    FindingKind::NotInPhase,
+                    2,
+                    "panel.v1 resp.send is disabled in header_filter_by_lua*".to_owned()
+                ),
+                (
+                    FindingKind::NotInPhase,
+                    4,
+                    "panel.v1 upstream.set_peer is disabled in header_filter_by_lua*".to_owned()
+                ),
+            ]
+        );
+        assert_eq!(
+            found(text, Role::Handler(Phase::Access)).len(),
+            1,
+            "only the balancer call"
+        );
+        assert!(found(
+            "local p = require 'panel.v1'\np.req.body()",
+            Role::Handler(Phase::Log)
+        )
+        .iter()
+        .any(|(_, _, message)| message.contains("req.body")));
     }
 }
