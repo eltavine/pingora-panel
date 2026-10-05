@@ -268,7 +268,27 @@ fn port(value: PortSummary) -> wire::PortMapping {
     }
 }
 
+/// A container's addresses by network, leaving out the host's network,
+/// where it has none of its own.
+fn addresses(value: &ContainerSummary) -> Vec<wire::ContainerAddress> {
+    let mut addresses: Vec<wire::ContainerAddress> = value
+        .network_settings
+        .iter()
+        .flat_map(|settings| settings.networks.iter().flatten())
+        .filter(|(network, _)| !matches!(network.as_str(), "host" | "none"))
+        .map(|(network, endpoint)| wire::ContainerAddress {
+            network: network.clone(),
+            ipv4: endpoint.ip_address.clone().unwrap_or_default(),
+            ipv6: endpoint.global_ipv6_address.clone().unwrap_or_default(),
+        })
+        .filter(|address| !address.ipv4.is_empty() || !address.ipv6.is_empty())
+        .collect();
+    addresses.sort_by(|left, right| left.network.cmp(&right.network));
+    addresses
+}
+
 pub(crate) fn container(value: ContainerSummary) -> wire::Container {
+    let addresses = addresses(&value);
     let labels = value.labels.unwrap_or_default();
     wire::Container {
         id: value.id.unwrap_or_default(),
@@ -294,6 +314,7 @@ pub(crate) fn container(value: ContainerSummary) -> wire::Container {
             .collect(),
         compose_project: labels.get(COMPOSE_PROJECT).cloned().unwrap_or_default(),
         labels: labels.into_iter().collect(),
+        addresses,
     }
 }
 
@@ -819,6 +840,44 @@ mod tests {
         assert!(!missing.reachable && !missing.detail.is_empty());
     }
 
+    #[test]
+    fn addresses_leave_out_the_hosts_network_and_empty_ones() {
+        let endpoint = |ipv4: &str, ipv6: &str| bollard::models::EndpointSettings {
+            ip_address: Some(ipv4.into()),
+            global_ipv6_address: Some(ipv6.into()),
+            ..bollard::models::EndpointSettings::default()
+        };
+        let summary = ContainerSummary {
+            network_settings: Some(bollard::models::ContainerSummaryNetworkSettings {
+                networks: Some(
+                    [
+                        ("shop_default".to_owned(), endpoint("172.18.0.2", "")),
+                        ("proxy".to_owned(), endpoint("", "fd00::2")),
+                        ("idle".to_owned(), endpoint("", "")),
+                        ("host".to_owned(), endpoint("10.0.0.5", "")),
+                    ]
+                    .into(),
+                ),
+            }),
+            ..ContainerSummary::default()
+        };
+        let found: Vec<_> = addresses(&summary)
+            .into_iter()
+            .map(|address| (address.network, address.ipv4, address.ipv6))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                ("proxy".to_owned(), String::new(), "fd00::2".to_owned()),
+                (
+                    "shop_default".to_owned(),
+                    "172.18.0.2".to_owned(),
+                    String::new()
+                ),
+            ]
+        );
+    }
+
     #[tokio::test]
     async fn containers_are_listed_searched_and_filtered() {
         let directory = tempfile::tempdir().unwrap();
@@ -848,6 +907,14 @@ mod tests {
         );
         assert_eq!(shop.ports[0].protocol, "tcp");
         assert_eq!(shop.created.unwrap().seconds, 1_800_000_000);
+        assert_eq!(
+            shop.addresses,
+            [wire::ContainerAddress {
+                network: "shop_default".into(),
+                ipv4: "172.18.0.2".into(),
+                ipv6: String::new(),
+            }]
+        );
 
         let found = list(&service, "NGINX", Vec::new()).await;
         assert_eq!(found.containers.len(), 1);

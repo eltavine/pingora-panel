@@ -346,7 +346,8 @@ pub(crate) async fn engine_with(directory: &Path, calls: Calls) -> PathBuf {
                                 "com.docker.compose.project.working_dir": "/srv/shop",
                                 "com.docker.compose.project.config_files":
                                     "/srv/shop/compose.yaml"},
-                     "NetworkSettings": {"Networks": {"shop_default": {}}},
+                     "NetworkSettings": {"Networks": {
+                         "shop_default": {"IPAddress": "172.18.0.2", "GlobalIPv6Address": ""}}},
                      "Mounts": [{"Type": "volume", "Name": "shop_html",
                                  "Destination": "/usr/share/nginx/html"},
                                 {"Type": "bind", "Source": "/srv/shop", "Destination": "/srv"}]},

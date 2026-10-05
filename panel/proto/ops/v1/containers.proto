@@ -114,6 +114,15 @@ message PortMapping {
   string protocol = 4;
 }
 
+// An address a container has on a network.
+message ContainerAddress {
+  // Such as `bridge` or `shop_default`.
+  string network = 1;
+  // Empty when it has none.
+  string ipv4 = 2;
+  string ipv6 = 3;
+}
+
 // A container as a list shows it; its command is left out, since command
 // lines carry secrets.
 message Container {
@@ -130,6 +139,8 @@ message Container {
   map<string, string> labels = 9;
   // The Compose project that created it, if one did.
   string compose_project = 10;
+  // By network, on networks other than the host's.
+  repeated ContainerAddress addresses = 11;
 }
 
 message ContainersListRequest {
