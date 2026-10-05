@@ -71,7 +71,7 @@ import { editorDiagnostics } from './lint'
 import NginxImportSheet from './NginxImportSheet.vue'
 import OutlineTree from './OutlineTree.vue'
 import ReviewSheet from './ReviewSheet.vue'
-import { useConfigFiles } from './useConfigFiles'
+import { useConfigFiles } from '@/lib/configFiles'
 import { isFilePath, ENTRY } from '@/lib/files'
 
 const { t } = useI18n()

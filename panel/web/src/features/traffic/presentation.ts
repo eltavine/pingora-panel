@@ -82,3 +82,17 @@ export function areaPath(
   close()
   return path
 }
+
+/** A Lua run time in seconds, in microseconds below a millisecond; a dash when unmeasured. */
+export function runTime(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) {
+    return '—'
+  }
+  if (seconds < 0.001) {
+    return `${Math.round(seconds * 1_000_000)} µs`
+  }
+  if (seconds < 1) {
+    return `${(seconds * 1_000).toFixed(seconds < 0.01 ? 2 : 1)} ms`
+  }
+  return `${seconds.toFixed(2)} s`
+}

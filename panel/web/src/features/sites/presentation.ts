@@ -3,6 +3,7 @@ import {
   ArrowRightLeft,
   Ban,
   Bot,
+  Braces,
   Construction,
   Cookie,
   CornerUpRight,
@@ -25,6 +26,7 @@ export const kindIcons: Record<SiteKind, Component> = {
   static: FolderOpen,
   redirect: CornerUpRight,
   maintenance: Construction,
+  script: Braces,
 }
 
 export const actionIcons: Record<Action['type'], Component> = {
@@ -32,6 +34,7 @@ export const actionIcons: Record<Action['type'], Component> = {
   static: FolderOpen,
   redirect: CornerUpRight,
   respond: MessageSquareText,
+  lua: Braces,
 }
 
 export const statusTones: Record<SiteStatus, StatusTone> = {

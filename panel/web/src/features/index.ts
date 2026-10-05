@@ -11,6 +11,7 @@ import { httpPoliciesFeature } from './http-policies'
 import { identityFeature } from './identity'
 import { listenersFeature } from './listeners'
 import { logsFeature } from './logs'
+import { luaFeature } from './lua'
 import { publishingFeature } from './publishing'
 import { receiptsFeature } from './receipts'
 import { revisionsFeature } from './revisions'
@@ -41,6 +42,7 @@ export const features: readonly FeatureModule[] = [
   httpPoliciesFeature,
   certificatesFeature,
   configStudioFeature,
+  luaFeature,
   siteFilesFeature,
   backupsFeature,
   identityFeature,

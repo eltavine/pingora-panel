@@ -178,6 +178,10 @@ function target(route: RouteView): string {
       return `${action.status ?? 308} → ${action.location}`
     case 'respond':
       return String(action.status ?? 503)
+    case 'lua':
+      return action.code.kind === 'file'
+        ? action.code.path
+        : `${action.code.file ?? 'Lua'}:${action.code.line ?? 1}`
   }
 }
 </script>

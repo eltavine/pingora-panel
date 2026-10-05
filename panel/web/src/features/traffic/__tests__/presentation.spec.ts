@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { areaPath, linePath, scaleOf } from '../presentation'
+import { areaPath, linePath, runTime, scaleOf } from '../presentation'
 import { formatters, nodeOf } from '@/lib/format'
 
 describe('traffic figures', () => {
@@ -42,5 +42,15 @@ describe('traffic charts', () => {
 
   it('fill the area under each unbroken run', () => {
     expect(areaPath([0, 4, null, 4], 4, 30, 10)).toBe('M0.00,10L0.00,10.00L10.00,0.00L10.00,10Z')
+  })
+})
+
+describe('runTime', () => {
+  it('reads Lua run times down to microseconds', () => {
+    expect(runTime(0.000_42)).toBe('420 µs')
+    expect(runTime(0.0031)).toBe('3.10 ms')
+    expect(runTime(0.025)).toBe('25.0 ms')
+    expect(runTime(1.5)).toBe('1.50 s')
+    expect(runTime(null)).toBe('—')
   })
 })

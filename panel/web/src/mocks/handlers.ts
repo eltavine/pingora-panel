@@ -157,6 +157,24 @@ function summary(windowSeconds: number): TrafficSummaryResponse {
     ],
     revision: 42,
     activated_at: activated,
+    lua: {
+      runs: requests * 0.4,
+      failures: { timeout: 2, error: 1 },
+      slow_runs: 4,
+      latency: { p50: 0.0004, p90: 0.0011, p95: 0.0021, p99: 0.009 },
+      handlers: [
+        {
+          site: 'shop',
+          route: 'checkout',
+          phase: 'access',
+          runs: requests * 0.38,
+          failures: 3,
+          slow_runs: 4,
+          p95: 0.0031,
+        },
+      ],
+      memory_bytes: 6_291_456,
+    },
   }
 }
 
@@ -213,6 +231,7 @@ export function handlers(sampler: Sampler): AnyHandler[] {
     redirect: 1,
     reverse_proxy: 2,
     static: 1,
+    script: 0,
   }
   const health: UpstreamHealthReportResponse = {
     active_revision_id: 42,

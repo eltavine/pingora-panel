@@ -26,7 +26,7 @@ import {
   keymap,
   lineNumbers,
 } from '@codemirror/view'
-import { configurationLanguage } from './language'
+import { languageOf } from './language'
 import { offsetOf, placeOf, type Place } from './spans'
 import { editorHighlight, editorTheme } from './theme'
 
@@ -37,6 +37,8 @@ const props = defineProps<{
   /** Accessible name of the text area. */
   label: string
   readonly?: boolean
+  /** Lua code, whatever the path; `.lua` paths are Lua anyway. */
+  lua?: boolean
   /** Fixed at mount: completion and lint sources read their inputs lazily. */
   extensions?: Extension[]
 }>()
@@ -83,7 +85,7 @@ function create(doc: string): EditorState {
       ]),
       indentUnit.of('    '),
       EditorState.tabSize.of(4),
-      configurationLanguage,
+      languageOf(props.path, props.lua),
       syntaxHighlighting(editorHighlight),
       editorTheme,
       editable.of(access(props.readonly ?? false)),

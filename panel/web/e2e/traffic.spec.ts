@@ -40,6 +40,24 @@ const summary = {
   ],
   revision: 7,
   activated_at: '2026-10-04T09:00:00Z',
+  lua: {
+    runs: 480,
+    failures: { timeout: 2, error: 1 },
+    slow_runs: 5,
+    latency: { p50: 0.0004, p90: 0.001, p95: 0.0031, p99: 0.02 },
+    handlers: [
+      {
+        site: 'shop',
+        route: 'checkout',
+        phase: 'access',
+        runs: 120,
+        failures: 3,
+        slow_runs: 5,
+        p95: 0.012,
+      },
+    ],
+    memory_bytes: 3_145_728,
+  },
 }
 
 const series = {
@@ -92,12 +110,17 @@ test('the traffic of a window is summarized and charted', async ({ page }) => {
   await expect(page.getByText('250 ms', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('1.5 MiB', { exact: true })).toBeVisible()
   await expect(page.getByRole('img', { name: 'Request rate' })).toBeVisible()
-  await expect(page.getByRole('cell', { name: 'checkout' })).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'checkout' }).first()).toBeVisible()
   await expect(page.getByRole('cell', { name: '*.shop.example' })).toBeVisible()
   await expect(page.getByRole('cell', { name: '10.0.0.7:8080' })).toBeVisible()
   await expect(page.getByRole('cell', { name: '87.5%' })).toBeVisible()
   await expect(page.getByRole('cell', { name: '12.5%' })).toBeVisible()
   await expect(page.getByText('Active configuration revision #7')).toBeVisible()
+  const lua = page.locator('[data-slot="card"]').filter({ hasText: 'Run time p95' })
+  await expect(lua.getByText('3.10 ms', { exact: true })).toBeVisible()
+  await expect(lua.getByText('timeout · 2')).toBeVisible()
+  await expect(lua.getByRole('cell', { name: 'access' })).toBeVisible()
+  await expect(lua.getByText('3 MiB', { exact: true })).toBeVisible()
   await expect(page.getByRole('img', { name: '4xx: 4% of requests' })).toBeVisible()
   expect(windows).toContain('3600')
 

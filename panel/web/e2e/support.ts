@@ -8,6 +8,7 @@ export const ALL_PERMISSIONS = [
   'config.read',
   'config.write',
   'config.apply',
+  'config.lua',
   'approval.manage',
   'approval.decide',
   'approval.bypass',

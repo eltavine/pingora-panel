@@ -108,3 +108,30 @@ describe('configurationTokens', () => {
     ])
   })
 })
+
+describe('Lua blocks', () => {
+  it('read their code with Lua tokens up to the brace that closes them', () => {
+    const read = tokens([
+      'access_by_lua_block {',
+      '    local t = { "}", [[}]] } -- }',
+      '    if ngx.var.arg_x then return ngx.exit(403) end',
+      '}',
+      'listen 80;',
+    ])
+    expect(read[0]).toEqual(['access_by_lua_block', 'keyword'])
+    expect(read).toContainEqual(['local', 'keyword'])
+    expect(read).toContainEqual(['"}"', 'string'])
+    expect(read).toContainEqual(['[[}]]', 'string'])
+    expect(read).toContainEqual(['-- }', 'comment'])
+    expect(read).toContainEqual(['return', 'keyword'])
+    const closing = read.findIndex(([text]) => text === 'listen')
+    expect(read[closing - 1]).toEqual(['}', 'brace'])
+    expect(read[closing]).toEqual(['listen', 'keyword'])
+  })
+
+  it('leave arguments named like blocks alone', () => {
+    const read = tokens(['set $x content_by_lua_block;', 'server s { }'])
+    expect(read).toContainEqual(['server', 'keyword'])
+    expect(read).toContainEqual(['{', 'brace'])
+  })
+})

@@ -22,6 +22,7 @@ export const SITE_KINDS: readonly SiteKind[] = [
   'static',
   'redirect',
   'maintenance',
+  'script',
 ]
 export const MATCH_KINDS: readonly MatchKind[] = ['prefix', 'exact', 'glob', 'regex']
 export const REDIRECT_STATUSES = [301, 302, 303, 307, 308] as const
@@ -33,6 +34,7 @@ export const siteKindAction: Record<SiteKind, ActionType> = {
   static: 'static',
   redirect: 'redirect',
   maintenance: 'respond',
+  script: 'lua',
 }
 
 /** Every action variant's fields at once, so switching type keeps typed input. */
@@ -49,6 +51,8 @@ export interface ActionForm {
   body: string
   contentType: string
   retryAfter: number | string
+  /** A Lua answer, kept as it is: Lua is written in the configuration files. */
+  lua?: Extract<Action, { type: 'lua' }>
 }
 
 /** Strict-Transport-Security as the form edits it, in days. */
@@ -147,6 +151,9 @@ export function actionForm(action?: Action): ActionForm {
       form.contentType = action.content_type ?? ''
       form.retryAfter = action.retry_after_seconds ?? ''
       break
+    case 'lua':
+      form.lua = action
+      break
   }
   return form
 }
@@ -177,6 +184,8 @@ export function toAction(form: ActionForm): Action {
         content_type: optionalText(form.contentType),
         retry_after_seconds: optionalNumber(form.retryAfter),
       }
+    case 'lua':
+      return form.lua ?? { type: 'lua', code: { kind: 'inline', code: '' } }
   }
 }
 

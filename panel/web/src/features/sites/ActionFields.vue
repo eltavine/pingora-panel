@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Braces } from '@lucide/vue'
 import { useQuery } from '@tanstack/vue-query'
 import { useI18n } from 'vue-i18n'
 import { listUpstreamsOptions } from '@/api/generated/@tanstack/vue-query.gen'
@@ -97,6 +98,13 @@ const id = (field: string) => `${props.idPrefix}-${field}`
       />
     </template>
 
+    <p
+      v-else-if="action.type === 'lua'"
+      class="text-muted-foreground flex items-start gap-2 text-sm"
+    >
+      <Braces class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+      {{ t('sites.form.luaAction') }}
+    </p>
     <template v-else>
       <div class="grid gap-4 sm:grid-cols-2">
         <FormField :id="id('respond-status')" :label="t('sites.form.respondStatus')">

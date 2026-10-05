@@ -49,6 +49,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useSession } from '@/lib/session'
+import LuaTrafficCard from './LuaTrafficCard.vue'
 import StatusBreakdown from './StatusBreakdown.vue'
 import TrafficChart from './TrafficChart.vue'
 import { REFRESH_INTERVAL_MS, WINDOWS } from './presentation'
@@ -465,6 +466,8 @@ function refresh() {
           </CardContent>
         </Card>
       </div>
+
+      <LuaTrafficCard v-if="figures.lua && figures.lua.runs > 0" :lua="figures.lua" />
 
       <p
         v-if="figures.revision !== null && figures.revision !== undefined"
