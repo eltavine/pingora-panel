@@ -107,8 +107,38 @@ export function containerHandlers(): AnyHandler[] {
         { private_port: 80, public_port: 8081, host_ip: '127.0.0.1', protocol: 'tcp' },
         { private_port: 443, public_port: null, host_ip: '', protocol: 'tcp' },
       ],
-      labels: { 'com.docker.compose.project': 'shop', 'com.docker.compose.service': 'web' },
+      labels: {
+        'com.docker.compose.project': 'shop',
+        'com.docker.compose.service': 'web',
+        'pingora-panel.site.domains': 'shop.example',
+        'pingora-panel.site.port': '80',
+      },
       compose_project: 'shop',
+      addresses: [{ network: 'shop_default', ipv4: '172.18.0.2', ipv6: null }],
+      endpoints: [
+        {
+          host: '127.0.0.1',
+          port: 8081,
+          container_port: 80,
+          route: 'published',
+          network: null,
+        },
+        {
+          host: '172.18.0.2',
+          port: 80,
+          container_port: 80,
+          route: 'network',
+          network: 'shop_default',
+        },
+        {
+          host: '172.18.0.2',
+          port: 443,
+          container_port: 443,
+          route: 'network',
+          network: 'shop_default',
+        },
+      ],
+      declared_site: { name: null, domains: ['shop.example'], port: 80 },
     },
     {
       id: '9b2e7d40c1f8a3e2',
@@ -121,6 +151,16 @@ export function containerHandlers(): AnyHandler[] {
       ports: [{ private_port: 5432, public_port: null, host_ip: '', protocol: 'tcp' }],
       labels: { 'com.docker.compose.project': 'shop', 'com.docker.compose.service': 'db' },
       compose_project: 'shop',
+      addresses: [{ network: 'shop_default', ipv4: '172.18.0.3', ipv6: null }],
+      endpoints: [
+        {
+          host: '172.18.0.3',
+          port: 5432,
+          container_port: 5432,
+          route: 'network',
+          network: 'shop_default',
+        },
+      ],
     },
     {
       id: 'c07a5e1d9f2b6c48',
@@ -133,6 +173,8 @@ export function containerHandlers(): AnyHandler[] {
       ports: [],
       labels: {},
       compose_project: null,
+      addresses: [{ network: 'bridge', ipv4: '172.17.0.2', ipv6: null }],
+      endpoints: [],
     },
     {
       id: 'e5d8b3a2f6c19d07',
@@ -145,6 +187,8 @@ export function containerHandlers(): AnyHandler[] {
       ports: [],
       labels: {},
       compose_project: null,
+      addresses: [],
+      endpoints: [],
     },
   ]
 

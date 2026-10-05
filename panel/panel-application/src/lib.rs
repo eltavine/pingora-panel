@@ -47,6 +47,7 @@ macro_rules! operations {
 mod alerts;
 mod audit;
 mod compose;
+mod container_sites;
 mod containers;
 mod context;
 mod engine_resources;
@@ -71,6 +72,10 @@ pub use audit::{AuditFilter, AuditPage, AuditPort, AuditRecord, AuditVerificatio
 pub use compose::{
     ComposeAction, ComposeChange, ComposeFailure, ComposeFile, ComposeLogLine, ComposeLogs,
     ComposePort, ComposeProject, ComposeProjectList, NoCompose, ProjectService, RecordedCompose,
+};
+pub use container_sites::{
+    declared_site, endpoint_for, endpoints, same_host, ContainerEndpoint, DeclaredSite,
+    EndpointRoute, SITE_DOMAINS_LABEL, SITE_NAME_LABEL, SITE_PORT_LABEL,
 };
 pub use containers::{
     ContainerAction, ContainerAddress, ContainerChange, ContainerDetail, ContainerEngine,

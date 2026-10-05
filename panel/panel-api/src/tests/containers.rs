@@ -1,10 +1,10 @@
 use super::*;
 use panel_application::{
-    CommandContext, ContainerAction, ContainerChange, ContainerDetail, ContainerEngine,
-    ContainerFilter, ContainerList, ContainerLogLine, ContainerLogQuery, ContainerLogStart,
-    ContainerLogStream, ContainerLogTail, ContainerLogs, ContainerMount, ContainerNetwork,
-    ContainerNetworkStats, ContainerState, ContainerStats, ContainerStatsList, ContainerSummary,
-    ContainersPort, EngineInfo, EngineVersion, PortMapping, RequestScope,
+    CommandContext, ContainerAction, ContainerAddress, ContainerChange, ContainerDetail,
+    ContainerEngine, ContainerFilter, ContainerList, ContainerLogLine, ContainerLogQuery,
+    ContainerLogStart, ContainerLogStream, ContainerLogTail, ContainerLogs, ContainerMount,
+    ContainerNetwork, ContainerNetworkStats, ContainerState, ContainerStats, ContainerStatsList,
+    ContainerSummary, ContainersPort, EngineInfo, EngineVersion, PortMapping, RequestScope,
 };
 use serde_json::Value;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -49,11 +49,20 @@ fn container(name: &str, image: &str, state: ContainerState) -> ContainerSummary
             host_ip: "0.0.0.0".into(),
             protocol: "tcp".into(),
         }],
-        labels: [("com.docker.compose.project".to_owned(), "shop".to_owned())]
-            .into_iter()
-            .collect(),
+        labels: [
+            ("com.docker.compose.project", "shop"),
+            ("pingora-panel.site.domains", "Shop.Example"),
+            ("pingora-panel.site.port", "80"),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect(),
         compose_project: Some("shop".into()),
-        addresses: Vec::new(),
+        addresses: vec![ContainerAddress {
+            network: "shop_default".into(),
+            ipv4: Some([172, 18, 0, 2].into()),
+            ipv6: None,
+        }],
     }
 }
 
@@ -388,6 +397,30 @@ async fn containers_are_searched_and_filtered_by_state() {
     assert_eq!(shop["ports"][0]["public_port"], 8081);
     assert_eq!(shop["compose_project"], "shop");
     assert_eq!(shop["labels"]["com.docker.compose.project"], "shop");
+    assert_eq!(shop["addresses"][0]["ipv4"], "172.18.0.2");
+    assert_eq!(shop["addresses"][0]["ipv6"], Value::Null);
+    let endpoints: Vec<(&str, u64, &str)> = shop["endpoints"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|endpoint| {
+            (
+                endpoint["host"].as_str().unwrap(),
+                endpoint["port"].as_u64().unwrap(),
+                endpoint["route"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        endpoints,
+        [
+            ("127.0.0.1", 8081, "published"),
+            ("172.18.0.2", 80, "network")
+        ]
+    );
+    assert_eq!(shop["endpoints"][1]["network"], "shop_default");
+    assert_eq!(shop["declared_site"]["domains"][0], "shop.example");
+    assert_eq!(shop["declared_site"]["port"], 80);
     assert_eq!(list["containers"].as_array().map(Vec::len), Some(1));
 
     let (status, problem) = get(

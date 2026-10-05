@@ -20,11 +20,11 @@ use axum::{
 use chrono::{DateTime, SecondsFormat, Utc};
 use futures_util::{future::ready, Stream, StreamExt};
 use panel_application::{
-    ContainerAction, ContainerChange, ContainerDetail, ContainerEngine, ContainerFilter,
-    ContainerList, ContainerLogLine, ContainerLogQuery, ContainerLogStart, ContainerLogStream,
-    ContainerLogTail, ContainerLogs, ContainerMount, ContainerNetwork, ContainerNetworkStats,
-    ContainerState, ContainerStats, ContainerStatsList, ContainerSummary, EngineInfo,
-    EngineVersion, PortMapping,
+    declared_site, endpoints, ContainerAction, ContainerChange, ContainerDetail, ContainerEndpoint,
+    ContainerEngine, ContainerFilter, ContainerList, ContainerLogLine, ContainerLogQuery,
+    ContainerLogStart, ContainerLogStream, ContainerLogTail, ContainerLogs, ContainerMount,
+    ContainerNetwork, ContainerNetworkStats, ContainerState, ContainerStats, ContainerStatsList,
+    ContainerSummary, EndpointRoute, EngineInfo, EngineVersion, PortMapping,
 };
 use panel_errors::PanelError;
 use serde::{Deserialize, Serialize};
@@ -243,6 +243,66 @@ impl From<PortMapping> for PortMappingView {
     }
 }
 
+/// An address a container has on a network.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct ContainerAddressView {
+    /// Such as `bridge` or `shop_default`.
+    pub network: String,
+    pub ipv4: Option<String>,
+    pub ipv6: Option<String>,
+}
+
+/// How the gateway reaches an endpoint.
+#[derive(Clone, Copy, Debug, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum EndpointRouteName {
+    /// A port the engine publishes on the host.
+    Published,
+    /// The container's address on a network, which changes when it is
+    /// recreated.
+    Network,
+}
+
+/// Where the gateway can reach one of a container's TCP ports (ADR 0033).
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct ContainerEndpointView {
+    /// An IP address, such as `127.0.0.1` or `172.18.0.2`.
+    pub host: String,
+    pub port: u16,
+    /// The container's own port behind it.
+    pub container_port: u16,
+    pub route: EndpointRouteName,
+    /// The network of a network address.
+    pub network: Option<String>,
+}
+
+impl From<ContainerEndpoint> for ContainerEndpointView {
+    fn from(value: ContainerEndpoint) -> Self {
+        let (route, network) = match value.route {
+            EndpointRoute::Network(network) => (EndpointRouteName::Network, Some(network)),
+            _ => (EndpointRouteName::Published, None),
+        };
+        Self {
+            host: value.address.to_string(),
+            port: value.port,
+            container_port: value.container_port,
+            route,
+            network,
+        }
+    }
+}
+
+/// The site a container's labels declare (ADR 0033).
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct DeclaredSiteView {
+    pub name: Option<String>,
+    /// Normalized.
+    pub domains: Vec<String>,
+    /// The container's port the site proxies to, when the labels name one.
+    pub port: Option<u16>,
+}
+
 /// A container as a list shows it, without its command line.
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct ContainerView {
@@ -260,10 +320,27 @@ pub struct ContainerView {
     pub labels: BTreeMap<String, String>,
     /// The Compose project that created it, if one did.
     pub compose_project: Option<String>,
+    /// By network, on networks other than the host's.
+    pub addresses: Vec<ContainerAddressView>,
+    /// Where the gateway can reach its TCP ports while it runs: published
+    /// ports first, then each port on each of its addresses.
+    pub endpoints: Vec<ContainerEndpointView>,
+    /// The site its labels declare, if they name a valid host.
+    pub declared_site: Option<DeclaredSiteView>,
 }
 
 impl From<ContainerSummary> for ContainerView {
     fn from(value: ContainerSummary) -> Self {
+        let endpoints = endpoints(&value).into_iter().map(Into::into).collect();
+        let declared_site = declared_site(&value.labels).map(|declared| DeclaredSiteView {
+            name: declared.name,
+            domains: declared
+                .domains
+                .iter()
+                .map(|host| host.as_str().to_owned())
+                .collect(),
+            port: declared.port,
+        });
         Self {
             id: value.id,
             names: value.names,
@@ -275,6 +352,17 @@ impl From<ContainerSummary> for ContainerView {
             ports: value.ports.into_iter().map(Into::into).collect(),
             labels: value.labels,
             compose_project: value.compose_project,
+            addresses: value
+                .addresses
+                .into_iter()
+                .map(|address| ContainerAddressView {
+                    network: address.network,
+                    ipv4: address.ipv4.map(|ip| ip.to_string()),
+                    ipv6: address.ipv6.map(|ip| ip.to_string()),
+                })
+                .collect(),
+            endpoints,
+            declared_site,
         }
     }
 }

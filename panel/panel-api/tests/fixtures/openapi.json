@@ -71360,6 +71360,31 @@
           "kill"
         ]
       },
+      "ContainerAddressView": {
+        "type": "object",
+        "description": "An address a container has on a network.",
+        "required": [
+          "network"
+        ],
+        "properties": {
+          "ipv4": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ipv6": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "network": {
+            "type": "string",
+            "description": "Such as `bridge` or `shop_default`."
+          }
+        }
+      },
       "ContainerChangeView": {
         "type": "object",
         "description": "A container an action was taken on.",
@@ -71499,6 +71524,43 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "ContainerEndpointView": {
+        "type": "object",
+        "description": "Where the gateway can reach one of a container's TCP ports (ADR 0033).",
+        "required": [
+          "host",
+          "port",
+          "container_port",
+          "route"
+        ],
+        "properties": {
+          "container_port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The container's own port behind it.",
+            "minimum": 0
+          },
+          "host": {
+            "type": "string",
+            "description": "An IP address, such as `127.0.0.1` or `172.18.0.2`."
+          },
+          "network": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The network of a network address."
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "route": {
+            "$ref": "#/components/schemas/EndpointRouteName"
           }
         }
       },
@@ -71932,9 +71994,18 @@
           "state",
           "status",
           "ports",
-          "labels"
+          "labels",
+          "addresses",
+          "endpoints"
         ],
         "properties": {
+          "addresses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContainerAddressView"
+            },
+            "description": "By network, on networks other than the host's."
+          },
           "compose_project": {
             "type": [
               "string",
@@ -71948,6 +72019,24 @@
               "null"
             ],
             "description": "RFC 3339."
+          },
+          "declared_site": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DeclaredSiteView",
+                "description": "The site its labels declare, if they name a valid host."
+              }
+            ]
+          },
+          "endpoints": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContainerEndpointView"
+            },
+            "description": "Where the gateway can reach its TCP ports while it runs: published\nports first, then each port on each of its addresses."
           },
           "id": {
             "type": "string"
@@ -72186,6 +72275,37 @@
           "worker_count": {
             "type": "integer",
             "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "DeclaredSiteView": {
+        "type": "object",
+        "description": "The site a container's labels declare (ADR 0033).",
+        "required": [
+          "domains"
+        ],
+        "properties": {
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Normalized."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "port": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The container's port the site proxies to, when the labels name one.",
             "minimum": 0
           }
         }
@@ -72814,6 +72934,14 @@
             "minimum": 0
           }
         }
+      },
+      "EndpointRouteName": {
+        "type": "string",
+        "description": "How the gateway reaches an endpoint.",
+        "enum": [
+          "published",
+          "network"
+        ]
       },
       "EngineDiskUsageView": {
         "type": "object",
