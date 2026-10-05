@@ -10,13 +10,18 @@ publish.workspace = true
 [dependencies]
 audit-service.workspace = true
 automation-service.workspace = true
+chrono.workspace = true
 config-service.workspace = true
 observability-service.workspace = true
 panel-api-server.workspace = true
+panel-backup.workspace = true
 panel-control-runtime.workspace = true
+panel-errors.workspace = true
+panel-sqlite.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 panel-health.workspace = true
 panel-service.workspace = true
 tempfile.workspace = true
-tokio.workspace = true

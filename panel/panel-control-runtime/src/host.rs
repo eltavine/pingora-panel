@@ -41,6 +41,11 @@ impl Module {
         self.defaults = addresses;
         self
     }
+
+    /// Where the module's operational listener binds.
+    pub fn ops_address(&self) -> std::net::SocketAddr {
+        self.defaults.ops
+    }
 }
 
 /// Modules started in one process; they reach each other in process and

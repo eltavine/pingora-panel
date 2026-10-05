@@ -28,6 +28,7 @@ pub use host::{
 pub use in_process::InProcessHub;
 pub use process::{ControlPlaneProcess, RunningProcess};
 pub use settings::{
-    DefaultAddresses, ProcessSettings, TlsSettings, DATA_DIR_ENV, GRPC_ADDRESS_ENV,
-    HEALTH_INTERVAL_MS_ENV, NATS_URL_ENV, OPS_ADDRESS_ENV, TLS_DIR_ENV, TRUST_DOMAIN_ENV,
+    DefaultAddresses, ProcessSettings, TlsSettings, DATA_DIR_ENV, DEFAULT_DATA_DIR,
+    GRPC_ADDRESS_ENV, HEALTH_INTERVAL_MS_ENV, NATS_URL_ENV, OPS_ADDRESS_ENV, TLS_DIR_ENV,
+    TRUST_DOMAIN_ENV,
 };

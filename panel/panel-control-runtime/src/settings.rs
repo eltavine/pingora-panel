@@ -20,7 +20,8 @@ pub const TLS_DIR_ENV: &str = "PINGORA_PANEL_TLS_DIR";
 pub const TRUST_DOMAIN_ENV: &str = "PINGORA_PANEL_TRUST_DOMAIN";
 
 const DEFAULT_NATS_URL: &str = "nats://127.0.0.1:4222";
-const DEFAULT_DATA_DIR: &str = "/var/lib/pingora-panel/control";
+/// Where the control plane keeps its modules' SQLite files by default.
+pub const DEFAULT_DATA_DIR: &str = "/var/lib/pingora-panel/control";
 const DEFAULT_HEALTH_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Listener addresses a service uses when its environment names none.

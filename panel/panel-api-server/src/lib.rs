@@ -23,6 +23,7 @@ use config_grpc_client::{ConfigClientConfig, ConfigPublicationClient};
 use gateway_grpc_client::{GatewayGrpcClient, GatewayGrpcClientConfig};
 use identity_oidc::OidcClient;
 use identity_sqlite::SqliteIdentityStore;
+pub use identity_sqlite::MIGRATIONS;
 use observability_grpc_client::ObservabilityClient;
 use ops_grpc_client::OpsAgentClient;
 use panel_api::{router_with_config, AccessSettings, ApiConfig, ApiState};
@@ -264,7 +265,7 @@ pub fn process(
         None => process,
     };
     Ok(process
-        .with_migrations(identity_sqlite::MIGRATIONS)
+        .with_migrations(MIGRATIONS)
         .with_database_impact(Impact::Degrading)
         .with_check(Arc::new(roles), Impact::Required)
         .with_check(Arc::new(config_health), Impact::Degrading)

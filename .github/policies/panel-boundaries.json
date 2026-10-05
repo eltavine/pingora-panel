@@ -649,9 +649,12 @@
         "config-service",
         "observability-service",
         "panel-api-server",
+        "panel-backup",
         "panel-control-runtime",
+        "panel-errors",
         "panel-health",
-        "panel-service"
+        "panel-service",
+        "panel-sqlite"
       ]
     }
   },
