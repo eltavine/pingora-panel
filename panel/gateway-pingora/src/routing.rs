@@ -278,6 +278,11 @@ fn compile_target(
     targets: &Targets<'_>,
 ) -> Result<RouteTarget> {
     Ok(match action {
+        RouteAction::Lua { .. } => {
+            return Err(PanelError::unsupported_capability(format!(
+                "route {route} answers with a Lua handler, which this gateway does not run"
+            )))
+        }
         RouteAction::Proxy { upstream_pool_id } => RouteTarget::Proxy(
             *targets
                 .pools

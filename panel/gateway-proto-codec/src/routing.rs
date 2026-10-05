@@ -1,7 +1,7 @@
 //! Listener, site and route wire conversion.
 
 use crate::{
-    domain_error, logging, optional_string, status_code,
+    domain_error, logging, lua, optional_string, status_code,
     upstream::{decode_retry_policy, encode_retry_policy},
 };
 use panel_contracts::gateway::v1 as wire;
@@ -123,6 +123,7 @@ pub(super) fn decode_site(value: wire::SiteSpec) -> Result<SiteSpec> {
         security_policy_id: optional_string(value.security_policy_id),
         access_log: logging::decode_access_log(value.access_log)?,
         header_policy_id: optional_string(value.header_policy_id),
+        lua: lua::decode_handlers(value.lua)?,
     })
 }
 
@@ -158,6 +159,7 @@ pub(super) fn encode_site(value: &SiteSpec) -> wire::SiteSpec {
         security_policy_id: value.security_policy_id.clone().unwrap_or_default(),
         access_log: logging::encode_access_log(&value.access_log),
         header_policy_id: value.header_policy_id.clone().unwrap_or_default(),
+        lua: lua::encode_handlers(&value.lua),
     }
 }
 
@@ -189,6 +191,7 @@ pub(super) fn decode_route(value: wire::RouteSpec) -> Result<RouteSpec> {
         lua_policy_id: optional_string(value.lua_policy_id),
         name: optional_string(value.name),
         access_log: logging::decode_access_log(value.access_log)?,
+        lua: lua::decode_handlers(value.lua)?,
     })
 }
 
@@ -208,6 +211,7 @@ pub(super) fn encode_route(value: &RouteSpec) -> wire::RouteSpec {
         lua_policy_id: value.lua_policy_id.clone().unwrap_or_default(),
         name: value.name.clone().unwrap_or_default(),
         access_log: logging::encode_access_log(&value.access_log),
+        lua: lua::encode_handlers(&value.lua),
     }
 }
 
@@ -415,6 +419,9 @@ fn decode_action(value: wire::RouteAction) -> Result<RouteAction> {
             content_type: optional_string(action.content_type),
             retry_after_seconds: action.retry_after_seconds,
         }),
+        Kind::Lua(handler) => Ok(RouteAction::Lua {
+            handler: lua::decode_handler(handler)?,
+        }),
     }
 }
 
@@ -446,6 +453,7 @@ fn encode_action(value: &RouteAction) -> wire::RouteAction {
             content_type: content_type.clone().unwrap_or_default(),
             retry_after_seconds: *retry_after_seconds,
         }),
+        RouteAction::Lua { handler } => Kind::Lua(lua::encode_handler(handler)),
     };
     wire::RouteAction { kind: Some(kind) }
 }

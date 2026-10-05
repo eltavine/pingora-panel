@@ -1,6 +1,6 @@
 //! Snapshot assembly and canonical content verification.
 
-use crate::{decode_hash, encode_hash, logging, policies, routing, upstream};
+use crate::{decode_hash, encode_hash, logging, lua, policies, routing, upstream};
 use panel_contracts::{common::v1 as common, gateway::v1 as wire};
 use panel_domain::RevisionId;
 use panel_errors::{PanelError, Result};
@@ -68,6 +68,7 @@ pub fn decode_snapshot(value: wire::RuntimeSnapshot) -> Result<RuntimeSnapshot> 
             .into_iter()
             .map(|capability| CapabilityRequirement::new(capability.name, capability.version))
             .collect(),
+        lua: lua::decode_program(value.lua)?,
     };
     if !snapshot.has_valid_content_hash() {
         return Err(PanelError::validation_failed(
@@ -133,5 +134,6 @@ pub fn encode_snapshot(value: &RuntimeSnapshot) -> wire::RuntimeSnapshot {
                 version: capability.version.clone(),
             })
             .collect(),
+        lua: lua::encode_program(&value.lua),
     }
 }

@@ -342,6 +342,18 @@
       "name": "Phase",
       "owner": "pingora-panel-platform",
       "reason": "Each phase is a point of the data plane where handlers run; a new phase must fail to compile wherever phases are mapped to the engine and to the configuration language."
+    },
+    {
+      "package": "panel-ir",
+      "name": "LuaFallback",
+      "owner": "pingora-panel-platform",
+      "reason": "gateway-proto-codec encodes every fallback onto the wire and the data plane acts on each. A new fallback must fail to compile there rather than be sent as the default one."
+    },
+    {
+      "package": "panel-ir",
+      "name": "LuaLogLevel",
+      "owner": "pingora-panel-platform",
+      "reason": "The levels are nginx's, mapped onto the protobuf enum and the runtime's levels. A new level must fail to compile in both rather than be sent as notice."
     }
   ]
 }

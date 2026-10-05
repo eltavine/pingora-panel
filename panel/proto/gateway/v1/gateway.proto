@@ -36,10 +36,14 @@ message RuntimeSnapshot {
   repeated StaticContentPolicy static_content = 10;
   repeated CachePolicy cache_policies = 11;
   repeated SecurityPolicy security_policies = 12;
+  // Reserved: gateways refuse it. Scripts are in `lua`.
   repeated LuaPolicy lua_policies = 13;
   repeated .pingora.panel.common.v1.Capability required_capabilities = 14;
   // Absent keeps the gateway's logging defaults.
   LoggingPolicy logging = 15;
+  // The scripts of the configuration (ADR 0039); a snapshot with any
+  // requires the `lua.scripts` capability.
+  LuaProgram lua = 16;
 }
 
 message ListenerRef {
@@ -92,6 +96,8 @@ message SiteSpec {
   // Every request for the site passes this HTTP policy before its route's
   // (ADR 0037).
   string header_policy_id = 11;
+  // Lua handlers for the site's requests, `server_rewrite` among them.
+  LuaHandlers lua = 12;
 }
 
 // An HTTP Strict Transport Security policy (RFC 6797 §6.1).
@@ -128,12 +134,16 @@ message RouteSpec {
   string header_policy_id = 8;
   string cache_policy_id = 9;
   string security_policy_id = 10;
+  // Reserved: gateways refuse it. Handlers are in `lua`.
   string lua_policy_id = 11;
   string name = 12;
   AccessLog access_log = 13;
   // Every one holds for the requests the route takes, after its matcher
   // (ADR 0036). A gateway refuses kinds it does not know.
   repeated RouteCondition conditions = 14;
+  // The Lua handlers the route's requests run, the site's and the
+  // configuration's included.
+  LuaHandlers lua = 15;
 }
 
 // A condition on a request.
@@ -276,6 +286,8 @@ message RouteAction {
     uint32 return_status = 4;
     RedirectAction redirect = 5;
     RespondAction respond = 6;
+    // `content_by_lua`: a handler makes the response.
+    LuaHandler lua = 7;
   }
 }
 
@@ -308,6 +320,8 @@ message UpstreamPoolSpec {
   CircuitBreaker circuit_breaker = 13;
   optional uint32 max_requests = 14;
   UpstreamQueue queue = 15;
+  // `balancer_by_lua`: chooses the endpoint of each try.
+  LuaHandler balancer = 16;
 }
 
 message UpstreamConnectionPolicy {
@@ -563,12 +577,102 @@ message LimitedResponse {
   string content_type = 3;
 }
 
+// Reserved: gateways refuse it. Scripts are in LuaProgram.
 message LuaPolicy {
   string id = 1;
   string script_ref = 2;
   repeated string capabilities = 3;
   uint64 instruction_limit = 4;
   uint64 timeout_ms = 5;
+  uint64 memory_limit_bytes = 6;
+}
+
+// Lua source text and where it comes from.
+message LuaScript {
+  // Unique in the snapshot: the file of a module, `file:line` of an inline
+  // block.
+  string id = 1;
+  string file = 2;
+  // The line of `file` the source starts on, from 1.
+  uint32 line = 3;
+  string source = 4;
+  // Lowercase hexadecimal SHA-256 of `source`.
+  string sha256 = 5;
+  // What `require` loads it by: set for files under `lua/`.
+  string module = 6;
+}
+
+// What scripts may do beyond reading and changing the request and response.
+message LuaPermissions {
+  bool body = 1;
+  bool upstream = 2;
+  bool network = 3;
+}
+
+enum LuaFallbackKind {
+  // Answers 500, or 502 in the balancer.
+  LUA_FALLBACK_KIND_UNSPECIFIED = 0;
+  // Goes on as if the handler had not run.
+  LUA_FALLBACK_KIND_CONTINUE = 1;
+  // Answers with `LuaFallback.status`.
+  LUA_FALLBACK_KIND_STATUS = 2;
+}
+
+message LuaFallback {
+  LuaFallbackKind kind = 1;
+  uint32 status = 2;
+}
+
+enum LuaLogLevel {
+  // `notice`.
+  LUA_LOG_LEVEL_UNSPECIFIED = 0;
+  LUA_LOG_LEVEL_STDERR = 1;
+  LUA_LOG_LEVEL_EMERG = 2;
+  LUA_LOG_LEVEL_ALERT = 3;
+  LUA_LOG_LEVEL_CRIT = 4;
+  LUA_LOG_LEVEL_ERROR = 5;
+  LUA_LOG_LEVEL_WARN = 6;
+  LUA_LOG_LEVEL_NOTICE = 7;
+  LUA_LOG_LEVEL_INFO = 8;
+  LUA_LOG_LEVEL_DEBUG = 9;
+}
+
+// A script run in a phase, and the terms it runs on. Zero limits keep the
+// gateway's defaults.
+message LuaHandler {
+  string script_id = 1;
+  uint64 time_limit_ms = 2;
+  uint64 work_limit = 3;
+  LuaPermissions allow = 4;
+  LuaFallback on_error = 5;
+  LuaLogLevel log_level = 6;
+  uint64 slow_threshold_ms = 7;
+  bool debug = 8;
+}
+
+// The handlers a site or route runs, by phase.
+message LuaHandlers {
+  LuaHandler server_rewrite = 1;
+  LuaHandler rewrite = 2;
+  LuaHandler access = 3;
+  LuaHandler header_filter = 4;
+  LuaHandler body_filter = 5;
+  LuaHandler log = 6;
+}
+
+message LuaSharedDict {
+  string name = 1;
+  uint64 capacity_bytes = 2;
+}
+
+message LuaProgram {
+  // `lua off`: the scripts stay but none runs.
+  bool disabled = 1;
+  repeated LuaScript scripts = 2;
+  LuaHandler init = 3;
+  LuaHandler init_worker = 4;
+  repeated LuaSharedDict shared_dicts = 5;
+  // Bytes each VM may allocate; zero keeps the gateway's default.
   uint64 memory_limit_bytes = 6;
 }
 

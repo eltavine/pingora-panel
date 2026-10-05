@@ -8,6 +8,7 @@ use panel_errors::{PanelError, Result};
 
 mod hash;
 mod logging;
+mod lua;
 mod policies;
 mod routing;
 mod snapshot;

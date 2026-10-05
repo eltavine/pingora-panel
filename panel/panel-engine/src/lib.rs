@@ -7,6 +7,7 @@ mod events;
 pub mod fake;
 mod http;
 mod logging;
+mod lua;
 pub mod ports;
 mod resilience;
 mod traffic;
@@ -18,6 +19,10 @@ pub use conditions::{
 pub use events::*;
 pub use fake::FakeGatewayEngine;
 pub use http::{problems as http_policy_problems, MOST_PREFLIGHT_SECONDS};
+pub use lua::{
+    problems as lua_problems, uses_lua, LEAST_LUA_MEMORY_BYTES, MOST_LUA_DICT_BYTES,
+    MOST_LUA_MEMORY_BYTES, MOST_LUA_SCRIPT_BYTES, MOST_LUA_TIME_MS, MOST_LUA_WORK,
+};
 pub use ports::*;
 pub use resilience::{
     problems as resilience_problems, uses_resilience, MOST_BACKOFF_MS, MOST_OPEN_MS, MOST_QUEUE_MS,

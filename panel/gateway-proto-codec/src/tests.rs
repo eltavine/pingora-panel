@@ -516,3 +516,112 @@ fn upstream_resilience_round_trips_and_unknown_conditions_are_refused() {
     let refused = decode_snapshot(unknown).unwrap_err();
     assert!(refused.message.contains("timeout or reset"), "{refused}");
 }
+
+#[test]
+fn lua_programs_and_handlers_round_trip_and_unknown_kinds_are_refused() {
+    use panel_ir::{
+        LuaFallback, LuaHandler, LuaLogLevel, LuaPermissions, LuaProgram, LuaScript, LuaSharedDict,
+    };
+    let script = |id: &str, module: Option<&str>| LuaScript {
+        id: id.into(),
+        file: id.split(':').next().unwrap_or(id).into(),
+        line: 3,
+        source: "ngx.say('hi')".into(),
+        sha256: "00".repeat(32),
+        module: module.map(Into::into),
+    };
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(11));
+    snapshot.lua = LuaProgram {
+        disabled: false,
+        scripts: vec![
+            script("main.conf:3", None),
+            script("lua/auth.lua", Some("auth")),
+        ],
+        init: Some(LuaHandler::new("lua/auth.lua")),
+        init_worker: None,
+        shared_dicts: vec![LuaSharedDict {
+            name: "hits".into(),
+            capacity_bytes: 1 << 20,
+        }],
+        memory_limit_bytes: 32 << 20,
+    };
+    let site_id = SiteId::new("site").unwrap();
+    let mut site = SiteSpec::new(
+        site_id.clone(),
+        "shop",
+        vec![DomainSpec::new(
+            NormalizedHost::new("shop.example").unwrap(),
+        )],
+    );
+    site.lua.server_rewrite = Some(LuaHandler::new("main.conf:3"));
+    snapshot.sites.push(site);
+    let mut access = LuaHandler::new("main.conf:3");
+    access.time_limit_ms = 25;
+    access.work_limit = 1_000;
+    access.allow = LuaPermissions {
+        body: true,
+        upstream: false,
+        network: true,
+    };
+    access.on_error = LuaFallback::Status { status: 503 };
+    access.log_level = LuaLogLevel::Debug;
+    access.slow_threshold_ms = 5;
+    access.debug = true;
+    let mut content = LuaHandler::new("main.conf:3");
+    content.on_error = LuaFallback::Continue;
+    let mut route = RouteSpec::new(
+        RouteId::new("route").unwrap(),
+        site_id,
+        10,
+        RouteMatcher::PathPrefix {
+            path: PathPrefix::new("/").unwrap(),
+        },
+        RouteAction::Lua { handler: content },
+    );
+    route.lua.access = Some(access);
+    route.lua.log = Some(LuaHandler::new("lua/auth.lua"));
+    snapshot.routes.push(route);
+    let mut pool = UpstreamPoolSpec::new(
+        UpstreamPoolId::new("pool").unwrap(),
+        "app",
+        vec![UpstreamEndpoint::new(
+            EndpointId::new("node").unwrap(),
+            EndpointAddress::new("127.0.0.1", 8080, false).unwrap(),
+        )],
+    );
+    pool.balancer = Some(LuaHandler::new("lua/auth.lua"));
+    snapshot.upstream_pools.push(pool);
+    snapshot.refresh_content_hash();
+    let wire = encode_snapshot(&snapshot);
+    assert_eq!(decode_snapshot(wire.clone()).unwrap(), snapshot);
+
+    let mut unknown = wire.clone();
+    unknown.routes[0]
+        .lua
+        .as_mut()
+        .unwrap()
+        .access
+        .as_mut()
+        .unwrap()
+        .on_error = Some(panel_contracts::gateway::v1::LuaFallback {
+        kind: 42,
+        status: 0,
+    });
+    let refused = decode_snapshot(unknown).unwrap_err();
+    assert!(refused.message.contains("Lua fallback"), "{refused}");
+
+    let mut nameless = wire;
+    nameless.upstream_pools[0]
+        .balancer
+        .as_mut()
+        .unwrap()
+        .script_id = String::new();
+    assert!(decode_snapshot(nameless).is_err());
+}
+
+#[test]
+fn snapshots_without_lua_keep_their_canonical_hash() {
+    let snapshot = RuntimeSnapshot::empty(RevisionId::new(7));
+    let canonical = String::from_utf8(snapshot.canonical_bytes()).unwrap();
+    assert!(!canonical.contains("\"lua\""), "{canonical}");
+}

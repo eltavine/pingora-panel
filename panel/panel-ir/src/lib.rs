@@ -18,6 +18,10 @@ pub use http::{
     HTTP_POLICIES_CAPABILITY,
 };
 pub use logging::{AccessLog, AccessLogFormat, LogFiles, LoggingPolicy};
+pub use lua::{
+    LuaFallback, LuaHandler, LuaHandlers, LuaLogLevel, LuaPermissions, LuaProgram, LuaScript,
+    LuaSharedDict, LUA_SCRIPTS_CAPABILITY,
+};
 pub use resilience::{
     CircuitBreaker, RetryBudget, RetryCondition, UpstreamQueue, UPSTREAM_RESILIENCE_CAPABILITY,
 };
@@ -29,6 +33,7 @@ pub use security::{
 pub mod conditions;
 pub mod http;
 pub mod logging;
+pub mod lua;
 pub mod resilience;
 pub mod security;
 pub mod template;
@@ -67,10 +72,13 @@ pub struct RuntimeSnapshot {
     pub static_content: Vec<StaticContentPolicy>,
     pub cache_policies: Vec<CachePolicy>,
     pub security_policies: Vec<SecurityPolicy>,
+    /// Reserved: gateways refuse it. Scripts are in `lua`.
     pub lua_policies: Vec<LuaPolicy>,
     #[serde(default, skip_serializing_if = "LoggingPolicy::is_default")]
     pub logging: LoggingPolicy,
     pub required_capabilities: Vec<CapabilityRequirement>,
+    #[serde(default, skip_serializing_if = "LuaProgram::is_empty")]
+    pub lua: LuaProgram,
 }
 
 #[derive(Serialize)]
@@ -90,6 +98,8 @@ struct CanonicalSnapshot<'a> {
     #[serde(skip_serializing_if = "LoggingPolicy::is_default")]
     logging: &'a LoggingPolicy,
     required_capabilities: &'a [CapabilityRequirement],
+    #[serde(skip_serializing_if = "LuaProgram::is_empty")]
+    lua: &'a LuaProgram,
 }
 
 impl RuntimeSnapshot {
@@ -110,6 +120,7 @@ impl RuntimeSnapshot {
             lua_policies: Vec::new(),
             logging: LoggingPolicy::default(),
             required_capabilities: Vec::new(),
+            lua: LuaProgram::default(),
         };
         snapshot.refresh_content_hash();
         snapshot
@@ -149,6 +160,10 @@ impl RuntimeSnapshot {
         lua_policies.sort_by(|left, right| left.id.cmp(&right.id));
         let mut required_capabilities = self.required_capabilities.clone();
         required_capabilities.sort();
+        let mut lua = self.lua.clone();
+        lua.scripts.sort_by(|left, right| left.id.cmp(&right.id));
+        lua.shared_dicts
+            .sort_by(|left, right| left.name.cmp(&right.name));
         let canonical = CanonicalSnapshot {
             schema_version: &self.schema_version,
             revision_id: &self.revision_id,
@@ -164,6 +179,7 @@ impl RuntimeSnapshot {
             lua_policies: &lua_policies,
             logging: &self.logging,
             required_capabilities: &required_capabilities,
+            lua: &lua,
         };
         serde_json::to_vec(&canonical).expect("IR canonical values are always serializable")
     }
@@ -303,6 +319,9 @@ pub struct SiteSpec {
     /// route's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub header_policy_id: Option<String>,
+    /// Lua handlers for the site's requests, `server_rewrite` among them.
+    #[serde(default, skip_serializing_if = "LuaHandlers::is_empty")]
+    pub lua: LuaHandlers,
 }
 
 /// An HTTP Strict Transport Security policy (RFC 6797 §6.1).
@@ -347,6 +366,7 @@ impl SiteSpec {
             security_policy_id: None,
             access_log: AccessLog::default(),
             header_policy_id: None,
+            lua: LuaHandlers::default(),
         }
     }
 }
@@ -413,11 +433,16 @@ pub struct RouteSpec {
     pub header_policy_id: Option<String>,
     pub cache_policy_id: Option<String>,
     pub security_policy_id: Option<String>,
+    /// Reserved: gateways refuse it. Handlers are in `lua`.
     pub lua_policy_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "AccessLog::is_unset")]
     pub access_log: AccessLog,
+    /// The Lua handlers the route's requests run, the site's and the
+    /// configuration's included.
+    #[serde(default, skip_serializing_if = "LuaHandlers::is_empty")]
+    pub lua: LuaHandlers,
 }
 
 impl RouteSpec {
@@ -443,6 +468,7 @@ impl RouteSpec {
             lua_policy_id: None,
             name: None,
             access_log: AccessLog::default(),
+            lua: LuaHandlers::default(),
         }
     }
 }
@@ -499,6 +525,10 @@ pub enum RouteAction {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         retry_after_seconds: Option<u32>,
     },
+    /// `content_by_lua`: a handler makes the response.
+    Lua {
+        handler: LuaHandler,
+    },
 }
 
 impl RouteAction {
@@ -547,6 +577,9 @@ pub struct UpstreamPoolSpec {
     /// Where requests over `max_requests` wait instead of getting 503.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue: Option<UpstreamQueue>,
+    /// `balancer_by_lua`: chooses the endpoint of each try.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub balancer: Option<LuaHandler>,
 }
 
 impl UpstreamPoolSpec {
@@ -569,6 +602,7 @@ impl UpstreamPoolSpec {
             circuit_breaker: None,
             max_requests: None,
             queue: None,
+            balancer: None,
         }
     }
 }

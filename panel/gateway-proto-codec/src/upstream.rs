@@ -55,6 +55,7 @@ pub(super) fn decode_upstream_pool(value: wire::UpstreamPoolSpec) -> Result<Upst
             max_waiting: queue.max_waiting,
             timeout_ms: queue.timeout_ms,
         }),
+        balancer: value.balancer.map(crate::lua::decode_handler).transpose()?,
     })
 }
 
@@ -98,6 +99,7 @@ pub(super) fn encode_upstream_pool(value: &UpstreamPoolSpec) -> wire::UpstreamPo
             max_waiting: queue.max_waiting,
             timeout_ms: queue.timeout_ms,
         }),
+        balancer: value.balancer.as_ref().map(crate::lua::encode_handler),
     }
 }
 

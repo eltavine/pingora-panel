@@ -1,0 +1,309 @@
+//! Checks of Lua scripts (ADR 0039): each script has a unique id and the
+//! SHA-256 of its source, modules have unique names, every handler names a
+//! script of the snapshot within bounded limits, shared dictionaries have
+//! names and sizes, and snapshots carrying scripts require the capability.
+
+use panel_domain::ContentHash;
+use panel_errors::{Diagnostic, ErrorCode};
+use panel_ir::{LuaFallback, LuaHandler, RouteAction, RuntimeSnapshot, LUA_SCRIPTS_CAPABILITY};
+use std::collections::BTreeSet;
+
+/// The longest a run may take, a minute.
+pub const MOST_LUA_TIME_MS: u64 = 60_000;
+/// The most function calls and loop iterations a run may make.
+pub const MOST_LUA_WORK: u64 = 10_000_000_000;
+/// The largest script.
+pub const MOST_LUA_SCRIPT_BYTES: usize = 1 << 20;
+/// The least and most memory a VM may be given.
+pub const LEAST_LUA_MEMORY_BYTES: u64 = 1 << 20;
+pub const MOST_LUA_MEMORY_BYTES: u64 = 4 << 30;
+/// The largest shared dictionary.
+pub const MOST_LUA_DICT_BYTES: u64 = 4 << 30;
+
+/// Whether `snapshot` carries scripts.
+pub fn uses_lua(snapshot: &RuntimeSnapshot) -> bool {
+    !snapshot.lua.is_empty()
+        || snapshot.sites.iter().any(|site| !site.lua.is_empty())
+        || snapshot
+            .routes
+            .iter()
+            .any(|route| !route.lua.is_empty() || matches!(route.action, RouteAction::Lua { .. }))
+        || snapshot
+            .upstream_pools
+            .iter()
+            .any(|pool| pool.balancer.is_some())
+}
+
+fn module_name_is_valid(name: &str) -> bool {
+    !name.is_empty()
+        && name.split('.').all(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        })
+}
+
+fn dict_name_is_valid(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
+fn check_handler(
+    found: &mut Vec<(String, String)>,
+    ids: &BTreeSet<&str>,
+    resource: String,
+    phase: &str,
+    handler: &LuaHandler,
+) {
+    if !ids.contains(handler.script_id.as_str()) {
+        found.push((
+            resource.clone(),
+            format!(
+                "{phase} handler names script {}, which the snapshot does not have",
+                handler.script_id
+            ),
+        ));
+    }
+    if handler.time_limit_ms > MOST_LUA_TIME_MS {
+        found.push((
+            resource.clone(),
+            format!(
+                "{phase} handler may run {} ms, longer than {MOST_LUA_TIME_MS}",
+                handler.time_limit_ms
+            ),
+        ));
+    }
+    if handler.work_limit > MOST_LUA_WORK {
+        found.push((
+            resource.clone(),
+            format!("{phase} handler's work limit is above {MOST_LUA_WORK}"),
+        ));
+    }
+    if let LuaFallback::Status { status } = handler.on_error {
+        if !(200..=599).contains(&status) {
+            found.push((
+                resource,
+                format!("{phase} handler falls back to status {status}, not 200 to 599"),
+            ));
+        }
+    }
+}
+
+/// What is wrong with `snapshot`'s scripts and handlers, with the resource
+/// each problem is in.
+pub fn problems(snapshot: &RuntimeSnapshot) -> Vec<(String, String)> {
+    let mut found = Vec::new();
+    let program = &snapshot.lua;
+    let mut ids = BTreeSet::new();
+    let mut modules = BTreeSet::new();
+    for script in &program.scripts {
+        let resource = || format!("lua:{}", script.id);
+        if script.id.is_empty() {
+            found.push(("lua".into(), "a script has no id".into()));
+            continue;
+        }
+        if !ids.insert(script.id.as_str()) {
+            found.push((resource(), format!("script {} appears twice", script.id)));
+        }
+        if script.line == 0 {
+            found.push((resource(), format!("script {} starts on line 0", script.id)));
+        }
+        if script.source.len() > MOST_LUA_SCRIPT_BYTES {
+            found.push((
+                resource(),
+                format!(
+                    "script {} is larger than {MOST_LUA_SCRIPT_BYTES} bytes",
+                    script.id
+                ),
+            ));
+        }
+        if ContentHash::from_bytes(script.source.as_bytes()).as_str() != script.sha256 {
+            found.push((
+                resource(),
+                format!("script {} does not match its SHA-256", script.id),
+            ));
+        }
+        if let Some(module) = &script.module {
+            if !module_name_is_valid(module) {
+                found.push((resource(), format!("module name {module:?} is invalid")));
+            } else if !modules.insert(module.as_str()) {
+                found.push((resource(), format!("module {module} is defined twice")));
+            }
+        }
+    }
+    if let Some(init) = &program.init {
+        check_handler(&mut found, &ids, "lua".into(), "init", init);
+    }
+    if let Some(init) = &program.init_worker {
+        check_handler(&mut found, &ids, "lua".into(), "init_worker", init);
+    }
+    for site in &snapshot.sites {
+        for (phase, value) in site.lua.iter() {
+            check_handler(&mut found, &ids, site.id.as_str().into(), phase, value);
+        }
+    }
+    for route in &snapshot.routes {
+        for (phase, value) in route.lua.iter() {
+            if phase == "server_rewrite" {
+                found.push((
+                    route.id.as_str().into(),
+                    "a route cannot have a server_rewrite handler; sites do".into(),
+                ));
+            }
+            check_handler(&mut found, &ids, route.id.as_str().into(), phase, value);
+        }
+        if let RouteAction::Lua { handler: value } = &route.action {
+            check_handler(&mut found, &ids, route.id.as_str().into(), "content", value);
+        }
+    }
+    for pool in &snapshot.upstream_pools {
+        if let Some(value) = &pool.balancer {
+            check_handler(&mut found, &ids, pool.id.as_str().into(), "balancer", value);
+        }
+    }
+    if program.memory_limit_bytes != 0
+        && !(LEAST_LUA_MEMORY_BYTES..=MOST_LUA_MEMORY_BYTES).contains(&program.memory_limit_bytes)
+    {
+        found.push((
+            "lua".into(),
+            format!(
+                "VMs get {} bytes, not {LEAST_LUA_MEMORY_BYTES} to {MOST_LUA_MEMORY_BYTES}",
+                program.memory_limit_bytes
+            ),
+        ));
+    }
+    let mut dicts = BTreeSet::new();
+    for dict in &program.shared_dicts {
+        if !dict_name_is_valid(&dict.name) {
+            found.push((
+                "lua".into(),
+                format!("shared dictionary name {:?} is invalid", dict.name),
+            ));
+        } else if !dicts.insert(dict.name.as_str()) {
+            found.push((
+                "lua".into(),
+                format!("shared dictionary {} is declared twice", dict.name),
+            ));
+        }
+        if dict.capacity_bytes < 8 << 10 || dict.capacity_bytes > MOST_LUA_DICT_BYTES {
+            found.push((
+                "lua".into(),
+                format!(
+                    "shared dictionary {} holds {} bytes, not 8 KiB to {MOST_LUA_DICT_BYTES}",
+                    dict.name, dict.capacity_bytes
+                ),
+            ));
+        }
+    }
+    found
+}
+
+pub(crate) fn validate_lua(snapshot: &RuntimeSnapshot, diagnostics: &mut Vec<Diagnostic>) {
+    for (resource, problem) in problems(snapshot) {
+        diagnostics
+            .push(Diagnostic::error(ErrorCode::VALIDATION_FAILED, problem).with_resource(resource));
+    }
+    let declared = snapshot
+        .required_capabilities()
+        .iter()
+        .any(|capability| capability.name == LUA_SCRIPTS_CAPABILITY);
+    if uses_lua(snapshot) && !declared {
+        diagnostics.push(
+            Diagnostic::error(
+                ErrorCode::VALIDATION_FAILED,
+                format!("Lua scripts are used without requiring {LUA_SCRIPTS_CAPABILITY}"),
+            )
+            .with_resource("lua"),
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use panel_domain::{RevisionId, RouteId, SiteId, UpstreamPoolId};
+    use panel_ir::{
+        CapabilityRequirement, LuaHandler, LuaScript, LuaSharedDict, RouteMatcher, RouteSpec,
+        UpstreamPoolSpec,
+    };
+
+    fn script(id: &str, source: &str) -> LuaScript {
+        LuaScript {
+            id: id.into(),
+            file: "main.conf".into(),
+            line: 1,
+            source: source.into(),
+            sha256: ContentHash::from_bytes(source.as_bytes()).as_str().into(),
+            module: None,
+        }
+    }
+
+    #[test]
+    fn handlers_name_scripts_of_the_snapshot_within_bounds() {
+        let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+        snapshot.lua.scripts = vec![script("a", "return 1"), script("a", "return 2")];
+        snapshot.lua.scripts[1].sha256 = "00".repeat(32);
+        snapshot.lua.shared_dicts.push(LuaSharedDict {
+            name: "bad name".into(),
+            capacity_bytes: 1,
+        });
+        let mut route = RouteSpec::new(
+            RouteId::new("r").unwrap(),
+            SiteId::new("s").unwrap(),
+            1,
+            RouteMatcher::ExactPath { path: "/".into() },
+            RouteAction::Lua {
+                handler: LuaHandler::new("missing"),
+            },
+        );
+        let mut slow = LuaHandler::new("a");
+        slow.time_limit_ms = MOST_LUA_TIME_MS + 1;
+        route.lua.server_rewrite = Some(slow);
+        snapshot.routes.push(route);
+        let mut pool = UpstreamPoolSpec::new(UpstreamPoolId::new("p").unwrap(), "p", Vec::new());
+        let mut balancer = LuaHandler::new("a");
+        balancer.on_error = LuaFallback::Status { status: 999 };
+        pool.balancer = Some(balancer);
+        snapshot.upstream_pools.push(pool);
+        let found: Vec<String> = problems(&snapshot)
+            .into_iter()
+            .map(|(_, problem)| problem)
+            .collect();
+        for expected in [
+            "script a appears twice",
+            "script a does not match its SHA-256",
+            "content handler names script missing",
+            "a route cannot have a server_rewrite handler",
+            "server_rewrite handler may run 60001 ms",
+            "balancer handler falls back to status 999",
+            "shared dictionary name \"bad name\" is invalid",
+            "shared dictionary bad name holds 1 bytes",
+        ] {
+            assert!(
+                found.iter().any(|problem| problem.contains(expected)),
+                "{expected}: {found:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn scripts_require_the_capability() {
+        let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+        snapshot.lua.scripts.push(script("a", "return 1"));
+        let mut diagnostics = Vec::new();
+        validate_lua(&snapshot, &mut diagnostics);
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains(LUA_SCRIPTS_CAPABILITY)));
+        snapshot
+            .required_capabilities
+            .push(CapabilityRequirement::new(LUA_SCRIPTS_CAPABILITY, "1"));
+        diagnostics.clear();
+        validate_lua(&snapshot, &mut diagnostics);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+}
