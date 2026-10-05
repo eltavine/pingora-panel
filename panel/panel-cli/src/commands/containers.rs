@@ -159,7 +159,30 @@ pub(crate) enum EngineAction {
     /// How much disk the engine's images, containers, volumes and build
     /// cache take, as `docker system df` reports it.
     Df { engine: String },
+    /// What pruning the engine would remove: containers that are not
+    /// running, images no container uses, anonymous volumes nothing mounts,
+    /// networks no container is on and build cache not in use. With
+    /// `--yes`, removes what this preview lists.
+    Prune {
+        engine: String,
+        /// Images a tag still names but no container uses, too.
+        #[arg(long)]
+        tagged_images: bool,
+        /// Volumes a name was given too; they usually hold data someone
+        /// meant to keep.
+        #[arg(long)]
+        named_volumes: bool,
+        /// Removes what the preview lists.
+        #[arg(long)]
+        yes: bool,
+    },
 }
+
+const PRUNED: &[Column] = &[
+    ("KIND", |item| text(&item["kind"])),
+    ("NAME", |item| text(&item["name"])),
+    ("SIZE", |item| bytes(&item["size_bytes"])),
+];
 
 /// One row of `docker system df`: a kind's count, what is in use, size, and
 /// what removing the rest would free.
@@ -342,6 +365,12 @@ pub async fn run(api: &Api, output: &Output, command: ContainerCommand) -> Resul
             EngineAction::Enable { engine } => set_engine(api, output, &engine, "enable").await?,
             EngineAction::Disable { engine } => set_engine(api, output, &engine, "disable").await?,
             EngineAction::Df { engine } => disk_usage(api, output, &engine).await?,
+            EngineAction::Prune {
+                engine,
+                tagged_images,
+                named_volumes,
+                yes,
+            } => prune(api, output, &engine, tagged_images, named_volumes, yes).await?,
         },
         ContainerCommand::List {
             engine,
@@ -622,5 +651,72 @@ async fn disk_usage(api: &Api, output: &Output, engine: &str) -> Result<()> {
     .map(|(kind, field)| serde_json::json!({"kind": kind, "use": usage[field]}))
     .collect();
     output.list(&Value::Array(rows), DISK);
+    Ok(())
+}
+
+async fn prune(
+    api: &Api,
+    output: &Output,
+    engine: &str,
+    tagged_images: bool,
+    named_volumes: bool,
+    yes: bool,
+) -> Result<()> {
+    let query = vec![
+        ("tagged_images", tagged_images.to_string()),
+        ("named_volumes", named_volumes.to_string()),
+    ];
+    let path = format!("/api/v1/container-engines/{engine}/prune-preview");
+    let preview = api.get(&path, &query).await?.body;
+    let items = preview["items"].as_array().cloned().unwrap_or_default();
+    if !yes {
+        if output.format == Format::Json {
+            output.json(&preview);
+        } else if items.is_empty() {
+            eprintln!("nothing to prune");
+        } else {
+            output.list(&preview["items"], PRUNED);
+            if !output.quiet {
+                eprintln!(
+                    "{} reclaimable; pass --yes to remove these",
+                    bytes(&preview["reclaimable_bytes"])
+                );
+            }
+        }
+        return Ok(());
+    }
+    if items.is_empty() {
+        if !output.quiet {
+            eprintln!("nothing to prune");
+        }
+        return Ok(());
+    }
+    let body = serde_json::json!({
+        "tagged_images": tagged_images,
+        "named_volumes": named_volumes,
+        "items": items,
+    });
+    let path = format!("/api/v1/container-engines/{engine}/prune");
+    let report = api
+        .change(Method::POST, &path, Some(&body), None)
+        .await?
+        .body;
+    if output.format == Format::Json {
+        output.json(&report);
+    } else if !output.quiet {
+        for outcome in report["outcomes"].as_array().into_iter().flatten() {
+            let item = &outcome["item"];
+            match &outcome["error"] {
+                Value::Null => println!("removed {} {}", text(&item["kind"]), text(&item["name"])),
+                error => println!(
+                    "kept {} {}: {}",
+                    text(&item["kind"]),
+                    text(&item["name"]),
+                    text(&error["message"])
+                ),
+            }
+        }
+        println!("{} reclaimed", bytes(&report["reclaimed_bytes"]));
+    }
     Ok(())
 }

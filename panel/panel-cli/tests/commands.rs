@@ -266,6 +266,24 @@ async fn api(
             "id": "b2", "name": "shop-web-1", "container": null
         }))
         .into_response(),
+        ("GET", "/api/v1/container-engines/docker/prune-preview") => Json(json!({
+            "observed_at": "2027-01-15T08:00:10Z",
+            "items": [
+                {"kind": "container", "id": "a1", "name": "cache", "size_bytes": 1_024},
+                {"kind": "image", "id": "sha256:cc", "name": "sha256:cc", "size_bytes": 52_428_800}
+            ],
+            "reclaimable_bytes": 52_429_824
+        }))
+        .into_response(),
+        ("POST", "/api/v1/container-engines/docker/prune") => Json(json!({
+            "outcomes": [
+                {"item": body["items"][0], "error": null},
+                {"item": body["items"][1],
+                 "error": {"code": "CONFLICT", "message": "image is being used by a container"}}
+            ],
+            "reclaimed_bytes": 1_024
+        }))
+        .into_response(),
         ("GET", "/api/v1/container-engines/docker/disk-usage") => Json(json!({
             "observed_at": "2027-01-15T08:00:10Z",
             "images": {"total": 5, "active": 2, "size_bytes": 1_073_741_824,
@@ -2773,4 +2791,41 @@ fn disk_use_from_the_command_line() {
     assert!(images.contains("1.0 GiB"), "{images}");
     assert!(images.contains("307.2 MiB (30%)"), "{images}");
     assert!(printed.contains("Local Volumes"), "{printed}");
+}
+
+#[test]
+fn pruning_from_the_command_line_shows_first() {
+    let stub = Stub::start();
+    let preview = stub.ppanel(&["container", "engine", "prune", "docker"]);
+    assert!(preview.status.success(), "{}", stderr(&preview));
+    assert!(stdout(&preview).contains("cache"), "{}", stdout(&preview));
+    assert!(
+        stderr(&preview).contains("50.0 MiB reclaimable; pass --yes"),
+        "{}",
+        stderr(&preview)
+    );
+    assert!(stub
+        .requests("POST", "/api/v1/container-engines/docker/prune")
+        .is_empty());
+
+    let pruned = stub.ppanel(&[
+        "container",
+        "engine",
+        "prune",
+        "docker",
+        "--named-volumes",
+        "--yes",
+    ]);
+    assert!(pruned.status.success(), "{}", stderr(&pruned));
+    assert_eq!(
+        stdout(&pruned),
+        "removed container cache\nkept image sha256:cc: image is being used by a container\n1.0 KiB reclaimed\n"
+    );
+    let asked = stub.requests("POST", "/api/v1/container-engines/docker/prune");
+    assert_eq!(asked[0].body["named_volumes"], true);
+    assert_eq!(asked[0].body["items"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        stub.requests("GET", "/api/v1/container-engines/docker/prune-preview")[1].query,
+        "tagged_images=false&named_volumes=true"
+    );
 }
