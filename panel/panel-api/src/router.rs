@@ -284,6 +284,10 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
             get(engine_resources::list_volumes::<U>),
         )
         .route(
+            "/api/v1/container-engines/{engine}/disk-usage",
+            get(engine_resources::disk_usage::<U>),
+        )
+        .route(
             "/api/v1/container-engines/{engine}/images/{image}",
             get(images::inspect_image::<U>).delete(images::remove_image::<U>),
         )

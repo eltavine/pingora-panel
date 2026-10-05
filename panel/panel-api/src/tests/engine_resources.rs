@@ -128,3 +128,14 @@ async fn without_the_agent_networks_are_unsupported() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
     assert_eq!(problem["code"], "UNSUPPORTED_CAPABILITY");
 }
+
+#[tokio::test]
+async fn disk_use_is_read() {
+    let (status, usage) = get(&app(true), "/api/v1/container-engines/docker/disk-usage").await;
+    assert_eq!(status, StatusCode::OK, "{usage}");
+    assert_eq!(usage["observed_at"], "2027-01-15T08:00:10Z");
+    assert_eq!(usage["images"]["total"], 5);
+    assert_eq!(usage["images"]["reclaimable_bytes"], 300_000_000);
+    assert_eq!(usage["build_cache"]["active"], 1);
+    assert_eq!(usage["containers"]["size_bytes"], 0);
+}

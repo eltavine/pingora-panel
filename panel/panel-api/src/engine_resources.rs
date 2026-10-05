@@ -13,7 +13,10 @@ use axum::{
     Json,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
-use panel_application::{EngineNetwork, EngineNetworkList, EngineVolume, EngineVolumeList};
+use panel_application::{
+    EngineDiskUsage, EngineDiskUse, EngineNetwork, EngineNetworkList, EngineVolume,
+    EngineVolumeList,
+};
 use serde::Serialize;
 use std::{collections::BTreeMap, time::SystemTime};
 use utoipa::ToSchema;
@@ -174,4 +177,69 @@ pub(crate) async fn list_volumes<U>(
         .volumes(request_scope(&headers)?, engine(name)?)
         .await?;
     Ok(Json(volumes.into()))
+}
+
+/// One kind of thing an engine keeps on disk.
+#[derive(Clone, Copy, Debug, Serialize, ToSchema)]
+pub struct EngineDiskUseView {
+    pub total: u32,
+    /// In use: running containers, images and volumes a container uses, and
+    /// build cache in use.
+    pub active: u32,
+    pub size_bytes: u64,
+    /// What removing what is not in use would free.
+    pub reclaimable_bytes: u64,
+}
+
+impl From<EngineDiskUse> for EngineDiskUseView {
+    fn from(value: EngineDiskUse) -> Self {
+        Self {
+            total: value.total,
+            active: value.active,
+            size_bytes: value.size_bytes,
+            reclaimable_bytes: value.reclaimable_bytes,
+        }
+    }
+}
+
+/// The disk an engine takes, as `docker system df` reports it.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct EngineDiskUsageView {
+    /// When the agent read it, RFC 3339.
+    pub observed_at: Option<String>,
+    pub images: EngineDiskUseView,
+    pub containers: EngineDiskUseView,
+    /// Local volumes.
+    pub volumes: EngineDiskUseView,
+    pub build_cache: EngineDiskUseView,
+}
+
+impl From<EngineDiskUsage> for EngineDiskUsageView {
+    fn from(value: EngineDiskUsage) -> Self {
+        Self {
+            observed_at: value.observed_at.map(rfc3339),
+            images: value.images.into(),
+            containers: value.containers.into(),
+            volumes: value.volumes.into(),
+            build_cache: value.build_cache.into(),
+        }
+    }
+}
+
+/// How much disk an enabled engine's images, containers, volumes and build
+/// cache take, and how much removing what is not in use would free. The
+/// engine sizes every volume, so this can take a while.
+#[utoipa::path(get, path = "/api/v1/container-engines/{engine}/disk-usage",
+    params(("engine" = String, Path, description = "docker or podman"), QueryHeaders),
+    responses((status = 200, body = EngineDiskUsageView)), tag = "containers")]
+pub(crate) async fn disk_usage<U>(
+    State(state): State<ApiState<U>>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<EngineDiskUsageView>, ApiError> {
+    let usage = state
+        .resources
+        .disk_usage(request_scope(&headers)?, engine(name)?)
+        .await?;
+    Ok(Json(usage.into()))
 }
