@@ -1,7 +1,10 @@
 #![forbid(unsafe_code)]
 
-//! `CertificatePort` over `automation-service`, so the public API manages
-//! the certificate inventory without holding private keys.
+//! `CertificatePort` and `BackupsPort` over `automation-service`, so the
+//! public API manages the certificate inventory without holding private
+//! keys, and backups without reading the databases they copy.
+
+mod backups;
 
 use async_trait::async_trait;
 use panel_application::{CommandContext, RequestScope};

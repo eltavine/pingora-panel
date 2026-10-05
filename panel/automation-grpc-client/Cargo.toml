@@ -9,14 +9,18 @@ publish.workspace = true
 
 [dependencies]
 async-trait.workspace = true
+futures-util.workspace = true
 panel-application.workspace = true
 panel-certificate-api.workspace = true
 panel-contracts.workspace = true
 panel-errors.workspace = true
 panel-service.workspace = true
+prost-types.workspace = true
 serde_json.workspace = true
 tonic.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
+panel-context.workspace = true
 tokio.workspace = true
+tokio-stream.workspace = true
