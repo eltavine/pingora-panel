@@ -554,6 +554,8 @@ ppanel compose list
 ppanel compose logs shop --lines 500 --since 1h
 ppanel compose config shop
 ppanel compose restart shop --yes
+ppanel container links
+ppanel container proxy shop-web-1 --domain shop.example
 ppanel container restart shop-web-1 --yes
 ppanel container remove nightly-report --volumes --yes
 ```
@@ -662,6 +664,26 @@ project's working directory, ends in `.yml` or `.yaml`, is a regular
 file and is at most 256 KiB, after following links; the agent's sandbox
 hides home directories and `/tmp`, and a file that cannot be read says
 why.
+Sites go in front of containers
+([decision](../docs/adr/0033-sites-in-front-of-containers.md)) through
+their endpoints, where the gateway can reach a running container's TCP
+ports: each published port, a wildcard address read as `127.0.0.1`, then
+each of its ports on its addresses on networks other than the host's.
+Listed containers carry their addresses, endpoints and the site their
+labels declare: `pingora-panel.site.domains`, comma-separated hosts,
+`pingora-panel.site.port` and `pingora-panel.site.name`; nothing is created
+from labels. `GET /api/v1/container-engines/{engine}/site-links` needs
+`containers.read` and `config.read` and lists the sites of the draft
+whose upstream nodes, the site's own or its routes', have the address and
+port of a container's endpoint, `localhost` and the loopback addresses
+being one host, naming only sites the caller may read, and the declared
+hosts no site serves.
+`POST .../containers/{container}/sites` needs `config.write` and
+`containers.read` and adds an upstream with one of the container's
+endpoints as its node and a reverse-proxy site for it to the draft as one
+import, taking what the request leaves out from the labels, or the
+container's name and only port, published first; applying the draft is a
+step of its own.
 `POST /api/v1/container-engines/{engine}/{enable,disable}` needs
 `containers.manage`, as do
 `POST /api/v1/container-engines/{engine}/containers/{container}/{start,stop,restart,kill}`
@@ -678,7 +700,12 @@ text, followed from the last line read and saved as a file. The table
 shows each running container's CPU and memory, and the details show
 everything it uses. An Images tab lists the engine's images, opens one's
 configuration, removes one after confirming and pulls one, showing each
-layer's state and how far it got; Networks and Volumes tabs list those. A Projects tab lists the engine's Compose
+layer's state and how far it got; Networks and Volumes tabs list those.
+The table links each container to the sites in front of it, says which
+declared hosts no site serves, and puts a site in front of a running
+container from its row; an upstream's node form offers running
+containers' endpoints, and a site's page lists the containers it points
+at. A Projects tab lists the engine's Compose
 projects, brings one up, or restarts or takes it down after confirming,
 and opens its merged logs, filtered by service, and its Compose files. A
 reachable engine's card opens its disk use, where operators see what
