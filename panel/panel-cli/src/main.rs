@@ -173,6 +173,9 @@ enum Command {
     /// reaches.
     #[command(subcommand)]
     Compose(commands::compose::ComposeCommand),
+    /// The files below the static sites' directory.
+    #[command(subcommand)]
+    Files(commands::files::FilesCommand),
     /// The running gateway.
     #[command(subcommand)]
     Gateway(commands::gateway::GatewayCommand),
@@ -280,6 +283,7 @@ async fn main() -> ExitCode {
                 commands::engine_resources::volumes(&api, &output, command).await
             }
             Command::Compose(command) => commands::compose::run(&api, &output, command).await,
+            Command::Files(command) => commands::files::run(&api, &output, command).await,
             Command::Gateway(command) => commands::gateway::gateway(&api, &output, command).await,
             Command::Completion { .. } => Ok(()),
         }

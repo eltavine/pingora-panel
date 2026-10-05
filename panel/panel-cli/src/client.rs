@@ -256,6 +256,28 @@ impl Api {
         }
     }
 
+    /// A change named by `query`, with a body of bytes and `headers` such as
+    /// a precondition.
+    pub async fn change_bytes(
+        &self,
+        method: Method,
+        path: &str,
+        query: &[(&str, String)],
+        body: Option<Vec<u8>>,
+        headers: &[(header::HeaderName, String)],
+    ) -> Result<Reply> {
+        let mut request = self.command(method, path, self.timeout).query(query);
+        for (name, value) in headers {
+            request = request.header(name, value);
+        }
+        if let Some(body) = body {
+            request = request
+                .header(header::CONTENT_TYPE, "application/octet-stream")
+                .body(body);
+        }
+        self.execute(request).await
+    }
+
     /// A change the API answers as server-sent events, read as they arrive
     /// for at most `lasting`.
     pub async fn change_events(

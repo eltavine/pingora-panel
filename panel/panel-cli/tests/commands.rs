@@ -28,6 +28,8 @@ struct Request {
     if_match: Option<String>,
     authorization: Option<String>,
     body: Value,
+    raw: Vec<u8>,
+    if_none_match: Option<String>,
 }
 
 type Log = Arc<Mutex<Vec<Request>>>;
@@ -46,7 +48,9 @@ async fn api(
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Response {
+    let raw = body.to_vec();
     let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    let query = uri.query().unwrap_or_default().to_owned();
     log.lock().unwrap().push(Request {
         method: method.clone(),
         path: uri.path().to_owned(),
@@ -58,6 +62,10 @@ async fn api(
             .get("authorization")
             .map(|value| value.to_str().unwrap().to_owned()),
         body: body.clone(),
+        raw: raw.clone(),
+        if_none_match: headers
+            .get("if-none-match")
+            .map(|value| value.to_str().unwrap().to_owned()),
     });
     let revision = json!({
         "id": 3, "draft_version": 2, "language_version": 1, "content_hash": "sha256:aa",
@@ -71,6 +79,32 @@ async fn api(
                    "diff": "--- a/sites/shop.conf\n+++ b/sites/shop.conf\n-a\n+b\n"}]
     });
     match (method.as_str(), uri.path()) {
+        ("GET", "/api/v1/site-files") => Json(json!({
+            "path": "shop",
+            "entries": [
+                {"name": "assets", "kind": "directory", "size_bytes": 0, "modified": null},
+                {"name": "index.html", "kind": "file", "size_bytes": 2048,
+                 "modified": "2027-01-15T08:00:00Z"}
+            ]
+        }))
+        .into_response(),
+        ("GET", "/api/v1/site-files/content") => (
+            [("content-type", "application/octet-stream"), ("etag", "\"t1\"")],
+            "<h1>Shop</h1>",
+        )
+            .into_response(),
+        ("PUT", "/api/v1/site-files/content") => (
+            StatusCode::CREATED,
+            Json(json!({"path": "shop/index.html", "size_bytes": raw.len(),
+                        "sha256": "ab".repeat(32), "created": true})),
+        )
+            .into_response(),
+        ("POST", "/api/v1/site-files/directories") => StatusCode::NO_CONTENT.into_response(),
+        ("DELETE", "/api/v1/site-files") => Json(json!({
+            "path": "shop/old", "kind": "directory",
+            "removed": if query.contains("recursive=true") { 3 } else { 1 }
+        }))
+        .into_response(),
         ("GET", "/api/v1/config/source") => with_etag(
             "draft-4",
             json!({"language_version": 1, "files": {"main.conf": MAIN, "sites/shop.conf": SHOP}, "diagnostics": []}),
@@ -903,6 +937,8 @@ async fn tail(State(log): State<Log>, uri: Uri, upgrade: WebSocketUpgrade) -> Re
             if_match: None,
             authorization: None,
             body: Value::Null,
+            raw: Vec::new(),
+            if_none_match: None,
         });
         log.iter()
             .filter(|request| request.path == uri.path())
@@ -951,6 +987,8 @@ async fn container_tail(State(log): State<Log>, uri: Uri, upgrade: WebSocketUpgr
         if_match: None,
         authorization: None,
         body: Value::Null,
+        raw: Vec::new(),
+        if_none_match: None,
     });
     let crashing = uri.path().contains("/crashing/");
     upgrade.on_upgrade(move |mut socket| async move {
@@ -3118,4 +3156,89 @@ fn sites_go_in_front_of_containers_from_the_command_line() {
     );
     let unparsed = stub.ppanel(&["container", "proxy", "shop-web-1", "--endpoint", "8081"]);
     assert_eq!(unparsed.status.code(), Some(2));
+}
+
+#[test]
+fn the_sites_files_from_the_command_line() {
+    let stub = Stub::start();
+    let listed = stub.ppanel(&["files", "ls", "shop"]);
+    assert!(listed.status.success(), "{}", stderr(&listed));
+    let printed = stdout(&listed);
+    assert!(
+        printed.lines().any(|line| line.starts_with("assets/")),
+        "{printed}"
+    );
+    assert!(printed.contains("2.0 KiB"), "{printed}");
+    assert_eq!(
+        stub.requests("GET", "/api/v1/site-files")[0].query,
+        "path=shop"
+    );
+
+    let shown = stub.ppanel(&["files", "cat", "shop/index.html"]);
+    assert_eq!(stdout(&shown), "<h1>Shop</h1>");
+    assert_eq!(
+        stub.requests("GET", "/api/v1/site-files/content")[0].query,
+        "path=shop%2Findex.html"
+    );
+    let directory = tempfile::tempdir().unwrap();
+    let saved = directory.path().join("index.html");
+    let got = stub.ppanel(&[
+        "files",
+        "get",
+        "shop/index.html",
+        "--to",
+        saved.to_str().unwrap(),
+    ]);
+    assert!(got.status.success(), "{}", stderr(&got));
+    assert_eq!(std::fs::read_to_string(&saved).unwrap(), "<h1>Shop</h1>");
+
+    let put = stub.ppanel(&[
+        "files",
+        "put",
+        saved.to_str().unwrap(),
+        "shop/index.html",
+        "--new",
+    ]);
+    assert!(put.status.success(), "{}", stderr(&put));
+    assert!(
+        stdout(&put).starts_with("created shop/index.html (13.0 B"),
+        "{}",
+        stdout(&put)
+    );
+    let uploaded = &stub.requests("PUT", "/api/v1/site-files/content")[0];
+    assert_eq!(uploaded.raw, b"<h1>Shop</h1>");
+    assert_eq!(uploaded.if_none_match.as_deref(), Some("*"));
+    let tagged = stub.ppanel(&[
+        "files",
+        "put",
+        saved.to_str().unwrap(),
+        "shop/index.html",
+        "--if-match",
+        "\"t1\"",
+    ]);
+    assert!(tagged.status.success());
+    assert_eq!(
+        stub.requests("PUT", "/api/v1/site-files/content")[1]
+            .if_match
+            .as_deref(),
+        Some("\"t1\"")
+    );
+
+    let piped = stub.ppanel_with_input(&["files", "put", "-", "shop/robots.txt"], "User-agent: *");
+    assert!(piped.status.success(), "{}", stderr(&piped));
+    assert_eq!(
+        stub.requests("PUT", "/api/v1/site-files/content")[2].raw,
+        b"User-agent: *"
+    );
+
+    let made = stub.ppanel(&["files", "mkdir", "blog/2027"]);
+    assert!(made.status.success(), "{}", stderr(&made));
+    let unconfirmed = stub.ppanel(&["files", "rm", "shop/old", "--recursive"]);
+    assert_eq!(unconfirmed.status.code(), Some(2));
+    let removed = stub.ppanel(&["files", "rm", "shop/old", "--recursive", "--yes"]);
+    assert_eq!(stdout(&removed), "removed shop/old (3 entries)\n");
+    assert_eq!(
+        stub.requests("DELETE", "/api/v1/site-files")[0].query,
+        "path=shop%2Fold&recursive=true"
+    );
 }

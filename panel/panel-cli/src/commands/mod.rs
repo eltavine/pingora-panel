@@ -10,6 +10,7 @@ pub mod config;
 pub mod containers;
 pub mod domains;
 pub mod engine_resources;
+pub mod files;
 pub mod gateway;
 pub mod host;
 pub mod identity;
