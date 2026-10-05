@@ -2016,6 +2016,8 @@ const zhCN = {
       killedFirst: '先强制停止',
       volumesRemoved: '连同匿名卷',
       forced: '强制删除，尽管有已停止的容器在用',
+      pruned: '删除 {count} 项',
+      kept: '保留 {count} 项',
     },
     types: {
       config_draft_changed: '修改草稿',
@@ -2088,6 +2090,7 @@ const zhCN = {
       container_killed: '强制停止了容器',
       container_removed: '删除了容器',
       container_image_removed: '删除了镜像',
+      container_engine_pruned: '清理了引擎',
       container_operation_refused: '拒绝了容器操作',
     },
   },

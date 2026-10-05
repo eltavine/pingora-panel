@@ -27,7 +27,8 @@ use observability_grpc_client::ObservabilityClient;
 use ops_grpc_client::OpsAgentClient;
 use panel_api::{router_with_config, AccessSettings, ApiConfig, ApiState};
 use panel_application::{
-    RecordedContainers, RecordedHostAgent, RecordedImages, RecordedLogs, RecordedRuntime,
+    RecordedContainers, RecordedEngineResources, RecordedHostAgent, RecordedImages, RecordedLogs,
+    RecordedRuntime,
 };
 use panel_control_runtime::{ControlPlaneProcess, DefaultAddresses, ProcessSettings};
 use panel_errors::{PanelError, Result};
@@ -216,7 +217,9 @@ pub fn process(
     let recorded_images = agent
         .clone()
         .map(|agent| RecordedImages::new(Arc::new(agent), operations.clone()));
-    let resources = agent.clone();
+    let resources = agent
+        .clone()
+        .map(|agent| RecordedEngineResources::new(Arc::new(agent), operations.clone()));
     let store = Arc::new(SqliteIdentityStore::new(process.database(), events));
     let roles = roles::BuiltInRoles::new(Arc::clone(&store), bootstrap.is_some());
     let oidc = Arc::new(OidcClient::new(PROVIDER_TIMEOUT)?);

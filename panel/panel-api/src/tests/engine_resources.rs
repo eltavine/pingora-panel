@@ -1,7 +1,8 @@
 use super::*;
 use panel_application::{
-    EngineDiskUsage, EngineDiskUse, EngineNetwork, EngineNetworkList, EngineResourcesPort,
-    EngineSubnet, EngineVolume, EngineVolumeList, RequestScope,
+    CommandContext, EngineDiskUsage, EngineDiskUse, EngineNetwork, EngineNetworkList,
+    EngineResourcesPort, EngineSubnet, EngineVolume, EngineVolumeList, PruneChoices, PruneItem,
+    PruneKind, PruneOutcome, PrunePreview, PruneReport, RequestScope,
 };
 use serde_json::Value;
 use std::time::{Duration, UNIX_EPOCH};
@@ -66,6 +67,69 @@ impl EngineResourcesPort for Resources {
             },
             ..EngineDiskUsage::default()
         })
+    }
+
+    async fn prune_preview(
+        &self,
+        _: RequestScope,
+        _: String,
+        choices: PruneChoices,
+    ) -> Result<PrunePreview> {
+        let mut items = vec![stopped()];
+        if choices.named_volumes {
+            items.push(PruneItem {
+                kind: PruneKind::Volume,
+                id: "orphan".into(),
+                name: "orphan".into(),
+                size_bytes: 2_048,
+            });
+        }
+        Ok(PrunePreview {
+            observed_at: Some(UNIX_EPOCH + Duration::from_secs(1_800_000_010)),
+            reclaimable_bytes: items.iter().map(|item| item.size_bytes).sum(),
+            items,
+        })
+    }
+
+    async fn prune(
+        &self,
+        _: CommandContext,
+        engine: String,
+        _: PruneChoices,
+        items: Vec<PruneItem>,
+    ) -> Result<PruneReport> {
+        if engine == "podman" {
+            return Err(PanelError::precondition_failed(
+                "the podman engine is disabled",
+            ));
+        }
+        let outcomes: Vec<PruneOutcome> = items
+            .into_iter()
+            .map(|item| PruneOutcome {
+                refusal: (item != stopped()).then(|| {
+                    PanelError::precondition_failed("no longer what pruning would remove")
+                }),
+                item,
+            })
+            .collect();
+        Ok(PruneReport {
+            reclaimed_bytes: outcomes
+                .iter()
+                .filter(|outcome| outcome.refusal.is_none())
+                .map(|outcome| outcome.item.size_bytes)
+                .sum(),
+            outcomes,
+        })
+    }
+}
+
+/// The stopped container pruning would remove.
+fn stopped() -> PruneItem {
+    PruneItem {
+        kind: PruneKind::Container,
+        id: "a1".into(),
+        name: "cache".into(),
+        size_bytes: 1_024,
     }
 }
 

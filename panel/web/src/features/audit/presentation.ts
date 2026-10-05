@@ -73,6 +73,7 @@ export const KNOWN_TYPES = [
   'container.killed',
   'container.removed',
   'container.image.removed',
+  'container.engine.pruned',
   'container.operation.refused',
 ] as const
 
@@ -258,6 +259,17 @@ export function summaryOf(event: AuditEvent, t: Translate): string {
       ]
         .filter(Boolean)
         .join(' · ')
+    case 'container.engine.pruned': {
+      const removed = Array.isArray(data.removed) ? data.removed.length : 0
+      const kept = Number(data.kept) || 0
+      return [
+        text(data.engine),
+        t('audit.summary.pruned', { count: removed }, removed),
+        kept > 0 && t('audit.summary.kept', { count: kept }, kept),
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    }
     case 'container.image.removed':
       return [
         `${text(data.engine)} · ${text(data.image)}`,

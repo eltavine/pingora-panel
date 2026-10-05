@@ -130,6 +130,17 @@ describe('audit presentation', () => {
     ).toBe('docker · redis:7 · audit.summary.forced')
     expect(
       summaryOf(
+        event('container.engine.pruned', {
+          engine: 'docker',
+          removed: ['container cache', 'image sha256:cc'],
+          kept: 1,
+          reclaimed_bytes: 1024,
+        }),
+        t,
+      ),
+    ).toBe('docker · audit.summary.pruned{"count":2} · audit.summary.kept{"count":1}')
+    expect(
+      summaryOf(
         event('container.operation.refused', {
           engine: 'docker',
           operation: 'image.remove',

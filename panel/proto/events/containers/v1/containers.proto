@@ -72,6 +72,17 @@ message ImageRemoved {
   bool force = 6;
 }
 
+// `container.engine.pruned`
+message EnginePruned {
+  string engine = 1;
+  // What went, each as its kind and name, such as `container cache`.
+  repeated string removed = 2;
+  // How many of the items asked for stayed.
+  uint32 kept = 3;
+  // What the items that went freed.
+  uint64 reclaimed_bytes = 4;
+}
+
 // `container.operation.refused`: an operation on an engine that was refused
 // or failed, and changed nothing.
 message OperationRefused {

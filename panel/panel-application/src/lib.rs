@@ -80,7 +80,8 @@ pub use context::{
 };
 pub use engine_resources::{
     EngineDiskUsage, EngineDiskUse, EngineNetwork, EngineNetworkList, EngineResourcesPort,
-    EngineSubnet, EngineVolume, EngineVolumeList, NoEngineResources,
+    EngineSubnet, EngineVolume, EngineVolumeList, NoEngineResources, PruneChoices, PruneItem,
+    PruneKind, PruneOutcome, PrunePreview, PruneReport, RecordedEngineResources,
 };
 pub use gateway::{
     AbortOutcome, ActivatedDeployment, ConfigCompiler, ConfigDocument, DeploymentOutcome,

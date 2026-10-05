@@ -14,7 +14,8 @@ use panel_application::{
     EngineNetwork, EngineNetworkList, EngineResourcesPort, EngineSubnet, EngineVersion,
     EngineVolume, EngineVolumeList, GatewayContainer, GatewayServiceAction, GatewayServiceStatus,
     HostAgentPort, Image, ImageDetail, ImageList, ImageRemoval, ImagesPort, ListenersReport,
-    ListeningProcess, PortListener, PortMapping, RequestScope,
+    ListeningProcess, PortListener, PortMapping, PruneChoices, PruneItem, PruneKind, PruneOutcome,
+    PrunePreview, PruneReport, RequestScope,
 };
 use panel_contracts::ops::v1::{
     self as wire, agent_client::AgentClient, containers_client::ContainersClient,
@@ -37,6 +38,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const CHANGE_TIMEOUT: Duration = Duration::from_secs(150);
 /// Longer than the agent gives an engine to add up its disk use.
 const USAGE_TIMEOUT: Duration = Duration::from_secs(75);
+/// Longer than the agent gives a prune preview.
+const PREVIEW_TIMEOUT: Duration = Duration::from_secs(125);
 
 #[derive(Clone)]
 pub struct OpsAgentClient {
@@ -852,6 +855,110 @@ impl EngineResourcesPort for OpsAgentClient {
             build_cache: use_of(response.build_cache),
         })
     }
+
+    async fn prune_preview(
+        &self,
+        scope: RequestScope,
+        engine_id: String,
+        choices: PruneChoices,
+    ) -> Result<PrunePreview> {
+        let message = wire::EngineResourcesPrunePreviewRequest {
+            context: Some(request_context(&scope)),
+            engine: engine_id,
+            choices: Some(wire_choices(choices)),
+        };
+        let mut request = self.request(message, &scope);
+        request.set_timeout(PREVIEW_TIMEOUT);
+        let response = EngineResourcesClient::new(self.channel.clone())
+            .prune_preview(request)
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        Ok(PrunePreview {
+            observed_at: time(response.observed_at),
+            items: response.items.into_iter().filter_map(prune_item).collect(),
+            reclaimable_bytes: response.reclaimable_bytes,
+        })
+    }
+
+    async fn prune(
+        &self,
+        context: CommandContext,
+        engine_id: String,
+        choices: PruneChoices,
+        items: Vec<PruneItem>,
+    ) -> Result<PruneReport> {
+        let message = wire::EngineResourcesPruneRequest {
+            context: Some(command_context(&context)),
+            engine: engine_id,
+            choices: Some(wire_choices(choices)),
+            items: items.into_iter().map(wire_item).collect(),
+        };
+        let mut request = self.request(message, &context.scope());
+        request.set_timeout(CHANGE_TIMEOUT);
+        let response = EngineResourcesClient::new(self.channel.clone())
+            .prune(request)
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        Ok(PruneReport {
+            outcomes: response
+                .outcomes
+                .into_iter()
+                .filter_map(|outcome| {
+                    Some(PruneOutcome {
+                        item: prune_item(outcome.item?)?,
+                        refusal: outcome.error.map(PanelError::from),
+                    })
+                })
+                .collect(),
+            reclaimed_bytes: response.reclaimed_bytes,
+        })
+    }
+}
+
+fn wire_choices(choices: PruneChoices) -> wire::EnginePruneChoices {
+    wire::EnginePruneChoices {
+        tagged_images: choices.tagged_images,
+        named_volumes: choices.named_volumes,
+    }
+}
+
+fn wire_item(item: PruneItem) -> wire::EnginePruneItem {
+    let kind = match item.kind {
+        PruneKind::Container => wire::EnginePruneKind::Container,
+        PruneKind::Image => wire::EnginePruneKind::Image,
+        PruneKind::Volume => wire::EnginePruneKind::Volume,
+        PruneKind::Network => wire::EnginePruneKind::Network,
+        PruneKind::BuildCache => wire::EnginePruneKind::BuildCache,
+    };
+    wire::EnginePruneItem {
+        kind: kind.into(),
+        id: item.id,
+        name: item.name,
+        size_bytes: item.size_bytes,
+    }
+}
+
+/// An item of a kind this build does not know is left out: nothing here
+/// could ask to remove it.
+fn prune_item(value: wire::EnginePruneItem) -> Option<PruneItem> {
+    let kind = match wire::EnginePruneKind::try_from(value.kind).ok()? {
+        wire::EnginePruneKind::Container => PruneKind::Container,
+        wire::EnginePruneKind::Image => PruneKind::Image,
+        wire::EnginePruneKind::Volume => PruneKind::Volume,
+        wire::EnginePruneKind::Network => PruneKind::Network,
+        wire::EnginePruneKind::BuildCache => PruneKind::BuildCache,
+        wire::EnginePruneKind::Unspecified => return None,
+    };
+    Some(PruneItem {
+        kind,
+        id: value.id,
+        name: value.name,
+        size_bytes: value.size_bytes,
+    })
 }
 
 #[cfg(test)]

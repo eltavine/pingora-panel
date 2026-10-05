@@ -232,6 +232,45 @@ impl OperationLog for OutboxOperations {
                     }
                 }
             }
+            Operation::EnginePrune { engine, result } => {
+                let (scope, actor) = (context.scope(), context.actor());
+                let target = (ENGINE, engine);
+                match result {
+                    Ok(report) => {
+                        let data = containers::EnginePruned {
+                            engine: engine.to_owned(),
+                            removed: report
+                                .outcomes
+                                .iter()
+                                .filter(|outcome| outcome.refusal.is_none())
+                                .map(|outcome| {
+                                    format!("{} {}", outcome.item.kind.as_str(), outcome.item.name)
+                                })
+                                .collect(),
+                            kept: u32::try_from(
+                                report
+                                    .outcomes
+                                    .iter()
+                                    .filter(|outcome| outcome.refusal.is_some())
+                                    .count(),
+                            )
+                            .unwrap_or(u32::MAX),
+                            reclaimed_bytes: report.reclaimed_bytes,
+                        };
+                        self.0.record(target, &scope, actor, &data).await;
+                    }
+                    Err(error) => {
+                        let refused = containers::OperationRefused {
+                            engine: engine.to_owned(),
+                            operation: "engine.prune".to_owned(),
+                            code: error.code.as_str().to_owned(),
+                            message: error.message.clone(),
+                            ..containers::OperationRefused::default()
+                        };
+                        self.0.record(target, &scope, actor, &refused).await;
+                    }
+                }
+            }
             Operation::ImageRemoval {
                 engine,
                 image,

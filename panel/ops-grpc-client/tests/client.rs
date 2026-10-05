@@ -5,7 +5,7 @@ use panel_application::{
     AgentCapability, CommandContext, ContainerAction, ContainerLogQuery, ContainerLogStart,
     ContainerLogStream, ContainerNetworkStats, ContainerState, ContainersPort, DirectoryKind,
     EngineResourcesPort, GatewayServiceAction, HostAgentPort, IdempotencyKey, ImagesPort,
-    RequestDeadline, RequestId, RequestScope,
+    PruneChoices, PruneItem, PruneKind, RequestDeadline, RequestId, RequestScope,
 };
 use panel_contracts::{
     common::v1 as common,
@@ -213,16 +213,49 @@ impl EngineResources for FakeResources {
 
     async fn prune_preview(
         &self,
-        _: Request<wire::EngineResourcesPrunePreviewRequest>,
+        request: Request<wire::EngineResourcesPrunePreviewRequest>,
     ) -> Result<Response<wire::EngineResourcesPrunePreviewResponse>, Status> {
-        Err(Status::unimplemented("prune"))
+        assert!(request.into_inner().choices.unwrap().named_volumes);
+        Ok(Response::new(wire::EngineResourcesPrunePreviewResponse {
+            observed_at: Some(at(10).into()),
+            items: vec![
+                wire::EnginePruneItem {
+                    kind: wire::EnginePruneKind::Container.into(),
+                    id: "a1".into(),
+                    name: "cache".into(),
+                    size_bytes: 1_024,
+                },
+                wire::EnginePruneItem {
+                    kind: 99,
+                    id: "x".into(),
+                    name: "something newer".into(),
+                    size_bytes: 1,
+                },
+            ],
+            reclaimable_bytes: 1_025,
+            error: None,
+        }))
     }
 
     async fn prune(
         &self,
-        _: Request<wire::EngineResourcesPruneRequest>,
+        request: Request<wire::EngineResourcesPruneRequest>,
     ) -> Result<Response<wire::EngineResourcesPruneResponse>, Status> {
-        Err(Status::unimplemented("prune"))
+        let items = request.into_inner().items;
+        assert_eq!(items[0].kind, i32::from(wire::EnginePruneKind::Volume));
+        Ok(Response::new(wire::EngineResourcesPruneResponse {
+            outcomes: vec![wire::EnginePruneOutcome {
+                item: Some(items[0].clone()),
+                error: Some(common::Error {
+                    code: "CONFLICT".into(),
+                    message: "volume is in use".into(),
+                    retryable: false,
+                    diagnostics: Vec::new(),
+                }),
+            }],
+            reclaimed_bytes: 0,
+            error: None,
+        }))
     }
 
     async fn disk_usage(
@@ -776,4 +809,48 @@ async fn networks_and_volumes_reach_the_application() {
     assert_eq!(volumes.volumes[0].name, "orphan");
     assert_eq!(volumes.volumes[0].compose_project, None);
     assert_eq!(volumes.volumes[0].created, None);
+}
+
+#[tokio::test]
+async fn pruning_reaches_the_application() {
+    let client = client(false).await;
+    let choices = PruneChoices {
+        tagged_images: false,
+        named_volumes: true,
+    };
+    let preview = client
+        .prune_preview(scope(), "docker".into(), choices)
+        .await
+        .unwrap();
+    assert_eq!(
+        preview.items.len(),
+        1,
+        "a kind this build does not know is left out"
+    );
+    assert_eq!(preview.items[0].kind, PruneKind::Container);
+    assert_eq!(preview.reclaimable_bytes, 1_025);
+
+    let context = CommandContext::new(
+        RequestId::new("request-1").unwrap(),
+        RequestId::new("request-1").unwrap(),
+        "ops",
+        RequestDeadline::new("2099-01-01T00:00:00Z").unwrap(),
+        IdempotencyKey::new("key-1").unwrap(),
+    )
+    .unwrap();
+    let volume = PruneItem {
+        kind: PruneKind::Volume,
+        id: "orphan".into(),
+        name: "orphan".into(),
+        size_bytes: 1_024,
+    };
+    let report = client
+        .prune(context, "docker".into(), choices, vec![volume.clone()])
+        .await
+        .unwrap();
+    assert_eq!(report.outcomes[0].item, volume);
+    assert_eq!(
+        report.outcomes[0].refusal.as_ref().unwrap().code.as_str(),
+        "CONFLICT"
+    );
 }

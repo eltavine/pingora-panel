@@ -152,6 +152,12 @@
       "reason": "Where following starts decides which lines a client receives; a new start must fail to compile in every adapter until it maps it, rather than following from somewhere else."
     },
     {
+      "package": "panel-application",
+      "name": "PruneKind",
+      "owner": "pingora-panel-platform",
+      "reason": "Each kind is a different removal on the engine and a line of the audit trail; a new kind must fail to compile in every adapter until it removes it, rather than being removed as another kind."
+    },
+    {
       "package": "panel-config-api",
       "name": "ConfigurationQuery",
       "owner": "pingora-panel-platform",
