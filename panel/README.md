@@ -546,6 +546,8 @@ ppanel image remove ghcr.io/example/app:2.3 --yes
 ppanel network list
 ppanel volume list
 ppanel container engine df docker
+ppanel container engine prune docker
+ppanel container engine prune docker --named-volumes --yes
 ppanel container restart shop-web-1 --yes
 ppanel container remove nightly-report --volumes --yes
 ```
@@ -606,6 +608,17 @@ take, how many of each are in use, and what removing the rest would
 free, as `docker system df` does. The agent reads the engine's own
 figures: Engine API 1.52 and later sum them up, and the agent sums an
 earlier version's lists as the Docker CLI does.
+`GET .../prune-preview` lists what pruning would remove, each with what
+removing it frees: containers that are not running, images no container
+uses, anonymous volumes nothing mounts, networks no container is on and
+build cache not in use; `tagged_images` and `named_volumes` add images a
+tag names and named volumes. What the installation made, and the
+engine's own networks, are never listed. `POST .../prune` needs
+`containers.manage` and takes up to 1000 items of a preview with its
+choices; the agent lists again and removes, one at a time, the requested
+items still listed, so whatever came into use meanwhile stays, and
+starts no removal after 130 seconds. Each prune is audited as
+`container.engine.pruned`, refused or not.
 `POST /api/v1/container-engines/{engine}/{enable,disable}` needs
 `containers.manage`, as do
 `POST /api/v1/container-engines/{engine}/containers/{container}/{start,stop,restart,kill}`
@@ -622,7 +635,9 @@ text, followed from the last line read and saved as a file. The table
 shows each running container's CPU and memory, and the details show
 everything it uses. An Images tab lists the engine's images, opens one's
 configuration and removes one after confirming, and Networks and
-Volumes tabs list those. A reachable engine's card opens its disk use.
+Volumes tabs list those. A reachable engine's card opens its disk use,
+where operators see what pruning would remove and remove it after
+confirming.
 
 ## Alerts
 
