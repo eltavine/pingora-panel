@@ -9,8 +9,13 @@ publish.workspace = true
 
 [dependencies]
 bollard.workspace = true
+bytes.workspace = true
 chrono.workspace = true
 futures-util.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
 panel-context.workspace = true
 panel-contracts.workspace = true
 panel-environment.workspace = true
@@ -18,6 +23,7 @@ panel-errors.workspace = true
 panel-pki.workspace = true
 panel-service.workspace = true
 panel-tls.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tonic.workspace = true
@@ -30,5 +36,4 @@ procfs.workspace = true
 
 [dev-dependencies]
 axum.workspace = true
-serde_json.workspace = true
 tempfile.workspace = true

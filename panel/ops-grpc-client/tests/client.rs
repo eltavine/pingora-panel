@@ -211,6 +211,13 @@ impl EngineResources for FakeResources {
         }))
     }
 
+    async fn disk_usage(
+        &self,
+        _: Request<wire::EngineResourcesDiskUsageRequest>,
+    ) -> Result<Response<wire::EngineResourcesDiskUsageResponse>, Status> {
+        Err(Status::unimplemented("disk usage"))
+    }
+
     async fn list_volumes(
         &self,
         _: Request<wire::EngineResourcesListVolumesRequest>,

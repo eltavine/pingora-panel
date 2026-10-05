@@ -2,7 +2,10 @@
 //! (ADR 0031): their networks and volumes, each with the containers that
 //! use it.
 
-use crate::containers::{answer, failure, time, Engines, COMPOSE_PROJECT};
+use crate::{
+    containers::{answer, failure, time, Engines, COMPOSE_PROJECT},
+    engine_disk,
+};
 use bollard::{
     models::{Network, Volume},
     query_parameters::{ListContainersOptionsBuilder, ListNetworksOptions, ListVolumesOptions},
@@ -143,6 +146,39 @@ impl ResourceService {
 
 #[tonic::async_trait]
 impl EngineResources for ResourceService {
+    async fn disk_usage(
+        &self,
+        request: Request<wire::EngineResourcesDiskUsageRequest>,
+    ) -> Result<Response<wire::EngineResourcesDiskUsageResponse>, Status> {
+        let read = async {
+            let socket = self.engines.enabled_socket(&request.get_ref().engine)?;
+            Ok(engine_disk::usage(&engine_disk::data_usage(socket).await?))
+        };
+        let result = tokio::time::timeout(engine_disk::USAGE_TIMEOUT, read)
+            .await
+            .unwrap_or_else(|_| {
+                Err(PanelError::deadline_exceeded(
+                    "the engine did not add up its disk use in time",
+                ))
+            });
+        Ok(Response::new(match result {
+            Ok([images, containers, volumes, build_cache]) => {
+                wire::EngineResourcesDiskUsageResponse {
+                    observed_at: Some(SystemTime::now().into()),
+                    images: Some(images),
+                    containers: Some(containers),
+                    volumes: Some(volumes),
+                    build_cache: Some(build_cache),
+                    error: None,
+                }
+            }
+            Err(error) => wire::EngineResourcesDiskUsageResponse {
+                error: Some((&error).into()),
+                ..wire::EngineResourcesDiskUsageResponse::default()
+            },
+        }))
+    }
+
     async fn list_networks(
         &self,
         request: Request<wire::EngineResourcesListNetworksRequest>,
@@ -196,6 +232,36 @@ mod tests {
         assert_eq!(shop.subnets[0].gateway, "172.18.0.1");
         assert!(shop.ipv6 && !shop.internal);
         assert_eq!(listed.networks[1].containers, 0);
+    }
+
+    #[tokio::test]
+    async fn disk_use_is_read_from_the_engine() {
+        let directory = tempfile::tempdir().unwrap();
+        let service = ResourceService::new(engines(engine(directory.path()).await, None));
+        let usage = service
+            .disk_usage(Request::new(wire::EngineResourcesDiskUsageRequest {
+                context: None,
+                engine: "docker".into(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(usage.error.is_none(), "{:?}", usage.error);
+        assert!(usage.observed_at.is_some());
+        let images = usage.images.unwrap();
+        assert_eq!((images.total, images.size_bytes), (3, 150_000_000));
+        assert_eq!(usage.volumes.unwrap().reclaimable_bytes, 1_024);
+
+        let gone = ResourceService::new(engines(directory.path().join("missing.sock"), None));
+        let unreachable = gone
+            .disk_usage(Request::new(wire::EngineResourcesDiskUsageRequest {
+                context: None,
+                engine: "docker".into(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(unreachable.error.unwrap().code, "UNAVAILABLE");
     }
 
     #[tokio::test]

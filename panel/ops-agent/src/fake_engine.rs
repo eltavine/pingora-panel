@@ -341,6 +341,28 @@ pub(crate) async fn engine_with(directory: &Path, calls: Calls) -> PathBuf {
             }),
         )
         .route(
+            "/system/df",
+            get(|| async {
+                Json(json!({
+                    "LayersSize": 150_000_000,
+                    "Images": [
+                        {"Id": "sha256:aa", "Size": 50_000_000, "SharedSize": 0, "Containers": 1},
+                        {"Id": "sha256:bb", "Size": 50_000_000, "SharedSize": 0, "Containers": 1},
+                        {"Id": "sha256:cc", "Size": 50_000_000, "SharedSize": 0, "Containers": 0}
+                    ],
+                    "Containers": [
+                        {"Id": "b2", "State": "running", "SizeRw": 2_048},
+                        {"Id": "a1", "State": "exited", "SizeRw": 1_024}
+                    ],
+                    "Volumes": [
+                        {"Name": "shop_html", "UsageData": {"Size": 4_096, "RefCount": 1}},
+                        {"Name": "orphan", "UsageData": {"Size": 1_024, "RefCount": 0}}
+                    ],
+                    "BuildCache": []
+                }))
+            }),
+        )
+        .route(
             "/volumes",
             get(|| async {
                 Json(json!({"Volumes": [

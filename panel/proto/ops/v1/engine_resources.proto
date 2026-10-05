@@ -6,10 +6,15 @@ import "common/v1/common.proto";
 import "google/protobuf/timestamp.proto";
 
 // What the container engines the agent reaches keep besides containers and
-// images (ADR 0031): their networks and volumes.
+// images (ADR 0031): their networks and volumes, and the disk all of it
+// takes.
 service EngineResources {
   rpc ListNetworks(EngineResourcesListNetworksRequest) returns (EngineResourcesListNetworksResponse);
   rpc ListVolumes(EngineResourcesListVolumesRequest) returns (EngineResourcesListVolumesResponse);
+  // How much disk images, containers, volumes and the build cache take, and
+  // how much removing what is not in use would free, as `docker system df`
+  // reports it.
+  rpc DiskUsage(EngineResourcesDiskUsageRequest) returns (EngineResourcesDiskUsageResponse);
 }
 
 message EngineSubnet {
@@ -75,4 +80,30 @@ message EngineResourcesListVolumesResponse {
   // By name.
   repeated EngineVolume volumes = 2;
   .pingora.panel.common.v1.Error error = 3;
+}
+
+// One kind of thing an engine keeps on disk.
+message EngineDiskUse {
+  uint32 total = 1;
+  // In use: running containers, images and volumes a container uses, and
+  // build cache in use.
+  uint32 active = 2;
+  uint64 size_bytes = 3;
+  // What removing what is not in use would free.
+  uint64 reclaimable_bytes = 4;
+}
+
+message EngineResourcesDiskUsageRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string engine = 2;
+}
+
+message EngineResourcesDiskUsageResponse {
+  google.protobuf.Timestamp observed_at = 1;
+  EngineDiskUse images = 2;
+  EngineDiskUse containers = 3;
+  // Local volumes.
+  EngineDiskUse volumes = 4;
+  EngineDiskUse build_cache = 5;
+  .pingora.panel.common.v1.Error error = 6;
 }

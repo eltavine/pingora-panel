@@ -2702,8 +2702,13 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "bollard",
+ "bytes",
  "chrono",
  "futures-util",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "panel-context",
  "panel-contracts",
  "panel-environment",

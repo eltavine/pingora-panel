@@ -11,6 +11,7 @@ mod container_logs;
 mod container_stats;
 mod containers;
 mod directories;
+mod engine_disk;
 mod engine_resources;
 #[cfg(test)]
 mod fake_engine;

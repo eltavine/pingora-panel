@@ -118,15 +118,20 @@ impl Engines {
         .map_err(|error| failure(&error))
     }
 
-    /// A client for an engine operators enabled.
-    pub(crate) fn enabled(&self, id: &str) -> Result<Docker, PanelError> {
+    /// The socket of an engine operators enabled.
+    pub(crate) fn enabled_socket(&self, id: &str) -> Result<&Path, PanelError> {
         let socket = self.socket(id)?;
         if !self.is_enabled(id) {
             return Err(PanelError::precondition_failed(format!(
                 "the {id} engine is disabled"
             )));
         }
-        Self::client(socket)
+        Ok(socket)
+    }
+
+    /// A client for an engine operators enabled.
+    pub(crate) fn enabled(&self, id: &str) -> Result<Docker, PanelError> {
+        Self::client(self.enabled_socket(id)?)
     }
 
     /// Enables or disables an engine and keeps the choice.
