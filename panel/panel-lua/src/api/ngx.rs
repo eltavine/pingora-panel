@@ -80,16 +80,14 @@ const STATUSES: [(&str, i64); 37] = [
 
 /// What lua-nginx-module has and this gateway does not: each raises an error
 /// naming itself rather than doing something else.
-pub(crate) const UNAVAILABLE: [&str; 20] = [
+pub(crate) const UNAVAILABLE: [&str; 18] = [
     "ngx.exec",
     "ngx.on_abort",
     "ngx.run_worker_thread",
     "ngx.location.capture",
     "ngx.location.capture_multi",
-    "ngx.socket.tcp",
     "ngx.socket.udp",
     "ngx.socket.stream",
-    "ngx.socket.connect",
     "ngx.thread.spawn",
     "ngx.thread.wait",
     "ngx.thread.kill",
@@ -150,6 +148,12 @@ pub(super) fn table(lua: &Lua, context: &Context) -> mlua::Result<Table> {
     for name in ["location", "socket", "thread", "timer"] {
         ngx.raw_set(name, lua.create_table()?)?;
     }
+    super::socket::install(
+        lua,
+        &ngx,
+        &context.slot,
+        &Arc::new(super::socket::Pool::default()),
+    )?;
     let timer: Table = ngx.raw_get("timer")?;
     timer.raw_set("running_count", lua.create_function(|_, ()| Ok(0))?)?;
     timer.raw_set("pending_count", lua.create_function(|_, ()| Ok(0))?)?;

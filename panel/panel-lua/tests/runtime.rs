@@ -746,3 +746,157 @@ async fn panel_v1_reads_and_answers_requests_without_ngx_quirks() {
     assert_eq!(body["rfc3339"], "1970-01-01T00:00:00Z");
     assert_eq!(body["decoded"], 2);
 }
+
+/// A service that answers `PING` with `PONG` and `BODY` with a body with a
+/// boundary in it, counting the connections it accepts.
+async fn line_service() -> (u16, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let accepted = std::sync::Arc::new(AtomicUsize::new(0));
+    let counted = std::sync::Arc::clone(&accepted);
+    tokio::spawn(async move {
+        loop {
+            let (stream, _) = listener.accept().await.unwrap();
+            counted.fetch_add(1, Ordering::SeqCst);
+            tokio::spawn(async move {
+                let (read, mut write) = stream.into_split();
+                let mut lines = BufReader::new(read).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    let answer: &[u8] = match line.as_str() {
+                        "PING" => b"PONG\r\n",
+                        "BODY" => b"abc--sep--def",
+                        _ => b"?\r\n",
+                    };
+                    if write.write_all(answer).await.is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+    });
+    (port, accepted)
+}
+
+#[tokio::test]
+async fn cosockets_talk_to_services_and_keep_connections_when_granted() {
+    let (port, accepted) = line_service().await;
+    let script = format!(
+        r#"
+        local sock = ngx.socket.tcp()
+        sock:settimeouts(1000, 1000, 1000)
+        assert(sock:connect("127.0.0.1", {port}))
+        local reused = sock:getreusedtimes()
+        assert(sock:send({{"PING", "\r\n"}}))
+        local line = assert(sock:receive())
+        assert(sock:send("BODY\r\n"))
+        local reader = sock:receiveuntil("--sep--")
+        local before = assert(reader())
+        local after = assert(sock:receive(3))
+        assert(sock:setkeepalive(10000, 4))
+        ngx.say(line, " ", before, " ", after, " ", reused)
+        "#
+    );
+    let lua = start(
+        1,
+        handlers(&[
+            &script,
+            "local sock = ngx.socket.tcp() sock:connect('127.0.0.1', 9)",
+        ]),
+    );
+    let mut granted = handler(lua.handlers[0], Phase::Content);
+    granted.permissions.network = true;
+    for expected in ["PONG abc def 0\n", "PONG abc def 1\n"] {
+        let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+        let outcome = run(&mut scripts, granted).await;
+        assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+        assert_eq!(scripts.exchange().response.body, expected.as_bytes());
+    }
+    assert_eq!(
+        accepted.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the second request reuses the kept connection"
+    );
+
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let refused = run(&mut scripts, handler(lua.handlers[1], Phase::Content)).await;
+    let Outcome::Failed(failure) = refused else {
+        panic!("{refused:?}");
+    };
+    assert_eq!(failure.kind, FailureKind::Refused);
+    assert!(
+        failure.message.contains("network permission"),
+        "{}",
+        failure.message
+    );
+
+    let mut in_filter = handler(lua.handlers[1], Phase::HeaderFilter);
+    in_filter.permissions.network = true;
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let Outcome::Failed(failure) = run(&mut scripts, in_filter).await else {
+        panic!("sockets are not for header filters");
+    };
+    assert!(
+        failure.message.contains("header_filter_by_lua"),
+        "{}",
+        failure.message
+    );
+}
+
+#[tokio::test]
+async fn cosockets_verify_certificates_unless_told_not_to() {
+    use std::sync::Arc;
+    use tokio::io::AsyncWriteExt;
+    let certified = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    let chain = vec![certified.cert.der().clone()];
+    let key = rustls::pki_types::PrivatePkcs8KeyDer::from(certified.signing_key.serialize_der());
+    let config = rustls::ServerConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .unwrap()
+    .with_no_client_auth()
+    .with_single_cert(chain, key.into())
+    .unwrap();
+    let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        loop {
+            let (stream, _) = listener.accept().await.unwrap();
+            let acceptor = acceptor.clone();
+            tokio::spawn(async move {
+                if let Ok(mut tls) = acceptor.accept(stream).await {
+                    let _ = tls.write_all(b"HELLO\r\n").await;
+                    let _ = tls.flush().await;
+                }
+            });
+        }
+    });
+    let trusting = format!(
+        r#"
+        local sock = ngx.socket.tcp()
+        assert(sock:connect("127.0.0.1", {port}))
+        assert(sock:sslhandshake(nil, "localhost", false))
+        ngx.say(assert(sock:receive()))
+        "#
+    );
+    let verifying = format!(
+        r#"
+        local sock = ngx.socket.tcp()
+        assert(sock:connect("127.0.0.1", {port}))
+        local ok, err = sock:sslhandshake(nil, "localhost")
+        ngx.say(tostring(ok), " ", err)
+        "#
+    );
+    let lua = start(1, handlers(&[&trusting, &verifying]));
+    for (index, expected) in [(0, "HELLO\n"), (1, "nil handshake failed")] {
+        let mut granted = handler(lua.handlers[index], Phase::Content);
+        granted.permissions.network = true;
+        let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+        assert_eq!(run(&mut scripts, granted).await, Outcome::Respond);
+        let body = String::from_utf8(scripts.exchange().response.body.clone()).unwrap();
+        assert!(body.starts_with(expected), "{body}");
+    }
+}

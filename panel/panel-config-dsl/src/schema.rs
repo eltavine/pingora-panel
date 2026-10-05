@@ -497,8 +497,11 @@ pub fn refusal(name: &str) -> Option<String> {
         _ if name.starts_with("ssl_") && name.contains("_by_lua") => {
             "TLS handshakes run no script; certificates come from TLS profiles"
         }
-        _ if name.starts_with("lua_socket_") || name.starts_with("lua_ssl_") => {
-            "scripts do not open sockets, so there is nothing to set"
+        _ if name.starts_with("lua_socket_") => {
+            "set a connection's timeouts in the script with sock:settimeouts"
+        }
+        _ if name.starts_with("lua_ssl_") => {
+            "sock:sslhandshake verifies certificates with the system's trusted roots"
         }
         _ => return None,
     };

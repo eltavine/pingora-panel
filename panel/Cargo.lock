@@ -3557,10 +3557,14 @@ dependencies = [
  "mlua",
  "parking_lot",
  "pcre2",
+ "rcgen",
+ "rustls",
+ "rustls-platform-verifier",
  "serde_json",
  "sha1 0.11.0",
  "sha2 0.11.0",
  "tokio",
+ "tokio-rustls",
  "uuid",
 ]
 

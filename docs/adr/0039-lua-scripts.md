@@ -70,8 +70,12 @@ where lua-nginx-module allows each function: `ngx.var`, `ngx.ctx`,
 `ngx.redirect`, `ngx.say`, `ngx.print`, `ngx.log`, the `ngx.HTTP_*` and
 log level constants, `ngx.re` on PCRE2 (the engine NGINX uses),
 `ngx.shared`, the time, escaping, argument, base64, digest and quoting
-functions, `ngx.sleep`, `ngx.get_phase`, `ngx.worker`, `ngx.config` and
-`ngx.balancer`. Modules OpenResty scripts commonly load are built in:
+functions, `ngx.sleep`, `ngx.get_phase`, `ngx.worker`, `ngx.config`,
+`ngx.balancer` and the TCP cosockets of `ngx.socket.tcp` and
+`ngx.socket.connect` (`connect`, `sslhandshake`, `send`, `receive`,
+`receiveany`, `receiveuntil`, `settimeout`, `settimeouts`, `setkeepalive`,
+`getreusedtimes` and `close`), whose idle connections each VM keeps for
+its later requests. Modules OpenResty scripts commonly load are built in:
 `cjson` and `cjson.safe`, `bit` with LuaJIT BitOp semantics, `table.new`,
 `table.clear`, `table.nkeys`, `resty.core`, `resty.string`, `resty.md5`,
 `resty.sha1`, `resty.sha256`, `resty.random`, `ngx.re` and
@@ -82,7 +86,11 @@ script uses a function this gateway does not provide.
 What runs differently: LuaJIT's `ffi` and `jit` modules, `goto` (Luau has
 `continue`), `string.dump` and bytecode, `setfenv`, `getfenv` and `module`
 are not available; `lua_package_path`, `lua_package_cpath` and
-`lua_code_cache off` are refused.
+`lua_code_cache off` are refused. `sslhandshake` verifies the server's
+certificate with the system's trusted roots unless the script passes
+`ssl_verify` false, where lua-nginx-module verifies nothing by default.
+UDP and stream sockets, timers, light threads and subrequests are not
+available yet.
 
 **Native API.** Next to `ngx`, `require("panel.v1")` returns the
 capabilities the specification names — `req`, `resp`, `ctx`, `upstream`,
