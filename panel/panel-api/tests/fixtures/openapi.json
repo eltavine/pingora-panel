@@ -26717,7 +26717,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LuaLibraryResponse"
+                  "$ref": "#/components/schemas/LuaScriptLibrary"
                 }
               }
             }
@@ -83327,66 +83327,6 @@
           }
         }
       },
-      "LuaLibraryResponse": {
-        "type": "object",
-        "description": "The Lua of the draft or of a revision.",
-        "required": [
-          "disabled",
-          "scripts",
-          "shared_dicts",
-          "diagnostics",
-          "version"
-        ],
-        "properties": {
-          "diagnostics": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DiagnosticDetails"
-            },
-            "description": "What checking found in the scripts and the Lua directives."
-          },
-          "disabled": {
-            "type": "boolean",
-            "description": "`lua off`: the scripts are kept, but none runs."
-          },
-          "memory_limit_bytes": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "minimum": 0
-          },
-          "revision": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "The revision whose scripts these are, when one was asked for.",
-            "minimum": 0
-          },
-          "scripts": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/LuaScriptInfo"
-            },
-            "description": "Every script with where it runs and the SHA-256 that names its\nversion."
-          },
-          "shared_dicts": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/LuaSharedDict"
-            }
-          },
-          "version": {
-            "type": "integer",
-            "format": "int64",
-            "description": "The draft version read.",
-            "minimum": 0
-          }
-        }
-      },
       "LuaLogLevel": {
         "type": "string",
         "description": "`ngx.log` levels, most severe first: messages less severe than a\nhandler's level are dropped.",
@@ -83627,6 +83567,66 @@
             "items": {
               "$ref": "#/components/schemas/LuaUse"
             }
+          }
+        }
+      },
+      "LuaScriptLibrary": {
+        "type": "object",
+        "description": "The Lua of the draft or of a revision.",
+        "required": [
+          "disabled",
+          "scripts",
+          "shared_dicts",
+          "diagnostics",
+          "version"
+        ],
+        "properties": {
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiagnosticDetails"
+            },
+            "description": "What checking found in the scripts and the Lua directives."
+          },
+          "disabled": {
+            "type": "boolean",
+            "description": "`lua off`: the scripts are kept, but none runs."
+          },
+          "memory_limit_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "revision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The revision whose scripts these are, when one was asked for.",
+            "minimum": 0
+          },
+          "scripts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LuaScriptInfo"
+            },
+            "description": "Every script with where it runs and the SHA-256 that names its\nversion."
+          },
+          "shared_dicts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LuaSharedDict"
+            }
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The draft version read.",
+            "minimum": 0
           }
         }
       },

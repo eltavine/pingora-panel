@@ -24,7 +24,7 @@ use utoipa::{IntoParams, ToSchema};
 
 /// The Lua of the draft or of a revision.
 #[derive(Clone, Debug, Serialize, ToSchema)]
-pub struct LuaLibraryResponse {
+pub struct LuaScriptLibrary {
     /// `lua off`: the scripts are kept, but none runs.
     pub disabled: bool,
     /// Every script with where it runs and the SHA-256 that names its
@@ -52,7 +52,7 @@ pub(crate) struct LuaLibraryQuery {
 /// the modules it loads and its version, the shared dictionaries, and what
 /// checking found.
 #[utoipa::path(get, path = "/api/v1/config/lua", params(LuaLibraryQuery, QueryHeaders),
-    responses((status = 200, body = LuaLibraryResponse)), tag = "configuration")]
+    responses((status = 200, body = LuaScriptLibrary)), tag = "configuration")]
 pub(crate) async fn lua_library<U: GatewayUseCases>(
     State(state): State<ApiState<U>>,
     headers: HeaderMap,
