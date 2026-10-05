@@ -505,6 +505,52 @@ jobs:
           ppanel site delete "$site" --permanent
           ppanel config apply
 
+      - name: Change fields, answer CORS and compress with an HTTP policy
+        run: |
+          ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
+          upstream=$(ppanel -o json upstream list \
+            | python3 -c "import json, sys; print(next(u['id'] for u in json.load(sys.stdin) if u['name'] == 'console'))")
+          ppanel http-policy set ci-headers --response-set 'X-Frame-Options: DENY' --remove-server \
+            --cors-origin https://app.policies.test --cors-method PUT --cors-max-age 600 \
+            --compress gzip --compress br --compress-type application/json --compress-min-size 1k
+          site=$(ppanel -o json site create --name ci-policies --domain policies.test \
+            --proxy "$upstream" --http-policy ci-headers \
+            | python3 -c "import json, sys; print(json.load(sys.stdin)['id'])")
+          ppanel http-policy list
+          ppanel config apply
+          fetch() {
+            curl --fail --silent --show-error --header 'Host: policies.test' --dump-header - \
+              --output /dev/null "$@" http://127.0.0.1:18080/api/v1/openapi.json
+          }
+          for _ in $(seq 1 30); do
+            if fetch 2>/dev/null | grep -qi '^x-frame-options: deny'; then
+              break
+            fi
+            sleep 1
+          done
+          headers=$(fetch --header 'Accept-Encoding: br, gzip')
+          grep -qi '^x-frame-options: deny' <<<"$headers"
+          grep -Eqi '^content-encoding: (br|gzip)' <<<"$headers"
+          grep -qi '^vary:.*accept-encoding' <<<"$headers"
+          if grep -qi '^server:' <<<"$headers"; then
+            exit 1
+          fi
+          # Clients that accept no coding get the response as it is.
+          if fetch | grep -qi '^content-encoding:'; then
+            exit 1
+          fi
+          # The gateway answers preflights from allowed origins itself.
+          preflight=$(curl --silent --show-error --dump-header - --output /dev/null --request OPTIONS \
+            --header 'Host: policies.test' --header 'Origin: https://app.policies.test' \
+            --header 'Access-Control-Request-Method: PUT' http://127.0.0.1:18080/api/v1/openapi.json)
+          grep -q '^HTTP/1.1 204' <<<"$preflight"
+          grep -qi '^access-control-allow-origin: https://app.policies.test' <<<"$preflight"
+          grep -qi '^access-control-allow-methods:.*PUT' <<<"$preflight"
+          grep -qi '^access-control-max-age: 600' <<<"$preflight"
+          ppanel site delete "$site" --permanent
+          ppanel http-policy delete ci-headers
+          ppanel config apply
+
       - name: Move the configuration between installations as a bundle
         run: |
           ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
