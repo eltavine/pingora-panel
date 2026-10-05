@@ -51,6 +51,24 @@ message RevisionNoted {
   optional string note = 2;
 }
 
+// `config.lua.tested`: Lua handlers, or one script, ran on a request
+// described in full, without changing anything.
+message LuaTested {
+  // The draft version tested.
+  uint64 version = 1;
+  // The phase of the one script run in place of the draft's handler; empty
+  // when the draft's handlers ran.
+  string script_phase = 2;
+  // The site and route the request reached, as the snapshot names them.
+  string site = 3;
+  string route = 4;
+  // The phases run, in order.
+  repeated string phases = 5;
+  // How the last run ended: continue, respond, abort or failed.
+  string outcome = 6;
+  uint64 duration_us = 7;
+}
+
 // `config.change.refused`
 message ChangeRefused {
   string operation = 1;

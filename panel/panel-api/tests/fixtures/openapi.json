@@ -26636,6 +26636,695 @@
         }
       }
     },
+    "/api/v1/config/lua": {
+      "parameters": [
+        {
+          "name": "x-request-id",
+          "in": "header",
+          "description": "Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1
+          }
+        },
+        {
+          "name": "traceparent",
+          "in": "header",
+          "description": "W3C Trace Context parent of the caller's trace. Invalid values are ignored.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 55
+          }
+        },
+        {
+          "name": "tracestate",
+          "in": "header",
+          "description": "W3C Trace Context vendor state, propagated with a valid traceparent.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "The Lua scripts of the draft, or of a revision: each with where it runs,\nthe modules it loads and its version, the shared dictionaries, and what\nchecking found.",
+        "operationId": "lua_library",
+        "parameters": [
+          {
+            "name": "revision",
+            "in": "query",
+            "description": "Reads the scripts of this revision instead of the draft's.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LuaLibraryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/config/lua/test": {
+      "parameters": [
+        {
+          "name": "x-request-id",
+          "in": "header",
+          "description": "Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1
+          }
+        },
+        {
+          "name": "traceparent",
+          "in": "header",
+          "description": "W3C Trace Context parent of the caller's trace. Invalid values are ignored.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 55
+          }
+        },
+        {
+          "name": "tracestate",
+          "in": "header",
+          "description": "W3C Trace Context vendor state, propagated with a valid traceparent.",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      ],
+      "post": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "Runs the draft's Lua handlers a request reaches, or one script in place\nof a phase's handler, on a request described in full, with the\ngateway's runtime and limits and without proxying it. Nothing changes;\nthe test is recorded in the audit trail.",
+        "operationId": "test_lua",
+        "parameters": [
+          {
+            "name": "x-deadline",
+            "in": "header",
+            "description": "Absolute request deadline in RFC 3339 format; 150 seconds after the\nrequest arrives when absent.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Idempotency identity, containing 1..=256 visible ASCII bytes. A retry\nwith the same key returns the first outcome; without a key, every\nrequest is a new command.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          },
+          {
+            "name": "x-correlation-id",
+            "in": "header",
+            "description": "Optional correlation identity; defaults to the request identifier.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 256,
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LuaTest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LuaTestResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Request Timeout",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Precondition Failed",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Payload Too Large",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Entity",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Precondition Required",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              },
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/config/plan": {
       "parameters": [
         {
@@ -81048,7 +81737,7 @@
       },
       "HeaderLine": {
         "type": "object",
-        "description": "A header field line of a simulated request.",
+        "description": "A header field line; a repeated name is a line of its own.",
         "required": [
           "name",
           "value"
@@ -82592,6 +83281,66 @@
         ],
         "description": "What a handler's failure does: an error, a timeout or a limit reached."
       },
+      "LuaLibraryResponse": {
+        "type": "object",
+        "description": "The Lua of the draft or of a revision.",
+        "required": [
+          "disabled",
+          "scripts",
+          "shared_dicts",
+          "diagnostics",
+          "version"
+        ],
+        "properties": {
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiagnosticDetails"
+            },
+            "description": "What checking found in the scripts and the Lua directives."
+          },
+          "disabled": {
+            "type": "boolean",
+            "description": "`lua off`: the scripts are kept, but none runs."
+          },
+          "memory_limit_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "revision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The revision whose scripts these are, when one was asked for.",
+            "minimum": 0
+          },
+          "scripts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LuaScriptInfo"
+            },
+            "description": "Every script with where it runs and the SHA-256 that names its\nversion."
+          },
+          "shared_dicts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LuaSharedDict"
+            }
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The draft version read.",
+            "minimum": 0
+          }
+        }
+      },
       "LuaLogLevel": {
         "type": "string",
         "description": "`ngx.log` levels, most severe first: messages less severe than a\nhandler's level are dropped.",
@@ -82625,6 +83374,16 @@
           }
         },
         "additionalProperties": false
+      },
+      "LuaRunOutcome": {
+        "type": "string",
+        "description": "How a handler's run ended.",
+        "enum": [
+          "continue",
+          "respond",
+          "abort",
+          "failed"
+        ]
       },
       "LuaScope": {
         "type": "object",
@@ -82759,6 +83518,476 @@
           }
         },
         "additionalProperties": false
+      },
+      "LuaScriptInfo": {
+        "type": "object",
+        "description": "A script of the configuration.",
+        "required": [
+          "id",
+          "file",
+          "line",
+          "sha256",
+          "bytes",
+          "lines",
+          "code",
+          "uses",
+          "requires"
+        ],
+        "properties": {
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "code": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "description": "The file's path, or `file:line` of code written in a block."
+          },
+          "line": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The line of `file` it starts on.",
+            "minimum": 0
+          },
+          "lines": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "module": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What `require` loads it by: files under `lua/`."
+          },
+          "requires": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The modules it loads by name."
+          },
+          "sha256": {
+            "type": "string",
+            "description": "Lowercase hexadecimal SHA-256 of the code, which names its version."
+          },
+          "uses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LuaUse"
+            }
+          }
+        }
+      },
+      "LuaSharedDict": {
+        "type": "object",
+        "description": "A dictionary `ngx.shared` holds for every VM of the gateway.",
+        "required": [
+          "name",
+          "capacity_bytes"
+        ],
+        "properties": {
+          "capacity_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "LuaTest": {
+        "type": "object",
+        "description": "A Lua test: the draft's handlers the request reaches, or one script.",
+        "required": [
+          "request"
+        ],
+        "properties": {
+          "request": {
+            "$ref": "#/components/schemas/LuaTestRequest"
+          },
+          "script": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LuaTestScript"
+              }
+            ]
+          },
+          "upstream": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LuaTestUpstream",
+                "description": "The answer of the upstream a proxied request goes to; 200 with an\nempty body when absent."
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "LuaTestFailure": {
+        "type": "object",
+        "description": "Why a run failed.",
+        "required": [
+          "kind",
+          "message"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "`error`, `timeout`, `work`, `memory` or `refused`."
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "LuaTestLog": {
+        "type": "object",
+        "description": "A message a script logged.",
+        "required": [
+          "level",
+          "message"
+        ],
+        "properties": {
+          "level": {
+            "type": "string",
+            "description": "`ngx.log`'s level, such as `notice`."
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "LuaTestReply": {
+        "type": "object",
+        "description": "The response the client gets.",
+        "required": [
+          "status",
+          "headers",
+          "body"
+        ],
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "The body as text, with invalid UTF-8 replaced."
+          },
+          "headers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HeaderLine"
+            }
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "LuaTestRequest": {
+        "type": "object",
+        "description": "The request a test runs on.",
+        "required": [
+          "host"
+        ],
+        "properties": {
+          "body": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What `ngx.req.read_body` reads."
+          },
+          "client": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The client's address, after trusted proxies."
+          },
+          "headers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HeaderLine"
+            }
+          },
+          "host": {
+            "type": "string",
+            "description": "The host the request names, with or without its port."
+          },
+          "listener": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The listener it arrives on, which may serve only some sites."
+          },
+          "method": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Such as `POST`; `GET` when absent."
+          },
+          "target": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The path and query, such as `/api/items?tag=new`; `/` when absent."
+          },
+          "tls": {
+            "type": "boolean",
+            "description": "Whether it arrives over TLS."
+          }
+        },
+        "additionalProperties": false
+      },
+      "LuaTestRequestState": {
+        "type": "object",
+        "description": "The request as the handlers left it.",
+        "required": [
+          "method",
+          "uri",
+          "headers"
+        ],
+        "properties": {
+          "args": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "headers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HeaderLine"
+            }
+          },
+          "method": {
+            "type": "string"
+          },
+          "uri": {
+            "type": "string",
+            "description": "The decoded path."
+          }
+        }
+      },
+      "LuaTestResult": {
+        "type": "object",
+        "description": "What a Lua test did.",
+        "required": [
+          "draft_version",
+          "runs",
+          "aborted"
+        ],
+        "properties": {
+          "aborted": {
+            "type": "boolean",
+            "description": "Whether a handler closed the connection without an answer."
+          },
+          "draft_version": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The draft version tested.",
+            "minimum": 0
+          },
+          "init_logs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LuaTestLog"
+            },
+            "description": "What `init_by_lua` and `init_worker_by_lua` logged."
+          },
+          "peer": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The endpoint a balancer chose, as `host:port`."
+          },
+          "request": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LuaTestRequestState"
+              }
+            ]
+          },
+          "response": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LuaTestReply"
+              }
+            ]
+          },
+          "route_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LuaTestRun"
+            },
+            "description": "The handlers run, in order."
+          },
+          "site_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The site and route the request reached, as the snapshot names them."
+          }
+        }
+      },
+      "LuaTestRun": {
+        "type": "object",
+        "description": "One handler's run.",
+        "required": [
+          "phase",
+          "script",
+          "outcome",
+          "duration_us"
+        ],
+        "properties": {
+          "duration_us": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "failure": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LuaTestFailure"
+              }
+            ]
+          },
+          "logs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LuaTestLog"
+            }
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/LuaRunOutcome"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "script": {
+            "type": "string",
+            "description": "The script, such as `lua/auth.lua` or `main.conf:12`."
+          }
+        }
+      },
+      "LuaTestScript": {
+        "type": "object",
+        "description": "One script run in place of a phase's handler, such as code being\nwritten, with the draft's modules and `init`.",
+        "required": [
+          "code",
+          "phase"
+        ],
+        "properties": {
+          "allow": {
+            "$ref": "#/components/schemas/LuaPermissions"
+          },
+          "code": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string",
+            "description": "`server_rewrite`, `rewrite`, `access`, `content`, `balancer`,\n`header_filter`, `body_filter` or `log`."
+          },
+          "time_limit_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The gateway's default when absent.",
+            "minimum": 0
+          },
+          "work_limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "LuaTestUpstream": {
+        "type": "object",
+        "description": "The upstream's answer to a proxied request, which the response's filters\nand the log handler see when no script answers.",
+        "properties": {
+          "body": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "headers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HeaderLine"
+            }
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "LuaUse": {
+        "type": "object",
+        "description": "Where a script runs.",
+        "required": [
+          "resource",
+          "label",
+          "phase"
+        ],
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "How the configuration names it, such as `server shop`."
+          },
+          "phase": {
+            "type": "string",
+            "description": "`init`, `init_worker`, `server_rewrite`, `rewrite`, `access`,\n`content`, `balancer`, `header_filter`, `body_filter` or `log`."
+          },
+          "resource": {
+            "type": "string",
+            "description": "`lua` for `http`, or `sites/<id>`, `sites/<id>/routes/<id>` or\n`upstreams/<id>`."
+          }
+        }
       },
       "MatchKind": {
         "type": "string",

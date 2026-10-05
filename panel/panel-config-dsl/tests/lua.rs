@@ -564,3 +564,41 @@ fn plans_name_the_lua_they_change() {
     );
     assert!(changes[1].diff.contains("+return"), "{}", changes[1].diff);
 }
+
+#[test]
+fn the_library_lists_each_script_where_it_runs() {
+    let lowered = read(&sources());
+    let library = panel_config_dsl::lua_library(&lowered);
+    let ids: Vec<_> = library
+        .scripts
+        .iter()
+        .map(|script| script.id.as_str())
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            "lua/auth.lua",
+            "lua/auth/keys.lua",
+            "lua/pick.lua",
+            "main.conf:13",
+            "main.conf:28",
+            "main.conf:37",
+            "main.conf:8",
+        ]
+    );
+    let auth = &library.scripts[0];
+    assert_eq!(auth.module.as_deref(), Some("auth"));
+    assert_eq!(auth.requires, ["auth.keys"]);
+    assert_eq!(
+        (auth.uses[0].label.as_str(), auth.uses[0].phase.as_str()),
+        ("http", "access")
+    );
+    assert_eq!(auth.sha256.len(), 64);
+    assert!(library.scripts[1].uses.is_empty());
+    assert_eq!(library.scripts[2].uses[0].label, "upstream app");
+    let content = &library.scripts[5];
+    assert_eq!(content.uses[0].label, "server shop, route hello");
+    assert_eq!(content.uses[0].phase, "content");
+    assert_eq!(library.shared_dicts.len(), 1);
+    assert!(library.diagnostics.is_empty(), "{:#?}", library.diagnostics);
+}

@@ -32,6 +32,7 @@ mod identity;
 mod images;
 mod language;
 mod logs;
+mod lua;
 mod middleware;
 mod openapi;
 mod request_context;

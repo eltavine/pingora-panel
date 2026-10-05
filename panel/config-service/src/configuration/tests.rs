@@ -179,3 +179,96 @@ async fn covered_changes_wait_for_someone_else_to_approve_them() {
         .unwrap();
     assert_eq!(json(&revisions.content)["items"][0]["outcome"], "failed");
 }
+
+#[tokio::test]
+async fn lua_tests_run_the_drafts_scripts_and_are_recorded() {
+    use panel_application::SiteScope;
+    use panel_config_api::{LanguageChange, LanguageQuery, LuaCommand};
+    let Harness { service, events } = harness();
+    let files = input(json!({
+        "main.conf": "language_version 1;\nhttp {\n    server shop {\n        server_name shop.example;\n        access_by_lua_block {\n            if ngx.var.arg_who == \"bad\" then return ngx.exit(403) end\n        }\n        content_by_lua_block {\n            ngx.say(require(\"greet\").hello, \" \", ngx.var.arg_who)\n        }\n    }\n}\n",
+        "lua/greet.lua": "return { hello = \"hi\" }\n",
+    }));
+    service
+        .change(
+            by("root", "files"),
+            ConfigurationChange::new(LanguageChange::ReplaceSource { files }),
+        )
+        .await
+        .unwrap();
+    let test = |value: Value| ConfigurationChange::new(LuaCommand::Test { test: input(value) });
+    let ran = service
+        .change(
+            by("root", "test"),
+            test(json!({"request": {"host": "shop.example:8080", "target": "/?who=lua"}})),
+        )
+        .await
+        .unwrap();
+    let result = json(&ran.content);
+    assert_eq!(result["response"]["body"], "hi lua\n", "{result}");
+    assert_eq!(result["runs"][0]["phase"], "access");
+    assert_eq!(result["runs"][1]["outcome"], "respond");
+    let refused = json(
+        &service
+            .change(
+                by("root", "bad"),
+                test(json!({"request": {"host": "shop.example", "target": "/?who=bad"}})),
+            )
+            .await
+            .unwrap()
+            .content,
+    );
+    assert_eq!(refused["response"]["status"], 403);
+    let script = json(
+        &service
+            .change(
+                by("root", "script"),
+                test(json!({
+                    "request": {"host": "shop.example"},
+                    "script": {"code": "ngx.log(ngx.WARN, require('greet').hello)", "phase": "access"}
+                })),
+            )
+            .await
+            .unwrap()
+            .content,
+    );
+    assert_eq!(script["runs"][0]["logs"][0]["message"], "editor:1: hi");
+    assert_eq!(
+        events
+            .types()
+            .iter()
+            .filter(|kind| *kind == "config.lua.tested")
+            .count(),
+        3
+    );
+
+    let library = json(
+        &service
+            .read(reading(), LanguageQuery::Lua { revision: None }.into())
+            .await
+            .unwrap()
+            .content,
+    );
+    assert_eq!(library["version"], 1);
+    let ids: Vec<_> = library["scripts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|script| script["id"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(ids, ["lua/greet.lua", "main.conf:6", "main.conf:9"], "the service writes the server's id in");
+
+    let operator = by("operator", "op-test").with_site_scope(Some(SiteScope {
+        unrestricted: vec![
+            "config.read".into(),
+            "config.write".into(),
+            "config.apply".into(),
+        ],
+        limited: Vec::new(),
+    }));
+    let denied = service
+        .change(operator, test(json!({"request": {"host": "shop.example"}})))
+        .await
+        .unwrap_err();
+    assert_eq!(denied.code.as_str(), ErrorCode::PERMISSION_DENIED);
+}

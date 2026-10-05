@@ -374,6 +374,22 @@ pub fn module_name(path: &str) -> Option<String> {
     valid.then(|| relative.replace('/', "."))
 }
 
+/// The identifier a snapshot gives the script of `code`: the path of a
+/// file, `file:line` of code written in the configuration.
+pub fn script_id(code: &LuaCode) -> String {
+    match code {
+        LuaCode::Inline {
+            file: Some(file),
+            line,
+            ..
+        } => format!("{file}:{line}"),
+        LuaCode::Inline {
+            code, file: None, ..
+        } => format!("inline:{}", &content_hash(code)[..16]),
+        LuaCode::File { path } => path.clone(),
+    }
+}
+
 /// Scripts of a snapshot being compiled, by id.
 #[derive(Default)]
 pub(crate) struct Scripts {
@@ -384,17 +400,14 @@ impl Scripts {
     /// The id of the script `code` is, added on first use. A file the model
     /// lacks is reported by validation, so it compiles as empty here.
     pub(crate) fn add(&mut self, code: &LuaCode, files: &BTreeMap<String, String>) -> String {
-        let (id, file, line, source) = match code {
-            LuaCode::Inline { code, file, line } => {
-                let id = match file {
-                    Some(file) => format!("{file}:{line}"),
-                    None => format!("inline:{}", &content_hash(code)[..16]),
-                };
-                let file = file.clone().unwrap_or_else(|| "inline".into());
-                (id, file, *line, code.clone())
-            }
+        let id = script_id(code);
+        let (file, line, source) = match code {
+            LuaCode::Inline { code, file, line } => (
+                file.clone().unwrap_or_else(|| "inline".into()),
+                *line,
+                code.clone(),
+            ),
             LuaCode::File { path } => (
-                path.clone(),
                 path.clone(),
                 1,
                 files.get(path).cloned().unwrap_or_default(),

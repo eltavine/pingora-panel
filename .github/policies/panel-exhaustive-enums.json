@@ -273,6 +273,12 @@
     },
     {
       "package": "panel-config-api",
+      "name": "LuaCommand",
+      "owner": "pingora-panel-platform",
+      "reason": "An operation of the configuration API contract. The configuration service and its callers match it exhaustively, so a new operation must fail to compile wherever it is not handled yet instead of reaching a wildcard."
+    },
+    {
+      "package": "panel-config-api",
       "name": "LanguageChange",
       "owner": "pingora-panel-platform",
       "reason": "An operation of the configuration API contract. The configuration service and its callers match it exhaustively, so a new operation must fail to compile wherever it is not handled yet instead of reaching a wildcard."
@@ -330,6 +336,18 @@
       "name": "TsigAlgorithm",
       "owner": "pingora-panel-platform",
       "reason": "The TSIG algorithms (RFC 8945) a provider signs updates with. Each maps onto the DNS client's, so a new one must fail to compile where it is not mapped yet."
+    },
+    {
+      "package": "panel-lua-ir",
+      "name": "RunOutcome",
+      "owner": "pingora-panel-platform",
+      "reason": "A run goes on, answers, closes the connection or fails, as the runtime's outcomes do; a test reports each, so a new one must fail to compile where it is reported."
+    },
+    {
+      "package": "panel-lua-ir",
+      "name": "TrialScript",
+      "owner": "pingora-panel-platform",
+      "reason": "A trial runs the handlers a request reaches or one script in place of a phase's handler; there is nothing else to try."
     },
     {
       "package": "panel-lua",

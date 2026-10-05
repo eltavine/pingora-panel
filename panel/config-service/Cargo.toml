@@ -9,10 +9,12 @@ publish.workspace = true
 
 [dependencies]
 async-trait.workspace = true
+bytes.workspace = true
 chrono.workspace = true
 config-proto-codec.workspace = true
 gateway-grpc-client.workspace = true
 gateway-proto-codec.workspace = true
+http.workspace = true
 panel-application.workspace = true
 panel-config-api.workspace = true
 panel-config-dsl.workspace = true
@@ -27,6 +29,8 @@ panel-event-contracts.workspace = true
 panel-events.workspace = true
 panel-health.workspace = true
 panel-ir.workspace = true
+panel-lua.workspace = true
+panel-lua-ir.workspace = true
 panel-platform-codec.workspace = true
 panel-platform.workspace = true
 panel-sqlite.workspace = true

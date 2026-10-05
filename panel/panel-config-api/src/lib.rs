@@ -8,11 +8,16 @@
 //! contract version that every service has to handle.
 
 mod command;
+mod lua;
 mod port;
 mod query;
 
 pub use command::{
-    ApprovalChange, ConfigurationCommand, LanguageChange, ModelChange, RevisionChange,
+    ApprovalChange, ConfigurationCommand, LanguageChange, LuaCommand, ModelChange, RevisionChange,
+};
+pub use lua::{
+    HeaderLine, LuaRunOutcome, LuaTest, LuaTestFailure, LuaTestLog, LuaTestReply, LuaTestRequest,
+    LuaTestRequestState, LuaTestResult, LuaTestRun, LuaTestScript, LuaTestUpstream,
 };
 pub use port::{
     ApplyOutcome, ApplyRequest, ApprovalBypass, ConfigurationChange, ConfigurationOutput,

@@ -69,6 +69,7 @@ event_types! {
     config::v1::ApplyRejected => "config.apply.rejected",
     config::v1::ApplyFailed => "config.apply.failed",
     config::v1::RevisionNoted => "config.revision.noted",
+    config::v1::LuaTested => "config.lua.tested",
     config::v1::ChangeRefused => "config.change.refused",
     config::v1::ApprovalPolicyCreated => "config.approval_policy.created",
     config::v1::ApprovalPolicyUpdated => "config.approval_policy.updated",

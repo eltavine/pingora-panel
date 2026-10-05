@@ -13,11 +13,11 @@ use panel_application::{
 use panel_config_api::{
     ApplyOutcome, ApplyRequest, ConfigurationChange, ConfigurationCommand, ConfigurationOutput,
     ConfigurationPort, ConfigurationQuery, DiffBase, DraftInfo, LanguageChange, LanguageQuery,
-    ModelChange, RevisionChange, RevisionQuery,
+    LuaCommand, LuaRunOutcome, LuaTest, ModelChange, RevisionChange, RevisionQuery,
 };
 use panel_config_dsl::{
-    explain, format_files, import_nginx, plan::changes, schema::DIRECTIVES, syntax_tree, Sources,
-    ENTRY, LANGUAGE_VERSION,
+    explain, format_files, import_nginx, lua_library, plan::changes, schema::DIRECTIVES,
+    syntax_tree, Sources, ENTRY, LANGUAGE_VERSION,
 };
 use panel_config_model::{
     compile, ApprovalRequest, ConfigModel, Revision, RevisionDetail, RevisionList,
@@ -69,6 +69,7 @@ fn whole(query: &ConfigurationQuery) -> bool {
                 | LanguageQuery::Explain { .. }
                 | LanguageQuery::Ir
                 | LanguageQuery::Plan
+                | LanguageQuery::Lua { .. }
         ),
         ConfigurationQuery::Revision(_) | ConfigurationQuery::Approval(_) => true,
     }
@@ -337,6 +338,66 @@ impl ConfigurationService {
                     String::new(),
                 )
             }
+            LanguageQuery::Lua { revision } => {
+                let sources = match revision {
+                    Some(id) => self.revisions.get(id).await?.1,
+                    None => draft.sources.clone(),
+                };
+                let lowered = language::read(&sources, Some(&draft.model), Utc::now());
+                let mut library =
+                    serde_json::to_value(lua_library(&lowered)).expect("API values serialize");
+                library["version"] = json!(draft.version);
+                library["revision"] = json!(revision);
+                json_output(&library, String::new())
+            }
+        })
+    }
+
+    /// Runs a Lua test on the draft and records that it ran.
+    async fn test_lua(&self, context: &CommandContext, test: LuaTest) -> Result<ChangeOutput> {
+        scope::require_everywhere(context.site_scope(), scope::LUA, "testing Lua scripts")?;
+        let draft = self.drafts.load().await?;
+        let script_phase = test
+            .script
+            .as_ref()
+            .map(|script| script.phase.clone())
+            .unwrap_or_default();
+        let result = crate::lua_test::run(
+            &draft.model,
+            draft.version,
+            test,
+            context.request_id().as_str(),
+        )
+        .await?;
+        let outcome = result
+            .runs
+            .last()
+            .map_or("continue", |run| match run.outcome {
+                LuaRunOutcome::Respond => "respond",
+                LuaRunOutcome::Abort => "abort",
+                LuaRunOutcome::Failed => "failed",
+                _ => "continue",
+            });
+        store::record(
+            &*self.events,
+            ("lua", "test"),
+            &context.scope(),
+            context.actor(),
+            &event::LuaTested {
+                version: draft.version,
+                script_phase,
+                site: result.site_id.clone().unwrap_or_default(),
+                route: result.route_id.clone().unwrap_or_default(),
+                phases: result.runs.iter().map(|run| run.phase.clone()).collect(),
+                outcome: outcome.to_owned(),
+                duration_us: result.runs.iter().map(|run| run.duration_us).sum(),
+            },
+        )
+        .await;
+        let output = json_output(&result, String::new());
+        Ok(ChangeOutput {
+            content: output.content,
+            etag: output.etag,
         })
     }
 
@@ -595,6 +656,10 @@ impl ConfigurationService {
         let edit = match command {
             ConfigurationCommand::Approval(change) => {
                 let output = self.change_approvals(context, change).await?;
+                return Ok((self.drafts.load().await?, output));
+            }
+            ConfigurationCommand::Lua(LuaCommand::Test { test }) => {
+                let output = self.test_lua(context, test).await?;
                 return Ok((self.drafts.load().await?, output));
             }
             ConfigurationCommand::Revision(RevisionChange::Note { id, note }) => {

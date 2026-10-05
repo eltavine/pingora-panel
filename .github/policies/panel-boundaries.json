@@ -94,6 +94,8 @@
         "panel-health",
         "panel-ir",
         "panel-jetstream",
+        "panel-lua",
+        "panel-lua-ir",
         "panel-platform",
         "panel-platform-codec",
         "panel-service",

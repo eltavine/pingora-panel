@@ -57,6 +57,9 @@ operations! {
         "config.schema" => Schema,
         /// What applying the draft would change.
         "config.plan" => Plan,
+        /// The Lua scripts of the draft, or of a revision: where each runs,
+        /// its version and what checking found.
+        "config.lua" => Lua { revision: Option<u64> },
     }
 }
 

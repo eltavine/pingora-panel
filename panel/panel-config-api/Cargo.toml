@@ -1,6 +1,6 @@
 [package]
 name = "panel-config-api"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -15,7 +15,12 @@ panel-config-model.workspace = true
 panel-domain.workspace = true
 panel-errors.workspace = true
 serde.workspace = true
+utoipa = { workspace = true, optional = true }
 uuid.workspace = true
+
+[features]
+# JSON Schema for the HTTP contract.
+openapi = ["dep:utoipa", "panel-config-model/openapi"]
 
 [dev-dependencies]
 serde_json.workspace = true

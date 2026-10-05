@@ -16,6 +16,7 @@ mod configuration;
 mod deployments;
 mod draft;
 mod language;
+mod lua_test;
 #[cfg(test)]
 mod memory;
 mod operations;

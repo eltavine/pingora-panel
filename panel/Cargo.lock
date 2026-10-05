@@ -900,12 +900,14 @@ name = "config-service"
 version = "0.2.0"
 dependencies = [
  "async-trait",
+ "bytes",
  "chrono",
  "config-grpc-client",
  "config-proto-codec",
  "gateway-grpc",
  "gateway-grpc-client",
  "gateway-proto-codec",
+ "http",
  "panel-application",
  "panel-config-api",
  "panel-config-dsl",
@@ -921,6 +923,8 @@ dependencies = [
  "panel-health",
  "panel-ir",
  "panel-jetstream",
+ "panel-lua",
+ "panel-lua-ir",
  "panel-platform",
  "panel-platform-codec",
  "panel-service",
@@ -3167,7 +3171,7 @@ dependencies = [
 
 [[package]]
 name = "panel-config-api"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3177,6 +3181,7 @@ dependencies = [
  "panel-errors",
  "serde",
  "serde_json",
+ "utoipa",
  "uuid",
 ]
 

@@ -1,4 +1,4 @@
-use crate::Files;
+use crate::{Files, LuaTest};
 use panel_application::operations;
 use panel_config_model::{
     ApprovalPolicyInput, BatchRequest, Domain, HttpPolicy, Listener, NodeInput, RouteInput,
@@ -58,6 +58,15 @@ operations! {
     /// A change to the draft's files.
     pub enum LanguageChange {
         "config.source.replace" => ReplaceSource { files: Files },
+    }
+}
+
+operations! {
+    /// Lua scripts run without changing anything (ADR 0039).
+    pub enum LuaCommand {
+        /// Runs the draft's handlers a request reaches, or one script, on a
+        /// request described in full.
+        "config.lua.test" => Test { test: LuaTest },
     }
 }
 
@@ -136,6 +145,7 @@ pub enum ConfigurationCommand {
     Language(LanguageChange),
     Revision(RevisionChange),
     Approval(ApprovalChange),
+    Lua(LuaCommand),
 }
 
 impl ConfigurationCommand {
@@ -145,6 +155,7 @@ impl ConfigurationCommand {
             Self::Language(change) => change.operation(),
             Self::Revision(change) => change.operation(),
             Self::Approval(change) => change.operation(),
+            Self::Lua(command) => command.operation(),
         }
     }
 
@@ -165,6 +176,7 @@ impl ConfigurationCommand {
                 | ApprovalChange::Withdraw { id }
                 | ApprovalChange::Revoke { id },
             ) => format!("approvals/{id}"),
+            Self::Lua(LuaCommand::Test { .. }) => "config/lua".into(),
         }
     }
 }
@@ -190,6 +202,12 @@ impl From<RevisionChange> for ConfigurationCommand {
 impl From<ApprovalChange> for ConfigurationCommand {
     fn from(change: ApprovalChange) -> Self {
         Self::Approval(change)
+    }
+}
+
+impl From<LuaCommand> for ConfigurationCommand {
+    fn from(command: LuaCommand) -> Self {
+        Self::Lua(command)
     }
 }
 
