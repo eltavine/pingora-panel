@@ -711,6 +711,44 @@ and opens its merged logs, filtered by service, and its Compose files. A
 reachable engine's card opens its disk use, where operators see what
 pruning would remove and remove it after confirming.
 
+## Site files
+
+The control plane manages the files below the directory the gateway serves
+static sites from ([decision](../docs/adr/0034-site-files.md)), which
+`PINGORA_PANEL_SITES_ROOT` names; the Compose installation mounts its
+`sites` volume there read-write. Every operation opens that directory as a
+capability and resolves paths beneath it, so neither a path nor a symbolic
+link in the tree leads out of it. Paths are names separated by `/`; empty
+parts, `.`, `..`, backslashes and control characters are refused.
+
+```sh
+ppanel files ls shop
+ppanel files cat shop/index.html
+ppanel files get shop/logo.png --to logo.png
+ppanel files put index.html shop/index.html --if-match '"<sha256>"'
+printf 'User-agent: *\n' | ppanel files put - shop/robots.txt --new
+ppanel files mkdir blog/2027
+ppanel files rm shop/old --recursive --yes
+```
+
+`GET /api/v1/site-files?path=` lists a directory, directories first, and
+`DELETE` removes an entry, a directory with what it holds only with
+`recursive=true`. `GET /api/v1/site-files/content?path=` returns a file of up
+to 64 MiB as an `application/octet-stream` attachment with `nosniff`, so
+nothing uploaded runs as a page of the console's origin, with its entity tag
+in `ETag`; `PUT` writes one atomically, through a temporary file renamed
+over it, creating its directories, `If-Match` replacing only the file of
+that tag and `If-None-Match: *` only creating one.
+`POST /api/v1/site-files/directories?path=` creates a directory.
+`files.read`, held by viewers and operators, lists and reads; `files.write`,
+held by operators, changes. Each change is audited as
+`files.file.written`, with its size and digest but never its content,
+`files.directory.created` or `files.entry.removed`, refused or not.
+The console's Site files page browses the directory, edits text files of up
+to 1 MiB on the entity tag they were read with, so a file changed meanwhile
+is not overwritten, and uploads files picked or dropped on it. The
+configuration's own files stay in the configuration language's editor.
+
 ## Alerts
 
 `observability-service` evaluates alert rules
