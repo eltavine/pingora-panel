@@ -543,6 +543,8 @@ ppanel container logs shop-web-1 --follow
 ppanel container stats
 ppanel image list --search nginx
 ppanel image remove ghcr.io/example/app:2.3 --yes
+ppanel network list
+ppanel volume list
 ppanel container restart shop-web-1 --yes
 ppanel container remove nightly-report --volumes --yes
 ```
@@ -593,6 +595,11 @@ a prefix of it, or a reference with its slashes percent-encoded, and the
 agent refuses a reference that would leave the engine's image paths. An
 image the installation's own containers use is never removed, and each
 removal is audited as `container.image.removed`, refused or not.
+`GET /api/v1/container-engines/{engine}/networks` lists an engine's
+networks with their driver, scope, subnets and gateways, and
+`.../volumes` its volumes with where their data lives on the host; each
+says how many containers use it and which Compose project created it.
+Both need `containers.read`.
 `POST /api/v1/container-engines/{engine}/{enable,disable}` needs
 `containers.manage`, as do
 `POST /api/v1/container-engines/{engine}/containers/{container}/{start,stop,restart,kill}`
@@ -608,7 +615,8 @@ before anything but a start. Its logs can be filtered by output and
 text, followed from the last line read and saved as a file. The table
 shows each running container's CPU and memory, and the details show
 everything it uses. An Images tab lists the engine's images, opens one's
-configuration and removes one after confirming.
+configuration and removes one after confirming, and Networks and
+Volumes tabs list those.
 
 ## Alerts
 
