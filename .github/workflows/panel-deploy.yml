@@ -400,6 +400,36 @@ jobs:
           curl --fail --silent --show-error --header 'Host: console.test' --header "$auth" \
             http://127.0.0.1:18080/api/v1/gateway/status
 
+      - name: Serve a container through a site put in front of it
+        run: |
+          ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
+          # A container that publishes its HTTP monitoring port on loopback and
+          # declares the site it backs.
+          docker run --detach --name panel-ci-web --publish 127.0.0.1:18222:8222 \
+            --label pingora-panel.site.domains=web.test --label pingora-panel.site.port=8222 \
+            "$(docker compose config --images | grep '/nats:')" -m 8222 >/dev/null
+          ppanel -o json container list --search panel-ci-web \
+            | python3 -c "import json, sys; c = json.load(sys.stdin)['containers'][0]; e = c['endpoints'][0]; assert (e['host'], e['port'], e['route']) == ('127.0.0.1', 18222, 'published') and c['declared_site']['domains'] == ['web.test'], c"
+          ppanel container proxy panel-ci-web
+          ppanel -o json container links \
+            | python3 -c "import json, sys; links = [l for l in json.load(sys.stdin)['links'] if l['container'] == 'panel-ci-web']; assert [(l['site'], l['node'], l['route']) for l in links] == [('panel-ci-web', '127.0.0.1:18222', 'published')], links"
+          ppanel container links
+          ppanel config apply
+          for _ in $(seq 1 30); do
+            if curl --fail --silent --output /dev/null --header 'Host: web.test' \
+              http://127.0.0.1:18080/varz; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent --show-error --header 'Host: web.test' http://127.0.0.1:18080/varz \
+            | python3 -c "import json, sys; assert json.load(sys.stdin)['server_id']"
+          # The name is taken now, so a second site is refused and nothing changes.
+          if ppanel container proxy panel-ci-web; then
+            exit 1
+          fi
+          docker rm --force panel-ci-web >/dev/null
+
       - name: Serve the site over HTTPS with a certificate the panel keeps
         run: |
           ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
