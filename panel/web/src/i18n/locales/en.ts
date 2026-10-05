@@ -1189,6 +1189,30 @@ const en: Messages = {
       reclaimable: '{size} reclaimable',
       readAt: 'Read at {time}',
     },
+    prune: {
+      title: 'Free space',
+      description:
+        "Pruning removes containers that are not running, images no container uses, anonymous volumes nothing mounts, networks no container is on and build cache not in use. What this panel's installation made stays.",
+      taggedImages: 'Images a tag still names, too',
+      namedVolumes: 'Named volumes too; they usually hold data someone meant to keep',
+      look: 'Show what would go',
+      nothing: 'Nothing would go',
+      kinds: {
+        container: 'Container',
+        image: 'Image',
+        volume: 'Volume',
+        network: 'Network',
+        build_cache: 'Build cache',
+      },
+      more: 'and {count} more | and {count} more',
+      reclaimable: '{count} item, {size} | {count} items, {size}',
+      remove: 'Remove {count} item | Remove {count} items',
+      confirmTitle: 'Remove {count} item? | Remove {count} items?',
+      confirmDetail:
+        'They are gone for good, freeing about {size}. Whatever came into use since stays.',
+      done: 'Removed {count} item, freed {size} | Removed {count} items, freed {size}',
+      kept: '{count} item stayed | {count} items stayed',
+    },
     logs: {
       action: 'Logs',
       open: 'Logs of {name}',

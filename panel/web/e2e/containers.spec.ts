@@ -271,6 +271,34 @@ async function setUp(
       },
     }),
   )
+  await page.route(/\/api\/v1\/container-engines\/docker\/prune-preview(\?.*)?$/, (route) => {
+    const named = new URL(route.request().url()).searchParams.get('named_volumes') === 'true'
+    seen.queries.push(new URL(route.request().url()).searchParams)
+    const items = [
+      { kind: 'container', id: 'e5d8b3a2f6c19d07', name: 'nightly-report', size_bytes: 1024 },
+      ...(named ? [{ kind: 'volume', id: 'scratch', name: 'scratch', size_bytes: 2048 }] : []),
+    ]
+    route.fulfill({
+      json: {
+        observed_at: '2026-10-04T10:00:00Z',
+        items,
+        reclaimable_bytes: items.reduce((total, item) => total + item.size_bytes, 0),
+      },
+    })
+  })
+  await page.route(/\/api\/v1\/container-engines\/docker\/prune$/, async (route) => {
+    const asked = route.request().postDataJSON() as { items: { kind: string }[] }
+    seen.changes.push(`POST prune ${asked.items.map((item) => item.kind).join(',')}`)
+    route.fulfill({
+      json: {
+        outcomes: asked.items.map((item) => ({
+          item,
+          error: item.kind === 'volume' ? { code: 'CONFLICT', message: 'volume is in use' } : null,
+        })),
+        reclaimed_bytes: 1024,
+      },
+    })
+  })
   await page.route(/\/api\/v1\/container-engines\/docker\/networks$/, (route) =>
     route.fulfill({
       json: {
@@ -649,4 +677,42 @@ test("an engine's disk use shows what removing unused things would free", async 
       name: 'Disk use',
     }),
   ).toHaveCount(0)
+})
+
+test('pruning shows what would go and removes it after confirming', async ({ page }) => {
+  const seen = await setUp(page)
+  await page.goto('/containers')
+  const card = page.locator('[data-slot="card"]').filter({ hasText: '/run/docker.sock' })
+  await card.getByRole('button', { name: 'Disk use' }).click()
+  const sheet = page.getByRole('dialog', { name: 'Disk use of Docker' })
+  await sheet.getByRole('checkbox', { name: /Named volumes too/ }).check()
+  await sheet.getByRole('button', { name: 'Show what would go' }).click()
+  await expect(sheet).toContainText('nightly-report')
+  await expect(sheet).toContainText('scratch')
+  await expect(sheet).toContainText('2 items, 3 KiB')
+  expect(seen.queries.at(-1)?.get('named_volumes')).toBe('true')
+
+  await sheet.getByRole('button', { name: 'Remove 2 items' }).click()
+  const dialog = page.getByRole('alertdialog', { name: 'Remove 2 items?' })
+  await expect(dialog).toContainText('freeing about 3 KiB')
+  await dialog.getByRole('button', { name: 'Remove' }).click()
+  await expect(page.getByText('Removed 1 item, freed 1 KiB')).toBeVisible()
+  await expect(sheet).toContainText('1 item stayed')
+  await expect(sheet).toContainText('volume is in use')
+  expect(seen.changes).toEqual(['POST prune container,volume'])
+})
+
+test('readers see what pruning would remove without removing it', async ({ page }) => {
+  await setUp(
+    page,
+    undefined,
+    ALL_PERMISSIONS.filter((permission) => permission !== 'containers.manage'),
+  )
+  await page.goto('/containers')
+  const card = page.locator('[data-slot="card"]').filter({ hasText: '/run/docker.sock' })
+  await card.getByRole('button', { name: 'Disk use' }).click()
+  const sheet = page.getByRole('dialog', { name: 'Disk use of Docker' })
+  await sheet.getByRole('button', { name: 'Show what would go' }).click()
+  await expect(sheet).toContainText('nightly-report')
+  await expect(sheet.getByRole('button', { name: /^Remove / })).toHaveCount(0)
 })

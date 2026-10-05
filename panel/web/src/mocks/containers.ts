@@ -13,6 +13,9 @@ import type {
   ImageDetailView,
   ImageListView,
   ImageView,
+  PrunePreviewView,
+  PruneReportView,
+  PruneRequest,
 } from '@/api/generated'
 
 const GIB = 1024 ** 3
@@ -290,6 +293,50 @@ export function containerHandlers(): AnyHandler[] {
         volumes: { total: 1, active: 1, size_bytes: 640 * 1024 ** 2, reclaimable_bytes: 0 },
         build_cache: { total: 0, active: 0, size_bytes: 0, reclaimable_bytes: 0 },
       } satisfies EngineDiskUsageView)
+    }),
+    http.get('*/api/v1/container-engines/:engine/prune-preview', ({ request }) => {
+      const named = new URL(request.url).searchParams.get('named_volumes') === 'true'
+      const items: PrunePreviewView['items'] = [
+        ...containers
+          .filter((container) => container.state === 'exited')
+          .map((container) => ({
+            kind: 'container' as const,
+            id: container.id,
+            name: container.names[0] ?? container.id,
+            size_bytes: 2 * 1024 ** 2,
+          })),
+        ...images
+          .filter((image) => image.containers === 0 && image.tags.length === 0)
+          .map((image) => ({
+            kind: 'image' as const,
+            id: image.id,
+            name: image.id,
+            size_bytes: image.size_bytes,
+          })),
+        ...(named
+          ? [
+              {
+                kind: 'volume' as const,
+                id: 'scratch',
+                name: 'scratch',
+                size_bytes: 12 * 1024 ** 2,
+              },
+            ]
+          : []),
+      ]
+      return HttpResponse.json({
+        observed_at: new Date().toISOString(),
+        items,
+        reclaimable_bytes: items.reduce((total, item) => total + item.size_bytes, 0),
+      } satisfies PrunePreviewView)
+    }),
+    http.post('*/api/v1/container-engines/:engine/prune', async ({ request }) => {
+      const asked = (await request.json()) as PruneRequest
+      const outcomes = asked.items.map((item) => ({ item, error: null }))
+      return HttpResponse.json({
+        outcomes,
+        reclaimed_bytes: asked.items.reduce((total, item) => total + item.size_bytes, 0),
+      } satisfies PruneReportView)
     }),
     http.get('*/api/v1/container-engines/:engine/networks', () =>
       HttpResponse.json({

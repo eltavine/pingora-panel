@@ -16,6 +16,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { engineName } from '@/lib/containers'
 import { formatters } from '@/lib/format'
+import EnginePrune from './EnginePrune.vue'
 
 const open = defineModel<boolean>('open', { required: true })
 const props = defineProps<{ engine: string }>()
@@ -107,6 +108,7 @@ function share(use: EngineDiskUseView): number {
               </div>
             </li>
           </ul>
+          <EnginePrune :engine="engine" />
           <p v-if="usage.data.value.observed_at" class="text-muted-foreground text-xs">
             {{
               t('containers.disk.readAt', {
