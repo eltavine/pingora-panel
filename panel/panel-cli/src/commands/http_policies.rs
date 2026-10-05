@@ -51,8 +51,8 @@ pub(crate) struct PolicyArgs {
     /// Removes the Server field of responses.
     #[arg(long)]
     remove_server: bool,
-    /// Origin allowed cross-origin requests, such as https://shop.example,
-    /// https://*.shop.example or *; repeatable. The gateway answers their
+    /// Origin allowed cross-origin requests, such as `https://shop.example`,
+    /// `https://*.shop.example` or `*`; repeatable. The gateway answers their
     /// preflights.
     #[arg(long = "cors-origin", value_name = "ORIGIN")]
     cors_origins: Vec<String>,
