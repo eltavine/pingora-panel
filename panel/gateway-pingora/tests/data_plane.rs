@@ -1812,6 +1812,28 @@ async fn http_policies_change_headers_answer_cors_and_compress() {
         Some("gzip")
     );
     assert!(compressed.headers["vary"].contains("Accept-Encoding"));
+    // Weights count (RFC 9110 §12.5.3): a refused coding is not used, and
+    // the upstream still sees the field as the client sent it.
+    let refused = send(
+        listen,
+        &request("GET /api/items", "accept-encoding: gzip;q=0, br\r\n"),
+    )
+    .await;
+    assert!(!refused.headers.contains_key("content-encoding"));
+    let head = String::from_utf8_lossy(&refused.body).to_ascii_lowercase();
+    assert!(head.contains("accept-encoding: gzip;q=0, br"), "{head}");
+    let weighed = send(
+        listen,
+        &request(
+            "GET /api/items",
+            "accept-encoding: br;q=0.5, gzip;q=0.8\r\n",
+        ),
+    )
+    .await;
+    assert_eq!(
+        weighed.headers.get("content-encoding").map(String::as_str),
+        Some("gzip")
+    );
     let elsewhere = send(listen, &request("GET /home", "accept-encoding: gzip\r\n")).await;
     assert!(
         !elsewhere.headers.contains_key("content-encoding"),

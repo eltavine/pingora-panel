@@ -22,7 +22,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use chrono::Utc;
-use http::header;
+use http::{header, HeaderValue};
 use panel_ir::AccessLogFormat;
 use panel_metrics::{method, protocol_version, ActiveRequest, ClientRequest, ServerRequest};
 use pingora_core::{
@@ -141,6 +141,9 @@ pub(crate) struct RequestContext {
     http_request: Vec<FieldChange>,
     /// The HTTP policy whose compression applies to its responses.
     compression: Option<usize>,
+    /// The client's `Accept-Encoding` lines, while the compression module
+    /// reads ranked ones.
+    accept_encoding: Option<Vec<HeaderValue>>,
     body_seen: u64,
     started: Instant,
     /// Counts the request as active while it is measured.
@@ -222,10 +225,20 @@ impl ProxyHttp for PanelProxy {
             admission: Admission::default(),
             http_request: Vec::new(),
             compression: None,
+            accept_encoding: None,
             body_seen: 0,
             started: Instant::now(),
             active: None,
         }
+    }
+
+    async fn early_request_filter(
+        &self,
+        session: &mut Session,
+        ctx: &mut RequestContext,
+    ) -> pingora_core::Result<()> {
+        ctx.accept_encoding = http_policy::rank_codings(session.req_header_mut());
+        Ok(())
     }
 
     async fn request_filter(
@@ -233,6 +246,9 @@ impl ProxyHttp for PanelProxy {
         session: &mut Session,
         ctx: &mut RequestContext,
     ) -> pingora_core::Result<bool> {
+        if let Some(original) = ctx.accept_encoding.take() {
+            http_policy::restore_codings(session.req_header_mut(), original);
+        }
         http_policy::disable_compression(session);
         request_identity::ensure_request_id(session.req_header_mut());
         if let Some(metrics) = &self.listener.metrics {

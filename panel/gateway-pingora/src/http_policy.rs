@@ -371,6 +371,106 @@ pub(crate) struct CorsResponse {
     expose: Option<HeaderValue>,
 }
 
+/// The codings the gateway compresses with, by their HTTP names, in the
+/// order it prefers among codings a client weighs the same.
+const CODINGS: [&str; 3] = ["br", "zstd", "gzip"];
+
+/// Ranks `Accept-Encoding` for Pingora's compression module, which reads
+/// one field line and takes codings in the order listed: the codings the
+/// client accepts by RFC 9110 §12.5.3, weights, `*` and `x-gzip` included,
+/// most wanted first, or `identity` when it accepts none of them. Returns
+/// the lines to put back once the module has read them, so upstreams see
+/// what the client sent.
+pub(crate) fn rank_codings(request: &mut RequestHeader) -> Option<Vec<HeaderValue>> {
+    let original: Vec<HeaderValue> = request
+        .headers
+        .get_all(header::ACCEPT_ENCODING)
+        .iter()
+        .cloned()
+        .collect();
+    if original.is_empty() {
+        return None;
+    }
+    let mut weights: Vec<(String, u16)> = Vec::new();
+    let mut any = None;
+    for element in original
+        .iter()
+        .filter_map(|line| line.to_str().ok())
+        .flat_map(|line| line.split(','))
+    {
+        let mut parts = element.split(';');
+        let coding = parts.next().unwrap_or_default().trim().to_ascii_lowercase();
+        let weight = parts.try_fold(1000, |weight, parameter| match parameter.split_once('=') {
+            Some((name, value)) if name.trim().eq_ignore_ascii_case("q") => qvalue(value.trim()),
+            _ => Some(weight),
+        });
+        let Some(weight) = weight.filter(|_| !coding.is_empty()) else {
+            continue;
+        };
+        match coding.as_str() {
+            "*" => any = Some(weight),
+            "x-gzip" => weights.push(("gzip".into(), weight)),
+            _ => weights.push((coding, weight)),
+        }
+    }
+    let weight = |coding: &str| {
+        weights
+            .iter()
+            .filter(|(name, _)| name == coding)
+            .map(|(_, weight)| *weight)
+            .max()
+            .or(any)
+            .unwrap_or(0)
+    };
+    let mut ranked: Vec<(&str, u16)> = CODINGS
+        .iter()
+        .map(|coding| (*coding, weight(coding)))
+        .filter(|(_, weight)| *weight > 0)
+        .collect();
+    ranked.sort_by_key(|(_, weight)| std::cmp::Reverse(*weight));
+    let value = if ranked.is_empty() {
+        "identity".to_owned()
+    } else {
+        ranked
+            .iter()
+            .map(|(coding, _)| *coding)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    if original.len() == 1 && original[0] == value.as_str() {
+        return None;
+    }
+    request
+        .insert_header(header::ACCEPT_ENCODING, value)
+        .expect("coding names are a valid field value");
+    Some(original)
+}
+
+/// Puts back the `Accept-Encoding` lines [`rank_codings`] replaced.
+pub(crate) fn restore_codings(request: &mut RequestHeader, original: Vec<HeaderValue>) {
+    request.remove_header(&header::ACCEPT_ENCODING);
+    for line in original {
+        request
+            .append_header(header::ACCEPT_ENCODING, line)
+            .expect("the lines came from the request");
+    }
+}
+
+/// An RFC 9110 §12.4.2 weight in thousandths: `0`, `1` or up to three
+/// decimals of either.
+fn qvalue(value: &str) -> Option<u16> {
+    let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
+    if fraction.len() > 3 || !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let thousandths: u16 = format!("{fraction:0<3}").parse().ok()?;
+    match whole {
+        "0" => Some(thousandths),
+        "1" if thousandths == 0 => Some(1000),
+        _ => None,
+    }
+}
+
 /// Turns compression off for a request; Pingora's module starts on so that
 /// it records the request's `Accept-Encoding`, and policies turn it back on.
 pub(crate) fn disable_compression(session: &mut Session) {
@@ -569,5 +669,53 @@ pub(crate) struct HttpPolicyBuilder;
 impl HttpModuleBuilder for HttpPolicyBuilder {
     fn init(&self) -> Module {
         Box::new(HttpPolicyModule::default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ranked(lines: &[&str]) -> (String, bool) {
+        let mut request = RequestHeader::build("GET", b"/", None).unwrap();
+        for line in lines {
+            request
+                .append_header(header::ACCEPT_ENCODING, *line)
+                .unwrap();
+        }
+        let original = rank_codings(&mut request);
+        let value = request.headers[header::ACCEPT_ENCODING]
+            .to_str()
+            .unwrap()
+            .to_owned();
+        if let Some(original) = original {
+            restore_codings(&mut request, original);
+            let restored: Vec<_> = request
+                .headers
+                .get_all(header::ACCEPT_ENCODING)
+                .iter()
+                .map(|line| line.to_str().unwrap())
+                .collect();
+            assert_eq!(restored, lines);
+            return (value, true);
+        }
+        (value, false)
+    }
+
+    #[test]
+    fn codings_are_ranked_by_weight_with_refusals_and_wildcards() {
+        assert_eq!(ranked(&["gzip"]), ("gzip".into(), false));
+        assert_eq!(ranked(&["gzip, deflate, br, zstd"]).0, "br, zstd, gzip");
+        assert_eq!(ranked(&["gzip;q=1.0, br;q=0.5"]).0, "gzip, br");
+        assert_eq!(ranked(&["gzip;q=0, *;q=0.2, br;q=0.8"]).0, "br, zstd");
+        assert_eq!(ranked(&["X-GZIP"]).0, "gzip");
+        assert_eq!(ranked(&["gzip", "br;q=0.9"]).0, "gzip, br");
+        assert_eq!(ranked(&["gzip;q=0"]).0, "identity");
+        assert_eq!(ranked(&["gzip;q=2, br;q=0.1234"]).0, "identity");
+        assert_eq!(ranked(&["identity"]), ("identity".into(), false));
+        assert_eq!(qvalue("0.5"), Some(500));
+        assert_eq!(qvalue("1"), Some(1000));
+        assert_eq!(qvalue("1.001"), None);
+        assert_eq!(qvalue(".5"), None);
     }
 }
