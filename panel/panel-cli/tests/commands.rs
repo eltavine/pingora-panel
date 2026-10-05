@@ -95,6 +95,22 @@ async fn api(
             route["id"] = json!("r-1");
             (StatusCode::CREATED, Json(route)).into_response()
         }
+        ("GET", "/api/v1/config/lua") => Json(json!({
+            "disabled": false, "version": 7, "revision": 3, "shared_dicts": [], "diagnostics": [],
+            "scripts": [{
+                "id": "lua/auth.lua", "file": "lua/auth.lua", "line": 1, "module": "auth",
+                "sha256": "0123456789abcdef".repeat(4), "bytes": 20, "lines": 2, "code": "return",
+                "uses": [{"resource": "lua", "label": "http", "phase": "access"}], "requires": []
+            }]
+        }))
+        .into_response(),
+        ("POST", "/api/v1/config/lua/test") => Json(json!({
+            "draft_version": 7, "site_id": "shop", "route_id": "api", "aborted": false,
+            "runs": [{"phase": "access", "script": "editor", "outcome": "respond", "duration_us": 120,
+                      "logs": [{"level": "warn", "message": "editor:1: refused"}]}],
+            "response": {"status": 403, "headers": [{"name": "x-reason", "value": "key"}], "body": ""}
+        }))
+        .into_response(),
         ("POST", "/api/v1/config/route-test") => Json(json!({
             "outcome": "routed", "draft_version": 9, "host": "shop.example", "path": "/api/items",
             "site_id": "shop", "default_site": false, "route_id": "r-2",
@@ -178,7 +194,17 @@ async fn api(
             }]}),
         ),
         ("POST", "/api/v1/config/check") => {
-            if body.to_string().contains("nowhere") {
+            if body.to_string().contains("ngx.say(") {
+                Json(json!({"valid": false, "diagnostics": [
+                    {"code": "DSL_LUA", "severity": "ERROR", "source_span": "lua/auth.lua:1.1-9",
+                     "message": "the Lua code does not compile: Expected ')'"},
+                    {"code": "DSL_LUA", "severity": "WARNING", "source_span": "main.conf:4.1-20",
+                     "message": "ngx.say is disabled in header_filter_by_lua*"},
+                    {"code": "DSL_REFERENCE", "severity": "ERROR", "source_span": "main.conf:9.5-20",
+                     "message": "no upstream is named \"x\""}
+                ]}))
+                .into_response()
+            } else if body.to_string().contains("nowhere") {
                 Json(json!({"valid": false, "diagnostics": [{
                     "code": "DSL_REFERENCE", "severity": "ERROR", "source_span": "main.conf:3.22-28",
                     "message": "no upstream is named \"nowhere\""
@@ -1464,6 +1490,82 @@ fn checks_and_formatting_report_positions_and_exit_codes() {
     assert_eq!(
         std::fs::read_to_string(&file).unwrap(),
         "language_version 1;\n"
+    );
+}
+
+#[test]
+fn lua_scripts_are_checked_listed_and_tested() {
+    let stub = Stub::start();
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(directory.path().join("main.conf"), "language_version 1;\n").unwrap();
+    std::fs::create_dir(directory.path().join("lua")).unwrap();
+    let script = directory.path().join("lua").join("auth.lua");
+    std::fs::write(&script, "ngx.say(\n").unwrap();
+
+    let checked = stub.ppanel(&["lua", "check", directory.path().to_str().unwrap()]);
+    assert_eq!(checked.status.code(), Some(5));
+    let reported = stderr(&checked);
+    assert!(reported.contains(
+        "lua/auth.lua:1.1-9: error: the Lua code does not compile: Expected ')' [DSL_LUA]"
+    ));
+    assert!(reported.contains("main.conf:4.1-20: warning: ngx.say is disabled"));
+    assert!(!reported.contains("no upstream"), "{reported}");
+    assert_eq!(
+        stub.requests("POST", "/api/v1/config/check")[0].body["files"]["lua/auth.lua"],
+        "ngx.say(\n"
+    );
+
+    let listed = stub.ppanel(&["lua", "scripts", "--revision", "3"]);
+    assert!(listed.status.success(), "{}", stderr(&listed));
+    let table = stdout(&listed);
+    assert!(
+        table.contains("lua/auth.lua") && table.contains("access in http"),
+        "{table}"
+    );
+    assert!(table.contains("0123456789ab"), "{table}");
+    assert_eq!(
+        stub.requests("GET", "/api/v1/config/lua")[0].query,
+        "revision=3"
+    );
+
+    std::fs::write(
+        &script,
+        "ngx.log(ngx.WARN, 'refused') return ngx.exit(403)\n",
+    )
+    .unwrap();
+    let tested = stub.ppanel(&[
+        "lua",
+        "test",
+        "--host",
+        "shop.example",
+        "--target",
+        "/api",
+        "-H",
+        "x-key: k",
+        "--script",
+        script.to_str().unwrap(),
+        "--phase",
+        "access",
+        "--allow",
+        "body",
+    ]);
+    assert!(tested.status.success(), "{}", stderr(&tested));
+    let printed = stdout(&tested);
+    assert!(
+        printed.contains("access") && printed.contains("respond"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains("[warn] access: editor:1: refused"),
+        "{printed}"
+    );
+    assert!(printed.contains("answers 403\nx-reason: key"), "{printed}");
+    let posted = &stub.requests("POST", "/api/v1/config/lua/test")[0].body;
+    assert_eq!(posted["script"]["phase"], "access");
+    assert_eq!(posted["script"]["allow"], json!({"body": true}));
+    assert_eq!(
+        posted["request"]["headers"],
+        json!([{"name": "x-key", "value": "k"}])
     );
 }
 

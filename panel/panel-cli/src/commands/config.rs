@@ -39,7 +39,7 @@ pub(crate) enum ConfigCommand {
     /// Replaces the draft with configuration files or a bundle.
     Import {
         /// A bundle, `-` for a bundle on standard input, a file read as
-        /// `main.conf`, or a directory of `.conf` files.
+        /// `main.conf`, or a directory of `.conf` and `.lua` files.
         path: PathBuf,
         /// Refuse if the draft changed since this version.
         #[arg(long)]
@@ -47,12 +47,12 @@ pub(crate) enum ConfigCommand {
     },
     /// Checks configuration files without saving them; the draft by default.
     Check {
-        /// A file read as `main.conf`, or a directory of `.conf` files.
+        /// A file read as `main.conf`, or a directory of `.conf` and `.lua` files.
         path: Option<PathBuf>,
     },
     /// Formats configuration files canonically.
     Fmt {
-        /// A file read as `main.conf`, or a directory of `.conf` files.
+        /// A file read as `main.conf`, or a directory of `.conf` and `.lua` files.
         path: PathBuf,
         /// List files that are not formatted and fail instead of printing.
         #[arg(long, conflicts_with = "write")]
@@ -84,7 +84,7 @@ pub(crate) enum ConfigCommand {
     Schema,
     /// The syntax tree of a file: its directives as the language reads them.
     Ast {
-        /// A file read as `main.conf`, or a directory of `.conf` files; the
+        /// A file read as `main.conf`, or a directory of `.conf` and `.lua` files; the
         /// draft by default.
         path: Option<PathBuf>,
         /// The file to show.
@@ -96,7 +96,7 @@ pub(crate) enum ConfigCommand {
     Explain {
         /// The position, as FILE:LINE or FILE:LINE.COLUMN.
         at: String,
-        /// A file read as `main.conf`, or a directory of `.conf` files; the
+        /// A file read as `main.conf`, or a directory of `.conf` and `.lua` files; the
         /// draft by default.
         path: Option<PathBuf>,
     },
@@ -175,7 +175,7 @@ pub(crate) fn read_files(path: &Path) -> Result<Map<String, Value>> {
                     pending.push(entry);
                 } else if entry
                     .extension()
-                    .is_some_and(|extension| extension == "conf")
+                    .is_some_and(|extension| extension == "conf" || extension == "lua")
                 {
                     let relative = entry
                         .strip_prefix(path)
@@ -296,7 +296,7 @@ pub(crate) fn print_diagnostics(diagnostics: &Value) {
     }
 }
 
-fn rejected(detail: &str) -> CliError {
+pub(crate) fn rejected(detail: &str) -> CliError {
     CliError::Api {
         status: StatusCode::UNPROCESSABLE_ENTITY,
         problem: json!({ "detail": detail }),
@@ -348,7 +348,7 @@ fn print_tree(nodes: &Value, depth: usize) {
     }
 }
 
-async fn draft_files(api: &Api, path: Option<PathBuf>) -> Result<Map<String, Value>> {
+pub(crate) async fn draft_files(api: &Api, path: Option<PathBuf>) -> Result<Map<String, Value>> {
     match path {
         Some(path) => read_files(&path),
         None => Ok(api.get("/api/v1/config/source", &[]).await?.body["files"]

@@ -143,6 +143,10 @@ enum Command {
     /// Configurations applied or attempted, their files and notes.
     #[command(subcommand)]
     Revision(commands::revisions::RevisionCommand),
+    /// Lua scripts: checked, listed with where they run, and tested on a
+    /// request.
+    #[command(subcommand)]
+    Lua(commands::lua::LuaCommand),
     /// Every change and every refused or failed attempt.
     #[command(subcommand)]
     Audit(commands::audit::AuditCommand),
@@ -279,6 +283,7 @@ async fn main() -> ExitCode {
                 commands::approvals::approval_policy(&api, &output, command).await
             }
             Command::Revision(command) => commands::revisions::run(&api, &output, command).await,
+            Command::Lua(command) => commands::lua::run(&api, &output, command).await,
             Command::Audit(command) => commands::audit::run(&api, &output, command).await,
             Command::Traffic(command) => commands::traffic::run(&api, &output, command).await,
             Command::Logs(command) => commands::logs::run(&api, &output, command).await,
@@ -337,6 +342,25 @@ mod tests {
                 "--maintenance",
             ],
             vec!["ppanel", "domain", "check", "bücher.example"],
+            vec!["ppanel", "lua", "check", "conf"],
+            vec!["ppanel", "lua", "scripts", "--revision", "3"],
+            vec![
+                "ppanel",
+                "lua",
+                "test",
+                "--host",
+                "shop.example",
+                "--target",
+                "/api?x=1",
+                "-H",
+                "x-key: k",
+                "--script",
+                "lua/auth.lua",
+                "--phase",
+                "access",
+                "--allow",
+                "body",
+            ],
             vec![
                 "ppanel",
                 "route",

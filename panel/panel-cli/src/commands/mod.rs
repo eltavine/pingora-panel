@@ -18,6 +18,7 @@ pub mod http_policies;
 pub mod identity;
 pub mod images;
 pub mod logs;
+pub mod lua;
 pub mod providers;
 pub mod revisions;
 pub mod routes;
