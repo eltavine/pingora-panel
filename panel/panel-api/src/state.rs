@@ -3,9 +3,10 @@ use crate::{
     sign_in::ProviderAccess,
 };
 use panel_application::{
-    AlertsPort, AuditPort, ComposePort, ContainersPort, EngineResourcesPort, GatewayRuntimePort,
-    HostAgentPort, HostPort, ImagesPort, LogsPort, NoCompose, NoContainers, NoEngineResources,
-    NoHostAgent, NoImages, NoSiteFiles, SiteFilesPort, TlsProbe, TrafficPort,
+    AlertsPort, AuditPort, BackupsPort, ComposePort, ContainersPort, EngineResourcesPort,
+    GatewayRuntimePort, HostAgentPort, HostPort, ImagesPort, LogsPort, NoBackups, NoCompose,
+    NoContainers, NoEngineResources, NoHostAgent, NoImages, NoSiteFiles, OperationLog,
+    SiteFilesPort, TlsProbe, TrafficPort,
 };
 use panel_certificate_api::CertificatePort;
 use panel_config_api::ConfigurationPort;
@@ -33,6 +34,9 @@ pub struct ApiState<U> {
     pub(crate) resources: Arc<dyn EngineResourcesPort>,
     pub(crate) compose: Arc<dyn ComposePort>,
     pub(crate) site_files: Arc<dyn SiteFilesPort>,
+    pub(crate) backups: Arc<dyn BackupsPort>,
+    /// Records what the API itself composes from several ports.
+    pub(crate) operations: Option<Arc<dyn OperationLog>>,
     pub(crate) identity: Option<Arc<Gate>>,
     pub(crate) providers: Option<Arc<ProviderAccess>>,
     pub(crate) workloads: Option<Arc<WorkloadIdentity>>,
@@ -60,6 +64,8 @@ impl<U> Clone for ApiState<U> {
             resources: Arc::clone(&self.resources),
             compose: Arc::clone(&self.compose),
             site_files: Arc::clone(&self.site_files),
+            backups: Arc::clone(&self.backups),
+            operations: self.operations.clone(),
             identity: self.identity.clone(),
             providers: self.providers.clone(),
             workloads: self.workloads.clone(),
@@ -89,6 +95,8 @@ impl<U> ApiState<U> {
             resources: Arc::new(NoEngineResources),
             compose: Arc::new(NoCompose),
             site_files: Arc::new(NoSiteFiles),
+            backups: Arc::new(NoBackups),
+            operations: None,
             identity: None,
             providers: None,
             workloads: None,
@@ -204,6 +212,20 @@ impl<U> ApiState<U> {
     /// them those paths say so.
     pub fn with_site_files(mut self, site_files: Arc<dyn SiteFilesPort>) -> Self {
         self.site_files = site_files;
+        self
+    }
+
+    /// Serves backups under `/api/v1/backups`; without them those paths say
+    /// so.
+    pub fn with_backups(mut self, backups: Arc<dyn BackupsPort>) -> Self {
+        self.backups = backups;
+        self
+    }
+
+    /// Records operations the API composes from several ports, such as
+    /// restoring the configuration from a backup.
+    pub fn with_operation_log(mut self, operations: Arc<dyn OperationLog>) -> Self {
+        self.operations = Some(operations);
         self
     }
 

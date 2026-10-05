@@ -32,6 +32,8 @@ pub enum Permission {
     ContainersManage,
     FilesRead,
     FilesWrite,
+    BackupsRead,
+    BackupsManage,
     PlatformRead,
     IdentityRead,
     IdentityManage,
@@ -153,6 +155,16 @@ const CATALOG: &[(Permission, &str, &str)] = &[
         Permission::FilesWrite,
         "files.write",
         "Upload, edit and remove the files below the static sites' directory.",
+    ),
+    (
+        Permission::BackupsRead,
+        "backups.read",
+        "List backups and how far taking them got.",
+    ),
+    (
+        Permission::BackupsManage,
+        "backups.manage",
+        "Take, download, restore and remove backups, which hold everything the databases do.",
     ),
     (
         Permission::PlatformRead,
@@ -303,7 +315,7 @@ pub fn built_in_roles() -> Vec<Role> {
         role(
             "operator",
             "Operator",
-            "Changes and applies configuration, decides on others' changes, manages certificates and the sites' files, operates the gateway, keeps its logs and its alerts.",
+            "Changes and applies configuration, decides on others' changes, manages certificates, the sites' files and backups, operates the gateway, keeps its logs and its alerts.",
             [
                 GatewayRead,
                 GatewayOperate,
@@ -323,6 +335,8 @@ pub fn built_in_roles() -> Vec<Role> {
                 ContainersManage,
                 FilesRead,
                 FilesWrite,
+                BackupsRead,
+                BackupsManage,
                 PlatformRead,
             ]
             .into_iter()

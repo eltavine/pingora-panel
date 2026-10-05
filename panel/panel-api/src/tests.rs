@@ -19,6 +19,7 @@ mod access;
 mod acme;
 mod admission;
 mod alerts;
+mod backups;
 mod certificates;
 mod compose;
 mod conditional;

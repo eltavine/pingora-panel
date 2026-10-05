@@ -12,6 +12,7 @@ mod admission;
 mod alerts;
 mod approvals;
 mod audit;
+mod backups;
 mod certificates;
 mod compose;
 mod conditional;

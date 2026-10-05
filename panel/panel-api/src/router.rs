@@ -1,10 +1,10 @@
 use crate::{
     access, acme,
     admission::{admit, Admission},
-    alerts, approvals, audit, certificates, compose, configuration as config, container_sites,
-    containers, engine_resources, gateway_runtime as runtime, grants, host, host_agent, identity,
-    images, language, logs, middleware, routes, sign_in, site_files, tls_checks, traffic, workload,
-    ApiConfig, ApiState,
+    alerts, approvals, audit, backups, certificates, compose, configuration as config,
+    container_sites, containers, engine_resources, gateway_runtime as runtime, grants, host,
+    host_agent, identity, images, language, logs, middleware, routes, sign_in, site_files,
+    tls_checks, traffic, workload, ApiConfig, ApiState,
 };
 use axum::{
     extract::DefaultBodyLimit,
@@ -184,6 +184,22 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         .route(
             "/api/v1/config/source",
             get(language::source::<U>).put(language::replace_source::<U>),
+        )
+        .route(
+            "/api/v1/backups",
+            get(backups::list_backups::<U>).post(backups::create_backup::<U>),
+        )
+        .route(
+            "/api/v1/backups/{id}",
+            get(backups::get_backup::<U>).delete(backups::delete_backup::<U>),
+        )
+        .route(
+            "/api/v1/backups/{id}/archive",
+            get(backups::download_backup::<U>),
+        )
+        .route(
+            "/api/v1/backups/{id}/restores",
+            post(backups::restore_backup::<U>),
         )
         .route(
             "/api/v1/config/bundle",

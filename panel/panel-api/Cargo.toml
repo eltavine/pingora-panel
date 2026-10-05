@@ -9,12 +9,14 @@ publish.workspace = true
 
 [dependencies]
 async-trait.workspace = true
+base64.workspace = true
 chrono.workspace = true
 cookie.workspace = true
 governor.workspace = true
 httpdate.workspace = true
 axum = { workspace = true, features = ["ws"] }
 futures-util.workspace = true
+hex.workspace = true
 panel-application.workspace = true
 panel-config-api.workspace = true
 panel-certificate-api.workspace = true
@@ -41,4 +43,5 @@ zeroize = { workspace = true, features = ["serde"] }
 [dev-dependencies]
 panel-domain.workspace = true
 rustls-pki-types.workspace = true
+sha2.workspace = true
 tokio-tungstenite.workspace = true

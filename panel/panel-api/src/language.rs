@@ -15,10 +15,10 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use panel_application::GatewayUseCases;
+use panel_application::{GatewayUseCases, RequestScope};
 use panel_config_api::{
-    ApplyOutcome, ApplyRequest as Apply, LanguageChange, LanguageQuery, RevisionChange,
-    RevisionQuery,
+    ApplyOutcome, ApplyRequest as Apply, ConfigurationOutput, ConfigurationPort, LanguageChange,
+    LanguageQuery, RevisionChange, RevisionQuery,
 };
 use panel_config_dsl::{
     plan::Changes, schema::DirectiveSpec, Explanation, SyntaxTree, LANGUAGE_VERSION,
@@ -210,26 +210,8 @@ pub(crate) async fn bundle<U: GatewayUseCases>(
     State(state): State<ApiState<U>>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
-    #[derive(Deserialize)]
-    struct Source {
-        language_version: u32,
-        version: u64,
-        files: BTreeMap<String, String>,
-    }
-    let output = port(&state)?
-        .read(request_scope(&headers)?, LanguageQuery::Source.into())
-        .await?;
-    let source: Source = serde_json::from_slice(&output.content).map_err(|_| {
-        ApiError::new(PanelError::corrupt_state(
-            "the draft's files are unreadable",
-        ))
-    })?;
-    let mut response = Json(ConfigBundle {
-        format: BUNDLE_FORMAT.to_owned(),
-        language_version: source.language_version,
-        files: source.files,
-    })
-    .into_response();
+    let (bundle, output) = draft_bundle(port(&state)?.as_ref(), request_scope(&headers)?).await?;
+    let mut response = Json(bundle).into_response();
     let headers = response.headers_mut();
     if let Some(etag) = output
         .etag
@@ -241,12 +223,55 @@ pub(crate) async fn bundle<U: GatewayUseCases>(
         header::CONTENT_DISPOSITION,
         HeaderValue::from_str(&format!(
             "attachment; filename=\"configuration-v{}.json\"",
-            source.version
+            output.draft.version
         ))
         .expect("the file name is ASCII"),
     );
     insert_draft(headers, &output.draft);
     Ok(response)
+}
+
+/// The draft as a configuration bundle, with what reading it answered.
+pub(crate) async fn draft_bundle(
+    configuration: &dyn ConfigurationPort,
+    scope: RequestScope,
+) -> Result<(ConfigBundle, ConfigurationOutput), ApiError> {
+    #[derive(Deserialize)]
+    struct Source {
+        language_version: u32,
+        files: BTreeMap<String, String>,
+    }
+    let output = configuration
+        .read(scope, LanguageQuery::Source.into())
+        .await?;
+    let source: Source = serde_json::from_slice(&output.content).map_err(|_| {
+        ApiError::new(PanelError::corrupt_state(
+            "the draft's files are unreadable",
+        ))
+    })?;
+    let bundle = ConfigBundle {
+        format: BUNDLE_FORMAT.to_owned(),
+        language_version: source.language_version,
+        files: source.files,
+    };
+    Ok((bundle, output))
+}
+
+/// Refuses a file that is not a configuration bundle this installation
+/// reads.
+pub(crate) fn importable(bundle: &ConfigBundle) -> Result<(), PanelError> {
+    if bundle.format != BUNDLE_FORMAT {
+        return Err(PanelError::invalid_argument(format!(
+            "this is not a configuration bundle; its format must be {BUNDLE_FORMAT}"
+        )));
+    }
+    if bundle.language_version > LANGUAGE_VERSION {
+        return Err(PanelError::validation_failed(format!(
+            "the bundle is written in language version {}, newer than this installation's {LANGUAGE_VERSION}",
+            bundle.language_version
+        )));
+    }
+    Ok(())
 }
 
 /// Replaces the draft with a configuration bundle's files. Bundles written
@@ -260,17 +285,7 @@ pub(crate) async fn import_bundle<U: GatewayUseCases>(
     body: Bytes,
 ) -> Result<Response, ApiError> {
     let bundle = json::<ConfigBundle>(&headers, &body)?;
-    if bundle.format != BUNDLE_FORMAT {
-        return Err(ApiError::new(PanelError::invalid_argument(format!(
-            "this is not a configuration bundle; its format must be {BUNDLE_FORMAT}"
-        ))));
-    }
-    if bundle.language_version > LANGUAGE_VERSION {
-        return Err(ApiError::new(PanelError::validation_failed(format!(
-            "the bundle is written in language version {}, newer than this installation's {LANGUAGE_VERSION}",
-            bundle.language_version
-        ))));
-    }
+    importable(&bundle).map_err(ApiError::new)?;
     change(
         &state,
         &headers,

@@ -27,8 +27,8 @@ use observability_grpc_client::ObservabilityClient;
 use ops_grpc_client::OpsAgentClient;
 use panel_api::{router_with_config, AccessSettings, ApiConfig, ApiState};
 use panel_application::{
-    RecordedCompose, RecordedContainers, RecordedEngineResources, RecordedHostAgent,
-    RecordedImages, RecordedLogs, RecordedRuntime, RecordedSiteFiles,
+    RecordedBackups, RecordedCompose, RecordedContainers, RecordedEngineResources,
+    RecordedHostAgent, RecordedImages, RecordedLogs, RecordedRuntime, RecordedSiteFiles,
 };
 use panel_control_runtime::{ControlPlaneProcess, DefaultAddresses, ProcessSettings};
 use panel_errors::{PanelError, Result};
@@ -212,6 +212,7 @@ pub fn process(
     let events = EventLog::new(process.database(), ServiceName::new(SERVICE)?);
     let operations = Arc::new(operations::OutboxOperations(events.clone()));
     let runtime = RecordedRuntime::new(Arc::new(gateway), operations.clone());
+    let backups = RecordedBackups::new(Arc::new(automation.clone()), operations.clone());
     let logs = RecordedLogs::new(Arc::new(observability.clone()), operations.clone());
     let recorded_agent = agent
         .clone()
@@ -277,12 +278,14 @@ pub fn process(
                 .with_runtime(Arc::new(runtime))
                 .with_audit(Arc::new(audit))
                 .with_certificates(Arc::new(automation))
+                .with_backups(Arc::new(backups))
                 .with_traffic(Arc::new(observability.clone()))
                 .with_logs(Arc::new(logs))
                 .with_host(Arc::new(observability.clone()))
                 .with_alerts(Arc::new(observability))
                 .with_tls_probe(Arc::new(RustlsProbe::default()))
                 .with_identity(identity, access)
+                .with_operation_log(operations.clone())
                 .with_access_audit(operations)
                 .with_health(running.health())
                 .with_directory(Arc::new(directory::RegistryDirectory::new(
