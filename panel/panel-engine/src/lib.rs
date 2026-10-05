@@ -2,6 +2,7 @@
 
 //! Stable gateway ports and an in-memory contract implementation.
 
+mod conditions;
 mod events;
 pub mod fake;
 mod logging;
@@ -9,6 +10,7 @@ pub mod ports;
 mod traffic;
 mod validation;
 
+pub use conditions::{token, MOST_CONDITIONS, MOST_CONDITION_DEPTH};
 pub use events::*;
 pub use fake::FakeGatewayEngine;
 pub use ports::*;

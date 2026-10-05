@@ -8,8 +8,8 @@ use panel_contracts::gateway::v1 as wire;
 use panel_domain::{NormalizedHost, PathPrefix, RouteId, SiteId, UpstreamPoolId};
 use panel_errors::{PanelError, Result};
 use panel_ir::{
-    DomainSpec, ListenerProtocols, ListenerRef, RealIpHeader, RouteAction, RouteMatcher, RouteSpec,
-    SiteSpec, StrictTransportSecurity, WwwRedirect,
+    DomainSpec, ListenerProtocols, ListenerRef, RealIpHeader, RouteAction, RouteCondition,
+    RouteMatcher, RouteSpec, SiteSpec, StrictTransportSecurity, ValueTest, WwwRedirect,
 };
 
 pub(super) fn decode_listener(value: wire::ListenerRef) -> Result<ListenerRef> {
@@ -170,6 +170,11 @@ pub(super) fn decode_route(value: wire::RouteSpec) -> Result<RouteSpec> {
                 .matcher
                 .ok_or_else(|| PanelError::invalid_argument("route matcher is required"))?,
         )?,
+        conditions: value
+            .conditions
+            .into_iter()
+            .map(decode_condition)
+            .collect::<Result<_>>()?,
         action: decode_action(
             value
                 .action
@@ -192,6 +197,7 @@ pub(super) fn encode_route(value: &RouteSpec) -> wire::RouteSpec {
         priority: value.priority,
         enabled: value.enabled,
         matcher: Some(encode_matcher(&value.matcher)),
+        conditions: value.conditions.iter().map(encode_condition).collect(),
         action: Some(encode_action(&value.action)),
         retry_policy_v1: value.retry_policy.as_ref().map(encode_retry_policy),
         header_policy_id: value.header_policy_id.clone().unwrap_or_default(),
@@ -200,6 +206,147 @@ pub(super) fn encode_route(value: &RouteSpec) -> wire::RouteSpec {
         lua_policy_id: value.lua_policy_id.clone().unwrap_or_default(),
         name: value.name.clone().unwrap_or_default(),
         access_log: logging::encode_access_log(&value.access_log),
+    }
+}
+
+fn decode_condition(value: wire::RouteCondition) -> Result<RouteCondition> {
+    use wire::route_condition::Kind;
+    let field = |field: wire::FieldCondition| -> Result<(String, ValueTest)> {
+        Ok((field.name, decode_test(field.test)?))
+    };
+    let group = |group: wire::RouteConditions| -> Result<Vec<RouteCondition>> {
+        group.conditions.into_iter().map(decode_condition).collect()
+    };
+    Ok(
+        match value.kind.ok_or_else(|| {
+            PanelError::invalid_argument(
+                "a route condition is of a kind this gateway does not know",
+            )
+        })? {
+            Kind::Method(method) => RouteCondition::Method {
+                methods: method.methods,
+            },
+            Kind::Host(host) => RouteCondition::Host {
+                hosts: host
+                    .hosts
+                    .into_iter()
+                    .map(|host| NormalizedHost::new(host).map_err(domain_error))
+                    .collect::<Result<_>>()?,
+            },
+            Kind::Header(header) => {
+                let (name, test) = field(header)?;
+                RouteCondition::Header { name, test }
+            }
+            Kind::Query(query) => {
+                let (name, test) = field(query)?;
+                RouteCondition::Query { name, test }
+            }
+            Kind::Cookie(cookie) => {
+                let (name, test) = field(cookie)?;
+                RouteCondition::Cookie { name, test }
+            }
+            Kind::Client(client) => RouteCondition::Client {
+                networks: client.networks,
+            },
+            Kind::UserAgent(test) => RouteCondition::UserAgent {
+                test: decode_test(Some(test))?,
+            },
+            Kind::Referer(test) => RouteCondition::Referer {
+                test: decode_test(Some(test))?,
+            },
+            Kind::ContentType(content_type) => RouteCondition::ContentType {
+                types: content_type.types,
+            },
+            Kind::All(all) => RouteCondition::All {
+                conditions: group(all)?,
+            },
+            Kind::Any(any) => RouteCondition::Any {
+                conditions: group(any)?,
+            },
+            Kind::Not(condition) => RouteCondition::Not {
+                condition: Box::new(decode_condition(*condition)?),
+            },
+        },
+    )
+}
+
+fn decode_test(value: Option<wire::ValueTest>) -> Result<ValueTest> {
+    use wire::ValueTestOperator as Operator;
+    let test = value.ok_or_else(|| PanelError::invalid_argument("a value test is required"))?;
+    let (value, ignore_case) = (test.value, test.ignore_case);
+    Ok(match Operator::try_from(test.operator) {
+        Ok(Operator::Present) => ValueTest::Present,
+        Ok(Operator::Absent) => ValueTest::Absent,
+        Ok(Operator::Equals) => ValueTest::Equals { value, ignore_case },
+        Ok(Operator::Prefix) => ValueTest::Prefix { value, ignore_case },
+        Ok(Operator::Suffix) => ValueTest::Suffix { value, ignore_case },
+        Ok(Operator::Contains) => ValueTest::Contains { value, ignore_case },
+        Ok(Operator::Regex) => ValueTest::Regex {
+            pattern: value,
+            ignore_case,
+        },
+        _ => {
+            return Err(PanelError::invalid_argument(
+                "a value test uses an operator this gateway does not know",
+            ))
+        }
+    })
+}
+
+fn encode_condition(value: &RouteCondition) -> wire::RouteCondition {
+    use wire::route_condition::Kind;
+    let field = |name: &str, test: &ValueTest| wire::FieldCondition {
+        name: name.to_owned(),
+        test: Some(encode_test(test)),
+    };
+    let group = |conditions: &[RouteCondition]| wire::RouteConditions {
+        conditions: conditions.iter().map(encode_condition).collect(),
+    };
+    let kind = match value {
+        RouteCondition::Method { methods } => Kind::Method(wire::MethodCondition {
+            methods: methods.clone(),
+        }),
+        RouteCondition::Host { hosts } => Kind::Host(wire::HostCondition {
+            hosts: hosts.iter().map(|host| host.as_str().to_owned()).collect(),
+        }),
+        RouteCondition::Header { name, test } => Kind::Header(field(name, test)),
+        RouteCondition::Query { name, test } => Kind::Query(field(name, test)),
+        RouteCondition::Cookie { name, test } => Kind::Cookie(field(name, test)),
+        RouteCondition::Client { networks } => Kind::Client(wire::ClientCondition {
+            networks: networks.clone(),
+        }),
+        RouteCondition::UserAgent { test } => Kind::UserAgent(encode_test(test)),
+        RouteCondition::Referer { test } => Kind::Referer(encode_test(test)),
+        RouteCondition::ContentType { types } => Kind::ContentType(wire::ContentTypeCondition {
+            types: types.clone(),
+        }),
+        RouteCondition::All { conditions } => Kind::All(group(conditions)),
+        RouteCondition::Any { conditions } => Kind::Any(group(conditions)),
+        RouteCondition::Not { condition } => Kind::Not(Box::new(encode_condition(condition))),
+    };
+    wire::RouteCondition { kind: Some(kind) }
+}
+
+fn encode_test(value: &ValueTest) -> wire::ValueTest {
+    use wire::ValueTestOperator as Operator;
+    let (operator, value, ignore_case) = match value {
+        ValueTest::Present => (Operator::Present, String::new(), false),
+        ValueTest::Absent => (Operator::Absent, String::new(), false),
+        ValueTest::Equals { value, ignore_case } => (Operator::Equals, value.clone(), *ignore_case),
+        ValueTest::Prefix { value, ignore_case } => (Operator::Prefix, value.clone(), *ignore_case),
+        ValueTest::Suffix { value, ignore_case } => (Operator::Suffix, value.clone(), *ignore_case),
+        ValueTest::Contains { value, ignore_case } => {
+            (Operator::Contains, value.clone(), *ignore_case)
+        }
+        ValueTest::Regex {
+            pattern,
+            ignore_case,
+        } => (Operator::Regex, pattern.clone(), *ignore_case),
+    };
+    wire::ValueTest {
+        operator: operator as i32,
+        value,
+        ignore_case,
     }
 }
 

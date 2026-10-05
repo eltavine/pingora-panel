@@ -170,6 +170,18 @@
       "reason": "A pull reports progress and then what it pulled; the audit records a pull when it ends, so a new kind of event must fail to compile wherever pulls are relayed and recorded, rather than ending one unrecorded."
     },
     {
+      "package": "panel-ir",
+      "name": "RouteCondition",
+      "owner": "pingora-panel-platform",
+      "reason": "Every codec, validator and evaluator of route conditions must handle each kind; a new kind must fail to compile where conditions are encoded or evaluated, rather than being dropped and widening what a route takes."
+    },
+    {
+      "package": "panel-ir",
+      "name": "ValueTest",
+      "owner": "pingora-panel-platform",
+      "reason": "Every codec and evaluator of route conditions must handle each test; a new test must fail to compile where tests are encoded or evaluated, rather than being dropped."
+    },
+    {
       "package": "panel-application",
       "name": "BackupChange",
       "owner": "pingora-panel-platform",

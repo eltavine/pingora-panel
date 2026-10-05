@@ -240,6 +240,7 @@ mod tests {
             matcher: panel_ir::RouteMatcher::PathPrefix {
                 path: panel_domain::PathPrefix::new("/").unwrap(),
             },
+            conditions: Vec::new(),
             action: panel_ir::RouteAction::Proxy {
                 upstream_pool_id: panel_domain::UpstreamPoolId::new("missing-pool").unwrap(),
             },

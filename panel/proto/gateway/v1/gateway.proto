@@ -128,6 +128,81 @@ message RouteSpec {
   string lua_policy_id = 11;
   string name = 12;
   AccessLog access_log = 13;
+  // Every one holds for the requests the route takes, after its matcher
+  // (ADR 0036). A gateway refuses kinds it does not know.
+  repeated RouteCondition conditions = 14;
+}
+
+// A condition on a request.
+message RouteCondition {
+  oneof kind {
+    // One of the methods, compared case-sensitively.
+    MethodCondition method = 1;
+    // One of the hosts, or `*.parent` wildcards of one label.
+    HostCondition host = 2;
+    // A header field by its case-insensitive name, tested as the combined
+    // value of its field lines.
+    FieldCondition header = 3;
+    // A query parameter, decoded as application/x-www-form-urlencoded.
+    FieldCondition query = 4;
+    // A cookie among the pairs of every Cookie field.
+    FieldCondition cookie = 5;
+    // The client's address, after trusted proxies.
+    ClientCondition client = 6;
+    ValueTest user_agent = 7;
+    ValueTest referer = 8;
+    // The media type without parameters, ignoring case.
+    ContentTypeCondition content_type = 9;
+    RouteConditions all = 10;
+    RouteConditions any = 11;
+    RouteCondition not = 12;
+  }
+}
+
+message MethodCondition {
+  repeated string methods = 1;
+}
+
+message HostCondition {
+  repeated string hosts = 1;
+}
+
+message FieldCondition {
+  string name = 1;
+  ValueTest test = 2;
+}
+
+message ClientCondition {
+  // Networks such as `10.0.0.0/8`, or single addresses.
+  repeated string networks = 1;
+}
+
+message ContentTypeCondition {
+  // Types such as `application/json`, or ranges such as `text/*`.
+  repeated string types = 1;
+}
+
+message RouteConditions {
+  repeated RouteCondition conditions = 1;
+}
+
+// A test of a field, parameter or cookie.
+message ValueTest {
+  ValueTestOperator operator = 1;
+  // The value, or the regular expression; empty for presence and absence.
+  string value = 2;
+  bool ignore_case = 3;
+}
+
+enum ValueTestOperator {
+  VALUE_TEST_OPERATOR_UNSPECIFIED = 0;
+  VALUE_TEST_OPERATOR_PRESENT = 1;
+  VALUE_TEST_OPERATOR_ABSENT = 2;
+  VALUE_TEST_OPERATOR_EQUALS = 3;
+  VALUE_TEST_OPERATOR_PREFIX = 4;
+  VALUE_TEST_OPERATOR_SUFFIX = 5;
+  VALUE_TEST_OPERATOR_CONTAINS = 6;
+  VALUE_TEST_OPERATOR_REGEX = 7;
 }
 
 // Access log settings of every site, of one site or of one route; unset

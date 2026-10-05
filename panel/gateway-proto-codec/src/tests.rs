@@ -319,3 +319,97 @@ fn logging_settings_round_trip() {
     let decoded = decode_snapshot(encode_snapshot(&snapshot)).unwrap();
     assert_eq!(decoded, snapshot);
 }
+
+#[test]
+fn route_conditions_round_trip_and_unknown_kinds_are_refused() {
+    use panel_ir::{RouteCondition, ValueTest};
+
+    let test = |value: &str| ValueTest::Equals {
+        value: value.into(),
+        ignore_case: true,
+    };
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(10));
+    let mut route = RouteSpec::new(
+        RouteId::new("route").unwrap(),
+        SiteId::new("site").unwrap(),
+        10,
+        RouteMatcher::PathPrefix {
+            path: PathPrefix::new("/api").unwrap(),
+        },
+        RouteAction::Proxy {
+            upstream_pool_id: UpstreamPoolId::new("pool").unwrap(),
+        },
+    );
+    route.conditions = vec![
+        RouteCondition::Method {
+            methods: vec!["GET".into(), "HEAD".into()],
+        },
+        RouteCondition::Host {
+            hosts: vec![NormalizedHost::new("*.shop.example").unwrap()],
+        },
+        RouteCondition::Header {
+            name: "x-env".into(),
+            test: test("staging"),
+        },
+        RouteCondition::Query {
+            name: "debug".into(),
+            test: ValueTest::Present,
+        },
+        RouteCondition::Cookie {
+            name: "beta".into(),
+            test: ValueTest::Regex {
+                pattern: "^on$".into(),
+                ignore_case: false,
+            },
+        },
+        RouteCondition::Client {
+            networks: vec!["10.0.0.0/8".into(), "2001:db8::1".into()],
+        },
+        RouteCondition::UserAgent {
+            test: ValueTest::Contains {
+                value: "bot".into(),
+                ignore_case: true,
+            },
+        },
+        RouteCondition::Referer {
+            test: ValueTest::Prefix {
+                value: "https://shop.example/".into(),
+                ignore_case: false,
+            },
+        },
+        RouteCondition::ContentType {
+            types: vec!["application/json".into(), "text/*".into()],
+        },
+        RouteCondition::Any {
+            conditions: vec![
+                RouteCondition::Header {
+                    name: "x-canary".into(),
+                    test: ValueTest::Suffix {
+                        value: "1".into(),
+                        ignore_case: false,
+                    },
+                },
+                RouteCondition::All {
+                    conditions: vec![RouteCondition::Cookie {
+                        name: "canary".into(),
+                        test: ValueTest::Absent,
+                    }],
+                },
+            ],
+        },
+        RouteCondition::Not {
+            condition: Box::new(RouteCondition::Client {
+                networks: vec!["192.0.2.0/24".into()],
+            }),
+        },
+    ];
+    snapshot.routes.push(route);
+    snapshot.refresh_content_hash();
+    let wire = encode_snapshot(&snapshot);
+    assert_eq!(decode_snapshot(wire.clone()).unwrap(), snapshot);
+
+    let mut unknown = wire;
+    unknown.routes[0].conditions[0].kind = None;
+    let refused = decode_snapshot(unknown).unwrap_err();
+    assert!(refused.message.contains("does not know"), "{refused}");
+}

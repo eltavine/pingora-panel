@@ -5,7 +5,7 @@ use panel_errors::{Diagnostic, ErrorCode};
 use panel_ir::{
     template::{parse_template, uses_variables, TEMPLATE_CAPABILITY},
     ActiveHealthCheck, HealthCheckProtocol, ListenerRef, LoadBalancingPolicy, RouteAction,
-    RouteMatcher, RuntimeSnapshot, UpstreamPoolSpec,
+    RouteMatcher, RuntimeSnapshot, UpstreamPoolSpec, ROUTE_CONDITIONS_CAPABILITY,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -39,6 +39,10 @@ pub(crate) fn validate_traffic(snapshot: &RuntimeSnapshot, diagnostics: &mut Vec
         .required_capabilities()
         .iter()
         .any(|capability| capability.name == TEMPLATE_CAPABILITY);
+    let conditions_declared = snapshot
+        .required_capabilities()
+        .iter()
+        .any(|capability| capability.name == ROUTE_CONDITIONS_CAPABILITY);
     let mut report = |resource: &str, message: String| {
         diagnostics
             .push(Diagnostic::error(ErrorCode::VALIDATION_FAILED, message).with_resource(resource));
@@ -259,6 +263,18 @@ pub(crate) fn validate_traffic(snapshot: &RuntimeSnapshot, diagnostics: &mut Vec
                 }
             }
             _ => {}
+        }
+        for problem in crate::conditions::problems(&route.conditions) {
+            report(resource, format!("route {} {problem}", route.id));
+        }
+        if !route.conditions.is_empty() && !conditions_declared {
+            report(
+                resource,
+                format!(
+                    "route {} has conditions without requiring {ROUTE_CONDITIONS_CAPABILITY}",
+                    route.id
+                ),
+            );
         }
         let templates: Vec<&str> = match &route.action {
             RouteAction::Redirect { location, .. } => vec![location.as_str()],

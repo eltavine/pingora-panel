@@ -12,12 +12,14 @@ use panel_domain::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub use conditions::{RouteCondition, ValueTest, ROUTE_CONDITIONS_CAPABILITY};
 pub use logging::{AccessLog, AccessLogFormat, LogFiles, LoggingPolicy};
 pub use security::{
     BasicAuth, LimitedResponse, RateLimit, RateLimitKey, RealIpHeader, RefererRule, SecurityPolicy,
     REQUEST_HEAD_TIMEOUT_CAPABILITY, REQUEST_SECURITY_CAPABILITY, TRUSTED_PROXIES_CAPABILITY,
 };
 
+pub mod conditions;
 pub mod logging;
 pub mod security;
 pub mod template;
@@ -384,6 +386,10 @@ pub struct RouteSpec {
     pub priority: u32,
     pub enabled: bool,
     pub matcher: RouteMatcher,
+    /// Every one of them holds for the requests the route takes, after its
+    /// matcher.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conditions: Vec<RouteCondition>,
     pub action: RouteAction,
     pub retry_policy: Option<RetryPolicy>,
     pub header_policy_id: Option<String>,
@@ -410,6 +416,7 @@ impl RouteSpec {
             priority,
             enabled: true,
             matcher,
+            conditions: Vec::new(),
             action,
             retry_policy: None,
             header_policy_id: None,
