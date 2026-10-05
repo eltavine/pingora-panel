@@ -311,14 +311,18 @@ impl Limit {
         let Some(queue) = self.queue else {
             return Err(Busy::Full);
         };
-        if self
-            .waiting
-            .fetch_update(Relaxed, Relaxed, |waiting| {
-                (waiting < queue.max_waiting).then_some(waiting + 1)
-            })
-            .is_err()
-        {
-            return Err(Busy::Full);
+        let mut waiting = self.waiting.load(Relaxed);
+        loop {
+            if waiting >= queue.max_waiting {
+                return Err(Busy::Full);
+            }
+            match self
+                .waiting
+                .compare_exchange_weak(waiting, waiting + 1, Relaxed, Relaxed)
+            {
+                Ok(_) => break,
+                Err(actual) => waiting = actual,
+            }
         }
         let waited = tokio::time::timeout(
             Duration::from_millis(queue.timeout_ms),
