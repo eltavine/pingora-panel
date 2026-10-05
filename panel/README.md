@@ -1341,6 +1341,111 @@ ppanel route add <site-id> --match prefix:/api --proxy <upstream-id> --http-poli
 ppanel http-policy list
 ```
 
+## Lua scripts
+
+Sites, routes and upstreams run Lua in the gateway's request phases with
+lua-nginx-module's directives and `ngx` API
+([decision](../docs/adr/0039-lua-scripts.md)), on Luau VMs bounded in time,
+work and memory.
+
+```nginx
+http {
+    lua_shared_dict hits 10m;
+    lua_time_limit 50ms;                   # wall-clock, waits included
+    lua_allow upstream;                    # what scripts may do beyond reading and changing requests
+    init_by_lua_block {
+        LIMITS = { per_minute = 60 }       # read-only to requests
+    }
+    access_by_lua_file lua/auth.lua;       # inherited by every server and route
+
+    upstream app {
+        server 10.0.0.11:8080;
+        server 10.0.0.12:8080;
+        balancer_by_lua_file lua/pick.lua;
+    }
+
+    server shop {
+        server_name shop.example;
+        lua_on_error 503;                  # or fail (500), or continue
+        header_filter_by_lua_block {
+            ngx.header["X-Served-By"] = "shop"
+        }
+        proxy app;
+
+        route hello {
+            match exact /hello;
+            lua_allow body network;        # bodies and TCP cosockets
+            content_by_lua_block {
+                local panel = require("panel.v1")
+                panel.resp.send(200, "hello " .. (panel.req.query_value("who") or "world"))
+            }
+        }
+    }
+}
+```
+
+Handlers run in `server_rewrite`, `rewrite`, `access`, `content` (the
+action of a server or route), `balancer`, `header_filter`, `body_filter`
+and `log`; a route's handler replaces its server's and a server's the one
+in `http`, as NGINX inherits them. `init_by_lua*` and `init_worker_by_lua*`
+run once in each VM. The code of a `*_by_lua_block` is read with Lua's
+lexical rules and kept as it is written. `lua off;` keeps every script
+checked without running any.
+
+Scripts are files of the configuration: `*_by_lua_file` names a file under
+`lua/`, and `require("a.b")` loads a built-in module (`cjson`, `bit`,
+`resty.string`, `resty.sha256`, `ngx.re`, `ngx.balancer` and others) or
+`lua/a/b.lua`. They are saved, compared and rolled back with every other
+file, and each has the SHA-256 of its code as its version. `panel.v1` is
+the gateway's own API next to `ngx`, with `req`, `resp`, `ctx`,
+`upstream`, `log`, `json`, `re`, `time`, `random` and `crypto` functions
+that mean one thing in every phase.
+
+| Term | Default | Effect |
+| :--- | :--- | :--- |
+| `lua_time_limit` | `100ms` | wall-clock time of a run |
+| `lua_work_limit` | `10000000` | function calls and loop iterations of a run |
+| `lua_memory_limit` | `64m` | memory of each VM (`http` only) |
+| `lua_allow` | `none` | `body`, `upstream` (balancers), `network` (cosockets) |
+| `lua_on_error` | `fail` | what a failed run does |
+| `lua_log_level` | `notice` | the least severe `ngx.log` messages kept |
+| `lua_slow_threshold` | `10ms` | runs longer than this are logged and counted as slow |
+| `lua_debug` | `off` | logs every run's start, end, duration and outcome |
+
+The sandbox has no `io`, `os.execute`, native libraries, FFI or bytecode
+loading; globals are read-only and a request's writes stay with it. A run
+that keeps the CPU for more than a millisecond yields its thread. A failed
+run leaves the request as it was before it. TCP cosockets
+(`ngx.socket.tcp`) verify certificates with the system's trusted roots
+unless a script passes `ssl_verify` false; UDP sockets, timers, light
+threads and subrequests are not available.
+
+Reading the configuration compiles every script with the gateway's
+compiler and reports, at their lines, scripts that do not compile, modules
+`require` cannot load, `ngx` functions the gateway does not provide or the
+phase does not allow, globals scripts write and Lua files nothing uses.
+
+```sh
+ppanel lua check conf/                      # the Lua diagnostics of local files
+ppanel lua scripts --revision 12            # every script, where it runs and its version
+ppanel lua test --host shop.example --target '/hello?who=lua' -H 'X-Key: k'
+ppanel lua test --host shop.example --script lua/auth.lua --phase access --allow body
+```
+
+`GET /api/v1/config/lua` lists the scripts of the draft or of a revision,
+and `POST /api/v1/config/lua/test` runs the handlers a described request
+reaches, or one script, with the gateway's runtime and limits without
+proxying anything; tests are recorded in the audit trail. Changing or
+applying Lua takes the `config.lua` permission, which only Administrators
+hold by default and which can be granted for site groups and sites;
+approval policies can cover `lua` as a kind of their own. The gateway
+exports `pingora_panel_gateway_lua_runs_total`,
+`pingora_panel_gateway_lua_run_duration_seconds`,
+`pingora_panel_gateway_lua_slow_runs_total` and
+`pingora_panel_gateway_lua_memory_bytes`, which the traffic summary turns
+into runs, failures by why, slow runs, run times and the handlers that
+fail most. The console's Lua page lists, edits and tests scripts.
+
 ## Activation invariant
 
 All fallible work required to build and durably publish the activation occurs

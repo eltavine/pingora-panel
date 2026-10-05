@@ -172,7 +172,8 @@ Without `PANEL_TEST_NATS_URL`, the tests that need the event broker are skipped.
 - Secrets are generated on the host, mounted as Compose secrets and never returned by the API. The master key seals stored private keys.
 - The control plane connects only to what you configure: ACME directories, DNS servers for DNS-01, OpenID Connect providers and alert webhooks. It reports no usage anywhere.
 - One installation runs one gateway. Rate limits, retry budgets, circuits and queues count per gateway process.
-- HTTP/3 and scripting extensions are not available yet.
+- HTTP/3 is not available yet.
+- Lua scripts run with the time, work and memory limits and the permissions their configuration grants, and only Administrators may change them by default; the sandbox is a defense in depth, not a boundary between untrusted tenants.
 
 # Project status
 
