@@ -50,6 +50,7 @@ const CAPABILITIES: &[&str] = &[
     "log.access",
     "request.security",
     "response.hsts",
+    "route.conditions",
     "route.exact-path",
     "route.glob",
     "route.host",

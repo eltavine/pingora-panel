@@ -1,15 +1,14 @@
-//! Immutable routing tables compiled before a snapshot becomes active.
+//! Immutable routing tables compiled before a snapshot becomes active:
+//! `panel-routing` decides which site and route take a request, and the
+//! table keeps what serving them needs.
 
 use crate::{access_log::AccessPlan, template::Template};
-use globset::{GlobBuilder, GlobMatcher};
 use http::HeaderValue;
-use panel_domain::{NormalizedHost, PathPrefix, RouteId, SiteId};
-use panel_engine::ROUTE_REGEX_SIZE_LIMIT;
+use panel_domain::{RouteId, SiteId};
 use panel_errors::{PanelError, Result};
-use panel_ir::{RouteAction, RouteMatcher, RuntimeSnapshot, WwwRedirect};
-use regex::{Regex, RegexBuilder};
+use panel_ir::{RouteAction, RuntimeSnapshot, WwwRedirect};
+use panel_routing::{HostEntry, Request, Router};
 use std::{
-    cmp::Reverse,
     collections::{BTreeSet, HashMap},
     net::SocketAddr,
 };
@@ -19,27 +18,13 @@ const HTTPS_PORT: u16 = 443;
 pub(crate) struct RoutingTable {
     /// How requests no site takes are logged.
     access: AccessPlan,
-    exact: HashMap<String, HostEntry>,
-    /// Keyed by the parent of `*.parent`, so a lookup strips one label.
-    wildcard: HashMap<String, HostEntry>,
-    /// Every enabled domain as configured, such as `*.shop.example`.
-    domains: Vec<String>,
+    router: Router,
+    /// Aligned with the router's sites.
     sites: Vec<SiteRoutes>,
-    default_sites: HashMap<String, usize>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct HostEntry {
-    pub site: usize,
-    /// The configured domain that matched, among the table's `domains`.
-    pub domain: usize,
-    pub redirect_to_primary: bool,
 }
 
 pub(crate) struct SiteRoutes {
     pub id: SiteId,
-    /// `None` serves every listener.
-    listeners: Option<BTreeSet<String>>,
     pub https_redirect: bool,
     /// Port of the TLS listener used for HTTPS redirects; `None` is 443.
     pub https_port: Option<u16>,
@@ -51,26 +36,17 @@ pub(crate) struct SiteRoutes {
     /// How requests the site takes without a route are logged.
     pub access: AccessPlan,
     www: HashMap<String, String>,
+    /// Aligned with the router's ranked routes of the site.
     routes: Vec<CompiledRoute>,
 }
 
 pub(crate) struct CompiledRoute {
     pub id: RouteId,
     pub name: Option<String>,
-    host: Option<NormalizedHost>,
-    path: PathMatcher,
     pub target: RouteTarget,
     /// The security policy the route's requests pass after the site's.
     pub security: Option<usize>,
     pub access: AccessPlan,
-}
-
-enum PathMatcher {
-    Any,
-    Exact(String),
-    Prefix(String),
-    Glob(GlobMatcher),
-    Regex(Regex),
 }
 
 pub(crate) enum RouteTarget {
@@ -111,28 +87,16 @@ fn policy(
 
 impl RoutingTable {
     pub(crate) fn compile(snapshot: &RuntimeSnapshot, targets: &Targets<'_>) -> Result<Self> {
-        let mut table = Self {
-            access: AccessPlan::resolve(&[&snapshot.logging.access])?,
-            exact: HashMap::new(),
-            wildcard: HashMap::new(),
-            domains: Vec::new(),
-            sites: Vec::new(),
-            default_sites: HashMap::new(),
-        };
-        let mut site_indexes = HashMap::new();
-        for site in snapshot.sites.iter().filter(|site| site.enabled) {
-            let index = table.sites.len();
-            site_indexes.insert(site.id.clone(), index);
-            let listeners = (!site.listener_ids.is_empty()).then(|| site.listener_ids.clone());
+        let router = Router::compile(snapshot)?;
+        let mut sites = Vec::with_capacity(router.sites().len());
+        for routing in router.sites() {
+            let site = &snapshot.sites[routing.spec];
+            let listeners = (!site.listener_ids.is_empty()).then_some(&site.listener_ids);
             let https_port = snapshot
                 .listeners
                 .iter()
                 .filter(|listener| listener.tls_profile_id.is_some())
-                .filter(|listener| {
-                    listeners
-                        .as_ref()
-                        .is_none_or(|ids| ids.contains(&listener.id))
-                })
+                .filter(|listener| listeners.is_none_or(|ids| ids.contains(&listener.id)))
                 .min_by(|left, right| left.id.cmp(&right.id))
                 .and_then(|listener| listener.address.parse::<SocketAddr>().ok())
                 .map(|address| address.port())
@@ -163,21 +127,30 @@ impl RoutingTable {
                     www.insert((*name).to_owned(), target);
                 }
             }
-            for domain in &domains {
-                let entry = HostEntry {
-                    site: index,
-                    domain: table.domains.len(),
-                    redirect_to_primary: domain.redirect_to_primary,
-                };
-                table.domains.push(domain.host.as_str().to_owned());
-                match domain.host.as_str().strip_prefix("*.") {
-                    Some(parent) => table.wildcard.insert(parent.to_owned(), entry),
-                    None => table.exact.insert(domain.host.as_str().to_owned(), entry),
-                };
-            }
-            table.sites.push(SiteRoutes {
+            let routes = routing
+                .routes()
+                .iter()
+                .map(|matched| {
+                    let route = &snapshot.routes[matched.spec];
+                    Ok(CompiledRoute {
+                        id: route.id.clone(),
+                        name: route.name.clone(),
+                        target: compile_target(&route.id, &route.action, targets)?,
+                        security: policy(
+                            targets,
+                            &format!("route {}", route.id),
+                            route.security_policy_id.as_ref(),
+                        )?,
+                        access: AccessPlan::resolve(&[
+                            &snapshot.logging.access,
+                            &site.access_log,
+                            &route.access_log,
+                        ])?,
+                    })
+                })
+                .collect::<Result<_>>()?;
+            sites.push(SiteRoutes {
                 id: site.id.clone(),
-                listeners,
                 https_redirect: site.https_redirect,
                 https_port,
                 primary: domains
@@ -194,73 +167,21 @@ impl RoutingTable {
                             site.id
                         ))
                     })?,
-                www,
-                routes: Vec::new(),
                 security: policy(
                     targets,
                     &format!("site {}", site.id),
                     site.security_policy_id.as_ref(),
                 )?,
                 access: AccessPlan::resolve(&[&snapshot.logging.access, &site.access_log])?,
+                www,
+                routes,
             });
         }
-        for listener in &snapshot.listeners {
-            if let Some(index) = listener
-                .default_site_id
-                .as_ref()
-                .and_then(|site| site_indexes.get(site))
-            {
-                table.default_sites.insert(listener.id.clone(), *index);
-            }
-        }
-        let site_logs: HashMap<&SiteId, &panel_ir::AccessLog> = snapshot
-            .sites
-            .iter()
-            .map(|site| (&site.id, &site.access_log))
-            .collect();
-        let mut ranked: Vec<Vec<(RouteRank, CompiledRoute)>> =
-            table.sites.iter().map(|_| Vec::new()).collect();
-        for route in snapshot.routes.iter().filter(|route| route.enabled) {
-            let Some(index) = site_indexes.get(&route.site_id) else {
-                continue;
-            };
-            let (host, path) = compile_matcher(&route.id, &route.matcher)?;
-            let target = compile_target(&route.id, &route.action, targets)?;
-            let rank = RouteRank {
-                priority: route.priority,
-                specificity: Reverse(path.specificity()),
-                host: Reverse(
-                    host.as_ref()
-                        .map_or(0, |host| if host.is_wildcard() { 1 } else { 2 }),
-                ),
-                id: route.id.clone(),
-            };
-            ranked[*index].push((
-                rank,
-                CompiledRoute {
-                    id: route.id.clone(),
-                    name: route.name.clone(),
-                    host,
-                    path,
-                    target,
-                    security: policy(
-                        targets,
-                        &format!("route {}", route.id),
-                        route.security_policy_id.as_ref(),
-                    )?,
-                    access: AccessPlan::resolve(&[
-                        &snapshot.logging.access,
-                        site_logs[&route.site_id],
-                        &route.access_log,
-                    ])?,
-                },
-            ));
-        }
-        for (site, mut routes) in table.sites.iter_mut().zip(ranked) {
-            routes.sort_by(|left, right| left.0.cmp(&right.0));
-            site.routes = routes.into_iter().map(|(_, route)| route).collect();
-        }
-        Ok(table)
+        Ok(Self {
+            access: AccessPlan::resolve(&[&snapshot.logging.access])?,
+            router,
+            sites,
+        })
     }
 
     /// How a request that `site` and `route` took, if any, is logged.
@@ -274,14 +195,11 @@ impl RoutingTable {
     }
 
     pub(crate) fn lookup(&self, host: &str) -> Option<HostEntry> {
-        self.exact.get(host).copied().or_else(|| {
-            host.split_once('.')
-                .and_then(|(_, parent)| self.wildcard.get(parent).copied())
-        })
+        self.router.lookup(host)
     }
 
     pub(crate) fn domains(&self) -> &[String] {
-        &self.domains
+        self.router.domains()
     }
 
     pub(crate) fn site(&self, index: usize) -> &SiteRoutes {
@@ -293,40 +211,23 @@ impl RoutingTable {
     }
 
     pub(crate) fn default_site(&self, listener: &str) -> Option<usize> {
-        self.default_sites.get(listener).copied()
+        self.router.default_site(listener)
     }
-}
 
-/// Explicit priority is authoritative. Ties prefer the more specific path
-/// matcher, then a concrete host constraint, then the stable route ID.
-#[derive(Eq, Ord, PartialEq, PartialOrd)]
-struct RouteRank {
-    priority: u32,
-    specificity: Reverse<(u8, usize)>,
-    host: Reverse<u8>,
-    id: RouteId,
+    /// Whether the site at `site` serves `listener`.
+    pub(crate) fn serves(&self, site: usize, listener: &str) -> bool {
+        self.router.site(site).serves(listener)
+    }
+
+    /// The first route of the site at `site` that takes `request`.
+    pub(crate) fn select(&self, site: usize, request: &impl Request) -> Option<usize> {
+        self.router.site(site).select(request)
+    }
 }
 
 impl SiteRoutes {
-    pub(crate) fn serves(&self, listener: &str) -> bool {
-        self.listeners
-            .as_ref()
-            .is_none_or(|listeners| listeners.contains(listener))
-    }
-
     pub(crate) fn www_target(&self, host: &str) -> Option<&str> {
         self.www.get(host).map(String::as_str)
-    }
-
-    /// `path` must already be normalized.
-    pub(crate) fn select(&self, host: &str, path: &str) -> Option<usize> {
-        self.routes.iter().position(|route| {
-            route
-                .host
-                .as_ref()
-                .is_none_or(|constraint| host_matches(constraint, host))
-                && route.path.matches(path)
-        })
     }
 
     pub(crate) fn routes(&self) -> &[CompiledRoute] {
@@ -338,85 +239,8 @@ impl SiteRoutes {
     }
 }
 
-impl PathMatcher {
-    /// Exact, then glob, then regex, then prefix; longer patterns first.
-    fn specificity(&self) -> (u8, usize) {
-        match self {
-            Self::Exact(path) => (4, path.len()),
-            Self::Glob(glob) => (3, glob.glob().glob().len()),
-            Self::Regex(regex) => (2, regex.as_str().len()),
-            Self::Prefix(prefix) => (1, prefix.len()),
-            Self::Any => (0, 0),
-        }
-    }
-
-    fn matches(&self, path: &str) -> bool {
-        match self {
-            Self::Any => true,
-            Self::Exact(exact) => path == exact,
-            Self::Prefix(prefix) => {
-                path == prefix
-                    || path
-                        .strip_prefix(prefix.as_str())
-                        .is_some_and(|remainder| remainder.starts_with('/'))
-            }
-            Self::Glob(glob) => glob.is_match(path),
-            Self::Regex(regex) => regex.is_match(path),
-        }
-    }
-}
-
-fn host_matches(pattern: &NormalizedHost, host: &str) -> bool {
-    match pattern.as_str().strip_prefix('*') {
-        Some(suffix) => host
-            .strip_suffix(suffix)
-            .is_some_and(|label| !label.is_empty() && !label.contains('.')),
-        None => pattern.as_str() == host,
-    }
-}
-
 fn template_error(route: &RouteId, error: &str) -> PanelError {
     PanelError::validation_failed(format!("route {route} has an invalid template: {error}"))
-}
-
-fn compile_matcher(
-    route: &RouteId,
-    matcher: &RouteMatcher,
-) -> Result<(Option<NormalizedHost>, PathMatcher)> {
-    let invalid = |detail: String| {
-        PanelError::validation_failed(format!("route {route} matcher is invalid: {detail}"))
-    };
-    // A "/" prefix matches every path, so it ranks like a host-only route.
-    let prefix = |path: &PathPrefix| match path.as_str() {
-        "/" => PathMatcher::Any,
-        prefix => PathMatcher::Prefix(prefix.to_owned()),
-    };
-    Ok(match matcher {
-        RouteMatcher::Host { host } => (Some(host.clone()), PathMatcher::Any),
-        RouteMatcher::PathPrefix { path } => (None, prefix(path)),
-        RouteMatcher::HostPathPrefix { host, path } => (Some(host.clone()), prefix(path)),
-        RouteMatcher::ExactPath { path } => {
-            let normalized = crate::path::normalize(path)
-                .ok_or_else(|| invalid("exact path must be absolute".into()))?;
-            (None, PathMatcher::Exact(normalized.into_owned()))
-        }
-        RouteMatcher::Glob { pattern } => {
-            let glob = GlobBuilder::new(pattern)
-                .literal_separator(true)
-                .backslash_escape(true)
-                .build()
-                .map_err(|error| invalid(error.to_string()))?;
-            (None, PathMatcher::Glob(glob.compile_matcher()))
-        }
-        RouteMatcher::Regex { pattern } => {
-            let regex = RegexBuilder::new(pattern)
-                .size_limit(ROUTE_REGEX_SIZE_LIMIT)
-                .dfa_size_limit(ROUTE_REGEX_SIZE_LIMIT)
-                .build()
-                .map_err(|error| invalid(error.to_string()))?;
-            (None, PathMatcher::Regex(regex))
-        }
-    })
 }
 
 fn compile_target(
@@ -469,8 +293,9 @@ fn compile_target(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use panel_domain::{RevisionId, UpstreamPoolId};
-    use panel_ir::{DomainSpec, ListenerRef, RouteSpec, SiteSpec};
+    use panel_domain::{NormalizedHost, RevisionId, UpstreamPoolId};
+    use panel_ir::{DomainSpec, ListenerRef, RouteMatcher, RouteSpec, SiteSpec};
+    use panel_routing::SimulatedRequest;
 
     fn site(id: &str, hosts: &[&str]) -> SiteSpec {
         SiteSpec::new(
@@ -480,18 +305,6 @@ mod tests {
                 .iter()
                 .map(|host| DomainSpec::new(NormalizedHost::new(host).unwrap()))
                 .collect(),
-        )
-    }
-
-    fn route(id: &str, priority: u32, matcher: RouteMatcher) -> RouteSpec {
-        RouteSpec::new(
-            RouteId::new(id).unwrap(),
-            SiteId::new("site").unwrap(),
-            priority,
-            matcher,
-            RouteAction::Proxy {
-                upstream_pool_id: UpstreamPoolId::new("pool").unwrap(),
-            },
         )
     }
 
@@ -509,142 +322,35 @@ mod tests {
         )
     }
 
-    fn selected(table: &RoutingTable, host: &str, path: &str) -> Option<String> {
-        let site = table.site(table.lookup(host)?.site);
-        site.select(host, path)
-            .map(|index| site.route(index).id.as_str().to_owned())
-    }
-
     #[test]
-    fn priority_then_specificity_decide() {
+    fn serving_data_follows_the_routes_the_router_ranks() {
         let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
         snapshot.sites.push(site("site", &["example.com"]));
-        let host = NormalizedHost::new("example.com").unwrap();
-        snapshot.routes = vec![
-            route(
-                "generic",
-                10,
+        let route = |id: &str, priority, path: &str| {
+            RouteSpec::new(
+                RouteId::new(id).unwrap(),
+                SiteId::new("site").unwrap(),
+                priority,
                 RouteMatcher::PathPrefix {
-                    path: PathPrefix::new("/").unwrap(),
+                    path: panel_domain::PathPrefix::new(path).unwrap(),
                 },
-            ),
-            route(
-                "host-default",
-                10,
-                RouteMatcher::Host { host: host.clone() },
-            ),
-            route(
-                "docs",
-                10,
-                RouteMatcher::PathPrefix {
-                    path: PathPrefix::new("/docs").unwrap(),
+                RouteAction::Proxy {
+                    upstream_pool_id: UpstreamPoolId::new("pool").unwrap(),
                 },
-            ),
-            route(
-                "specific",
-                10,
-                RouteMatcher::HostPathPrefix {
-                    host,
-                    path: PathPrefix::new("/api").unwrap(),
-                },
-            ),
-            route(
-                "priority",
-                1,
-                RouteMatcher::PathPrefix {
-                    path: PathPrefix::new("/admin").unwrap(),
-                },
-            ),
-            route(
-                "exact",
-                10,
-                RouteMatcher::ExactPath {
-                    path: "/docs/index".into(),
-                },
-            ),
-            route(
-                "glob",
-                10,
-                RouteMatcher::Glob {
-                    pattern: "/assets/*.css".into(),
-                },
-            ),
-            route(
-                "regex",
-                10,
-                RouteMatcher::Regex {
-                    pattern: "^/v[0-9]+/".into(),
-                },
-            ),
-        ];
-        let table = compile(&snapshot).unwrap();
-        let select = |path| selected(&table, "example.com", path).unwrap();
-        assert_eq!(select("/api/v1"), "specific");
-        assert_eq!(select("/admin"), "priority");
-        assert_eq!(select("/docs/page"), "docs");
-        assert_eq!(select("/docs/index"), "exact");
-        assert_eq!(select("/assets/site.css"), "glob");
-        assert_eq!(select("/assets/nested/site.css"), "host-default");
-        assert_eq!(select("/v2/items"), "regex");
-        assert_eq!(select("/other"), "host-default");
-    }
-
-    #[test]
-    fn prefixes_respect_segment_boundaries() {
-        let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
-        snapshot.sites.push(site("site", &["example.com"]));
-        snapshot.routes.push(route(
-            "api",
-            1,
-            RouteMatcher::PathPrefix {
-                path: PathPrefix::new("/api/").unwrap(),
-            },
-        ));
-        let table = compile(&snapshot).unwrap();
-        assert!(selected(&table, "example.com", "/api").is_some());
-        assert!(selected(&table, "example.com", "/api/users").is_some());
-        assert!(selected(&table, "example.com", "/apiculture").is_none());
-    }
-
-    #[test]
-    fn wildcard_domains_cover_one_label_and_exact_names_win() {
-        let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
-        snapshot.sites = vec![
-            site("wild", &["*.example.com"]),
-            site("api", &["api.example.com"]),
-        ];
-        let table = compile(&snapshot).unwrap();
-        let site_of = |host| {
-            table
-                .lookup(host)
-                .map(|entry| table.site(entry.site).id.as_str().to_owned())
+            )
         };
-        assert_eq!(site_of("www.example.com").as_deref(), Some("wild"));
-        assert_eq!(site_of("api.example.com").as_deref(), Some("api"));
-        assert_eq!(site_of("a.b.example.com"), None);
-        assert_eq!(site_of("example.com"), None);
-    }
-
-    #[test]
-    fn disabled_sites_domains_and_routes_are_omitted() {
-        let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
-        let mut primary = site("site", &["example.com", "old.example.com"]);
-        primary.domains[1].enabled = false;
-        snapshot.sites.push(primary);
-        snapshot.routes.push(route(
-            "all",
-            1,
-            RouteMatcher::PathPrefix {
-                path: PathPrefix::new("/").unwrap(),
-            },
-        ));
+        snapshot.routes = vec![route("late", 20, "/"), route("early", 10, "/api")];
         let table = compile(&snapshot).unwrap();
-        assert!(table.lookup("old.example.com").is_none());
-        assert!(selected(&table, "example.com", "/").is_some());
-        snapshot.routes[0].enabled = false;
-        assert!(selected(&compile(&snapshot).unwrap(), "example.com", "/").is_none());
-        snapshot.sites[0].enabled = false;
-        assert!(compile(&snapshot).unwrap().lookup("example.com").is_none());
+        let request = SimulatedRequest {
+            method: "GET".into(),
+            host: "example.com".into(),
+            path: "/api/items".into(),
+            ..SimulatedRequest::default()
+        };
+        let site = table.lookup("example.com").unwrap().site;
+        let index = table.select(site, &request).unwrap();
+        assert_eq!(table.site(site).route(index).id.as_str(), "early");
+        assert_eq!(table.site(site).routes()[1].id.as_str(), "late");
     }
 
     #[test]
@@ -681,29 +387,7 @@ mod tests {
         );
         assert_eq!(table.default_site("http"), Some(0));
         assert_eq!(table.default_site("https"), None);
-        let internal = table.site(table.lookup("internal.example").unwrap().site);
-        assert!(internal.serves("https") && !internal.serves("http"));
-    }
-
-    #[test]
-    fn invalid_patterns_fail_compilation() {
-        let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
-        snapshot.sites.push(site("site", &["example.com"]));
-        snapshot.routes.push(route(
-            "regex",
-            1,
-            RouteMatcher::Regex {
-                pattern: "(".into(),
-            },
-        ));
-        assert!(compile(&snapshot).is_err());
-        snapshot.routes[0].matcher = RouteMatcher::Glob {
-            pattern: "/[".into(),
-        };
-        assert!(compile(&snapshot).is_err());
-        snapshot.routes[0].matcher = RouteMatcher::Regex {
-            pattern: "a{1000}{1000}".into(),
-        };
-        assert!(compile(&snapshot).is_err());
+        let internal = table.lookup("internal.example").unwrap().site;
+        assert!(table.serves(internal, "https") && !table.serves(internal, "http"));
     }
 }

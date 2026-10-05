@@ -7,7 +7,7 @@ use std::borrow::Cow;
 
 /// Decodes percent-encoded unreserved characters, uppercases the remaining
 /// percent-encodings and removes dot segments. `None` for non-absolute paths.
-pub(crate) fn normalize(path: &str) -> Option<Cow<'_, str>> {
+pub fn normalize(path: &str) -> Option<Cow<'_, str>> {
     if !path.starts_with('/') {
         return None;
     }

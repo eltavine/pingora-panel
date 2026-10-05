@@ -1552,7 +1552,6 @@ dependencies = [
  "chrono",
  "cookie",
  "getrandom 0.4.3",
- "globset",
  "governor",
  "http",
  "http-body-util",
@@ -1565,6 +1564,7 @@ dependencies = [
  "panel-errors",
  "panel-ir",
  "panel-metrics",
+ "panel-routing",
  "parking_lot",
  "pem",
  "percent-encoding",
@@ -3542,6 +3542,19 @@ dependencies = [
  "prost",
  "prost-types",
  "uuid",
+]
+
+[[package]]
+name = "panel-routing"
+version = "0.1.0"
+dependencies = [
+ "form_urlencoded",
+ "globset",
+ "panel-domain",
+ "panel-engine",
+ "panel-errors",
+ "panel-ir",
+ "regex",
 ]
 
 [[package]]

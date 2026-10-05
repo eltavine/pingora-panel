@@ -1,0 +1,17 @@
+[package]
+name = "panel-routing"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+form_urlencoded.workspace = true
+globset.workspace = true
+panel-domain.workspace = true
+panel-engine.workspace = true
+panel-errors.workspace = true
+panel-ir.workspace = true
+regex.workspace = true

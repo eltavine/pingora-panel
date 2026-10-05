@@ -131,7 +131,17 @@
         "panel-engine",
         "panel-errors",
         "panel-ir",
-        "panel-metrics"
+        "panel-metrics",
+        "panel-routing"
+      ]
+    },
+    "panel-routing": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-domain",
+        "panel-engine",
+        "panel-errors",
+        "panel-ir"
       ]
     },
     "gateway-proto-codec": {

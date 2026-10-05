@@ -1544,3 +1544,111 @@ async fn requests_are_logged_by_site_route_and_format() {
         .contains("pingora_panel_log_records_total{log=\"access\"} 4"));
     gateway.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn route_conditions_pick_the_route_a_request_takes() {
+    use panel_ir::{RouteCondition, ValueTest, ROUTE_CONDITIONS_CAPABILITY};
+
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    let mut listener = ListenerRef::new("http", listen.to_string());
+    listener.trusted_proxies = ["127.0.0.1/32".to_owned()].into_iter().collect();
+    snapshot.listeners.push(listener);
+    snapshot.sites.push(site(&["shop.test"]));
+    snapshot
+        .required_capabilities
+        .push(CapabilityRequirement::new(ROUTE_CONDITIONS_CAPABILITY, "1"));
+    let equals = |value: &str| ValueTest::Equals {
+        value: value.into(),
+        ignore_case: false,
+    };
+    let mut canary = route(
+        "canary",
+        1,
+        prefix("/"),
+        RouteAction::respond(200, Some("canary".into())),
+    );
+    canary.conditions = vec![
+        RouteCondition::Method {
+            methods: vec!["GET".into()],
+        },
+        RouteCondition::Any {
+            conditions: vec![
+                RouteCondition::Header {
+                    name: "x-canary".into(),
+                    test: equals("1"),
+                },
+                RouteCondition::Cookie {
+                    name: "canary".into(),
+                    test: equals("1"),
+                },
+            ],
+        },
+        RouteCondition::Not {
+            condition: Box::new(RouteCondition::Client {
+                networks: vec!["203.0.113.0/24".into()],
+            }),
+        },
+    ];
+    let mut json = route(
+        "json",
+        2,
+        prefix("/api"),
+        RouteAction::respond(201, Some("json".into())),
+    );
+    json.conditions = vec![
+        RouteCondition::ContentType {
+            types: vec!["application/json".into()],
+        },
+        RouteCondition::Query {
+            name: "debug".into(),
+            test: ValueTest::Absent,
+        },
+    ];
+    snapshot.routes = vec![
+        canary,
+        json,
+        route(
+            "stable",
+            10,
+            prefix("/"),
+            RouteAction::respond(200, Some("stable".into())),
+        ),
+    ];
+    let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
+    wait_for(listen).await;
+
+    let request = |line: &str, extra: &str| {
+        format!("{line} HTTP/1.1\r\nhost: shop.test\r\n{extra}content-length: 0\r\nconnection: close\r\n\r\n")
+    };
+    let body = |response: Response| String::from_utf8(response.body).unwrap();
+    let canary_header = send(listen, &request("GET /", "x-canary: 1\r\n")).await;
+    assert_eq!(body(canary_header), "canary");
+    let outside = send(
+        listen,
+        &request(
+            "GET /",
+            "cookie: canary=1\r\nx-forwarded-for: 203.0.113.5\r\n",
+        ),
+    )
+    .await;
+    assert_eq!(body(outside), "stable", "the client is outside the route");
+    let posted = send(
+        listen,
+        &request("POST /api/items", "content-type: application/json\r\n"),
+    )
+    .await;
+    assert_eq!(posted.status, 201);
+    let debugging = send(
+        listen,
+        &request(
+            "POST /api/items?debug=1",
+            "content-type: application/json\r\n",
+        ),
+    )
+    .await;
+    assert_eq!(body(debugging), "stable");
+    let plain = send(listen, &request("GET /api/items", "")).await;
+    assert_eq!(body(plain), "stable");
+    gateway.stop().await;
+}

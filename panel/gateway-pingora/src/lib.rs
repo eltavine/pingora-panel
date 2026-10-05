@@ -17,7 +17,6 @@ mod hosts;
 mod hsts;
 mod listeners;
 mod log_files;
-mod path;
 mod proxy;
 mod request_identity;
 mod responses;

@@ -11,7 +11,7 @@ use crate::{
     hosts::{self, HostError, RequestHost},
     hsts::{StrictTransport, StrictTransportBuilder},
     log_files::{Destination, Logs},
-    path, request_identity, responses,
+    request_identity, responses,
     routing::{RouteTarget, SiteRoutes},
     security::{Admission, Candidate, ClientResolution, Refusal},
     static_files,
@@ -149,6 +149,45 @@ impl RequestContext {
     }
 }
 
+/// A request as routing sees it: its normalized host and path, and the
+/// client after trusted proxies.
+struct Routed<'a> {
+    header: &'a RequestHeader,
+    host: &'a str,
+    path: &'a str,
+    client: Option<IpAddr>,
+}
+
+impl panel_routing::Request for Routed<'_> {
+    fn method(&self) -> &str {
+        self.header.method.as_str()
+    }
+
+    fn host(&self) -> &str {
+        self.host
+    }
+
+    fn path(&self) -> &str {
+        self.path
+    }
+
+    fn query(&self) -> Option<&str> {
+        self.header.uri.query()
+    }
+
+    fn header_lines(&self, name: &str) -> impl Iterator<Item = &[u8]> {
+        self.header
+            .headers
+            .get_all(name)
+            .into_iter()
+            .map(http::HeaderValue::as_bytes)
+    }
+
+    fn client(&self) -> Option<IpAddr> {
+        self.client
+    }
+}
+
 #[async_trait]
 impl ProxyHttp for PanelProxy {
     type CTX = RequestContext;
@@ -249,7 +288,7 @@ impl ProxyHttp for PanelProxy {
         let routing = &snapshot.routing;
         let entry = routing
             .lookup(host_name)
-            .filter(|entry| routing.site(entry.site).serves(&self.listener.id));
+            .filter(|entry| routing.serves(entry.site, &self.listener.id));
         ctx.domain = entry.map(|entry| entry.domain);
         let (site_index, alias) = match entry {
             Some(entry) => (entry.site, entry.redirect_to_primary),
@@ -279,8 +318,8 @@ impl ProxyHttp for PanelProxy {
             return Ok(true);
         }
 
-        let Some(path) =
-            path::normalize(session.req_header().uri.path()).map(|path| path.into_owned())
+        let Some(path) = panel_routing::path::normalize(session.req_header().uri.path())
+            .map(|path| path.into_owned())
         else {
             responses::plain(
                 session,
@@ -291,7 +330,13 @@ impl ProxyHttp for PanelProxy {
             .await?;
             return Ok(true);
         };
-        let Some(route_index) = site.select(host_name, &path) else {
+        let request = Routed {
+            header: session.req_header(),
+            host: host_name,
+            path: &path,
+            client: ctx.client,
+        };
+        let Some(route_index) = routing.select(site_index, &request) else {
             responses::plain(session, 404, "not found", &[]).await?;
             return Ok(true);
         };
