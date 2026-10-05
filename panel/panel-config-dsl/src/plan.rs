@@ -1,7 +1,7 @@
 //! What applying a configuration changes: the resources it adds, changes or
 //! removes, and the line differences of its files.
 
-use crate::{edit::blocks, Sources};
+use crate::{edit::blocks, print::lua_http, Sources};
 use panel_config_model::ConfigModel;
 use panel_dsl::format_directive;
 use serde::Serialize;
@@ -64,13 +64,23 @@ fn unified(old: &str, new: &str, old_name: &str, new_name: &str) -> String {
 }
 
 /// The resources `next` adds, changes and removes relative to `current`, in
-/// resource order.
+/// resource order. The Lua directives of `http` are the resource `lua`, and
+/// each Lua file is a resource of its own path.
 pub fn plan(current: &ConfigModel, next: &ConfigModel) -> Vec<ResourceChange> {
     let render = |model: &ConfigModel| -> BTreeMap<String, String> {
-        blocks(model)
+        let mut rendered: BTreeMap<String, String> = blocks(model)
             .into_iter()
             .map(|(key, directive)| (key, format_directive(&directive, 0)))
-            .collect()
+            .collect();
+        let lua: String = lua_http(&model.lua)
+            .iter()
+            .map(|directive| format_directive(directive, 0))
+            .collect();
+        if !lua.is_empty() {
+            rendered.insert("lua".into(), lua);
+        }
+        rendered.extend(model.lua.files.clone());
+        rendered
     };
     let (before, after) = (render(current), render(next));
     let keys: BTreeSet<&String> = before.keys().chain(after.keys()).collect();

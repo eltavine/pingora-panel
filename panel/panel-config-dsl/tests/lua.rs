@@ -540,3 +540,27 @@ http {
         .iter()
         .any(|(code, _, _)| code == codes::LUA || code == codes::NO_EFFECT));
 }
+
+#[test]
+fn plans_name_the_lua_they_change() {
+    let lowered = read(&sources());
+    let mut next = lowered.model.clone();
+    next.lua
+        .files
+        .insert("lua/auth.lua".into(), "return\n".into());
+    next.lua.http.time_limit_ms = Some(20);
+    next.sites[0].lua.debug = Some(true);
+    let changes = panel_config_dsl::plan::plan(&lowered.model, &next);
+    let resources: Vec<_> = changes
+        .iter()
+        .map(|change| change.resource.as_str())
+        .collect();
+    let site = format!("sites/{}", next.sites[0].id);
+    assert_eq!(resources, ["lua", "lua/auth.lua", site.as_str()]);
+    assert!(
+        changes[0].diff.contains("+lua_time_limit 20ms;"),
+        "{}",
+        changes[0].diff
+    );
+    assert!(changes[1].diff.contains("+return"), "{}", changes[1].diff);
+}

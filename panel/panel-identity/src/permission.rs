@@ -37,6 +37,7 @@ pub enum Permission {
     PlatformRead,
     IdentityRead,
     IdentityManage,
+    ConfigLua,
 }
 
 /// Every permission with its name and what it allows.
@@ -70,6 +71,11 @@ const CATALOG: &[(Permission, &str, &str)] = &[
         Permission::ConfigApply,
         "config.apply",
         "Apply the draft to the gateway, run dry runs and roll back.",
+    ),
+    (
+        Permission::ConfigLua,
+        "config.lua",
+        "Change and apply Lua scripts and the Lua directives of the configuration, and test scripts; scripts run in the gateway with every request they handle.",
     ),
     (
         Permission::ApprovalManage,

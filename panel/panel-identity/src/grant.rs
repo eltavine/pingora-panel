@@ -11,10 +11,11 @@ use uuid::Uuid;
 
 /// The permissions a scope narrower than everything can limit; only sites
 /// have groups.
-pub const SCOPABLE: [Permission; 3] = [
+pub const SCOPABLE: [Permission; 4] = [
     Permission::ConfigRead,
     Permission::ConfigWrite,
     Permission::ConfigApply,
+    Permission::ConfigLua,
 ];
 const MAX_NETWORKS: usize = 32;
 const MAX_WINDOWS: usize = 16;

@@ -104,7 +104,8 @@ fn lua_scope(scope: &LuaScope) -> Vec<Directive> {
     body
 }
 
-fn lua_http(lua: &LuaConfig) -> Vec<Directive> {
+/// The Lua directives of `http`.
+pub(crate) fn lua_http(lua: &LuaConfig) -> Vec<Directive> {
     let mut body = Vec::new();
     if lua.disabled {
         body.push(Directive::simple("lua", ["off"]));

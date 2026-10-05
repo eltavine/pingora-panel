@@ -24,15 +24,19 @@ already belong to groups in the configuration model.
   counts for a request only while all of its conditions hold; grants are
   audited like role changes.
 - **What scopes cover.** Only the configuration permissions,
-  `config.read`, `config.write` and `config.apply`, can be scoped, since only
-  sites have groups. A scoped grant of a role holding other permissions
+  `config.read`, `config.write`, `config.apply` and `config.lua`
+  ([ADR 0039](0039-lua-scripts.md)), can be scoped, since only sites have
+  groups. A scoped grant of a role holding other permissions
   confers those only when its scope is everything.
 - **Evaluation.** The API evaluates an account's grants on every request
   with the time and the client address it sees. A permission held through a
   role or a grant scoped to everything is held without restriction. A
   configuration permission held only through scoped grants lets the request
   through with a site scope attached to it: for each permission, the groups
-  and sites it covers.
+  and sites it covers. A request that needs a configuration permission
+  carries the scope as well when its caller lacks another one anywhere, such
+  as `config.lua`, since what that permission guards depends on what a
+  change contains.
 - **Enforcement where the data lives.** The scope travels in the request
   context to the configuration service, which knows each site's group.
   There, reads list and show only sites in scope, changes are refused unless
@@ -41,7 +45,10 @@ already belong to groups in the configuration model.
   resources such as upstreams, listeners and TLS profiles stay readable,
   since sites refer to them, but changing them, and reading or replacing the
   configuration files and revisions as a whole, needs the permission
-  without restriction. Refusals are audited like other refused changes.
+  without restriction. Changing or applying Lua needs `config.lua`: without
+  restriction for the Lua of `http`, the Lua files and upstreams' balancers,
+  and for the site for a server's and its routes' handlers. Refusals are
+  audited like other refused changes.
 
 ## Consequences
 

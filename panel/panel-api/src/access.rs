@@ -27,7 +27,8 @@ use std::{net::SocketAddr, num::NonZeroU32, sync::Arc, time::Duration};
 pub(crate) const SESSION_COOKIE: &str = "__Host-ppanel_session";
 pub(crate) const CSRF_HEADER: &str = "x-csrf-token";
 pub(crate) const ACTOR_HEADER: &str = "x-actor";
-/// The sites a request is limited to (ADR 0021); set only by the guard.
+/// The sites a request is limited to and the configuration permissions its
+/// caller holds everywhere (ADR 0021); set only by the guard.
 pub(crate) const SITE_SCOPE_HEADER: &str = "x-panel-site-scope";
 
 /// The site scope of configuration permissions held only for some sites.
@@ -57,6 +58,18 @@ pub(crate) fn site_scope(access: &HeldAccess) -> SiteScope {
             .collect(),
         limited,
     }
+}
+
+/// Whether a request that needs `permission` carries the site scope: when
+/// the permission is held only for some sites, or a configuration
+/// permission is not held everywhere, so the configuration service keeps
+/// the request, and whatever it changes in the configuration, within what
+/// the caller holds, which can depend on what a change contains.
+fn scope_needed(held: &HeldAccess, permission: Permission) -> bool {
+    !held.unrestricted.contains(permission)
+        || SCOPABLE
+            .iter()
+            .any(|scopable| !held.unrestricted.contains(*scopable))
 }
 
 /// What a route requires of its caller.
@@ -965,16 +978,14 @@ pub(crate) async fn guard<U: Send + Sync + 'static>(
             .and_then(|address| address.parse().ok()),
     );
     if let Requires(permission) = access {
-        if !held.unrestricted.contains(permission) {
-            if !held.holds(permission) {
-                let error = ApiError::new(PanelError::permission_denied(format!(
-                    "this needs the {} permission",
-                    permission.name()
-                )));
-                return refused("permission", Some(permission), error).await;
-            }
-            // Held only for some sites: the configuration service keeps the
-            // request within them.
+        if !held.holds(permission) {
+            let error = ApiError::new(PanelError::permission_denied(format!(
+                "this needs the {} permission",
+                permission.name()
+            )));
+            return refused("permission", Some(permission), error).await;
+        }
+        if scope_needed(&held, permission) {
             if let Ok(value) = serde_json::to_string(&site_scope(&held))
                 .map_err(|_| ())
                 .and_then(|scope| HeaderValue::from_str(&scope).map_err(|_| ()))
@@ -989,4 +1000,33 @@ pub(crate) async fn guard<U: Send + Sync + 'static>(
     }
     request.extensions_mut().insert(principal);
     next.run(request).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use panel_identity::{built_in_roles, PermissionSet};
+
+    fn role(id: &str) -> PermissionSet {
+        built_in_roles()
+            .into_iter()
+            .find(|role| role.id == id)
+            .unwrap()
+            .permissions
+    }
+
+    #[test]
+    fn callers_without_config_lua_carry_the_site_scope() {
+        let access =
+            |permissions: PermissionSet| HeldAccess::of(&permissions, &[], Utc::now(), None);
+        let administrator = access(role("administrator"));
+        assert!(!scope_needed(&administrator, Permission::ConfigWrite));
+        let operator = access(role("operator"));
+        assert!(scope_needed(&operator, Permission::ConfigWrite));
+        assert!(scope_needed(&operator, Permission::BackupsManage));
+        let scope = site_scope(&operator);
+        assert!(!scope.everywhere("config.lua"));
+        assert!(scope.everywhere("config.write"));
+        assert!(site_scope(&administrator).everywhere("config.lua"));
+    }
 }

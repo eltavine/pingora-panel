@@ -3,13 +3,14 @@
 
 use panel_application::SiteScope;
 use panel_config_dsl::plan::plan;
-use panel_config_model::ConfigModel;
+use panel_config_model::{lua_changes, ConfigModel};
 use panel_errors::{PanelError, Result};
 use std::borrow::Cow;
 
 pub(crate) const READ: &str = "config.read";
 pub(crate) const WRITE: &str = "config.write";
 pub(crate) const APPLY: &str = "config.apply";
+pub(crate) const LUA: &str = "config.lua";
 
 /// Whether `scope` limits `permission` to some sites.
 fn limits(scope: Option<&SiteScope>, permission: &str) -> bool {
@@ -26,6 +27,40 @@ pub(crate) fn require_everywhere(
         return Err(PanelError::permission_denied(format!(
             "{what} needs {permission} for every site"
         )));
+    }
+    Ok(())
+}
+
+/// Refuses a change from `before` to `after` that changes Lua the caller
+/// may not (ADR 0039): `http`'s, the files and the balancers need
+/// `config.lua` everywhere, a site's needs it for the site.
+pub(crate) fn check_lua(
+    before: &ConfigModel,
+    after: &ConfigModel,
+    scope: Option<&SiteScope>,
+) -> Result<()> {
+    let Some(scope) = scope.filter(|scope| !scope.everywhere(LUA)) else {
+        return Ok(());
+    };
+    let changes = lua_changes(before, after);
+    if changes.shared {
+        return Err(PanelError::permission_denied(format!(
+            "changing the Lua of http, the Lua files or upstream balancers needs {LUA} for every site"
+        )));
+    }
+    for id in &changes.sites {
+        let site = after
+            .sites
+            .iter()
+            .chain(&before.sites)
+            .find(|site| site.id == *id);
+        let group = site.and_then(|site| site.group.as_deref());
+        if !scope.covers(LUA, &id.to_string(), group) {
+            return Err(PanelError::permission_denied(format!(
+                "changing the Lua scripts of {} needs {LUA}",
+                site.map_or_else(|| id.to_string(), |site| format!("site {:?}", site.name))
+            )));
+        }
     }
     Ok(())
 }
@@ -154,5 +189,55 @@ mod tests {
         assert!(check_changes(&model, &shared, None, WRITE).is_ok());
         assert!(require_everywhere(Some(&scope), WRITE, "replacing the files").is_err());
         assert!(require_everywhere(None, WRITE, "replacing the files").is_ok());
+    }
+
+    #[test]
+    fn lua_changes_need_config_lua_where_they_apply() {
+        use panel_config_model::LuaCode;
+        let model = ConfigModel {
+            sites: vec![site("shop", Some("shop")), site("intranet", Some("corp"))],
+            ..ConfigModel::default()
+        };
+        let operator = SiteScope {
+            unrestricted: vec![READ.into(), WRITE.into(), APPLY.into()],
+            limited: Vec::new(),
+        };
+        let mut renamed = model.clone();
+        renamed.sites[0].name = "store".into();
+        assert!(check_lua(&model, &renamed, Some(&operator)).is_ok());
+
+        let mut scripted = model.clone();
+        scripted.sites[0].lua.access = Some(LuaCode::inline("ngx.exit(403)"));
+        let refused = check_lua(&model, &scripted, Some(&operator)).unwrap_err();
+        assert!(
+            refused.message.contains("site \"shop\" needs config.lua"),
+            "{}",
+            refused.message
+        );
+        let mut shop_scripter = operator.clone();
+        shop_scripter.limited.push(SiteAccess {
+            permission: LUA.into(),
+            groups: vec!["shop".into()],
+            sites: Vec::new(),
+        });
+        assert!(check_lua(&model, &scripted, Some(&shop_scripter)).is_ok());
+        let mut shared = model.clone();
+        shared
+            .lua
+            .files
+            .insert("lua/a.lua".into(), "return 1".into());
+        assert!(check_lua(&model, &shared, Some(&shop_scripter)).is_err());
+        assert!(check_lua(&model, &shared, None).is_ok());
+        let mut administrator = operator.clone();
+        administrator.unrestricted.push(LUA.into());
+        assert!(check_lua(&model, &shared, Some(&administrator)).is_ok());
+
+        let mut moved = scripted.clone();
+        moved.sites[0].lua.access = Some(LuaCode::Inline {
+            code: "ngx.exit(403)".into(),
+            file: Some("main.conf".into()),
+            line: 40,
+        });
+        assert!(check_lua(&scripted, &moved, Some(&operator)).is_ok());
     }
 }

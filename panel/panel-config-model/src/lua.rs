@@ -8,7 +8,8 @@ use panel_domain::ContentHash;
 pub use panel_ir::{LuaFallback, LuaLogLevel, LuaPermissions, LuaSharedDict};
 use panel_ir::{LuaHandler, LuaHandlers, LuaScript};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use uuid::Uuid;
 
 /// The directory of the configuration that holds its Lua files.
 pub const LUA_DIRECTORY: &str = "lua/";
@@ -278,6 +279,86 @@ pub fn lua_codes_mut(model: &mut ConfigModel) -> Vec<&mut LuaCode> {
     found
 }
 
+/// What differs in Lua between two models, where inline code is written
+/// aside.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct LuaChanges {
+    /// What every site shares: `http`'s Lua, the files and the upstreams'
+    /// balancers.
+    pub shared: bool,
+    /// The sites whose own handlers, terms or scripted actions differ,
+    /// sites added or removed with any included.
+    pub sites: BTreeSet<Uuid>,
+}
+
+impl LuaChanges {
+    pub fn is_empty(&self) -> bool {
+        !self.shared && self.sites.is_empty()
+    }
+}
+
+/// The Lua of `model` with inline code taken from where it is written.
+fn placeless(model: &ConfigModel) -> ConfigModel {
+    let mut model = model.clone();
+    for code in lua_codes_mut(&mut model) {
+        if let LuaCode::Inline { file, line, .. } = code {
+            *file = None;
+            *line = 1;
+        }
+    }
+    model
+}
+
+/// The Lua `before` and `after` differ in.
+pub fn lua_changes(before: &ConfigModel, after: &ConfigModel) -> LuaChanges {
+    let (before, after) = (placeless(before), placeless(after));
+    let balancers = |model: &ConfigModel| -> BTreeMap<Uuid, Option<LuaCode>> {
+        model
+            .upstreams
+            .iter()
+            .filter(|upstream| upstream.balancer.is_some())
+            .map(|upstream| (upstream.id, upstream.balancer.clone()))
+            .collect()
+    };
+    type SiteLua = (
+        LuaScope,
+        Option<LuaCode>,
+        Vec<(Uuid, LuaScope, Option<LuaCode>)>,
+    );
+    let scripted = |action: &Action| match action {
+        Action::Lua { code } => Some(code.clone()),
+        _ => None,
+    };
+    let sites = |model: &ConfigModel| -> BTreeMap<Uuid, SiteLua> {
+        model
+            .sites
+            .iter()
+            .map(|site| {
+                let routes: Vec<(Uuid, LuaScope, Option<LuaCode>)> = site
+                    .routes
+                    .iter()
+                    .filter(|route| !route.lua.is_empty() || scripted(&route.action).is_some())
+                    .map(|route| (route.id, route.lua.clone(), scripted(&route.action)))
+                    .collect();
+                (site.id, (site.lua.clone(), scripted(&site.action), routes))
+            })
+            .filter(|(_, (scope, action, routes))| {
+                !scope.is_empty() || action.is_some() || !routes.is_empty()
+            })
+            .collect()
+    };
+    let (old_sites, new_sites) = (sites(&before), sites(&after));
+    LuaChanges {
+        shared: before.lua != after.lua || balancers(&before) != balancers(&after),
+        sites: old_sites
+            .keys()
+            .chain(new_sites.keys())
+            .filter(|id| old_sites.get(id) != new_sites.get(id))
+            .copied()
+            .collect(),
+    }
+}
+
 /// The name `require` loads a file under `lua/` by: `lua/a/b.lua` is `a.b`
 /// and `lua/a/init.lua` is `a`, as `?.lua;?/init.lua` resolve in OpenResty.
 pub fn module_name(path: &str) -> Option<String> {
@@ -445,6 +526,29 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["access", "log"]
         );
+    }
+
+    #[test]
+    fn changes_ignore_where_code_is_written() {
+        let mut before = ConfigModel::default();
+        before.lua.http.access = Some(LuaCode::Inline {
+            code: "x()".into(),
+            file: Some("main.conf".into()),
+            line: 3,
+        });
+        let mut moved = before.clone();
+        moved.lua.http.access = Some(LuaCode::Inline {
+            code: "x()".into(),
+            file: Some("main.conf".into()),
+            line: 9,
+        });
+        assert!(lua_changes(&before, &moved).is_empty());
+        let mut changed = before.clone();
+        changed
+            .lua
+            .files
+            .insert("lua/a.lua".into(), "return 1".into());
+        assert!(lua_changes(&before, &changed).shared);
     }
 
     #[test]

@@ -25,9 +25,10 @@ pub const RESOURCE_KINDS: &[&str] = &[
     "tls-profiles",
     "security-policies",
     "http-policies",
+    "lua",
 ];
 /// Changes to these kinds are high-risk, as are removals.
-const HIGH_RISK_KINDS: &[&str] = &["listeners", "tls-profiles", "security-policies"];
+const HIGH_RISK_KINDS: &[&str] = &["listeners", "tls-profiles", "security-policies", "lua"];
 const MAX_ID: usize = 64;
 const MAX_TEXT: usize = 256;
 
@@ -39,8 +40,8 @@ const MAX_TEXT: usize = 256;
 pub enum Risk {
     #[default]
     Low,
-    /// Removes something, or touches listeners, TLS profiles or security
-    /// policies.
+    /// Removes something, or touches listeners, TLS profiles, security
+    /// policies or Lua scripts.
     High,
 }
 

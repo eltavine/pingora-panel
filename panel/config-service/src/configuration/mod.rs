@@ -400,6 +400,7 @@ impl ConfigurationService {
         if context.site_scope().is_some() {
             let (active, _) = self.active().await?;
             scope::check_changes(&active, &draft.model, context.site_scope(), scope::APPLY)?;
+            scope::check_lua(&active, &draft.model, context.site_scope())?;
         }
         let status = self.publication.status().await?;
         self.revisions
@@ -661,6 +662,7 @@ impl ConfigurationService {
                             ));
                         }
                         let (model, written, warnings) = language::replace(&sources, &draft.model)?;
+                        scope::check_lua(&draft.model, &model, context.site_scope())?;
                         let next_etag = draft_etag(draft.version + 1);
                         let content = serde_json::to_vec(&json!({
                             "language_version": LANGUAGE_VERSION,
@@ -688,6 +690,7 @@ impl ConfigurationService {
                             context.site_scope(),
                             scope::WRITE,
                         )?;
+                        scope::check_lua(&draft.model, &model, context.site_scope())?;
                         Ok(DraftChange {
                             sources: language::follow(&draft.sources, &draft.model, &model),
                             model,

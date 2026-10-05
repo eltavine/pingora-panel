@@ -5,17 +5,19 @@
 use chrono::{DateTime, Duration, Utc};
 use panel_config_dsl::plan::plan;
 use panel_config_model::{
-    ApprovalPolicy, ApprovalRequest, ApprovalState, Assessment, ConfigModel, PlannedChange,
-    PolicyVersion, REQUEST_LIFETIME,
+    lua_changes, ApprovalPolicy, ApprovalRequest, ApprovalState, Assessment, ConfigModel,
+    PlannedChange, PolicyVersion, REQUEST_LIFETIME,
 };
 use panel_errors::{PanelError, Result};
 use serde::Serialize;
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
-/// What a change touches, from the plan people review.
+/// What a change touches, from the plan people review. A change to a
+/// server's or route's Lua touches `lua` as well as the site, so policies on
+/// Lua cover it.
 pub fn assess(current: &ConfigModel, next: &ConfigModel) -> Assessment {
-    let changes: Vec<PlannedChange> = plan(current, next)
+    let mut changes: Vec<PlannedChange> = plan(current, next)
         .into_iter()
         .map(|change| PlannedChange {
             resource: change.resource,
@@ -25,6 +27,17 @@ pub fn assess(current: &ConfigModel, next: &ConfigModel) -> Assessment {
                 .unwrap_or_default(),
         })
         .collect();
+    let lua = lua_changes(current, next);
+    if !lua.sites.is_empty()
+        && !changes
+            .iter()
+            .any(|change| change.resource.split('/').next() == Some("lua"))
+    {
+        changes.push(PlannedChange {
+            resource: "lua".into(),
+            change: "changed".into(),
+        });
+    }
     let touched: BTreeSet<&str> = changes
         .iter()
         .filter_map(|change| change.resource.strip_prefix("sites/"))
@@ -315,6 +328,39 @@ mod tests {
 
     fn code(error: PanelError) -> String {
         error.code.as_str().to_owned()
+    }
+
+    #[test]
+    fn lua_in_a_site_touches_lua_as_well() {
+        let site: panel_config_model::Site = serde_json::from_value(serde_json::json!({
+            "id": Uuid::now_v7(),
+            "name": "shop",
+            "action": {"type": "respond"},
+            "created_at": "2026-10-03T00:00:00Z",
+            "updated_at": "2026-10-03T00:00:00Z",
+        }))
+        .unwrap();
+        let current = ConfigModel {
+            sites: vec![site],
+            ..ConfigModel::default()
+        };
+        let mut next = current.clone();
+        next.sites[0].lua.log = Some(panel_config_model::LuaCode::inline("local n = 1"));
+        let assessment = assess(&current, &next);
+        assert!(assessment.kinds.contains("sites") && assessment.kinds.contains("lua"));
+        assert_eq!(assessment.risk, panel_config_model::Risk::High);
+        let mut file = current.clone();
+        file.lua.files.insert("lua/a.lua".into(), "return 1".into());
+        let assessment = assess(&current, &file);
+        assert_eq!(
+            assessment
+                .changes
+                .iter()
+                .map(|change| change.resource.as_str())
+                .collect::<Vec<_>>(),
+            ["lua/a.lua"]
+        );
+        assert!(assessment.kinds.contains("lua"));
     }
 
     #[test]
