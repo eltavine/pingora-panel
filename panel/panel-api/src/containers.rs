@@ -41,9 +41,9 @@ fn precise(time: SystemTime) -> String {
 }
 
 /// The most lines a read returns.
-const MOST_LINES: u32 = 5_000;
+pub(crate) const MOST_LINES: u32 = 5_000;
 /// The lines a read returns unless asked for another number.
-const DEFAULT_LINES: u32 = 200;
+pub(crate) const DEFAULT_LINES: u32 = 200;
 /// The most lines sent before following.
 const MOST_BACKLOG: u32 = 1_000;
 /// The lines sent before following unless asked for another number.
@@ -708,7 +708,12 @@ impl From<ContainerLogs> for ContainerLogsView {
 }
 
 /// How many lines a query asks for, between 1 and `most`.
-fn lines(value: Option<u32>, default: u32, least: u32, most: u32) -> Result<u32, ApiError> {
+pub(crate) fn lines(
+    value: Option<u32>,
+    default: u32,
+    least: u32,
+    most: u32,
+) -> Result<u32, ApiError> {
     let lines = value.unwrap_or(default);
     if (least..=most).contains(&lines) {
         Ok(lines)

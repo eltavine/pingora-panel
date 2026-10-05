@@ -1,9 +1,10 @@
 use crate::{
     access, acme,
     admission::{admit, Admission},
-    alerts, approvals, audit, certificates, configuration as config, containers, engine_resources,
-    gateway_runtime as runtime, grants, host, host_agent, identity, images, language, logs,
-    middleware, routes, sign_in, tls_checks, traffic, workload, ApiConfig, ApiState,
+    alerts, approvals, audit, certificates, compose, configuration as config, containers,
+    engine_resources, gateway_runtime as runtime, grants, host, host_agent, identity, images,
+    language, logs, middleware, routes, sign_in, tls_checks, traffic, workload, ApiConfig,
+    ApiState,
 };
 use axum::{
     extract::DefaultBodyLimit,
@@ -294,6 +295,22 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         .route(
             "/api/v1/container-engines/{engine}/prune",
             post(engine_resources::prune::<U>),
+        )
+        .route(
+            "/api/v1/container-engines/{engine}/compose-projects",
+            get(compose::list_projects::<U>),
+        )
+        .route(
+            "/api/v1/container-engines/{engine}/compose-projects/{project}/logs",
+            get(compose::project_logs::<U>),
+        )
+        .route(
+            "/api/v1/container-engines/{engine}/compose-projects/{project}/files",
+            get(compose::project_files::<U>),
+        )
+        .route(
+            "/api/v1/container-engines/{engine}/compose-projects/{project}/{action}",
+            post(compose::act_on_project::<U>),
         )
         .route(
             "/api/v1/container-engines/{engine}/images/{image}",

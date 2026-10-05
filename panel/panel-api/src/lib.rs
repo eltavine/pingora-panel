@@ -13,6 +13,7 @@ mod alerts;
 mod approvals;
 mod audit;
 mod certificates;
+mod compose;
 mod conditional;
 mod config;
 mod configuration;

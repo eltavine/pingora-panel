@@ -3,9 +3,9 @@ use crate::{
     sign_in::ProviderAccess,
 };
 use panel_application::{
-    AlertsPort, AuditPort, ContainersPort, EngineResourcesPort, GatewayRuntimePort, HostAgentPort,
-    HostPort, ImagesPort, LogsPort, NoContainers, NoEngineResources, NoHostAgent, NoImages,
-    TlsProbe, TrafficPort,
+    AlertsPort, AuditPort, ComposePort, ContainersPort, EngineResourcesPort, GatewayRuntimePort,
+    HostAgentPort, HostPort, ImagesPort, LogsPort, NoCompose, NoContainers, NoEngineResources,
+    NoHostAgent, NoImages, TlsProbe, TrafficPort,
 };
 use panel_certificate_api::CertificatePort;
 use panel_config_api::ConfigurationPort;
@@ -31,6 +31,7 @@ pub struct ApiState<U> {
     pub(crate) containers: Arc<dyn ContainersPort>,
     pub(crate) images: Arc<dyn ImagesPort>,
     pub(crate) resources: Arc<dyn EngineResourcesPort>,
+    pub(crate) compose: Arc<dyn ComposePort>,
     pub(crate) identity: Option<Arc<Gate>>,
     pub(crate) providers: Option<Arc<ProviderAccess>>,
     pub(crate) workloads: Option<Arc<WorkloadIdentity>>,
@@ -56,6 +57,7 @@ impl<U> Clone for ApiState<U> {
             containers: Arc::clone(&self.containers),
             images: Arc::clone(&self.images),
             resources: Arc::clone(&self.resources),
+            compose: Arc::clone(&self.compose),
             identity: self.identity.clone(),
             providers: self.providers.clone(),
             workloads: self.workloads.clone(),
@@ -83,6 +85,7 @@ impl<U> ApiState<U> {
             containers: Arc::new(NoContainers),
             images: Arc::new(NoImages),
             resources: Arc::new(NoEngineResources),
+            compose: Arc::new(NoCompose),
             identity: None,
             providers: None,
             workloads: None,
@@ -183,6 +186,14 @@ impl<U> ApiState<U> {
     /// those paths say so.
     pub fn with_engine_resources(mut self, resources: Arc<dyn EngineResourcesPort>) -> Self {
         self.resources = resources;
+        self
+    }
+
+    /// Serves the engines' Compose projects under
+    /// `/api/v1/container-engines/{engine}/compose-projects`; without them
+    /// those paths say so.
+    pub fn with_compose(mut self, compose: Arc<dyn ComposePort>) -> Self {
+        self.compose = compose;
         self
     }
 

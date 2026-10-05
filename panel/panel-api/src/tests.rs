@@ -20,6 +20,7 @@ mod acme;
 mod admission;
 mod alerts;
 mod certificates;
+mod compose;
 mod conditional;
 mod containers;
 mod engine_resources;

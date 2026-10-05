@@ -64,6 +64,10 @@ mod tests;
         crate::engine_resources::disk_usage,
         crate::engine_resources::prune_preview,
         crate::engine_resources::prune,
+        crate::compose::list_projects,
+        crate::compose::act_on_project,
+        crate::compose::project_logs,
+        crate::compose::project_files,
         crate::alerts::list_alert_rules, crate::alerts::put_alert_rule,
         crate::alerts::delete_alert_rule, crate::alerts::list_alert_channels,
         crate::alerts::create_alert_channel, crate::alerts::rotate_alert_channel,
@@ -157,6 +161,7 @@ mod tests;
         crate::logs::LogTailMessage,
         crate::host_agent::GatewayServiceActionName,
         crate::containers::ContainerActionName,
+        crate::compose::ComposeActionName,
         crate::containers::ContainerLogTailMessage
     ))
 )]

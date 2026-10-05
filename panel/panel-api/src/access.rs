@@ -537,6 +537,26 @@ pub(crate) static ROUTES: &[(&str, &str, Access)] = &[
     ),
     (
         "GET",
+        "/api/v1/container-engines/{engine}/compose-projects",
+        Requires(ContainersRead),
+    ),
+    (
+        "GET",
+        "/api/v1/container-engines/{engine}/compose-projects/{project}/logs",
+        Requires(ContainersInspect),
+    ),
+    (
+        "GET",
+        "/api/v1/container-engines/{engine}/compose-projects/{project}/files",
+        Requires(ContainersInspect),
+    ),
+    (
+        "POST",
+        "/api/v1/container-engines/{engine}/compose-projects/{project}/{action}",
+        Requires(ContainersManage),
+    ),
+    (
+        "GET",
         "/api/v1/container-engines/{engine}/images/{image}",
         Requires(ContainersRead),
     ),

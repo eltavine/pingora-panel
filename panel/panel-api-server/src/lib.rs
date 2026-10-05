@@ -27,8 +27,8 @@ use observability_grpc_client::ObservabilityClient;
 use ops_grpc_client::OpsAgentClient;
 use panel_api::{router_with_config, AccessSettings, ApiConfig, ApiState};
 use panel_application::{
-    RecordedContainers, RecordedEngineResources, RecordedHostAgent, RecordedImages, RecordedLogs,
-    RecordedRuntime,
+    RecordedCompose, RecordedContainers, RecordedEngineResources, RecordedHostAgent,
+    RecordedImages, RecordedLogs, RecordedRuntime,
 };
 use panel_control_runtime::{ControlPlaneProcess, DefaultAddresses, ProcessSettings};
 use panel_errors::{PanelError, Result};
@@ -220,6 +220,9 @@ pub fn process(
     let resources = agent
         .clone()
         .map(|agent| RecordedEngineResources::new(Arc::new(agent), operations.clone()));
+    let compose = agent
+        .clone()
+        .map(|agent| RecordedCompose::new(Arc::new(agent), operations.clone()));
     let store = Arc::new(SqliteIdentityStore::new(process.database(), events));
     let roles = roles::BuiltInRoles::new(Arc::clone(&store), bootstrap.is_some());
     let oidc = Arc::new(OidcClient::new(PROVIDER_TIMEOUT)?);
@@ -290,6 +293,10 @@ pub fn process(
             };
             let state = match resources {
                 Some(resources) => state.with_engine_resources(Arc::new(resources)),
+                None => state,
+            };
+            let state = match compose {
+                Some(compose) => state.with_compose(Arc::new(compose)),
                 None => state,
             };
             let state = match providers {
