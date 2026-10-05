@@ -157,6 +157,8 @@ Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交
 
 0.5 网站文件按 ADR 0034 实现：控制面以读写方式挂载网关提供静态网站的目录（Compose 安装中的 `sites` 卷，镜像把它交给控制面的用户），由 `PINGORA_PANEL_SITES_ROOT` 指定，只管理其中的文件；每次操作都以 `cap-std` 把该目录作为能力打开并在其下解析路径，路径以 `/` 分隔、每段都是名称，空段、`.`、`..`、反斜杠与控制字符一律拒绝，任何路径或目录内的符号链接都无法通向目录之外，目录内的链接照常跟随。项目配置目录的查看与编辑（`BACKUP-001`、`BACKUP-002` 的 DSL 部分）即配置语言的文件，由配置文件页经草稿查看与修改，修改照常校验并应用。静态站点目录的查看、编辑、上传与下载（`BACKUP-002`～`BACKUP-004`）由 `/api/v1/site-files`（列出目录，目录在前、按名称排列，给出类型、大小与修改时间；删除条目，非空目录只在明确要求时连同内容删除）、`.../content`（整读至多 64 MiB 的文件，总是以 `application/octet-stream` 附件与 `nosniff` 返回，上传的内容不会作为控制台同源的页面运行；整写文件，先写临时文件、同步后改名覆盖，并按需创建上级目录，`If-Match` 只替换该实体标签的文件，`If-None-Match: *` 只新建）与 `.../directories`（创建目录）、`ppanel files ls|cat|get|put|mkdir|rm`（`put -` 读取标准输入，`rm` 需要 `--yes`）与控制台的“网站文件”页提供：页面按位置导航，1 MiB 以内的文本文件在面板中编辑，保存时携带读取时的实体标签，期间被修改的文件不会被覆盖并提示重新加载；上传可选择或拖放文件。`files.read`（查看者与操作员）列出与读取，`files.write`（操作员）写入、创建与删除；每次修改无论成功与否都以 `files.file.written`（含大小与摘要，从不记录内容）、`files.directory.created`、`files.entry.removed` 或 `files.operation.refused` 事件写入审计。CI 的 Compose 检查从标准输入上传一个页面，读回并以静态网站经网关提供它，按写入时的实体标签替换后立即可见，确认过期的实体标签与通向目录之外的路径被拒绝，连同内容删除目录并核对审计。
 
+0.5 全量配置包按 ADR 0035 实现：配置包是一个自描述的 JSON 文件，`format` 为 `pingora-panel-configuration`，带配置语言版本与草稿的全部配置语言文件，覆盖站点、上游、监听、TLS 配置与安全策略；证书不在其中，TLS 配置按名称引用。`GET /api/v1/config/bundle`（`config.read`）以附件导出草稿，带草稿的实体标签；`PUT /api/v1/config/bundle`（`config.write`）把配置包作为一次草稿修改导入，照常校验、审计并可携带 `If-Match`，不是配置包的文件与以更新语言版本写成的配置包在改动任何内容前被拒绝。`ppanel config export --bundle FILE|-` 与 `ppanel config import FILE.json|-`（`-` 读取标准输入，可在两套安装之间直接管道传输）以及配置文件页“导入与导出”菜单提供同样的操作；控制台只在草稿没有未保存修改时导入，并在发送前拒绝无法解析的文件。CI 的 Compose 检查导出配置包，按草稿版本经标准输入导入修改后的副本，确认更新语言版本的配置包被拒绝，再导入原包并取回完全相同的配置。
+
 ### 3.2 目标仓库边界
 
 Pingora 上游 crates 继续保留在根 workspace，以便固定版本、审计源码、紧急打补丁和进行兼容测试。产品代码统一进入 `panel/` 边界。只有 `panel/gateway-pingora` 可以在 `Cargo.toml` 中依赖 `pingora-*`；其他产品 crate 只能依赖稳定的 `GatewayEngine` port 与 Engine-neutral IR。
@@ -1260,8 +1262,8 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | BACKUP-008 | 516 | 配置恢复 | 0.5 | A/C/G/I | Operator | automation-service | 执行“配置恢复”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | BACKUP-009 | 517 | 证书备份 | 0.5 | A/C/G/I | Operator | automation-service | 执行“证书备份”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | BACKUP-010 | 518 | SQLite 数据库备份 | 0.5 | A/C/G/I | Operator | automation-service | 执行“SQLite 数据库备份”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| BACKUP-011 | 519 | 全量配置包导出 | 0.5 | A/C/G/I | Operator | automation-service | 执行“全量配置包导出”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| BACKUP-012 | 520 | 全量配置包导入 | 0.5 | A/C/G/I | Operator | automation-service | 执行“全量配置包导入”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| BACKUP-011 | 519 | 全量配置包导出 | 0.5 | A/C/G/I | Operator | config-service | 执行“全量配置包导出”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| BACKUP-012 | 520 | 全量配置包导入 | 0.5 | A/C/G/I | Operator | config-service | 执行“全量配置包导入”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | CLI-001 | 521 | CLI `panel status` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'panel status'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | CLI-002 | 522 | CLI `site list` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'site list'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | CLI-003 | 523 | CLI `site create` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'site create'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
@@ -1436,7 +1438,7 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | 新增团队/平台需求 | 105 |
 | 总 Feature ID | 685 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
-| 当前 `Implemented` | 434（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-006`；身份：`IAM-001`～`IAM-038`；证书：`TLS-001`～`TLS-033`；安全：`SEC-001`～`SEC-035`；可观测：`OBS-001`～`OBS-044`、`OBS-047`～`OBS-053`；主机：`HOST-001`～`HOST-018`；容器：`CTR-001`～`CTR-038`；文件：`BACKUP-001`～`BACKUP-004`） |
+| 当前 `Implemented` | 436（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-009`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-006`；身份：`IAM-001`～`IAM-038`；证书：`TLS-001`～`TLS-033`；安全：`SEC-001`～`SEC-035`；可观测：`OBS-001`～`OBS-044`、`OBS-047`～`OBS-053`；主机：`HOST-001`～`HOST-018`；容器：`CTR-001`～`CTR-038`；文件与备份：`BACKUP-001`～`BACKUP-004`、`BACKUP-011`、`BACKUP-012`） |
 | 1.0 要求 `Verified` | 685 |
 
 分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 47、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。

@@ -308,6 +308,23 @@ ppanel config rollback --to 3 --reason "errors after launch"
 ppanel config import-nginx /etc/nginx/nginx.conf --dir conf
 ```
 
+The whole configuration also travels as one bundle: a JSON file naming its
+format and language version with every file of the draft, so sites,
+upstreams, listeners, TLS profiles and security policies move between
+installations together; certificates stay behind, named by the TLS profiles
+that use them. `GET /api/v1/config/bundle` exports the draft as an
+attachment and `PUT` imports a bundle as a change of the draft, validated
+and audited like any other; a file that is not a bundle, or one written in a
+newer language version, is refused before anything changes
+([decision](../docs/adr/0035-backups.md)). The configuration page's import
+and export menu does the same.
+
+```sh
+ppanel config export --bundle configuration.json
+ppanel config import configuration.json --expected-version 7
+ppanel config export --bundle - | ssh standby ppanel config import -
+```
+
 The console edits the same files with highlighting, completion for the
 block being edited, problems checked as the text changes, an outline and
 the effective values at the cursor, imports NGINX configuration for review,
