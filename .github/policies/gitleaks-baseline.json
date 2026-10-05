@@ -69,6 +69,15 @@
         "838db320ba00e90ec1932c00e6ba0ab7a808f620:panel/panel-api/src/tests/access.rs:generic-api-key:394",
         "2fad085ca00c6a708fc0cfe0e4be247b62472743:panel/web/src/features/audit/__tests__/presentation.spec.ts:generic-api-key:115"
       ]
+    },
+    {
+      "owner": "pingora-panel-security",
+      "reason": "Redaction tests of the certificate API held only the armor line of a PEM private key, never key material; the scanner matched from one armor line to the next. The tests no longer use armor, but the published history keeps those lines.",
+      "expires_on": "2027-03-01",
+      "fingerprints": [
+        "760596ba739e4250336dcaf233bd633aa62b46d8:panel/panel-certificate-api/src/operations.rs:private-key:99",
+        "760596ba739e4250336dcaf233bd633aa62b46d8:panel/panel-certificate-api/src/secret.rs:private-key:39"
+      ]
     }
   ]
 }
