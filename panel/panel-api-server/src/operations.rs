@@ -4,13 +4,13 @@
 use async_trait::async_trait;
 use panel_api::{AccessAudit, Refusal};
 use panel_application::{
-    CommandContext, ComposeAction, ContainerAction, DataPlaneState, GatewayServiceAction,
-    Operation, OperationLog, RequestScope, SiteFileChange,
+    BackupChange, CommandContext, ComposeAction, ContainerAction, DataPlaneState,
+    GatewayServiceAction, Operation, OperationLog, RequestScope, SiteFileChange,
 };
 use panel_errors::PanelError;
 use panel_event_contracts::{
-    containers::v1 as containers, files::v1 as files, gateway::v1 as gateway, host::v1 as host,
-    identity::v1 as identity,
+    backups::v1 as backups, containers::v1 as containers, files::v1 as files,
+    gateway::v1 as gateway, host::v1 as host, identity::v1 as identity,
 };
 use panel_events::EventData;
 use panel_identity::Principal;
@@ -27,6 +27,7 @@ const IMAGE: &str = "container_image";
 const PROJECT: &str = "compose_project";
 /// The aggregate type of events about the static sites' files, by path.
 const SITE_FILE: &str = "site_file";
+const BACKUP: &str = "backup";
 
 pub struct OutboxOperations(pub EventLog);
 
@@ -423,6 +424,75 @@ impl OperationLog for OutboxOperations {
                     }
                 }
             }
+            Operation::Backup { id, change } => {
+                let (scope, actor) = (context.scope(), context.actor());
+                let refused = |operation: &str, error: &PanelError| backups::OperationRefused {
+                    operation: operation.to_owned(),
+                    backup_id: id.to_owned(),
+                    code: error.code.as_str().to_owned(),
+                    message: error.message.clone(),
+                };
+                let target = (BACKUP, if id.is_empty() { "-" } else { id });
+                match change {
+                    BackupChange::Requested(Ok(backup)) => {
+                        let data = backups::BackupRequested {
+                            backup_id: backup.id.clone(),
+                            contents: backup
+                                .contents
+                                .iter()
+                                .map(|content| content.as_str().to_owned())
+                                .collect(),
+                            site_path: backup.site_path.clone(),
+                        };
+                        self.0
+                            .record((BACKUP, backup.id.as_str()), &scope, actor, &data)
+                            .await;
+                    }
+                    BackupChange::Requested(Err(error)) => {
+                        let data = refused("archive.request", error);
+                        self.0.record(target, &scope, actor, &data).await;
+                    }
+                    BackupChange::Deleted(Ok(())) => {
+                        let data = backups::BackupDeleted {
+                            backup_id: id.to_owned(),
+                        };
+                        self.0.record(target, &scope, actor, &data).await;
+                    }
+                    BackupChange::Deleted(Err(error)) => {
+                        let data = refused("archive.delete", error);
+                        self.0.record(target, &scope, actor, &data).await;
+                    }
+                    BackupChange::SitesRestored {
+                        site_path,
+                        result: Ok(restored),
+                    } => {
+                        let data = backups::SitesRestored {
+                            backup_id: id.to_owned(),
+                            site_path: site_path.to_owned(),
+                            files: restored.files,
+                            bytes: restored.bytes,
+                        };
+                        self.0.record(target, &scope, actor, &data).await;
+                    }
+                    BackupChange::SitesRestored {
+                        result: Err(error), ..
+                    } => {
+                        let data = refused("sites.restore", error);
+                        self.0.record(target, &scope, actor, &data).await;
+                    }
+                    BackupChange::ConfigurationRestored(Ok(draft_version)) => {
+                        let data = backups::ConfigurationRestored {
+                            backup_id: id.to_owned(),
+                            draft_version,
+                        };
+                        self.0.record(target, &scope, actor, &data).await;
+                    }
+                    BackupChange::ConfigurationRestored(Err(error)) => {
+                        let data = refused("configuration.restore", error);
+                        self.0.record(target, &scope, actor, &data).await;
+                    }
+                }
+            }
             Operation::ImagePull {
                 engine,
                 reference,
@@ -494,6 +564,7 @@ mod tests {
             IMAGE,
             PROJECT,
             SITE_FILE,
+            BACKUP,
             "upstream",
             "gateway",
             "site",

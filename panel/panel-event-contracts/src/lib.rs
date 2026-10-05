@@ -24,6 +24,7 @@ macro_rules! packages {
 
 packages! {
     automation => "pingora.panel.events.automation.v1",
+    backups => "pingora.panel.events.backups.v1",
     config => "pingora.panel.events.config.v1",
     containers => "pingora.panel.events.containers.v1",
     files => "pingora.panel.events.files.v1",
@@ -145,6 +146,11 @@ event_types! {
     host::v1::GatewayServiceStopped => "host.gateway_service.stopped",
     host::v1::GatewayServiceRestarted => "host.gateway_service.restarted",
     host::v1::OperationRefused => "host.operation.refused",
+    backups::v1::BackupRequested => "backup.archive.requested",
+    backups::v1::BackupDeleted => "backup.archive.deleted",
+    backups::v1::SitesRestored => "backup.sites.restored",
+    backups::v1::ConfigurationRestored => "backup.configuration.restored",
+    backups::v1::OperationRefused => "backup.operation.refused",
     files::v1::FileWritten => "files.file.written",
     files::v1::DirectoryCreated => "files.directory.created",
     files::v1::EntryRemoved => "files.entry.removed",

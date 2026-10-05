@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+// The data of events about backups (ADR 0035). Each message is the data of
+// one event type, named in its comment; events carry it as JSON in the
+// proto3 JSON mapping, with the field names below. What an archive holds is
+// never recorded.
+package pingora.panel.events.backups.v1;
+
+// `backup.archive.requested`
+message BackupRequested {
+  string backup_id = 1;
+  // Such as `configuration` or `sites`.
+  repeated string contents = 2;
+  // The directory below the sites' directory it holds; empty for all of it.
+  string site_path = 3;
+}
+
+// `backup.archive.deleted`
+message BackupDeleted {
+  string backup_id = 1;
+}
+
+// `backup.sites.restored`
+message SitesRestored {
+  string backup_id = 1;
+  // The directory below the sites' directory that was replaced.
+  string site_path = 2;
+  uint64 files = 3;
+  uint64 bytes = 4;
+}
+
+// `backup.configuration.restored`
+message ConfigurationRestored {
+  string backup_id = 1;
+  // The draft version the archive's configuration was saved as.
+  uint64 draft_version = 2;
+}
+
+// `backup.operation.refused`
+message OperationRefused {
+  // `archive.request`, `archive.delete`, `sites.restore` or
+  // `configuration.restore`.
+  string operation = 1;
+  // Empty when a request was refused before a backup was listed.
+  string backup_id = 2;
+  string code = 3;
+  string message = 4;
+}

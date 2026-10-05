@@ -69,6 +69,11 @@ export const KNOWN_TYPES = [
   'files.directory.created',
   'files.entry.removed',
   'files.operation.refused',
+  'backup.archive.requested',
+  'backup.archive.deleted',
+  'backup.sites.restored',
+  'backup.configuration.restored',
+  'backup.operation.refused',
   'container.engine.enabled',
   'container.engine.disabled',
   'container.started',
@@ -170,6 +175,18 @@ export function summaryOf(event: AuditEvent, t: Translate): string {
         .map(text)
         .filter(Boolean)
         .join(' · ')
+    case 'backup.archive.requested':
+      return [list(data.contents), text(data.site_path)].filter(Boolean).join(' · ')
+    case 'backup.archive.deleted':
+      return text(data.backup_id).slice(0, 8)
+    case 'backup.sites.restored': {
+      const files = Number(data.files ?? 0)
+      return [text(data.site_path), t('audit.summary.entries', { count: files }, files)].join(' · ')
+    }
+    case 'backup.configuration.restored':
+      return t('audit.summary.draftVersion', { version: text(data.draft_version) })
+    case 'backup.operation.refused':
+      return [text(data.operation), data.code, data.message].map(text).filter(Boolean).join(' · ')
     case 'config.revision.noted':
       return `#${text(data.revision)}${note}`
     case 'gateway.snapshot.prepared':

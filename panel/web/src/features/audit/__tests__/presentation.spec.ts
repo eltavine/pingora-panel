@@ -158,6 +158,22 @@ describe('audit presentation', () => {
     ).toBe('/shop/old · audit.summary.entries{"count":3}')
     expect(
       summaryOf(
+        event('backup.archive.requested', {
+          backup_id: 'b'.repeat(36),
+          contents: ['configuration', 'sites'],
+          site_path: 'shop',
+        }),
+        t,
+      ),
+    ).toBe('configuration, sites · shop')
+    expect(
+      summaryOf(event('backup.sites.restored', { site_path: 'shop', files: 2, bytes: 30 }), t),
+    ).toBe('shop · audit.summary.entries{"count":2}')
+    expect(summaryOf(event('backup.configuration.restored', { draft_version: 12 }), t)).toBe(
+      'audit.summary.draftVersion{"version":"12"}',
+    )
+    expect(
+      summaryOf(
         event('container.engine.pruned', {
           engine: 'docker',
           removed: ['container cache', 'image sha256:cc'],

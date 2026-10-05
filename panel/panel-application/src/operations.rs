@@ -2,7 +2,7 @@
 //! such as calls to the gateway, for the audit trail.
 
 use crate::{
-    CommandContext, ComposeAction, ComposeChange, ContainerAction, ContainerChange,
+    BackupChange, CommandContext, ComposeAction, ComposeChange, ContainerAction, ContainerChange,
     ContainerEngine, DataPlaneState, FileChecks, GatewayRuntimePort, GatewayServiceAction,
     GatewayServiceStatus, ImagePulled, ImageRemoval, LogDeletion, PruneReport, RequestScope,
     SiteFileChange, SitePath, UpstreamHealth, UpstreamHealthReport,
@@ -61,6 +61,12 @@ pub enum Operation<'a> {
     SiteFile {
         path: &'a SitePath,
         change: SiteFileChange<'a>,
+    },
+    /// A backup was asked for, removed or restored; `id` is empty when a
+    /// request was refused before a backup was listed.
+    Backup {
+        id: &'a str,
+        change: BackupChange<'a>,
     },
     /// The host agent was asked to pull an image.
     ImagePull {
@@ -297,6 +303,23 @@ mod tests {
                     SiteFileChange::Removed { result, .. } => (
                         "file-remove".to_owned(),
                         result.map(|removal| removal.removed.to_string()),
+                    ),
+                },
+                Operation::Backup { id, change } => match change {
+                    BackupChange::Requested(result) => (
+                        "backup-request".to_owned(),
+                        result.map(|backup| backup.id.clone()),
+                    ),
+                    BackupChange::Deleted(result) => {
+                        ("backup-delete".to_owned(), result.map(|()| id.to_owned()))
+                    }
+                    BackupChange::SitesRestored { result, .. } => (
+                        "backup-restore-sites".to_owned(),
+                        result.map(|restored| restored.files.to_string()),
+                    ),
+                    BackupChange::ConfigurationRestored(result) => (
+                        "backup-restore-configuration".to_owned(),
+                        result.map(|version| version.to_string()),
                     ),
                 },
                 Operation::ImagePull {

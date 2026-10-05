@@ -46,6 +46,7 @@ macro_rules! operations {
 
 mod alerts;
 mod audit;
+mod backups;
 mod compose;
 mod container_sites;
 mod containers;
@@ -70,6 +71,10 @@ pub use alerts::{
     AlertRule, AlertRuleSpec, AlertSeverity, AlertState, AlertTest, AlertsPort, NewAlertChannel,
 };
 pub use audit::{AuditFilter, AuditPage, AuditPort, AuditRecord, AuditVerification};
+pub use backups::{
+    Backup, BackupChange, BackupContent, BackupDownload, BackupRequest, BackupState, BackupsPort,
+    NoBackups, RecordedBackups, SitesRestored, ACTIVE_BUNDLE, DRAFT_BUNDLE,
+};
 pub use compose::{
     ComposeAction, ComposeChange, ComposeFailure, ComposeFile, ComposeLogLine, ComposeLogs,
     ComposePort, ComposeProject, ComposeProjectList, NoCompose, ProjectService, RecordedCompose,

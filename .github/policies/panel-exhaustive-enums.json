@@ -171,6 +171,12 @@
     },
     {
       "package": "panel-application",
+      "name": "BackupChange",
+      "owner": "pingora-panel-platform",
+      "reason": "Each change of the backups is an audit event of its own; a new kind of change must fail to compile where changes are recorded, rather than going unrecorded."
+    },
+    {
+      "package": "panel-application",
       "name": "SiteFileChange",
       "owner": "pingora-panel-platform",
       "reason": "Each change of the sites' files is an audit event of its own; a new kind of change must fail to compile where changes are recorded, rather than going unrecorded."
