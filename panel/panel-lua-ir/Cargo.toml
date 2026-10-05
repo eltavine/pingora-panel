@@ -1,0 +1,18 @@
+[package]
+name = "panel-lua-ir"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+panel-engine.workspace = true
+panel-errors.workspace = true
+panel-ir.workspace = true
+panel-lua.workspace = true
+
+[dev-dependencies]
+panel-domain.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -5,26 +5,18 @@
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use http::{header, HeaderMap, HeaderValue, Method};
-use panel_errors::{Diagnostic, ErrorCode, PanelError, Result};
-use panel_ir::{LuaFallback, LuaHandler, LuaHandlers, LuaLogLevel, RouteAction, RuntimeSnapshot};
-use panel_lua::{
-    Connection, Exchange, Handler, HandlerId, Host, Limits, LogLevel, Permissions, Phase, Program,
-    Request, Runtime, Settings, SharedStore, Source,
-};
+use panel_errors::{PanelError, Result};
+use panel_ir::RuntimeSnapshot;
+use panel_lua::{Connection, Exchange, Host, Request, Runtime, SharedStore};
 use percent_encoding::{percent_decode_str, utf8_percent_encode, AsciiSet, CONTROLS};
 use pingora_http::{RequestHeader, ResponseHeader};
 use pingora_proxy::Session;
 use std::{
-    collections::HashMap,
     net::SocketAddr,
     sync::Arc,
-    time::{Duration, Instant, SystemTime},
+    time::{Instant, SystemTime},
 };
 
-const DEFAULT_TIME: Duration = Duration::from_millis(100);
-const DEFAULT_WORK: u64 = 10_000_000;
-const DEFAULT_SLOW: Duration = Duration::from_millis(10);
-const DEFAULT_MEMORY: usize = 64 << 20;
 /// Bytes of a request body the gateway holds for a request it proxies after
 /// a script read it: what Pingora keeps to send the body again.
 pub(crate) const PROXIED_BODY_LIMIT: usize = 64 << 10;
@@ -48,41 +40,7 @@ const PATH: &AsciiSet = &CONTROLS
     .add(b'|')
     .add(b'}');
 
-/// A handler as the request path runs it.
-#[derive(Clone, Debug)]
-pub(crate) struct Hook {
-    pub handler: Handler,
-    pub fallback: LuaFallback,
-    pub slow: Duration,
-    pub debug: bool,
-    pub script: Arc<str>,
-}
-
-impl Hook {
-    pub(crate) fn phase(&self) -> Phase {
-        self.handler.phase
-    }
-}
-
-/// The hooks a site or route runs, by phase.
-#[derive(Clone, Debug, Default)]
-pub(crate) struct Hooks {
-    pub server_rewrite: Option<Hook>,
-    pub rewrite: Option<Hook>,
-    pub access: Option<Hook>,
-    pub header_filter: Option<Hook>,
-    pub body_filter: Option<Hook>,
-    pub log: Option<Hook>,
-}
-
-/// Hooks by the IR identifier of what runs them.
-#[derive(Debug, Default)]
-pub(crate) struct HookIndex {
-    pub sites: HashMap<String, Hooks>,
-    pub routes: HashMap<String, Hooks>,
-    pub contents: HashMap<String, Hook>,
-    pub balancers: HashMap<String, Hook>,
-}
+pub(crate) use panel_lua_ir::{Hook, HookIndex, Hooks};
 
 /// A snapshot's VMs.
 pub(crate) struct LuaPlan {
@@ -100,99 +58,6 @@ impl std::fmt::Debug for LuaPlan {
     }
 }
 
-fn level(level: LuaLogLevel) -> LogLevel {
-    match level {
-        LuaLogLevel::Stderr => LogLevel::Stderr,
-        LuaLogLevel::Emerg => LogLevel::Emerg,
-        LuaLogLevel::Alert => LogLevel::Alert,
-        LuaLogLevel::Crit => LogLevel::Crit,
-        LuaLogLevel::Error => LogLevel::Err,
-        LuaLogLevel::Warn => LogLevel::Warn,
-        LuaLogLevel::Notice => LogLevel::Notice,
-        LuaLogLevel::Info => LogLevel::Info,
-        LuaLogLevel::Debug => LogLevel::Debug,
-    }
-}
-
-struct Compiler<'a> {
-    snapshot: &'a RuntimeSnapshot,
-    builder: panel_lua::ProgramBuilder,
-    handlers: HashMap<String, HandlerId>,
-}
-
-impl Compiler<'_> {
-    fn hook(&mut self, handler: &LuaHandler, phase: Phase) -> Result<Hook> {
-        let script = self
-            .snapshot
-            .lua
-            .script(&handler.script_id)
-            .ok_or_else(|| {
-                PanelError::validation_failed(format!(
-                    "a Lua handler names unknown script {}",
-                    handler.script_id
-                ))
-            })?;
-        let id = match self.handlers.get(&script.id) {
-            Some(id) => *id,
-            None => {
-                let id = self.builder.handler(&Source::new(
-                    script.file.clone(),
-                    script.source.clone(),
-                    script.line,
-                ));
-                self.handlers.insert(script.id.clone(), id);
-                id
-            }
-        };
-        Ok(Hook {
-            handler: Handler {
-                id,
-                phase,
-                limits: Limits {
-                    time: match handler.time_limit_ms {
-                        0 => DEFAULT_TIME,
-                        millis => Duration::from_millis(millis),
-                    },
-                    work: match handler.work_limit {
-                        0 => DEFAULT_WORK,
-                        work => work,
-                    },
-                },
-                permissions: Permissions {
-                    body: handler.allow.body,
-                    upstream: handler.allow.upstream,
-                    network: handler.allow.network,
-                },
-                log_level: level(handler.log_level),
-            },
-            fallback: handler.on_error,
-            slow: match handler.slow_threshold_ms {
-                0 => DEFAULT_SLOW,
-                millis => Duration::from_millis(millis),
-            },
-            debug: handler.debug,
-            script: Arc::from(script.id.as_str()),
-        })
-    }
-
-    fn hooks(&mut self, handlers: &LuaHandlers) -> Result<Hooks> {
-        let mut hook = |handler: &Option<LuaHandler>, phase| {
-            handler
-                .as_ref()
-                .map(|handler| self.hook(handler, phase))
-                .transpose()
-        };
-        Ok(Hooks {
-            server_rewrite: hook(&handlers.server_rewrite, Phase::ServerRewrite)?,
-            rewrite: hook(&handlers.rewrite, Phase::Rewrite)?,
-            access: hook(&handlers.access, Phase::Access)?,
-            header_filter: hook(&handlers.header_filter, Phase::HeaderFilter)?,
-            body_filter: hook(&handlers.body_filter, Phase::BodyFilter)?,
-            log: hook(&handlers.log, Phase::Log)?,
-        })
-    }
-}
-
 /// Compiles `snapshot`'s scripts and starts `vms` VMs for them. Syntax
 /// errors and failing `init_by_lua` refuse the snapshot.
 pub(crate) fn compile(
@@ -200,102 +65,26 @@ pub(crate) fn compile(
     store: &SharedStore,
     vms: usize,
 ) -> Result<(Option<Arc<LuaPlan>>, HookIndex)> {
-    if !panel_engine::uses_lua(snapshot) {
+    let Some(compiled) = panel_lua_ir::compile(snapshot, vms)? else {
         return Ok((None, HookIndex::default()));
-    }
-    let mut compiler = Compiler {
-        snapshot,
-        builder: Program::builder(),
-        handlers: HashMap::new(),
     };
-    for script in &snapshot.lua.scripts {
-        if let Some(module) = &script.module {
-            compiler.builder.module(
-                module.clone(),
-                &Source::new(script.file.clone(), script.source.clone(), script.line),
-            );
-        }
-    }
-    let mut index = HookIndex::default();
-    for (phase, handler) in [
-        (Phase::Init, &snapshot.lua.init),
-        (Phase::InitWorker, &snapshot.lua.init_worker),
-    ] {
-        if let Some(handler) = handler {
-            let hook = compiler.hook(handler, phase)?;
-            let limits = hook.handler.limits;
-            match phase {
-                Phase::Init => compiler.builder.init(hook.handler.id),
-                _ => compiler.builder.init_worker(hook.handler.id),
-            };
-            compiler.builder.init_limits(limits);
-        }
-    }
-    for site in &snapshot.sites {
-        if !site.lua.is_empty() {
-            index
-                .sites
-                .insert(site.id.as_str().into(), compiler.hooks(&site.lua)?);
-        }
-    }
-    for route in &snapshot.routes {
-        if !route.lua.is_empty() {
-            index
-                .routes
-                .insert(route.id.as_str().into(), compiler.hooks(&route.lua)?);
-        }
-        if let RouteAction::Lua { handler } = &route.action {
-            let hook = compiler.hook(handler, Phase::Content)?;
-            index.contents.insert(route.id.as_str().into(), hook);
-        }
-    }
-    for pool in &snapshot.upstream_pools {
-        if let Some(handler) = &pool.balancer {
-            let hook = compiler.hook(handler, Phase::Balancer)?;
-            index.balancers.insert(pool.id.as_str().into(), hook);
-        }
-    }
-    for dict in &snapshot.lua.shared_dicts {
-        compiler.builder.shared_dict(
-            dict.name.clone(),
-            usize::try_from(dict.capacity_bytes).unwrap_or(usize::MAX),
-        );
-    }
-    let program = compiler.builder.build().map_err(|diagnostics| {
-        PanelError::new(ErrorCode::VALIDATION_FAILED, "Lua scripts do not compile")
-            .with_diagnostics(
-                diagnostics
-                    .into_iter()
-                    .map(|diagnostic| {
-                        Diagnostic::error(ErrorCode::VALIDATION_FAILED, diagnostic.to_string())
-                            .with_resource(format!("lua:{}", diagnostic.source))
-                    })
-                    .collect(),
-            )
-    })?;
-    let settings = Settings {
-        vms: vms.max(1),
-        memory: match snapshot.lua.memory_limit_bytes {
-            0 => DEFAULT_MEMORY,
-            bytes => usize::try_from(bytes).unwrap_or(usize::MAX),
-        },
-    };
-    let (runtime, logs) = Runtime::start(&program, &settings, store).map_err(|failure| {
-        PanelError::validation_failed(format!(
-            "init_by_lua failed ({}): {}",
-            failure.kind.name(),
-            failure.message
-        ))
-    })?;
+    let (runtime, logs) =
+        Runtime::start(&compiled.program, &compiled.settings, store).map_err(|failure| {
+            PanelError::validation_failed(format!(
+                "init_by_lua failed ({}): {}",
+                failure.kind.name(),
+                failure.message
+            ))
+        })?;
     for entry in logs {
         tracing::info!(event = "lua_log", phase = "init", level = entry.level.name(), message = %entry.message);
     }
     Ok((
         Some(Arc::new(LuaPlan {
             runtime,
-            disabled: snapshot.lua.disabled,
+            disabled: compiled.disabled,
         })),
-        index,
+        compiled.index,
     ))
 }
 

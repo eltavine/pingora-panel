@@ -1576,6 +1576,7 @@ dependencies = [
  "panel-errors",
  "panel-ir",
  "panel-lua",
+ "panel-lua-ir",
  "panel-metrics",
  "panel-routing",
  "parking_lot",
@@ -3556,6 +3557,18 @@ dependencies = [
  "sha2 0.11.0",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "panel-lua-ir"
+version = "0.1.0"
+dependencies = [
+ "panel-domain",
+ "panel-engine",
+ "panel-errors",
+ "panel-ir",
+ "panel-lua",
+ "tokio",
 ]
 
 [[package]]
