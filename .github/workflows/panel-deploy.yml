@@ -240,6 +240,10 @@ jobs:
             | python3 -c "import json, sys; vols = [v for v in json.load(sys.stdin)['volumes'] if v['compose_project'] == 'pingora-panel']; assert vols and any(v['containers'] >= 1 for v in vols), vols"
           ppanel network list
           ppanel volume list
+          # The disk the engine takes, as docker system df reports it.
+          ppanel -o json container engine df docker \
+            | python3 -c "import json, sys; d = json.load(sys.stdin); assert d['images']['total'] >= 1 and d['images']['size_bytes'] > 0 and d['volumes']['active'] >= 1, d"
+          ppanel container engine df docker
           ppanel container kill panel-ci-throwaway --yes
           test "$(status)" = exited
           ppanel container remove panel-ci-throwaway --yes
