@@ -11,6 +11,7 @@ mod container_logs;
 mod container_stats;
 mod containers;
 mod directories;
+mod engine_resources;
 #[cfg(test)]
 mod fake_engine;
 mod gateway_service;
@@ -25,6 +26,7 @@ use panel_contracts::ops::v1::{
     agent_server::{self, AgentServer},
     containers_server::{self, ContainersServer},
     directories_server::{self, DirectoriesServer},
+    engine_resources_server::{self, EngineResourcesServer},
     gateway_service_server::{self, GatewayServiceServer},
     images_server::{self, ImagesServer},
     CapabilityState,
@@ -61,35 +63,40 @@ pub async fn serve(config: AgentConfig, shutdown: impl Future<Output = ()> + Sen
         containers::capability(&config.engines),
         gateway_service::capability(&config.engines),
     ]);
-    let (container_service, image_service, gateway_service) = if config.engines.is_empty() {
-        (None, None, None)
-    } else {
-        policy = policy
-            .allow(containers_server::SERVICE_NAME, panel_api.clone())
-            .allow(images_server::SERVICE_NAME, panel_api.clone())
-            .allow(gateway_service_server::SERVICE_NAME, panel_api.clone());
-        let engines = Arc::new(containers::Engines::load(
-            config.engines.clone(),
-            config.state.clone(),
-        ));
-        (
-            Some(ContainersServer::new(containers::ContainerService::new(
-                Arc::clone(&engines),
-                config.installation_project.clone(),
-            ))),
-            Some(ImagesServer::new(images::ImageService::new(
-                Arc::clone(&engines),
-                config.installation_project.clone(),
-            ))),
-            Some(GatewayServiceServer::new(
-                gateway_service::GatewayService::new(
-                    engines,
+    let (container_service, image_service, resource_service, gateway_service) =
+        if config.engines.is_empty() {
+            (None, None, None, None)
+        } else {
+            policy = policy
+                .allow(containers_server::SERVICE_NAME, panel_api.clone())
+                .allow(images_server::SERVICE_NAME, panel_api.clone())
+                .allow(engine_resources_server::SERVICE_NAME, panel_api.clone())
+                .allow(gateway_service_server::SERVICE_NAME, panel_api.clone());
+            let engines = Arc::new(containers::Engines::load(
+                config.engines.clone(),
+                config.state.clone(),
+            ));
+            (
+                Some(ContainersServer::new(containers::ContainerService::new(
+                    Arc::clone(&engines),
                     config.installation_project.clone(),
-                    config.gateway_service.clone(),
-                ),
-            )),
-        )
-    };
+                ))),
+                Some(ImagesServer::new(images::ImageService::new(
+                    Arc::clone(&engines),
+                    config.installation_project.clone(),
+                ))),
+                Some(EngineResourcesServer::new(
+                    engine_resources::ResourceService::new(Arc::clone(&engines)),
+                )),
+                Some(GatewayServiceServer::new(
+                    gateway_service::GatewayService::new(
+                        engines,
+                        config.installation_project.clone(),
+                        config.gateway_service.clone(),
+                    ),
+                )),
+            )
+        };
     let directories = if config.directories.is_empty() {
         None
     } else {
@@ -134,6 +141,7 @@ pub async fn serve(config: AgentConfig, shutdown: impl Future<Output = ()> + Sen
         .add_optional_service(directories)
         .add_optional_service(container_service)
         .add_optional_service(image_service)
+        .add_optional_service(resource_service)
         .add_optional_service(gateway_service);
     #[cfg(target_os = "linux")]
     let router = router.add_optional_service(listener_service);

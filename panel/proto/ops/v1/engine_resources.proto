@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package pingora.panel.ops.v1;
+
+import "common/v1/common.proto";
+import "google/protobuf/timestamp.proto";
+
+// What the container engines the agent reaches keep besides containers and
+// images (ADR 0031): their networks and volumes.
+service EngineResources {
+  rpc ListNetworks(EngineResourcesListNetworksRequest) returns (EngineResourcesListNetworksResponse);
+  rpc ListVolumes(EngineResourcesListVolumesRequest) returns (EngineResourcesListVolumesResponse);
+}
+
+message EngineSubnet {
+  // Such as `172.18.0.0/16`.
+  string subnet = 1;
+  string gateway = 2;
+}
+
+message EngineNetwork {
+  string id = 1;
+  string name = 2;
+  // Such as `bridge`, `host`, `overlay` or `macvlan`.
+  string driver = 3;
+  // `local`, `global` or `swarm`.
+  string scope = 4;
+  google.protobuf.Timestamp created = 5;
+  // Whether containers on it are cut off from outside networks.
+  bool internal = 6;
+  bool ipv6 = 7;
+  repeated EngineSubnet subnets = 8;
+  // The containers, running or not, attached to it.
+  uint32 containers = 9;
+  // The Compose project that created it, if one did.
+  string compose_project = 10;
+  map<string, string> labels = 11;
+}
+
+message EngineVolume {
+  string name = 1;
+  // Such as `local`.
+  string driver = 2;
+  // Where its data lives on the host.
+  string mountpoint = 3;
+  google.protobuf.Timestamp created = 4;
+  // `local` or `global`.
+  string scope = 5;
+  // The containers, running or not, that mount it.
+  uint32 containers = 6;
+  // The Compose project that created it, if one did.
+  string compose_project = 7;
+  map<string, string> labels = 8;
+}
+
+message EngineResourcesListNetworksRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string engine = 2;
+}
+
+message EngineResourcesListNetworksResponse {
+  google.protobuf.Timestamp observed_at = 1;
+  // By name.
+  repeated EngineNetwork networks = 2;
+  .pingora.panel.common.v1.Error error = 3;
+}
+
+message EngineResourcesListVolumesRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string engine = 2;
+}
+
+message EngineResourcesListVolumesResponse {
+  google.protobuf.Timestamp observed_at = 1;
+  // By name.
+  repeated EngineVolume volumes = 2;
+  .pingora.panel.common.v1.Error error = 3;
+}

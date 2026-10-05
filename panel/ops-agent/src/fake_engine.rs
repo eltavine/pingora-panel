@@ -264,7 +264,11 @@ pub(crate) async fn engine_with(directory: &Path, calls: Calls) -> PathBuf {
                      "Status": "Up 3 hours (healthy)",
                      "Ports": [{"IP": "0.0.0.0", "PrivatePort": 80, "PublicPort": 8081,
                                 "Type": "tcp"}],
-                     "Labels": {"com.docker.compose.project": "shop"}},
+                     "Labels": {"com.docker.compose.project": "shop"},
+                     "NetworkSettings": {"Networks": {"shop_default": {}}},
+                     "Mounts": [{"Type": "volume", "Name": "shop_html",
+                                 "Destination": "/usr/share/nginx/html"},
+                                {"Type": "bind", "Source": "/srv/shop", "Destination": "/srv"}]},
                     {"Id": "a1", "Names": ["/cache"], "Image": "redis:7",
                      "ImageID": "sha256:bb", "Created": 1_800_000_100, "State": "exited",
                      "Status": "Exited (0) 2 days ago", "Ports": [], "Labels": {}}
@@ -318,6 +322,37 @@ pub(crate) async fn engine_with(directory: &Path, calls: Calls) -> PathBuf {
                     }
                 },
             ),
+        );
+    let router = router
+        .route(
+            "/networks",
+            get(|| async {
+                Json(json!([
+                    {"Name": "shop_default", "Id": "n3", "Created": "2027-01-15T08:00:00Z",
+                     "Scope": "local", "Driver": "bridge", "Internal": false,
+                     "Options": {"com.docker.network.enable_ipv6": "true"},
+                     "IPAM": {"Config": [{"Subnet": "172.18.0.0/16", "Gateway": "172.18.0.1"}]},
+                     "Labels": {"com.docker.compose.project": "shop"}},
+                    {"Name": "bridge", "Id": "n1", "Scope": "local", "Driver": "bridge",
+                     "IPAM": {"Config": [{"Subnet": "172.17.0.0/16"}]}, "Labels": {}},
+                    {"Name": "host", "Id": "n2", "Scope": "local", "Driver": "host",
+                     "IPAM": {"Config": []}, "Labels": {}}
+                ]))
+            }),
+        )
+        .route(
+            "/volumes",
+            get(|| async {
+                Json(json!({"Volumes": [
+                    {"Name": "shop_html", "Driver": "local", "Scope": "local",
+                     "Mountpoint": "/var/lib/docker/volumes/shop_html/_data",
+                     "CreatedAt": "2027-01-15T08:00:00Z", "Options": {},
+                     "Labels": {"com.docker.compose.project": "shop"}},
+                    {"Name": "orphan", "Driver": "local", "Scope": "local",
+                     "Mountpoint": "/var/lib/docker/volumes/orphan/_data",
+                     "Options": {}, "Labels": {}}
+                ], "Warnings": []}))
+            }),
         );
     let removing = calls.clone();
     let router = router.route(
