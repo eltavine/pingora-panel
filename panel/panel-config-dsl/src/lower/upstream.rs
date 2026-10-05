@@ -8,7 +8,7 @@ use crate::{
     variables,
 };
 use panel_config_model::{Upstream, UpstreamNode};
-use panel_dsl::{Body, Directive};
+use panel_dsl::{Argument, Body, Directive};
 use panel_ir::{
     ActiveHealthCheck, HealthCheckProtocol, LoadBalancingPolicy, PassiveHealthPolicy,
     UpstreamConnectionPolicy, UpstreamTlsPolicy,
@@ -44,6 +44,10 @@ impl<'a> Lowerer<'a> {
             connection: UpstreamConnectionPolicy::default(),
             health_check: None,
             passive_health: None,
+            retry: None,
+            circuit_breaker: None,
+            max_requests: None,
+            queue: None,
             note: None,
             created_at: now,
             updated_at: now,
@@ -78,7 +82,8 @@ impl<'a> Lowerer<'a> {
         depth: usize,
         upstream: &mut Upstream,
     ) {
-        let arg = &directive.args[0];
+        let empty = Argument::new("");
+        let arg = directive.args.first().unwrap_or(&empty);
         let duration = |lowerer: &mut Self| {
             let value = lowerer.value(file, arg)?;
             lowerer.duration(file, arg, &value)
@@ -182,6 +187,15 @@ impl<'a> Lowerer<'a> {
                 }
             }
             "http2" => upstream.connection.http2 = self.bool_arg(file, arg).unwrap_or_default(),
+            "h2c" => upstream.connection.h2c = self.bool_arg(file, arg).unwrap_or_default(),
+            "retry" => upstream.retry = self.retry(file, directive),
+            "circuit_breaker" => upstream.circuit_breaker = self.circuit_breaker(file, directive),
+            "max_requests" => {
+                if let Some(value) = self.value(file, arg) {
+                    upstream.max_requests = self.number(file, arg, &value, "a whole number");
+                }
+            }
+            "queue" => upstream.queue = self.queue(file, directive),
             "health_check" => upstream.health_check = self.health_check(file, directive),
             "passive_health" => {
                 let params = Params::split(&directive.args);

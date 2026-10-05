@@ -685,6 +685,103 @@ http {
 }
 
 #[test]
+fn upstreams_retry_break_circuits_and_queue() {
+    let text = r#"language_version 1;
+http {
+    upstream api {
+        server 10.0.0.1:8080;
+        server 10.0.0.2:8080;
+        h2c on;
+        passive_health;
+        retry 2 on=timeout,reset,502,503 backoff=25ms budget=20% budget_min=3;
+        circuit_breaker failures=40% open=10s;
+        max_requests 200;
+        queue size=50 timeout=1500ms;
+    }
+    server api {
+        server_name api.example;
+        proxy api;
+    }
+}
+"#;
+    let lowered = read(text);
+    assert!(
+        lowered.errors().next().is_none(),
+        "{:#?}",
+        lowered.diagnostics
+    );
+    let upstream = &lowered.model.upstreams[0];
+    assert!(upstream.connection.h2c);
+    assert!(upstream.passive_health.is_some());
+    let retry = upstream.retry.as_ref().unwrap();
+    assert_eq!(retry.attempts, 2);
+    assert_eq!(retry.statuses, [502, 503].into());
+    assert_eq!(retry.on.len(), 2);
+    assert_eq!(retry.backoff_ms, 25);
+    let budget = retry.budget.unwrap();
+    assert_eq!((budget.percent, budget.min_per_second), (20, 3));
+    let breaker = upstream.circuit_breaker.unwrap();
+    assert_eq!(
+        (
+            breaker.failure_percent,
+            breaker.min_requests,
+            breaker.open_ms,
+            breaker.half_open_requests
+        ),
+        (40, 20, 10_000, 1)
+    );
+    assert_eq!(upstream.max_requests, Some(200));
+    let queue = upstream.queue.unwrap();
+    assert_eq!((queue.max_waiting, queue.timeout_ms), (50, 1500));
+
+    let printed = print(&lowered.model);
+    for line in [
+        "        h2c on;\n",
+        "        retry 2 on=timeout,reset,502,503 backoff=25ms budget=20% budget_min=3;\n",
+        "        circuit_breaker failures=40% open=10s;\n",
+        "        max_requests 200;\n",
+        "        queue size=50 timeout=1500ms;\n",
+    ] {
+        assert!(printed.contains(line), "{line}{printed}");
+    }
+    assert!(same_configuration(&lowered.model, &read(&printed).model));
+    let plain = read(&text.replace("circuit_breaker failures=40% open=10s;", "circuit_breaker;"));
+    assert!(print(&plain.model).contains("        circuit_breaker;\n"));
+
+    for (from, to, message) in [
+        ("retry 2 on", "retry two on", "is not a whole number"),
+        (
+            "on=timeout,reset",
+            "on=timeout,slow",
+            "is not timeout, reset or a status",
+        ),
+        ("budget=20%", "budget=20", "is not a percentage"),
+        ("retry 2", "retry 11", "retries 11 times, more than 10"),
+        (
+            "failures=40%",
+            "failures=0%",
+            "opens its circuit at a share",
+        ),
+        ("max_requests 200;", "", "queues requests without a limit"),
+        ("queue size=50", "queue 50", "is not a parameter"),
+        (
+            "retry 2 on=timeout,reset,502,503 backoff=25ms budget=20% budget_min=3;",
+            "retry 0 on=503;",
+            "says what to retry but retries no times",
+        ),
+    ] {
+        let lowered = read(&text.replace(from, to));
+        assert!(
+            lowered
+                .errors()
+                .any(|diagnostic| diagnostic.message.contains(message)),
+            "{message}: {:#?}",
+            lowered.diagnostics
+        );
+    }
+}
+
+#[test]
 fn unverified_tls_nodes_are_warned_about() {
     let text = "language_version 1;\nhttp {\n    upstream app {\n        server 10.0.0.1:443 tls;\n        tls verify=off;\n    }\n    server s {\n        server_name s.example;\n        proxy app;\n    }\n}\n";
     let lowered = read(text);

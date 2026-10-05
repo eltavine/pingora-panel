@@ -11,13 +11,13 @@ use panel_ir::logging::LOGGING_CAPABILITY;
 use panel_ir::template::{uses_variables, TEMPLATE_CAPABILITY};
 use panel_ir::tls::{HSTS_CAPABILITY, TLS_SETTINGS_CAPABILITY};
 use panel_ir::{
-    CapabilityRequirement, DomainSpec, ListenerRef, LoadBalancingPolicy, RetryPolicy, RouteAction,
-    RouteMatcher, RouteSpec, RuntimeSnapshot, SiteSpec, StaticContentPolicy, UpstreamEndpoint,
-    UpstreamPoolSpec, WwwRedirect, HTTP_POLICIES_CAPABILITY,
+    CapabilityRequirement, DomainSpec, ListenerRef, LoadBalancingPolicy, RouteAction, RouteMatcher,
+    RouteSpec, RuntimeSnapshot, SiteSpec, StaticContentPolicy, UpstreamEndpoint, UpstreamPoolSpec,
+    WwwRedirect, HTTP_POLICIES_CAPABILITY,
 };
 use panel_ir::{
     REQUEST_HEAD_TIMEOUT_CAPABILITY, REQUEST_SECURITY_CAPABILITY, ROUTE_CONDITIONS_CAPABILITY,
-    TRUSTED_PROXIES_CAPABILITY,
+    TRUSTED_PROXIES_CAPABILITY, UPSTREAM_RESILIENCE_CAPABILITY,
 };
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -220,12 +220,19 @@ impl Compiler {
         let mut pool =
             UpstreamPoolSpec::new(pool_id(upstream.id), upstream.name.clone(), endpoints);
         pool.load_balancing = upstream.balancing.clone();
-        pool.retry_policy = RetryPolicy::none();
+        let resilience = upstream.resilience();
+        pool.retry_policy = resilience.retry_policy;
         pool.connection = upstream.connection.clone();
         pool.tls = upstream.tls.clone();
         pool.host_header.clone_from(&upstream.host_header);
         pool.health_check.clone_from(&upstream.health_check);
         pool.passive_health.clone_from(&upstream.passive_health);
+        pool.circuit_breaker = resilience.circuit_breaker;
+        pool.max_requests = resilience.max_requests;
+        pool.queue = resilience.queue;
+        if panel_engine::uses_resilience(&pool) {
+            self.capabilities.insert(UPSTREAM_RESILIENCE_CAPABILITY);
+        }
         self.snapshot.upstream_pools.push(pool);
     }
 
@@ -527,6 +534,10 @@ mod tests {
             connection: Default::default(),
             health_check: None,
             passive_health: None,
+            retry: None,
+            circuit_breaker: None,
+            max_requests: None,
+            queue: None,
             note: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -714,6 +725,55 @@ mod tests {
         assert_eq!(
             snapshot.sites[0].hsts.unwrap().header_value(),
             "max-age=63072000; includeSubDomains; preload"
+        );
+    }
+
+    #[test]
+    fn upstream_resilience_reaches_the_snapshot_and_requires_its_capability() {
+        let (mut model, _) = model();
+        let snapshot = compile(&model, RevisionId::new(9)).unwrap();
+        assert!(!snapshot
+            .required_capabilities
+            .iter()
+            .any(|capability| capability.name == UPSTREAM_RESILIENCE_CAPABILITY));
+        model.upstreams[0].retry = Some(crate::UpstreamRetry {
+            attempts: 2,
+            statuses: [503].into(),
+            on: [panel_ir::RetryCondition::Reset].into(),
+            ..crate::UpstreamRetry::default()
+        });
+        model.upstreams[0].circuit_breaker = Some(panel_ir::CircuitBreaker {
+            failure_percent: 50,
+            min_requests: 20,
+            open_ms: 30_000,
+            half_open_requests: 1,
+        });
+        model.upstreams[0].max_requests = Some(10);
+        model.upstreams[0].queue = Some(panel_ir::UpstreamQueue {
+            max_waiting: 5,
+            timeout_ms: 1_000,
+        });
+        let snapshot = compile(&model, RevisionId::new(10)).unwrap();
+        assert!(snapshot
+            .required_capabilities
+            .iter()
+            .any(|capability| capability.name == UPSTREAM_RESILIENCE_CAPABILITY));
+        let pool = &snapshot.upstream_pools[0];
+        assert_eq!(pool.retry_policy.attempts, 2);
+        assert!(pool.retry_policy.retry_statuses.contains(&503));
+        assert_eq!(pool.max_requests, Some(10));
+        assert_eq!(pool.queue.unwrap().max_waiting, 5);
+        assert!(pool.circuit_breaker.is_some());
+
+        model.upstreams[0].max_requests = None;
+        let messages: Vec<String> = crate::validate(&model)
+            .into_iter()
+            .map(|diagnostic| diagnostic.message)
+            .collect();
+        assert!(
+            messages.iter().any(|message| message
+                == "the upstream queues requests without a limit of requests at once"),
+            "{messages:?}"
         );
     }
 

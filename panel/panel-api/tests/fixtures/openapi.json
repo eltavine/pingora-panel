@@ -77970,6 +77970,43 @@
           }
         }
       },
+      "CircuitBreaker": {
+        "type": "object",
+        "description": "Opens an upstream's circuit on a share of failures.",
+        "required": [
+          "failure_percent",
+          "min_requests",
+          "open_ms",
+          "half_open_requests"
+        ],
+        "properties": {
+          "failure_percent": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Failures per hundred requests of the last ten seconds that open it.",
+            "minimum": 0
+          },
+          "half_open_requests": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Trial requests let through; all must succeed to close it.",
+            "minimum": 0
+          },
+          "min_requests": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Requests the last ten seconds need before it may open.",
+            "minimum": 0
+          },
+          "open_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How long it stays open before trial requests go through.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "ClaimNamesBody": {
         "type": "object",
         "description": "The claims that give a person's attributes.",
@@ -83660,6 +83697,36 @@
           }
         }
       },
+      "RetryBudget": {
+        "type": "object",
+        "description": "Retries as a share of an upstream's requests over the last ten seconds.",
+        "required": [
+          "percent"
+        ],
+        "properties": {
+          "min_per_second": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Retries allowed per second however few requests there are.",
+            "minimum": 0
+          },
+          "percent": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Retries allowed per hundred requests.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "RetryCondition": {
+        "type": "string",
+        "description": "A failure retried besides failed connections, which always are.",
+        "enum": [
+          "timeout",
+          "reset"
+        ]
+      },
       "Revision": {
         "type": "object",
         "required": [
@@ -86333,6 +86400,17 @@
           "balancing": {
             "$ref": "#/components/schemas/LoadBalancingPolicy"
           },
+          "circuit_breaker": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CircuitBreaker",
+                "description": "Answers requests at once with 503 while too many of them fail."
+              }
+            ]
+          },
           "connection": {
             "$ref": "#/components/schemas/UpstreamConnectionPolicy"
           },
@@ -86361,6 +86439,15 @@
             "type": "string",
             "format": "uuid"
           },
+          "max_requests": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Requests the upstream handles at once across its nodes.",
+            "minimum": 0
+          },
           "name": {
             "type": "string"
           },
@@ -86386,6 +86473,28 @@
               }
             ]
           },
+          "queue": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UpstreamQueue",
+                "description": "Where requests over `max_requests` wait instead of getting 503."
+              }
+            ]
+          },
+          "retry": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UpstreamRetry",
+                "description": "What failed requests are retried, how often and within what budget."
+              }
+            ]
+          },
           "tls": {
             "$ref": "#/components/schemas/UpstreamTlsPolicy"
           },
@@ -86407,6 +86516,10 @@
             ],
             "format": "int64",
             "minimum": 0
+          },
+          "h2c": {
+            "type": "boolean",
+            "description": "Speaks HTTP/2 with prior knowledge (h2c) to plaintext endpoints, as\ngRPC servers expect."
           },
           "http2": {
             "type": "boolean",
@@ -86552,6 +86665,16 @@
           "balancing": {
             "$ref": "#/components/schemas/LoadBalancingPolicy"
           },
+          "circuit_breaker": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CircuitBreaker"
+              }
+            ]
+          },
           "connection": {
             "$ref": "#/components/schemas/UpstreamConnectionPolicy"
           },
@@ -86570,6 +86693,14 @@
               "string",
               "null"
             ]
+          },
+          "max_requests": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
           },
           "name": {
             "type": "string"
@@ -86593,6 +86724,26 @@
               },
               {
                 "$ref": "#/components/schemas/PassiveHealthPolicy"
+              }
+            ]
+          },
+          "queue": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UpstreamQueue"
+              }
+            ]
+          },
+          "retry": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UpstreamRetry"
               }
             ]
           },
@@ -86656,6 +86807,79 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpstreamQueue": {
+        "type": "object",
+        "description": "Requests over an upstream's limit wait here, first in, first out.",
+        "required": [
+          "max_waiting",
+          "timeout_ms"
+        ],
+        "properties": {
+          "max_waiting": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Requests that may wait at once; more are answered with 503.",
+            "minimum": 0
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The longest a request waits before it is answered with 503.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpstreamRetry": {
+        "type": "object",
+        "description": "Retries of an upstream's failed requests, each on a node not yet tried.\nFailed connections are always retried; requests that may have reached\nthe upstream only when their method is idempotent.",
+        "required": [
+          "attempts"
+        ],
+        "properties": {
+          "attempts": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Retries after the first try.",
+            "minimum": 0
+          },
+          "backoff_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The longest wait before the first retry, doubled for each later one;\neach wait is drawn at random up to it.",
+            "minimum": 0
+          },
+          "budget": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RetryBudget"
+              }
+            ]
+          },
+          "on": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RetryCondition"
+            },
+            "description": "Failures retried besides failed connections.",
+            "uniqueItems": true
+          },
+          "statuses": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "Response statuses retried, such as 502, 503 and 504.",
+            "uniqueItems": true
           }
         },
         "additionalProperties": false

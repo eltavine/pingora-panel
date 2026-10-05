@@ -29,7 +29,8 @@ pub use edit::{checked, NodeInput, RouteInput, SiteBundle, SiteInput, UpstreamIn
 pub use http::{FieldChanges, HttpPolicy};
 pub use model::{
     entity_tag, Action, ConfigModel, Domain, Listener, MatchKind, Route, RouteCondition,
-    RouteMatch, Site, SiteKind, TlsProfile, TlsProfileInput, Upstream, UpstreamNode, ValueTest,
+    RouteMatch, Site, SiteKind, TlsProfile, TlsProfileInput, Upstream, UpstreamNode, UpstreamRetry,
+    ValueTest,
 };
 /// Whether a value is an RFC 9110 token, and why a route regular expression
 /// would not compile, as the gateway judges them.

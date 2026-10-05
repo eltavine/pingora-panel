@@ -2,7 +2,10 @@
 //! service stores and formats, with defaults left out.
 
 use crate::{
-    lower::{print_access, print_policy, print_rate, CODINGS, DEFAULT_REALM},
+    lower::{
+        print_access, print_breaker, print_policy, print_queue, print_rate, print_retry, CODINGS,
+        DEFAULT_REALM,
+    },
     values::{print_bool, print_duration_ms, print_size},
     variables::{escape, print_hash_key},
     LANGUAGE_VERSION,
@@ -391,6 +394,9 @@ pub fn upstream(upstream: &Upstream) -> Directive {
     if connection.http2 {
         body.push(Directive::simple("http2", ["on"]));
     }
+    if connection.h2c {
+        body.push(Directive::simple("h2c", ["on"]));
+    }
     if let Some(check) = &upstream.health_check {
         let mut args = Vec::new();
         match check.protocol {
@@ -423,6 +429,18 @@ pub fn upstream(upstream: &Upstream) -> Directive {
                 format!("eject={}", print_duration_ms(passive.ejection_ms)),
             ],
         ));
+    }
+    if let Some(retry) = &upstream.retry {
+        body.push(Directive::simple("retry", print_retry(retry)));
+    }
+    if let Some(breaker) = &upstream.circuit_breaker {
+        body.push(Directive::simple("circuit_breaker", print_breaker(breaker)));
+    }
+    if let Some(max) = upstream.max_requests {
+        body.push(Directive::simple("max_requests", [max.to_string()]));
+    }
+    if let Some(queue) = &upstream.queue {
+        body.push(Directive::simple("queue", print_queue(queue)));
     }
     if let Some(note) = &upstream.note {
         body.push(Directive::simple("note", [note.clone()]));

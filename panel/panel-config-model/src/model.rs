@@ -5,8 +5,9 @@ use crate::security::SecurityPolicy;
 use chrono::{DateTime, Utc};
 use panel_domain::{CertificateId, ContentHash, NormalizedHost};
 use panel_ir::{
-    AccessLog, ActiveHealthCheck, ListenerProtocols, LoadBalancingPolicy, LoggingPolicy,
-    PassiveHealthPolicy, RealIpHeader, StrictTransportSecurity, UpstreamConnectionPolicy,
+    AccessLog, ActiveHealthCheck, CircuitBreaker, ListenerProtocols, LoadBalancingPolicy,
+    LoggingPolicy, PassiveHealthPolicy, RealIpHeader, RetryBudget, RetryCondition, RetryPolicy,
+    StrictTransportSecurity, UpstreamConnectionPolicy, UpstreamPoolSpec, UpstreamQueue,
     UpstreamTlsPolicy, WwwRedirect,
 };
 use serde::{Deserialize, Serialize};
@@ -512,10 +513,79 @@ pub struct Upstream {
     pub health_check: Option<ActiveHealthCheck>,
     #[serde(default)]
     pub passive_health: Option<PassiveHealthPolicy>,
+    /// What failed requests are retried, how often and within what budget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry: Option<UpstreamRetry>,
+    /// Answers requests at once with 503 while too many of them fail.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub circuit_breaker: Option<CircuitBreaker>,
+    /// Requests the upstream handles at once across its nodes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_requests: Option<u32>,
+    /// Where requests over `max_requests` wait instead of getting 503.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue: Option<UpstreamQueue>,
     #[serde(default)]
     pub note: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl Upstream {
+    /// The pool's retries, circuit, limit and queue as the gateway takes
+    /// them, without its nodes.
+    pub fn resilience(&self) -> UpstreamPoolSpec {
+        let mut pool = UpstreamPoolSpec::new(
+            panel_domain::UpstreamPoolId::new(self.id.to_string()).expect("a UUID is a pool ID"),
+            self.name.clone(),
+            Vec::new(),
+        );
+        pool.retry_policy = self
+            .retry
+            .as_ref()
+            .map_or_else(RetryPolicy::none, UpstreamRetry::policy);
+        pool.connection = self.connection.clone();
+        pool.circuit_breaker = self.circuit_breaker;
+        pool.max_requests = self.max_requests;
+        pool.queue = self.queue;
+        pool
+    }
+}
+
+/// Retries of an upstream's failed requests, each on a node not yet tried.
+/// Failed connections are always retried; requests that may have reached
+/// the upstream only when their method is idempotent.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
+pub struct UpstreamRetry {
+    /// Retries after the first try.
+    pub attempts: u32,
+    /// Response statuses retried, such as 502, 503 and 504.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub statuses: BTreeSet<u16>,
+    /// Failures retried besides failed connections.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub on: BTreeSet<RetryCondition>,
+    /// The longest wait before the first retry, doubled for each later one;
+    /// each wait is drawn at random up to it.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub backoff_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<RetryBudget>,
+}
+
+impl UpstreamRetry {
+    pub fn policy(&self) -> RetryPolicy {
+        RetryPolicy {
+            attempts: self.attempts,
+            retry_statuses: self.statuses.clone(),
+            retry_on: self.on.clone(),
+            backoff_ms: self.backoff_ms,
+            budget: self.budget,
+            ..RetryPolicy::none()
+        }
+    }
 }
 
 fn round_robin() -> LoadBalancingPolicy {

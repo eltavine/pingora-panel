@@ -297,6 +297,9 @@ fn validate_upstreams(model: &ConfigModel, report: &mut Report) -> BTreeSet<Uuid
             MAX_NOTE_BYTES,
             false,
         );
+        for problem in panel_engine::resilience_problems(&upstream.resilience()) {
+            report.error(&resource, format!("the upstream {problem}"));
+        }
         let mut nodes = HashSet::new();
         for node in &upstream.nodes {
             let node_resource = format!("{resource}/nodes/{}", node.id);
@@ -718,6 +721,10 @@ mod tests {
             connection: Default::default(),
             health_check: None,
             passive_health: None,
+            retry: None,
+            circuit_breaker: None,
+            max_requests: None,
+            queue: None,
             note: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),

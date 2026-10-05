@@ -27,6 +27,7 @@ mod conditions;
 mod http;
 mod listener;
 mod logging;
+mod resilience;
 mod route;
 mod security;
 mod server;
@@ -35,6 +36,7 @@ mod upstream;
 
 pub(crate) use http::CODINGS;
 pub(crate) use logging::{print_access, print_policy};
+pub(crate) use resilience::{print_breaker, print_queue, print_retry};
 pub(crate) use security::{print_rate, DEFAULT_REALM};
 
 /// How references in a value are resolved.

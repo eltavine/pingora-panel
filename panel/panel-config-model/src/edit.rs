@@ -6,7 +6,7 @@ use crate::{
     http::HttpPolicy,
     model::{
         Action, ConfigModel, Domain, Listener, Route, RouteMatch, Site, TlsProfile, Upstream,
-        UpstreamNode,
+        UpstreamNode, UpstreamRetry,
     },
     security::SecurityPolicy,
     validate::validate,
@@ -16,8 +16,9 @@ use chrono::{DateTime, Utc};
 use panel_domain::NormalizedHost;
 use panel_errors::{Diagnostic, PanelError, Result};
 use panel_ir::{
-    AccessLog, ActiveHealthCheck, LoadBalancingPolicy, PassiveHealthPolicy,
-    StrictTransportSecurity, UpstreamConnectionPolicy, UpstreamTlsPolicy, WwwRedirect,
+    AccessLog, ActiveHealthCheck, CircuitBreaker, LoadBalancingPolicy, PassiveHealthPolicy,
+    StrictTransportSecurity, UpstreamConnectionPolicy, UpstreamQueue, UpstreamTlsPolicy,
+    WwwRedirect,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
@@ -119,6 +120,14 @@ pub struct UpstreamInput {
     pub health_check: Option<ActiveHealthCheck>,
     #[serde(default)]
     pub passive_health: Option<PassiveHealthPolicy>,
+    #[serde(default)]
+    pub retry: Option<UpstreamRetry>,
+    #[serde(default)]
+    pub circuit_breaker: Option<CircuitBreaker>,
+    #[serde(default)]
+    pub max_requests: Option<u32>,
+    #[serde(default)]
+    pub queue: Option<UpstreamQueue>,
     #[serde(default)]
     pub note: Option<String>,
 }
@@ -566,6 +575,10 @@ impl ConfigModel {
             connection: input.connection,
             health_check: input.health_check,
             passive_health: input.passive_health,
+            retry: input.retry,
+            circuit_breaker: input.circuit_breaker,
+            max_requests: input.max_requests,
+            queue: input.queue,
             note: input.note,
             created_at: now,
             updated_at: now,
@@ -591,6 +604,10 @@ impl ConfigModel {
             connection: input.connection,
             health_check: input.health_check,
             passive_health: input.passive_health,
+            retry: input.retry,
+            circuit_breaker: input.circuit_breaker,
+            max_requests: input.max_requests,
+            queue: input.queue,
             note: input.note,
             created_at: upstream.created_at,
             updated_at: now,
@@ -1019,6 +1036,10 @@ mod tests {
             connection: Default::default(),
             health_check: None,
             passive_health: None,
+            retry: None,
+            circuit_breaker: None,
+            max_requests: None,
+            queue: None,
             note: None,
         }
     }
