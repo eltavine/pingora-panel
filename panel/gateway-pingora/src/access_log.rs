@@ -213,6 +213,50 @@ fn header(headers: &HeaderMap, name: header::HeaderName) -> Option<&str> {
     headers.get(name).and_then(|value| value.to_str().ok())
 }
 
+/// Where a Lua message comes from.
+pub(crate) struct LuaPlace<'a> {
+    pub request_id: Option<&'a str>,
+    pub listener: &'a str,
+    pub site: Option<&'a str>,
+    pub route: Option<&'a str>,
+    pub phase: &'static str,
+    pub script: &'a str,
+}
+
+/// OpenTelemetry's severity for an `ngx.log` level.
+fn lua_severity(level: &str) -> &'static str {
+    match level {
+        "debug" => "DEBUG",
+        "info" | "notice" => "INFO",
+        "warn" => "WARN",
+        "error" => "ERROR",
+        _ => "FATAL",
+    }
+}
+
+/// A message a script logged, or the gateway logged about a script's run,
+/// as a JSON line of the error log.
+pub(crate) fn lua(
+    place: &LuaPlace<'_>,
+    level: &str,
+    message: &str,
+    logging: &LoggingPlan,
+    now: DateTime<Utc>,
+) -> Vec<u8> {
+    let mut record = Record::new(now, "pingora_panel.lua");
+    record.field("severity_text", lua_severity(level));
+    record.field("pingora_panel.lua.level", level);
+    record.field("message", message);
+    record.field("pingora_panel.lua.phase", place.phase);
+    record.field("pingora_panel.lua.script", place.script);
+    record.some("pingora_panel.request.id", place.request_id);
+    record.field("pingora_panel.listener.id", place.listener);
+    record.some("pingora_panel.site.id", place.site);
+    record.some("pingora_panel.route.id", place.route);
+    record.some("pingora_panel.revision.id", logging.revision.as_ref());
+    record.finish()
+}
+
 /// An access record as a JSON line.
 pub(crate) fn json(
     served: &Served<'_>,

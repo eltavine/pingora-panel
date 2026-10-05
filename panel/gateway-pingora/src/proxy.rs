@@ -44,7 +44,14 @@ use std::{
     time::Instant,
 };
 
+mod lua_phases;
+
+use lua_phases::LuaStep;
+
 const REDIRECT_STATUS: u16 = 308;
+/// Times the rewrite phase may send a request to another route, as nginx
+/// allows ten internal redirects.
+const MOST_REWRITES: usize = 10;
 /// Forwarding headers dropped from peers that are not trusted proxies, so
 /// upstreams are not told a forged client.
 const UNTRUSTED_FORWARDING: [&str; 3] = ["x-forwarded-for", "x-real-ip", "forwarded"];
@@ -160,6 +167,18 @@ pub(crate) struct RequestContext {
     started: Instant,
     /// Counts the request as active while it is measured.
     active: Option<ActiveRequest>,
+    /// A body a script set, sent upstream instead of the client's.
+    lua_body: Option<bytes::Bytes>,
+    /// A body filter ended the response before the upstream did.
+    lua_body_done: bool,
+    /// Tries the balancer allows beyond the upstream's own.
+    lua_more_tries: u32,
+    /// Tries the balancer chose for.
+    lua_tries: u32,
+    /// How the last try the balancer chose ended, for `get_last_failure`.
+    lua_last_failure: Option<(String, Option<u16>)>,
+    /// Where the balancer sent the current try.
+    lua_peer: Option<SocketAddr>,
 }
 
 impl RequestContext {
@@ -238,6 +257,7 @@ impl ProxyHttp for PanelProxy {
         modules.add_module(ResponseCompressionBuilder::enable(1));
         modules.add_module(Box::new(StrictTransportBuilder));
         modules.add_module(Box::new(HttpPolicyBuilder));
+        modules.add_module(Box::new(lua_phases::LuaModuleBuilder));
     }
 
     fn new_ctx(&self) -> RequestContext {
@@ -267,6 +287,12 @@ impl ProxyHttp for PanelProxy {
             body_seen: 0,
             started: Instant::now(),
             active: None,
+            lua_body: None,
+            lua_body_done: false,
+            lua_more_tries: 0,
+            lua_tries: 0,
+            lua_last_failure: None,
+            lua_peer: None,
         }
     }
 
@@ -380,8 +406,23 @@ impl ProxyHttp for PanelProxy {
             responses::redirect(session, REDIRECT_STATUS, &location).await?;
             return Ok(true);
         }
+        let site_path = panel_routing::path::normalize(session.req_header().uri.path())
+            .map_or_else(
+                || session.req_header().uri.path().to_owned(),
+                |path| path.into_owned(),
+            );
+        self.lua_prepare_header_filter(session, ctx, &site_path, host_name);
+        if let Some(hook) = site.lua.server_rewrite.clone() {
+            let path = site_path;
+            if let LuaStep::Done = self
+                .lua_request(session, ctx, &hook, &path, host_name, true)
+                .await?
+            {
+                return Ok(true);
+            }
+        }
 
-        let Some(path) = panel_routing::path::normalize(session.req_header().uri.path())
+        let Some(mut path) = panel_routing::path::normalize(session.req_header().uri.path())
             .map(|path| path.into_owned())
         else {
             responses::plain(
@@ -399,12 +440,54 @@ impl ProxyHttp for PanelProxy {
             path: &path,
             client: ctx.client,
         };
-        let Some(route_index) = routing.select(site_index, &request) else {
+        let Some(mut route_index) = routing.select(site_index, &request) else {
             responses::plain(session, 404, "not found", &[]).await?;
             return Ok(true);
         };
         ctx.route = Some(route_index);
+        for _ in 0..MOST_REWRITES {
+            let Some(hook) = site.route(route_index).lua.rewrite.clone() else {
+                break;
+            };
+            let proxied = matches!(site.route(route_index).target, RouteTarget::Proxy(_));
+            match self
+                .lua_request(session, ctx, &hook, &path, host_name, proxied)
+                .await?
+            {
+                LuaStep::Done => return Ok(true),
+                LuaStep::Go { jump: false } => break,
+                LuaStep::Go { jump: true } => {
+                    let Some(rewritten) =
+                        panel_routing::path::normalize(session.req_header().uri.path())
+                            .map(|path| path.into_owned())
+                    else {
+                        responses::plain(
+                            session,
+                            400,
+                            "the rewritten target is not an absolute path",
+                            &[],
+                        )
+                        .await?;
+                        return Ok(true);
+                    };
+                    path = rewritten;
+                    let request = Routed {
+                        header: session.req_header(),
+                        host: host_name,
+                        path: &path,
+                        client: ctx.client,
+                    };
+                    let Some(next) = routing.select(site_index, &request) else {
+                        responses::plain(session, 404, "not found", &[]).await?;
+                        return Ok(true);
+                    };
+                    route_index = next;
+                    ctx.route = Some(route_index);
+                }
+            }
+        }
         let route = site.route(route_index);
+        self.lua_prepare_header_filter(session, ctx, &path, host_name);
         let gates: Vec<usize> = site.security.into_iter().chain(route.security).collect();
         if !gates.is_empty() {
             let mut admission = Admission::default();
@@ -433,6 +516,15 @@ impl ProxyHttp for PanelProxy {
                 session.set_read_timeout(Some(timeout));
             }
             ctx.admission = admission;
+        }
+        if let Some(hook) = route.lua.access.clone() {
+            let proxied = matches!(route.target, RouteTarget::Proxy(_));
+            if let LuaStep::Done = self
+                .lua_request(session, ctx, &hook, &path, host_name, proxied)
+                .await?
+            {
+                return Ok(true);
+            }
         }
         let http: Vec<&HttpPolicy> = site
             .http
@@ -562,6 +654,12 @@ impl ProxyHttp for PanelProxy {
                 responses::send(session, *status, &headers, body).await?;
                 Ok(true)
             }
+            RouteTarget::Lua(hook) => {
+                let hook = hook.clone();
+                self.lua_request(session, ctx, &hook, &path, host_name, false)
+                    .await?;
+                Ok(true)
+            }
         }
     }
 
@@ -587,6 +685,29 @@ impl ProxyHttp for PanelProxy {
             let delay = pool.retry.delay(ctx.retries);
             if !delay.is_zero() {
                 tokio::time::sleep(delay).await;
+            }
+        }
+        if let Some(hook) = pool.balancer.clone() {
+            if let Some((address, timeouts)) = self
+                .lua_balancer(session, ctx, &hook, pool.id.as_str())
+                .await?
+            {
+                let mut peer = pool.peer_at(address, is_upgrade_req(session.req_header()));
+                if let Some(timeout) = timeouts.connect {
+                    peer.options.connection_timeout = Some(timeout);
+                }
+                if let Some(timeout) = timeouts.read {
+                    peer.options.read_timeout = Some(timeout);
+                }
+                if let Some(timeout) = timeouts.send {
+                    peer.options.write_timeout = Some(timeout);
+                }
+                ctx.lua_peer = Some(address);
+                ctx.endpoint = None;
+                ctx.lease = None;
+                ctx.failure_recorded = true;
+                ctx.sent_at = Some(Instant::now());
+                return Ok(Box::new(peer));
             }
         }
         let endpoint = pool.select(&key, &ctx.tried).ok_or_else(|| {
@@ -634,6 +755,10 @@ impl ProxyHttp for PanelProxy {
         if let Some(client) = ctx.client {
             upstream_request.insert_header(X_REAL_IP.clone(), client.to_string())?;
         }
+        if let Some(body) = &ctx.lua_body {
+            upstream_request.remove_header(&header::TRANSFER_ENCODING);
+            upstream_request.insert_header(header::CONTENT_LENGTH, body.len().to_string())?;
+        }
         http_policy::apply_to_request(upstream_request, &ctx.http_request)
     }
 
@@ -655,7 +780,30 @@ impl ProxyHttp for PanelProxy {
             // An upgraded connection idles as long as its protocol wants.
             session.set_read_timeout(None);
         }
+        let bodied = !matches!(upstream_response.status.as_u16(), 100..=199 | 204 | 304)
+            && session.req_header().method != http::Method::HEAD;
+        if bodied && Self::lua_hook(ctx, |hooks| &hooks.body_filter).is_some() {
+            // The filter may change the body's length.
+            upstream_response.remove_header(&header::CONTENT_LENGTH);
+            if !session.is_http2() && session.req_header().version == http::Version::HTTP_11 {
+                upstream_response.insert_header(header::TRANSFER_ENCODING, "chunked")?;
+            }
+        }
         Ok(())
+    }
+
+    async fn response_body_filter(
+        &self,
+        session: &mut Session,
+        body: &mut Option<bytes::Bytes>,
+        end_of_stream: bool,
+        ctx: &mut RequestContext,
+    ) -> pingora_core::Result<Option<std::time::Duration>> {
+        if let Some(hook) = Self::lua_hook(ctx, |hooks| &hooks.body_filter) {
+            self.lua_body_filter(session, ctx, &hook, body, end_of_stream)
+                .await?;
+        }
+        Ok(None)
     }
 
     async fn request_body_filter(
@@ -666,6 +814,10 @@ impl ProxyHttp for PanelProxy {
         ctx: &mut RequestContext,
     ) -> pingora_core::Result<()> {
         if session.was_upgraded() {
+            return Ok(());
+        }
+        if ctx.lua_body.is_some() {
+            *body = ctx.lua_body.take();
             return Ok(());
         }
         if let (Some(limit), Some(chunk)) = (ctx.admission.max_body_bytes, body.as_ref()) {
@@ -758,6 +910,14 @@ impl ProxyHttp for PanelProxy {
             Some(&error),
         );
         ctx.record_outcome(true);
+        if ctx.lua_peer.take().is_some() {
+            ctx.lua_last_failure = Some(("failed".into(), None));
+            if ctx.lua_more_tries > 0 {
+                ctx.lua_more_tries -= 1;
+                error.set_retry(true);
+                return error;
+            }
+        }
         // Nothing reached the upstream, so trying another endpoint is safe.
         let retried = ctx
             .upstream()
@@ -822,6 +982,8 @@ impl ProxyHttp for PanelProxy {
     ) -> FailToProxy {
         http_policy::disable_compression(session);
         let code = match (error.etype(), error.esource()) {
+            // A script closed the connection without an answer.
+            (ErrorType::HTTPStatus(444), _) => 0,
             (ErrorType::HTTPStatus(code), _) => *code,
             (ErrorType::ReadTimedout, ErrorSource::Downstream) => 408,
             (_, ErrorSource::Upstream) => 502,
@@ -877,6 +1039,9 @@ impl ProxyHttp for PanelProxy {
             }
         }
         ctx.lease = None;
+        if let Some(hook) = Self::lua_hook(ctx, |hooks| &hooks.log) {
+            self.lua_log_phase(session, ctx, &hook, status).await;
+        }
         self.measure(session, error, ctx, status);
         self.record(session, error, ctx, status);
         if tracing::enabled!(tracing::Level::DEBUG) {

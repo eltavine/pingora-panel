@@ -1575,6 +1575,7 @@ dependencies = [
  "panel-engine",
  "panel-errors",
  "panel-ir",
+ "panel-lua",
  "panel-metrics",
  "panel-routing",
  "parking_lot",

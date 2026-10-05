@@ -18,6 +18,7 @@ mod hsts;
 mod http_policy;
 mod listeners;
 mod log_files;
+mod lua;
 mod proxy;
 mod request_identity;
 mod resilience;

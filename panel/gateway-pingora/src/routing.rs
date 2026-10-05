@@ -2,7 +2,11 @@
 //! `panel-routing` decides which site and route take a request, and the
 //! table keeps what serving them needs.
 
-use crate::{access_log::AccessPlan, template::Template};
+use crate::{
+    access_log::AccessPlan,
+    lua::{Hook, HookIndex, Hooks},
+    template::Template,
+};
 use http::HeaderValue;
 use panel_domain::{RouteId, SiteId};
 use panel_errors::{PanelError, Result};
@@ -38,6 +42,9 @@ pub(crate) struct SiteRoutes {
     pub http: Option<usize>,
     /// How requests the site takes without a route are logged.
     pub access: AccessPlan,
+    /// Lua hooks for the site's requests; `server_rewrite` runs before the
+    /// route is chosen.
+    pub lua: Hooks,
     www: HashMap<String, String>,
     /// Aligned with the router's ranked routes of the site.
     routes: Vec<CompiledRoute>,
@@ -52,6 +59,8 @@ pub(crate) struct CompiledRoute {
     /// The HTTP policy the route's requests pass after the site's.
     pub http: Option<usize>,
     pub access: AccessPlan,
+    /// The Lua hooks the route's requests run, inheritance resolved.
+    pub lua: Hooks,
 }
 
 pub(crate) enum RouteTarget {
@@ -68,6 +77,8 @@ pub(crate) enum RouteTarget {
         content_type: Option<String>,
         retry_after: Option<u32>,
     },
+    /// `content_by_lua`.
+    Lua(Hook),
 }
 
 /// Resolves IR references to compiled pool and static content indexes.
@@ -76,6 +87,7 @@ pub(crate) struct Targets<'a> {
     pub statics: &'a HashMap<&'a str, usize>,
     pub policies: &'a HashMap<&'a str, usize>,
     pub http: &'a HashMap<&'a str, usize>,
+    pub lua: &'a HookIndex,
 }
 
 fn http_policy(
@@ -170,6 +182,12 @@ impl RoutingTable {
                             &site.access_log,
                             &route.access_log,
                         ])?,
+                        lua: targets
+                            .lua
+                            .routes
+                            .get(route.id.as_str())
+                            .cloned()
+                            .unwrap_or_default(),
                     })
                 })
                 .collect::<Result<_>>()?;
@@ -202,6 +220,12 @@ impl RoutingTable {
                     site.header_policy_id.as_ref(),
                 )?,
                 access: AccessPlan::resolve(&[&snapshot.logging.access, &site.access_log])?,
+                lua: targets
+                    .lua
+                    .sites
+                    .get(site.id.as_str())
+                    .cloned()
+                    .unwrap_or_default(),
                 www,
                 routes,
             });
@@ -278,11 +302,18 @@ fn compile_target(
     targets: &Targets<'_>,
 ) -> Result<RouteTarget> {
     Ok(match action {
-        RouteAction::Lua { .. } => {
-            return Err(PanelError::unsupported_capability(format!(
-                "route {route} answers with a Lua handler, which this gateway does not run"
-            )))
-        }
+        RouteAction::Lua { .. } => RouteTarget::Lua(
+            targets
+                .lua
+                .contents
+                .get(route.as_str())
+                .cloned()
+                .ok_or_else(|| {
+                    PanelError::validation_failed(format!(
+                        "route {route} has a Lua handler that was not compiled"
+                    ))
+                })?,
+        ),
         RouteAction::Proxy { upstream_pool_id } => RouteTarget::Proxy(
             *targets
                 .pools
@@ -354,6 +385,7 @@ mod tests {
                 statics: &statics,
                 policies: &policies,
                 http: &http,
+                lua: &HookIndex::default(),
             },
         )
     }

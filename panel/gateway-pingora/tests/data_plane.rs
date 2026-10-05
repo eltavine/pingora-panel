@@ -2419,3 +2419,201 @@ async fn grpc_goes_over_http2_both_ways_with_its_trailers() {
     drop(sender);
     gateway.stop().await;
 }
+
+fn lua_script(id: &str, source: &str) -> panel_ir::LuaScript {
+    panel_ir::LuaScript {
+        id: id.into(),
+        file: "main.conf".into(),
+        line: 1,
+        source: source.into(),
+        sha256: panel_domain::ContentHash::from_bytes(source.as_bytes())
+            .as_str()
+            .into(),
+        module: None,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn lua_handlers_rewrite_answer_filter_and_choose_peers() {
+    use panel_ir::{LuaFallback, LuaHandler, LuaSharedDict, LUA_SCRIPTS_CAPABILITY};
+
+    let upstream = echo_upstream().await;
+    let unreachable = free_address();
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    snapshot
+        .required_capabilities
+        .push(CapabilityRequirement::new(LUA_SCRIPTS_CAPABILITY, "1"));
+    let balancer = format!(
+        "assert(require('ngx.balancer').set_current_peer('127.0.0.1', {}))",
+        upstream.port()
+    );
+    snapshot.lua.scripts = vec![
+        lua_script("rewrite", "if ngx.var.uri == '/old' then ngx.req.set_uri('/new') end"),
+        lua_script(
+            "content",
+            "ngx.header['X-From'] = 'lua' ngx.say('hello ', ngx.var.arg_name or 'nobody')",
+        ),
+        lua_script(
+            "access",
+            "if ngx.req.get_headers()['x-key'] ~= 'secret' then return ngx.exit(403) end ngx.req.set_header('X-Checked', 'yes')",
+        ),
+        lua_script("header", "ngx.header['X-Filtered'] = tostring(ngx.status)"),
+        lua_script("seen", "ngx.header['X-Seen'] = ngx.var.uri"),
+        lua_script("body", "ngx.arg[1] = string.upper(ngx.arg[1])"),
+        lua_script("balancer", &balancer),
+        lua_script("broken", "error('nope')"),
+        lua_script("loop", "while true do end"),
+        lua_script(
+            "count",
+            "local hits = ngx.shared.hits hits:safe_add('n', 0) ngx.say(hits:incr('n', 1))",
+        ),
+    ];
+    snapshot.lua.shared_dicts.push(LuaSharedDict {
+        name: "hits".into(),
+        capacity_bytes: 1 << 20,
+    });
+    let mut shop = site(&["shop.test"]);
+    shop.lua.server_rewrite = Some(LuaHandler::new("rewrite"));
+    snapshot.sites.push(shop);
+    let mut checked = route("checked", 3, prefix("/checked"), proxy("app"));
+    checked.lua.access = Some(LuaHandler::new("access"));
+    checked.lua.header_filter = Some(LuaHandler::new("header"));
+    let mut upper = LuaHandler::new("body");
+    upper.allow.body = true;
+    checked.lua.body_filter = Some(upper);
+    let mut broken = LuaHandler::new("broken");
+    broken.on_error = LuaFallback::Status { status: 503 };
+    let mut looping = LuaHandler::new("loop");
+    looping.time_limit_ms = 50;
+    let mut generated = route(
+        "new",
+        1,
+        prefix("/new"),
+        RouteAction::respond(200, Some("new".into())),
+    );
+    generated.lua.header_filter = Some(LuaHandler::new("seen"));
+    snapshot.routes = vec![
+        generated,
+        route(
+            "content",
+            2,
+            prefix("/lua"),
+            RouteAction::Lua {
+                handler: LuaHandler::new("content"),
+            },
+        ),
+        checked,
+        route("balanced", 4, prefix("/balanced"), proxy("lb")),
+        route(
+            "broken",
+            5,
+            prefix("/broken"),
+            RouteAction::Lua { handler: broken },
+        ),
+        route(
+            "loop",
+            6,
+            prefix("/loop"),
+            RouteAction::Lua { handler: looping },
+        ),
+        route(
+            "count",
+            7,
+            prefix("/count"),
+            RouteAction::Lua {
+                handler: LuaHandler::new("count"),
+            },
+        ),
+    ];
+    snapshot.upstream_pools.push(pool("app", &[upstream]));
+    let mut lb = pool("lb", &[unreachable]);
+    let mut choose = LuaHandler::new("balancer");
+    choose.allow.upstream = true;
+    lb.balancer = Some(choose);
+    snapshot.upstream_pools.push(lb);
+    let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
+    wait_for(listen).await;
+
+    let body = |response: &Response| String::from_utf8_lossy(&response.body).into_owned();
+    let rewritten = get(listen, Some("shop.test"), "/old", "").await;
+    assert_eq!(body(&rewritten), "new", "server_rewrite chose the route");
+    assert_eq!(
+        rewritten.headers["x-seen"], "/new",
+        "the header filter runs on responses the gateway makes"
+    );
+
+    let answered = get(listen, Some("shop.test"), "/lua?name=ann", "").await;
+    assert_eq!(answered.status, 200);
+    assert_eq!(answered.headers["x-from"], "lua");
+    assert_eq!(body(&answered), "hello ann\n");
+
+    let refused = get(listen, Some("shop.test"), "/checked", "").await;
+    assert_eq!(refused.status, 403);
+    let admitted = get(listen, Some("shop.test"), "/checked", "x-key: secret\r\n").await;
+    assert_eq!(admitted.status, 200);
+    assert_eq!(admitted.headers["x-filtered"], "200");
+    assert_eq!(admitted.headers["transfer-encoding"], "chunked");
+    let echoed = body(&admitted);
+    assert!(echoed.contains("X-CHECKED: YES"), "{echoed}");
+    assert!(echoed.contains("\r\nGET /CHECKED"), "{echoed}");
+
+    let balanced = get(listen, Some("shop.test"), "/balanced", "").await;
+    assert_eq!(balanced.status, 200, "{}", body(&balanced));
+    assert!(body(&balanced).starts_with("GET /balanced"));
+
+    assert_eq!(
+        get(listen, Some("shop.test"), "/broken", "").await.status,
+        503
+    );
+    let started = std::time::Instant::now();
+    assert_eq!(
+        get(listen, Some("shop.test"), "/loop", "").await.status,
+        500
+    );
+    assert!(started.elapsed() < Duration::from_secs(2));
+
+    for expected in ["1\n", "2\n", "3\n"] {
+        assert_eq!(
+            body(&get(listen, Some("shop.test"), "/count", "").await),
+            expected
+        );
+    }
+    gateway.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn snapshots_whose_scripts_do_not_compile_are_refused() {
+    use panel_ir::{LuaHandler, LUA_SCRIPTS_CAPABILITY};
+
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", free_address().to_string()));
+    snapshot
+        .required_capabilities
+        .push(CapabilityRequirement::new(LUA_SCRIPTS_CAPABILITY, "1"));
+    snapshot.lua.scripts = vec![lua_script("broken", "local x = \nif x then")];
+    snapshot.sites.push(site(&["shop.test"]));
+    snapshot.routes.push(route(
+        "content",
+        1,
+        prefix("/"),
+        RouteAction::Lua {
+            handler: LuaHandler::new("broken"),
+        },
+    ));
+    snapshot.refresh_content_hash();
+    let adapter = PingoraGatewayAdapter::with_options(AdapterOptions::default());
+    let error = adapter.prepare(snapshot).await.err().expect("refused");
+    assert!(
+        error
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.starts_with("main.conf:2:")),
+        "{error:?}"
+    );
+}

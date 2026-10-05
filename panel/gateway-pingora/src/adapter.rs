@@ -5,6 +5,7 @@ use crate::{
     file_checks::{self, FileChecks},
     http_policy::HttpPolicy,
     listeners::{self, ListenerPlan, SocketKey},
+    lua::{self, LuaPlan},
     routing::{RoutingTable, Targets},
     secrets::{NoSecrets, SecretSource},
     security::{LimitState, SecurityGate},
@@ -50,6 +51,7 @@ const CAPABILITIES: &[&str] = &[
     "listener.tls-settings",
     "listener.trusted-proxies",
     "log.access",
+    "lua.scripts",
     "request.security",
     "response.hsts",
     "route.conditions",
@@ -75,6 +77,7 @@ pub struct AdapterOptions {
     secrets: Arc<dyn SecretSource>,
     static_root: Option<PathBuf>,
     challenges: Option<Arc<ChallengeDirectory>>,
+    lua_vms: usize,
 }
 
 impl Default for AdapterOptions {
@@ -83,6 +86,7 @@ impl Default for AdapterOptions {
             secrets: Arc::new(NoSecrets),
             static_root: None,
             challenges: None,
+            lua_vms: std::thread::available_parallelism().map_or(1, usize::from),
         }
     }
 }
@@ -115,6 +119,12 @@ impl AdapterOptions {
         self.static_root = Some(root.into());
         self
     }
+
+    /// Lua VMs each snapshot starts: one per data-plane worker thread.
+    pub fn with_lua_vms(mut self, vms: usize) -> Self {
+        self.lua_vms = vms.max(1);
+        self
+    }
 }
 
 pub struct PingoraGatewayAdapter {
@@ -128,6 +138,9 @@ pub struct PingoraGatewayAdapter {
     bound: Mutex<BTreeSet<SocketKey>>,
     /// Rate limit and concurrency state that outlives snapshots.
     limits: Arc<LimitState>,
+    /// `ngx.shared` dictionaries, which keep their contents across
+    /// snapshots.
+    lua_dicts: Arc<panel_lua::SharedStore>,
 }
 
 /// Opaque immutable artifact built entirely before activation.
@@ -149,6 +162,8 @@ pub struct PreparedPingoraSnapshot {
     pub(crate) labels: SnapshotLabels,
     /// What records keep out and how log files rotate.
     pub(crate) logging: LoggingPlan,
+    /// The VMs of the snapshot's scripts.
+    pub(crate) lua: Option<Arc<LuaPlan>>,
 }
 
 impl Default for PingoraGatewayAdapter {
@@ -171,6 +186,7 @@ impl PingoraGatewayAdapter {
             endpoints: Arc::default(),
             bound: Mutex::default(),
             limits: Arc::default(),
+            lua_dicts: Arc::default(),
         }
     }
 
@@ -208,6 +224,16 @@ impl PingoraGatewayAdapter {
 
     pub fn adapter_version(&self) -> &'static str {
         ADAPTER_VERSION
+    }
+
+    /// Bytes each Lua VM of the active snapshot uses.
+    pub fn lua_memory(&self) -> Vec<usize> {
+        self.active
+            .load()
+            .as_ref()
+            .and_then(|prepared| prepared.lua.as_ref())
+            .map(|plan| plan.runtime.memory())
+            .unwrap_or_default()
     }
 
     /// The revision of the active snapshot.
@@ -365,29 +391,34 @@ impl PingoraGatewayAdapter {
         let static_root = self.options.static_root.clone();
         let blocking = snapshot.clone();
         let limits = Arc::clone(&self.limits);
-        let (certificates, statics, policies) = tokio::task::spawn_blocking(move || {
-            let certificates = CertificateIndex::build(&blocking, secrets.as_ref())?;
-            let statics = blocking
-                .static_content
-                .iter()
-                .map(|policy| StaticContent::compile(policy, static_root.as_deref()))
-                .collect::<Result<Vec<_>>>()?;
-            let policies = blocking
-                .security_policies
-                .iter()
-                .map(|policy| SecurityGate::compile(policy, secrets.as_ref(), &limits))
-                .collect::<Result<Vec<_>>>()?;
-            Ok::<_, PanelError>((certificates, statics, policies))
-        })
-        .await
-        .map_err(|error| {
-            PanelError::internal(format!("snapshot compilation stopped: {error}"))
-        })??;
+        let lua_dicts = Arc::clone(&self.lua_dicts);
+        let lua_vms = self.options.lua_vms;
+        let (certificates, statics, policies, (lua, lua_hooks)) =
+            tokio::task::spawn_blocking(move || {
+                let certificates = CertificateIndex::build(&blocking, secrets.as_ref())?;
+                let statics = blocking
+                    .static_content
+                    .iter()
+                    .map(|policy| StaticContent::compile(policy, static_root.as_deref()))
+                    .collect::<Result<Vec<_>>>()?;
+                let policies = blocking
+                    .security_policies
+                    .iter()
+                    .map(|policy| SecurityGate::compile(policy, secrets.as_ref(), &limits))
+                    .collect::<Result<Vec<_>>>()?;
+                let lua = lua::compile(&blocking, &lua_dicts, lua_vms)?;
+                Ok::<_, PanelError>((certificates, statics, policies, lua))
+            })
+            .await
+            .map_err(|error| {
+                PanelError::internal(format!("snapshot compilation stopped: {error}"))
+            })??;
         let mut pools = Vec::with_capacity(snapshot.upstream_pools.len());
         for pool in &snapshot.upstream_pools {
-            pools.push(
-                UpstreamPool::compile(pool, &self.endpoints, self.options.secrets.as_ref()).await?,
-            );
+            let mut compiled =
+                UpstreamPool::compile(pool, &self.endpoints, self.options.secrets.as_ref()).await?;
+            compiled.balancer = lua_hooks.balancers.get(pool.id.as_str()).cloned();
+            pools.push(compiled);
         }
         let pool_indexes: HashMap<&str, usize> = snapshot
             .upstream_pools
@@ -425,6 +456,7 @@ impl PingoraGatewayAdapter {
                 statics: &static_indexes,
                 policies: &policy_indexes,
                 http: &http_indexes,
+                lua: &lua_hooks,
             },
         )?;
         let labels = SnapshotLabels::new(&routing, &pools);
@@ -440,6 +472,7 @@ impl PingoraGatewayAdapter {
             listeners,
             labels,
             logging,
+            lua,
         })
     }
 

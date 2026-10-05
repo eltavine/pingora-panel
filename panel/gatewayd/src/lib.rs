@@ -426,7 +426,8 @@ pub async fn serve_gatewayd(
         config.worker_count().as_non_zero(),
     ));
     let resource_limits = config.resource_limits();
-    let mut adapter_options = AdapterOptions::default();
+    let mut adapter_options = AdapterOptions::default()
+        .with_lua_vms(usize::try_from(config.worker_count().as_non_zero().get()).unwrap_or(1));
     if let Some(directory) = config.secret_directory() {
         adapter_options = adapter_options
             .with_secrets(Arc::new(DirectorySecrets::new(directory)))

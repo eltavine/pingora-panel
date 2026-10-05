@@ -25,6 +25,7 @@ panel-domain.workspace = true
 panel-engine.workspace = true
 panel-errors.workspace = true
 panel-ir.workspace = true
+panel-lua.workspace = true
 panel-metrics.workspace = true
 panel-routing.workspace = true
 parking_lot.workspace = true

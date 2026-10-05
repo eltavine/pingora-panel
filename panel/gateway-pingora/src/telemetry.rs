@@ -21,11 +21,26 @@ use prometheus_client::{
         counter::Counter,
         family::Family,
         gauge::{ConstGauge, Gauge},
+        histogram::Histogram,
         TypedMetric,
     },
     registry::Unit,
 };
-use std::{sync::Arc, time::UNIX_EPOCH};
+use std::{
+    sync::Arc,
+    time::{Duration, UNIX_EPOCH},
+};
+
+/// Upper bounds of Lua run durations, in seconds: most runs take well under
+/// a millisecond.
+const LUA_BUCKETS: [f64; 14] = [
+    0.000_05, 0.000_1, 0.000_25, 0.000_5, 0.001, 0.002_5, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5,
+    1.0,
+];
+
+fn lua_histogram() -> Histogram {
+    Histogram::new(LUA_BUCKETS)
+}
 
 /// The gateway's metrics, registered once and shared by every generation of
 /// the data plane.
@@ -37,6 +52,26 @@ pub struct GatewayMetrics {
     handshakes: Family<HandshakeLabels, Counter>,
     domains: Family<DomainLabels, Counter>,
     upstream_connections: Family<ConnectionLabels, Counter>,
+    lua_runs: Family<LuaRunLabels, Counter>,
+    lua_durations: Family<LuaPhaseLabels, Histogram, fn() -> Histogram>,
+    lua_slow: Family<LuaPhaseLabels, Counter>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, EncodeLabelSet)]
+struct LuaPhaseLabels {
+    site: Option<Arc<str>>,
+    route: Option<Arc<str>>,
+    phase: &'static str,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, EncodeLabelSet)]
+struct LuaRunLabels {
+    site: Option<Arc<str>>,
+    route: Option<Arc<str>>,
+    phase: &'static str,
+    /// `ok`, or how the run failed: `error`, `timeout`, `work`, `memory`
+    /// or `refused`.
+    outcome: &'static str,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, EncodeLabelSet)]
@@ -73,6 +108,9 @@ impl GatewayMetrics {
             handshakes: Family::default(),
             domains: Family::default(),
             upstream_connections: Family::default(),
+            lua_runs: Family::default(),
+            lua_durations: Family::new_with_constructor(lua_histogram),
+            lua_slow: Family::default(),
         };
         registry.register(
             "pingora_panel_gateway_open_connections",
@@ -94,7 +132,50 @@ impl GatewayMetrics {
             "Number of requests by the configured domain that took them",
             gateway.domains.clone(),
         );
+        registry.register(
+            "pingora_panel_gateway_lua_runs",
+            "Number of Lua handler runs, by phase and outcome",
+            gateway.lua_runs.clone(),
+        );
+        registry.register_with_unit(
+            "pingora_panel_gateway_lua_run_duration",
+            "Duration of Lua handler runs",
+            Unit::Seconds,
+            gateway.lua_durations.clone(),
+        );
+        registry.register(
+            "pingora_panel_gateway_lua_slow_runs",
+            "Number of Lua handler runs longer than their slow threshold",
+            gateway.lua_slow.clone(),
+        );
         gateway
+    }
+
+    /// Counts and measures a Lua handler run.
+    pub(crate) fn lua_run(
+        &self,
+        site: Option<Arc<str>>,
+        route: Option<Arc<str>>,
+        phase: &'static str,
+        outcome: &'static str,
+        duration: Duration,
+        slow: bool,
+    ) {
+        let labels = LuaPhaseLabels { site, route, phase };
+        self.lua_durations
+            .get_or_create(&labels)
+            .observe(duration.as_secs_f64());
+        if slow {
+            self.lua_slow.get_or_create(&labels).inc();
+        }
+        self.lua_runs
+            .get_or_create(&LuaRunLabels {
+                site: labels.site,
+                route: labels.route,
+                phase,
+                outcome,
+            })
+            .inc();
     }
 
     /// The open connections of `listener`.
@@ -175,6 +256,20 @@ impl Collector for Configuration {
                 Some(&Unit::Seconds),
                 ConstGauge::<f64>::TYPE,
             )?)?;
+        }
+        let memory = self.0.lua_memory();
+        if !memory.is_empty() {
+            let mut family = encoder.encode_descriptor(
+                "pingora_panel_gateway_lua_memory",
+                "Memory each Lua VM of the active configuration uses",
+                Some(&Unit::Bytes),
+                ConstGauge::<i64>::TYPE,
+            )?;
+            for (vm, bytes) in memory.into_iter().enumerate() {
+                let labels = [("vm", vm.to_string())];
+                ConstGauge::new(i64::try_from(bytes).unwrap_or(i64::MAX))
+                    .encode(family.encode_family(&labels)?)?;
+            }
         }
         Ok(())
     }

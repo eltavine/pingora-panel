@@ -338,6 +338,8 @@ pub(crate) struct UpstreamPool {
     breaker: Option<CircuitBreaker>,
     limit: Option<Limit>,
     state: Arc<PoolState>,
+    /// `balancer_by_lua`: chooses the endpoint of each try.
+    pub balancer: Option<crate::lua::Hook>,
 }
 
 /// Resolves endpoint host names; IP literals are used as they are.
@@ -494,6 +496,7 @@ impl UpstreamPool {
                 .max_requests
                 .map(|max_requests| Limit::new(max_requests, spec.queue)),
             state: states.pool(spec.id.as_str()),
+            balancer: None,
         })
     }
 
@@ -534,6 +537,23 @@ impl UpstreamPool {
 
     /// The peer for `endpoint`; upgrades such as WebSocket always go over
     /// HTTP/1.1, which is where they exist.
+    /// A peer at `address`, which a balancer chose, reached as the
+    /// upstream's endpoints are: with their TLS and server name.
+    pub(crate) fn peer_at(&self, address: SocketAddr, upgrade: bool) -> HttpPeer {
+        let (tls, sni) = self
+            .endpoints
+            .first()
+            .map_or((false, String::new()), |endpoint| {
+                (endpoint.tls, endpoint.sni.clone())
+            });
+        let mut peer = HttpPeer::new(address, tls, sni);
+        self.peer.apply(&mut peer.options, tls);
+        if upgrade {
+            peer.options.alpn = ALPN::H1;
+        }
+        peer
+    }
+
     pub(crate) fn peer(&self, endpoint: usize, upgrade: bool) -> HttpPeer {
         let endpoint = &self.endpoints[endpoint];
         let mut peer = HttpPeer::new(endpoint.address, endpoint.tls, endpoint.sni.clone());
