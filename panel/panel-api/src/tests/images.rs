@@ -1,7 +1,7 @@
 use super::*;
 use panel_application::{
-    CommandContext, Image, ImageDetail, ImageList, ImagePull, ImagePullRequest, ImageRemoval,
-    ImagesPort, RequestScope,
+    CommandContext, Image, ImageDetail, ImageLayerProgress, ImageLayerState, ImageList, ImagePull,
+    ImagePullEvent, ImagePullRequest, ImagePulled, ImageRemoval, ImagesPort, RequestScope,
 };
 use serde_json::Value;
 use std::{
@@ -9,8 +9,9 @@ use std::{
     time::{Duration, UNIX_EPOCH},
 };
 
-/// nginx, which a running container uses, and redis, which goes; records
-/// the images it was asked about.
+/// nginx, which a running container uses, and redis, which goes; busybox,
+/// which pulls, and flaky, which breaks off. Records the images it was
+/// asked about.
 #[derive(Default)]
 struct Images(Mutex<Vec<String>>);
 
@@ -88,10 +89,40 @@ impl ImagesPort for Images {
     async fn pull_image(
         &self,
         _: CommandContext,
-        _: String,
-        _: ImagePullRequest,
+        engine: String,
+        request: ImagePullRequest,
     ) -> Result<ImagePull> {
-        Err(PanelError::unsupported_capability("not pulled here"))
+        let credentials = request.credentials.as_ref();
+        self.0.lock().unwrap().push(format!(
+            "pull {engine} {} platform={} user={} password={}",
+            request.reference,
+            request.platform.as_deref().unwrap_or("-"),
+            credentials.map_or("-", |credentials| credentials.username.as_str()),
+            credentials.is_some_and(|credentials| credentials.password.as_str() == "hunter2"),
+        ));
+        let progress = Ok(ImagePullEvent::Progress(vec![ImageLayerProgress {
+            id: "9c0abc9c5bd3".into(),
+            state: ImageLayerState::Downloading,
+            current_bytes: 1_024,
+            total_bytes: 4_096,
+        }]));
+        let events = match request.reference.as_str() {
+            "busybox:1.37" => vec![
+                progress,
+                Ok(ImagePullEvent::Pulled(ImagePulled {
+                    image: Image {
+                        id: "sha256:dd".into(),
+                        tags: vec!["busybox:1.37".into()],
+                        ..nginx()
+                    },
+                    digest: Some("sha256:d2".into()),
+                    updated: true,
+                })),
+            ],
+            "flaky:1" => vec![progress, Err(PanelError::unavailable("connection reset"))],
+            reference => vec![Err(PanelError::not_found(format!("no {reference}")))],
+        };
+        Ok(Box::pin(futures_util::stream::iter(events)))
     }
 }
 
@@ -193,5 +224,89 @@ async fn images_are_removed_or_refused() {
     assert_eq!(
         *images.0.lock().unwrap(),
         ["remove redis:7 force=true", "remove nginx:1.27 force=false"]
+    );
+}
+
+async fn pull(app: &axum::Router, body: Value) -> (StatusCode, Option<String>, Vec<Value>) {
+    let request = Request::post("/api/v1/container-engines/docker/image-pulls")
+        .header("content-type", "application/json")
+        .header("x-actor", "ops")
+        .header("idempotency-key", "pull-1")
+        .header("x-deadline", "2099-01-01T00:00:00Z")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let kind = response
+        .headers()
+        .get("content-type")
+        .map(|value| value.to_str().unwrap().to_owned());
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let text = String::from_utf8(bytes.to_vec()).unwrap();
+    let messages = if kind.as_deref() == Some("text/event-stream") {
+        text.lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .map(|data| serde_json::from_str(data).unwrap())
+            .collect()
+    } else {
+        vec![serde_json::from_str(&text).unwrap_or(Value::Null)]
+    };
+    (status, kind, messages)
+}
+
+#[tokio::test]
+async fn images_are_pulled_as_server_sent_events() {
+    let images = Arc::new(Images::default());
+    let app = app(Some(images.clone()));
+    let (status, kind, messages) = pull(
+        &app,
+        serde_json::json!({
+            "reference": " busybox:1.37 ",
+            "platform": "linux/arm64",
+            "credentials": {"username": "ci", "password": "hunter2"}
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{messages:?}");
+    assert_eq!(kind.as_deref(), Some("text/event-stream"));
+    assert_eq!(messages[0]["kind"], "progress");
+    assert_eq!(messages[0]["layers"][0]["state"], "downloading");
+    assert_eq!(messages[0]["layers"][0]["total_bytes"], 4_096);
+    assert_eq!(messages[1]["kind"], "pulled");
+    assert_eq!(messages[1]["image"]["tags"][0], "busybox:1.37");
+    assert_eq!(messages[1]["digest"], "sha256:d2");
+    assert_eq!(messages[1]["updated"], true);
+    assert_eq!(messages.len(), 2);
+
+    let (status, _, problem) = pull(&app, serde_json::json!({"reference": "missing:1"})).await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "a refusal before anything is pulled"
+    );
+    assert_eq!(problem[0]["code"], "NOT_FOUND");
+    let (status, _, messages) = pull(&app, serde_json::json!({"reference": "flaky:1"})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(messages[1]["kind"], "failed");
+    assert_eq!(messages[1]["error"]["code"], "UNAVAILABLE");
+
+    for body in [
+        serde_json::json!({"reference": "../etc"}),
+        serde_json::json!({"reference": ""}),
+        serde_json::json!({"reference": "nginx", "platform": "x".repeat(65)}),
+        serde_json::json!({"reference": "nginx", "all_tags": true}),
+    ] {
+        let (status, _, _) = pull(&app, body.clone()).await;
+        assert!(status.is_client_error(), "{body} {status}");
+    }
+    assert_eq!(
+        *images.0.lock().unwrap(),
+        [
+            "pull docker busybox:1.37 platform=linux/arm64 user=ci password=true",
+            "pull docker missing:1 platform=- user=- password=false",
+            "pull docker flaky:1 platform=- user=- password=false"
+        ]
     );
 }

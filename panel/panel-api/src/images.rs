@@ -4,19 +4,27 @@ use crate::{
     containers::engine,
     error::ApiError,
     request_context::{command_context, request_scope, MutationHeaders, QueryHeaders},
+    tail::LogTailError,
     ApiState,
 };
 use axum::{
     extract::{Path, Query, State},
     http::HeaderMap,
+    response::sse::{Event, KeepAlive, Sse},
     Json,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
-use panel_application::{Image, ImageDetail, ImageList, ImageRemoval};
+use futures_util::{Stream, StreamExt};
+use panel_application::{
+    Image, ImageDetail, ImageLayerProgress, ImageLayerState, ImageList, ImagePullEvent,
+    ImagePullRequest, ImageRemoval, RegistryCredentials,
+};
 use panel_errors::PanelError;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, time::SystemTime};
+use std::{collections::BTreeMap, convert::Infallible, time::SystemTime};
+use tokio::sync::mpsc::{self, error::TrySendError};
 use utoipa::{IntoParams, ToSchema};
+use zeroize::Zeroizing;
 
 fn rfc3339(time: SystemTime) -> String {
     DateTime::<Utc>::from(time).to_rfc3339_opts(SecondsFormat::Secs, true)
@@ -241,4 +249,196 @@ pub(crate) async fn remove_image<U>(
         )
         .await?;
     Ok(Json(removal.into()))
+}
+
+/// For a registry that wants a sign-in: used for this pull only, never kept
+/// or recorded.
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RegistryCredentialsBody {
+    #[schema(max_length = 256)]
+    pub username: String,
+    /// A password or an access token.
+    #[schema(value_type = String, format = Password, max_length = 8192)]
+    pub password: Zeroizing<String>,
+}
+
+/// An image to pull.
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ImagePullBody {
+    /// Such as `nginx:1.27` or `ghcr.io/example/app@sha256:…`; a name alone,
+    /// such as `nginx`, is `nginx:latest`.
+    #[schema(min_length = 1, max_length = 512)]
+    pub reference: String,
+    /// Such as `linux/arm64`; the engine's own when absent.
+    #[schema(max_length = 64)]
+    pub platform: Option<String>,
+    pub credentials: Option<RegistryCredentialsBody>,
+}
+
+/// Where a layer of an image being pulled is.
+#[derive(Clone, Copy, Debug, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ImageLayerStateName {
+    /// Behind other layers, or about to be retried.
+    Waiting,
+    Downloading,
+    /// Downloaded and checked against its digest.
+    Downloaded,
+    Extracting,
+    Complete,
+    /// The engine had it already.
+    Exists,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct ImageLayerView {
+    /// Such as `a2abf6c4d29d`.
+    pub id: String,
+    pub state: ImageLayerStateName,
+    /// How far downloading or extracting it got, of how much; 0 while
+    /// unknown.
+    pub current_bytes: u64,
+    pub total_bytes: u64,
+}
+
+impl From<ImageLayerProgress> for ImageLayerView {
+    fn from(value: ImageLayerProgress) -> Self {
+        Self {
+            state: match value.state {
+                ImageLayerState::Downloading => ImageLayerStateName::Downloading,
+                ImageLayerState::Downloaded => ImageLayerStateName::Downloaded,
+                ImageLayerState::Extracting => ImageLayerStateName::Extracting,
+                ImageLayerState::Complete => ImageLayerStateName::Complete,
+                ImageLayerState::Exists => ImageLayerStateName::Exists,
+                _ => ImageLayerStateName::Waiting,
+            },
+            id: value.id,
+            current_bytes: value.current_bytes,
+            total_bytes: value.total_bytes,
+        }
+    }
+}
+
+/// What a pull says as it goes, one per event: how far its layers got, then
+/// what it pulled or why it failed, which is the last.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ImagePullMessage {
+    Progress {
+        /// In the order the engine first named them.
+        layers: Vec<ImageLayerView>,
+    },
+    Pulled {
+        image: ImageView,
+        /// Such as `sha256:…`: what the registry served.
+        digest: Option<String>,
+        /// Whether the engine downloaded a newer image than it had.
+        updated: bool,
+    },
+    Failed {
+        error: LogTailError,
+    },
+}
+
+impl From<Result<ImagePullEvent, PanelError>> for ImagePullMessage {
+    fn from(value: Result<ImagePullEvent, PanelError>) -> Self {
+        match value {
+            Ok(ImagePullEvent::Progress(layers)) => Self::Progress {
+                layers: layers.into_iter().map(Into::into).collect(),
+            },
+            Ok(ImagePullEvent::Pulled(pulled)) => Self::Pulled {
+                image: pulled.image.into(),
+                digest: pulled.digest,
+                updated: pulled.updated,
+            },
+            Err(error) => Self::Failed {
+                error: LogTailError::from(&error),
+            },
+        }
+    }
+}
+
+/// How many messages wait for a slow client; progress beyond them is
+/// dropped, since each says all there is.
+const PULL_BACKLOG: usize = 8;
+
+/// Pulls an image from its registry as Server-Sent Events, each a JSON
+/// message: how far its layers got, at most four times a second, then what
+/// it pulled or why it failed. A refusal before anything is pulled answers
+/// as any other. A pull goes on to its end when its client leaves, and the
+/// audit trail records each, refused or not.
+#[utoipa::path(post, path = "/api/v1/container-engines/{engine}/image-pulls",
+    params(("engine" = String, Path, description = "docker or podman"), MutationHeaders),
+    request_body = ImagePullBody,
+    responses((status = 200, content_type = "text/event-stream", body = ImagePullMessage)),
+    tag = "containers")]
+pub(crate) async fn pull_image<U>(
+    State(state): State<ApiState<U>>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<ImagePullBody>,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
+    let platform = body
+        .platform
+        .map(|platform| platform.trim().to_owned())
+        .filter(|platform| !platform.is_empty());
+    if platform
+        .as_ref()
+        .is_some_and(|platform| platform.len() > 64)
+        || body.credentials.as_ref().is_some_and(|credentials| {
+            credentials.username.len() > 256 || credentials.password.len() > 8192
+        })
+    {
+        return Err(ApiError::new(PanelError::invalid_argument(
+            "the platform or the credentials are too long",
+        )));
+    }
+    let request = ImagePullRequest {
+        reference: image(body.reference.trim().to_owned())?,
+        platform,
+        credentials: body.credentials.map(|credentials| RegistryCredentials {
+            username: credentials.username,
+            password: credentials.password,
+        }),
+    };
+    let mut pull = state
+        .images
+        .pull_image(command_context(&headers)?, engine(name)?, request)
+        .await?;
+    let first = match pull.next().await {
+        Some(Ok(event)) => event,
+        Some(Err(error)) => return Err(ApiError::new(error)),
+        None => {
+            return Err(ApiError::new(PanelError::unavailable(
+                "the pull ended before it began",
+            )))
+        }
+    };
+    let (sender, mut receiver) = mpsc::channel(PULL_BACKLOG);
+    tokio::spawn(async move {
+        let mut listening = sender.send(Ok(first)).await.is_ok();
+        while let Some(event) = pull.next().await {
+            if !listening {
+                continue;
+            }
+            listening = match event {
+                Ok(ImagePullEvent::Progress(_)) => {
+                    !matches!(sender.try_send(event), Err(TrySendError::Closed(_)))
+                }
+                event => sender.send(event).await.is_ok(),
+            };
+        }
+    });
+    let events =
+        futures_util::stream::poll_fn(move |context| receiver.poll_recv(context)).map(|event| {
+            let message = ImagePullMessage::from(event);
+            Ok(Event::default()
+                .json_data(&message)
+                .unwrap_or_else(|_| Event::default().comment("unserializable")))
+        });
+    Ok(Sse::new(events).keep_alive(KeepAlive::default()))
 }

@@ -59,6 +59,7 @@ mod tests;
         crate::images::list_images,
         crate::images::inspect_image,
         crate::images::remove_image,
+        crate::images::pull_image,
         crate::engine_resources::list_networks,
         crate::engine_resources::list_volumes,
         crate::engine_resources::disk_usage,

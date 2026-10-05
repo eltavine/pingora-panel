@@ -297,6 +297,10 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
             post(engine_resources::prune::<U>),
         )
         .route(
+            "/api/v1/container-engines/{engine}/image-pulls",
+            post(images::pull_image::<U>),
+        )
+        .route(
             "/api/v1/container-engines/{engine}/compose-projects",
             get(compose::list_projects::<U>),
         )
