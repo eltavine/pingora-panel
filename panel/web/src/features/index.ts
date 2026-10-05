@@ -13,6 +13,7 @@ import { publishingFeature } from './publishing'
 import { receiptsFeature } from './receipts'
 import { revisionsFeature } from './revisions'
 import { securityFeature } from './security'
+import { siteFilesFeature } from './site-files'
 import { sitesFeature } from './sites'
 import { trafficFeature } from './traffic'
 import type { FeatureModule, NavigationGroup } from './types'
@@ -37,6 +38,7 @@ export const features: readonly FeatureModule[] = [
   securityFeature,
   certificatesFeature,
   configStudioFeature,
+  siteFilesFeature,
   identityFeature,
 ]
 
