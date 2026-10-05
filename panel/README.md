@@ -545,6 +545,7 @@ ppanel image list --search nginx
 ppanel image remove ghcr.io/example/app:2.3 --yes
 ppanel network list
 ppanel volume list
+ppanel container engine df docker
 ppanel container restart shop-web-1 --yes
 ppanel container remove nightly-report --volumes --yes
 ```
@@ -599,7 +600,12 @@ removal is audited as `container.image.removed`, refused or not.
 networks with their driver, scope, subnets and gateways, and
 `.../volumes` its volumes with where their data lives on the host; each
 says how many containers use it and which Compose project created it.
-Both need `containers.read`.
+Both need `containers.read`, as does `.../disk-usage`, which reports how
+much disk the engine's images, containers, local volumes and build cache
+take, how many of each are in use, and what removing the rest would
+free, as `docker system df` does. The agent reads the engine's own
+figures: Engine API 1.52 and later sum them up, and the agent sums an
+earlier version's lists as the Docker CLI does.
 `POST /api/v1/container-engines/{engine}/{enable,disable}` needs
 `containers.manage`, as do
 `POST /api/v1/container-engines/{engine}/containers/{container}/{start,stop,restart,kill}`
@@ -616,7 +622,7 @@ text, followed from the last line read and saved as a file. The table
 shows each running container's CPU and memory, and the details show
 everything it uses. An Images tab lists the engine's images, opens one's
 configuration and removes one after confirming, and Networks and
-Volumes tabs list those.
+Volumes tabs list those. A reachable engine's card opens its disk use.
 
 ## Alerts
 
