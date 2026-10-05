@@ -1718,11 +1718,31 @@ async fn http_policies_change_headers_answer_cors_and_compress() {
     let request = |line: &str, extra: &str| {
         format!("{line} HTTP/1.1\r\nhost: shop.test\r\n{extra}connection: close\r\n\r\n")
     };
-    let forwarded = send(listen, &request("GET /api/items", "x-internal: secret\r\n")).await;
+    let traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+    let forwarded = send(
+        listen,
+        &request(
+            "GET /api/items",
+            &format!(
+                "x-internal: secret\r\nx-request-id: req-77\r\ntraceparent: {traceparent}\r\n"
+            ),
+        ),
+    )
+    .await;
     let head = String::from_utf8_lossy(&forwarded.body).to_ascii_lowercase();
     assert!(head.contains("x-from-site: site"), "{head}");
     assert!(head.contains("x-tenant: shop.test"), "{head}");
     assert!(!head.contains("x-internal"), "{head}");
+    // The client's Host, request ID and trace context reach the upstream
+    // untouched, beside the forwarding fields the gateway writes.
+    for line in [
+        "host: shop.test",
+        "x-forwarded-host: shop.test",
+        "x-request-id: req-77",
+        &format!("traceparent: {traceparent}"),
+    ] {
+        assert!(head.contains(line), "{line}: {head}");
+    }
     assert_eq!(forwarded.headers["server"], "shop");
     assert_eq!(forwarded.headers["x-site"], "yes");
 
