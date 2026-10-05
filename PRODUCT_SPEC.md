@@ -133,7 +133,7 @@ Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交
 上述状态只覆盖 Initial Foundation，不把面板完整功能目录误写为已实现。
 0.2 网关核心各项已在 REST API、`ppanel` CLI 与 Web 控制台实现，并由模块、集成、真实进程与浏览器端到端测试覆盖，因此标记为 `Implemented`。其验收中的操作审计与权限检查分别随 `AUDIT-*`（0.3）与 `IAM-*`（0.4）完成；在此之前这些功能不得标记为 `Verified`。
 
-0.3 配置语言与版本（`SITE-034`～`SITE-045` 及上列 `DSL-*`）已在 REST API、`ppanel` CLI 与 Web 控制台实现：草稿以 `main.conf` 为入口的语言文件编辑，支持检查、格式化、补全 Schema、语法树、计划与 Diff、IR 导出、试运行，以及记录作者、备注与结果、可比较和一键回滚的配置版本；同样在操作审计（`AUDIT-*`）与权限（`IAM-*`）验收完成前不得标记为 `Verified`。请求变量（`DSL-010`～`DSL-017`）可用于重定向目标与响应内容，由网关按请求求值，并以 `action.template` 能力协商，无法求值的网关拒绝快照；Size 与 IP/CIDR 类型（`DSL-023`、`DSL-024`）用于安全策略的头部与请求体上限、客户端网络和监听的受信任代理；Nginx 子集导入与迁移报告（`DSL-043`～`DSL-045`）按 ADR 0012 所列子集转换，并在 API、CLI 与控制台逐条报告未转换或含义改变的指令及其位置；继承规则写在 Schema 中，Explain（`DSL-034`）按位置列出块内每个生效值及其来源（本块、外层块或监听、默认值），无效设置给出警告；Lua 脚本引用（`DSL-042`）仍为 `Planned`。
+0.3 配置语言与版本（`SITE-034`～`SITE-045` 及上列 `DSL-*`）已在 REST API、`ppanel` CLI 与 Web 控制台实现：草稿以 `main.conf` 为入口的语言文件编辑，支持检查、格式化、补全 Schema、语法树、计划与 Diff、IR 导出、试运行，以及记录作者、备注与结果、可比较和一键回滚的配置版本；同样在操作审计（`AUDIT-*`）与权限（`IAM-*`）验收完成前不得标记为 `Verified`。请求变量（`DSL-010`～`DSL-017`）可用于重定向目标与响应内容，由网关按请求求值，并以 `action.template` 能力协商，无法求值的网关拒绝快照；Size 与 IP/CIDR 类型（`DSL-023`、`DSL-024`）用于安全策略的头部与请求体上限、客户端网络和监听的受信任代理；Nginx 子集导入与迁移报告（`DSL-043`～`DSL-045`）按 ADR 0012 所列子集转换，并在 API、CLI 与控制台逐条报告未转换或含义改变的指令及其位置；继承规则写在 Schema 中，Explain（`DSL-034`）按位置列出块内每个生效值及其来源（本块、外层块或监听、默认值），无效设置给出警告；Lua 脚本引用完整性检查（`DSL-042`）随 0.7 的 Lua 脚本实现。
 
 0.3 审计（`AUDIT-001`、`AUDIT-003`、`AUDIT-004`）已由 `audit-service` 实现：各服务通过事务性 Outbox 发布每次变更及被拒绝或失败的尝试，审计服务按来源与事件 ID 幂等写入带检查点、只追加的 SHA-256 哈希链，并在 REST API、`ppanel audit` 与控制台审计日志中提供筛选、详情与完整性校验。证书操作审计（`AUDIT-005`）覆盖 TLS Profile 变更，证书的上传、生成、替换、删除和被拒绝的尝试，ACME 账户的注册与删除，自动证书的申请、签发、续期、失败与停止，以及证书到期提醒；由任务完成的签发与续期以 `automation-service` 为操作者，并与发起请求共享关联 ID；登录审计（`AUDIT-002`）已随 0.4 的登录实现；Docker 操作审计（`AUDIT-006`）随 `CTR-*` 实现，仍为 `Planned`。
 
@@ -164,6 +164,8 @@ Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交
 0.6 路由条件与路由命中测试（`ROUTE-010`～`ROUTE-025`）按 ADR 0036 实现：路由在路径之外可以要求方法（按 RFC 9110 §9.1 区分大小写）、主机（含一层 `*.parent` 通配）、请求头（名称不区分大小写，多行按 RFC 9110 §5.3 合并后判断）、查询参数（按 WHATWG URL 标准的 `application/x-www-form-urlencoded` 解码，重复参数任一值成立即可）、Cookie（取自每个 `Cookie` 字段，RFC 6265 §5.4）、客户端地址（经可信代理之后，网段或单个地址，IPv4 映射的 IPv6 按 IPv4 判断）、User-Agent、Referer 与内容类型（不含参数、不区分大小写，可写 `text/*`），取值判断有存在、不存在、等于、开头、结尾、包含与正则，并可忽略大小写；`any`、`all` 与 `not` 组合条件，最多 64 个、嵌套 8 层，正则受与路径相同的大小限制。匹配移入 `panel-routing`：它为主机找到网站、为网站的路由排序并判断路由是否接收请求，必要时说明原因；网关以它处理请求，控制面以它解释请求，二者因此一致。条件贯穿模型、配置语言（路由块内的 `method`、`host`、`header`、`query`、`cookie`、`client`、`user_agent`、`referer`、`content_type` 指令与 `any`、`all`、`not` 块，错误定位到参数，打印可往返）、IR 与网关 gRPC 契约；带条件的快照要求 `route.conditions` 能力，未知的条件种类会被网关拒绝而不是被忽略。`POST /api/v1/config/route-test` 按应用时的方式编译草稿，给出接收请求的网站与路由、是否为监听器的默认网站、比较所用的规范化主机与路径，以及之前尝试的每条路由及其第一个不成立的部分，或说明没有网站（网关返回 421）或没有路由（返回 404）。`ppanel route add` 以 `--method`、`--header`、`--query`、`--cookie`、`--client`、`--content-type` 与 `--condition` 写入条件，`ppanel route test` 测试请求；控制台的路由表单逐项编辑条件与分组，路由列表显示条件数量，“测试请求”面板展示命中的路由与原因。CI 的 Compose 检查添加只接收来自某网段之外、带 `X-Canary: 1` 的 GET 请求的路由，应用前用测试器确认去向，应用后确认网关只在条件全部成立时由该路由回答。
 
 0.6 HTTP 策略（`HTTP-001`～`HTTP-028`）按 ADR 0037 实现：HTTP 策略是有名称的资源，网站与路由引用它，先应用网站的、再应用路由的，路由策略中的 CORS 与压缩取代网站的设置。策略按删除、替换、追加的顺序修改请求字段与响应字段，值是可以引用 `$host`、`$client_ip`、`$request_id`、`$http_<name>` 等请求变量的模板；响应修改同样作用于网关生成的响应。逐跳与分帧字段、`Host` 和网关写入的转发字段不可修改，`Content-Encoding` 由压缩决定。`Server` 字段可以保留、删除或替换（RFC 9110 §10.2.4）。CORS 按 Fetch 标准的协议实现：来自所列来源（可写一层 `https://*.parent` 通配或 `*`）的预检由网关直接以 204 应答，给出允许的方法、回显所请求的字段、凭据与不超过一天的 `Access-Control-Max-Age`，其他来源只得到 `Vary`；实际请求的响应带上允许的来源（允许凭据时回显来源而不是 `*`，`*` 与凭据同时出现会被拒绝）、`Vary: Origin` 与脚本可读取的字段。压缩借助 Pingora 的压缩模块，以客户端接受的 gzip、Brotli 或 Zstandard（按 RFC 9110 §12.5.3 的权重选择，`q=0` 表示拒绝，`*` 覆盖未列出的编码）压缩代理与静态文件响应中所列媒体类型（可写 `text/*`）且不小于最小体积的部分，跳过已编码、带 `no-transform`（RFC 9111 §5.2.2.6）、部分内容、HEAD 与无主体的响应，并添加 `Vary: Accept-Encoding`。Host 透传、`X-Forwarded-For`、`X-Forwarded-Host`、`X-Forwarded-Proto`、`X-Real-IP`、`Forwarded`（RFC 7239）、Request-ID 的生成与透传和 `traceparent` 透传（W3C Trace Context）由网关对每个代理请求完成，数据面测试确认它们到达上游。策略贯穿模型、配置语言（`http_policy` 块中的 `request_header`、`response_header`、`server_header`、`cors` 块与 `compress`，服务器与路由以 `http_policy` 引用，错误定位到参数，打印可往返，变更计划与设置解释同样覆盖）、IR 与网关 gRPC 契约；引用策略的快照要求 `http.policies` 能力，未知的压缩编码或 `Server` 处理方式会被网关拒绝。`/api/v1/http-policies` 列出、读取、设置与删除策略，被使用的策略不能删除；`ppanel http-policy` 以字段行与 CORS、压缩参数设置策略，`ppanel site create` 与 `ppanel route add` 以 `--http-policy` 引用；控制台的“HTTP 策略”页面逐行编辑字段修改并设置 `Server`、CORS 与压缩，网站与路由表单选择策略。CI 的 Compose 检查在控制面的 OpenAPI 文档前放置策略，确认网关设置 `X-Frame-Options`、删除 `Server`、只为接受 br 或 gzip 的客户端压缩，并直接应答来自允许来源的预检。
+
+0.7 Lua 脚本（`LUA-001`～`LUA-047`）按 ADR 0039 实现：网关以嵌入的 Luau 运行脚本，配置语言按 lua-nginx-module 的名称、上下文与 NGINX 继承规则接受 `server_rewrite`、`rewrite`、`access`、`content`、`balancer`、`header_filter`、`body_filter`、`log` 各阶段的 `*_by_lua_block` 与 `*_by_lua_file`，以及 `init_by_lua*`、`init_worker_by_lua*` 与 `lua_shared_dict`；`*_by_lua_block` 的代码按 Lua 词法读取并原样打印，NGINX 导入器同样迁移这些指令；`lua off` 保留并检查脚本但都不运行（`LUA-001`）。脚本是配置的一部分：内联代码块与 `lua/` 目录下的 `.lua` 文件随草稿保存、比较，以 SHA-256 标识版本，并随配置版本回滚（`LUA-002`、`LUA-004`、`LUA-045`、`LUA-046`）；`require` 只加载内置模块（`cjson`、`bit`、`resty.*`、`ngx.re` 等）与 `lua/` 下的文件（`LUA-040`）。`ngx` API 按文档语义并在各函数允许的阶段提供请求方法、URI、参数、请求头与请求体的读写，响应状态与响应头，以 `ngx.exit`、`ngx.say` 短路应答，以 `ngx.balancer` 选择上游端点，以及 `ngx.ctx`、`ngx.shared`、PCRE2 正则、JSON、Base64、摘要与 HMAC、时间与随机数、`ngx.log` 和 TCP cosocket（`LUA-014`～`LUA-031`）；`require("panel.v1")` 另提供版本化的 `req`、`resp`、`ctx`、`upstream`、`log`、`crypto` 等 capability。每次运行受墙钟时间（默认 100 ms）、指令数（默认一千万）与每个 VM 内存（默认 64 MiB）限制，占用 CPU 超过 1 ms 的运行在下一次中断时让出线程（`LUA-032`～`LUA-034`）；沙箱不提供 `io`、`os.execute`、动态库、`package.loadlib`、FFI 与字节码加载，全局表只读，请求写入的全局变量只属于该请求（`LUA-035`～`LUA-038`）；读写请求体与响应体、选择上游端点、打开网络连接分别需要 `lua_allow body`、`upstream`、`network`，网络默认关闭，TLS cosocket 默认按系统信任根校验证书（`LUA-012`、`LUA-039`、`LUA-041`）；`lua_on_error` 以失败、继续或指定状态码回退，失败的运行不改变请求（`LUA-042`）。网关按网站、路由、阶段与结果统计运行次数，记录耗时直方图、慢运行与 VM 内存，`lua_debug` 记录每次运行的开始、结束、耗时与结果；流量汇总在 REST API、`ppanel traffic` 与控制台报告 Lua 运行、按原因的失败、慢运行与耗时分位数，并列出失败与运行最多的处理器（`LUA-043`、`LUA-044`、`LUA-047`、`OBS-045`、`OBS-046`）。读取配置时，以网关同一编译器编译每个脚本，并静态检查无法加载的模块、网关未提供或该阶段不允许的函数以及脚本写入的全局变量；`*_by_lua_file` 引用不存在的文件、未被运行也未被加载的 Lua 文件同样报告（`LUA-005`、`DSL-042`）。`POST /api/v1/config/lua/test`、`ppanel lua test` 与控制台以网关的运行时与限制，在描述的请求上运行草稿的处理器或编辑器中的代码，报告每次运行的结果、日志与耗时及最终的请求与响应，不代理也不改变任何东西，并记入审计（`LUA-006`、`CLI-021`）；`ppanel lua check` 报告 Lua 诊断，`ppanel lua scripts` 列出脚本库（`CLI-020`）。修改与应用 Lua 需要 `config.lua` 权限，默认只有 Administrator 持有，可按站点组与网站授予；Lua 变更是审批策略可单独覆盖的高风险资源类型。控制台 Lua 页面列出脚本库，以 CodeMirror 的 Lua 模式高亮并编辑 `lua/` 下的文件，并提供测试面板；配置文件中的 `*_by_lua_block` 同样按 Lua 高亮（`LUA-003`、`GUI-003`）。快照以 `lua.scripts` 能力协商，无法运行脚本的网关拒绝快照。UDP 与 stream 套接字、定时器、轻线程与子请求尚未提供，调用它们以说明不可用的错误失败，并在检查时报告。
 
 ### 3.2 目标仓库边界
 
@@ -1054,7 +1056,7 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | DSL-039 | 302 | 正则表达式预编译检查 | 0.3 | A/C/G | Viewer | config-compiler | 查询“正则表达式预编译检查”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | Yes |
 | DSL-040 | 303 | Upstream 引用完整性检查 | 0.3 | A/C/G | Operator | config-compiler | 执行“Upstream 引用完整性检查”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | DSL-041 | 304 | Certificate 引用完整性检查 | 0.3 | A/C/G | Viewer | config-compiler | 查询“Certificate 引用完整性检查”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | Yes |
-| DSL-042 | 305 | Lua Script 引用完整性检查 | 0.3 | A/C/G | Viewer | config-compiler | 查询“Lua Script 引用完整性检查”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | Yes |
+| DSL-042 | 305 | Lua Script 引用完整性检查 | 0.3 | A/C/G | Viewer | config-compiler | 查询“Lua Script 引用完整性检查”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | Yes |
 | DSL-043 | 306 | Nginx 子集配置导入 | 0.3 | A/C/G | Operator | config-compiler | 执行“Nginx 子集配置导入”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | DSL-044 | 307 | Nginx 子集迁移报告 | 0.3 | A/C/G | Operator | config-compiler | 执行“Nginx 子集迁移报告”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | DSL-045 | 308 | 不支持 Nginx Directive 报告 | 0.3 | A/C/G | Operator | config-compiler | 执行“不支持 Nginx Directive 报告”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
@@ -1063,53 +1065,53 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | DSL-048 | 311 | 配置 Hash | 0.3 | A/C/G | Operator | config-compiler | 执行“配置 Hash”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | DSL-049 | 312 | 配置原子 Snapshot | 0.3 | A/C/G | Operator | config-compiler | 执行“配置原子 Snapshot”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | DSL-050 | 313 | 配置 Snapshot 回滚 | 0.3 | A/C/G | Operator | config-compiler | 执行“配置 Snapshot 回滚”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
-| LUA-001 | 314 | Lua 总开关 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 总开关”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-002 | 315 | Lua 脚本库 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 脚本库”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-003 | 316 | Lua 在线编辑器 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 在线编辑器”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-004 | 317 | Lua 文件脚本 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 文件脚本”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-005 | 318 | Lua 语法检查 | 0.7 | A/C/G | Administrator | lua-runtime | 查询“Lua 语法检查”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| LUA-006 | 319 | Lua 编译测试 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 编译测试”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-007 | 320 | `lua_early` Hook | 0.7 | A/C/G | Administrator | lua-runtime | 执行“'lua_early' Hook”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-008 | 321 | `lua_access` Hook | 0.7 | A/C/G | Administrator | lua-runtime | 执行“'lua_access' Hook”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-009 | 322 | `lua_upstream` Hook | 0.7 | A/C/G | Administrator | lua-runtime | 执行“'lua_upstream' Hook”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-010 | 323 | `lua_request_header` Hook | 0.7 | A/C/G | Administrator | lua-runtime | 执行“'lua_request_header' Hook”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-011 | 324 | `lua_response_header` Hook | 0.7 | A/C/G | Administrator | lua-runtime | 执行“'lua_response_header' Hook”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-012 | 325 | `lua_body_filter` 谨慎开放 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“'lua_body_filter' 谨慎开放”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-013 | 326 | `lua_log` Hook | 0.7 | A/C/G | Administrator | lua-runtime | 执行“'lua_log' Hook”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-014 | 327 | Lua 获取请求 Method | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 获取请求 Method”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-015 | 328 | Lua 获取 URI | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 获取 URI”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-016 | 329 | Lua 获取 Query | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 获取 Query”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-017 | 330 | Lua 获取 Header | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 获取 Header”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-018 | 331 | Lua 设置 Request Header | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 设置 Request Header”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-019 | 332 | Lua 设置 Response Header | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 设置 Response Header”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-020 | 333 | Lua 设置状态码 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 设置状态码”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-021 | 334 | Lua 短路返回 Response | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 短路返回 Response”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-022 | 335 | Lua 修改 Upstream | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 修改 Upstream”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-023 | 336 | Lua 设置上下文变量 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 设置上下文变量”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-024 | 337 | Lua 读取上下文变量 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 读取上下文变量”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-025 | 338 | Lua JSON 编解码 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua JSON 编解码”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-026 | 339 | Lua 正则匹配封装 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 正则匹配封装”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-027 | 340 | Lua Base64 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua Base64”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-028 | 341 | Lua Hash/HMAC 安全 API | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua Hash/HMAC 安全 API”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-029 | 342 | Lua 时间 API | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 时间 API”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-030 | 343 | Lua 随机 ID API | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 随机 ID API”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-031 | 344 | Lua 日志 API | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 日志 API”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-032 | 345 | Lua 指令数限制 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 指令数限制”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-033 | 346 | Lua 执行超时 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 执行超时”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-034 | 347 | Lua VM 内存上限 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua VM 内存上限”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-035 | 348 | Lua 禁止 `os.execute` | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 禁止 'os.execute'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-036 | 349 | Lua 禁止任意文件访问 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 禁止任意文件访问”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-037 | 350 | Lua 禁止 `package.loadlib` | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 禁止 'package.loadlib'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-038 | 351 | Lua 禁止 FFI | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 禁止 FFI”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-039 | 352 | Lua 网络请求默认关闭 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 网络请求默认关闭”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-040 | 353 | Lua 白名单模块 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 白名单模块”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-041 | 354 | Lua 每站点权限 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 每站点权限”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-042 | 355 | Lua Error Fallback | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua Error Fallback”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-043 | 356 | Lua 错误计数 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 错误计数”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-044 | 357 | Lua 慢脚本统计 | 0.7 | A/C/G | Administrator | lua-runtime | 查询“Lua 慢脚本统计”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| LUA-045 | 358 | Lua 脚本版本 | 0.7 | A/C/G | Administrator | lua-runtime | 查询“Lua 脚本版本”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| LUA-046 | 359 | Lua 脚本回滚 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 脚本回滚”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| LUA-047 | 360 | Lua Hook 调试日志 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua Hook 调试日志”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| LUA-001 | 314 | Lua 总开关 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 总开关”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-002 | 315 | Lua 脚本库 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 脚本库”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-003 | 316 | Lua 在线编辑器 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 在线编辑器”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-004 | 317 | Lua 文件脚本 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 文件脚本”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-005 | 318 | Lua 语法检查 | 0.7 | A/C/G | Administrator | lua-runtime | 查询“Lua 语法检查”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| LUA-006 | 319 | Lua 编译测试 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 编译测试”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-007 | 320 | `lua_early` Hook | 0.7 | A/C/G | Administrator | lua-runtime | 执行“'lua_early' Hook”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-008 | 321 | `lua_access` Hook | 0.7 | A/C/G | Administrator | lua-runtime | 执行“'lua_access' Hook”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-009 | 322 | `lua_upstream` Hook | 0.7 | A/C/G | Administrator | lua-runtime | 执行“'lua_upstream' Hook”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-010 | 323 | `lua_request_header` Hook | 0.7 | A/C/G | Administrator | lua-runtime | 执行“'lua_request_header' Hook”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-011 | 324 | `lua_response_header` Hook | 0.7 | A/C/G | Administrator | lua-runtime | 执行“'lua_response_header' Hook”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-012 | 325 | `lua_body_filter` 谨慎开放 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“'lua_body_filter' 谨慎开放”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-013 | 326 | `lua_log` Hook | 0.7 | A/C/G | Administrator | lua-runtime | 执行“'lua_log' Hook”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-014 | 327 | Lua 获取请求 Method | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 获取请求 Method”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-015 | 328 | Lua 获取 URI | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 获取 URI”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-016 | 329 | Lua 获取 Query | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 获取 Query”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-017 | 330 | Lua 获取 Header | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 获取 Header”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-018 | 331 | Lua 设置 Request Header | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 设置 Request Header”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-019 | 332 | Lua 设置 Response Header | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 设置 Response Header”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-020 | 333 | Lua 设置状态码 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 设置状态码”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-021 | 334 | Lua 短路返回 Response | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 短路返回 Response”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-022 | 335 | Lua 修改 Upstream | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 修改 Upstream”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-023 | 336 | Lua 设置上下文变量 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 设置上下文变量”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-024 | 337 | Lua 读取上下文变量 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 读取上下文变量”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-025 | 338 | Lua JSON 编解码 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua JSON 编解码”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-026 | 339 | Lua 正则匹配封装 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 正则匹配封装”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-027 | 340 | Lua Base64 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua Base64”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-028 | 341 | Lua Hash/HMAC 安全 API | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua Hash/HMAC 安全 API”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-029 | 342 | Lua 时间 API | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 时间 API”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-030 | 343 | Lua 随机 ID API | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 随机 ID API”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-031 | 344 | Lua 日志 API | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 日志 API”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-032 | 345 | Lua 指令数限制 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 指令数限制”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-033 | 346 | Lua 执行超时 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 执行超时”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-034 | 347 | Lua VM 内存上限 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua VM 内存上限”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-035 | 348 | Lua 禁止 `os.execute` | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 禁止 'os.execute'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-036 | 349 | Lua 禁止任意文件访问 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 禁止任意文件访问”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-037 | 350 | Lua 禁止 `package.loadlib` | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 禁止 'package.loadlib'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-038 | 351 | Lua 禁止 FFI | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 禁止 FFI”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-039 | 352 | Lua 网络请求默认关闭 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 网络请求默认关闭”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-040 | 353 | Lua 白名单模块 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 白名单模块”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-041 | 354 | Lua 每站点权限 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 每站点权限”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-042 | 355 | Lua Error Fallback | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua Error Fallback”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-043 | 356 | Lua 错误计数 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 错误计数”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-044 | 357 | Lua 慢脚本统计 | 0.7 | A/C/G | Administrator | lua-runtime | 查询“Lua 慢脚本统计”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| LUA-045 | 358 | Lua 脚本版本 | 0.7 | A/C/G | Administrator | lua-runtime | 查询“Lua 脚本版本”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| LUA-046 | 359 | Lua 脚本回滚 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua 脚本回滚”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| LUA-047 | 360 | Lua Hook 调试日志 | 0.7 | A/C/G | Administrator | lua-runtime | 执行“Lua Hook 调试日志”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | SEC-001 | 361 | Basic Auth | 0.4 | A/C/G | Operator | policy-engine | 执行“Basic Auth”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | SEC-002 | 362 | 用户名密码文件 | 0.4 | A/C/G | Operator | policy-engine | 执行“用户名密码文件”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | SEC-003 | 363 | IP 白名单 | 0.4 | A/C/G | Operator | policy-engine | 执行“IP 白名单”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
@@ -1193,8 +1195,8 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | OBS-042 | 441 | Readiness `/readyz` | 0.5 | A/C/G | Operator | observability-service | 执行“Readiness '/readyz'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | OBS-043 | 442 | 运行时配置版本指标 | 0.5 | A/C/G | Operator | observability-service | 执行“运行时配置版本指标”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | OBS-044 | 443 | 配置发布时间指标 | 0.5 | A/C/G | Operator | observability-service | 执行“配置发布时间指标”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
-| OBS-045 | 444 | Lua 错误指标 | 0.5 | A/C/G | Viewer | observability-service | 查询“Lua 错误指标”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| OBS-046 | 445 | Lua 耗时指标 | 0.5 | A/C/G | Viewer | observability-service | 查询“Lua 耗时指标”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
+| OBS-045 | 444 | Lua 错误指标 | 0.5 | A/C/G | Viewer | observability-service | 查询“Lua 错误指标”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| OBS-046 | 445 | Lua 耗时指标 | 0.5 | A/C/G | Viewer | observability-service | 查询“Lua 耗时指标”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
 | OBS-047 | 446 | Dashboard 实时趋势图 | 0.5 | A/C/G | Viewer | observability-service | 查询“Dashboard 实时趋势图”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
 | OBS-048 | 447 | 最近异常请求 | 0.5 | A/C/G | Viewer | observability-service | 查询“最近异常请求”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
 | OBS-049 | 448 | 最近上游故障 | 0.5 | A/C/G | Viewer | observability-service | 查询“最近上游故障”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
@@ -1289,8 +1291,8 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | CLI-017 | 537 | CLI `upstream check` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'upstream check'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | CLI-018 | 538 | CLI `cert list` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'cert list'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | CLI-019 | 539 | CLI `cert renew` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'cert renew'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CLI-020 | 540 | CLI `lua check` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'lua check'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CLI-021 | 541 | CLI `lua test` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'lua test'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| CLI-020 | 540 | CLI `lua check` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'lua check'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CLI-021 | 541 | CLI `lua test` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'lua test'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | CLI-022 | 542 | CLI `logs tail` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'logs tail'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | CLI-023 | 543 | CLI `metrics` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'metrics'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | CLI-024 | 544 | CLI `docker ps` 简化封装 | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'docker ps' 简化封装”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
@@ -1320,7 +1322,7 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | SEC-035 | 568 | Web API 操作审计 | 0.4 | A/C/G | Operator | policy-engine | 执行“Web API 操作审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | GUI-001 | 569 | UI 配置编辑器 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“UI 配置编辑器”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | In Progress | No |
 | GUI-002 | 570 | UI DSL Monaco 高亮 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“UI DSL Monaco 高亮”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Planned | No |
-| GUI-003 | 571 | UI Lua Monaco 高亮 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“UI Lua Monaco 高亮”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Planned | No |
+| GUI-003 | 571 | UI Lua Monaco 高亮 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“UI Lua Monaco 高亮”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Implemented | No |
 | GUI-004 | 572 | UI 配置错误行定位 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“UI 配置错误行定位”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Planned | No |
 | GUI-005 | 573 | UI 上游拓扑视图 | 0.8 | G/S | Viewer | web | 在 Web GUI 完成“UI 上游拓扑视图”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Planned | No |
 | GUI-006 | 574 | UI 网站状态卡片 | 0.8 | G/S | Viewer | web | 在 Web GUI 完成“UI 网站状态卡片”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Planned | No |
@@ -1444,7 +1446,7 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | 新增团队/平台需求 | 105 |
 | 总 Feature ID | 685 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
-| 当前 `Implemented` | 486（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-025`、`HTTP-001`～`HTTP-028`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-041`、`DSL-043`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-006`；身份：`IAM-001`～`IAM-038`；证书：`TLS-001`～`TLS-033`；安全：`SEC-001`～`SEC-035`；可观测：`OBS-001`～`OBS-044`、`OBS-047`～`OBS-053`；主机：`HOST-001`～`HOST-018`；容器：`CTR-001`～`CTR-038`；文件与备份：`BACKUP-001`～`BACKUP-012`） |
+| 当前 `Implemented` | 539（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-003`、`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-025`、`HTTP-001`～`HTTP-028`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-006`；身份：`IAM-001`～`IAM-038`；证书：`TLS-001`～`TLS-033`；安全：`SEC-001`～`SEC-035`；可观测：`OBS-001`～`OBS-053`；主机：`HOST-001`～`HOST-018`；容器：`CTR-001`～`CTR-038`；文件与备份：`BACKUP-001`～`BACKUP-012`；Lua：`LUA-001`～`LUA-047`；CLI：`CLI-020`、`CLI-021`） |
 | 1.0 要求 `Verified` | 685 |
 
 分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 47、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。
