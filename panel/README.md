@@ -548,6 +548,10 @@ ppanel volume list
 ppanel container engine df docker
 ppanel container engine prune docker
 ppanel container engine prune docker --named-volumes --yes
+ppanel compose list
+ppanel compose logs shop --lines 500 --since 1h
+ppanel compose config shop
+ppanel compose restart shop --yes
 ppanel container restart shop-web-1 --yes
 ppanel container remove nightly-report --volumes --yes
 ```
@@ -619,6 +623,27 @@ choices; the agent lists again and removes, one at a time, the requested
 items still listed, so whatever came into use meanwhile stays, and
 starts no removal after 130 seconds. Each prune is audited as
 `container.engine.pruned`, refused or not.
+`GET /api/v1/container-engines/{engine}/compose-projects` needs
+`containers.read` and lists the Compose projects the engine's containers
+are labelled with, running or not, each with its working directory,
+Compose files and services and how many of its containers run, marking
+the panel's own installation.
+`POST .../compose-projects/{project}/{up,down,restart}` needs
+`containers.manage`: up starts the project's containers that are not
+running, down stops and removes its containers and networks and keeps
+its volumes, and restart restarts its containers, at most 8 at once. The
+answer says how many containers changed and which containers or networks
+the engine refused. Recreating a project from a changed file stays with
+Compose, and the installation is only ever brought up. Each action is
+audited as `container.compose.up`, `.down` or `.restarted`, refused or
+not. `.../logs` merges the last lines of all the project's containers by
+time, each with its service and container, and `.../files` reads the
+Compose files its labels name; both need `containers.inspect`, since
+either can hold secrets. A file is read only when it lies in the
+project's working directory, ends in `.yml` or `.yaml`, is a regular
+file and is at most 256 KiB, after following links; the agent's sandbox
+hides home directories and `/tmp`, and a file that cannot be read says
+why.
 `POST /api/v1/container-engines/{engine}/{enable,disable}` needs
 `containers.manage`, as do
 `POST /api/v1/container-engines/{engine}/containers/{container}/{start,stop,restart,kill}`
@@ -635,9 +660,11 @@ text, followed from the last line read and saved as a file. The table
 shows each running container's CPU and memory, and the details show
 everything it uses. An Images tab lists the engine's images, opens one's
 configuration and removes one after confirming, and Networks and
-Volumes tabs list those. A reachable engine's card opens its disk use,
-where operators see what pruning would remove and remove it after
-confirming.
+Volumes tabs list those. A Projects tab lists the engine's Compose
+projects, brings one up, or restarts or takes it down after confirming,
+and opens its merged logs, filtered by service, and its Compose files. A
+reachable engine's card opens its disk use, where operators see what
+pruning would remove and remove it after confirming.
 
 ## Alerts
 
