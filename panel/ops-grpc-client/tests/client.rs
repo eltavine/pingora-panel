@@ -211,6 +211,20 @@ impl EngineResources for FakeResources {
         }))
     }
 
+    async fn prune_preview(
+        &self,
+        _: Request<wire::EngineResourcesPrunePreviewRequest>,
+    ) -> Result<Response<wire::EngineResourcesPrunePreviewResponse>, Status> {
+        Err(Status::unimplemented("prune"))
+    }
+
+    async fn prune(
+        &self,
+        _: Request<wire::EngineResourcesPruneRequest>,
+    ) -> Result<Response<wire::EngineResourcesPruneResponse>, Status> {
+        Err(Status::unimplemented("prune"))
+    }
+
     async fn disk_usage(
         &self,
         _: Request<wire::EngineResourcesDiskUsageRequest>,

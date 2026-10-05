@@ -12,6 +12,7 @@ mod container_stats;
 mod containers;
 mod directories;
 mod engine_disk;
+mod engine_prune;
 mod engine_resources;
 #[cfg(test)]
 mod fake_engine;
@@ -87,7 +88,10 @@ pub async fn serve(config: AgentConfig, shutdown: impl Future<Output = ()> + Sen
                     config.installation_project.clone(),
                 ))),
                 Some(EngineResourcesServer::new(
-                    engine_resources::ResourceService::new(Arc::clone(&engines)),
+                    engine_resources::ResourceService::new(
+                        Arc::clone(&engines),
+                        config.installation_project.clone(),
+                    ),
                 )),
                 Some(GatewayServiceServer::new(
                     gateway_service::GatewayService::new(

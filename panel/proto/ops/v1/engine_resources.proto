@@ -15,6 +15,14 @@ service EngineResources {
   // how much removing what is not in use would free, as `docker system df`
   // reports it.
   rpc DiskUsage(EngineResourcesDiskUsageRequest) returns (EngineResourcesDiskUsageResponse);
+  // What pruning would remove: containers that are not running, images no
+  // container uses, volumes nothing mounts, networks no container is on and
+  // build cache not in use; never what the panel's own installation made,
+  // nor the engine's own networks.
+  rpc PrunePreview(EngineResourcesPrunePreviewRequest) returns (EngineResourcesPrunePreviewResponse);
+  // Removes the items of a preview that a preview with the same choices
+  // still lists, one at a time, so what came into use meanwhile stays.
+  rpc Prune(EngineResourcesPruneRequest) returns (EngineResourcesPruneResponse);
 }
 
 message EngineSubnet {
@@ -106,4 +114,71 @@ message EngineResourcesDiskUsageResponse {
   EngineDiskUse volumes = 4;
   EngineDiskUse build_cache = 5;
   .pingora.panel.common.v1.Error error = 6;
+}
+
+enum EnginePruneKind {
+  ENGINE_PRUNE_KIND_UNSPECIFIED = 0;
+  ENGINE_PRUNE_KIND_CONTAINER = 1;
+  ENGINE_PRUNE_KIND_IMAGE = 2;
+  ENGINE_PRUNE_KIND_VOLUME = 3;
+  ENGINE_PRUNE_KIND_NETWORK = 4;
+  ENGINE_PRUNE_KIND_BUILD_CACHE = 5;
+}
+
+message EnginePruneItem {
+  EnginePruneKind kind = 1;
+  // Its ID, or a volume's name.
+  string id = 2;
+  // How people know it: a container's, volume's or network's name, an
+  // image's tag, what a build cache record holds.
+  string name = 3;
+  // What removing it frees, as far as the engine says.
+  uint64 size_bytes = 4;
+}
+
+// What pruning looks at besides containers, images nothing names,
+// anonymous volumes, networks and build cache.
+message EnginePruneChoices {
+  // Images a tag still names but no container uses.
+  bool tagged_images = 1;
+  // Volumes a name was given, which usually hold data someone meant to keep.
+  bool named_volumes = 2;
+}
+
+message EngineResourcesPrunePreviewRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string engine = 2;
+  EnginePruneChoices choices = 3;
+}
+
+message EngineResourcesPrunePreviewResponse {
+  google.protobuf.Timestamp observed_at = 1;
+  // By kind, then name.
+  repeated EnginePruneItem items = 2;
+  // What removing them all would free.
+  uint64 reclaimable_bytes = 3;
+  .pingora.panel.common.v1.Error error = 4;
+}
+
+message EngineResourcesPruneRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string engine = 2;
+  // The choices of the preview the items come from.
+  EnginePruneChoices choices = 3;
+  // At most 1000.
+  repeated EnginePruneItem items = 4;
+}
+
+message EnginePruneOutcome {
+  EnginePruneItem item = 1;
+  // Why it stayed; unset once it is gone.
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message EngineResourcesPruneResponse {
+  // In the order of the request.
+  repeated EnginePruneOutcome outcomes = 1;
+  // What the items that went freed.
+  uint64 reclaimed_bytes = 2;
+  .pingora.panel.common.v1.Error error = 3;
 }

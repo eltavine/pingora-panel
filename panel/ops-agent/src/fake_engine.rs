@@ -261,6 +261,7 @@ pub(crate) async fn engine_with(directory: &Path, calls: Calls) -> PathBuf {
                 let every = json!([
                     {"Id": "b2", "Names": ["/shop-web-1"], "Image": "nginx:1.27",
                      "ImageID": "sha256:aa", "Created": 1_800_000_000, "State": "running",
+                     "SizeRw": 2_048,
                      "Status": "Up 3 hours (healthy)",
                      "Ports": [{"IP": "0.0.0.0", "PrivatePort": 80, "PublicPort": 8081,
                                 "Type": "tcp"}],
@@ -269,7 +270,7 @@ pub(crate) async fn engine_with(directory: &Path, calls: Calls) -> PathBuf {
                      "Mounts": [{"Type": "volume", "Name": "shop_html",
                                  "Destination": "/usr/share/nginx/html"},
                                 {"Type": "bind", "Source": "/srv/shop", "Destination": "/srv"}]},
-                    {"Id": "a1", "Names": ["/cache"], "Image": "redis:7",
+                    {"Id": "a1", "Names": ["/cache"], "Image": "redis:7", "SizeRw": 1_024,
                      "ImageID": "sha256:bb", "Created": 1_800_000_100, "State": "exited",
                      "Status": "Exited (0) 2 days ago", "Ports": [], "Labels": {}}
                 ]);
@@ -336,6 +337,8 @@ pub(crate) async fn engine_with(directory: &Path, calls: Calls) -> PathBuf {
                     {"Name": "bridge", "Id": "n1", "Scope": "local", "Driver": "bridge",
                      "IPAM": {"Config": [{"Subnet": "172.17.0.0/16"}]}, "Labels": {}},
                     {"Name": "host", "Id": "n2", "Scope": "local", "Driver": "host",
+                     "IPAM": {"Config": []}, "Labels": {}},
+                    {"Name": "stale_net", "Id": "n4", "Scope": "local", "Driver": "bridge",
                      "IPAM": {"Config": []}, "Labels": {}}
                 ]))
             }),
@@ -356,9 +359,14 @@ pub(crate) async fn engine_with(directory: &Path, calls: Calls) -> PathBuf {
                     ],
                     "Volumes": [
                         {"Name": "shop_html", "UsageData": {"Size": 4_096, "RefCount": 1}},
-                        {"Name": "orphan", "UsageData": {"Size": 1_024, "RefCount": 0}}
+                        {"Name": "orphan", "UsageData": {"Size": 1_024, "RefCount": 0}},
+                        {"Name": "3f9a1c", "UsageData": {"Size": 2_048, "RefCount": 0}}
                     ],
-                    "BuildCache": []
+                    "BuildCache": [
+                        {"ID": "c1", "Type": "regular", "InUse": false, "Shared": false,
+                         "Size": 700, "Description": "mount / from exec /bin/sh -c make"},
+                        {"ID": "c2", "Type": "regular", "InUse": true, "Shared": false, "Size": 80}
+                    ]
                 }))
             }),
         )
@@ -372,9 +380,54 @@ pub(crate) async fn engine_with(directory: &Path, calls: Calls) -> PathBuf {
                      "Labels": {"com.docker.compose.project": "shop"}},
                     {"Name": "orphan", "Driver": "local", "Scope": "local",
                      "Mountpoint": "/var/lib/docker/volumes/orphan/_data",
-                     "Options": {}, "Labels": {}}
+                     "Options": {}, "Labels": {}},
+                    {"Name": "3f9a1c", "Driver": "local", "Scope": "local",
+                     "Mountpoint": "/var/lib/docker/volumes/3f9a1c/_data",
+                     "Options": {}, "Labels": {"com.docker.volume.anonymous": ""}}
                 ], "Warnings": []}))
             }),
+        );
+    let (volumes_gone, networks_gone, cache_gone) = (calls.clone(), calls.clone(), calls.clone());
+    let router = router
+        .route(
+            "/volumes/{name}",
+            delete(move |Segments(name): Segments<String>| async move {
+                volumes_gone
+                    .lock()
+                    .unwrap()
+                    .push(format!("remove-volume {name}"));
+                StatusCode::NO_CONTENT
+            }),
+        )
+        .route(
+            "/networks/{id}",
+            delete(move |Segments(id): Segments<String>| async move {
+                networks_gone
+                    .lock()
+                    .unwrap()
+                    .push(format!("remove-network {id}"));
+                StatusCode::NO_CONTENT
+            }),
+        )
+        .route(
+            "/build/prune",
+            post(
+                move |Query(query): Query<HashMap<String, String>>| async move {
+                    let ids = query
+                        .get("filters")
+                        .and_then(|filters| {
+                            serde_json::from_str::<HashMap<String, Vec<String>>>(filters).ok()
+                        })
+                        .and_then(|mut filters| filters.remove("id"))
+                        .unwrap_or_default();
+                    let deleted: Vec<&String> = ids.iter().filter(|id| *id == "c1").collect();
+                    cache_gone
+                        .lock()
+                        .unwrap()
+                        .extend(deleted.iter().map(|id| format!("prune-build {id}")));
+                    Json(json!({"CachesDeleted": deleted, "SpaceReclaimed": 700}))
+                },
+            ),
         );
     let removing = calls.clone();
     let router = router.route(

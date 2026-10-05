@@ -44,7 +44,7 @@ fn reference(value: &str) -> Result<&str, PanelError> {
 
 /// References without the `<none>` placeholders the engine gives an image
 /// nothing names.
-fn named(references: Vec<String>) -> Vec<String> {
+pub(crate) fn named(references: Vec<String>) -> Vec<String> {
     references
         .into_iter()
         .filter(|reference| !reference.starts_with("<none>"))
