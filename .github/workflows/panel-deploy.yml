@@ -278,6 +278,71 @@ jobs:
               | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"
           done
 
+      - name: Manage Compose projects through the host agent
+        run: |
+          ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
+          # The installation is a project of its own, only ever brought up.
+          ppanel -o json compose list \
+            | python3 -c "import json, sys; p = {p['name']: p for p in json.load(sys.stdin)['projects']}['pingora-panel']; assert p['installation'] and p['running'] >= 1 and 'control' in [s['name'] for s in p['services']], p"
+          if ppanel compose down pingora-panel --yes; then
+            exit 1
+          fi
+          if ppanel compose restart pingora-panel --yes; then
+            exit 1
+          fi
+          ppanel compose up pingora-panel
+          test "$(docker inspect --format '{{.State.Status}}' pingora-panel-control-1)" = running
+          # Its Compose files are in the runner's home, which the agent's
+          # sandbox hides, so each says why it is not read.
+          ppanel -o json compose config pingora-panel \
+            | python3 -c "import json, sys; files = json.load(sys.stdin)['files']; assert files and all(f['content'] is None and f['error'] for f in files), files"
+          # A throwaway project from an image the installation already has, in
+          # a directory the agent may read.
+          nats_image="$(docker compose config --images | grep '/nats:')"
+          sudo install -d -m 0755 /srv/panel-ci-shop
+          printf 'services:\n  queue:\n    image: %s\n' "$nats_image" \
+            | sudo tee /srv/panel-ci-shop/compose.yaml >/dev/null
+          docker compose --project-directory /srv/panel-ci-shop \
+            --file /srv/panel-ci-shop/compose.yaml --project-name panel-ci-shop up --detach --wait
+          ppanel -o json compose list \
+            | python3 -c "import json, sys; p = {p['name']: p for p in json.load(sys.stdin)['projects']}['panel-ci-shop']; assert not p['installation'] and p['running'] == 1 and p['working_directory'] == '/srv/panel-ci-shop', p"
+          ppanel compose list
+          ppanel -o json compose config panel-ci-shop \
+            | python3 -c "import json, sys; files = json.load(sys.stdin)['files']; assert files[0]['path'] == '/srv/panel-ci-shop/compose.yaml' and 'queue:' in files[0]['content'], files"
+          ppanel compose config panel-ci-shop
+          ppanel -o json compose logs panel-ci-shop --lines 50 \
+            | python3 -c "import json, sys; lines = json.load(sys.stdin)['lines']; assert any(l['service'] == 'queue' and 'Server is ready' in l['line']['text'] for l in lines), lines"
+          ppanel compose logs panel-ci-shop --lines 5
+          status() { docker inspect --format '{{.State.Status}}' panel-ci-shop-queue-1; }
+          ppanel compose restart panel-ci-shop --yes
+          test "$(status)" = running
+          docker stop panel-ci-shop-queue-1 >/dev/null
+          ppanel -o json compose up panel-ci-shop \
+            | python3 -c "import json, sys; c = json.load(sys.stdin); assert c['changed'] == 1 and c['project']['running'] == 1 and not c['failures'], c"
+          test "$(status)" = running
+          # Down removes its containers and networks.
+          ppanel -o json compose down panel-ci-shop --yes \
+            | python3 -c "import json, sys; c = json.load(sys.stdin); assert c['project'] is None and c['changed'] == 1 and not c['failures'], c"
+          if docker inspect panel-ci-shop-queue-1 >/dev/null 2>&1; then
+            exit 1
+          fi
+          if docker network inspect panel-ci-shop_default >/dev/null 2>&1; then
+            exit 1
+          fi
+          for type in container.compose.up container.compose.restarted container.compose.down; do
+            for _ in $(seq 1 30); do
+              if ppanel -o json audit list --type "$type" --actor-id ci \
+                | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"; then
+                break
+              fi
+              sleep 1
+            done
+            ppanel -o json audit list --type "$type" --actor-id ci \
+              | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"
+          done
+          ppanel -o json audit list --type container.operation.refused --actor-id ci \
+            | python3 -c "import json, sys; ops = {i['data'].get('operation') for i in json.load(sys.stdin)['items'] if i['data'].get('project') == 'pingora-panel'}; assert {'compose.down', 'compose.restart'} <= ops, ops"
+
       - name: Serve a site through the gateway with the command line
         run: |
           ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
