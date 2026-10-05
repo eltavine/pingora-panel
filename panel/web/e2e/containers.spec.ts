@@ -112,6 +112,32 @@ const usage = {
   pids: 5,
 }
 
+const shop = {
+  name: 'shop',
+  working_directory: '/srv/shop',
+  config_files: ['/srv/shop/compose.yaml', '/srv/shop/compose.override.yaml'],
+  services: [
+    { name: 'web', containers: 1, running: 1 },
+    { name: 'worker', containers: 1, running: 0 },
+  ],
+  containers: 2,
+  running: 1,
+  installation: false,
+}
+
+const projects = [
+  {
+    name: 'pingora-panel',
+    working_directory: '/opt/pingora-panel',
+    config_files: ['/opt/pingora-panel/compose.yaml'],
+    services: [{ name: 'panel', containers: 1, running: 1 }],
+    containers: 1,
+    running: 1,
+    installation: true,
+  },
+  shop,
+]
+
 interface Seen {
   queries: URLSearchParams[]
   changes: string[]
@@ -345,6 +371,70 @@ async function setUp(
   )
   await page.route(/\/api\/v1\/container-engines\/docker\/containers\/[\w.-]+\/stats$/, (route) =>
     route.fulfill({ json: usage }),
+  )
+  await page.route(/\/api\/v1\/container-engines\/docker\/compose-projects$/, (route) =>
+    route.fulfill({ json: { observed_at: '2026-10-04T10:00:00Z', projects } }),
+  )
+  await page.route(/\/compose-projects\/[\w-]+\/(up|down|restart)$/, (route) => {
+    const [, project, action] = /compose-projects\/([\w-]+)\/(\w+)$/.exec(route.request().url())!
+    seen.changes.push(`POST compose ${project} ${action}`)
+    route.fulfill({
+      json:
+        action === 'down'
+          ? { project: null, changed: 2, failures: [] }
+          : {
+              project: shop,
+              changed: 1,
+              failures:
+                action === 'up'
+                  ? [
+                      {
+                        name: 'shop-worker-1',
+                        error: { code: 'PRECONDITION_FAILED', message: 'port 8080 is taken' },
+                      },
+                    ]
+                  : [],
+            },
+    })
+  })
+  await page.route(/\/compose-projects\/shop\/logs(\?.*)?$/, (route) => {
+    seen.queries.push(new URL(route.request().url()).searchParams)
+    route.fulfill({
+      json: {
+        observed_at: '2026-10-04T10:00:00Z',
+        lines: [
+          {
+            service: 'web',
+            container: 'shop-web-1',
+            line: { time: '2026-10-04T09:59:58Z', stream: 'stdout', text: 'GET /cart 200' },
+          },
+          {
+            service: 'worker',
+            container: 'shop-worker-1',
+            line: { time: '2026-10-04T09:59:59Z', stream: 'stderr', text: 'queue is unreachable' },
+          },
+        ],
+        truncated: false,
+      },
+    })
+  })
+  await page.route(/\/compose-projects\/shop\/files$/, (route) =>
+    route.fulfill({
+      json: {
+        files: [
+          {
+            path: '/srv/shop/compose.yaml',
+            content: 'services:\n  web:\n    image: nginx:1.27\n',
+            error: null,
+          },
+          {
+            path: '/srv/shop/compose.override.yaml',
+            content: null,
+            error: { code: 'PERMISSION_DENIED', message: 'the host agent may not read it' },
+          },
+        ],
+      },
+    }),
   )
   await page.route(/\/api\/v1\/container-engines\/\w+\/(enable|disable)$/, (route) => {
     const path = new URL(route.request().url()).pathname
@@ -715,4 +805,72 @@ test('readers see what pruning would remove without removing it', async ({ page 
   await sheet.getByRole('button', { name: 'Show what would go' }).click()
   await expect(sheet).toContainText('nightly-report')
   await expect(sheet.getByRole('button', { name: /^Remove / })).toHaveCount(0)
+})
+
+test('compose projects show their services and are acted on after confirming', async ({ page }) => {
+  const seen = await setUp(page)
+  await page.goto('/containers')
+  await page.getByRole('tab', { name: 'Projects' }).click()
+  await expect(page).toHaveURL(/view=projects/)
+  const row = page.getByRole('row').filter({ hasText: '/srv/shop' })
+  await expect(row.getByRole('status')).toHaveText('Partly running')
+  await expect(row).toContainText('1 of 2 containers running')
+  await expect(row).toContainText('worker0/1')
+
+  await row.getByRole('button', { name: 'Actions for shop' }).click()
+  await page.getByRole('menuitem', { name: 'Take down' }).click()
+  const dialog = page.getByRole('alertdialog', { name: 'Take shop down?' })
+  await expect(dialog).toContainText('its volumes stay')
+  await dialog.getByRole('button', { name: 'Take down' }).click()
+  await expect(page.getByText('shop is down')).toBeVisible()
+
+  await row.getByRole('button', { name: 'Actions for shop' }).click()
+  await page.getByRole('menuitem', { name: 'Bring up' }).click()
+  await expect(page.getByText('The engine refused 1 part of shop')).toBeVisible()
+  await expect(page.getByText('shop-worker-1: port 8080 is taken')).toBeVisible()
+  expect(seen.changes).toEqual(['POST compose shop down', 'POST compose shop up'])
+
+  const panel = page.getByRole('row').filter({ hasText: 'This panel' })
+  await panel.getByRole('button', { name: 'Actions for pingora-panel' }).click()
+  await expect(page.getByRole('menuitem', { name: 'Bring up' })).toBeVisible()
+  await expect(page.getByRole('menuitem', { name: 'Take down' })).toHaveCount(0)
+  await expect(page.getByRole('menu')).toContainText('only brought up from here')
+})
+
+test("a project's merged logs and Compose files are read", async ({ page }) => {
+  const seen = await setUp(page)
+  await page.goto('/containers?view=projects')
+  const row = page.getByRole('row').filter({ hasText: '/srv/shop' })
+  await row.getByRole('button', { name: 'Logs of shop' }).click()
+  const sheet = page.getByRole('dialog', { name: 'shop logs' })
+  const log = sheet.getByRole('log')
+  await expect(log).toContainText('shop-web-1')
+  await expect(log).toContainText('queue is unreachable')
+  expect(seen.queries.at(-1)?.get('lines')).toBe('200')
+  await sheet.getByRole('combobox', { name: 'Service' }).click()
+  await page.getByRole('option', { name: 'worker' }).click()
+  await expect(log).not.toContainText('GET /cart')
+  await expect(sheet).toContainText('1 of 2 lines')
+  await page.keyboard.press('Escape')
+
+  await row.getByRole('button', { name: 'Compose files of shop' }).click()
+  const files = page.getByRole('dialog', { name: 'Compose files of shop' })
+  await expect(files.getByRole('region', { name: '/srv/shop/compose.yaml' })).toContainText(
+    'image: nginx:1.27',
+  )
+  await expect(files).toContainText('It could not be read: the host agent may not read it')
+})
+
+test('readers see projects without reading their logs or acting on them', async ({ page }) => {
+  await setUp(
+    page,
+    undefined,
+    ALL_PERMISSIONS.filter(
+      (permission) => permission !== 'containers.manage' && permission !== 'containers.inspect',
+    ),
+  )
+  await page.goto('/containers?view=projects')
+  const row = page.getByRole('row').filter({ hasText: '/srv/shop' })
+  await expect(row).toContainText('Partly running')
+  await expect(row.getByRole('button')).toHaveCount(0)
 })

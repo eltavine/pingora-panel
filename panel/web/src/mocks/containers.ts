@@ -1,5 +1,10 @@
 import { http, HttpResponse, ws, type AnyHandler } from 'msw'
 import type {
+  ComposeChangeView,
+  ComposeFilesView,
+  ComposeLogsView,
+  ComposeProjectListView,
+  ComposeProjectView,
   ContainerEngineView,
   ContainerLogLineView,
   ContainerLogsView,
@@ -197,6 +202,65 @@ export function containerHandlers(): AnyHandler[] {
   ]
 
   const tail = ws.link(/\/api\/v1\/container-engines\/[^/]+\/containers\/[^/]+\/logs\/tail/)
+
+  /** The panel's own installation, whose containers the page does not list. */
+  const installation: ComposeProjectView = {
+    name: 'pingora-panel',
+    working_directory: '/opt/pingora-panel',
+    config_files: ['/opt/pingora-panel/compose.yaml'],
+    services: [{ name: 'panel', containers: 1, running: 1 }],
+    containers: 1,
+    running: 1,
+    installation: true,
+  }
+
+  /** The Compose projects the containers' labels name, as the agent groups them. */
+  function projects(): ComposeProjectView[] {
+    const byName = new Map<string, ContainerView[]>()
+    for (const container of containers) {
+      if (container.compose_project) {
+        byName.set(container.compose_project, [
+          ...(byName.get(container.compose_project) ?? []),
+          container,
+        ])
+      }
+    }
+    const grouped = [...byName].map(([name, members]): ComposeProjectView => {
+      const services = new Map<string, { containers: number; running: number }>()
+      for (const member of members) {
+        const service = member.labels['com.docker.compose.service'] ?? ''
+        const counted = services.get(service) ?? { containers: 0, running: 0 }
+        counted.containers += 1
+        counted.running += member.state === 'running' ? 1 : 0
+        services.set(service, counted)
+      }
+      return {
+        name,
+        working_directory: `/srv/${name}`,
+        config_files: [`/srv/${name}/compose.yaml`, `/srv/${name}/compose.override.yaml`],
+        services: [...services]
+          .map(([service, counted]) => ({ name: service, ...counted }))
+          .sort((left, right) => left.name.localeCompare(right.name)),
+        containers: members.length,
+        running: members.filter((member) => member.state === 'running').length,
+        installation: false,
+      }
+    })
+    return [installation, ...grouped].sort((left, right) => left.name.localeCompare(right.name))
+  }
+
+  function noProject(project: string) {
+    return HttpResponse.json(
+      {
+        type: 'about:blank',
+        title: 'Not found',
+        status: 404,
+        code: 'NOT_FOUND',
+        detail: `No Compose project is named ${project}`,
+      },
+      { status: 404 },
+    )
+  }
 
   function missing(container: string) {
     return HttpResponse.json(
@@ -447,6 +511,105 @@ export function containerHandlers(): AnyHandler[] {
         }
         images.splice(index, 1)
         return HttpResponse.json({ id: found.id, untagged: found.tags, deleted: [found.id] })
+      },
+    ),
+    http.get('*/api/v1/container-engines/:engine/compose-projects', ({ params }) =>
+      HttpResponse.json({
+        observed_at: new Date().toISOString(),
+        projects: params.engine === 'docker' ? projects() : [],
+      } satisfies ComposeProjectListView),
+    ),
+    http.get<{ engine: string; project: string }>(
+      '*/api/v1/container-engines/:engine/compose-projects/:project/logs',
+      ({ params, request }) => {
+        const members = containers.filter(
+          (container) => container.compose_project === params.project,
+        )
+        if (members.length === 0) {
+          return noProject(params.project)
+        }
+        const count = Number(new URL(request.url).searchParams.get('lines')) || 200
+        const now = Date.now()
+        const lines = Array.from({ length: Math.min(count, 300) }, (_, index) => {
+          const member = members[index % members.length]!
+          return {
+            service: member.labels['com.docker.compose.service'] ?? '',
+            container: member.names[0] ?? member.id,
+            line: printed(now - (300 - index) * PRINT_INTERVAL_MS, index),
+          }
+        })
+        return HttpResponse.json({
+          observed_at: new Date(now).toISOString(),
+          lines,
+          truncated: false,
+        } satisfies ComposeLogsView)
+      },
+    ),
+    http.get<{ engine: string; project: string }>(
+      '*/api/v1/container-engines/:engine/compose-projects/:project/files',
+      ({ params }) => {
+        const found = projects().find((project) => project.name === params.project)
+        if (!found) {
+          return noProject(params.project)
+        }
+        const services = found.services
+          .map((service) => `  ${service.name}:\n    image: ${service.name}:latest\n`)
+          .join('')
+        return HttpResponse.json({
+          files: found.config_files.map((path, index) =>
+            index === 0
+              ? { path, content: `services:\n${services}`, error: null }
+              : {
+                  path,
+                  content: null,
+                  error: { code: 'PERMISSION_DENIED', message: 'the host agent may not read it' },
+                },
+          ),
+        } satisfies ComposeFilesView)
+      },
+    ),
+    http.post<{ engine: string; project: string; action: string }>(
+      '*/api/v1/container-engines/:engine/compose-projects/:project/:action',
+      ({ params }) => {
+        if (params.project === installation.name && params.action !== 'up') {
+          return HttpResponse.json(
+            {
+              type: 'about:blank',
+              title: 'Precondition failed',
+              status: 412,
+              code: 'PRECONDITION_FAILED',
+              detail: "the panel's own installation is only ever brought up",
+            },
+            { status: 412, headers: { 'content-type': 'application/problem+json' } },
+          )
+        }
+        const members = containers.filter(
+          (container) => container.compose_project === params.project,
+        )
+        if (params.project !== installation.name && members.length === 0) {
+          return noProject(params.project)
+        }
+        if (params.action === 'down') {
+          for (const member of members) {
+            containers.splice(containers.indexOf(member), 1)
+          }
+          return HttpResponse.json({
+            project: null,
+            changed: members.length,
+            failures: [],
+          } satisfies ComposeChangeView)
+        }
+        const changed = members.filter(
+          (member) => params.action === 'restart' || member.state !== 'running',
+        )
+        for (const member of changed) {
+          Object.assign(member, { state: 'running', status: 'Up 1 second' })
+        }
+        return HttpResponse.json({
+          project: projects().find((project) => project.name === params.project) ?? null,
+          changed: changed.length,
+          failures: [],
+        } satisfies ComposeChangeView)
       },
     ),
     http.get('*/api/v1/container-engines/:engine/stats', () =>

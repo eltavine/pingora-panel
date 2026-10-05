@@ -1169,6 +1169,51 @@ const en: Messages = {
       internal: 'Internal',
       empty: 'This engine has no networks',
     },
+    projects: {
+      title: 'Projects',
+      name: 'Project',
+      services: 'Services',
+      installation: 'This panel',
+      conditions: {
+        running: 'Running',
+        partial: 'Partly running',
+        stopped: 'Stopped',
+      },
+      running: '{running} of {count} container running | {running} of {count} containers running',
+      empty: 'This engine runs no Compose projects',
+      emptyDetail: 'A project shows here once Compose has created its containers.',
+      up: 'Bring up',
+      restart: 'Restart',
+      down: 'Take down',
+      onlyUp: "This panel's own installation is only brought up from here.",
+      confirm: {
+        restart: {
+          title: 'Restart {name}?',
+          detail: "What runs in the project's containers stops and starts again.",
+        },
+        down: {
+          title: 'Take {name} down?',
+          detail:
+            'Its containers and networks are removed and its volumes stay. Only Compose on the host brings it back.',
+        },
+      },
+      done: {
+        up: '{name} is up',
+        restart: '{name} restarted',
+        down: '{name} is down',
+      },
+      refused:
+        'The engine refused {count} part of {name} | The engine refused {count} parts of {name}',
+      service: 'Service',
+      allServices: 'All services',
+      logsDetail: 'All its containers, merged by time',
+      noLines: 'Its containers have printed nothing',
+      files: 'Compose files of {name}',
+      filesDetail: 'As they are on the host; they can hold secrets',
+      noFiles: 'Its labels name no Compose files',
+      copyFile: 'Copy {path}',
+      unreadable: 'It could not be read: {reason}',
+    },
     volumes: {
       title: 'Volumes',
       mountpoint: 'Data on the host',

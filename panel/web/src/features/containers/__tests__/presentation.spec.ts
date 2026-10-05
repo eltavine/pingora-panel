@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type {
+  ComposeLogLineView,
   ContainerEngineView,
   ContainerLogLineView,
   ContainerStatsView,
@@ -12,9 +13,13 @@ import {
   logFile,
   logTailUrl,
   matchesLine,
+  matchesProjectLine,
   memoryShare,
   plainText,
   portLabel,
+  projectCondition,
+  projectLogFile,
+  projectTone,
   sortedLabels,
   stoppable,
   withoutAgent,
@@ -153,5 +158,42 @@ describe('container usage', () => {
     const stats = { memory_bytes: 256, memory_limit_bytes: 1_024 } as ContainerStatsView
     expect(memoryShare(stats)).toBe(0.25)
     expect(memoryShare({ ...stats, memory_limit_bytes: 0 })).toBeUndefined()
+  })
+})
+
+describe('compose projects', () => {
+  it('run fully, in part or not at all, each with its own glyph', () => {
+    expect(projectCondition({ running: 2, containers: 2 })).toBe('running')
+    expect(projectCondition({ running: 1, containers: 2 })).toBe('partial')
+    expect(projectCondition({ running: 0, containers: 2 })).toBe('stopped')
+    expect(projectTone('running')).toBe('positive')
+    expect(projectTone('partial')).toBe('warning')
+    expect(projectTone('stopped')).toBe('neutral')
+  })
+
+  const lines: ComposeLogLineView[] = [
+    {
+      service: 'web',
+      container: 'shop-web-1',
+      line: { time: '2027-01-15T08:00:00Z', stream: 'stdout', text: 'GET /cart' },
+    },
+    {
+      service: 'db',
+      container: 'shop-db-1',
+      line: { time: '2027-01-15T08:00:01Z', stream: 'stderr', text: 'checkpoint' },
+    },
+  ]
+
+  it('filter their lines by service as well as by output and text', () => {
+    expect(lines.filter((line) => matchesProjectLine(line, '', 'all', ''))).toHaveLength(2)
+    expect(lines.filter((line) => matchesProjectLine(line, 'db', 'all', ''))).toEqual([lines[1]])
+    expect(lines.filter((line) => matchesProjectLine(line, 'web', 'stderr', ''))).toEqual([])
+    expect(lines.filter((line) => matchesProjectLine(line, '', 'all', 'CART'))).toEqual([lines[0]])
+  })
+
+  it('save their lines after each container as docker compose logs prints them', () => {
+    expect(projectLogFile(lines)).toBe(
+      '2027-01-15T08:00:00Z shop-web-1 | GET /cart\n2027-01-15T08:00:01Z shop-db-1 | checkpoint\n',
+    )
   })
 })

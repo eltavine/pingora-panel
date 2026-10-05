@@ -11,6 +11,7 @@ import {
   RefreshCw,
   ScrollText,
   Search,
+  SquareStack,
 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -51,6 +52,7 @@ import type { ContainerView } from '@/api/generated'
 import ContainerActions from './ContainerActions.vue'
 import ContainerDetailSheet from './ContainerDetailSheet.vue'
 import ContainerEngines from './ContainerEngines.vue'
+import ComposeProjects from './ComposeProjects.vue'
 import ContainerImages from './ContainerImages.vue'
 import ContainerNetworks from './ContainerNetworks.vue'
 import ContainerVolumes from './ContainerVolumes.vue'
@@ -133,7 +135,7 @@ const state = computed({
 const filtered = computed(() => Boolean(queried('search') || queried('state')))
 
 /** Which of the engine's things the page shows; the address keeps it. */
-const VIEWS = ['containers', 'images', 'networks', 'volumes'] as const
+const VIEWS = ['containers', 'projects', 'images', 'networks', 'volumes'] as const
 const view = computed({
   get: () => VIEWS.find((name) => name === route.query.view) ?? 'containers',
   set: (value: string) =>
@@ -281,6 +283,11 @@ function refresh() {
               <TabsTrigger value="containers">
                 <Boxes aria-hidden="true" /><span class="max-sm:sr-only">{{
                   t('containers.list.title')
+                }}</span>
+              </TabsTrigger>
+              <TabsTrigger value="projects">
+                <SquareStack aria-hidden="true" /><span class="max-sm:sr-only">{{
+                  t('containers.projects.title')
                 }}</span>
               </TabsTrigger>
               <TabsTrigger value="images">
@@ -476,6 +483,9 @@ function refresh() {
                   </EmptyTitle>
                 </EmptyHeader>
               </Empty>
+            </TabsContent>
+            <TabsContent v-if="!notice && engineId" value="projects">
+              <ComposeProjects :engine="engineId" />
             </TabsContent>
             <TabsContent v-if="!notice && engineId" value="images">
               <ContainerImages :engine="engineId" />

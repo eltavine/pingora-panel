@@ -1,4 +1,6 @@
 import type {
+  ComposeLogLineView,
+  ComposeProjectView,
   ContainerEngineView,
   ContainerLogLineView,
   ContainerLogStreamName,
@@ -142,4 +144,42 @@ export function shortId(id: string): string {
 /** An image by its first tag, or its short ID when nothing names it. */
 export function imageName(image: Pick<ImageView, 'id' | 'tags'>): string {
   return image.tags[0] ?? shortId(image.id)
+}
+
+export type ProjectCondition = 'running' | 'partial' | 'stopped'
+
+/** Whether all, some or none of a project's containers run. */
+export function projectCondition(
+  project: Pick<ComposeProjectView, 'running' | 'containers'>,
+): ProjectCondition {
+  if (project.running === 0) {
+    return 'stopped'
+  }
+  return project.running < project.containers ? 'partial' : 'running'
+}
+
+export function projectTone(condition: ProjectCondition): StatusTone {
+  switch (condition) {
+    case 'running':
+      return 'positive'
+    case 'partial':
+      return 'warning'
+    default:
+      return 'neutral'
+  }
+}
+
+/** Whether a project's line is from `service`, or any when it is empty, and matches as {@link matchesLine} does. */
+export function matchesProjectLine(
+  line: ComposeLogLineView,
+  service: string,
+  stream: ContainerLogStreamName | 'all',
+  search: string,
+): boolean {
+  return (!service || line.service === service) && matchesLine(line.line, stream, search)
+}
+
+/** A project's lines as a log file, each after its container's name as `docker compose logs` writes them. */
+export function projectLogFile(lines: readonly ComposeLogLineView[]): string {
+  return lines.map(({ container, line }) => `${line.time} ${container} | ${line.text}\n`).join('')
 }
