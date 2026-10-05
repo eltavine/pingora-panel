@@ -14,6 +14,7 @@ pub mod nginx;
 pub mod plan;
 pub mod print;
 pub mod schema;
+mod scripts;
 mod source;
 pub mod syntax;
 pub mod values;
@@ -62,6 +63,10 @@ pub mod codes {
     /// take it over sets its own, nothing uses it, or a constant is never
     /// used; a warning.
     pub const NO_EFFECT: &str = "DSL_NO_EFFECT";
+    /// A Lua script does not compile, loads a module there is not, uses a
+    /// function the gateway does not provide or its phase does not allow, or
+    /// writes a global; only a script that does not compile is an error.
+    pub const LUA: &str = "DSL_LUA";
     /// A setting works but exposes traffic: passwords asked for over plain
     /// HTTP, every peer trusted as a proxy, or TLS nodes whose certificates
     /// are not verified; a warning.

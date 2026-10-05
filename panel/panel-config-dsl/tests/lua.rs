@@ -458,3 +458,85 @@ http {
         "{idle:#?}"
     );
 }
+
+#[test]
+fn scripts_are_compiled_and_checked_where_they_are_written() {
+    let mut sources = Sources::single(
+        r#"language_version 1;
+http {
+    upstream app {
+        server 10.0.0.1:80;
+    }
+    server s {
+        server_name s.example;
+        header_filter_by_lua_block {
+            ngx.say("too late")
+        }
+        access_by_lua_file lua/gate.lua;
+        proxy app;
+        route broken {
+            match prefix /broken;
+            content_by_lua_block {
+                if then
+            }
+        }
+    }
+}
+"#,
+    );
+    sources.insert(
+        "lua/gate.lua",
+        "local redis = require \"resty.redis\"\nlocal res = ngx.location.capture(\"/auth\")\nseen = true\n",
+    );
+    sources.insert("lua/lib/util.lua", "counter = 0\nreturn {}\n");
+    sources.insert("lua/bad.lua", "return function(\n");
+    let found = messages(&read(&sources));
+    for (code, at, message) in [
+        (codes::LUA, "main.conf:16", "the Lua code does not compile"),
+        (
+            codes::LUA,
+            "main.conf:9",
+            "ngx.say is disabled in header_filter_by_lua*",
+        ),
+        (
+            codes::LUA,
+            "lua/gate.lua:1",
+            "module \"resty.redis\" is neither built in nor a file under lua/",
+        ),
+        (
+            codes::LUA,
+            "lua/gate.lua:2",
+            "ngx.location.capture is not available in Pingora Panel",
+        ),
+        (
+            codes::LUA,
+            "lua/gate.lua:3",
+            "writes the global seen, which stays with this request",
+        ),
+        (
+            codes::LUA,
+            "lua/lib/util.lua:1",
+            "the module writes the global counter",
+        ),
+        (codes::LUA, "lua/bad.lua:2", "the Lua code does not compile"),
+        (
+            codes::NO_EFFECT,
+            "lua/lib/util.lua",
+            "lua/lib/util.lua is not used",
+        ),
+    ] {
+        assert!(
+            has(&found, code, at, message),
+            "{code} {at} {message}: {found:#?}"
+        );
+    }
+    let lowered = read(&sources);
+    let errors: Vec<_> = lowered
+        .errors()
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect();
+    assert_eq!(errors.len(), 2, "{errors:#?}");
+    assert!(!messages(&read(&self::sources()))
+        .iter()
+        .any(|(code, _, _)| code == codes::LUA || code == codes::NO_EFFECT));
+}

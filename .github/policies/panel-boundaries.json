@@ -347,7 +347,8 @@
         "panel-domain",
         "panel-dsl",
         "panel-errors",
-        "panel-ir"
+        "panel-ir",
+        "panel-lua"
       ]
     },
     "panel-config-json": {

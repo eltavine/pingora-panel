@@ -266,6 +266,28 @@ impl<'a> Lowerer<'a> {
         self.diagnostics.push(diagnostic);
     }
 
+    /// Reports `diagnostic` on the whole `line` of `file`, or on the file.
+    fn report_line(&mut self, diagnostic: Diagnostic, file: &str, line: Option<u32>) {
+        let text = self.sources.get(file).unwrap_or_default();
+        let span = line.and_then(|line| {
+            let start = self.indexes.get(file)?.offset(text, line as usize, 1)?;
+            let end = text[start..]
+                .find('\n')
+                .map_or(text.len(), |end| start + end);
+            Some(Span::new(start, end))
+        });
+        match span {
+            Some(span) => self.report(diagnostic, file, span),
+            None => {
+                let mut diagnostic = diagnostic;
+                if self.sources.get(file).is_some() {
+                    diagnostic.source_span = Some(file.to_owned());
+                }
+                self.diagnostics.push(diagnostic);
+            }
+        }
+    }
+
     fn error(&mut self, file: &str, span: Span, code: &str, message: impl Into<String>) {
         self.report(Diagnostic::error(code, message), file, span);
     }
@@ -1053,6 +1075,9 @@ impl<'a> Lowerer<'a> {
                 None => self.diagnostics.push(diagnostic),
             }
         }
+        crate::scripts::check(&model, &mut |file, line, diagnostic| {
+            self.report_line(diagnostic, file, line);
+        });
         crate::checks::routes(&model, &mut |site, route, diagnostic| {
             let resource = format!("sites/{site}/routes/{route}");
             match self.origins.get(&resource).cloned() {

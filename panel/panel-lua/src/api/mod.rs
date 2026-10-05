@@ -3,7 +3,7 @@
 
 mod bit;
 mod codec;
-mod contexts;
+pub(crate) mod contexts;
 mod json;
 mod modules;
 mod ngx;

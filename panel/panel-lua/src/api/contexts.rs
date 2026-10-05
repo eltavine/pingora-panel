@@ -62,6 +62,58 @@ pub(crate) enum Api {
 }
 
 impl Api {
+    const ALL: [Api; 33] = [
+        Api::Arg,
+        Api::Ctx,
+        Api::Eof,
+        Api::Exit,
+        Api::Flush,
+        Api::Header,
+        Api::HeadersSent,
+        Api::IsSubrequest,
+        Api::Output,
+        Api::Redirect,
+        Api::SendHeaders,
+        Api::Sleep,
+        Api::Status,
+        Api::Var,
+        Api::ReqClearHeader,
+        Api::ReqDiscardBody,
+        Api::ReqGetBodyData,
+        Api::ReqGetHeaders,
+        Api::ReqGetMethod,
+        Api::ReqGetPostArgs,
+        Api::ReqGetUriArgs,
+        Api::ReqHttpVersion,
+        Api::ReqIsInternal,
+        Api::ReqRawHeader,
+        Api::ReqReadBody,
+        Api::ReqSetBodyData,
+        Api::ReqSetHeader,
+        Api::ReqSetMethod,
+        Api::ReqSetUri,
+        Api::ReqSetUriArgs,
+        Api::ReqStartTime,
+        Api::RespGetHeaders,
+        Api::Balancer,
+    ];
+
+    /// The function a path such as `ngx.var.host` or `ngx.req.get_headers`
+    /// reaches, if a phase restricts it.
+    pub(crate) fn by_path(path: &str) -> Option<Self> {
+        let path = match path.strip_prefix("ngx.print") {
+            Some(rest) if rest.is_empty() || rest.starts_with('.') => "ngx.say",
+            _ => path,
+        };
+        Self::ALL
+            .into_iter()
+            .filter(|api| {
+                path.strip_prefix(api.name())
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
+            })
+            .max_by_key(|api| api.name().len())
+    }
+
     pub(crate) const fn name(self) -> &'static str {
         match self {
             Api::Arg => "ngx.arg",

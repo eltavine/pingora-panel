@@ -3197,6 +3197,7 @@ dependencies = [
  "panel-dsl",
  "panel-errors",
  "panel-ir",
+ "panel-lua",
  "regex",
  "serde",
  "similar",

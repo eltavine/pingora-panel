@@ -15,6 +15,7 @@ panel-domain.workspace = true
 panel-dsl.workspace = true
 panel-errors.workspace = true
 panel-ir.workspace = true
+panel-lua.workspace = true
 regex.workspace = true
 serde.workspace = true
 similar.workspace = true

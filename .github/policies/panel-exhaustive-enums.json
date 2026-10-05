@@ -339,6 +339,12 @@
     },
     {
       "package": "panel-lua",
+      "name": "Role",
+      "owner": "pingora-panel-platform",
+      "reason": "A script runs as the handler of a phase or loads as a module; there is no third way, and checking must judge each by how it runs."
+    },
+    {
+      "package": "panel-lua",
       "name": "Outcome",
       "owner": "pingora-panel-platform",
       "reason": "Every outcome of a handler run changes what the data plane does with the request; a new outcome must fail to compile in each adapter until the adapter acts on it."

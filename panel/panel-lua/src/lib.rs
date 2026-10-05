@@ -7,10 +7,11 @@
 //! The crate knows neither Pingora nor the control plane. The gateway fills
 //! an [`Exchange`] with the request, runs a [`Handler`] through [`Scripts`]
 //! and applies what the run changed; the control plane checks scripts with
-//! [`compile`] and tries them with the same runtime.
+//! [`compile`] and [`lint`] and tries them with the same runtime.
 
 mod api;
 mod exchange;
+mod lint;
 mod program;
 mod runtime;
 mod shared;
@@ -20,6 +21,7 @@ pub use exchange::{
     Balancer, Changes, Chunk, Connection, Exchange, Failure, FailureKind, Limits, LogEntry,
     LogLevel, Outcome, Peer, PeerTimeouts, Permissions, Phase, Request, Response,
 };
+pub use lint::{lint, Finding, FindingKind, Lint, Role};
 pub use program::{compile, Diagnostic, HandlerId, Program, ProgramBuilder, SharedDict, Source};
 pub use runtime::{Handler, Host, NoHost, Runtime, Scripts, Settings};
 pub use shared::SharedStore;
