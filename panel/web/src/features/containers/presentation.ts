@@ -6,6 +6,7 @@ import type {
   ContainerLogStreamName,
   ContainerStateName,
   ContainerStatsView,
+  ImageLayerView,
   ImageView,
   PortMappingView,
 } from '@/api/generated'
@@ -182,4 +183,52 @@ export function matchesProjectLine(
 /** A project's lines as a log file, each after its container's name as `docker compose logs` writes them. */
 export function projectLogFile(lines: readonly ComposeLogLineView[]): string {
   return lines.map(({ container, line }) => `${line.time} ${container} | ${line.text}\n`).join('')
+}
+
+/** How long a pull may take: the host agent's limit, and a margin. */
+export const PULL_TIMEOUT_MS = 35 * 60_000
+
+/**
+ * How far a pull got, from 0 to 1, by the layers whose size is known:
+ * downloading is the first half of a layer and extracting the second, and
+ * what the engine had already does not count. Unknown until a size is.
+ */
+export function pullShare(layers: readonly ImageLayerView[]): number | undefined {
+  let done = 0
+  let total = 0
+  for (const layer of layers) {
+    if (layer.state === 'exists' || layer.total_bytes === 0) {
+      continue
+    }
+    const size = layer.total_bytes
+    const current = Math.min(layer.current_bytes, size)
+    total += 2 * size
+    switch (layer.state) {
+      case 'downloading':
+        done += current
+        break
+      case 'downloaded':
+        done += size
+        break
+      case 'extracting':
+        done += size + current
+        break
+      case 'complete':
+        done += 2 * size
+        break
+    }
+  }
+  return total > 0 ? done / total : undefined
+}
+
+/** A layer once its image is pulled: complete, unless the engine had it. */
+export function finished(layer: ImageLayerView): ImageLayerView {
+  return layer.state === 'exists'
+    ? layer
+    : { ...layer, state: 'complete', current_bytes: layer.total_bytes }
+}
+
+/** The layers there is nothing more to do for. */
+export function layersDone(layers: readonly ImageLayerView[]): number {
+  return layers.filter((layer) => layer.state === 'complete' || layer.state === 'exists').length
 }

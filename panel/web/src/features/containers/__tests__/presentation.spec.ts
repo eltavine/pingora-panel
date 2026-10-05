@@ -4,12 +4,16 @@ import type {
   ContainerEngineView,
   ContainerLogLineView,
   ContainerStatsView,
+  ImageLayerStateName,
+  ImageLayerView,
   ProblemDetails,
 } from '@/api/generated'
 import {
   chosenEngine,
   conditionTone,
   engineCondition,
+  finished,
+  layersDone,
   logFile,
   logTailUrl,
   matchesLine,
@@ -20,6 +24,7 @@ import {
   projectCondition,
   projectLogFile,
   projectTone,
+  pullShare,
   sortedLabels,
   stoppable,
   withoutAgent,
@@ -195,5 +200,38 @@ describe('compose projects', () => {
     expect(projectLogFile(lines)).toBe(
       '2027-01-15T08:00:00Z shop-web-1 | GET /cart\n2027-01-15T08:00:01Z shop-db-1 | checkpoint\n',
     )
+  })
+})
+
+describe('image pulls', () => {
+  const layer = (state: ImageLayerStateName, current: number, total: number): ImageLayerView => ({
+    id: `${state}-${current}`,
+    state,
+    current_bytes: current,
+    total_bytes: total,
+  })
+
+  it('count downloading as the first half of a layer and extracting as the second', () => {
+    expect(pullShare([])).toBeUndefined()
+    expect(pullShare([layer('exists', 0, 4096)])).toBeUndefined()
+    expect(pullShare([layer('downloading', 1024, 4096)])).toBe(0.125)
+    expect(pullShare([layer('extracting', 2048, 4096)])).toBe(0.75)
+    expect(pullShare([layer('complete', 0, 4096), layer('waiting', 0, 4096)])).toBe(0.5)
+    expect(pullShare([layer('exists', 0, 4096), layer('downloaded', 0, 4096)])).toBe(0.5)
+    expect(pullShare([layer('downloading', 9000, 4096)])).toBe(0.5)
+  })
+
+  it('are complete once their image is pulled, unless the engine had them', () => {
+    expect(finished(layer('downloading', 1024, 4096))).toMatchObject({
+      state: 'complete',
+      current_bytes: 4096,
+    })
+    expect(finished(layer('exists', 0, 4096)).state).toBe('exists')
+  })
+
+  it('count the layers there is nothing more to do for', () => {
+    expect(
+      layersDone([layer('exists', 0, 0), layer('complete', 0, 1), layer('extracting', 0, 1)]),
+    ).toBe(2)
   })
 })

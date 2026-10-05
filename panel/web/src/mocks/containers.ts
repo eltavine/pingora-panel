@@ -1,4 +1,4 @@
-import { http, HttpResponse, ws, type AnyHandler } from 'msw'
+import { delay, http, HttpResponse, ws, type AnyHandler } from 'msw'
 import type {
   ComposeChangeView,
   ComposeFilesView,
@@ -16,7 +16,10 @@ import type {
   EngineNetworkListView,
   EngineVolumeListView,
   ImageDetailView,
+  ImageLayerStateName,
   ImageListView,
+  ImagePullBody,
+  ImagePullMessage,
   ImageView,
   PrunePreviewView,
   PruneReportView,
@@ -610,6 +613,70 @@ export function containerHandlers(): AnyHandler[] {
           changed: changed.length,
           failures: [],
         } satisfies ComposeChangeView)
+      },
+    ),
+    http.post<{ engine: string }, ImagePullBody>(
+      '*/api/v1/container-engines/:engine/image-pulls',
+      async ({ request }) => {
+        const reference = (await request.json()).reference.trim()
+        if (reference.startsWith('missing')) {
+          return HttpResponse.json(
+            {
+              type: 'about:blank',
+              title: 'Not found',
+              status: 404,
+              code: 'NOT_FOUND',
+              detail: `pull access denied for ${reference}, repository does not exist`,
+            },
+            { status: 404, headers: { 'content-type': 'application/problem+json' } },
+          )
+        }
+        const sizes = [0, 3_400_000, 12_800_000]
+        const ids = ['1f2a3b4c5d6e', '9c0abc9c5bd3', '5e6f7a8b9c0d']
+        const encoder = new TextEncoder()
+        const stream = new ReadableStream({
+          async start(controller) {
+            const send = (message: ImagePullMessage) =>
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(message)}\n\n`))
+            for (let step = 0; step <= 12; step += 1) {
+              send({
+                kind: 'progress',
+                layers: ids.map((id, index) => {
+                  const size = sizes[index] ?? 0
+                  const progress = Math.max(0, step - index * 2) / 8
+                  const state: ImageLayerStateName =
+                    size === 0
+                      ? 'exists'
+                      : progress >= 1
+                        ? 'complete'
+                        : progress >= 0.5
+                          ? 'extracting'
+                          : progress > 0
+                            ? 'downloading'
+                            : 'waiting'
+                  const current = Math.round(size * ((progress % 0.5) * 2))
+                  return { id, state, current_bytes: current, total_bytes: size }
+                }),
+              })
+              await delay(300)
+            }
+            const image: ImageView = {
+              id: `sha256:${ids[2]}${'0'.repeat(20)}`,
+              tags: [reference.includes(':') ? reference : `${reference}:latest`],
+              digests: [],
+              created: new Date().toISOString(),
+              size_bytes: sizes.reduce((sum, size) => sum + size, 0),
+              containers: 0,
+              labels: {},
+            }
+            if (!images.some((known) => known.tags.includes(image.tags[0] ?? ''))) {
+              images.push(image)
+            }
+            send({ kind: 'pulled', image, digest: `sha256:${'d2'.repeat(32)}`, updated: true })
+            controller.close()
+          },
+        })
+        return new HttpResponse(stream, { headers: { 'content-type': 'text/event-stream' } })
       },
     ),
     http.get('*/api/v1/container-engines/:engine/stats', () =>

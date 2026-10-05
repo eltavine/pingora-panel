@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { refDebounced } from '@vueuse/core'
-import { Layers, Search, Trash2 } from '@lucide/vue'
+import { Download, Layers, Search, Trash2 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import type { ImageView } from '@/api/generated'
@@ -31,6 +31,7 @@ import { notifyFailure, plainHeaders } from '@/lib/configuration'
 import { formatters } from '@/lib/format'
 import { useSession } from '@/lib/session'
 import ImageDetailSheet from './ImageDetailSheet.vue'
+import ImagePullSheet from './ImagePullSheet.vue'
 import { imageName, REFRESH_INTERVAL_MS, shortId } from './presentation'
 
 const props = defineProps<{ engine: string }>()
@@ -52,6 +53,13 @@ const images = useQuery(
   })),
 )
 const rows = computed(() => images.data.value?.images ?? [])
+
+const pullOpen = ref(false)
+function pulled() {
+  void queryClient.invalidateQueries({
+    queryKey: listImagesQueryKey({ path: { engine: props.engine } }),
+  })
+}
 
 const inspecting = ref<ImageView>()
 const detailOpen = ref(false)
@@ -103,18 +111,24 @@ function confirmRemove() {
 
 <template>
   <div class="flex flex-col gap-4">
-    <div class="relative">
-      <Search
-        class="text-muted-foreground absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
-        aria-hidden="true"
-      />
-      <Input
-        v-model="search"
-        type="search"
-        class="pl-8"
-        :placeholder="t('containers.images.searchPlaceholder')"
-        :aria-label="t('containers.images.search')"
-      />
+    <div class="flex flex-wrap items-center gap-2">
+      <div class="relative min-w-56 flex-1">
+        <Search
+          class="text-muted-foreground absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
+          aria-hidden="true"
+        />
+        <Input
+          v-model="search"
+          type="search"
+          class="pl-8"
+          :placeholder="t('containers.images.searchPlaceholder')"
+          :aria-label="t('containers.images.search')"
+        />
+      </div>
+      <Button v-if="can('containers.manage')" variant="outline" @click="pullOpen = true">
+        <Download data-icon="inline-start" aria-hidden="true" />
+        {{ t('containers.pull.open') }}
+      </Button>
     </div>
     <ApiFailureAlert
       v-if="images.isError.value && !images.data.value"
@@ -206,6 +220,12 @@ function confirmRemove() {
       </EmptyHeader>
     </Empty>
 
+    <ImagePullSheet
+      v-if="can('containers.manage')"
+      v-model:open="pullOpen"
+      :engine="engine"
+      @pulled="pulled"
+    />
     <ImageDetailSheet
       v-if="inspecting"
       v-model:open="detailOpen"

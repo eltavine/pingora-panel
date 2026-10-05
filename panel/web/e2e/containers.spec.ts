@@ -372,6 +372,72 @@ async function setUp(
   await page.route(/\/api\/v1\/container-engines\/docker\/containers\/[\w.-]+\/stats$/, (route) =>
     route.fulfill({ json: usage }),
   )
+  await page.route(/\/api\/v1\/container-engines\/docker\/image-pulls$/, (route) => {
+    const asked = route.request().postDataJSON() as {
+      reference: string
+      credentials?: { username: string; password: string }
+    }
+    const signedIn = asked.credentials
+      ? ` as ${asked.credentials.username}:${asked.credentials.password}`
+      : ''
+    seen.changes.push(`POST pull ${asked.reference}${signedIn}`)
+    if (asked.reference === 'missing:1') {
+      return route.fulfill({
+        status: 404,
+        contentType: 'application/problem+json',
+        json: {
+          type: 'about:blank',
+          title: 'Not found',
+          status: 404,
+          code: 'NOT_FOUND',
+          detail: 'pull access denied for missing, repository does not exist',
+        },
+      })
+    }
+    const layer = (id: string, state: string, current: number) => ({
+      id,
+      state,
+      current_bytes: current,
+      total_bytes: 4096,
+    })
+    const events =
+      asked.reference === 'flaky:1'
+        ? [
+            { kind: 'progress', layers: [layer('9c0abc9c5bd3', 'downloading', 1024)] },
+            {
+              kind: 'failed',
+              error: { code: 'UNAVAILABLE', message: 'read: connection reset by peer' },
+            },
+          ]
+        : [
+            {
+              kind: 'progress',
+              layers: [
+                layer('1f2a3b4c5d6e', 'exists', 0),
+                layer('9c0abc9c5bd3', 'downloading', 1024),
+              ],
+            },
+            {
+              kind: 'pulled',
+              image: {
+                id: 'sha256:dd00112233445566',
+                tags: ['busybox:1.37'],
+                digests: [],
+                created: null,
+                size_bytes: 4096,
+                containers: 0,
+                labels: {},
+              },
+              digest: `sha256:${'d2'.repeat(32)}`,
+              updated: true,
+            },
+          ]
+    return route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''),
+    })
+  })
   await page.route(/\/api\/v1\/container-engines\/docker\/compose-projects$/, (route) =>
     route.fulfill({ json: { observed_at: '2026-10-04T10:00:00Z', projects } }),
   )
@@ -732,6 +798,7 @@ test('readers see images without removing them', async ({ page }) => {
   await page.goto('/containers?view=images')
   await expect(page.getByRole('row').filter({ hasText: 'nginx:1.27' })).toBeVisible()
   await expect(page.getByRole('button', { name: /^Remove / })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Pull image' })).toHaveCount(0)
 })
 
 test('networks and volumes show what uses them', async ({ page }) => {
@@ -873,4 +940,38 @@ test('readers see projects without reading their logs or acting on them', async 
   const row = page.getByRole('row').filter({ hasText: '/srv/shop' })
   await expect(row).toContainText('Partly running')
   await expect(row.getByRole('button')).toHaveCount(0)
+})
+
+test('an image is pulled layer by layer, signing in when asked', async ({ page }) => {
+  const seen = await setUp(page)
+  await page.goto('/containers?view=images')
+  await page.getByRole('button', { name: 'Pull image' }).click()
+  const sheet = page.getByRole('dialog', { name: 'Pull an image' })
+  await sheet.getByLabel('Image', { exact: true }).fill('busybox:1.37')
+  await sheet.getByRole('switch', { name: 'Sign in to the registry' }).click()
+  await sheet.getByLabel('Username').fill('ci')
+  await sheet.getByLabel('Password or access token').fill('hunter2')
+  await sheet.getByRole('button', { name: 'Pull', exact: true }).click()
+  await expect(sheet.getByRole('status')).toHaveText('Downloaded a newer image')
+  const layers = sheet.getByRole('listitem')
+  await expect(layers.filter({ hasText: '1f2a3b4c5d6e' })).toContainText('Already here')
+  await expect(layers.filter({ hasText: '9c0abc9c5bd3' })).toContainText('Complete')
+  await expect(sheet).toContainText('2 of 2 layers done')
+  await expect(page.getByText('Pulled busybox:1.37')).toBeVisible()
+  await expect(sheet.getByLabel('Password or access token')).toHaveValue('')
+  expect(seen.changes).toEqual(['POST pull busybox:1.37 as ci:hunter2'])
+})
+
+test('a pull says why it was refused or broke off', async ({ page }) => {
+  await setUp(page)
+  await page.goto('/containers?view=images')
+  await page.getByRole('button', { name: 'Pull image' }).click()
+  const sheet = page.getByRole('dialog', { name: 'Pull an image' })
+  const reference = sheet.getByLabel('Image', { exact: true })
+  await reference.fill('missing:1')
+  await sheet.getByRole('button', { name: 'Pull', exact: true }).click()
+  await expect(sheet).toContainText('repository does not exist')
+  await reference.fill('flaky:1')
+  await sheet.getByRole('button', { name: 'Pull', exact: true }).click()
+  await expect(sheet.getByRole('status')).toHaveText('read: connection reset by peer')
 })
