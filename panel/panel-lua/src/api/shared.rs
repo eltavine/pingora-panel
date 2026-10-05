@@ -2,7 +2,7 @@
 //! lua-nginx-module's methods and return values.
 
 use super::{failed, results, Context};
-use crate::shared::{Dict, Refusal, Scalar, SetMode};
+use crate::shared::{Dict, Scalar, SetMode};
 use mlua::{Lua, Table, UserData, UserDataMethods, Value};
 use std::{sync::Arc, time::Duration};
 
@@ -98,12 +98,15 @@ impl UserData for Handle {
                     (got.flags != 0).then_some(got.flags),
                     Value::Boolean(got.stale),
                 ),
-                Ok(None) => (Value::Nil, None, Value::Nil),
-                Err(refusal) => (
-                    Value::Nil,
-                    None,
-                    Value::String(lua.create_string(refusal.message())?),
-                ),
+                Ok(None) => return Ok(results([Value::Nil])),
+                Err(refusal) => return failed(lua, 1, refusal.message()),
+            })
+            .map(|(value, flags, stale)| {
+                results([
+                    value,
+                    flags.map_or(Value::Nil, |flags| Value::Integer(flags.into())),
+                    stale,
+                ])
             })
         });
         for (name, mode) in [
@@ -117,60 +120,71 @@ impl UserData for Handle {
         }
         methods.add_method("delete", |_, this, key_value: Value| {
             this.0.delete(&key(&key_value)?);
-            Ok(())
+            Ok((true, None::<&str>, false))
         });
         methods.add_method(
             "incr",
-            |_, this, (key_value, by, init, init_ttl): (Value, f64, Option<f64>, Option<f64>)| {
+            |lua, this, (key_value, by, init, init_ttl): (Value, f64, Option<f64>, Option<f64>)| {
                 let key = key(&key_value)?;
-                Ok(match this.0.incr(&key, by, init, ttl(init_ttl)) {
-                    Ok((value, forcible)) => (Some(value), None, forcible),
-                    Err(refusal) => (None, Some(refusal.message()), false),
-                })
+                match this.0.incr(&key, by, init, ttl(init_ttl)) {
+                    Ok((value, _)) if init.is_none() => Ok(results([Value::Number(value)])),
+                    Ok((value, forcible)) => Ok(results([
+                        Value::Number(value),
+                        Value::Nil,
+                        Value::Boolean(forcible),
+                    ])),
+                    Err(refusal) => failed(lua, 1, refusal.message()),
+                }
             },
         );
         for (name, head) in [("lpush", true), ("rpush", false)] {
-            methods.add_method(name, move |_, this, (key_value, value): (Value, Value)| {
-                let key = key(&key_value)?;
-                let value = match scalar(&value)? {
-                    Some(value @ (Scalar::Number(_) | Scalar::String(_))) => value,
-                    _ => return Err(mlua::Error::runtime("bad value type")),
-                };
-                Ok(match this.0.push(&key, value, head) {
-                    Ok(length) => (Some(length), None),
-                    Err(refusal) => (None, Some(refusal.message())),
-                })
-            });
+            methods.add_method(
+                name,
+                move |lua, this, (key_value, value): (Value, Value)| {
+                    let key = key(&key_value)?;
+                    let value = match scalar(&value)? {
+                        Some(value @ (Scalar::Number(_) | Scalar::String(_))) => value,
+                        _ => return Err(mlua::Error::runtime("bad value type")),
+                    };
+                    match this.0.push(&key, value, head) {
+                        Ok(length) => Ok(results([Value::Integer(length as i64)])),
+                        Err(refusal) => failed(lua, 1, refusal.message()),
+                    }
+                },
+            );
         }
         for (name, head) in [("lpop", true), ("rpop", false)] {
             methods.add_method(name, move |lua, this, key_value: Value| {
                 let key = key(&key_value)?;
-                Ok(match this.0.pop(&key, head) {
-                    Ok(Some(value)) => (lua_scalar(lua, value)?, None),
-                    Ok(None) => (Value::Nil, None),
-                    Err(refusal) => (Value::Nil, Some(refusal.message())),
-                })
+                match this.0.pop(&key, head) {
+                    Ok(Some(value)) => Ok(results([lua_scalar(lua, value)?])),
+                    Ok(None) => Ok(results([Value::Nil])),
+                    Err(refusal) => failed(lua, 1, refusal.message()),
+                }
             });
         }
-        methods.add_method("llen", |_, this, key_value: Value| {
-            Ok(match this.0.len(&key(&key_value)?) {
-                Ok(length) => (Some(length), None),
-                Err(refusal) => (None, Some(refusal.message())),
-            })
+        methods.add_method("llen", |lua, this, key_value: Value| {
+            match this.0.len(&key(&key_value)?) {
+                Ok(length) => Ok(results([Value::Integer(length as i64)])),
+                Err(refusal) => failed(lua, 1, refusal.message()),
+            }
         });
-        methods.add_method("ttl", |_, this, key_value: Value| {
-            Ok(match this.0.ttl(&key(&key_value)?) {
-                Ok(left) => (Some(left.as_millis() as f64 / 1000.0), None),
-                Err(refusal) => (None, Some(refusal.message())),
-            })
+        methods.add_method("ttl", |lua, this, key_value: Value| {
+            match this.0.ttl(&key(&key_value)?) {
+                Ok(left) => Ok(results([Value::Number(left.as_millis() as f64 / 1000.0)])),
+                Err(refusal) => failed(lua, 1, refusal.message()),
+            }
         });
-        methods.add_method("expire", |_, this, (key_value, exptime): (Value, f64)| {
-            Ok(match this.0.expire(&key(&key_value)?, ttl(Some(exptime))) {
-                Ok(()) => (true, None),
-                Err(Refusal::NotFound) => (false, Some("not found")),
-                Err(refusal) => (false, Some(refusal.message())),
-            })
-        });
+        methods.add_method(
+            "expire",
+            |lua, this, (key_value, exptime): (Value, f64)| match this
+                .0
+                .expire(&key(&key_value)?, ttl(Some(exptime)))
+            {
+                Ok(()) => Ok(results([Value::Boolean(true)])),
+                Err(refusal) => failed(lua, 1, refusal.message()),
+            },
+        );
         methods.add_method("flush_all", |_, this, ()| {
             this.0.flush_all();
             Ok(())

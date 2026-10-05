@@ -172,6 +172,8 @@ pub struct Balancer {
 pub struct Changes {
     pub method: bool,
     pub uri: bool,
+    /// `ngx.req.set_uri(uri, true)`: the route is chosen again.
+    pub jump: bool,
     pub args: bool,
     pub headers: bool,
     pub body: bool,

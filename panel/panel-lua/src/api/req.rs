@@ -197,6 +197,11 @@ pub(super) fn table(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
             let cell = cell(&s, Api::ReqSetBodyData)?;
             require_permission(&cell, Api::ReqSetBodyData, |granted| granted.body, "body")?;
             let mut exchange = cell.exchange.lock();
+            if exchange.request.body.is_none() {
+                return Err(mlua::Error::runtime(
+                    "request body not read yet: call ngx.req.read_body first",
+                ));
+            }
             exchange.request.body = Some(::bytes::Bytes::copy_from_slice(&data.as_bytes()));
             exchange.changes.body = true;
             Ok(())
@@ -297,6 +302,7 @@ pub(super) fn table(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
                     }
                     exchange.request.uri = uri.to_owned();
                     exchange.changes.uri = true;
+                    exchange.changes.jump |= jump.unwrap_or(false);
                     Ok(())
                 })
             },
