@@ -9,9 +9,21 @@ import tomllib
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-MAINTAINED_DOCS = ("README.md", "panel/README.md", "PRODUCT_SPEC.md", "docs/upstream-patches.md")
+MAINTAINED_DOCS = (
+    "README.md",
+    "README_ZH.md",
+    "panel/README.md",
+    "PRODUCT_SPEC.md",
+    "docs/upstream-patches.md",
+)
+VERSIONED_DOCS = ("README.md", "README_ZH.md", "PRODUCT_SPEC.md")
 LINK = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
-VERSION_MARKER = re.compile(r"^> 当前 Pingora crates：([0-9]+\.[0-9]+\.[0-9]+)$", re.M)
+# The specification states the version in a note; the READMEs in the
+# Pingora row of their compatibility table.
+VERSION_MARKER = re.compile(
+    r"^(?:> 当前 Pingora crates：|\| \*\*Pingora\*\* \| )([0-9]+\.[0-9]+\.[0-9]+)(?![0-9.])",
+    re.M,
+)
 ADAPTER_VERSION = re.compile(
     r'^pub const PINGORA_PACKAGE_VERSION: &str = "([0-9]+\.[0-9]+\.[0-9]+)";$',
     re.M,
@@ -45,7 +57,7 @@ def check(root: Path) -> list[str]:
         match = ADAPTER_VERSION.search(adapter)
         if not match or match.group(1) != current:
             errors.append("Pingora adapter version does not match the workspace dependency")
-        for name in ("README.md", "PRODUCT_SPEC.md"):
+        for name in VERSIONED_DOCS:
             contents = (root / name).read_text(encoding="utf-8")
             match = VERSION_MARKER.search(contents)
             if not match or match.group(1) != current:
