@@ -4,6 +4,9 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 baseline_ref="${1:-}"
 spec_path=panel/panel-api/tests/fixtures/openapi.json
+# Response unions that grow, such as route actions, gain members as warnings
+# (ADR 0003); every other level is oasdiff's.
+levels_path=.github/policies/openapi-severity-levels.txt
 
 if [[ -z "$baseline_ref" ]]; then
   printf 'usage: %s <git-baseline-ref>\n' "${BASH_SOURCE[0]}" >&2
@@ -11,6 +14,10 @@ if [[ -z "$baseline_ref" ]]; then
 fi
 if [[ ! -f "$repo_root/$spec_path" ]]; then
   printf 'Current OpenAPI fixture is missing: %s\n' "$spec_path" >&2
+  exit 2
+fi
+if [[ ! -f "$repo_root/$levels_path" ]]; then
+  printf 'OpenAPI severity levels are missing: %s\n' "$levels_path" >&2
   exit 2
 fi
 if [[ "$baseline_ref" =~ ^0+$ ]]; then
@@ -36,4 +43,5 @@ git -C "$repo_root" show "${baseline_ref}:${spec_path}" >"$baseline_spec"
 # Views flatten their resource into an allOf; comparing the merged schema
 # judges what a response guarantees rather than how it is composed.
 oasdiff breaking --allow-external-refs=false --flatten-allof --fail-on ERR \
+  --severity-levels "$repo_root/$levels_path" \
   "$baseline_spec" "$repo_root/$spec_path"

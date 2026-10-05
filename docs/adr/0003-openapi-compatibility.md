@@ -45,6 +45,20 @@ values it knows. Closed sets such as risks, states and outcomes stay `enum`.
 Moving an enum to `x-extensible-enum` reads as removed request values to
 `oasdiff`, so it happens before the enum reaches a published contract.
 
+## Unions that grow
+
+Tagged unions in responses gain members the same way: a route action, a
+route condition or a block of the configuration is a kind the product adds
+as it learns to do more, and the Rust enums behind them are
+`#[non_exhaustive]`. Clients must accept members they do not know, as they
+accept unknown `x-extensible-enum` values. The guard therefore reports a new
+member of a response union (`response-property-one-of-added`) as a warning,
+through the severity levels in `.github/policies/openapi-severity-levels.txt`.
+Every other change keeps the level oasdiff gives it, so changing a member or
+narrowing what a request accepts is still an error.
+A union that is closed by design is an exhaustive Rust enum recorded in the
+exhaustive-enum policy, so a new member of it still fails the Rust API guard.
+
 ## Upgrade and limits
 
 Pinning the release and digest makes upgrades reviewable and guards against

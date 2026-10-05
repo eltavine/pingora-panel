@@ -11,8 +11,9 @@ test_root="$(mktemp -d "${TMPDIR:-/tmp}/pingora-panel-openapi-test.XXXXXX")"
 trap 'rm -rf -- "$test_root"' EXIT
 test_repo="$test_root/repository"
 spec_dir="$test_repo/panel/panel-api/tests/fixtures"
-mkdir -p "$test_repo/.github/scripts" "$spec_dir"
+mkdir -p "$test_repo/.github/scripts" "$test_repo/.github/policies" "$spec_dir"
 cp "$script_dir/check-panel-openapi-breaking.sh" "$test_repo/.github/scripts/"
+cp "$script_dir/../policies/openapi-severity-levels.txt" "$test_repo/.github/policies/"
 
 cat >"$spec_dir/openapi.json" <<'EOF'
 {
@@ -29,7 +30,13 @@ cat >"$spec_dir/openapi.json" <<'EOF'
       }
     }
   },
-  "components": {"schemas": {"Item": {"type": "object", "properties": {"name": {"type": "string"}}}}}
+  "components": {"schemas": {"Item": {"type": "object", "properties": {
+    "name": {"type": "string"},
+    "action": {"oneOf": [
+      {"type": "object", "required": ["type"], "properties": {"type": {"type": "string", "enum": ["proxy"]}}},
+      {"type": "object", "required": ["type"], "properties": {"type": {"type": "string", "enum": ["respond"]}}}
+    ]}
+  }}}}
 }
 EOF
 
@@ -80,6 +87,12 @@ elif case == "response":
     del operation["responses"]["200"]
 elif case == "type":
     spec["components"]["schemas"]["Item"]["properties"]["name"]["type"] = "integer"
+elif case == "member":
+    spec["components"]["schemas"]["Item"]["properties"]["action"]["oneOf"].append(
+        {"type": "object", "required": ["type"], "properties": {"type": {"type": "string", "enum": ["lua"]}}}
+    )
+elif case == "member-type":
+    spec["components"]["schemas"]["Item"]["properties"]["action"]["oneOf"][0]["properties"]["type"]["type"] = "integer"
 else:
     raise ValueError(case)
 path.write_text(json.dumps(spec, indent=2) + "\n")
@@ -88,7 +101,11 @@ PY
 
 mutate additive
 check "$baseline_ref" >"$test_root/result"
-for case in endpoint required response type; do
+# A response union gaining a member is a warning; changing one is an error.
+mutate member
+check "$baseline_ref" >"$test_root/result"
+grep -q 'response-property-one-of-added' "$test_root/result"
+for case in endpoint required response type member-type; do
   mutate "$case"
   if check "$baseline_ref" >"$test_root/result" 2>&1; then
     printf 'Breaking OpenAPI change was accepted: %s\n' "$case" >&2
