@@ -8,6 +8,7 @@ pub mod fake;
 mod http;
 mod logging;
 pub mod ports;
+mod resilience;
 mod traffic;
 mod validation;
 
@@ -18,5 +19,9 @@ pub use events::*;
 pub use fake::FakeGatewayEngine;
 pub use http::{problems as http_policy_problems, MOST_PREFLIGHT_SECONDS};
 pub use ports::*;
+pub use resilience::{
+    problems as resilience_problems, uses_resilience, MOST_BACKOFF_MS, MOST_OPEN_MS, MOST_QUEUE_MS,
+    MOST_RETRIES,
+};
 pub use traffic::{route_regex_error, ROUTE_REGEX_SIZE_LIMIT};
 pub use validation::validate_engine_ir;

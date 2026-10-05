@@ -70,6 +70,7 @@ fn populated_snapshot_round_trips_additive_v1_fields() {
         attempts: 2,
         per_try_timeout_ms: 500,
         retry_statuses: [502, 503].into_iter().collect(),
+        ..RetryPolicy::none()
     });
     route.header_policy_id = Some("headers".into());
     route.cache_policy_id = Some("cache".into());
@@ -131,6 +132,7 @@ fn populated_snapshot_round_trips_additive_v1_fields() {
         attempts: 3,
         per_try_timeout_ms: 750,
         retry_statuses: [500, 502].into_iter().collect(),
+        ..RetryPolicy::none()
     };
     pool.connection.connect_timeout_ms = Some(1_000);
     pool.connection.idle_timeout_ms = Some(60_000);
@@ -468,4 +470,49 @@ fn http_policies_round_trip_and_unknown_codings_are_refused() {
         .push(42);
     let refused = decode_snapshot(unknown).unwrap_err();
     assert!(refused.message.contains("does not know"), "{refused}");
+}
+
+#[test]
+fn upstream_resilience_round_trips_and_unknown_conditions_are_refused() {
+    use panel_ir::{CircuitBreaker, RetryBudget, RetryCondition, UpstreamQueue};
+
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(12));
+    let mut pool = UpstreamPoolSpec::new(UpstreamPoolId::new("grpc").unwrap(), "grpc", Vec::new());
+    pool.retry_policy = RetryPolicy {
+        attempts: 2,
+        retry_statuses: [503].into_iter().collect(),
+        retry_on: [RetryCondition::Timeout, RetryCondition::Reset].into(),
+        backoff_ms: 25,
+        budget: Some(RetryBudget {
+            percent: 20,
+            min_per_second: 3,
+        }),
+        ..RetryPolicy::none()
+    };
+    pool.circuit_breaker = Some(CircuitBreaker {
+        failure_percent: 50,
+        min_requests: 20,
+        open_ms: 30_000,
+        half_open_requests: 2,
+    });
+    pool.max_requests = Some(64);
+    pool.queue = Some(UpstreamQueue {
+        max_waiting: 100,
+        timeout_ms: 2_000,
+    });
+    pool.connection.h2c = true;
+    snapshot.upstream_pools.push(pool);
+    snapshot.refresh_content_hash();
+    let wire = encode_snapshot(&snapshot);
+    assert_eq!(decode_snapshot(wire.clone()).unwrap(), snapshot);
+
+    let mut unknown = wire;
+    unknown.upstream_pools[0]
+        .retry_policy_v1
+        .as_mut()
+        .unwrap()
+        .retry_on
+        .push(42);
+    let refused = decode_snapshot(unknown).unwrap_err();
+    assert!(refused.message.contains("timeout or reset"), "{refused}");
 }

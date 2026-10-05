@@ -18,6 +18,9 @@ pub use http::{
     HTTP_POLICIES_CAPABILITY,
 };
 pub use logging::{AccessLog, AccessLogFormat, LogFiles, LoggingPolicy};
+pub use resilience::{
+    CircuitBreaker, RetryBudget, RetryCondition, UpstreamQueue, UPSTREAM_RESILIENCE_CAPABILITY,
+};
 pub use security::{
     BasicAuth, LimitedResponse, RateLimit, RateLimitKey, RealIpHeader, RefererRule, SecurityPolicy,
     REQUEST_HEAD_TIMEOUT_CAPABILITY, REQUEST_SECURITY_CAPABILITY, TRUSTED_PROXIES_CAPABILITY,
@@ -26,6 +29,7 @@ pub use security::{
 pub mod conditions;
 pub mod http;
 pub mod logging;
+pub mod resilience;
 pub mod security;
 pub mod template;
 pub mod tls;
@@ -183,6 +187,10 @@ impl RuntimeSnapshot {
 
 // Fields added after the first schema release default to values that are not
 // serialized, so snapshots written before them keep their canonical hash.
+fn is_zero(value: &u64) -> bool {
+    *value == 0
+}
+
 fn is_false(value: &bool) -> bool {
     !*value
 }
@@ -531,6 +539,14 @@ pub struct UpstreamPoolSpec {
     pub health_check: Option<ActiveHealthCheck>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub passive_health: Option<PassiveHealthPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub circuit_breaker: Option<CircuitBreaker>,
+    /// Requests the upstream handles at once across its endpoints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_requests: Option<u32>,
+    /// Where requests over `max_requests` wait instead of getting 503.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue: Option<UpstreamQueue>,
 }
 
 impl UpstreamPoolSpec {
@@ -550,6 +566,9 @@ impl UpstreamPoolSpec {
             host_header: None,
             health_check: None,
             passive_health: None,
+            circuit_breaker: None,
+            max_requests: None,
+            queue: None,
         }
     }
 }
@@ -577,6 +596,10 @@ pub struct UpstreamConnectionPolicy {
     /// Speaks HTTP/2 to TLS upstreams that negotiate it with ALPN.
     #[serde(default, skip_serializing_if = "is_false")]
     pub http2: bool,
+    /// Speaks HTTP/2 with prior knowledge (h2c) to plaintext endpoints, as
+    /// gRPC servers expect.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub h2c: bool,
 }
 
 impl Default for UpstreamConnectionPolicy {
@@ -589,6 +612,7 @@ impl Default for UpstreamConnectionPolicy {
             keepalive: true,
             max_connections: None,
             http2: false,
+            h2c: false,
         }
     }
 }
@@ -714,9 +738,21 @@ pub enum LoadBalancingPolicy {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RetryPolicy {
+    /// Retries after the first try, each on an endpoint not yet tried.
     pub attempts: u32,
+    /// Reserved: no gateway limits single tries yet.
     pub per_try_timeout_ms: u64,
+    /// Response statuses retried.
     pub retry_statuses: BTreeSet<u16>,
+    /// Failures retried besides failed connections, which always are.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub retry_on: BTreeSet<RetryCondition>,
+    /// The longest wait before the first retry, doubled for each later one;
+    /// each wait is drawn at random up to it.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub backoff_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<RetryBudget>,
 }
 
 impl RetryPolicy {
@@ -725,6 +761,9 @@ impl RetryPolicy {
             attempts: 0,
             per_try_timeout_ms: 0,
             retry_statuses: BTreeSet::new(),
+            retry_on: BTreeSet::new(),
+            backoff_ms: 0,
+            budget: None,
         }
     }
 }

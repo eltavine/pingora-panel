@@ -5,8 +5,9 @@ use panel_contracts::gateway::v1 as wire;
 use panel_domain::{EndpointAddress, EndpointId, UpstreamPoolId};
 use panel_errors::{PanelError, Result};
 use panel_ir::{
-    ActiveHealthCheck, HealthCheckProtocol, LoadBalancingPolicy, PassiveHealthPolicy, RetryPolicy,
-    UpstreamConnectionPolicy, UpstreamEndpoint, UpstreamPoolSpec, UpstreamTlsPolicy,
+    ActiveHealthCheck, CircuitBreaker, HealthCheckProtocol, LoadBalancingPolicy,
+    PassiveHealthPolicy, RetryBudget, RetryCondition, RetryPolicy, UpstreamConnectionPolicy,
+    UpstreamEndpoint, UpstreamPoolSpec, UpstreamQueue, UpstreamTlsPolicy,
 };
 use std::collections::BTreeSet;
 
@@ -19,11 +20,7 @@ pub(super) fn decode_upstream_pool(value: wire::UpstreamPoolSpec) -> Result<Upst
     let retry_policy = if let Some(policy) = value.retry_policy_v1 {
         decode_retry_policy(policy)?
     } else if value.retry_policy.is_empty() || value.retry_policy == "none" {
-        RetryPolicy {
-            attempts: 0,
-            per_try_timeout_ms: 0,
-            retry_statuses: BTreeSet::new(),
-        }
+        RetryPolicy::none()
     } else {
         return Err(PanelError::invalid_argument(
             "legacy retry_policy only supports the value 'none'",
@@ -46,6 +43,17 @@ pub(super) fn decode_upstream_pool(value: wire::UpstreamPoolSpec) -> Result<Upst
         passive_health: value.passive_health.map(|policy| PassiveHealthPolicy {
             failure_threshold: policy.failure_threshold,
             ejection_ms: policy.ejection_ms,
+        }),
+        circuit_breaker: value.circuit_breaker.map(|breaker| CircuitBreaker {
+            failure_percent: breaker.failure_percent,
+            min_requests: breaker.min_requests,
+            open_ms: breaker.open_ms,
+            half_open_requests: breaker.half_open_requests,
+        }),
+        max_requests: value.max_requests,
+        queue: value.queue.map(|queue| UpstreamQueue {
+            max_waiting: queue.max_waiting,
+            timeout_ms: queue.timeout_ms,
         }),
     })
 }
@@ -79,6 +87,17 @@ pub(super) fn encode_upstream_pool(value: &UpstreamPoolSpec) -> wire::UpstreamPo
                 failure_threshold: policy.failure_threshold,
                 ejection_ms: policy.ejection_ms,
             }),
+        circuit_breaker: value.circuit_breaker.map(|breaker| wire::CircuitBreaker {
+            failure_percent: breaker.failure_percent,
+            min_requests: breaker.min_requests,
+            open_ms: breaker.open_ms,
+            half_open_requests: breaker.half_open_requests,
+        }),
+        max_requests: value.max_requests,
+        queue: value.queue.map(|queue| wire::UpstreamQueue {
+            max_waiting: queue.max_waiting,
+            timeout_ms: queue.timeout_ms,
+        }),
     }
 }
 
@@ -91,6 +110,7 @@ fn decode_connection(value: wire::UpstreamConnectionPolicy) -> UpstreamConnectio
         keepalive: !value.disable_keepalive,
         max_connections: value.max_connections,
         http2: value.http2,
+        h2c: value.h2c,
     }
 }
 
@@ -103,6 +123,7 @@ fn encode_connection(value: &UpstreamConnectionPolicy) -> wire::UpstreamConnecti
         disable_keepalive: !value.keepalive,
         max_connections: value.max_connections,
         http2: value.http2,
+        h2c: value.h2c,
     }
 }
 
@@ -234,10 +255,29 @@ pub(super) fn decode_retry_policy(value: wire::RetryPolicy) -> Result<RetryPolic
         .into_iter()
         .map(status_code)
         .collect::<Result<BTreeSet<_>>>()?;
+    let retry_on = value
+        .retry_on
+        .into_iter()
+        .map(
+            |condition| match wire::RetryCondition::try_from(condition) {
+                Ok(wire::RetryCondition::Timeout) => Ok(RetryCondition::Timeout),
+                Ok(wire::RetryCondition::Reset) => Ok(RetryCondition::Reset),
+                Ok(wire::RetryCondition::Unspecified) | Err(_) => Err(
+                    PanelError::invalid_argument("retry conditions must be timeout or reset"),
+                ),
+            },
+        )
+        .collect::<Result<BTreeSet<_>>>()?;
     Ok(RetryPolicy {
         attempts: value.attempts,
         per_try_timeout_ms: value.per_try_timeout_ms,
         retry_statuses,
+        retry_on,
+        backoff_ms: value.backoff_ms,
+        budget: value.budget.map(|budget| RetryBudget {
+            percent: budget.percent,
+            min_per_second: budget.min_per_second,
+        }),
     })
 }
 
@@ -251,5 +291,18 @@ pub(super) fn encode_retry_policy(value: &RetryPolicy) -> wire::RetryPolicy {
             .copied()
             .map(u32::from)
             .collect(),
+        retry_on: value
+            .retry_on
+            .iter()
+            .map(|condition| match condition {
+                RetryCondition::Timeout => wire::RetryCondition::Timeout,
+                RetryCondition::Reset => wire::RetryCondition::Reset,
+            } as i32)
+            .collect(),
+        backoff_ms: value.backoff_ms,
+        budget: value.budget.map(|budget| wire::RetryBudget {
+            percent: budget.percent,
+            min_per_second: budget.min_per_second,
+        }),
     }
 }

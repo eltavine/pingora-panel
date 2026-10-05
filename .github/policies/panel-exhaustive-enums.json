@@ -183,6 +183,12 @@
     },
     {
       "package": "panel-ir",
+      "name": "RetryCondition",
+      "owner": "pingora-panel-platform",
+      "reason": "Every codec and gateway decides what each failure means for a retry; a new condition must fail to compile where conditions are encoded and matched, rather than being dropped so the gateway retries less, or more, than the upstream allows."
+    },
+    {
+      "package": "panel-ir",
       "name": "CompressionAlgorithm",
       "owner": "pingora-panel-platform",
       "reason": "Every codec and gateway handles each coding; a new coding must fail to compile where codings are encoded and negotiated, rather than being dropped or sent to clients that never asked for it."

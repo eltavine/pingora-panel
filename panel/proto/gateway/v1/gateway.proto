@@ -305,6 +305,9 @@ message UpstreamPoolSpec {
   string host_header = 10;
   ActiveHealthCheck health_check = 11;
   PassiveHealthPolicy passive_health = 12;
+  CircuitBreaker circuit_breaker = 13;
+  optional uint32 max_requests = 14;
+  UpstreamQueue queue = 15;
 }
 
 message UpstreamConnectionPolicy {
@@ -315,6 +318,7 @@ message UpstreamConnectionPolicy {
   bool disable_keepalive = 5;
   optional uint32 max_connections = 6;
   bool http2 = 7;
+  bool h2c = 8;
 }
 
 message UpstreamTlsPolicy {
@@ -371,6 +375,32 @@ message RetryPolicy {
   uint32 attempts = 1;
   uint64 per_try_timeout_ms = 2;
   repeated uint32 retry_statuses = 3;
+  repeated RetryCondition retry_on = 4;
+  uint64 backoff_ms = 5;
+  RetryBudget budget = 6;
+}
+
+enum RetryCondition {
+  RETRY_CONDITION_UNSPECIFIED = 0;
+  RETRY_CONDITION_TIMEOUT = 1;
+  RETRY_CONDITION_RESET = 2;
+}
+
+message RetryBudget {
+  uint32 percent = 1;
+  uint32 min_per_second = 2;
+}
+
+message CircuitBreaker {
+  uint32 failure_percent = 1;
+  uint32 min_requests = 2;
+  uint64 open_ms = 3;
+  uint32 half_open_requests = 4;
+}
+
+message UpstreamQueue {
+  uint32 max_waiting = 1;
+  uint64 timeout_ms = 2;
 }
 
 message TlsProfile {
