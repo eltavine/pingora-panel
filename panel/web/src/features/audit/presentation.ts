@@ -10,6 +10,7 @@ export const KNOWN_TYPES = [
   'config.apply.rejected',
   'config.apply.failed',
   'config.revision.noted',
+  'config.lua.tested',
   'gateway.snapshot.prepared',
   'gateway.snapshot.activated',
   'gateway.snapshot.aborted',
@@ -189,6 +190,15 @@ export function summaryOf(event: AuditEvent, t: Translate): string {
       return [text(data.operation), data.code, data.message].map(text).filter(Boolean).join(' · ')
     case 'config.revision.noted':
       return `#${text(data.revision)}${note}`
+    case 'config.lua.tested':
+      return [
+        data.script_phase ? t('audit.summary.luaScript', { phase: text(data.script_phase) }) : '',
+        [data.site, data.route].map(text).filter(Boolean).join('/'),
+        list(data.phases),
+        text(data.outcome),
+      ]
+        .filter(Boolean)
+        .join(' · ')
     case 'gateway.snapshot.prepared':
     case 'gateway.snapshot.activated':
       return `#${text(data.revision_id)} · ${text(data.content_hash).slice(0, 12)}`

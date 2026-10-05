@@ -92,6 +92,19 @@ describe('audit presentation', () => {
     ).toBe('v4 · A, B')
     expect(
       summaryOf(
+        event('config.lua.tested', {
+          version: 4,
+          script_phase: '',
+          site: 'shop',
+          route: 'hello',
+          phases: ['access', 'content'],
+          outcome: 'respond',
+        }),
+        t,
+      ),
+    ).toBe('shop/hello · access, content · respond')
+    expect(
+      summaryOf(
         event('gateway.operation.refused', { operation: 'reloaded', code: 'UNAVAILABLE' }),
         t,
       ),
