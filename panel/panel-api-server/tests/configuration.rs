@@ -35,6 +35,7 @@ async fn gateway() -> SocketAddr {
             "request.security",
             "route.path-prefix",
             "upstream.http",
+            "upstream.resilience",
         ]
         .map(|name| EngineCapability::new(name, "1")),
     );
@@ -775,6 +776,48 @@ async fn sites_are_edited_validated_and_applied_through_the_api() {
     );
     assert!(
         source.to_string().contains("http_policy headers {"),
+        "{source}"
+    );
+
+    // Upstreams retry, break circuits, limit and queue requests, and speak
+    // h2c, as the gateway would check them.
+    let (resilient, _) = api
+        .json(
+            api.mutate(Method::POST, "/api/v1/upstreams", "resilient-upstream")
+                .json(&json!({
+                    "name": "grpc",
+                    "nodes": [{"host": "127.0.0.1", "port": 9001}],
+                    "connection": {"h2c": true},
+                    "retry": {"attempts": 2, "statuses": [503], "on": ["reset"], "backoff_ms": 25,
+                              "budget": {"percent": 20, "min_per_second": 3}},
+                    "circuit_breaker": {"failure_percent": 50, "min_requests": 20,
+                                        "open_ms": 30000, "half_open_requests": 1},
+                    "max_requests": 100,
+                    "queue": {"max_waiting": 50, "timeout_ms": 2000}
+                })),
+            StatusCode::CREATED,
+        )
+        .await;
+    assert_eq!(resilient["retry"]["on"], json!(["reset"]));
+    assert_eq!(resilient["connection"]["h2c"], true);
+    let unbounded = api
+        .mutate(Method::POST, "/api/v1/upstreams", "unbounded-upstream")
+        .json(&json!({
+            "name": "unbounded",
+            "nodes": [{"host": "127.0.0.1", "port": 9002}],
+            "queue": {"max_waiting": 50, "timeout_ms": 2000}
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unbounded.status(), StatusCode::BAD_REQUEST);
+    let (source, _) = api
+        .json(api.get("/api/v1/config/source"), StatusCode::OK)
+        .await;
+    assert!(
+        source
+            .to_string()
+            .contains("retry 2 on=reset,503 backoff=25ms budget=20% budget_min=3;"),
         "{source}"
     );
     let (draft, _) = api
