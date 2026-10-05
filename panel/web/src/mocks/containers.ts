@@ -7,6 +7,7 @@ import type {
   ContainerStatsListView,
   ContainerStatsView,
   ContainerView,
+  EngineDiskUsageView,
   EngineNetworkListView,
   EngineVolumeListView,
   ImageDetailView,
@@ -270,6 +271,26 @@ export function containerHandlers(): AnyHandler[] {
         })
       },
     ),
+    http.get('*/api/v1/container-engines/:engine/disk-usage', async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600))
+      return HttpResponse.json({
+        observed_at: new Date().toISOString(),
+        images: {
+          total: images.length,
+          active: images.filter((image) => image.containers > 0).length,
+          size_bytes: 397 * 1024 ** 2,
+          reclaimable_bytes: 88 * 1024 ** 2,
+        },
+        containers: {
+          total: 4,
+          active: 3,
+          size_bytes: 12 * 1024 ** 2,
+          reclaimable_bytes: 2 * 1024 ** 2,
+        },
+        volumes: { total: 1, active: 1, size_bytes: 640 * 1024 ** 2, reclaimable_bytes: 0 },
+        build_cache: { total: 0, active: 0, size_bytes: 0, reclaimable_bytes: 0 },
+      } satisfies EngineDiskUsageView)
+    }),
     http.get('*/api/v1/container-engines/:engine/networks', () =>
       HttpResponse.json({
         observed_at: new Date().toISOString(),

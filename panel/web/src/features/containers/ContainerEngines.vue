@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
-import { Container, Power, PowerOff, ShieldAlert } from '@lucide/vue'
+import { Container, HardDrive, Power, PowerOff, ShieldAlert } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import type { ContainerEngineView } from '@/api/generated'
@@ -26,6 +26,7 @@ import { notifyFailure, plainHeaders } from '@/lib/configuration'
 import { useSession } from '@/lib/session'
 import { conditionTone, engineCondition } from './presentation'
 import { engineName } from '@/lib/containers'
+import EngineDiskSheet from './EngineDiskSheet.vue'
 
 defineProps<{ engines: readonly ContainerEngineView[] }>()
 
@@ -36,6 +37,14 @@ const enable = useMutation(enableEngineMutation())
 const disable = useMutation(disableEngineMutation())
 const busy = computed(() => enable.isPending.value || disable.isPending.value)
 const format = computed(() => formatters(locale.value))
+
+/** The engine whose disk use is shown. */
+const sizing = ref<string>()
+const diskOpen = ref(false)
+function showDisk(engine: string) {
+  sizing.value = engine
+  diskOpen.value = true
+}
 
 /** The engine whose disabling waits for confirmation. */
 const disabling = ref<string | null>(null)
@@ -157,10 +166,16 @@ function facts(engine: ContainerEngineView) {
             <dd class="min-w-0 break-words tabular-nums">{{ fact.value }}</dd>
           </template>
         </dl>
+        <div v-if="engineCondition(engine) === 'reachable'">
+          <Button variant="outline" size="sm" @click="showDisk(engine.id)">
+            <HardDrive data-icon="inline-start" aria-hidden="true" />{{ t('containers.disk.open') }}
+          </Button>
+        </div>
       </CardContent>
     </Card>
   </section>
 
+  <EngineDiskSheet v-if="sizing" v-model:open="diskOpen" :engine="sizing" />
   <ConfirmDialog
     v-model:open="confirmOpen"
     :icon="PowerOff"

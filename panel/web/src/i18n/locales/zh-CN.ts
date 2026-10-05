@@ -1135,6 +1135,21 @@ const zhCN = {
       mountpoint: '宿主机上的数据',
       empty: '此引擎没有卷',
     },
+    disk: {
+      open: '磁盘占用',
+      title: '{engine} 的磁盘占用',
+      description: '引擎在磁盘上保存的内容，以及删除未使用的部分可释放的空间。',
+      reading: '引擎正在统计占用，可能需要一些时间。',
+      kinds: {
+        images: '镜像',
+        containers: '容器',
+        volumes: '本地卷',
+        build_cache: '构建缓存',
+      },
+      inUse: '使用中 {active} / 共 {total}',
+      reclaimable: '可释放 {size}',
+      readAt: '读取于 {time}',
+    },
     logs: {
       action: '日志',
       open: '{name} 的日志',

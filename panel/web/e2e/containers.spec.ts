@@ -260,6 +260,17 @@ async function setUp(
       },
     })
   })
+  await page.route(/\/api\/v1\/container-engines\/docker\/disk-usage$/, (route) =>
+    route.fulfill({
+      json: {
+        observed_at: '2026-10-04T10:00:00Z',
+        images: { total: 5, active: 2, size_bytes: 1024 ** 3, reclaimable_bytes: 300 * 1024 ** 2 },
+        containers: { total: 3, active: 1, size_bytes: 4096, reclaimable_bytes: 1024 },
+        volumes: { total: 2, active: 1, size_bytes: 0, reclaimable_bytes: 0 },
+        build_cache: { total: 0, active: 0, size_bytes: 0, reclaimable_bytes: 0 },
+      },
+    }),
+  )
   await page.route(/\/api\/v1\/container-engines\/docker\/networks$/, (route) =>
     route.fulfill({
       json: {
@@ -618,4 +629,24 @@ test('networks and volumes show what uses them', async ({ page }) => {
   await expect(page).toHaveURL(/view=volumes/)
   const html = page.getByRole('row').filter({ hasText: 'shop_html' })
   await expect(html).toContainText('0 containers')
+})
+
+test("an engine's disk use shows what removing unused things would free", async ({ page }) => {
+  await setUp(page)
+  await page.goto('/containers')
+  const card = page.locator('[data-slot="card"]').filter({ hasText: '/run/docker.sock' })
+  await card.getByRole('button', { name: 'Disk use' }).click()
+  const sheet = page.getByRole('dialog', { name: 'Disk use of Docker' })
+  const images = sheet.getByRole('listitem').filter({ hasText: 'Images' })
+  await expect(images).toContainText('1 GiB')
+  await expect(images).toContainText('2 of 5 in use')
+  await expect(images).toContainText('300 MiB reclaimable')
+  await expect(sheet.getByRole('listitem').filter({ hasText: 'Build cache' })).toContainText(
+    '0 of 0 in use',
+  )
+  await expect(
+    page.locator('[data-slot="card"]').filter({ hasText: 'podman.sock' }).getByRole('button', {
+      name: 'Disk use',
+    }),
+  ).toHaveCount(0)
 })

@@ -1174,6 +1174,21 @@ const en: Messages = {
       mountpoint: 'Data on the host',
       empty: 'This engine has no volumes',
     },
+    disk: {
+      open: 'Disk use',
+      title: 'Disk use of {engine}',
+      description: 'What the engine keeps on disk, and what removing what nothing uses would free.',
+      reading: 'The engine is sizing what it keeps; this can take a while.',
+      kinds: {
+        images: 'Images',
+        containers: 'Containers',
+        volumes: 'Local volumes',
+        build_cache: 'Build cache',
+      },
+      inUse: '{active} of {total} in use',
+      reclaimable: '{size} reclaimable',
+      readAt: 'Read at {time}',
+    },
     logs: {
       action: 'Logs',
       open: 'Logs of {name}',
