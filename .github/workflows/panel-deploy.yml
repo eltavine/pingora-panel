@@ -473,6 +473,32 @@ jobs:
               | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"
           done
 
+      - name: Move the configuration between installations as a bundle
+        run: |
+          ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
+          ppanel config export --bundle - > configuration.json
+          python3 - <<'PY'
+          import json
+          bundle = json.load(open("configuration.json"))
+          assert bundle["format"] == "pingora-panel-configuration", bundle
+          assert "main.conf" in bundle["files"], sorted(bundle["files"])
+          bundle["files"]["main.conf"] += "# Moved as a bundle\n"
+          json.dump(bundle, open("changed.json", "w"))
+          bundle["language_version"] += 1
+          json.dump(bundle, open("newer.json", "w"))
+          PY
+          version=$(ppanel -o json config draft | python3 -c "import json, sys; print(json.load(sys.stdin)['version'])")
+          ppanel config import - --expected-version "$version" < changed.json
+          ppanel config export --bundle - | grep -q 'Moved as a bundle'
+          # A bundle written in a newer language version changes nothing.
+          if ppanel config import - < newer.json; then
+            exit 1
+          fi
+          ppanel config import - < configuration.json
+          ppanel config export --bundle - \
+            | python3 -c "import json, sys; assert json.load(sys.stdin) == json.load(open('configuration.json'))"
+          rm configuration.json changed.json newer.json
+
       - name: Serve the site over HTTPS with a certificate the panel keeps
         run: |
           ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
