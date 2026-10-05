@@ -1551,6 +1551,7 @@ dependencies = [
  "bytes",
  "chrono",
  "cookie",
+ "futures-util",
  "getrandom 0.4.3",
  "governor",
  "http",
@@ -1584,6 +1585,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-rustls",
+ "tokio-tungstenite",
  "tracing",
  "uuid",
 ]

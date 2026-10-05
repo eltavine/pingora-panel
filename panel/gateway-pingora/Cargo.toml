@@ -46,13 +46,15 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+futures-util.workspace = true
 http-body-util.workspace = true
-hyper = { workspace = true, features = ["http2"] }
+hyper = { workspace = true, features = ["http2", "server"] }
 hyper-util = { workspace = true, features = ["http2"] }
 pem.workspace = true
 rcgen.workspace = true
 tempfile.workspace = true
 tokio-rustls.workspace = true
+tokio-tungstenite.workspace = true
 
 [features]
 default = []

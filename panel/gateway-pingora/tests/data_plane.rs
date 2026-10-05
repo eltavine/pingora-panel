@@ -14,10 +14,11 @@ use panel_domain::{
 use panel_engine::DataPlaneAdapter;
 use panel_ir::{
     logging::LOGGING_CAPABILITY, template::TEMPLATE_CAPABILITY, AccessLogFormat, BasicAuth,
-    CapabilityRequirement, DomainSpec, ListenerRef, RateLimit, RateLimitKey, RefererRule,
-    RouteAction, RouteMatcher, RouteSpec, RuntimeSnapshot, SecurityPolicy, SiteSpec,
-    StaticContentPolicy, StrictTransportSecurity, TlsProfile, UpstreamEndpoint, UpstreamPoolSpec,
-    WwwRedirect,
+    CapabilityRequirement, CircuitBreaker, DomainSpec, ListenerRef, RateLimit, RateLimitKey,
+    RefererRule, RetryBudget, RetryCondition, RetryPolicy, RouteAction, RouteMatcher, RouteSpec,
+    RuntimeSnapshot, SecurityPolicy, SiteSpec, StaticContentPolicy, StrictTransportSecurity,
+    TlsProfile, UpstreamEndpoint, UpstreamPoolSpec, UpstreamQueue, WwwRedirect,
+    REQUEST_SECURITY_CAPABILITY, UPSTREAM_RESILIENCE_CAPABILITY,
 };
 use panel_metrics::Metrics;
 use std::{
@@ -25,7 +26,10 @@ use std::{
     net::SocketAddr,
     num::NonZeroUsize,
     path::Path,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU16, AtomicUsize, Ordering::SeqCst},
+        Arc,
+    },
     time::Duration,
 };
 use tokio::{
@@ -1846,5 +1850,572 @@ async fn http_policies_change_headers_answer_cors_and_compress() {
         elsewhere.headers["server"], "shop",
         "the site's policy still applies"
     );
+    gateway.stop().await;
+}
+
+/// An upstream that answers every request with the status `status` holds
+/// after `delay`, counting the requests it reads.
+async fn status_upstream(
+    status: Arc<AtomicU16>,
+    delay: Duration,
+) -> (SocketAddr, Arc<AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let hits = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&hits);
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let (status, hits) = (Arc::clone(&status), Arc::clone(&counted));
+            tokio::spawn(async move {
+                let mut head = Vec::new();
+                let mut byte = [0; 1];
+                while !head.ends_with(b"\r\n\r\n") {
+                    if stream.read(&mut byte).await.unwrap_or(0) == 0 {
+                        return;
+                    }
+                    head.push(byte[0]);
+                }
+                hits.fetch_add(1, SeqCst);
+                tokio::time::sleep(delay).await;
+                let status = status.load(SeqCst);
+                let body = format!("{status} from {address}");
+                let response = format!(
+                    "HTTP/1.1 {status} Status\r\ncontent-type: text/plain\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes()).await;
+            });
+        }
+    });
+    (address, hits)
+}
+
+/// An upstream that reads each request head and closes without answering.
+async fn closing_upstream() -> (SocketAddr, Arc<AtomicUsize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let hits = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&hits);
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let hits = Arc::clone(&counted);
+            tokio::spawn(async move {
+                let mut head = Vec::new();
+                let mut byte = [0; 1];
+                while !head.ends_with(b"\r\n\r\n") {
+                    if stream.read(&mut byte).await.unwrap_or(0) == 0 {
+                        return;
+                    }
+                    head.push(byte[0]);
+                }
+                hits.fetch_add(1, SeqCst);
+            });
+        }
+    });
+    (address, hits)
+}
+
+fn resilient(snapshot: &mut RuntimeSnapshot) {
+    snapshot
+        .required_capabilities
+        .push(CapabilityRequirement::new(
+            UPSTREAM_RESILIENCE_CAPABILITY,
+            "1",
+        ));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn upstreams_retry_what_their_policy_lists_within_their_budget() {
+    let failing = Arc::new(AtomicU16::new(503));
+    let healthy = Arc::new(AtomicU16::new(200));
+    let (refusing, refused_hits) = status_upstream(Arc::clone(&failing), Duration::ZERO).await;
+    let (answering, _) = status_upstream(Arc::clone(&healthy), Duration::ZERO).await;
+    let (closing, closed_hits) = closing_upstream().await;
+    let (answering_too, _) = status_upstream(Arc::clone(&healthy), Duration::ZERO).await;
+    let (tight_refusing, _) = status_upstream(Arc::clone(&failing), Duration::ZERO).await;
+    let (tight_answering, _) = status_upstream(healthy, Duration::ZERO).await;
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    snapshot.sites.push(site(&["retry.test"]));
+    let retry = |statuses: &[u16], on: &[RetryCondition], budget| RetryPolicy {
+        attempts: 1,
+        retry_statuses: statuses.iter().copied().collect(),
+        retry_on: on.iter().copied().collect(),
+        backoff_ms: 5,
+        budget,
+        ..RetryPolicy::none()
+    };
+    let mut statuses = pool("statuses", &[refusing, answering]);
+    statuses.retry_policy = retry(&[503], &[], None);
+    let mut resets = pool("resets", &[closing, answering_too]);
+    resets.retry_policy = retry(&[], &[RetryCondition::Reset], None);
+    let mut tight = pool("tight", &[tight_refusing, tight_answering]);
+    tight.retry_policy = retry(
+        &[503],
+        &[],
+        Some(RetryBudget {
+            percent: 1,
+            min_per_second: 0,
+        }),
+    );
+    snapshot.upstream_pools.extend([statuses, resets, tight]);
+    snapshot.routes.extend([
+        route("statuses", 1, prefix("/statuses"), proxy("statuses")),
+        route("resets", 2, prefix("/resets"), proxy("resets")),
+        route("tight", 3, prefix("/tight"), proxy("tight")),
+    ]);
+    resilient(&mut snapshot);
+    let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
+    wait_for(listen).await;
+
+    for _ in 0..4 {
+        assert_eq!(
+            get(listen, Some("retry.test"), "/statuses", "")
+                .await
+                .status,
+            200
+        );
+    }
+    assert!(refused_hits.load(SeqCst) >= 1, "some tries met the 503");
+    let mut posted = Vec::new();
+    for _ in 0..4 {
+        let request =
+            "POST /statuses HTTP/1.1\r\nhost: retry.test\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
+        posted.push(send(listen, request).await.status);
+    }
+    assert!(
+        posted.contains(&503) && posted.contains(&200),
+        "POST is not idempotent, so its 503 stands: {posted:?}"
+    );
+
+    for _ in 0..4 {
+        assert_eq!(
+            get(listen, Some("retry.test"), "/resets", "").await.status,
+            200
+        );
+    }
+    assert!(closed_hits.load(SeqCst) >= 1, "some tries were cut off");
+
+    let mut budgeted = Vec::new();
+    for _ in 0..4 {
+        budgeted.push(get(listen, Some("retry.test"), "/tight", "").await.status);
+    }
+    assert!(
+        budgeted.contains(&503),
+        "a budget of one in a hundred leaves no retry: {budgeted:?}"
+    );
+    gateway.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn circuits_open_on_failures_and_close_after_a_trial() {
+    let status = Arc::new(AtomicU16::new(502));
+    let (upstream, hits) = status_upstream(Arc::clone(&status), Duration::ZERO).await;
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    snapshot.sites.push(site(&["circuit.test"]));
+    let mut app = pool("app", &[upstream]);
+    app.circuit_breaker = Some(CircuitBreaker {
+        failure_percent: 50,
+        min_requests: 2,
+        open_ms: 1_000,
+        half_open_requests: 1,
+    });
+    snapshot.upstream_pools.push(app);
+    snapshot
+        .routes
+        .push(route("app", 1, prefix("/"), proxy("app")));
+    resilient(&mut snapshot);
+    let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
+    wait_for(listen).await;
+
+    let call = || get(listen, Some("circuit.test"), "/", "");
+    assert_eq!(call().await.status, 502);
+    assert_eq!(call().await.status, 502);
+    let open = call().await;
+    assert_eq!(open.status, 503);
+    assert_eq!(open.headers["retry-after"], "1");
+    assert_eq!(
+        hits.load(SeqCst),
+        2,
+        "an open circuit sends nothing upstream"
+    );
+
+    tokio::time::sleep(Duration::from_millis(1_100)).await;
+    assert_eq!(call().await.status, 502, "the trial still fails");
+    assert_eq!(call().await.status, 503, "and the circuit opens again");
+    assert_eq!(hits.load(SeqCst), 3);
+
+    status.store(200, SeqCst);
+    tokio::time::sleep(Duration::from_millis(1_100)).await;
+    assert_eq!(call().await.status, 200, "a good trial closes it");
+    assert_eq!(call().await.status, 200);
+    assert_eq!(hits.load(SeqCst), 5);
+    gateway.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn upstream_limits_queue_or_refuse_requests_over_them() {
+    let ok = Arc::new(AtomicU16::new(200));
+    let slow = Duration::from_millis(500);
+    let (queued_node, _) = status_upstream(Arc::clone(&ok), slow).await;
+    let (impatient_node, _) = status_upstream(Arc::clone(&ok), slow).await;
+    let (strict_node, _) = status_upstream(ok, slow).await;
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    snapshot.sites.push(site(&["limit.test"]));
+    let limited = |id: &str, node, queue| {
+        let mut limited = pool(id, &[node]);
+        limited.max_requests = Some(1);
+        limited.queue = queue;
+        limited
+    };
+    snapshot.upstream_pools.extend([
+        limited(
+            "queued",
+            queued_node,
+            Some(UpstreamQueue {
+                max_waiting: 1,
+                timeout_ms: 2_000,
+            }),
+        ),
+        limited(
+            "impatient",
+            impatient_node,
+            Some(UpstreamQueue {
+                max_waiting: 4,
+                timeout_ms: 100,
+            }),
+        ),
+        limited("strict", strict_node, None),
+    ]);
+    snapshot.routes.extend([
+        route("queued", 1, prefix("/queued"), proxy("queued")),
+        route("impatient", 2, prefix("/impatient"), proxy("impatient")),
+        route("strict", 3, prefix("/strict"), proxy("strict")),
+    ]);
+    resilient(&mut snapshot);
+    let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
+    wait_for(listen).await;
+
+    for path in ["/queued", "/impatient", "/strict"] {
+        assert_eq!(get(listen, Some("limit.test"), path, "").await.status, 200);
+    }
+    let later = |path: &'static str, wait: u64| async move {
+        tokio::time::sleep(Duration::from_millis(wait)).await;
+        get(listen, Some("limit.test"), path, "").await
+    };
+    let outcome = |responses: &[&Response]| {
+        let mut outcome: Vec<(u16, String)> = responses
+            .iter()
+            .map(|response| {
+                let body = String::from_utf8_lossy(&response.body).into_owned();
+                (
+                    response.status,
+                    body.split(" from ").next().unwrap().trim().to_owned(),
+                )
+            })
+            .collect();
+        outcome.sort();
+        outcome
+    };
+    let (first, second, third) = tokio::join!(
+        later("/queued", 0),
+        later("/queued", 100),
+        later("/queued", 200)
+    );
+    assert_eq!(
+        outcome(&[&first, &second, &third]),
+        [
+            (200, "200".to_owned()),
+            (200, "200".to_owned()),
+            (
+                503,
+                "the upstream is handling all the requests it takes".to_owned()
+            )
+        ],
+        "one waits its turn and the queue holds no more"
+    );
+    let (first, second) = tokio::join!(later("/impatient", 0), later("/impatient", 100));
+    assert_eq!(
+        outcome(&[&first, &second]),
+        [
+            (200, "200".to_owned()),
+            (
+                503,
+                "the upstream did not take the request in time".to_owned()
+            )
+        ]
+    );
+    let (first, second) = tokio::join!(later("/strict", 0), later("/strict", 100));
+    let refused = if first.status == 503 { &first } else { &second };
+    assert_eq!(
+        outcome(&[&first, &second]),
+        [
+            (200, "200".to_owned()),
+            (
+                503,
+                "the upstream is handling all the requests it takes".to_owned()
+            )
+        ]
+    );
+    assert_eq!(refused.headers["retry-after"], "1");
+    gateway.stop().await;
+}
+
+/// A WebSocket server that sends back every message it receives.
+async fn websocket_upstream() -> SocketAddr {
+    use futures_util::{SinkExt, StreamExt};
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let Ok(mut socket) = tokio_tungstenite::accept_async(stream).await else {
+                    return;
+                };
+                while let Some(Ok(message)) = socket.next().await {
+                    if (message.is_text() || message.is_binary())
+                        && socket.send(message).await.is_err()
+                    {
+                        return;
+                    }
+                }
+            });
+        }
+    });
+    address
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn websocket_upgrades_go_through_beyond_body_limits() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+
+    let upstream = websocket_upstream().await;
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    let mut chat = site(&["chat.test"]);
+    chat.security_policy_id = Some("small".into());
+    snapshot.sites.push(chat);
+    snapshot.security_policies.push(SecurityPolicy {
+        id: "small".into(),
+        max_body_bytes: Some(16),
+        ..SecurityPolicy::default()
+    });
+    let mut app = pool("chat", &[upstream]);
+    app.connection.keepalive = false;
+    snapshot.upstream_pools.push(app);
+    snapshot
+        .routes
+        .push(route("chat", 1, prefix("/"), proxy("chat")));
+    snapshot
+        .required_capabilities
+        .push(CapabilityRequirement::new(REQUEST_SECURITY_CAPABILITY, "1"));
+    let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
+    wait_for(listen).await;
+
+    let stream = TcpStream::connect(listen).await.unwrap();
+    let (mut socket, response) = tokio_tungstenite::client_async("ws://chat.test/ws", stream)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 101);
+    for message in [
+        "a message longer than the sixteen bytes a body may have",
+        "and another after it",
+    ] {
+        socket.send(Message::text(message)).await.unwrap();
+        let echoed = socket.next().await.unwrap().unwrap();
+        assert_eq!(echoed.to_text().unwrap(), message);
+    }
+    socket.close(None).await.unwrap();
+    gateway.stop().await;
+}
+
+/// An upstream that streams one Server-Sent Event, and a second once
+/// `release` is notified.
+async fn event_upstream(release: Arc<tokio::sync::Notify>) -> SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let release = Arc::clone(&release);
+            tokio::spawn(async move {
+                let mut head = Vec::new();
+                let mut byte = [0; 1];
+                while !head.ends_with(b"\r\n\r\n") {
+                    if stream.read(&mut byte).await.unwrap_or(0) == 0 {
+                        return;
+                    }
+                    head.push(byte[0]);
+                }
+                let _ = stream
+                    .write_all(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncache-control: no-cache\r\nconnection: close\r\n\r\ndata: one\n\n")
+                    .await;
+                release.notified().await;
+                let _ = stream.write_all(b"data: two\n\n").await;
+            });
+        }
+    });
+    address
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn server_sent_events_stream_as_they_come_and_are_not_compressed() {
+    use panel_ir::{
+        CompressionAlgorithm, CompressionPolicy, HeaderPolicy, HTTP_POLICIES_CAPABILITY,
+    };
+
+    let release = Arc::new(tokio::sync::Notify::new());
+    let upstream = event_upstream(Arc::clone(&release)).await;
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    let mut feed = site(&["feed.test"]);
+    feed.header_policy_id = Some("compress".into());
+    snapshot.sites.push(feed);
+    snapshot.header_policies.push(HeaderPolicy {
+        id: "compress".into(),
+        compression: Some(CompressionPolicy {
+            algorithms: [CompressionAlgorithm::Gzip].into(),
+            types: vec!["text/*".into()],
+            min_bytes: 0,
+        }),
+        ..HeaderPolicy::default()
+    });
+    snapshot.upstream_pools.push(pool("feed", &[upstream]));
+    snapshot
+        .routes
+        .push(route("feed", 1, prefix("/"), proxy("feed")));
+    snapshot
+        .required_capabilities
+        .push(CapabilityRequirement::new(HTTP_POLICIES_CAPABILITY, "1"));
+    let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
+    wait_for(listen).await;
+
+    let mut stream = TcpStream::connect(listen).await.unwrap();
+    stream
+        .write_all(b"GET /events HTTP/1.1\r\nhost: feed.test\r\naccept: text/event-stream\r\naccept-encoding: gzip\r\nconnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let mut received = Vec::new();
+    let mut chunk = [0; 1024];
+    // The upstream holds the second event back until the first arrives, so
+    // a gateway that waited for the whole response would never deliver it.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !String::from_utf8_lossy(&received).contains("data: one") {
+            let read = stream.read(&mut chunk).await.unwrap();
+            assert!(read > 0, "the stream ended early");
+            received.extend_from_slice(&chunk[..read]);
+        }
+    })
+    .await
+    .expect("the first event arrives while the stream is open");
+    release.notify_one();
+    let head = String::from_utf8_lossy(&received).to_ascii_lowercase();
+    assert!(head.contains("content-type: text/event-stream"), "{head}");
+    assert!(!head.contains("content-encoding"), "{head}");
+    stream.read_to_end(&mut received).await.unwrap();
+    assert!(String::from_utf8_lossy(&received).contains("data: two"));
+    gateway.stop().await;
+}
+
+/// A gRPC-style server over h2c that answers each call with its own
+/// message and the `grpc-status` trailer.
+async fn grpc_upstream() -> SocketAddr {
+    use http_body_util::{BodyExt, StreamBody};
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let service = hyper::service::service_fn(
+                    |request: http::Request<hyper::body::Incoming>| async move {
+                        let version = format!("{:?}", request.version());
+                        let message = request.into_body().collect().await?.to_bytes();
+                        let mut trailers = http::HeaderMap::new();
+                        trailers.insert("grpc-status", "0".parse().unwrap());
+                        trailers.insert("grpc-message", "ok".parse().unwrap());
+                        let frames = vec![
+                            Ok::<_, hyper::Error>(hyper::body::Frame::data(message)),
+                            Ok(hyper::body::Frame::trailers(trailers)),
+                        ];
+                        Ok::<_, hyper::Error>(
+                            http::Response::builder()
+                                .header("content-type", "application/grpc")
+                                .header("x-upstream-version", version)
+                                .body(StreamBody::new(futures_util::stream::iter(frames)))
+                                .unwrap(),
+                        )
+                    },
+                );
+                let _ =
+                    hyper::server::conn::http2::Builder::new(hyper_util::rt::TokioExecutor::new())
+                        .serve_connection(hyper_util::rt::TokioIo::new(stream), service)
+                        .await;
+            });
+        }
+    });
+    address
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn grpc_goes_over_http2_both_ways_with_its_trailers() {
+    use http_body_util::{BodyExt, Full};
+
+    let upstream = grpc_upstream().await;
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    snapshot.sites.push(site(&["grpc.test"]));
+    let mut app = pool("grpc", &[upstream]);
+    app.connection.h2c = true;
+    snapshot.upstream_pools.push(app);
+    snapshot
+        .routes
+        .push(route("grpc", 1, prefix("/"), proxy("grpc")));
+    resilient(&mut snapshot);
+    let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
+    wait_for(listen).await;
+
+    let stream = TcpStream::connect(listen).await.unwrap();
+    let (mut sender, connection) = hyper::client::conn::http2::handshake(
+        hyper_util::rt::TokioExecutor::new(),
+        hyper_util::rt::TokioIo::new(stream),
+    )
+    .await
+    .unwrap();
+    tokio::spawn(connection);
+    let message = bytes::Bytes::from_static(b"\0\0\0\0\x05hello");
+    let request = http::Request::post("http://grpc.test/echo.Echo/Say")
+        .header("content-type", "application/grpc")
+        .header("te", "trailers")
+        .body(Full::new(message.clone()))
+        .unwrap();
+    let response = sender.send_request(request).await.unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.headers()["x-upstream-version"], "HTTP/2.0");
+    let collected = response.into_body().collect().await.unwrap();
+    let trailers = collected.trailers().cloned().expect("trailers");
+    assert_eq!(trailers["grpc-status"], "0");
+    assert_eq!(trailers["grpc-message"], "ok");
+    assert_eq!(collected.to_bytes(), message);
+    drop(sender);
     gateway.stop().await;
 }

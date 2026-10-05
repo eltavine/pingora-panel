@@ -66,6 +66,7 @@ const CAPABILITIES: &[&str] = &[
     "upstream.http2",
     "upstream.https",
     "upstream.passive-health",
+    "upstream.resilience",
 ];
 
 /// Gateway resources the adapter reads while preparing snapshots.
@@ -334,9 +335,6 @@ impl PingoraGatewayAdapter {
             }
         }
         for pool in &snapshot.upstream_pools {
-            if pool.retry_policy.attempts != 0 {
-                unsupported.push("upstream retry policy");
-            }
             if pool
                 .endpoints
                 .iter()

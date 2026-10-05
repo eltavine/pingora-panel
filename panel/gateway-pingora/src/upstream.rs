@@ -1,12 +1,13 @@
 //! Upstream pools: endpoint selection, connection settings, failover and health.
 
+use crate::resilience::{Busy, Limit, PoolState, RetryRules};
 use crate::secrets::SecretSource;
 use http::{header, HeaderName};
 use panel_domain::{EndpointId, UpstreamPoolId};
 use panel_errors::{PanelError, Result};
 use panel_ir::{
-    ActiveHealthCheck, HealthCheckProtocol, LoadBalancingPolicy, PassiveHealthPolicy,
-    UpstreamPoolSpec,
+    ActiveHealthCheck, CircuitBreaker, HealthCheckProtocol, LoadBalancingPolicy,
+    PassiveHealthPolicy, UpstreamPoolSpec,
 };
 use parking_lot::Mutex;
 use pingora_core::{
@@ -90,13 +91,19 @@ impl EndpointState {
     }
 }
 
-/// Endpoint state shared by every snapshot, keyed by pool and endpoint ID.
+/// Endpoint state shared by every snapshot, keyed by pool and endpoint ID,
+/// and each pool's own, keyed by pool ID.
 #[derive(Debug, Default)]
 pub(crate) struct EndpointStates {
     states: Mutex<HashMap<(String, String), Arc<EndpointState>>>,
+    pools: Mutex<HashMap<String, Arc<PoolState>>>,
 }
 
 impl EndpointStates {
+    fn pool(&self, pool: &str) -> Arc<PoolState> {
+        Arc::clone(self.pools.lock().entry(pool.to_owned()).or_default())
+    }
+
     fn state(&self, pool: &str, endpoint: &str) -> Arc<EndpointState> {
         Arc::clone(
             self.states
@@ -109,6 +116,9 @@ impl EndpointStates {
     /// Forgets endpoints that no longer exist in the active snapshot.
     pub(crate) fn retain(&self, live: &HashSet<(String, String)>) {
         self.states.lock().retain(|key, _| live.contains(key));
+        self.pools
+            .lock()
+            .retain(|pool, _| live.iter().any(|(live_pool, _)| live_pool == pool));
     }
 
     pub(crate) fn set_drained(&self, pool: &str, endpoint: &str, drained: bool) {
@@ -292,6 +302,7 @@ struct PeerSettings {
     verify_hostname: bool,
     ca: Option<Arc<[WrappedX509]>>,
     http2: bool,
+    h2c: bool,
 }
 
 impl PeerSettings {
@@ -305,6 +316,8 @@ impl PeerSettings {
             options.verify_hostname = self.verify_hostname;
             options.ca.clone_from(&self.ca);
             options.alpn = if self.http2 { ALPN::H2H1 } else { ALPN::H1 };
+        } else if self.h2c {
+            options.alpn = ALPN::H2;
         }
     }
 }
@@ -321,6 +334,10 @@ pub(crate) struct UpstreamPool {
     passive: Option<PassiveHealthPolicy>,
     pub health_interval: Option<Duration>,
     max_connections: Option<u32>,
+    pub retry: RetryRules,
+    breaker: Option<CircuitBreaker>,
+    limit: Option<Limit>,
+    state: Arc<PoolState>,
 }
 
 /// Resolves endpoint host names; IP literals are used as they are.
@@ -415,6 +432,7 @@ impl UpstreamPool {
             verify_hostname: spec.tls.verify_hostname,
             ca,
             http2: spec.connection.http2,
+            h2c: spec.connection.h2c,
         };
         let check_tls = endpoints.first().is_some_and(|endpoint| endpoint.tls);
         if spec.health_check.is_some() && endpoints.iter().any(|endpoint| endpoint.tls != check_tls)
@@ -470,6 +488,12 @@ impl UpstreamPool {
                 .as_ref()
                 .map(|check| Duration::from_millis(check.interval_ms)),
             max_connections: spec.connection.max_connections,
+            retry: RetryRules::compile(&spec.retry_policy),
+            breaker: spec.circuit_breaker,
+            limit: spec
+                .max_requests
+                .map(|max_requests| Limit::new(max_requests, spec.queue)),
+            state: states.pool(spec.id.as_str()),
         })
     }
 
@@ -491,8 +515,14 @@ impl UpstreamPool {
             .and_then(|backend| backend.ext.get::<Slot>().map(|slot| slot.0))
     }
 
-    pub(crate) fn may_fail_over(&self, attempts: usize) -> bool {
-        attempts < MAX_FAILOVER_ATTEMPTS.min(self.endpoints.len())
+    /// Whether a failed connection is tried on another endpoint: within the
+    /// retry policy when the upstream has one, otherwise up to three tries.
+    pub(crate) fn may_fail_over(&self, attempts: usize, retries: u32) -> bool {
+        if self.retry.attempts > 0 {
+            self.may_retry(retries)
+        } else {
+            attempts < MAX_FAILOVER_ATTEMPTS.min(self.endpoints.len())
+        }
     }
 
     pub(crate) fn lease(&self, endpoint: usize) -> EndpointLease {
@@ -502,21 +532,61 @@ impl UpstreamPool {
         EndpointLease { state }
     }
 
-    pub(crate) fn peer(&self, endpoint: usize) -> HttpPeer {
+    /// The peer for `endpoint`; upgrades such as WebSocket always go over
+    /// HTTP/1.1, which is where they exist.
+    pub(crate) fn peer(&self, endpoint: usize, upgrade: bool) -> HttpPeer {
         let endpoint = &self.endpoints[endpoint];
         let mut peer = HttpPeer::new(endpoint.address, endpoint.tls, endpoint.sni.clone());
         self.peer.apply(&mut peer.options, endpoint.tls);
+        if upgrade {
+            peer.options.alpn = ALPN::H1;
+        }
         peer
     }
 
-    pub(crate) fn record_success(&self, endpoint: usize) {
+    pub(crate) fn record_success(&self, endpoint: usize, trial: bool) {
         self.endpoints[endpoint].state.record_success();
+        self.state
+            .outcome(false, trial, self.breaker.as_ref(), now_ms());
     }
 
-    pub(crate) fn record_failure(&self, endpoint: usize) {
+    pub(crate) fn record_failure(&self, endpoint: usize, trial: bool) {
+        let now = now_ms();
         self.endpoints[endpoint]
             .state
-            .record_failure(self.passive.as_ref(), now_ms());
+            .record_failure(self.passive.as_ref(), now);
+        self.state.outcome(true, trial, self.breaker.as_ref(), now);
+    }
+
+    /// Whether the circuit lets a request through: `Ok(true)` for a trial,
+    /// or `Err` with the seconds until it may be tried again.
+    pub(crate) fn admit(&self) -> std::result::Result<bool, u64> {
+        self.state.admit(self.breaker.as_ref(), now_ms())
+    }
+
+    pub(crate) fn cancel_trial(&self) {
+        self.state.cancel_trial();
+    }
+
+    /// A place among the requests the upstream takes at once, if it limits
+    /// them; `None` when it does not.
+    pub(crate) async fn place(
+        &self,
+    ) -> std::result::Result<Option<tokio::sync::OwnedSemaphorePermit>, Busy> {
+        match &self.limit {
+            Some(limit) => limit.acquire().await.map(Some),
+            None => Ok(None),
+        }
+    }
+
+    /// Counts a request toward the retry budget.
+    pub(crate) fn count_request(&self) {
+        self.state.request(now_ms());
+    }
+
+    /// Whether the policy allows retry `retries + 1`, counting it if so.
+    pub(crate) fn may_retry(&self, retries: u32) -> bool {
+        retries < self.retry.attempts && self.state.may_retry(self.retry.budget, now_ms())
     }
 
     pub(crate) fn record_latency(&self, endpoint: usize, latency: Duration) {
@@ -760,9 +830,9 @@ mod tests {
             ejection_ms: 60_000,
         });
         let pool = pool(&spec, &EndpointStates::default()).await;
-        pool.record_failure(0);
+        pool.record_failure(0, false);
         assert_eq!(pool.select(b"", &[]), Some(0));
-        pool.record_failure(0);
+        pool.record_failure(0, false);
         assert_eq!(pool.select(b"", &[]), None);
         let health = pool.health();
         assert!(health.endpoints[0].ejected_until_ms.is_some());

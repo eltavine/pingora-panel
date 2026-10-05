@@ -20,6 +20,7 @@ mod listeners;
 mod log_files;
 mod proxy;
 mod request_identity;
+mod resilience;
 mod responses;
 mod routing;
 mod secrets;

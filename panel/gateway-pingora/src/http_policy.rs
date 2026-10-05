@@ -557,6 +557,9 @@ impl Compression {
                 let (kind, subtype) = essence.split_once('/')?;
                 Some((kind.to_owned(), subtype.to_owned()))
             })
+            // Server-Sent Events go out as they come; a coding would hold
+            // them back until enough bytes arrive.
+            .filter(|(kind, subtype)| !(kind == "text" && subtype == "event-stream"))
             .is_some_and(|(kind, subtype)| {
                 self.types.iter().any(|(allowed_kind, allowed_subtype)| {
                     (allowed_kind == "*" || *allowed_kind == kind)

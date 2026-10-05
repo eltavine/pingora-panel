@@ -12,7 +12,9 @@ use crate::{
     hsts::{StrictTransport, StrictTransportBuilder},
     http_policy::{self, FieldChange, HttpPolicy, HttpPolicyBuilder, HttpPolicyModule},
     log_files::{Destination, Logs},
-    request_identity, responses,
+    request_identity,
+    resilience::Busy,
+    responses,
     routing::{RouteTarget, SiteRoutes},
     security::{Admission, Candidate, ClientResolution, Refusal},
     static_files,
@@ -27,6 +29,7 @@ use panel_ir::AccessLogFormat;
 use panel_metrics::{method, protocol_version, ActiveRequest, ClientRequest, ServerRequest};
 use pingora_core::{
     modules::http::{compression::ResponseCompressionBuilder, HttpModules},
+    protocols::http::v1::common::is_upgrade_req,
     upstreams::peer::HttpPeer,
     Error, ErrorSource, ErrorType,
 };
@@ -144,6 +147,15 @@ pub(crate) struct RequestContext {
     /// The client's `Accept-Encoding` lines, while the compression module
     /// reads ranked ones.
     accept_encoding: Option<Vec<HeaderValue>>,
+    /// Whether the request is a trial of a half-open circuit whose outcome
+    /// is not counted yet.
+    trial: bool,
+    /// The request's place among those its upstream takes at once.
+    place: Option<tokio::sync::OwnedSemaphorePermit>,
+    /// Retries made under the upstream's retry policy.
+    retries: u32,
+    /// Whether the upstream's response is being replaced by a retry.
+    retrying: bool,
     body_seen: u64,
     started: Instant,
     /// Counts the request as active while it is measured.
@@ -154,6 +166,28 @@ impl RequestContext {
     fn upstream(&self) -> Option<(&UpstreamPool, usize)> {
         let pool = &self.snapshot.as_ref()?.pools[self.pool?];
         Some((pool, self.endpoint?))
+    }
+
+    /// Counts an attempt's outcome for its endpoint and upstream; the first
+    /// one settles a circuit trial.
+    fn record_outcome(&mut self, failed: bool) {
+        let trial = std::mem::take(&mut self.trial);
+        if let Some((pool, endpoint)) = self.upstream() {
+            if failed {
+                pool.record_failure(endpoint, trial);
+            } else {
+                pool.record_success(endpoint, trial);
+            }
+        }
+        self.failure_recorded = true;
+    }
+
+    /// Whether the request could be sent again as it was: idempotent
+    /// (RFC 9110 §9.2.2), its body still held, and nothing sent back yet.
+    fn replayable(session: &Session) -> bool {
+        session.req_header().method.is_idempotent()
+            && !session.as_ref().retry_buffer_truncated()
+            && session.response_written().is_none()
     }
 }
 
@@ -226,6 +260,10 @@ impl ProxyHttp for PanelProxy {
             http_request: Vec::new(),
             compression: None,
             accept_encoding: None,
+            trial: false,
+            place: None,
+            retries: 0,
+            retrying: false,
             body_seen: 0,
             started: Instant::now(),
             active: None,
@@ -440,8 +478,39 @@ impl ProxyHttp for PanelProxy {
             }
         }
         match &route.target {
-            RouteTarget::Proxy(pool) => {
-                ctx.pool = Some(*pool);
+            RouteTarget::Proxy(index) => {
+                let pool = &snapshot.pools[*index];
+                match pool.admit() {
+                    Ok(trial) => ctx.trial = trial,
+                    Err(seconds) => {
+                        let wait = seconds.to_string();
+                        responses::plain(
+                            session,
+                            503,
+                            "the upstream is failing; try again later",
+                            &[(header::RETRY_AFTER, wait.as_str())],
+                        )
+                        .await?;
+                        return Ok(true);
+                    }
+                }
+                match pool.place().await {
+                    Ok(place) => ctx.place = place,
+                    Err(busy) => {
+                        if std::mem::take(&mut ctx.trial) {
+                            pool.cancel_trial();
+                        }
+                        let message = match busy {
+                            Busy::Full => "the upstream is handling all the requests it takes",
+                            Busy::Waited => "the upstream did not take the request in time",
+                        };
+                        responses::plain(session, 503, message, &[(header::RETRY_AFTER, "1")])
+                            .await?;
+                        return Ok(true);
+                    }
+                }
+                pool.count_request();
+                ctx.pool = Some(*index);
                 Ok(false)
             }
             RouteTarget::Static(content) => {
@@ -514,6 +583,12 @@ impl ProxyHttp for PanelProxy {
                 .map(|client| SocketAddr::new(client, 0))
                 .or_else(|| client_address(session)),
         );
+        if !ctx.tried.is_empty() && ctx.retries > 0 {
+            let delay = pool.retry.delay(ctx.retries);
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+        }
         let endpoint = pool.select(&key, &ctx.tried).ok_or_else(|| {
             Error::explain(
                 ErrorType::HTTPStatus(503),
@@ -525,7 +600,9 @@ impl ProxyHttp for PanelProxy {
         ctx.endpoint = Some(endpoint);
         ctx.failure_recorded = false;
         ctx.sent_at = Some(Instant::now());
-        Ok(Box::new(pool.peer(endpoint)))
+        Ok(Box::new(
+            pool.peer(endpoint, is_upgrade_req(session.req_header())),
+        ))
     }
 
     async fn upstream_request_filter(
@@ -551,7 +628,7 @@ impl ProxyHttp for PanelProxy {
                 client: client_address(session).map(|address| address.ip()),
                 tls: self.listener.tls,
                 host_override: pool.host_header.as_deref(),
-                close: !pool.keepalive,
+                close: !pool.keepalive && !is_upgrade_req(session.req_header()),
             },
         )?;
         if let Some(client) = ctx.client {
@@ -574,16 +651,23 @@ impl ProxyHttp for PanelProxy {
         {
             compression.decide(session, upstream_response)?;
         }
+        if upstream_response.status == http::StatusCode::SWITCHING_PROTOCOLS {
+            // An upgraded connection idles as long as its protocol wants.
+            session.set_read_timeout(None);
+        }
         Ok(())
     }
 
     async fn request_body_filter(
         &self,
-        _session: &mut Session,
+        session: &mut Session,
         body: &mut Option<bytes::Bytes>,
         _end_of_stream: bool,
         ctx: &mut RequestContext,
     ) -> pingora_core::Result<()> {
+        if session.was_upgraded() {
+            return Ok(());
+        }
         if let (Some(limit), Some(chunk)) = (ctx.admission.max_body_bytes, body.as_ref()) {
             ctx.body_seen += u64::try_from(chunk.len()).unwrap_or(u64::MAX);
             if ctx.body_seen > limit {
@@ -617,6 +701,23 @@ impl ProxyHttp for PanelProxy {
             Some(status),
             None,
         );
+        let retried = ctx.upstream().is_some_and(|(pool, _)| {
+            pool.retry.retries_status(status)
+                && RequestContext::replayable(session)
+                && pool.may_retry(ctx.retries)
+        });
+        if retried {
+            ctx.record_outcome(matches!(status, 502..=504));
+            ctx.retries += 1;
+            ctx.retrying = true;
+            let mut error = Error::explain(
+                ErrorType::HTTPStatus(status),
+                "the upstream's status is retried",
+            );
+            error.esource = ErrorSource::Upstream;
+            error.set_retry(true);
+            return Err(error);
+        }
         Ok(())
     }
 
@@ -656,14 +757,20 @@ impl ProxyHttp for PanelProxy {
             None,
             Some(&error),
         );
-        if let Some((pool, endpoint)) = ctx.upstream() {
-            pool.record_failure(endpoint);
-            // Nothing reached the upstream, so trying another endpoint is safe.
-            if pool.may_fail_over(ctx.tried.len()) {
-                error.set_retry(true);
+        ctx.record_outcome(true);
+        // Nothing reached the upstream, so trying another endpoint is safe.
+        let retried = ctx
+            .upstream()
+            .is_some_and(|(pool, _)| pool.may_fail_over(ctx.tried.len(), ctx.retries));
+        if retried {
+            if ctx
+                .upstream()
+                .is_some_and(|(pool, _)| pool.retry.attempts > 0)
+            {
+                ctx.retries += 1;
             }
+            error.set_retry(true);
         }
-        ctx.failure_recorded = true;
         error
     }
 
@@ -675,24 +782,30 @@ impl ProxyHttp for PanelProxy {
         ctx: &mut RequestContext,
         client_reused: bool,
     ) -> Box<Error> {
-        let sent_at = ctx.sent_at.take();
-        self.measure_upstream(
-            &session.req_header().method,
-            ctx,
-            sent_at,
-            None,
-            Some(&error),
-        );
+        let retrying = std::mem::take(&mut ctx.retrying);
+        if !retrying {
+            let sent_at = ctx.sent_at.take();
+            self.measure_upstream(
+                &session.req_header().method,
+                ctx,
+                sent_at,
+                None,
+                Some(&error),
+            );
+        }
         if !ctx.failure_recorded && error.esource() == &pingora_core::ErrorSource::Upstream {
-            if let Some((pool, endpoint)) = ctx.upstream() {
-                pool.record_failure(endpoint);
-            }
-            ctx.failure_recorded = true;
+            ctx.record_outcome(true);
         }
         let mut error = error.more_context(format!("Peer: {peer}"));
-        if !session.req_header().method.is_idempotent() || session.as_ref().retry_buffer_truncated()
-        {
+        if !RequestContext::replayable(session) {
             error.set_retry(false);
+        } else if retrying {
+            error.set_retry(true);
+        } else if ctx.upstream().is_some_and(|(pool, _)| {
+            pool.retry.retries_error(error.etype()) && pool.may_retry(ctx.retries)
+        }) {
+            ctx.retries += 1;
+            error.set_retry(true);
         } else {
             error.retry.decide_reuse(client_reused);
         }
@@ -747,16 +860,20 @@ impl ProxyHttp for PanelProxy {
         let status = session
             .response_written()
             .map_or(0, |response| response.status.as_u16());
-        if let Some((pool, endpoint)) = ctx.upstream() {
-            if !ctx.failure_recorded {
-                if error
-                    .is_some_and(|error| error.esource() == &pingora_core::ErrorSource::Upstream)
-                    || matches!(status, 502..=504)
-                {
-                    pool.record_failure(endpoint);
-                } else {
-                    pool.record_success(endpoint);
-                }
+        if ctx.upstream().is_some() && !ctx.failure_recorded {
+            ctx.record_outcome(
+                error.is_some_and(|error| error.esource() == &pingora_core::ErrorSource::Upstream)
+                    || matches!(status, 502..=504),
+            );
+        }
+        if std::mem::take(&mut ctx.trial) {
+            if let Some(pool) = ctx
+                .snapshot
+                .as_ref()
+                .zip(ctx.pool)
+                .map(|(s, i)| &s.pools[i])
+            {
+                pool.cancel_trial();
             }
         }
         ctx.lease = None;
