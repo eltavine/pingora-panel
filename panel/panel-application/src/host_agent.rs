@@ -278,6 +278,7 @@ mod tests {
                     ports: Vec::new(),
                     labels: std::collections::BTreeMap::new(),
                     compose_project: Some("pingora-panel".into()),
+                    addresses: Vec::new(),
                 },
                 started_at: None,
                 finished_at: None,

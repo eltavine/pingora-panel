@@ -70,6 +70,7 @@ impl HostAgentPort for Agent {
                     ports: Vec::new(),
                     labels: Default::default(),
                     compose_project: Some("pingora-panel".into()),
+                    addresses: Vec::new(),
                 },
                 started_at: Some(UNIX_EPOCH + Duration::from_secs(1_800_000_000)),
                 finished_at: None,

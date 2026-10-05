@@ -53,6 +53,7 @@ fn container(name: &str, image: &str, state: ContainerState) -> ContainerSummary
             .into_iter()
             .collect(),
         compose_project: Some("shop".into()),
+        addresses: Vec::new(),
     }
 }
 

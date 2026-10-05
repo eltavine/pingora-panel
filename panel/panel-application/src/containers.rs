@@ -5,7 +5,13 @@ use crate::{CommandContext, Operation, OperationLog, RequestScope};
 use async_trait::async_trait;
 use futures_core::Stream;
 use panel_errors::{PanelError, Result};
-use std::{collections::BTreeMap, pin::Pin, sync::Arc, time::SystemTime};
+use std::{
+    collections::BTreeMap,
+    net::{Ipv4Addr, Ipv6Addr},
+    pin::Pin,
+    sync::Arc,
+    time::SystemTime,
+};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct EngineVersion {
@@ -87,6 +93,15 @@ pub struct PortMapping {
     pub protocol: String,
 }
 
+/// An address a container has on a network.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContainerAddress {
+    /// Such as `bridge` or `shop_default`.
+    pub network: String,
+    pub ipv4: Option<Ipv4Addr>,
+    pub ipv6: Option<Ipv6Addr>,
+}
+
 /// A container as a list shows it, without its command line.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContainerSummary {
@@ -100,6 +115,8 @@ pub struct ContainerSummary {
     pub ports: Vec<PortMapping>,
     pub labels: BTreeMap<String, String>,
     pub compose_project: Option<String>,
+    /// By network, on networks other than the host's.
+    pub addresses: Vec<ContainerAddress>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

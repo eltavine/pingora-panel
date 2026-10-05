@@ -73,11 +73,11 @@ pub use compose::{
     ComposePort, ComposeProject, ComposeProjectList, NoCompose, ProjectService, RecordedCompose,
 };
 pub use containers::{
-    ContainerAction, ContainerChange, ContainerDetail, ContainerEngine, ContainerFilter,
-    ContainerList, ContainerLogLine, ContainerLogQuery, ContainerLogStart, ContainerLogStream,
-    ContainerLogTail, ContainerLogs, ContainerMount, ContainerNetwork, ContainerNetworkStats,
-    ContainerState, ContainerStats, ContainerStatsList, ContainerSummary, ContainersPort,
-    EngineInfo, EngineVersion, NoContainers, PortMapping, RecordedContainers,
+    ContainerAction, ContainerAddress, ContainerChange, ContainerDetail, ContainerEngine,
+    ContainerFilter, ContainerList, ContainerLogLine, ContainerLogQuery, ContainerLogStart,
+    ContainerLogStream, ContainerLogTail, ContainerLogs, ContainerMount, ContainerNetwork,
+    ContainerNetworkStats, ContainerState, ContainerStats, ContainerStatsList, ContainerSummary,
+    ContainersPort, EngineInfo, EngineVersion, NoContainers, PortMapping, RecordedContainers,
 };
 pub use context::{
     Actor, CommandContext, IdempotencyKey, RequestDeadline, RequestId, RequestScope, SiteAccess,

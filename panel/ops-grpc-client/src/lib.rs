@@ -7,15 +7,15 @@ use async_trait::async_trait;
 use panel_application::{
     AgentCapability, AgentDescription, CapabilityState, CapabilityStatus, CommandContext,
     ComposeAction, ComposeChange, ComposeFailure, ComposeFile, ComposeLogLine, ComposeLogs,
-    ComposePort, ComposeProject, ComposeProjectList, ContainerAction, ContainerChange,
-    ContainerDetail, ContainerEngine, ContainerFilter, ContainerList, ContainerLogLine,
-    ContainerLogQuery, ContainerLogStart, ContainerLogStream, ContainerLogTail, ContainerLogs,
-    ContainerMount, ContainerNetwork, ContainerNetworkStats, ContainerState, ContainerStats,
-    ContainerStatsList, ContainerSummary, ContainersPort, DirectoriesReport, DirectoryKind,
-    DirectoryUsage, EngineDiskUsage, EngineDiskUse, EngineInfo, EngineNetwork, EngineNetworkList,
-    EngineResourcesPort, EngineSubnet, EngineVersion, EngineVolume, EngineVolumeList,
-    GatewayContainer, GatewayServiceAction, GatewayServiceStatus, HostAgentPort, Image,
-    ImageDetail, ImageLayerProgress, ImageLayerState, ImageList, ImagePull, ImagePullEvent,
+    ComposePort, ComposeProject, ComposeProjectList, ContainerAction, ContainerAddress,
+    ContainerChange, ContainerDetail, ContainerEngine, ContainerFilter, ContainerList,
+    ContainerLogLine, ContainerLogQuery, ContainerLogStart, ContainerLogStream, ContainerLogTail,
+    ContainerLogs, ContainerMount, ContainerNetwork, ContainerNetworkStats, ContainerState,
+    ContainerStats, ContainerStatsList, ContainerSummary, ContainersPort, DirectoriesReport,
+    DirectoryKind, DirectoryUsage, EngineDiskUsage, EngineDiskUse, EngineInfo, EngineNetwork,
+    EngineNetworkList, EngineResourcesPort, EngineSubnet, EngineVersion, EngineVolume,
+    EngineVolumeList, GatewayContainer, GatewayServiceAction, GatewayServiceStatus, HostAgentPort,
+    Image, ImageDetail, ImageLayerProgress, ImageLayerState, ImageList, ImagePull, ImagePullEvent,
     ImagePullRequest, ImagePulled, ImageRemoval, ImagesPort, ListenersReport, ListeningProcess,
     PortListener, PortMapping, ProjectService, PruneChoices, PruneItem, PruneKind, PruneOutcome,
     PrunePreview, PruneReport, RequestScope,
@@ -360,6 +360,15 @@ fn summary(value: wire::Container) -> ContainerSummary {
             .collect(),
         labels: value.labels.into_iter().collect(),
         compose_project: (!value.compose_project.is_empty()).then_some(value.compose_project),
+        addresses: value
+            .addresses
+            .into_iter()
+            .map(|address| ContainerAddress {
+                network: address.network,
+                ipv4: address.ipv4.parse().ok(),
+                ipv6: address.ipv6.parse().ok(),
+            })
+            .collect(),
     }
 }
 

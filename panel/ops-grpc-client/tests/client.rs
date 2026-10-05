@@ -2,7 +2,7 @@
 
 use ops_grpc_client::OpsAgentClient;
 use panel_application::{
-    AgentCapability, CommandContext, ComposeAction, ComposePort, ContainerAction,
+    AgentCapability, CommandContext, ComposeAction, ComposePort, ContainerAction, ContainerFilter,
     ContainerLogQuery, ContainerLogStart, ContainerLogStream, ContainerNetworkStats,
     ContainerState, ContainersPort, DirectoryKind, EngineResourcesPort, GatewayServiceAction,
     HostAgentPort, IdempotencyKey, ImageLayerState, ImagePullEvent, ImagePullRequest, ImagesPort,
@@ -524,7 +524,19 @@ impl Containers for FakeContainers {
         &self,
         _: Request<wire::ContainersListRequest>,
     ) -> Result<Response<wire::ContainersListResponse>, Status> {
-        Ok(Response::new(wire::ContainersListResponse::default()))
+        Ok(Response::new(wire::ContainersListResponse {
+            containers: vec![wire::Container {
+                id: "b2".into(),
+                names: vec!["shop-web-1".into()],
+                addresses: vec![wire::ContainerAddress {
+                    network: "shop_default".into(),
+                    ipv4: "172.18.0.2".into(),
+                    ipv6: String::new(),
+                }],
+                ..wire::Container::default()
+            }],
+            ..wire::ContainersListResponse::default()
+        }))
     }
 
     async fn act(
@@ -961,6 +973,19 @@ async fn images_are_listed_inspected_and_refused_removal() {
         "an empty digest is one the agent does not know"
     );
     assert!(pulled.updated);
+}
+
+#[tokio::test]
+async fn containers_reach_the_application_with_their_addresses() {
+    let client = client(false).await;
+    let list = client
+        .containers(scope(), "docker".into(), ContainerFilter::default())
+        .await
+        .unwrap();
+    let address = &list.containers[0].addresses[0];
+    assert_eq!(address.network, "shop_default");
+    assert_eq!(address.ipv4, Some([172, 18, 0, 2].into()));
+    assert_eq!(address.ipv6, None, "an empty address is none");
 }
 
 #[tokio::test]
