@@ -343,6 +343,43 @@ jobs:
           ppanel -o json audit list --type container.operation.refused --actor-id ci \
             | python3 -c "import json, sys; ops = {i['data'].get('operation') for i in json.load(sys.stdin)['items'] if i['data'].get('project') == 'pingora-panel'}; assert {'compose.down', 'compose.restart'} <= ops, ops"
 
+      - name: Pull images through the host agent
+        run: |
+          ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
+          # A small image from a registry other than Docker Hub, whose
+          # anonymous pulls the installation already leans on.
+          image=gcr.io/distroless/static-debian12:nonroot
+          ppanel image pull "$image" > pulled.out 2> pulled.err
+          cat pulled.err
+          test "$(cat pulled.out)" = "$image"
+          grep -Eq ': (Pull complete|Already exists)$' pulled.err
+          grep -q '^Status: ' pulled.err
+          docker image inspect "$image" >/dev/null
+          # Pulling it again finds it up to date, as JSON lines.
+          ppanel -o json image pull "$image" > pulled.jsonl
+          tail -n 1 pulled.jsonl \
+            | python3 -c "import json, sys; m = json.load(sys.stdin); assert m['kind'] == 'pulled' and not m['updated'] and m['image']['id'], m"
+          # A reference the registry does not have fails, and says why.
+          if ppanel image pull gcr.io/distroless/panel-ci-missing:1 2> missing.err; then
+            exit 1
+          fi
+          cat missing.err
+          ppanel image remove "$image" --yes
+          # Each pull is recorded once it ends, refused or not.
+          recorded() {
+            ppanel -o json audit list --type container.image.pulled --actor-id ci \
+              | python3 -c "import json, sys; refs = [i['data'].get('reference') for i in json.load(sys.stdin)['items']]; assert refs.count('$image') == 2, refs" \
+              && ppanel -o json audit list --type container.operation.refused --actor-id ci \
+              | python3 -c "import json, sys; refused = [i['data'].get('image') for i in json.load(sys.stdin)['items'] if i['data'].get('operation') == 'image.pull']; assert refused == ['gcr.io/distroless/panel-ci-missing:1'], refused"
+          }
+          for _ in $(seq 1 30); do
+            if recorded 2>/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          recorded
+
       - name: Serve a site through the gateway with the command line
         run: |
           ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
