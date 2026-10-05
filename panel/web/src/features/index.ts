@@ -1,6 +1,7 @@
 import { alertsFeature } from './alerts'
 import { approvalsFeature } from './approvals'
 import { auditFeature } from './audit'
+import { backupsFeature } from './backups'
 import { certificatesFeature } from './certificates'
 import { configStudioFeature } from './config-studio'
 import { containersFeature } from './containers'
@@ -39,6 +40,7 @@ export const features: readonly FeatureModule[] = [
   certificatesFeature,
   configStudioFeature,
   siteFilesFeature,
+  backupsFeature,
   identityFeature,
 ]
 

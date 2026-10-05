@@ -14,6 +14,7 @@ import type {
   UpstreamView,
 } from '@/api/generated'
 import { alertHandlers } from './alerts'
+import { backupHandlers } from './backups'
 import { containerHandlers } from './containers'
 import { hostAgentHandlers } from './host'
 import { logHandlers } from './logs'
@@ -299,6 +300,7 @@ export function handlers(sampler: Sampler): AnyHandler[] {
     ...hostAgentHandlers(),
     ...containerHandlers(),
     ...siteFileHandlers(),
+    ...backupHandlers(),
     ...logHandlers(),
     ...alertHandlers(),
     http.all('*/api/*', ({ request }) => {
