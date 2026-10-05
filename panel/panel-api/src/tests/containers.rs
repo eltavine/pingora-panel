@@ -684,3 +684,89 @@ async fn what_running_containers_use_is_read() {
     let (status, _) = get(&app, &format!("{path}/ghost/stats")).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+/// A draft with the shop and blog sites the links are read against.
+struct Sites;
+
+#[async_trait]
+impl panel_config_api::ConfigurationPort for Sites {
+    async fn read(
+        &self,
+        _: RequestScope,
+        query: panel_config_api::ConfigurationQuery,
+    ) -> Result<panel_config_api::ConfigurationOutput> {
+        let panel_config_api::ConfigurationQuery::Model(
+            panel_config_api::ModelQuery::ExportSites { ids },
+        ) = query
+        else {
+            return Err(PanelError::unavailable("only sites are exported here"));
+        };
+        assert!(ids.is_empty(), "every readable site");
+        Ok(panel_config_api::ConfigurationOutput {
+            content: serde_json::to_vec(&crate::container_sites::tests::bundle()).unwrap(),
+            etag: None,
+            draft: panel_config_api::DraftInfo::default(),
+        })
+    }
+
+    async fn change(
+        &self,
+        _: CommandContext,
+        _: panel_config_api::ConfigurationChange,
+    ) -> Result<panel_config_api::ConfigurationOutput> {
+        Err(PanelError::unavailable("read only"))
+    }
+
+    async fn apply(
+        &self,
+        _: CommandContext,
+        _: panel_config_api::ApplyRequest,
+    ) -> Result<panel_config_api::ApplyOutcome> {
+        Err(PanelError::unavailable("read only"))
+    }
+}
+
+#[tokio::test]
+async fn the_sites_that_point_at_containers_are_listed() {
+    let state = ApiState::new(Arc::new(GatewayService::new(
+        Arc::new(FakeGateway),
+        Arc::new(IdentityCompiler),
+    )))
+    .with_containers(Arc::new(Engines));
+    let app = router(state.clone().with_configuration(Arc::new(Sites)));
+    let (status, found) = get(&app, "/api/v1/container-engines/docker/site-links").await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    assert_eq!(found["observed_at"], "2027-01-15T08:00:00Z");
+    let links: Vec<(&str, &str, &str, &str)> = found["links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|link| {
+            (
+                link["container"].as_str().unwrap(),
+                link["site"].as_str().unwrap(),
+                link["node"].as_str().unwrap(),
+                link["route"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        links,
+        [
+            ("shop-web-1", "shop", "localhost:8081", "published"),
+            ("shop-web-1", "shop", "172.18.0.2:80", "network"),
+        ]
+    );
+    assert_eq!(
+        found["unserved"],
+        serde_json::json!([]),
+        "shop.example is served"
+    );
+
+    let (status, problem) = get(
+        &router(state),
+        "/api/v1/container-engines/docker/site-links",
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{problem}");
+}

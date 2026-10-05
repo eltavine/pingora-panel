@@ -1,9 +1,9 @@
 use crate::{
     access, acme,
     admission::{admit, Admission},
-    alerts, approvals, audit, certificates, compose, configuration as config, containers,
-    engine_resources, gateway_runtime as runtime, grants, host, host_agent, identity, images,
-    language, logs, middleware, routes, sign_in, tls_checks, traffic, workload, ApiConfig,
+    alerts, approvals, audit, certificates, compose, configuration as config, container_sites,
+    containers, engine_resources, gateway_runtime as runtime, grants, host, host_agent, identity,
+    images, language, logs, middleware, routes, sign_in, tls_checks, traffic, workload, ApiConfig,
     ApiState,
 };
 use axum::{
@@ -299,6 +299,10 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         .route(
             "/api/v1/container-engines/{engine}/image-pulls",
             post(images::pull_image::<U>),
+        )
+        .route(
+            "/api/v1/container-engines/{engine}/site-links",
+            get(container_sites::site_links::<U>),
         )
         .route(
             "/api/v1/container-engines/{engine}/compose-projects",

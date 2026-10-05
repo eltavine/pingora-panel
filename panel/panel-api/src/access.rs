@@ -31,7 +31,7 @@ pub(crate) const ACTOR_HEADER: &str = "x-actor";
 pub(crate) const SITE_SCOPE_HEADER: &str = "x-panel-site-scope";
 
 /// The site scope of configuration permissions held only for some sites.
-fn site_scope(access: &HeldAccess) -> SiteScope {
+pub(crate) fn site_scope(access: &HeldAccess) -> SiteScope {
     let limited = SCOPABLE
         .iter()
         .filter_map(|permission| {
@@ -539,6 +539,11 @@ pub(crate) static ROUTES: &[(&str, &str, Access)] = &[
         "POST",
         "/api/v1/container-engines/{engine}/image-pulls",
         Requires(ContainersManage),
+    ),
+    (
+        "GET",
+        "/api/v1/container-engines/{engine}/site-links",
+        Requires(ContainersRead),
     ),
     (
         "GET",
