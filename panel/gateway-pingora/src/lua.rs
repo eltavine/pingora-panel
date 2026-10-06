@@ -40,7 +40,7 @@ const PATH: &AsciiSet = &CONTROLS
     .add(b'|')
     .add(b'}');
 
-pub(crate) use panel_lua_ir::{Hook, HookIndex, Hooks};
+pub(crate) use panel_lua_ir::{Hook, HookIndex, Hooks, Variable};
 
 /// A snapshot's VMs.
 pub(crate) struct LuaPlan {

@@ -62,7 +62,7 @@ impl<'a> Lowerer<'a> {
             return;
         };
         let mut explicit_primary = false;
-        self.with_scope(format!("sites/{}", draft.site.id), |lowerer| {
+        let variables = self.with_scope(format!("sites/{}", draft.site.id), |lowerer| {
             let mut seen = BTreeSet::new();
             lowerer.each(
                 file,
@@ -82,6 +82,7 @@ impl<'a> Lowerer<'a> {
                 },
             );
         });
+        draft.site.lua.variables = variables;
         if !explicit_primary {
             if let Some(first) = draft
                 .site

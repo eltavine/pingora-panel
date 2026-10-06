@@ -196,6 +196,18 @@ pub(crate) fn maybe_truncated(
 }
 
 /// Bytes of a string or number argument, as Lua's `tostring` gives them.
+/// What a `set_by_lua` handler's result sets its variable to: strings and
+/// numbers as text, anything else empty, as lua-nginx-module has it.
+pub(crate) fn set_value(value: &Value) -> Result<String, String> {
+    match value {
+        Value::String(_) | Value::Integer(_) | Value::Number(_) => {
+            String::from_utf8(bytes(value).unwrap_or_default())
+                .map_err(|_| "set_by_lua values must be UTF-8".to_owned())
+        }
+        _ => Ok(String::new()),
+    }
+}
+
 pub(crate) fn bytes(value: &Value) -> Option<Vec<u8>> {
     match value {
         Value::String(text) => Some(text.as_bytes().to_vec()),

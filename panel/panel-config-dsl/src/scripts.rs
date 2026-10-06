@@ -194,6 +194,7 @@ fn phase(name: &str) -> Phase {
         "rewrite" => Phase::Rewrite,
         "access" => Phase::Access,
         "precontent" => Phase::Precontent,
+        "set" => Phase::Set,
         "content" => Phase::Content,
         "balancer" => Phase::Balancer,
         "header_filter" => Phase::HeaderFilter,

@@ -1,11 +1,11 @@
 //! Lua directives (ADR 0039): the handlers of each phase, the terms they
 //! run on, what runs once in each VM, and the shared dictionaries.
 
-use super::{Lowerer, Origin};
+use super::{Expansion, Lowerer, Origin};
 use crate::{codes, values};
 use panel_config_model::{
     Action, LuaCode, LuaFallback, LuaLogLevel, LuaPermissions, LuaScope, LuaSharedDict,
-    LUA_DIRECTORY,
+    LuaVariable, LUA_DIRECTORY,
 };
 use panel_dsl::Directive;
 use panel_errors::Diagnostic;
@@ -211,6 +211,12 @@ fn log_level_name(level: LuaLogLevel) -> &'static str {
 impl<'a> Lowerer<'a> {
     /// The code of a `*_by_lua_block` or `*_by_lua_file` directive.
     pub(super) fn lua_code(&mut self, file: &str, directive: &Directive) -> Option<LuaCode> {
+        self.lua_code_at(file, directive, 0)
+    }
+
+    /// The code of a `*_by_lua_block` directive, or of the file the
+    /// argument at `path` of a `*_by_lua_file` directive names.
+    fn lua_code_at(&mut self, file: &str, directive: &Directive, path: usize) -> Option<LuaCode> {
         let name = directive.name.value.as_str();
         if name.ends_with("_by_lua_block") {
             let Some(lua) = directive.lua() else {
@@ -234,7 +240,7 @@ impl<'a> Lowerer<'a> {
                 line: u32::try_from(line).unwrap_or(u32::MAX),
             });
         }
-        let arg = &directive.args[0];
+        let arg = &directive.args[path];
         let path = self.value(file, arg)?;
         if !path.starts_with(LUA_DIRECTORY) || !path.ends_with(".lua") {
             self.error_with_help(
@@ -278,6 +284,34 @@ impl<'a> Lowerer<'a> {
             return;
         }
         *slot = self.lua_code(file, directive);
+    }
+
+    /// `set_by_lua_block $name [argument ...] { ... }` and
+    /// `set_by_lua_file $name lua/<file>.lua [argument ...]`: a variable of
+    /// the request a script sets as the request reaches the block.
+    pub(super) fn set_by_lua(&mut self, file: &str, directive: &Directive) {
+        let Some(name) = self.variable_name(file, &directive.args[0]) else {
+            return;
+        };
+        let block = directive.name.value.ends_with("_block");
+        let Some(code) = self.lua_code_at(file, directive, 1) else {
+            return;
+        };
+        let mut args = Vec::new();
+        for arg in &directive.args[if block { 1 } else { 2 }..] {
+            let Some(value) = self.expand(file, arg, &arg.value.clone(), Expansion::Template)
+            else {
+                return;
+            };
+            if let Err(error) = panel_ir::template::parse_template(&value) {
+                self.error(file, arg.span, codes::TYPE, error);
+                return;
+            }
+            args.push(value);
+        }
+        let scope = self.scopes.last_mut().expect("a scope");
+        scope.scripted.insert(name.clone());
+        scope.variables.push(LuaVariable::script(name, code, args));
     }
 
     /// An OpenResty directive with nothing to tune here.

@@ -521,6 +521,7 @@ fn upstream_resilience_round_trips_and_unknown_conditions_are_refused() {
 fn lua_programs_and_handlers_round_trip_and_unknown_kinds_are_refused() {
     use panel_ir::{
         LuaFallback, LuaHandler, LuaLogLevel, LuaPermissions, LuaProgram, LuaScript, LuaSharedDict,
+        LuaVariable,
     };
     let script = |id: &str, module: Option<&str>| LuaScript {
         id: id.into(),
@@ -561,6 +562,20 @@ fn lua_programs_and_handlers_round_trip_and_unknown_kinds_are_refused() {
         )],
     );
     site.lua.server_rewrite = Some(LuaHandler::new("main.conf:3"));
+    site.lua.variables = vec![
+        LuaVariable {
+            name: "tenant".into(),
+            value: "none".into(),
+            handler: None,
+            args: Vec::new(),
+        },
+        LuaVariable {
+            name: "hash".into(),
+            value: String::new(),
+            handler: Some(LuaHandler::new("lua/auth.lua")),
+            args: vec!["$http_x_key".into(), "${lua:tenant}".into()],
+        },
+    ];
     snapshot.sites.push(site);
     let mut access = LuaHandler::new("main.conf:3");
     access.time_limit_ms = 25;

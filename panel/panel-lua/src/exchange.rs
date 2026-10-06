@@ -25,10 +25,12 @@ pub enum Phase {
     ExitWorker,
     /// A module's function in `ngx.run_worker_thread`.
     WorkerThread,
+    /// `set_by_lua`: what a variable is set to as its block is reached.
+    Set,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 14] = [
+    pub const ALL: [Phase; 15] = [
         Phase::Init,
         Phase::InitWorker,
         Phase::ServerRewrite,
@@ -43,6 +45,7 @@ impl Phase {
         Phase::Timer,
         Phase::ExitWorker,
         Phase::WorkerThread,
+        Phase::Set,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -61,6 +64,7 @@ impl Phase {
             Phase::Timer => "timer",
             Phase::ExitWorker => "exit_worker",
             Phase::WorkerThread => "worker_thread",
+            Phase::Set => "set",
         }
     }
 
@@ -298,6 +302,11 @@ pub struct Exchange {
     pub dropped_logs: usize,
     pub(crate) changes: Changes,
     pub(crate) exit: Option<Exit>,
+    /// What `ngx.arg` holds in a `set_by_lua` handler: the directive's
+    /// arguments, filled in for the request.
+    pub arguments: Vec<String>,
+    /// What the last `set_by_lua` handler returned, as text.
+    pub(crate) value: Option<String>,
     /// The response header was sent by `ngx.say`, `ngx.flush` or
     /// `ngx.send_headers`.
     pub(crate) headers_sent: bool,
@@ -324,6 +333,8 @@ impl Exchange {
             dropped_logs: 0,
             changes: Changes::default(),
             exit: None,
+            arguments: Vec::new(),
+            value: None,
             headers_sent: false,
             new_body: None,
             internal: false,

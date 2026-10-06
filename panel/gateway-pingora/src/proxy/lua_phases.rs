@@ -11,7 +11,7 @@ use crate::{
     access_log::{self, LuaPlace},
     adapter::PreparedPingoraSnapshot,
     log_files::Destination,
-    lua::{self, Hook, Hooks, LuaPlan, SessionHost, PROXIED_BODY_LIMIT},
+    lua::{self, Hook, Hooks, LuaPlan, SessionHost, Variable, PROXIED_BODY_LIMIT},
     responses,
 };
 use async_trait::async_trait;
@@ -29,6 +29,7 @@ use pingora_http::ResponseHeader;
 use pingora_proxy::Session;
 use std::{
     any::Any,
+    collections::HashMap,
     net::{IpAddr, SocketAddr},
     sync::Arc,
     time::{Duration, Instant},
@@ -254,6 +255,23 @@ fn put_scripts(session: &mut Session, scripts: Scripts) {
     }
 }
 
+/// Runs `run` on the request's variables: its scripts' once it has any,
+/// otherwise `variables`, the ones `set` gave it before.
+pub(super) fn with_variables<R>(
+    session: &Session,
+    variables: &HashMap<String, String>,
+    run: impl FnOnce(&HashMap<String, String>) -> R,
+) -> R {
+    match session
+        .downstream_modules_ctx
+        .get::<LuaModule>()
+        .and_then(|module| module.scripts.as_ref())
+    {
+        Some(scripts) => run(&scripts.exchange().variables),
+        None => run(variables),
+    }
+}
+
 impl PanelProxy {
     pub(super) fn lua_plan(ctx: &RequestContext) -> Option<Arc<LuaPlan>> {
         ctx.snapshot
@@ -292,7 +310,7 @@ impl PanelProxy {
     fn lua_scripts(
         &self,
         session: &mut Session,
-        ctx: &RequestContext,
+        ctx: &mut RequestContext,
         plan: &LuaPlan,
         path: &str,
         host: &str,
@@ -301,6 +319,7 @@ impl PanelProxy {
             lua::sync_request(&mut scripts.exchange(), session.req_header(), path);
             return scripts;
         }
+        let variables = std::mem::take(&mut ctx.variables);
         let peer = client_address(session);
         let client = ctx
             .client
@@ -310,7 +329,7 @@ impl PanelProxy {
             .server_addr()
             .and_then(|address| address.as_inet())
             .copied();
-        plan.runtime.scripts(lua::exchange(
+        let scripts = plan.runtime.scripts(lua::exchange(
             session.req_header(),
             path,
             client,
@@ -318,7 +337,80 @@ impl PanelProxy {
             self.listener.tls,
             host,
             ctx.started,
-        ))
+        ));
+        scripts.exchange().variables = variables;
+        scripts
+    }
+
+    /// Sets `variables` in order as a site's or route's first phase begins:
+    /// a value, or what its `set_by_lua` handler returns. Handlers do not
+    /// run with `lua off`.
+    pub(super) async fn lua_variables(
+        &self,
+        session: &mut Session,
+        ctx: &mut RequestContext,
+        variables: &[Variable],
+        path: &str,
+        host: &str,
+    ) -> pingora_core::Result<LuaStep> {
+        for variable in variables {
+            let Some(hook) = &variable.hook else {
+                let name = variable.name.to_string();
+                let value = variable.value.to_string();
+                match take_scripts(session) {
+                    Some(scripts) => {
+                        scripts.exchange().variables.insert(name, value);
+                        put_scripts(session, scripts);
+                    }
+                    None => {
+                        ctx.variables.insert(name, value);
+                    }
+                }
+                continue;
+            };
+            let (Some(plan), Some(report)) = (Self::lua_plan(ctx), self.report(ctx)) else {
+                continue;
+            };
+            let tls = self.listener.tls;
+            let args = with_variables(session, &ctx.variables, |known| {
+                let facts = super::facts(session, host, path, tls, known);
+                variable
+                    .args
+                    .iter()
+                    .map(|arg| {
+                        crate::template::Template::parse(arg).map_or_else(
+                            |_| String::new(),
+                            |template| {
+                                String::from_utf8_lossy(&template.render(&facts)).into_owned()
+                            },
+                        )
+                    })
+                    .collect()
+            });
+            let mut scripts = self.lua_scripts(session, ctx, &plan, path, host);
+            let started = Instant::now();
+            let outcome = scripts
+                .set(hook.handler, &mut NoHost, &variable.name, args)
+                .await;
+            report.finished(hook, &scripts, &outcome, started.elapsed());
+            put_scripts(session, scripts);
+            if let Outcome::Failed(_) = outcome {
+                if let Some(status) = fallback_status(hook, 500) {
+                    responses::send(
+                        session,
+                        status,
+                        &[
+                            (header::CONTENT_TYPE, "text/plain; charset=utf-8"),
+                            (header::CACHE_CONTROL, "no-store"),
+                        ],
+                        lua::default_body(status),
+                    )
+                    .await?;
+                    return Ok(LuaStep::Done);
+                }
+            }
+        }
+        Ok(LuaStep::Go { jump: false })
     }
 
     /// Readies the header filter of the request's route, or of its site,
@@ -326,7 +418,7 @@ impl PanelProxy {
     pub(super) fn lua_prepare_header_filter(
         &self,
         session: &mut Session,
-        ctx: &RequestContext,
+        ctx: &mut RequestContext,
         path: &str,
         host: &str,
     ) {

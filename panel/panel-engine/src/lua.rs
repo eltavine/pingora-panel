@@ -5,7 +5,9 @@
 
 use panel_domain::ContentHash;
 use panel_errors::{Diagnostic, ErrorCode};
-use panel_ir::{LuaFallback, LuaHandler, RouteAction, RuntimeSnapshot, LUA_SCRIPTS_CAPABILITY};
+use panel_ir::{
+    LuaFallback, LuaHandler, LuaVariable, RouteAction, RuntimeSnapshot, LUA_SCRIPTS_CAPABILITY,
+};
 use std::collections::BTreeSet;
 
 /// The longest a run may take, a minute.
@@ -27,6 +29,8 @@ pub const MOST_LUA_SOCKET_BUFFER: u64 = 16 << 20;
 pub const MOST_LUA_SOCKET_POOL: u64 = 1 << 16;
 /// The most VMs `lua_worker_thread_vm_pool_size` may allow.
 pub const MOST_LUA_WORKER_VMS: u64 = 1024;
+/// The most variables a site or a route may set.
+pub const MOST_LUA_VARIABLES: usize = 256;
 /// The most `lua_max_pending_timers`, `lua_max_running_timers` and
 /// `lua_regex_cache_max_entries` may set.
 pub const MOST_LUA_TIMERS: u64 = 1 << 20;
@@ -137,6 +141,47 @@ fn check_handler(
     }
 }
 
+fn check_variables(found: &mut Vec<(String, String)>, resource: &str, variables: &[LuaVariable]) {
+    if variables.len() > MOST_LUA_VARIABLES {
+        found.push((
+            resource.to_owned(),
+            format!("more than {MOST_LUA_VARIABLES} variables are set"),
+        ));
+    }
+    for variable in variables {
+        let name = variable.name.as_bytes();
+        if !name
+            .first()
+            .is_some_and(|first| first.is_ascii_alphabetic() || *first == b'_')
+            || !name
+                .iter()
+                .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+        {
+            found.push((
+                resource.to_owned(),
+                format!("{:?} is not a variable name", variable.name),
+            ));
+        }
+        if variable.handler.is_none() && !variable.args.is_empty() {
+            found.push((
+                resource.to_owned(),
+                format!("${} has arguments but no handler", variable.name),
+            ));
+        }
+        for arg in &variable.args {
+            if let Err(error) = panel_ir::template::parse_template(arg) {
+                found.push((
+                    resource.to_owned(),
+                    format!(
+                        "an argument of ${} is not a template: {error}",
+                        variable.name
+                    ),
+                ));
+            }
+        }
+    }
+}
+
 /// What is wrong with `snapshot`'s scripts and handlers, with the resource
 /// each problem is in.
 pub fn problems(snapshot: &RuntimeSnapshot) -> Vec<(String, String)> {
@@ -192,8 +237,10 @@ pub fn problems(snapshot: &RuntimeSnapshot) -> Vec<(String, String)> {
         for (phase, value) in site.lua.iter() {
             check_handler(&mut found, &ids, site.id.as_str().into(), phase, value);
         }
+        check_variables(&mut found, site.id.as_str(), &site.lua.variables);
     }
     for route in &snapshot.routes {
+        check_variables(&mut found, route.id.as_str(), &route.lua.variables);
         for (phase, value) in route.lua.iter() {
             if phase == "server_rewrite" {
                 found.push((

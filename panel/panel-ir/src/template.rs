@@ -26,6 +26,9 @@ pub enum RequestVariable {
     /// A request header, by its lowercase name with `_` for `-`.
     Header(String),
     Cookie(String),
+    /// `${lua:NAME}`: what `set` or a script last gave a variable of the
+    /// request.
+    Lua(String),
 }
 
 impl RequestVariable {
@@ -63,6 +66,7 @@ impl fmt::Display for RequestVariable {
             Self::UpstreamAddr => formatter.write_str("upstream_addr"),
             Self::Header(name) => write!(formatter, "http_{}", name.replace('-', "_")),
             Self::Cookie(name) => write!(formatter, "cookie_{name}"),
+            Self::Lua(name) => write!(formatter, "lua:{name}"),
         }
     }
 }
@@ -115,6 +119,18 @@ pub fn parse_template(value: &str) -> Result<Vec<TemplatePart>, String> {
                     return Err("an unclosed ${ starts a variable".into());
                 };
                 let name = &value[index + 2..index + 2 + end];
+                if let Some(lua) = name.strip_prefix("lua:") {
+                    if !lua.bytes().next().is_some_and(is_name_start) || !lua.bytes().all(is_name) {
+                        return Err(format!("${{{name}}} is not a variable name"));
+                    }
+                    if !text.is_empty() {
+                        parts.push(TemplatePart::Text(std::mem::take(&mut text)));
+                    }
+                    parts.push(TemplatePart::Variable(RequestVariable::Lua(lua.to_owned())));
+                    index += end + 3;
+                    start = index;
+                    continue;
+                }
                 if name.is_empty() || !name.bytes().all(is_name) {
                     return Err(format!("${{{name}}} is not a variable name"));
                 }
@@ -207,5 +223,25 @@ mod tests {
         assert!(!uses_variables("plain $$text"));
         assert_eq!(literal("a $$ b").as_deref(), Some("a $ b"));
         assert_eq!(literal("$host"), None);
+    }
+
+    #[test]
+    fn script_variables_are_braced_with_lua() {
+        assert_eq!(
+            parse_template("t=${lua:tenant}/$host").unwrap(),
+            [
+                TemplatePart::Text("t=".into()),
+                TemplatePart::Variable(RequestVariable::Lua("tenant".into())),
+                TemplatePart::Text("/".into()),
+                TemplatePart::Variable(RequestVariable::Host),
+            ]
+        );
+        assert_eq!(
+            RequestVariable::Lua("tenant".into()).to_string(),
+            "lua:tenant"
+        );
+        for broken in ["${lua:}", "${lua:1a}", "${lua:a-b}", "$lua:a"] {
+            assert!(parse_template(broken).is_err(), "{broken}");
+        }
     }
 }

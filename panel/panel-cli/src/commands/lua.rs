@@ -12,7 +12,8 @@ use reqwest::Method;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
-const PHASES: [&str; 9] = [
+const PHASES: [&str; 10] = [
+    "set",
     "server_rewrite",
     "rewrite",
     "access",

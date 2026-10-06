@@ -19,6 +19,7 @@ use std::net::IpAddr;
 /// The phase a test names.
 fn phase(name: &str) -> Result<Phase> {
     Ok(match name {
+        "set" => Phase::Set,
         "server_rewrite" => Phase::ServerRewrite,
         "rewrite" => Phase::Rewrite,
         "access" => Phase::Access,
@@ -30,7 +31,7 @@ fn phase(name: &str) -> Result<Phase> {
         "log" => Phase::Log,
         other => {
             return Err(PanelError::invalid_argument(format!(
-                "{other:?} is not a phase a script runs in: use server_rewrite, rewrite, access, content, balancer, header_filter, body_filter or log"
+                "{other:?} is not a phase a script runs in: use set, server_rewrite, rewrite, access, precontent, content, balancer, header_filter, body_filter or log"
             )))
         }
     })

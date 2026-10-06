@@ -11,8 +11,8 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use panel_config_model::{
-    validate, Action, ConfigModel, HttpPolicy, Listener, LuaConfig, Route, SecurityPolicy, Site,
-    TlsProfile, Upstream,
+    validate, Action, ConfigModel, HttpPolicy, Listener, LuaConfig, LuaVariable, Route,
+    SecurityPolicy, Site, TlsProfile, Upstream,
 };
 use panel_domain::NormalizedHost;
 use panel_dsl::{Argument, Body, Directive, Document, LineIndex, Span};
@@ -182,6 +182,38 @@ struct Scope {
     /// The block's resource path, `http`, or empty at the top level.
     block: String,
     constants: BTreeMap<String, Defined>,
+    /// The variables of the request it sets, in order.
+    variables: Vec<LuaVariable>,
+    /// The names `set_by_lua` sets in it.
+    scripted: BTreeSet<String>,
+}
+
+impl Scope {
+    fn new(block: String) -> Self {
+        Self {
+            block,
+            constants: BTreeMap::new(),
+            variables: Vec::new(),
+            scripted: BTreeSet::new(),
+        }
+    }
+}
+
+/// Whether `directives` or the blocks inside them run a Lua handler or
+/// read a variable of the request with `${lua:name}`.
+fn runs_lua(directives: &[Directive]) -> bool {
+    directives.iter().any(|directive| {
+        let name = directive.name.value.as_str();
+        name.ends_with("_by_lua_block")
+            || name.ends_with("_by_lua_file")
+            || directive
+                .args
+                .iter()
+                .any(|arg| arg.value.contains("${lua:"))
+            || directive
+                .block()
+                .is_some_and(|block| runs_lua(&block.directives))
+    })
 }
 
 struct Lowerer<'a> {
@@ -202,6 +234,9 @@ struct Lowerer<'a> {
     logging: panel_ir::LoggingPolicy,
     /// The Lua directives of `http` and the configuration's Lua files.
     lua: LuaConfig,
+    /// The configuration runs Lua handlers: `set` gives variables of the
+    /// request scripts may change, and templates read them per request.
+    scripting: bool,
     origins: BTreeMap<String, Origin>,
     insertions: Vec<Insertion>,
     written: BTreeMap<String, Vec<Written>>,
@@ -220,10 +255,7 @@ impl<'a> Lowerer<'a> {
             indexes: BTreeMap::new(),
             diagnostics: Vec::new(),
             includes: Vec::new(),
-            scopes: vec![Scope {
-                block: String::new(),
-                constants: BTreeMap::new(),
-            }],
+            scopes: vec![Scope::new(String::new())],
             profiles: Vec::new(),
             policies: Vec::new(),
             http_policies: Vec::new(),
@@ -232,6 +264,7 @@ impl<'a> Lowerer<'a> {
             servers: Vec::new(),
             logging: panel_ir::LoggingPolicy::default(),
             lua: LuaConfig::default(),
+            scripting: false,
             origins: BTreeMap::new(),
             insertions: Vec::new(),
             written: BTreeMap::new(),
@@ -250,6 +283,10 @@ impl<'a> Lowerer<'a> {
                 .documents
                 .insert(path.to_owned(), Rc::new(parsed.document));
         }
+        lowerer.scripting = lowerer
+            .documents
+            .values()
+            .any(|document| runs_lua(&document.directives));
         lowerer
     }
 
@@ -436,6 +473,7 @@ impl<'a> Lowerer<'a> {
             match name {
                 "include" => self.include(file, directive, context, seen, handle),
                 "set" => self.set(file, directive),
+                "set_by_lua_block" | "set_by_lua_file" => self.set_by_lua(file, directive),
                 _ => {
                     let block = &self.scopes.last().expect("a scope").block;
                     if spec.block.is_none() && !block.is_empty() {
@@ -545,15 +583,15 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    fn set(&mut self, file: &str, directive: &Directive) {
-        let name_arg = &directive.args[0];
+    /// The name `$name` in `name_arg` gives a variable that may be set.
+    fn variable_name(&mut self, file: &str, name_arg: &Argument) -> Option<String> {
         let Some(name) = name_arg
             .value
             .strip_prefix('$')
             .filter(|name| matches!(variables::pieces(name_arg.value.as_str()).as_deref(), Ok([Piece::Variable(variable)]) if variable == name))
         else {
             self.error(file, name_arg.span, codes::VARIABLE, format!("{:?} is not a variable name such as $name", name_arg.value));
-            return;
+            return None;
         };
         if variables::is_request_variable(name) {
             self.error(
@@ -562,8 +600,17 @@ impl<'a> Lowerer<'a> {
                 codes::VARIABLE,
                 format!("${name} is a request variable and cannot be set"),
             );
-            return;
+            return None;
         }
+        Some(name.to_owned())
+    }
+
+    fn set(&mut self, file: &str, directive: &Directive) {
+        let name_arg = &directive.args[0];
+        let Some(name) = self.variable_name(file, name_arg) else {
+            return;
+        };
+        let name = name.as_str();
         let Some(value) = self.expand(
             file,
             &directive.args[1],
@@ -572,13 +619,21 @@ impl<'a> Lowerer<'a> {
         ) else {
             return;
         };
-        let replaced = self.scopes.last_mut().expect("a scope").constants.insert(
+        let scripting = self.scripting;
+        let scope = self.scopes.last_mut().expect("a scope");
+        if scripting {
+            scope
+                .variables
+                .push(LuaVariable::value(name, value.clone()));
+        }
+        // Scripts may read what it is set to with ngx.var.
+        let replaced = scope.constants.insert(
             name.to_owned(),
             Defined {
                 value,
                 file: file.to_owned(),
                 span: directive.span,
-                used: false,
+                used: scripting,
             },
         );
         if let Some(unused) = replaced.filter(|replaced| !replaced.used) {
@@ -686,16 +741,50 @@ impl<'a> Lowerer<'a> {
                         }
                     }
                 }
+                Piece::Lua(name) => {
+                    if mode == Expansion::Text {
+                        self.error(
+                            file,
+                            arg.span,
+                            codes::VARIABLE,
+                            format!(
+                                "${{lua:{name}}} is known only per request and cannot be used here"
+                            ),
+                        );
+                        return None;
+                    }
+                    push(&mut out, &mut open_variable, &format!("${{lua:{name}}}"));
+                }
                 Piece::Variable(name) => {
+                    let scripted = self
+                        .scopes
+                        .iter()
+                        .any(|scope| scope.scripted.contains(name));
                     if let Some(found) = self
                         .scopes
                         .iter_mut()
                         .rev()
                         .find_map(|scope| scope.constants.get_mut(name))
+                        .filter(|_| !scripted || mode == Expansion::Text)
                     {
                         found.used = true;
-                        let found = literal(&found.value);
-                        push(&mut out, &mut open_variable, &found);
+                        if self.scripting && mode != Expansion::Text {
+                            push(&mut out, &mut open_variable, &format!("${{lua:{name}}}"));
+                        } else {
+                            let found = literal(&found.value);
+                            push(&mut out, &mut open_variable, &found);
+                        }
+                    } else if scripted {
+                        if mode == Expansion::Text {
+                            self.error(
+                                file,
+                                arg.span,
+                                codes::VARIABLE,
+                                format!("${name} is set per request by set_by_lua and cannot be used here"),
+                            );
+                            return None;
+                        }
+                        push(&mut out, &mut open_variable, &format!("${{lua:{name}}}"));
                     } else if variables::is_request_variable(name) {
                         if mode == Expansion::Text {
                             self.error(
@@ -749,12 +838,10 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    /// Reads a block, `block` being its resource path, in a scope of its own.
-    fn with_scope(&mut self, block: String, run: impl FnOnce(&mut Self)) {
-        self.scopes.push(Scope {
-            block,
-            constants: BTreeMap::new(),
-        });
+    /// Reads a block, `block` being its resource path, in a scope of its own,
+    /// and gives the variables of the request it sets.
+    fn with_scope(&mut self, block: String, run: impl FnOnce(&mut Self)) -> Vec<LuaVariable> {
+        self.scopes.push(Scope::new(block));
         run(self);
         let visible = self.visible();
         let scope = self.scopes.pop().expect("a scope");
@@ -767,13 +854,14 @@ impl<'a> Lowerer<'a> {
         if !visible.is_empty() {
             self.constants.insert(scope.block, visible);
         }
+        scope.variables
     }
 
     fn http(&mut self, file: &str, directive: &Directive, depth: usize) {
         let Some(block) = directive.block() else {
             return;
         };
-        self.with_scope("http".into(), |lowerer| {
+        let variables = self.with_scope("http".into(), |lowerer| {
             let mut seen = BTreeSet::new();
             lowerer.each(
                 file,
@@ -805,6 +893,7 @@ impl<'a> Lowerer<'a> {
                 },
             );
         });
+        self.lua.http.variables = variables;
     }
 
     fn origin(file: &str, directive: &Directive, depth: usize) -> Origin {

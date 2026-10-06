@@ -74,7 +74,7 @@ impl<'a> Lowerer<'a> {
             draft.route.name = Some(Self::literal(name));
         }
         let block = directive.block()?;
-        self.with_scope(
+        let variables = self.with_scope(
             format!("sites/{}/routes/{}", site.id, draft.route.id),
             |lowerer| {
                 let mut seen = BTreeSet::new();
@@ -206,6 +206,7 @@ impl<'a> Lowerer<'a> {
                 );
             },
         );
+        draft.route.lua.variables = variables;
         draft.route.matcher.conditions = conditions;
         if !matched {
             self.error_with_help(

@@ -68,8 +68,8 @@ pub struct LuaTestUpstream {
 #[serde(deny_unknown_fields)]
 pub struct LuaTestScript {
     pub code: String,
-    /// `server_rewrite`, `rewrite`, `access`, `content`, `balancer`,
-    /// `header_filter`, `body_filter` or `log`.
+    /// `set`, `server_rewrite`, `rewrite`, `access`, `precontent`,
+    /// `content`, `balancer`, `header_filter`, `body_filter` or `log`.
     pub phase: String,
     #[serde(default)]
     pub allow: LuaPermissions,

@@ -1,7 +1,8 @@
 //! Variable references in argument values.
 //!
 //! `$name` and `${name}` name a constant set with `set` or a request
-//! variable; `${env:NAME}` reads the environment. `$$` is a literal `$`, and a
+//! variable; `${env:NAME}` reads the environment and `${lua:name}` what a
+//! script last gave a variable of the request. `$$` is a literal `$`, and a
 //! `$` not followed by a name is literal too, so regular expressions keep
 //! their anchors.
 
@@ -40,6 +41,8 @@ pub enum Piece<'a> {
     Variable(&'a str),
     /// `${env:NAME}`.
     Environment(&'a str),
+    /// `${lua:name}`.
+    Lua(&'a str),
 }
 
 fn is_name_start(byte: u8) -> bool {
@@ -74,6 +77,11 @@ pub fn pieces(value: &str) -> Result<Vec<Piece<'_>>, String> {
                         )
                     })?;
                 let inner = &value[index + 2..close];
+                let named = |name: &str| {
+                    !name.is_empty()
+                        && is_name_start(name.as_bytes()[0])
+                        && name.bytes().all(is_name)
+                };
                 let piece = match inner.strip_prefix("env:") {
                     Some(name) if !name.is_empty() && name.bytes().all(is_name) => {
                         Piece::Environment(name)
@@ -83,6 +91,10 @@ pub fn pieces(value: &str) -> Result<Vec<Piece<'_>>, String> {
                             "{inner:?} is not a valid environment variable name"
                         ))
                     }
+                    None if inner.starts_with("lua:") => match &inner[4..] {
+                        name if named(name) => Piece::Lua(name),
+                        _ => return Err(format!("{inner:?} is not a valid variable name")),
+                    },
                     None if !inner.is_empty()
                         && is_name_start(inner.as_bytes()[0])
                         && inner.bytes().all(is_name) =>

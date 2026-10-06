@@ -5,7 +5,7 @@ use panel_config_dsl::{
     codes, explain, format_files, lower, print, print_sources, reconcile, LowerOptions, Lowered,
     Sources,
 };
-use panel_config_model::{compile, Action, LuaCode, LuaFallback, LuaLogLevel};
+use panel_config_model::{compile, Action, LuaCode, LuaFallback, LuaLogLevel, LuaVariable};
 use panel_domain::RevisionId;
 use std::collections::BTreeMap;
 
@@ -746,4 +746,144 @@ http {
         .get("main.conf")
         .unwrap()
         .contains("    exit_worker_by_lua_block {\n"));
+}
+
+#[test]
+fn set_and_set_by_lua_give_variables_templates_read_per_request() {
+    let mut sources = Sources::single(
+        r#"language_version 1;
+http {
+    set $base b;
+    server s {
+        server_name s.example;
+        set $site s1;
+        set_by_lua_block $tenant $http_x_key {
+            return ngx.arg[1] .. ngx.var.base
+        }
+        respond 404;
+        route r {
+            match prefix /;
+            set_by_lua_file $hash lua/hash.lua $host ${lua:tenant};
+            respond 200 "body=$tenant $hash $site $$";
+        }
+    }
+}
+"#,
+    );
+    sources.insert("lua/hash.lua", "return ngx.md5(ngx.arg[1])\n");
+    let lowered = read(&sources);
+    assert!(lowered.is_valid(), "{:#?}", lowered.diagnostics);
+    let model = &lowered.model;
+    assert_eq!(model.lua.http.variables, [LuaVariable::value("base", "b")]);
+    let site = &model.sites[0];
+    let names: Vec<_> = site.lua.variables.iter().map(|v| v.name.as_str()).collect();
+    assert_eq!(names, ["site", "tenant"]);
+    assert_eq!(site.lua.variables[1].args, ["$http_x_key"]);
+    let route = &site.routes[0];
+    assert_eq!(
+        route.lua.variables,
+        [LuaVariable::script(
+            "hash",
+            LuaCode::file("lua/hash.lua"),
+            vec!["$host".into(), "${lua:tenant}".into()],
+        )]
+    );
+    let Action::Respond { body, .. } = &route.action else {
+        panic!("{:?}", route.action);
+    };
+    assert_eq!(
+        body.as_deref(),
+        Some("${lua:tenant} ${lua:hash} ${lua:site} $$")
+    );
+
+    let snapshot = compile(model, RevisionId::new(1)).unwrap();
+    let site_variables: Vec<_> = snapshot.sites[0]
+        .lua
+        .variables
+        .iter()
+        .map(|v| v.name.as_str())
+        .collect();
+    assert_eq!(site_variables, ["base", "site", "tenant"]);
+    let route = snapshot
+        .routes
+        .iter()
+        .find(|route| !route.lua.variables.is_empty())
+        .unwrap();
+    assert_eq!(route.lua.variables[0].name, "hash");
+    assert!(route.lua.variables[0].handler.is_some());
+
+    let printed = print_sources(model);
+    let main = printed.get("main.conf").unwrap();
+    for written in [
+        "    set $base b;\n",
+        "        set $site s1;\n",
+        "        set_by_lua_block $tenant $http_x_key {\n",
+        "            set_by_lua_file $hash lua/hash.lua $host ${lua:tenant};\n",
+    ] {
+        assert!(main.contains(written), "{written}: {main}");
+    }
+    let again = read(&printed);
+    assert!(again.is_valid(), "{:#?}", again.diagnostics);
+    assert_eq!(again.model.lua.http.variables, model.lua.http.variables);
+    assert_eq!(
+        again.model.sites[0].routes[0].action,
+        model.sites[0].routes[0].action
+    );
+    assert_eq!(
+        again.model.sites[0].routes[0].lua.variables,
+        model.sites[0].routes[0].lua.variables
+    );
+}
+
+#[test]
+fn variables_scripts_set_are_known_only_per_request() {
+    let sources = Sources::single(
+        r#"language_version 1;
+http {
+    set_by_lua_block $h { return 1 }
+    server s {
+        server_name s.example;
+        set_by_lua_block $uri { return 1 }
+        set_by_lua_block $t { return 1 }
+        set_by_lua 'return 1';
+        set_by_lua_file $f lua/missing.lua;
+        respond 200 body=${lua:anything};
+        route r {
+            match prefix /$t;
+            respond 200;
+        }
+    }
+}
+"#,
+    );
+    let found = messages(&read(&sources));
+    for (code, message) in [
+        (codes::CONTEXT, "'set_by_lua_block'"),
+        (
+            codes::VARIABLE,
+            "$uri is a request variable and cannot be set",
+        ),
+        (codes::UNKNOWN_DIRECTIVE, "'set_by_lua' is not available"),
+        (
+            codes::REFERENCE,
+            "lua/missing.lua is not a file of this configuration",
+        ),
+        (
+            codes::VARIABLE,
+            "$t is set per request by set_by_lua and cannot be used here",
+        ),
+    ] {
+        assert!(
+            found
+                .iter()
+                .any(|(found, _, text)| found == code && text.contains(message)),
+            "{message}: {found:#?}"
+        );
+    }
+    assert!(
+        !found
+            .iter()
+            .any(|(_, _, text)| text.contains("lua:anything")),
+        "{found:#?}"
+    );
 }

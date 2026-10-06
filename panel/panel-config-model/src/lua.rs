@@ -59,8 +59,50 @@ impl LuaCode {
     }
 }
 
+/// A variable of the request a level sets as the request reaches it, as
+/// `set` and `set_by_lua*` do in nginx: to a value, or to what a script
+/// returns. Templates name it as `${lua:NAME}` and scripts as
+/// `ngx.var.NAME`.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
+pub struct LuaVariable {
+    pub name: String,
+    /// What `set` gives it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    /// The `set_by_lua` script whose result it is set to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<LuaCode>,
+    /// Templates filled in for the request: the script's `ngx.arg`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+}
+
+impl LuaVariable {
+    pub fn value(name: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            value: Some(value.into()),
+            code: None,
+            args: Vec::new(),
+        }
+    }
+
+    pub fn script(name: impl Into<String>, code: LuaCode, args: Vec<String>) -> Self {
+        Self {
+            name: name.into(),
+            value: None,
+            code: Some(code),
+            args,
+        }
+    }
+}
+
 /// What one level runs and the terms its handlers run on; what it leaves
-/// unset comes from the level around it.
+/// unset comes from the level around it. Its variables are its own: those
+/// of `http` and a site are set before the site's `server_rewrite`, a
+/// route's before its `rewrite`.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
@@ -132,6 +174,9 @@ pub struct LuaScope {
     /// `lua_need_request_body`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub need_request_body: Option<bool>,
+    /// Set in order as the request reaches the level.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variables: Vec<LuaVariable>,
 }
 
 impl LuaScope {
@@ -181,10 +226,12 @@ impl LuaScope {
             transform_underscores: pick(&self.transform_underscores, &outer.transform_underscores),
             use_default_type: pick(&self.use_default_type, &outer.use_default_type),
             need_request_body: pick(&self.need_request_body, &outer.need_request_body),
+            variables: self.variables.clone(),
         }
     }
 
-    /// The handlers it declares, with the names of their phases.
+    /// The handlers it declares, with the names of their phases; those of
+    /// its variables run in `set`.
     pub fn handlers(&self) -> impl Iterator<Item = (&'static str, &LuaCode)> {
         [
             ("server_rewrite", &self.server_rewrite),
@@ -197,6 +244,11 @@ impl LuaScope {
         ]
         .into_iter()
         .filter_map(|(phase, code)| code.as_ref().map(|code| (phase, code)))
+        .chain(
+            self.variables
+                .iter()
+                .filter_map(|variable| variable.code.as_ref().map(|code| ("set", code))),
+        )
     }
 
     fn handlers_mut(&mut self) -> impl Iterator<Item = &mut LuaCode> {
@@ -211,6 +263,11 @@ impl LuaScope {
         ]
         .into_iter()
         .flatten()
+        .chain(
+            self.variables
+                .iter_mut()
+                .filter_map(|variable| variable.code.as_mut()),
+        )
     }
 
     /// Whether it sets any term, as opposed to only handlers.
@@ -583,6 +640,27 @@ pub(crate) fn handler(id: String, scope: &LuaScope) -> LuaHandler {
     handler
 }
 
+/// `variables` in order, their scripts running on the terms of `scope`.
+pub(crate) fn variables<'v>(
+    variables: impl IntoIterator<Item = &'v LuaVariable>,
+    scope: &LuaScope,
+    scripts: &mut Scripts,
+    files: &BTreeMap<String, String>,
+) -> Vec<panel_ir::LuaVariable> {
+    variables
+        .into_iter()
+        .map(|variable| panel_ir::LuaVariable {
+            name: variable.name.clone(),
+            value: variable.value.clone().unwrap_or_default(),
+            handler: variable
+                .code
+                .as_ref()
+                .map(|code| handler(scripts.add(code, files), scope)),
+            args: variable.args.clone(),
+        })
+        .collect()
+}
+
 /// The handlers `scope` runs; a route's never include `server_rewrite`.
 pub(crate) fn handlers(
     scope: &LuaScope,
@@ -606,6 +684,7 @@ pub(crate) fn handlers(
         header_filter: compile(&scope.header_filter),
         body_filter: compile(&scope.body_filter),
         log: compile(&scope.log),
+        variables: Vec::new(),
     }
 }
 

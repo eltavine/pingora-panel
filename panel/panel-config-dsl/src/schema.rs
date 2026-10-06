@@ -103,7 +103,7 @@ pub static DIRECTIVES: &[DirectiveSpec] = &[
     spec!("include" in &[Main, Http, Server, Upstream], None, 1..Some(1), true,
         "include sites/*.conf;", "Reads directives from other files of the configuration."),
     spec!("set" in &[Http, Server, Route], None, 2..Some(2), true,
-        "set $name value;", "Defines a constant for this block and the blocks inside it.",
+        "set $name value;", "Defines a constant for this block and the blocks inside it; in a configuration with Lua handlers, scripts may change it per request.",
         inherits "Visible in this block and the blocks inside it; a set in an inner block replaces it there."),
     spec!("http" in &[Main], Some(Http), 0..Some(0), false,
         "http { ... }", "Holds the listeners, TLS profiles, upstreams and servers."),
@@ -418,6 +418,12 @@ pub static DIRECTIVES: &[DirectiveSpec] = &[
     spec!("rewrite_by_lua_file" in LUA_CONTEXTS, None, 1..Some(1), false,
         "rewrite_by_lua_file lua/<file>.lua;", "Runs a file after the route is chosen, before security policies.",
         inherits "A route's replaces its server's, and a server's the one in http."),
+    spec!("set_by_lua_block" in &[Server, Route], None, 1..None, true,
+        "set_by_lua_block $name [argument ...] { ... }", "Sets $name to what the code returns as the request reaches the block, before its rewrite handler; the arguments are ngx.arg.",
+        inherits "Visible in this block and the blocks inside it; templates read the value it has when they are filled in."),
+    spec!("set_by_lua_file" in &[Server, Route], None, 2..None, true,
+        "set_by_lua_file $name lua/<file>.lua [argument ...];", "Sets $name to what a file returns as the request reaches the block, before its rewrite handler; the arguments are ngx.arg.",
+        inherits "Visible in this block and the blocks inside it; templates read the value it has when they are filled in."),
     spec!("access_by_lua_block" in LUA_CONTEXTS, None, 0..Some(0), false,
         "access_by_lua_block { ... }", "Runs after security policies; ngx.exit answers in place of the action.",
         inherits "A route's replaces its server's, and a server's the one in http."),
@@ -566,9 +572,6 @@ pub fn refusal(name: &str) -> Option<String> {
     let reason = match name {
         "lua_package_path" | "lua_package_cpath" => {
             "require loads the built-in modules and the files under lua/, and nothing else"
-        }
-        "set_by_lua" | "set_by_lua_block" | "set_by_lua_file" => {
-            "set variables with ngx.var in rewrite_by_lua_block"
         }
         _ if name.starts_with("ssl_") && name.contains("_by_lua") => {
             "TLS handshakes run no script; certificates come from TLS profiles"

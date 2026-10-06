@@ -3,6 +3,7 @@ import type { StatusTone } from '@/components/StatusIndicator.vue'
 
 /** The phases a script can be tested in, in the order a request runs them. */
 export const PHASES = [
+  'set',
   'server_rewrite',
   'rewrite',
   'access',

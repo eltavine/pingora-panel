@@ -505,6 +505,15 @@ pub(super) fn arg_proxy(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
         "__index",
         lua.create_function(move |lua, (_, index): (Table, i64)| {
             let cell = cell(&reader, Api::Arg)?;
+            if cell.exchange.lock().phase == Phase::Set {
+                let exchange = cell.exchange.lock();
+                let at = usize::try_from(index - 1).ok();
+                return at
+                    .and_then(|at| exchange.arguments.get(at))
+                    .map_or(Ok(Value::Nil), |argument| {
+                        lua.create_string(argument).map(Value::String)
+                    });
+            }
             require_permission(&cell, Api::Arg, |granted| granted.body, "body")?;
             let exchange = cell.exchange.lock();
             Ok(match index {
@@ -519,6 +528,9 @@ pub(super) fn arg_proxy(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
         "__newindex",
         lua.create_function(move |_, (_, index, value): (Table, i64, Value)| {
             let cell = cell(&writer, Api::Arg)?;
+            if cell.exchange.lock().phase == Phase::Set {
+                return Err(refused("ngx.arg is read-only in set_by_lua*"));
+            }
             require_permission(&cell, Api::Arg, |granted| granted.body, "body")?;
             let mut exchange = cell.exchange.lock();
             match index {
@@ -534,6 +546,18 @@ pub(super) fn arg_proxy(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
             }
             exchange.changes.chunk = true;
             Ok(())
+        })?,
+    )?;
+    let counter = Arc::clone(slot);
+    meta.raw_set(
+        "__len",
+        lua.create_function(move |_, _: Table| {
+            let cell = cell(&counter, Api::Arg)?;
+            let exchange = cell.exchange.lock();
+            Ok(match exchange.phase {
+                Phase::Set => exchange.arguments.len(),
+                _ => 2,
+            })
         })?,
     )?;
     proxy.set_metatable(Some(meta))?;

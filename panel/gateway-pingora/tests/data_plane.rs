@@ -2766,3 +2766,53 @@ async fn access_handlers_run_before_security_policies_when_not_postponed() {
         gateway.stop().await;
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn variables_set_and_set_by_lua_reach_templates_and_scripts() {
+    use panel_ir::{LuaHandler, LuaVariable, LUA_SCRIPTS_CAPABILITY};
+
+    let value = |name: &str, value: &str| LuaVariable {
+        name: name.into(),
+        value: value.into(),
+        handler: None,
+        args: Vec::new(),
+    };
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    snapshot.required_capabilities.extend([
+        CapabilityRequirement::new(LUA_SCRIPTS_CAPABILITY, "1"),
+        CapabilityRequirement::new(panel_ir::template::TEMPLATE_CAPABILITY, "1"),
+    ]);
+    snapshot.lua.scripts = vec![
+        lua_script("tenant", "return ngx.arg[1] .. '-' .. ngx.var.base"),
+        lua_script("user", "ngx.var.user = 'alice'"),
+    ];
+    let mut shop = site(&["shop.test"]);
+    shop.lua.variables = vec![value("base", "b")];
+    snapshot.sites.push(shop);
+    let mut answered = route(
+        "answered",
+        1,
+        prefix("/"),
+        RouteAction::respond(200, Some("${lua:tenant} ${lua:user} ${lua:base}".into())),
+    );
+    answered.lua.variables = vec![
+        value("user", "nobody"),
+        LuaVariable {
+            handler: Some(LuaHandler::new("tenant")),
+            args: vec!["$http_x_tenant".into()],
+            ..value("tenant", "")
+        },
+    ];
+    answered.lua.access = Some(LuaHandler::new("user"));
+    snapshot.routes.push(answered);
+    let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
+    wait_for(listen).await;
+    let response = get(listen, Some("shop.test"), "/", "x-tenant: acme\r\n").await;
+    assert_eq!(response.status, 200);
+    assert_eq!(String::from_utf8_lossy(&response.body), "acme-b alice b");
+    gateway.stop().await;
+}

@@ -5,7 +5,7 @@ use panel_contracts::gateway::v1 as wire;
 use panel_errors::{PanelError, Result};
 use panel_ir::{
     LuaFallback, LuaHandler, LuaHandlers, LuaLogLevel, LuaPermissions, LuaProgram, LuaScript,
-    LuaSharedDict, LuaSockets,
+    LuaSharedDict, LuaSockets, LuaVariable,
 };
 
 pub(super) fn decode_program(value: Option<wire::LuaProgram>) -> Result<LuaProgram> {
@@ -233,6 +233,18 @@ pub(super) fn decode_handlers(value: Option<wire::LuaHandlers>) -> Result<LuaHan
         header_filter: handler(value.header_filter)?,
         body_filter: handler(value.body_filter)?,
         log: handler(value.log)?,
+        variables: value
+            .variables
+            .into_iter()
+            .map(|variable| {
+                Ok(LuaVariable {
+                    name: variable.name,
+                    value: variable.value,
+                    handler: handler(variable.handler)?,
+                    args: variable.args,
+                })
+            })
+            .collect::<Result<_>>()?,
     })
 }
 
@@ -249,5 +261,15 @@ pub(super) fn encode_handlers(value: &LuaHandlers) -> Option<wire::LuaHandlers> 
         header_filter: handler(&value.header_filter),
         body_filter: handler(&value.body_filter),
         log: handler(&value.log),
+        variables: value
+            .variables
+            .iter()
+            .map(|variable| wire::LuaVariable {
+                name: variable.name.clone(),
+                value: variable.value.clone(),
+                handler: handler(&variable.handler),
+                args: variable.args.clone(),
+            })
+            .collect(),
     })
 }

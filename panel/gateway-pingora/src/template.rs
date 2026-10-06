@@ -9,7 +9,10 @@ use panel_ir::{
     logging::REDACTED,
     template::{parse_template, RequestVariable, TemplatePart},
 };
-use std::{collections::HashSet, net::IpAddr};
+use std::{
+    collections::{HashMap, HashSet},
+    net::IpAddr,
+};
 
 #[derive(Clone, Debug)]
 pub(crate) enum Template {
@@ -28,6 +31,8 @@ pub(crate) struct Facts<'a> {
     pub headers: &'a HeaderMap,
     /// The upstream node the request went to, as `address:port`.
     pub upstream: Option<&'a str>,
+    /// The variables `set` and scripts gave the request.
+    pub variables: &'a HashMap<String, String>,
 }
 
 impl Template {
@@ -116,6 +121,7 @@ fn value(variable: &RequestVariable, facts: &Facts<'_>) -> String {
         RequestVariable::Header(name) => header(facts.headers, name).unwrap_or_default().to_owned(),
         RequestVariable::Cookie(name) => cookie(facts.headers, name).unwrap_or_default(),
         RequestVariable::UpstreamAddr => facts.upstream.unwrap_or_default().to_owned(),
+        RequestVariable::Lua(name) => facts.variables.get(name).cloned().unwrap_or_default(),
         _ => String::new(),
     }
 }
@@ -124,8 +130,12 @@ fn value(variable: &RequestVariable, facts: &Facts<'_>) -> String {
 mod tests {
     use super::*;
 
+    static NONE: std::sync::LazyLock<HashMap<String, String>> =
+        std::sync::LazyLock::new(HashMap::new);
+
     fn facts(headers: &HeaderMap) -> Facts<'_> {
         Facts {
+            variables: &NONE,
             host: "shop.example",
             uri: "/a/b",
             method: "GET",
@@ -157,6 +167,17 @@ mod tests {
         assert_eq!(
             template.render(&facts(&headers)),
             "http://shop.example/a/b GET 192.0.2.7 req-7 acme xyz [] "
+        );
+        let variables = HashMap::from([("tenant".to_owned(), "t1".to_owned())]);
+        let scripted = Facts {
+            variables: &variables,
+            ..facts(&headers)
+        };
+        assert_eq!(
+            Template::parse("${lua:tenant}/${lua:unset}.")
+                .unwrap()
+                .render(&scripted),
+            "t1/."
         );
     }
 

@@ -12,7 +12,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use bytes::Bytes;
-use mlua::MultiValue;
+use mlua::{MultiValue, Value};
 use parking_lot::{Mutex, MutexGuard};
 use std::{
     future::{poll_fn, Future},
@@ -270,7 +270,7 @@ pub struct Scripts {
 }
 
 enum Step {
-    Done(mlua::Result<()>),
+    Done(mlua::Result<Value>),
     Exited,
     Sliced,
     Serve(HostCall, tokio::sync::oneshot::Sender<HostReply>),
@@ -350,8 +350,23 @@ impl Scripts {
         )
         .await;
         match settle(&vm.slot, key, &cell, result) {
-            Ok(()) => {
-                let exchange = self.exchange.lock();
+            Ok(value) => {
+                let mut exchange = self.exchange.lock();
+                if handler.phase == Phase::Set {
+                    match crate::api::set_value(&value) {
+                        Ok(text) => exchange.value = Some(text),
+                        Err(message) => {
+                            drop(exchange);
+                            return self.fail(
+                                before,
+                                Failure {
+                                    kind: FailureKind::Error,
+                                    message,
+                                },
+                            );
+                        }
+                    }
+                }
                 match exchange.exit {
                     Some(Exit::Exec) => Outcome::Continue,
                     Some(Exit::Abort) => Outcome::Abort,
@@ -365,6 +380,27 @@ impl Scripts {
             }
             Err(failure) => self.fail(before, failure),
         }
+    }
+
+    /// Runs the `set_by_lua` handler of `variable` with `arguments` as
+    /// `ngx.arg`, and sets the variable to what it returns.
+    pub async fn set(
+        &mut self,
+        handler: Handler,
+        host: &mut (dyn Host + Send),
+        variable: &str,
+        arguments: Vec<String>,
+    ) -> Outcome {
+        self.exchange.lock().arguments = arguments;
+        let outcome = self.run(handler, host).await;
+        let mut exchange = self.exchange.lock();
+        exchange.arguments.clear();
+        if let Some(value) = exchange.value.take() {
+            if outcome == Outcome::Continue {
+                exchange.variables.insert(variable.to_owned(), value);
+            }
+        }
+        outcome
     }
 
     fn fail(&self, before: Exchange, failure: Failure) -> Outcome {
@@ -398,9 +434,9 @@ pub(crate) async fn drive(
     cell: &Arc<Cell>,
     host: &mut (dyn Host + Send),
     args: MultiValue,
-) -> mlua::Result<()> {
-    let mut running = pin!(thread.clone().into_async::<()>(args)?);
-    let mut entry: Option<mlua::Result<()>> = None;
+) -> mlua::Result<Value> {
+    let mut running = pin!(thread.clone().into_async::<Value>(args)?);
+    let mut entry: Option<mlua::Result<Value>> = None;
     loop {
         let step = poll_fn(|context| {
             if entry.is_none() {
@@ -409,14 +445,14 @@ pub(crate) async fn drive(
                 }
             }
             if matches!(entry, Some(Err(_))) {
-                return Poll::Ready(Step::Done(entry.take().unwrap_or(Ok(()))));
+                return Poll::Ready(Step::Done(entry.take().unwrap_or(Ok(Value::Nil))));
             }
             let ended = poll_threads(slot, cell, context);
             if cell.exchange.lock().exit.is_some() {
                 return Poll::Ready(Step::Exited);
             }
             if entry.is_some() && cell.threads.lock().waiting.is_empty() {
-                return Poll::Ready(Step::Done(Ok(())));
+                return Poll::Ready(Step::Done(entry.take().unwrap_or(Ok(Value::Nil))));
             }
             if ended {
                 // Threads waiting on the ones that ended go on.
@@ -434,7 +470,7 @@ pub(crate) async fn drive(
         .await;
         match step {
             Step::Done(result) => return result,
-            Step::Exited => return Ok(()),
+            Step::Exited => return Ok(Value::Nil),
             Step::Sliced => tokio::task::yield_now().await,
             Step::Serve(call, reply) => {
                 let answer = match call {
@@ -449,12 +485,12 @@ pub(crate) async fn drive(
 
 /// Ends a run whose entry thread was `key`: drops its light threads and
 /// tells how it went.
-pub(crate) fn settle(
+pub(crate) fn settle<T>(
     slot: &Slot,
     key: usize,
     cell: &Arc<Cell>,
-    result: Result<mlua::Result<()>, tokio::time::error::Elapsed>,
-) -> Result<(), Failure> {
+    result: Result<mlua::Result<T>, tokio::time::error::Elapsed>,
+) -> Result<T, Failure> {
     slot.entries.lock().remove(&key);
     end_threads(slot, cell);
     {
@@ -471,7 +507,7 @@ pub(crate) fn settle(
         (Some(exceeded), _) => Err(exceeded_failure(exceeded)),
         (None, Err(_)) => Err(exceeded_failure(Exceeded::Time)),
         (None, Ok(Err(error))) => Err(failure(&error)),
-        (None, Ok(Ok(()))) => Ok(()),
+        (None, Ok(Ok(value))) => Ok(value),
     }
 }
 

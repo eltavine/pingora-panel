@@ -50,6 +50,7 @@ inheritance, where a directive in an inner block replaces the outer one:
 | `init_by_lua_block`, `_file` | once in each VM when a configuration is activated | `http` |
 | `init_worker_by_lua_block`, `_file` | once in each VM after `init_by_lua` | `http` |
 | `exit_worker_by_lua_block`, `_file` | once in each VM when a configuration replaces it, before its pending timers run | `http` |
+| `set_by_lua_block $name [arg ...]`, `set_by_lua_file $name <file> [arg ...]` | as the request reaches the server or route, before its rewrite handler; `$name` is what the code returns | `server`, `route` |
 | `server_rewrite_by_lua_block`, `_file` | before the route is chosen; may change the URI and host it is chosen by | `http`, `server` |
 | `rewrite_by_lua_block`, `_file` | after the route is chosen, before security policies | `http`, `server`, `route` |
 | `access_by_lua_block`, `_file` | after security policies | `http`, `server`, `route` |
@@ -65,6 +66,24 @@ The body of a `*_by_lua_block` directive is read with Lua's lexical rules,
 as ngx_lua reads it, so braces inside strings, long brackets and comments
 do not end it, and it is printed back unchanged. The NGINX importer carries
 these directives over.
+
+**Variables.** `set` and `set_by_lua*` give the request variables in
+nginx's order: those of `http` and a server as the server's
+`server_rewrite` phase begins, a route's as its `rewrite` phase begins,
+each before the phase's handler, so a variable is what the last block the
+request reached gave it. `set_by_lua*` runs its code in the `set_by_lua*`
+context lua-nginx-module documents, with the directive's arguments,
+templates filled in for the request, as `ngx.arg`; the variable is the
+first value the code returns, as text for strings and numbers and empty
+for anything else. `set_by_lua_block` takes arguments too, which nginx's
+does not, so the importer carries `set_by_lua` over with its arguments.
+In a configuration with Lua handlers, a constant `set` gives is such a
+variable: `ngx.var` reads it, scripts may change it, and the templates of
+headers, log fields, redirects and answers read the value it has when they
+are filled in, which they name as `${lua:name}`; `$name` is written so
+there, and `${lua:name}` also reads what a script gave any other variable.
+Where a value must be known before requests, a constant stays the text it
+was set to, and a variable only scripts set cannot be used.
 
 `ngx` is lua-nginx-module's API with its documented semantics, in the phases
 where lua-nginx-module allows each function: `ngx.var`, `ngx.ctx`,

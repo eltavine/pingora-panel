@@ -546,6 +546,17 @@ fn validate_lua(model: &ConfigModel, report: &mut Report) {
         }
     }
     check_lua_scope(&lua.http, "lua", false, report);
+    if lua
+        .http
+        .variables
+        .iter()
+        .any(|variable| variable.code.is_some())
+    {
+        report.error(
+            "lua",
+            "set_by_lua runs in a server or a route; http sets variables to values only",
+        );
+    }
     for site in model.sites.iter().filter(|site| !site.is_deleted()) {
         let resource = format!("sites/{}", site.id);
         check_lua_scope(&site.lua, &resource, false, report);
@@ -656,7 +667,58 @@ fn validate_lua(model: &ConfigModel, report: &mut Report) {
     }
 }
 
+fn check_lua_variables(scope: &LuaScope, resource: &str, report: &mut Report) {
+    if scope.variables.len() > panel_engine::MOST_LUA_VARIABLES {
+        report.error(
+            resource,
+            format!(
+                "more than {} variables are set",
+                panel_engine::MOST_LUA_VARIABLES
+            ),
+        );
+    }
+    for variable in &scope.variables {
+        let name = variable.name.as_bytes();
+        if !name
+            .first()
+            .is_some_and(|first| first.is_ascii_alphabetic() || *first == b'_')
+            || !name
+                .iter()
+                .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+        {
+            report.error(
+                resource,
+                format!("{:?} is not a variable name", variable.name),
+            );
+        }
+        match (&variable.value, &variable.code) {
+            (Some(_), Some(_)) => report.error(
+                resource,
+                format!("${} is set both to a value and by a script", variable.name),
+            ),
+            (None, None) => report.error(resource, format!("${} is set to nothing", variable.name)),
+            (Some(_), None) if !variable.args.is_empty() => report.error(
+                resource,
+                format!("${} takes arguments only from a script", variable.name),
+            ),
+            _ => {}
+        }
+        for arg in &variable.args {
+            if let Err(error) = panel_ir::template::parse_template(arg) {
+                report.error(
+                    resource,
+                    format!(
+                        "an argument of ${} is not a template: {error}",
+                        variable.name
+                    ),
+                );
+            }
+        }
+    }
+}
+
 fn check_lua_scope(scope: &LuaScope, resource: &str, route: bool, report: &mut Report) {
+    check_lua_variables(scope, resource, report);
     if route && scope.server_rewrite.is_some() {
         report.error(
             resource,
@@ -1006,7 +1068,7 @@ mod tests {
 
     #[test]
     fn lua_problems_name_the_level_that_has_them() {
-        use crate::lua::{LuaCode, LuaFallback, LuaScope, LuaSharedDict};
+        use crate::lua::{LuaCode, LuaFallback, LuaScope, LuaSharedDict, LuaVariable};
         let mut upstream = upstream();
         upstream.balancer = Some(LuaCode::file("lua/pick.lua"));
         let mut model = ConfigModel::default();
@@ -1018,6 +1080,21 @@ mod tests {
             },
         );
         shop.lua.time_limit_ms = Some(0);
+        shop.lua.variables = vec![
+            LuaVariable::value("1st", "a"),
+            LuaVariable {
+                args: vec!["$nope".into()],
+                ..LuaVariable::script("x", LuaCode::inline("return 1"), Vec::new())
+            },
+            LuaVariable {
+                args: vec!["$host".into()],
+                ..LuaVariable::value("y", "1")
+            },
+            LuaVariable {
+                code: Some(LuaCode::inline("return 1")),
+                ..LuaVariable::value("z", "1")
+            },
+        ];
         model.sites.push(shop);
         model.upstreams.push(upstream);
         for (path, text) in [
@@ -1031,6 +1108,11 @@ mod tests {
         model.lua.http = LuaScope {
             access: Some(LuaCode::file("lua/missing.lua")),
             on_error: Some(LuaFallback::Status { status: 700 }),
+            variables: vec![LuaVariable::script(
+                "h",
+                LuaCode::inline("return 1"),
+                Vec::new(),
+            )],
             ..LuaScope::default()
         };
         model.lua.shared_dicts = vec![
@@ -1061,6 +1143,11 @@ mod tests {
             "shared dictionary tiny holds 1 bytes",
             "memory limit of 1 bytes",
             "needs the upstream permission",
+            "\"1st\" is not a variable name",
+            "an argument of $x is not a template",
+            "$y takes arguments only from a script",
+            "$z is set both to a value and by a script",
+            "http sets variables to values only",
         ] {
             assert!(
                 found.iter().any(|message| message.contains(expected)),

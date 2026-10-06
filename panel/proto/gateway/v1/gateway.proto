@@ -685,6 +685,20 @@ message LuaHandlers {
   LuaHandler log = 6;
   // After access and the HTTP policies, before the route's action.
   LuaHandler precontent = 7;
+  // Set in order before the site's server_rewrite or the route's rewrite
+  // handler (set and set_by_lua).
+  repeated LuaVariable variables = 8;
+}
+
+// A variable of the request templates name as ${lua:NAME}.
+message LuaVariable {
+  string name = 1;
+  // What it is set to when no handler sets it.
+  string value = 2;
+  // The set_by_lua handler whose result it is set to.
+  LuaHandler handler = 3;
+  // Templates filled in for the request: the handler's ngx.arg.
+  repeated string args = 4;
 }
 
 message LuaSharedDict {

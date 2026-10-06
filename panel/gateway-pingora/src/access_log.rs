@@ -16,7 +16,7 @@ use pingora_http::RequestHeader;
 use serde::Serialize;
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fmt::Write as _,
     net::{IpAddr, SocketAddr},
     sync::LazyLock,
@@ -139,6 +139,8 @@ impl LoggingPlan {
 
 /// A request that is done, as the logs see it.
 pub(crate) struct Served<'a> {
+    /// The variables `set` and scripts gave the request.
+    pub variables: &'a HashMap<String, String>,
     pub request: &'a RequestHeader,
     pub scheme: &'static str,
     pub host: Option<&'a str>,
@@ -316,6 +318,7 @@ pub(crate) fn json(
             client_ip: served.client,
             headers,
             upstream: served.node,
+            variables: served.variables,
         };
         for (name, template) in &plan.fields {
             record.field(
@@ -449,8 +452,11 @@ mod tests {
         request
     }
 
+    static NONE: LazyLock<HashMap<String, String>> = LazyLock::new(HashMap::new);
+
     fn served(request: &RequestHeader) -> Served<'_> {
         Served {
+            variables: &NONE,
             request,
             scheme: "https",
             host: Some("shop.example"),

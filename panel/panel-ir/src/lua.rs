@@ -199,6 +199,25 @@ impl LuaHandler {
     }
 }
 
+/// A variable of the request, as `set` and `set_by_lua*` give it one in
+/// nginx: a value, or what a handler returns. Templates name it as
+/// `${lua:NAME}` and scripts as `ngx.var.NAME`.
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LuaVariable {
+    pub name: String,
+    /// What it is set to when no handler sets it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub value: String,
+    /// The `set_by_lua` handler whose result it is set to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handler: Option<LuaHandler>,
+    /// Templates filled in for the request: the handler's `ngx.arg`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+}
+
 /// The handlers a site or route runs, by phase.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -222,6 +241,10 @@ pub struct LuaHandlers {
     pub body_filter: Option<LuaHandler>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub log: Option<LuaHandler>,
+    /// Set in order as the site's server rewrite phase or the route's
+    /// rewrite phase begins, before its handler.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variables: Vec<LuaVariable>,
 }
 
 impl LuaHandlers {
@@ -229,7 +252,8 @@ impl LuaHandlers {
         *self == Self::default()
     }
 
-    /// Every handler, with the name of its phase.
+    /// Every handler, with the name of its phase; those of variables run in
+    /// `set`.
     pub fn iter(&self) -> impl Iterator<Item = (&'static str, &LuaHandler)> {
         [
             ("server_rewrite", &self.server_rewrite),
@@ -242,6 +266,11 @@ impl LuaHandlers {
         ]
         .into_iter()
         .filter_map(|(phase, handler)| handler.as_ref().map(|handler| (phase, handler)))
+        .chain(
+            self.variables
+                .iter()
+                .filter_map(|variable| variable.handler.as_ref().map(|handler| ("set", handler))),
+        )
     }
 }
 

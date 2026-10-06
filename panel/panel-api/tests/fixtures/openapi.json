@@ -83373,7 +83373,7 @@
       },
       "LuaScope": {
         "type": "object",
-        "description": "What one level runs and the terms its handlers run on; what it leaves\nunset comes from the level around it.",
+        "description": "What one level runs and the terms its handlers run on; what it leaves\nunset comes from the level around it. Its variables are its own: those\nof `http` and a site are set before the site's `server_rewrite`, a\nroute's before its `rewrite`.",
         "properties": {
           "access": {
             "oneOf": [
@@ -83585,6 +83585,13 @@
               "null"
             ],
             "description": "`lua_use_default_type`."
+          },
+          "variables": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LuaVariable"
+            },
+            "description": "Set in order as the request reaches the level."
           },
           "work_limit": {
             "type": [
@@ -84059,7 +84066,7 @@
           },
           "phase": {
             "type": "string",
-            "description": "`server_rewrite`, `rewrite`, `access`, `content`, `balancer`,\n`header_filter`, `body_filter` or `log`."
+            "description": "`set`, `server_rewrite`, `rewrite`, `access`, `precontent`,\n`content`, `balancer`, `header_filter`, `body_filter` or `log`."
           },
           "time_limit_ms": {
             "type": [
@@ -84176,6 +84183,44 @@
             "description": "`lua` for `http`, or `sites/<id>`, `sites/<id>/routes/<id>` or\n`upstreams/<id>`."
           }
         }
+      },
+      "LuaVariable": {
+        "type": "object",
+        "description": "A variable of the request a level sets as the request reaches it, as\n`set` and `set_by_lua*` do in nginx: to a value, or to what a script\nreturns. Templates name it as `${lua:NAME}` and scripts as\n`ngx.var.NAME`.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Templates filled in for the request: the script's `ngx.arg`."
+          },
+          "code": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LuaCode",
+                "description": "The `set_by_lua` script whose result it is set to."
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What `set` gives it."
+          }
+        },
+        "additionalProperties": false
       },
       "MatchKind": {
         "type": "string",

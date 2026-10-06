@@ -290,6 +290,8 @@ http {
 
         location /hello {
             set_by_lua_block $x { return 1 }
+            set_by_lua $y 'return ngx.arg[1] .. ngx.arg[2]' $host $x;
+            set_by_lua_file $z /usr/local/openresty/nginx/lua/pick.lua $host;
             header_filter_by_lua 'ngx.header["X-Hello"] = "1"';
             content_by_lua_block {
                 ngx.say("hello, ", ngx.var.arg_name or "world") -- }
@@ -322,6 +324,9 @@ http {
         "    lua_shared_dict limits 10m;\n    init_by_lua_block {\n        local cjson = require \"cjson\"\n    }\n",
         "        balancer_by_lua_file lua/pick.lua;\n",
         "        access_by_lua_file lua/auth.lua;\n",
+        "            set_by_lua_block $x { return 1 }\n",
+        "            set_by_lua_block $y $host $x { return ngx.arg[1] .. ngx.arg[2] }\n",
+        "            set_by_lua_file $z lua/pick.lua $host;\n",
         "            header_filter_by_lua_block { ngx.header[\"X-Hello\"] = \"1\" }\n",
         "            content_by_lua_block {\n                ngx.say(\"hello, \", ngx.var.arg_name or \"world\") -- }\n            }\n",
     ] {
@@ -340,10 +345,6 @@ http {
         (
             codes::UNSUPPORTED,
             "'lua_package_path' is not carried over: require loads",
-        ),
-        (
-            codes::UNSUPPORTED,
-            "'set_by_lua_block' is not carried over: set variables with ngx.var",
         ),
         (
             codes::CHANGED,

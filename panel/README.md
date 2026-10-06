@@ -1395,6 +1395,14 @@ configuration replaces it. The code of a `*_by_lua_block` is read with Lua's
 lexical rules and kept as it is written. `lua off;` keeps every script
 checked without running any.
 
+`set_by_lua_block $name [argument ...] { ... }` and `set_by_lua_file $name
+lua/<file>.lua [argument ...]` in a server or route set `$name` to what
+their code returns before the block's rewrite handler, with the arguments
+as `ngx.arg`. With Lua handlers in the configuration, `set` gives such a
+variable too: scripts read and change it with `ngx.var`, and headers, log
+fields, redirects and answers use the value it has when they are filled
+in, written `${lua:name}`.
+
 Scripts are files of the configuration: `*_by_lua_file` names a file under
 `lua/`, and `require("a.b")` loads a built-in module (`cjson`, `bit`,
 `resty.string`, `resty.sha256`, `ngx.re`, `ngx.balancer` and others) or

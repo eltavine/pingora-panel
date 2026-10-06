@@ -36,6 +36,7 @@ use pingora_core::{
 use pingora_http::{RequestHeader, ResponseHeader};
 use pingora_proxy::{FailToProxy, ProxyHttp, Session};
 use std::{
+    collections::HashMap,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::{
         atomic::{AtomicUsize, Ordering::Relaxed},
@@ -187,6 +188,9 @@ pub(crate) struct RequestContext {
     lua_last_failure: Option<(String, Option<u16>)>,
     /// Where the balancer sent the current try.
     lua_peer: Option<SocketAddr>,
+    /// The variables `set` gave the request before it had scripts; the
+    /// scripts hold them once they do.
+    variables: HashMap<String, String>,
 }
 
 impl RequestContext {
@@ -301,6 +305,7 @@ impl ProxyHttp for PanelProxy {
             lua_tries: 0,
             lua_last_failure: None,
             lua_peer: None,
+            variables: HashMap::new(),
         }
     }
 
@@ -422,6 +427,12 @@ impl ProxyHttp for PanelProxy {
                     |path| path.into_owned(),
                 );
             self.lua_prepare_header_filter(session, ctx, &site_path, host_name);
+            if let LuaStep::Done = self
+                .lua_variables(session, ctx, &site.lua.variables, &site_path, host_name)
+                .await?
+            {
+                return Ok(true);
+            }
             if let Some(hook) = site.lua.server_rewrite.clone() {
                 match self
                     .lua_request(session, ctx, &hook, &site_path, host_name, true)
@@ -461,7 +472,22 @@ impl ProxyHttp for PanelProxy {
                 return Ok(true);
             };
             ctx.route = Some(route_index);
-            while let Some(hook) = site.route(route_index).lua.rewrite.clone() {
+            loop {
+                if let LuaStep::Done = self
+                    .lua_variables(
+                        session,
+                        ctx,
+                        &site.route(route_index).lua.variables,
+                        &path,
+                        host_name,
+                    )
+                    .await?
+                {
+                    return Ok(true);
+                }
+                let Some(hook) = site.route(route_index).lua.rewrite.clone() else {
+                    break;
+                };
                 let proxied = matches!(site.route(route_index).target, RouteTarget::Proxy(_));
                 match self
                     .lua_request(session, ctx, &hook, &path, host_name, proxied)
@@ -561,12 +587,16 @@ impl ProxyHttp for PanelProxy {
                     responses::send(session, 204, &headers, bytes::Bytes::new()).await?;
                     return Ok(true);
                 }
-                let facts = facts(session, host_name, &path, self.listener.tls);
-                for policy in &http {
-                    policy.request_changes(&facts, &mut ctx.http_request);
-                }
-                let mut module = HttpPolicyModule::default();
-                module.prepare(&http, &facts, session.req_header());
+                let tls = self.listener.tls;
+                let module = lua_phases::with_variables(session, &ctx.variables, |variables| {
+                    let facts = facts(session, host_name, &path, tls, variables);
+                    for policy in &http {
+                        policy.request_changes(&facts, &mut ctx.http_request);
+                    }
+                    let mut module = HttpPolicyModule::default();
+                    module.prepare(&http, &facts, session.req_header());
+                    module
+                });
                 if let Some(slot) = session.downstream_modules_ctx.get_mut::<HttpPolicyModule>() {
                     *slot = module;
                 }
@@ -651,8 +681,11 @@ impl ProxyHttp for PanelProxy {
                     status,
                     preserve_path,
                 } => {
+                    let tls = self.listener.tls;
                     let rendered =
-                        location.render(&facts(session, host_name, &path, self.listener.tls));
+                        lua_phases::with_variables(session, &ctx.variables, |variables| {
+                            location.render(&facts(session, host_name, &path, tls, variables))
+                        });
                     let location = String::from_utf8_lossy(&rendered).into_owned();
                     let location = if *preserve_path {
                         let target = session
@@ -673,7 +706,10 @@ impl ProxyHttp for PanelProxy {
                     content_type,
                     retry_after,
                 } => {
-                    let body = body.render(&facts(session, host_name, &path, self.listener.tls));
+                    let tls = self.listener.tls;
+                    let body = lua_phases::with_variables(session, &ctx.variables, |variables| {
+                        body.render(&facts(session, host_name, &path, tls, variables))
+                    });
                     let retry_after = retry_after.map(|seconds| seconds.to_string());
                     let mut headers = Vec::with_capacity(2);
                     if let Some(content_type) = content_type {
@@ -1218,39 +1254,42 @@ impl PanelProxy {
             .map(|endpoint| format!("{}:{}", endpoint.address, endpoint.port));
         let host = hosts::request_host(request).ok().flatten();
         let status = (status > 0).then_some(status);
-        let served = Served {
-            request,
-            scheme: self.scheme(),
-            host: host.as_ref().map(|host| host.name.as_str()),
-            client: ctx.client,
-            peer: client_address(session),
-            status,
-            request_bytes: u64::try_from(session.body_bytes_read()).unwrap_or(u64::MAX),
-            response_bytes: u64::try_from(session.body_bytes_sent()).unwrap_or(u64::MAX),
-            duration: ctx.started.elapsed(),
-            error_type: telemetry::server_error_type(error, status),
-            listener: &self.listener.id,
-            site: site.as_deref(),
-            route: route.as_deref(),
-            upstream: endpoint.as_ref().map(|endpoint| &*endpoint.upstream),
-            node: node.as_deref(),
-        };
-        let now = Utc::now();
-        if plan.enabled {
-            let line = match plan.format {
-                AccessLogFormat::Json => access_log::json(&served, plan, logging, now),
-                AccessLogFormat::Combined => access_log::combined(&served, logging, now),
+        lua_phases::with_variables(session, &ctx.variables, |variables| {
+            let served = Served {
+                variables,
+                request,
+                scheme: self.scheme(),
+                host: host.as_ref().map(|host| host.name.as_str()),
+                client: ctx.client,
+                peer: client_address(session),
+                status,
+                request_bytes: u64::try_from(session.body_bytes_read()).unwrap_or(u64::MAX),
+                response_bytes: u64::try_from(session.body_bytes_sent()).unwrap_or(u64::MAX),
+                duration: ctx.started.elapsed(),
+                error_type: telemetry::server_error_type(error, status),
+                listener: &self.listener.id,
+                site: site.as_deref(),
+                route: route.as_deref(),
+                upstream: endpoint.as_ref().map(|endpoint| &*endpoint.upstream),
+                node: node.as_deref(),
             };
-            let destination = site.clone().map_or(Destination::Gateway, Destination::Site);
-            logs.send(destination, line, logging.files);
-        }
-        if let Some(error) = error {
-            logs.send(
-                Destination::Errors,
-                access_log::error(&served, error, logging, now),
-                logging.files,
-            );
-        }
+            let now = Utc::now();
+            if plan.enabled {
+                let line = match plan.format {
+                    AccessLogFormat::Json => access_log::json(&served, plan, logging, now),
+                    AccessLogFormat::Combined => access_log::combined(&served, logging, now),
+                };
+                let destination = site.clone().map_or(Destination::Gateway, Destination::Site);
+                logs.send(destination, line, logging.files);
+            }
+            if let Some(error) = error {
+                logs.send(
+                    Destination::Errors,
+                    access_log::error(&served, error, logging, now),
+                    logging.files,
+                );
+            }
+        });
     }
 
     /// Records a request that is done, and stops counting it as active.
@@ -1376,7 +1415,13 @@ impl PanelProxy {
 }
 
 /// What a template may name about the request being answered.
-fn facts<'a>(session: &'a Session, host: &'a str, path: &'a str, tls: bool) -> Facts<'a> {
+fn facts<'a>(
+    session: &'a Session,
+    host: &'a str,
+    path: &'a str,
+    tls: bool,
+    variables: &'a HashMap<String, String>,
+) -> Facts<'a> {
     Facts {
         host,
         uri: path,
@@ -1385,6 +1430,7 @@ fn facts<'a>(session: &'a Session, host: &'a str, path: &'a str, tls: bool) -> F
         client_ip: client_address(session).map(|address| address.ip()),
         headers: &session.req_header().headers,
         upstream: None,
+        variables,
     }
 }
 

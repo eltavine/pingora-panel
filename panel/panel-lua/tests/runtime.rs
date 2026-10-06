@@ -1619,3 +1619,50 @@ async fn worker_threads_run_module_functions_on_threads_of_their_own() {
     assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
     assert_eq!(scripts.exchange().response.body, b"false\n");
 }
+
+#[tokio::test]
+async fn set_handlers_give_their_variable_what_they_return() {
+    let lua = start(
+        1,
+        handlers(&[
+            "return ngx.arg[1] .. '-' .. #ngx.arg .. '-' .. ngx.var.http_x .. '-' .. ngx.get_phase()",
+            "return 42",
+            "return {}",
+            "ngx.say('no')",
+            "ngx.arg[1] = 'x'",
+            "ngx.say(ngx.var.a, ' ', ngx.var.b, ' ', ngx.var.c == '')",
+        ]),
+    );
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[("x", "h")]));
+    let set = |index: usize| handler(lua.handlers[index], Phase::Set);
+    let arguments = vec!["one".to_owned(), "two".to_owned()];
+    assert_eq!(
+        scripts.set(set(0), &mut NoHost, "a", arguments).await,
+        Outcome::Continue
+    );
+    assert_eq!(
+        scripts.set(set(1), &mut NoHost, "b", Vec::new()).await,
+        Outcome::Continue
+    );
+    assert_eq!(
+        scripts.set(set(2), &mut NoHost, "c", Vec::new()).await,
+        Outcome::Continue
+    );
+    for (index, refusal) in [
+        (3, "context of set_by_lua*"),
+        (4, "read-only in set_by_lua*"),
+    ] {
+        let outcome = scripts.set(set(index), &mut NoHost, "d", Vec::new()).await;
+        let Outcome::Failed(failure) = outcome else {
+            panic!("{outcome:?}");
+        };
+        assert!(failure.message.contains(refusal), "{}", failure.message);
+    }
+    assert_eq!(scripts.exchange().variables["a"], "one-2-h-set");
+    assert!(!scripts.exchange().variables.contains_key("d"));
+    assert_eq!(
+        run(&mut scripts, handler(lua.handlers[5], Phase::Content)).await,
+        Outcome::Respond
+    );
+    assert_eq!(scripts.exchange().response.body, b"one-2-h-set 42 true\n");
+}

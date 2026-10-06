@@ -288,6 +288,12 @@ impl Compiler<'_> {
         }
         let scope = site.lua.over(&self.lua.http);
         compiled.lua = lua::handlers(&scope, &mut self.scripts, &self.lua.files, false);
+        compiled.lua.variables = lua::variables(
+            self.lua.http.variables.iter().chain(&site.lua.variables),
+            &scope,
+            &mut self.scripts,
+            &self.lua.files,
+        );
         self.snapshot.sites.push(compiled);
 
         for route in &site.routes {
@@ -374,6 +380,12 @@ impl Compiler<'_> {
             self.capabilities.insert(LOGGING_CAPABILITY);
         }
         compiled.lua = lua::handlers(&scope, &mut self.scripts, &self.lua.files, true);
+        compiled.lua.variables = lua::variables(
+            &route.lua.variables,
+            &scope,
+            &mut self.scripts,
+            &self.lua.files,
+        );
         self.snapshot.routes.push(compiled);
     }
 
@@ -398,6 +410,16 @@ impl Compiler<'_> {
             ..LuaProgram::default()
         };
         if self.scripts.is_empty() {
+            let variables = self
+                .snapshot
+                .sites
+                .iter()
+                .map(|site| &site.lua)
+                .chain(self.snapshot.routes.iter().map(|route| &route.lua))
+                .any(|lua| !lua.variables.is_empty());
+            if variables {
+                self.capabilities.insert(LUA_SCRIPTS_CAPABILITY);
+            }
             return;
         }
         self.scripts.modules(&config.files);
@@ -703,7 +725,7 @@ mod tests {
 
     #[test]
     fn lua_handlers_are_inherited_from_http_through_sites_to_routes() {
-        use crate::lua::{LuaCode, LuaPermissions, LuaScope, LuaSharedDict};
+        use crate::lua::{LuaCode, LuaPermissions, LuaScope, LuaSharedDict, LuaVariable};
         let (mut model, _) = model();
         let unused = plain_route_count(&compile(&model, RevisionId::new(1)).unwrap());
         assert!(unused > 0);
@@ -732,16 +754,23 @@ mod tests {
                 upstream: true,
                 ..LuaPermissions::default()
             }),
+            variables: vec![LuaVariable::value("base", "b")],
             ..LuaScope::default()
         };
         model.sites[0].lua = LuaScope {
             server_rewrite: Some(LuaCode::inline("ngx.req.set_uri('/x')")),
             time_limit_ms: Some(20),
+            variables: vec![LuaVariable::script(
+                "tenant",
+                LuaCode::inline("return ngx.arg[1]"),
+                vec!["$http_x_tenant".into()],
+            )],
             ..LuaScope::default()
         };
         model.sites[0].routes[0].lua = LuaScope {
             access: Some(LuaCode::file("lua/auth.lua")),
             debug: Some(true),
+            variables: vec![LuaVariable::value("r", "1")],
             ..LuaScope::default()
         };
         model.sites[0].routes[0].action = Action::Lua {
@@ -752,6 +781,12 @@ mod tests {
 
         let site = &snapshot.sites[0].lua;
         assert_eq!(site.server_rewrite.as_ref().unwrap().time_limit_ms, 20);
+        let names: Vec<_> = site.variables.iter().map(|v| v.name.as_str()).collect();
+        assert_eq!(names, ["base", "tenant"]);
+        assert_eq!(site.variables[0].value, "b");
+        let tenant = &site.variables[1];
+        assert_eq!(tenant.handler.as_ref().unwrap().time_limit_ms, 20);
+        assert_eq!(tenant.args, ["$http_x_tenant"]);
         assert_eq!(site.access.as_ref().unwrap().script_id, "main.conf:4");
         let route = snapshot
             .routes
@@ -764,6 +799,8 @@ mod tests {
         assert!(access.debug && access.allow.upstream);
         assert!(route.lua.server_rewrite.is_none());
         assert!(route.lua.log.is_some());
+        assert_eq!(route.lua.variables.len(), 1);
+        assert_eq!(route.lua.variables[0].name, "r");
         let RouteAction::Lua { handler } = &route.action else {
             panic!("the route answers with Lua");
         };

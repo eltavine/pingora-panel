@@ -108,7 +108,7 @@ site-files-local = { version = "=0.1.0", path = "site-files-local" }
 panel-backup = { version = "=0.1.0", path = "panel-backup" }
 panel-routing = { version = "=0.1.0", path = "panel-routing" }
 panel-lua = { version = "=0.4.0", path = "panel-lua" }
-panel-lua-ir = { version = "=0.2.0", path = "panel-lua-ir" }
+panel-lua-ir = { version = "=0.3.0", path = "panel-lua-ir" }
 config-grpc-client = { version = "=0.2.0", path = "config-grpc-client" }
 config-proto-codec = { version = "=0.2.0", path = "config-proto-codec" }
 config-service = { version = "=0.2.0", path = "config-service" }

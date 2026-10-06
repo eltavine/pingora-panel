@@ -366,10 +366,13 @@ impl<'a> Importer<'a> {
         let directive = &located.directive;
         let name = directive.name.value.as_str();
         let block = format!("{name}_block");
+        // set_by_lua's first argument is its variable, then come its code
+        // and the arguments the code reads.
+        let at = usize::from(name == "set_by_lua");
         let (written, code) = if name.ends_with("_by_lua") {
             (
                 block.as_str(),
-                directive.args.first().map(|arg| arg.value.clone()),
+                directive.args.get(at).map(|arg| arg.value.clone()),
             )
         } else {
             (name, None)
@@ -385,7 +388,16 @@ impl<'a> Importer<'a> {
             return None;
         }
         if let Some(code) = code {
-            return Some(Directive::with_lua(written, format!(" {code} ")));
+            let mut converted = Directive::with_lua(written, format!(" {code} "));
+            if at == 1 {
+                converted.args = args(directive)
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(index, _)| *index != 1)
+                    .map(|(_, arg)| panel_dsl::Argument::new(arg))
+                    .collect();
+            }
+            return Some(converted);
         }
         match name {
             _ if name.ends_with("_by_lua_block") => Some(Directive {
@@ -394,7 +406,9 @@ impl<'a> Importer<'a> {
                 ..directive.clone()
             }),
             _ if name.ends_with("_by_lua_file") => {
-                let path = args(directive).first().copied().unwrap_or_default();
+                let written = args(directive);
+                let at = usize::from(name == "set_by_lua_file");
+                let path = written.get(at).copied().unwrap_or_default();
                 let target = lua_path(path);
                 if !self.out.lua_files.contains_key(&target) {
                     self.changed(
@@ -404,7 +418,12 @@ impl<'a> Importer<'a> {
                 } else if target != path {
                     self.changed(located, format!("{path} is read from {target}"));
                 }
-                Some(Directive::simple(name, [target]))
+                let mut converted: Vec<String> =
+                    written.iter().map(|arg| (*arg).to_owned()).collect();
+                if let Some(slot) = converted.get_mut(at) {
+                    *slot = target;
+                }
+                Some(Directive::simple(name, converted))
             }
             "lua_code_cache" if args(directive).as_slice() == ["off"] => {
                 self.unsupported(

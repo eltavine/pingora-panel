@@ -12,10 +12,11 @@ use crate::{
     LANGUAGE_VERSION,
 };
 use panel_config_model::{
-    Action, ConfigModel, FieldChanges, HttpPolicy, Listener, LuaCode, LuaConfig, LuaScope, Route,
-    RouteCondition, SecurityPolicy, Site, TlsProfile, Upstream, UpstreamNode, ValueTest,
+    Action, ConfigModel, FieldChanges, HttpPolicy, Listener, LuaCode, LuaConfig, LuaScope,
+    LuaVariable, Route, RouteCondition, SecurityPolicy, Site, TlsProfile, Upstream, UpstreamNode,
+    ValueTest,
 };
-use panel_dsl::{Directive, Document, Trivia};
+use panel_dsl::{Argument, Directive, Document, Trivia};
 use panel_ir::{
     HealthCheckProtocol, ListenerProtocols, LoadBalancingPolicy, RateLimitKey, RealIpHeader,
     ServerHeader, WwwRedirect,
@@ -90,15 +91,45 @@ fn lua_handler(phase: &str, code: &LuaCode) -> Directive {
     }
 }
 
-/// The terms a level sets, then its handlers.
+/// The directive that sets `variable`: `set`, or `set_by_lua*` with the
+/// arguments its script reads.
+fn lua_variable(variable: &LuaVariable) -> Directive {
+    let name = format!("${}", variable.name);
+    match &variable.code {
+        Some(LuaCode::Inline { code, .. }) => Directive {
+            args: std::iter::once(name)
+                .chain(variable.args.iter().cloned())
+                .map(Argument::new)
+                .collect(),
+            ..Directive::with_lua("set_by_lua_block", code.clone())
+        },
+        Some(LuaCode::File { path }) => Directive::simple(
+            "set_by_lua_file",
+            [name, expanded(path)]
+                .into_iter()
+                .chain(variable.args.iter().cloned()),
+        ),
+        None => Directive::simple(
+            "set",
+            [
+                name,
+                expanded(variable.value.as_deref().unwrap_or_default()),
+            ],
+        ),
+    }
+}
+
+/// The terms a level sets, its variables, then its handlers.
 fn lua_scope(scope: &LuaScope) -> Vec<Directive> {
     let mut body: Vec<Directive> = print_lua_terms(scope)
         .into_iter()
         .map(|(name, args)| Directive::simple(name, args))
         .collect();
+    body.extend(scope.variables.iter().map(lua_variable));
     body.extend(
         scope
             .handlers()
+            .filter(|(phase, _)| *phase != "set")
             .map(|(phase, code)| lua_handler(phase, code)),
     );
     body
@@ -140,7 +171,7 @@ pub(crate) fn lua_http(lua: &LuaConfig) -> Vec<Directive> {
         ));
     }
     let mut scope = lua_scope(&lua.http);
-    let handlers = scope.split_off(print_lua_terms(&lua.http).len());
+    let handlers = scope.split_off(print_lua_terms(&lua.http).len() + lua.http.variables.len());
     body.extend(scope);
     if let Some(code) = &lua.init {
         body.push(lua_handler("init", code));

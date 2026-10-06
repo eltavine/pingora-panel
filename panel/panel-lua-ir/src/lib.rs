@@ -43,6 +43,18 @@ impl Hook {
     }
 }
 
+/// A variable a site or route sets as its first phase begins.
+#[derive(Clone, Debug)]
+pub struct Variable {
+    pub name: Arc<str>,
+    /// What it is set to, unless `hook` sets it.
+    pub value: Arc<str>,
+    /// The `set_by_lua` handler whose result it is set to.
+    pub hook: Option<Hook>,
+    /// Templates filled in for the request: the handler's `ngx.arg`.
+    pub args: Vec<String>,
+}
+
 /// The hooks a site or route runs, by phase.
 #[derive(Clone, Debug, Default)]
 pub struct Hooks {
@@ -53,6 +65,9 @@ pub struct Hooks {
     pub header_filter: Option<Hook>,
     pub body_filter: Option<Hook>,
     pub log: Option<Hook>,
+    /// Set in order before the site's server rewrite or the route's rewrite
+    /// hook.
+    pub variables: Vec<Variable>,
 }
 
 impl Hooks {
@@ -202,6 +217,18 @@ impl Compiler<'_> {
             header_filter: hook(&handlers.header_filter, Phase::HeaderFilter)?,
             body_filter: hook(&handlers.body_filter, Phase::BodyFilter)?,
             log: hook(&handlers.log, Phase::Log)?,
+            variables: handlers
+                .variables
+                .iter()
+                .map(|variable| {
+                    Ok(Variable {
+                        name: Arc::from(variable.name.as_str()),
+                        value: Arc::from(variable.value.as_str()),
+                        hook: hook(&variable.handler, Phase::Set)?,
+                        args: variable.args.clone(),
+                    })
+                })
+                .collect::<Result<_>>()?,
         })
     }
 }

@@ -3,12 +3,15 @@
 //! order, each with how it ended, what it logged and how long it took, and
 //! the request and response as they were left.
 
-use crate::{compile, compile_script, Compiled, Hook, HookIndex, Hooks, DEFAULT_MEMORY};
+use crate::{compile, compile_script, Compiled, Hook, HookIndex, Hooks, Variable, DEFAULT_MEMORY};
 use async_trait::async_trait;
 use bytes::Bytes;
 use http::{header::CONTENT_LENGTH, HeaderMap, HeaderName, HeaderValue, Version};
 use panel_errors::{PanelError, Result};
-use panel_ir::{LuaFallback, LuaHandler, RouteAction, RuntimeSnapshot};
+use panel_ir::{
+    template::{parse_template, RequestVariable, TemplatePart},
+    LuaFallback, LuaHandler, RouteAction, RuntimeSnapshot,
+};
 use panel_lua::{
     Chunk, Connection, Exchange, FailureKind, Host, LogEntry, Outcome, Peer, Phase, Program,
     Request, Runtime, Scripts, Settings, SharedStore, Source,
@@ -185,10 +188,101 @@ struct Runner<'a> {
     trial: &'a mut Trial,
 }
 
+/// `template` filled in from the request as the handlers left it.
+fn fill(template: &str, exchange: &Exchange) -> String {
+    let Ok(parts) = parse_template(template) else {
+        return String::new();
+    };
+    let request = &exchange.request;
+    let header = |name: &str| {
+        request
+            .headers
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned)
+    };
+    let mut out = String::new();
+    for part in parts {
+        let TemplatePart::Variable(variable) = part else {
+            if let TemplatePart::Text(text) = part {
+                out.push_str(&text);
+            }
+            continue;
+        };
+        let value = match variable {
+            RequestVariable::Host => Some(exchange.connection.server_name.clone()),
+            RequestVariable::Uri => Some(request.uri.clone()),
+            RequestVariable::Method => Some(request.method.clone()),
+            RequestVariable::Scheme => Some(
+                if exchange.connection.tls {
+                    "https"
+                } else {
+                    "http"
+                }
+                .to_owned(),
+            ),
+            RequestVariable::ClientIp => exchange
+                .connection
+                .client
+                .map(|client| client.ip().to_string()),
+            RequestVariable::RequestId => Some(exchange.connection.request_id.clone()),
+            RequestVariable::Header(name) => header(&name),
+            RequestVariable::Cookie(name) => header("cookie").and_then(|line| {
+                line.split(';').find_map(|pair| {
+                    let (key, value) = pair.trim().split_once('=')?;
+                    (key == name).then(|| value.to_owned())
+                })
+            }),
+            RequestVariable::Lua(name) => exchange.variables.get(&name).cloned(),
+            _ => None,
+        };
+        out.push_str(value.as_deref().unwrap_or_default());
+    }
+    out
+}
+
 impl Runner<'_> {
     async fn run(&mut self, hook: &Hook) -> Next {
+        self.run_as(hook, None).await
+    }
+
+    /// Sets `variables` in order, running the handlers of those a script
+    /// sets.
+    async fn variables(&mut self, variables: &[Variable]) -> Next {
+        for variable in variables {
+            let Some(hook) = &variable.hook else {
+                self.scripts
+                    .exchange()
+                    .variables
+                    .insert(variable.name.to_string(), variable.value.to_string());
+                continue;
+            };
+            let args = {
+                let exchange = self.scripts.exchange();
+                variable
+                    .args
+                    .iter()
+                    .map(|arg| fill(arg, &exchange))
+                    .collect()
+            };
+            match self.run_as(hook, Some((&variable.name, args))).await {
+                Next::Go => {}
+                next => return next,
+            }
+        }
+        Next::Go
+    }
+
+    async fn run_as(&mut self, hook: &Hook, set: Option<(&str, Vec<String>)>) -> Next {
         let started = Instant::now();
-        let outcome = self.scripts.run(hook.handler, &mut self.host).await;
+        let outcome = match set {
+            Some((name, args)) => {
+                self.scripts
+                    .set(hook.handler, &mut self.host, name, args)
+                    .await
+            }
+            None => self.scripts.run(hook.handler, &mut self.host).await,
+        };
         let duration = started.elapsed();
         let logs = std::mem::take(&mut self.scripts.exchange().logs);
         let (outcome, next) = match outcome {
@@ -453,6 +547,20 @@ async fn pipeline(
     let site_hooks = index.sites.get(site.id.as_str());
     let mut changes_left = MOST_URI_CHANGES;
     'request: loop {
+        let variables = site_hooks.map_or(&[][..], |hooks| &hooks.variables);
+        match runner.variables(variables).await {
+            Next::Go => {}
+            Next::Answer => {
+                runner.respond(site_hooks).await;
+                runner.log(site_hooks).await;
+                return Ok(());
+            }
+            Next::Close | Next::Redirect => {
+                runner.trial.aborted = true;
+                runner.log(site_hooks).await;
+                return Ok(());
+            }
+        }
         if let Some(hook) = site_hooks.and_then(|hooks| hooks.server_rewrite.as_ref()) {
             match runner.run(hook).await {
                 Next::Go => {}
@@ -483,6 +591,20 @@ async fn pipeline(
             route = site.select(&simulated).map(|position| site.route(position));
             runner.trial.route = route.map(|route| route.id.as_str().to_owned());
             let hooks = route.and_then(|route| index.routes.get(route.id.as_str()));
+            let variables = hooks.map_or(&[][..], |hooks| &hooks.variables);
+            match runner.variables(variables).await {
+                Next::Go => {}
+                Next::Answer => {
+                    runner.respond(hooks).await;
+                    runner.log(hooks).await;
+                    return Ok(());
+                }
+                Next::Close | Next::Redirect => {
+                    runner.trial.aborted = true;
+                    runner.log(hooks).await;
+                    return Ok(());
+                }
+            }
             let Some(hook) = hooks.and_then(|hooks| hooks.rewrite.as_ref()) else {
                 break;
             };
@@ -612,8 +734,8 @@ mod tests {
     use super::*;
     use panel_domain::{NormalizedHost, PathPrefix, RevisionId, RouteId, SiteId};
     use panel_ir::{
-        DomainSpec, LuaHandlers, LuaPermissions, LuaProgram, LuaScript, RouteMatcher, RouteSpec,
-        SiteSpec,
+        DomainSpec, LuaHandlers, LuaPermissions, LuaProgram, LuaScript, LuaVariable, RouteMatcher,
+        RouteSpec, SiteSpec,
     };
 
     fn script(id: &str, source: &str) -> LuaScript {
@@ -826,6 +948,45 @@ mod tests {
             ]
         );
         assert_eq!(trial.request.unwrap().headers["x-pre"], "1");
+    }
+
+    #[tokio::test]
+    async fn variables_are_set_before_the_rewrite_handlers_of_their_block() {
+        let mut snapshot = snapshot();
+        snapshot.lua.scripts.extend([
+            script("tenant", "return ngx.arg[1] .. ':' .. ngx.var.base"),
+            script("pre", "ngx.req.set_header('X-Tenant', ngx.var.tenant)"),
+        ]);
+        snapshot.sites[0].lua.variables = vec![LuaVariable {
+            name: "base".into(),
+            value: "b".into(),
+            handler: None,
+            args: Vec::new(),
+        }];
+        snapshot.routes[0].lua.variables = vec![LuaVariable {
+            name: "tenant".into(),
+            value: String::new(),
+            handler: Some(LuaHandler::new("tenant")),
+            args: vec!["$http_x_key".into()],
+        }];
+        snapshot.routes[0].lua.precontent = Some(LuaHandler::new("pre"));
+        let trial = try_request(
+            &snapshot,
+            TrialScript::Configured,
+            request("/", &[("x-key", "k")]),
+            TrialResponse::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            phases(&trial)[..3],
+            [
+                (Phase::Set, RunOutcome::Continue),
+                (Phase::Access, RunOutcome::Continue),
+                (Phase::Precontent, RunOutcome::Continue),
+            ]
+        );
+        assert_eq!(trial.request.unwrap().headers["x-tenant"], "k:b");
     }
 
     #[tokio::test]

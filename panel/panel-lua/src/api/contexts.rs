@@ -24,10 +24,8 @@ const fn bits(phases: &[Phase]) -> u16 {
 
 use Phase::{
     Access as AC, Balancer as BL, BodyFilter as BF, Content as CT, HeaderFilter as HF,
-    InitWorker as IW, Log as LG, Rewrite as RW, Timer as TM,
+    InitWorker as IW, Log as LG, Rewrite as RW, Set as ST, Timer as TM,
 };
-
-const REQUEST: u16 = bits(&[RW, AC, CT, BL, HF, BF, LG, TM]);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Api {
@@ -199,38 +197,37 @@ impl Api {
 
     pub(crate) const fn phases(self) -> u16 {
         match self {
-            Api::Arg => bits(&[BF]),
-            Api::Ctx | Api::Timer => bits(&[IW, RW, AC, CT, BL, HF, BF, LG, TM]),
+            Api::Arg => bits(&[ST, BF]),
+            Api::Ctx | Api::Timer => bits(&[IW, ST, RW, AC, CT, BL, HF, BF, LG, TM]),
             Api::Eof | Api::Flush | Api::Output | Api::Redirect | Api::SendHeaders => {
                 bits(&[RW, AC, CT])
             }
-            Api::ReqReadBody | Api::ReqDiscardBody | Api::HeadersSent => bits(&[RW, AC, CT]),
+            Api::ReqReadBody | Api::ReqDiscardBody => bits(&[RW, AC, CT]),
+            Api::HeadersSent => bits(&[ST, RW, AC, CT]),
             Api::Exit => bits(&[RW, AC, CT, BL, HF, TM]),
-            Api::Header | Api::Status => bits(&[RW, AC, CT, HF, BF, LG]),
-            Api::IsSubrequest | Api::ReqIsInternal | Api::ReqStartTime => {
-                bits(&[RW, AC, CT, HF, BF, LG])
+            Api::Header => bits(&[RW, AC, CT, HF, BF, LG]),
+            Api::Status | Api::IsSubrequest | Api::ReqIsInternal | Api::ReqStartTime => {
+                bits(&[ST, RW, AC, CT, HF, BF, LG])
             }
             Api::Sleep => bits(&[RW, AC, CT, TM]),
-            Api::Var => bits(&[RW, AC, CT, BL, HF, BF, LG]),
+            Api::Var => bits(&[ST, RW, AC, CT, BL, HF, BF, LG]),
             Api::ReqClearHeader | Api::ReqSetHeader | Api::ReqSetUri | Api::ReqSetUriArgs => {
-                bits(&[RW, AC, CT, HF, BF])
+                bits(&[ST, RW, AC, CT, HF, BF])
             }
             Api::ReqGetBodyData => bits(&[RW, AC, CT, LG]),
-            Api::ReqGetHeaders | Api::ReqGetPostArgs => bits(&[RW, AC, CT, HF, BF, LG]),
-            Api::ReqGetMethod | Api::ReqGetUriArgs => bits(&[RW, AC, CT, BL, HF, BF, LG]),
-            Api::ReqHttpVersion | Api::ReqRawHeader => bits(&[RW, AC, CT, HF, LG]),
+            Api::ReqGetHeaders => bits(&[ST, RW, AC, CT, HF, BF, LG]),
+            Api::ReqGetPostArgs => bits(&[RW, AC, CT, HF, BF, LG]),
+            Api::ReqGetMethod | Api::ReqGetUriArgs => bits(&[ST, RW, AC, CT, BL, HF, BF, LG]),
+            Api::ReqHttpVersion | Api::ReqRawHeader => bits(&[ST, RW, AC, CT, HF, LG]),
             Api::ReqSetBodyData => bits(&[RW, AC, CT, BL]),
-            Api::ReqSetMethod => bits(&[RW, AC, CT, HF]),
-            Api::RespGetHeaders => REQUEST,
+            Api::ReqSetMethod => bits(&[ST, RW, AC, CT, HF]),
+            Api::RespGetHeaders => bits(&[ST, RW, AC, CT, BL, HF, BF, LG]),
             Api::Balancer => bits(&[BL]),
             Api::Socket | Api::Thread | Api::Udp | Api::SemaphoreWait => bits(&[RW, AC, CT, TM]),
-            Api::ReqInitBody
-            | Api::ReqAppendBody
-            | Api::ReqFinishBody
-            | Api::ReqGetBodyFile
-            | Api::Exec
-            | Api::ReqSocket
-            | Api::RunWorkerThread => bits(&[RW, AC, CT]),
+            Api::ReqInitBody | Api::ReqAppendBody | Api::ReqFinishBody => bits(&[ST, RW, AC, CT]),
+            Api::ReqGetBodyFile | Api::Exec | Api::ReqSocket | Api::RunWorkerThread => {
+                bits(&[RW, AC, CT])
+            }
         }
     }
 
@@ -256,5 +253,6 @@ pub(crate) const fn context(phase: Phase) -> &'static str {
         Phase::Timer => "ngx.timer",
         Phase::ExitWorker => "exit_worker_by_lua*",
         Phase::WorkerThread => "ngx.run_worker_thread",
+        Phase::Set => "set_by_lua*",
     }
 }
