@@ -35,3 +35,7 @@ uuid.workspace = true
 [dev-dependencies]
 rcgen.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+
+[package.metadata.cargo-machete]
+# md-5 is imported under its library name, md5.
+ignored = ["md-5"]
