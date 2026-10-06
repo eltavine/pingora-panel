@@ -1,17 +1,25 @@
 //! The response: `ngx.header`, `ngx.resp`, `ngx.status`, output with
 //! `ngx.say` and `ngx.print`, `ngx.exit`, `ngx.redirect` and `ngx.arg`.
 
-use super::{bytes, cell, codec::encode_args, exchange, require_permission, results, Api};
+use super::{bytes, cell, codec::encode_args, exchange, failed, require_permission, results, Api};
 use crate::{
+    capture::Share,
     exchange::{Exit, LogLevel, Phase},
-    vm::{refused, Slot},
+    stream::Output,
+    vm::{refused, Cell, HostCall, HostReply, Slot},
 };
+use bytes::Bytes;
 use http::{header, HeaderMap, HeaderName, HeaderValue};
 use mlua::{Lua, LuaString, MultiValue, Table, Value, Variadic};
 use std::{future, sync::Arc};
+use tokio::sync::oneshot;
 
-/// Bytes a handler may print; the response is held in memory until sent.
+/// Bytes a handler may print where the response is held in memory until
+/// the handler ends.
 const MAX_OUTPUT: usize = 16 << 20;
+/// Printed bytes kept before they go on, where the response is sent as it
+/// is made.
+const SEND_AFTER: usize = 64 << 10;
 /// Header fields `get_headers` returns by default.
 pub(crate) const MAX_HEADERS: usize = 100;
 
@@ -307,26 +315,89 @@ fn written(lua: &Lua, eof: bool) -> mlua::Result<MultiValue> {
     Ok(results([Value::Integer(1)]))
 }
 
-fn print(lua: &Lua, slot: &Slot, args: &[Value], newline: bool) -> mlua::Result<MultiValue> {
+/// The host call that sends what was printed, and the response header the
+/// first time; `None` where the response is sent when the handler ends.
+fn sending(
+    lua: &Lua,
+    slot: &Slot,
+    cell: &Cell,
+    last: bool,
+) -> mlua::Result<Option<oneshot::Receiver<HostReply>>> {
+    if !cell.run.lock().streams {
+        return Ok(None);
+    }
+    let ctx = {
+        let mut ctx = cell.ctx.lock();
+        match &*ctx {
+            Some(ctx) => ctx.clone(),
+            None => ctx.insert(lua.create_table()?).clone(),
+        }
+    };
+    let output = {
+        let mut exchange = cell.exchange.lock();
+        let body = Bytes::from(std::mem::take(&mut exchange.response.body));
+        let header = (!exchange.streaming).then(|| Box::new(exchange.clone()));
+        exchange.streaming = true;
+        Output {
+            header,
+            body,
+            last,
+            share: Share {
+                vm: slot.index,
+                ctx,
+            },
+        }
+    };
+    let (reply, answer) = oneshot::channel();
+    cell.run.lock().call = Some((HostCall::Send(output), reply));
+    Ok(Some(answer))
+}
+
+/// What a function that may have sent output returns.
+async fn sent(lua: &Lua, answer: Option<oneshot::Receiver<HostReply>>) -> mlua::Result<MultiValue> {
+    let Some(answer) = answer else {
+        return Ok(results([Value::Integer(1)]));
+    };
+    match answer.await {
+        Ok(HostReply::Sent(Ok(()))) => Ok(results([Value::Integer(1)])),
+        Ok(HostReply::Sent(Err(error))) => failed(lua, 1, &error),
+        _ => failed(lua, 1, "the response could not be sent"),
+    }
+}
+
+async fn print(
+    lua: Lua,
+    slot: Arc<Slot>,
+    args: Variadic<Value>,
+    newline: bool,
+) -> mlua::Result<MultiValue> {
     let mut text = Vec::new();
-    for arg in args {
+    for arg in args.iter() {
         output(arg, &mut text, 0)?;
     }
     if newline {
         text.push(b'\n');
     }
-    let eof = exchange(slot, Api::Output, |exchange| {
+    let cell = cell(&slot, Api::Output)?;
+    let streams = cell.run.lock().streams;
+    let full = {
+        let mut exchange = cell.exchange.lock();
         if exchange.eof {
-            return Ok(true);
+            return written(&lua, true);
         }
-        if exchange.response.body.len() + text.len() > MAX_OUTPUT {
+        if !streams && exchange.response.body.len() + text.len() > MAX_OUTPUT {
             return Err(mlua::Error::runtime("the response printed is too large"));
         }
-        start_response(exchange);
+        start_response(&mut exchange);
         exchange.response.body.extend_from_slice(&text);
-        Ok(false)
-    })?;
-    written(lua, eof)
+        exchange.response.body.len() >= SEND_AFTER
+    };
+    let answer = if full {
+        sending(&lua, &slot, &cell, false)?
+    } else {
+        None
+    };
+    sent(&lua, answer).await
 }
 
 fn start_response(exchange: &mut crate::exchange::Exchange) {
@@ -470,43 +541,76 @@ pub(super) fn install(lua: &Lua, ngx: &Table, slot: &Arc<Slot>) -> mlua::Result<
     let say = Arc::clone(slot);
     ngx.raw_set(
         "say",
-        lua.create_function(move |lua, args: Variadic<Value>| print(lua, &say, &args, true))?,
+        lua.create_async_function(move |lua, args: Variadic<Value>| {
+            print(lua, Arc::clone(&say), args, true)
+        })?,
     )?;
     let printer = Arc::clone(slot);
     ngx.raw_set(
         "print",
-        lua.create_function(move |lua, args: Variadic<Value>| print(lua, &printer, &args, false))?,
+        lua.create_async_function(move |lua, args: Variadic<Value>| {
+            print(lua, Arc::clone(&printer), args, false)
+        })?,
     )?;
     let flush = Arc::clone(slot);
     ngx.raw_set(
         "flush",
-        lua.create_function(move |lua, _: Option<bool>| {
-            let eof = exchange(&flush, Api::Flush, |exchange| {
-                start_response(exchange);
-                Ok(exchange.eof)
-            })?;
-            written(lua, eof)
+        lua.create_async_function(move |lua, _: Option<bool>| {
+            let slot = Arc::clone(&flush);
+            async move {
+                let cell = cell(&slot, Api::Flush)?;
+                let eof = {
+                    let mut exchange = cell.exchange.lock();
+                    start_response(&mut exchange);
+                    exchange.eof
+                };
+                if eof {
+                    return written(&lua, true);
+                }
+                let answer = sending(&lua, &slot, &cell, false)?;
+                sent(&lua, answer).await
+            }
         })?,
     )?;
     let send_headers = Arc::clone(slot);
     ngx.raw_set(
         "send_headers",
-        lua.create_function(move |_, ()| {
-            exchange(&send_headers, Api::SendHeaders, |exchange| {
-                start_response(exchange);
-                Ok(1)
-            })
+        lua.create_async_function(move |lua, ()| {
+            let slot = Arc::clone(&send_headers);
+            async move {
+                let cell = cell(&slot, Api::SendHeaders)?;
+                let streaming = {
+                    let mut exchange = cell.exchange.lock();
+                    start_response(&mut exchange);
+                    exchange.streaming || exchange.eof
+                };
+                let answer = if streaming {
+                    None
+                } else {
+                    sending(&lua, &slot, &cell, false)?
+                };
+                sent(&lua, answer).await
+            }
         })?,
     )?;
     let eof = Arc::clone(slot);
     ngx.raw_set(
         "eof",
-        lua.create_function(move |lua, ()| {
-            let seen = exchange(&eof, Api::Eof, |exchange| {
-                start_response(exchange);
-                Ok(std::mem::replace(&mut exchange.eof, true))
-            })?;
-            written(lua, seen)
+        lua.create_async_function(move |lua, ()| {
+            let slot = Arc::clone(&eof);
+            async move {
+                let cell = cell(&slot, Api::Eof)?;
+                let seen = {
+                    let mut exchange = cell.exchange.lock();
+                    start_response(&mut exchange);
+                    std::mem::replace(&mut exchange.eof, true)
+                };
+                if seen {
+                    return written(&lua, true);
+                }
+                let answer = sending(&lua, &slot, &cell, true)?;
+                sent(&lua, answer).await
+            }
         })?,
     )?;
     // `ngx.exit` and `ngx.redirect` never return: their phase handler ends.

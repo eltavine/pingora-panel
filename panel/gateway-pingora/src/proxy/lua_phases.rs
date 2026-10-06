@@ -21,7 +21,9 @@ use chrono::Utc;
 use http::{header, Method};
 use panel_errors::PanelError;
 use panel_ir::LuaFallback;
-use panel_lua::{Balancer, Chunk, NoHost, Outcome, PeerTimeouts, Scripts};
+use panel_lua::{
+    Balancer, Capture, Captured, Chunk, Host, NoHost, Outcome, Output, PeerTimeouts, Scripts,
+};
 use pingora_core::{
     modules::http::{HttpModule, HttpModuleBuilder, Module},
     Error, ErrorType,
@@ -214,6 +216,69 @@ impl Report {
                 ),
             );
         }
+    }
+}
+
+/// A client's request as a handler that may answer it runs: what the
+/// handler sends before it ends goes out through the header and body
+/// filters, which run on the handler's VM with its `ngx.ctx`.
+struct StreamingHost<'a> {
+    host: SessionHost<'a>,
+    proxy: &'a PanelProxy,
+    ctx: &'a mut RequestContext,
+    plan: Arc<LuaPlan>,
+}
+
+#[async_trait]
+impl Host for StreamingHost<'_> {
+    async fn read_body(&mut self, limit: usize) -> Result<Bytes, String> {
+        self.host.read_body(limit).await
+    }
+
+    async fn read_body_chunk(&mut self) -> Result<Option<Bytes>, String> {
+        self.host.read_body_chunk().await
+    }
+
+    async fn closed(&mut self) {
+        self.host.closed().await;
+    }
+
+    async fn capture(&mut self, requests: Vec<Capture>) -> Result<Vec<Captured>, String> {
+        self.host.capture(requests).await
+    }
+
+    fn streams(&self) -> bool {
+        true
+    }
+
+    async fn send(&mut self, output: Output) -> Result<(), String> {
+        let session = &mut *self.host.session;
+        if let Some(exchange) = output.header {
+            let filters = self.plan.runtime.scripts_sharing(*exchange, &output.share);
+            let chunked = session.req_header().version != http::Version::HTTP_10;
+            let header = lua::streamed_header(&filters.exchange(), chunked)
+                .map_err(|error| error.message)?;
+            put_scripts(session, filters);
+            session
+                .write_response_header(Box::new(header), false)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+        let mut chunk = Some(output.body);
+        if let Some(hook) = PanelProxy::lua_hook(self.ctx, |hooks| &hooks.body_filter) {
+            self.proxy
+                .lua_body_filter(session, self.ctx, &hook, &mut chunk, output.last)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+        let chunk = chunk.filter(|chunk| !chunk.is_empty());
+        if chunk.is_some() || output.last {
+            session
+                .write_response_body(chunk, output.last)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(())
     }
 }
 
@@ -519,20 +584,28 @@ impl PanelProxy {
             ANSWERED_BODY_LIMIT
         };
         let started = Instant::now();
-        let outcome = scripts
-            .run(
-                hook.handler,
-                &mut SessionHost {
-                    session,
-                    limit,
-                    streamed: 0,
-                    depth: ctx
-                        .subrequest
-                        .as_ref()
-                        .map_or(0, |subrequest| subrequest.depth),
-                },
-            )
-            .await;
+        let depth = ctx
+            .subrequest
+            .as_ref()
+            .map_or(0, |subrequest| subrequest.depth);
+        let host = SessionHost {
+            session,
+            limit,
+            streamed: 0,
+            depth,
+        };
+        // A subrequest's response goes back to the script that made it.
+        let outcome = if ctx.subrequest.is_some() {
+            scripts.run(hook.handler, &mut { host }).await
+        } else {
+            let mut host = StreamingHost {
+                host,
+                proxy: self,
+                ctx,
+                plan: Arc::clone(&plan),
+            };
+            scripts.run(hook.handler, &mut host).await
+        };
         report.finished(hook, &scripts, &outcome, started.elapsed());
         match outcome {
             Outcome::Continue | Outcome::Respond => {
@@ -567,7 +640,20 @@ impl PanelProxy {
                 Err(if left { client_closed() } else { abort() })
             }
             Outcome::Failed(_) => {
+                let (streaming, ended) = {
+                    let exchange = scripts.exchange();
+                    (exchange.streaming(), exchange.ended())
+                };
                 put_scripts(session, scripts);
+                // What the client got cannot be taken back: a response the
+                // handler ended stays whole, one it left open is cut off.
+                if streaming {
+                    return if ended {
+                        Ok(LuaStep::Done)
+                    } else {
+                        Err(abort())
+                    };
+                }
                 match fallback_status(hook, 500) {
                     None => Ok(LuaStep::Go { jump: false }),
                     Some(status) => {
@@ -598,6 +684,29 @@ impl PanelProxy {
         let Some(scripts) = take_scripts(session) else {
             return Ok(());
         };
+        let streamed = {
+            let mut exchange = scripts.exchange();
+            exchange.streaming().then(|| {
+                (
+                    exchange.ended(),
+                    Bytes::from(std::mem::take(&mut exchange.response.body)),
+                )
+            })
+        };
+        if let Some((ended, rest)) = streamed {
+            put_scripts(session, scripts);
+            if ended {
+                return Ok(());
+            }
+            let mut chunk = Some(rest);
+            if let Some(hook) = Self::lua_hook(ctx, |hooks| &hooks.body_filter) {
+                self.lua_body_filter(session, ctx, &hook, &mut chunk, true)
+                    .await?;
+            }
+            return session
+                .write_response_body(chunk.filter(|chunk| !chunk.is_empty()), true)
+                .await;
+        }
         let (mut header, mut body) = {
             let mut exchange = scripts.exchange();
             let status = match exchange.response.status {

@@ -237,6 +237,16 @@ pub(crate) fn apply_response(header: &mut ResponseHeader, exchange: &mut Exchang
 
 /// The response a handler answered with, as Pingora sends it.
 pub(crate) fn response_header(exchange: &Exchange, body: usize) -> Result<ResponseHeader> {
+    header_of(exchange, Some(body), false)
+}
+
+/// The header of a response a handler sends as it makes it: chunked over
+/// HTTP/1.1 when `chunked`, as the body's length is not known.
+pub(crate) fn streamed_header(exchange: &Exchange, chunked: bool) -> Result<ResponseHeader> {
+    header_of(exchange, None, chunked)
+}
+
+fn header_of(exchange: &Exchange, body: Option<usize>, chunked: bool) -> Result<ResponseHeader> {
     let status = match exchange.response.status {
         0 => 200,
         status => status,
@@ -254,9 +264,19 @@ pub(crate) fn response_header(exchange: &Exchange, body: usize) -> Result<Respon
                 .insert_header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
                 .map_err(header_error)?;
         }
-        response
-            .insert_header(header::CONTENT_LENGTH, body.to_string())
-            .map_err(header_error)?;
+        match body {
+            Some(body) => response
+                .insert_header(header::CONTENT_LENGTH, body.to_string())
+                .map_err(header_error)?,
+            None => {
+                response.remove_header(&header::CONTENT_LENGTH);
+                if chunked {
+                    response
+                        .insert_header(header::TRANSFER_ENCODING, "chunked")
+                        .map_err(header_error)?;
+                }
+            }
+        }
     }
     Ok(response)
 }

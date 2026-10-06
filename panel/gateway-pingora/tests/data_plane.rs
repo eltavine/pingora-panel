@@ -3154,3 +3154,96 @@ async fn handshake_scripts_refuse_hellos_and_present_their_certificates() {
     assert_eq!(presented(&stream), profile.cert.der().to_vec());
     gateway.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn handler_output_streams_through_the_filters_as_it_is_flushed() {
+    use panel_ir::{LuaHandler, LUA_SCRIPTS_CAPABILITY};
+
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    snapshot
+        .required_capabilities
+        .push(CapabilityRequirement::new(LUA_SCRIPTS_CAPABILITY, "1"));
+    snapshot.lua.scripts = vec![
+        lua_script(
+            "events",
+            "ngx.header['Content-Type'] = 'text/event-stream' ngx.ctx.n = 7 \
+             ngx.say('data: one\\n') assert(ngx.flush(true)) ngx.sleep(1.5) ngx.say('data: two\\n')",
+        ),
+        lua_script("header", "ngx.header['X-Seen'] = tostring(ngx.ctx.n)"),
+        lua_script(
+            "body",
+            "if ngx.arg[1] then ngx.arg[1] = string.upper(ngx.arg[1]) end",
+        ),
+    ];
+    snapshot.sites.push(site(&["shop.test"]));
+    let mut events = LuaHandler::new("events");
+    events.time_limit_ms = 10_000;
+    let mut streamed = route(
+        "events",
+        1,
+        prefix("/"),
+        RouteAction::Lua { handler: events },
+    );
+    streamed.lua.header_filter = Some(LuaHandler::new("header"));
+    let mut upper = LuaHandler::new("body");
+    upper.allow.body = true;
+    streamed.lua.body_filter = Some(upper);
+    snapshot.routes.push(streamed);
+    let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
+    wait_for(listen).await;
+
+    let mut stream = TcpStream::connect(listen).await.unwrap();
+    stream
+        .write_all(b"GET /events HTTP/1.1\r\nhost: shop.test\r\n\r\n")
+        .await
+        .unwrap();
+    /// Reads into `seen` until it holds `wanted`, for at most `within`.
+    async fn read_until(
+        stream: &mut TcpStream,
+        seen: &mut Vec<u8>,
+        wanted: &str,
+        within: Duration,
+    ) -> (bool, String) {
+        let found = tokio::time::timeout(within, async {
+            let mut buffer = [0u8; 4096];
+            while !String::from_utf8_lossy(seen).contains(wanted) {
+                let read = stream.read(&mut buffer).await.unwrap();
+                assert!(read > 0, "{}", String::from_utf8_lossy(seen));
+                seen.extend_from_slice(&buffer[..read]);
+            }
+        })
+        .await;
+        (
+            found.is_ok(),
+            String::from_utf8_lossy(seen).to_ascii_lowercase(),
+        )
+    }
+    let mut seen = Vec::new();
+    // The first event arrives while the handler still sleeps.
+    let (found, head) = read_until(
+        &mut stream,
+        &mut seen,
+        "DATA: ONE",
+        Duration::from_millis(1000),
+    )
+    .await;
+    assert!(found, "{head}");
+    assert!(head.contains("transfer-encoding: chunked"), "{head}");
+    assert!(head.contains("x-seen: 7"), "{head}");
+    assert!(head.contains("content-type: text/event-stream"), "{head}");
+    assert!(!head.contains("data: two"), "{head}");
+    let (found, whole) = read_until(
+        &mut stream,
+        &mut seen,
+        "\r\n0\r\n\r\n",
+        Duration::from_secs(5),
+    )
+    .await;
+    assert!(found, "{whole}");
+    assert!(whole.contains("data: two"), "{whole}");
+    gateway.stop().await;
+}

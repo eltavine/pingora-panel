@@ -257,9 +257,18 @@ contents across activations while its name and size stay.
 
 What a handler changes — the request line and header, the response status
 and header, a response it starts — is held until the handler returns. A
-handler that fails leaves the request as it was before it ran. `ngx.eof`
-ends the response but not the handler, which goes on: what it prints after
-returns `nil, "seen eof"`, as lua-nginx-module's output functions do.
+handler that fails leaves the request as it was before it ran. A response
+a handler makes goes to the client as nginx sends it, before the handler
+ends: `ngx.flush`, `ngx.send_headers`, `ngx.eof` and output past 64 KiB
+send the header, through the header filter, and then what was printed,
+each piece through the body filter; both filters run on the handler's VM
+with its `ngx.ctx`, and over HTTP/1.1 the body is chunked. `ngx.eof` ends
+the response but not the handler, which goes on: what it prints after
+returns `nil, "seen eof"`, as lua-nginx-module's output functions do. A
+handler that fails once its header went out cannot take it back: the
+connection closes, unless `ngx.eof` had ended the response. Where a
+response is taken by a script, from a subrequest, or tried with
+`ppanel lua test`, output is kept until the handler ends, up to 16 MiB.
 
 **Limits.** Each run of a handler is bounded:
 

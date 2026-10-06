@@ -77,6 +77,8 @@ pub(crate) enum HostCall {
     ReadBodyChunk,
     /// The subrequests of `ngx.location.capture`.
     Capture(Vec<crate::capture::Capture>),
+    /// Output sent to the client before the handler ends.
+    Send(crate::stream::Output),
 }
 
 #[derive(Debug)]
@@ -84,6 +86,7 @@ pub(crate) enum HostReply {
     Body(Result<Bytes, String>),
     Chunk(Result<Option<Bytes>, String>),
     Captured(Result<Vec<crate::capture::Captured>, String>),
+    Sent(Result<(), String>),
 }
 
 /// The run under way for a request.
@@ -109,6 +112,8 @@ pub(crate) struct Run {
     /// What `ngx.on_abort` registered, to run as a light thread when the
     /// client closes the connection.
     pub on_abort: Option<mlua::Thread>,
+    /// The response goes to the client as the handler makes it.
+    pub streams: bool,
 }
 
 /// A request on a VM: what its scripts read and change, its globals and

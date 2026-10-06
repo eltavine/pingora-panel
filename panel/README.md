@@ -1466,7 +1466,10 @@ run later under the limits and permissions of the run that created them;
 when a new configuration takes over, pending ones run at once with
 `premature` true. `ngx.socket.udp` sends datagrams under the same
 permission, and `ngx.semaphore` coordinates the threads, timers and
-requests of a VM. `ngx.req.socket()` streams the request body to a script,
+requests of a VM. Output goes to the client as it is flushed, through the
+header and body filters: `ngx.flush`, `ngx.eof` and every 64 KiB printed
+send what is kept, so server-sent events and long responses reach clients
+as handlers make them. `ngx.req.socket()` streams the request body to a script,
 chunked bodies included. `ngx.exec` handles the request again with a new URI, up
 to ten URI changes as in nginx. `ngx.run_worker_thread` runs a module's
 function on a thread and VM of its own, copying its arguments and results.

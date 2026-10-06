@@ -337,6 +337,8 @@ pub struct Exchange {
     pub(crate) default_type: bool,
     /// The TLS handshake `ssl_*_by_lua` handlers run in.
     pub handshake: Handshake,
+    /// The response header went to the client while a handler ran.
+    pub(crate) streaming: bool,
 }
 
 impl Exchange {
@@ -364,6 +366,7 @@ impl Exchange {
             named: None,
             default_type: true,
             handshake: Handshake::default(),
+            streaming: false,
         }
     }
 
@@ -377,6 +380,17 @@ impl Exchange {
     /// for it, as `lua_check_client_abort on` has it.
     pub fn client_closed(&self) -> bool {
         self.client_closed
+    }
+
+    /// Whether the response header went to the client while a handler
+    /// ran, through [`crate::Host::send`]; the rest of the body follows it.
+    pub fn streaming(&self) -> bool {
+        self.streaming
+    }
+
+    /// Whether `ngx.eof` ended the response.
+    pub fn ended(&self) -> bool {
+        self.eof
     }
 
     /// What the last run changed.

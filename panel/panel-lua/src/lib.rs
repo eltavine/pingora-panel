@@ -17,6 +17,7 @@ mod program;
 mod runtime;
 mod shared;
 mod ssl;
+mod stream;
 mod timer;
 mod tls;
 mod vm;
@@ -32,6 +33,7 @@ pub use program::{compile, Diagnostic, HandlerId, Program, ProgramBuilder, Share
 pub use runtime::{Handler, Host, NoHost, Runtime, Scripts, Settings};
 pub use shared::SharedStore;
 pub use ssl::Handshake;
+pub use stream::Output;
 pub use timer::TimerRun;
 pub use tls::{TlsId, TlsTerms};
 

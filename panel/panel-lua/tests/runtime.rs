@@ -2267,3 +2267,82 @@ async fn modules_refused_for_the_sandbox_say_why() {
     );
     assert!(body.contains("ffi false") && body.contains("FFI"), "{body}");
 }
+
+/// A client that takes a handler's output as it is sent.
+#[derive(Default)]
+struct Streamer {
+    sent: Vec<(Option<u16>, Vec<u8>, bool)>,
+}
+
+#[async_trait]
+impl Host for Streamer {
+    async fn read_body(&mut self, _limit: usize) -> Result<Bytes, String> {
+        Ok(Bytes::new())
+    }
+
+    fn streams(&self) -> bool {
+        true
+    }
+
+    async fn send(&mut self, output: panel_lua::Output) -> Result<(), String> {
+        let status = output.header.map(|exchange| exchange.response.status);
+        self.sent.push((status, output.body.to_vec(), output.last));
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn output_goes_to_the_client_as_handlers_flush_it() {
+    let lua = start(
+        1,
+        handlers(&[
+            r#"
+            ngx.status = 201
+            ngx.say("first")
+            assert(ngx.flush(true) == 1)
+            ngx.print(string.rep("x", 70000))
+            ngx.say("last")
+            assert(ngx.eof() == 1)
+            local ok, err = ngx.say("ignored")
+            assert(ok == nil and err == "seen eof", err)
+            "#,
+            r#"
+            ngx.say("partial")
+            ngx.flush()
+            error("broken")
+            "#,
+        ]),
+    );
+    let mut streamer = Streamer::default();
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = scripts
+        .run(handler(lua.handlers[0], Phase::Content), &mut streamer)
+        .await;
+    assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+    let sent: Vec<_> = streamer
+        .sent
+        .iter()
+        .map(|(status, body, last)| (*status, body.len(), *last))
+        .collect();
+    assert_eq!(
+        sent,
+        [(Some(201), 6, false), (None, 70000, false), (None, 5, true)]
+    );
+    assert_eq!(streamer.sent[2].1, b"last\n");
+    assert!(scripts.exchange().streaming() && scripts.exchange().ended());
+
+    let mut kept = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = run(&mut kept, handler(lua.handlers[0], Phase::Content)).await;
+    assert_eq!(outcome, Outcome::Respond);
+    assert_eq!(kept.exchange().response.body.len(), 6 + 70000 + 5);
+    assert!(!kept.exchange().streaming());
+
+    let mut streamer = Streamer::default();
+    let mut broken = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = broken
+        .run(handler(lua.handlers[1], Phase::Content), &mut streamer)
+        .await;
+    assert!(matches!(outcome, Outcome::Failed(_)), "{outcome:?}");
+    assert_eq!(streamer.sent.len(), 1);
+    assert!(broken.exchange().streaming() && !broken.exchange().ended());
+}

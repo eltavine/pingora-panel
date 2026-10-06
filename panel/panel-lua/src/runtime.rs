@@ -68,6 +68,17 @@ pub trait Host: Send {
     ) -> Result<Vec<crate::capture::Captured>, String> {
         Err("subrequests cannot be made here".into())
     }
+
+    /// Whether [`Host::send`] sends a handler's response as it is made;
+    /// where it does not, the response is sent when the handler ends.
+    fn streams(&self) -> bool {
+        false
+    }
+
+    /// Sends output to the client before the handler ends.
+    async fn send(&mut self, _output: crate::stream::Output) -> Result<(), String> {
+        Err("the response cannot be sent before the handler ends here".into())
+    }
 }
 
 /// A host for runs that have no request to read from.
@@ -370,6 +381,7 @@ impl Scripts {
                 work_left: i64::try_from(handler.limits.work).unwrap_or(i64::MAX),
                 deadline: vm.slot.after(handler.limits.time),
                 check_abort: handler.check_client_abort && handler.phase.answers(),
+                streams: host.streams() && handler.phase.answers(),
                 ..Default::default()
             };
         }
@@ -442,9 +454,13 @@ impl Scripts {
         let mut exchange = self.exchange.lock();
         let logs = std::mem::take(&mut exchange.logs);
         let dropped = exchange.dropped_logs;
+        let (streaming, eof) = (exchange.streaming, exchange.eof);
         *exchange = before;
         exchange.logs = logs;
         exchange.dropped_logs = dropped;
+        // What reached the client stays sent.
+        exchange.streaming = streaming;
+        exchange.eof |= streaming && eof;
         Outcome::Failed(failure)
     }
 
@@ -523,6 +539,7 @@ pub(crate) async fn drive(
                     HostCall::Capture(requests) => {
                         HostReply::Captured(host.capture(requests).await)
                     }
+                    HostCall::Send(output) => HostReply::Sent(host.send(output).await),
                 };
                 let _ = reply.send(answer);
             }
