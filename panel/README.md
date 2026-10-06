@@ -764,7 +764,9 @@ static sites from ([decision](../docs/adr/0034-site-files.md)), which
 `sites` volume there read-write. Every operation opens that directory as a
 capability and resolves paths beneath it, so neither a path nor a symbolic
 link in the tree leads out of it. Paths are names separated by `/`; empty
-parts, `.`, `..`, backslashes and control characters are refused.
+parts, `.`, `..`, backslashes and control characters are refused. As in
+NGINX, a static site whose directory is not there answers 404 until it is,
+so removing a site's files does not stop other changes from applying.
 
 ```sh
 ppanel files ls shop

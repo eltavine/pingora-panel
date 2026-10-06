@@ -43,15 +43,19 @@ impl StaticContent {
         let base = base
             .canonicalize()
             .map_err(|_| invalid("the static content root does not exist"))?;
-        let root = base
-            .join(relative)
-            .canonicalize()
-            .map_err(|_| invalid("root directory does not exist"))?;
-        if !root.starts_with(&base) || !root.is_dir() {
-            return Err(invalid(
-                "root must be a directory inside the static content root",
-            ));
-        }
+        let joined = base.join(relative);
+        let root = match joined.canonicalize() {
+            Ok(root) if root.starts_with(&base) && root.is_dir() => root,
+            Ok(_) => {
+                return Err(invalid(
+                    "root must be a directory inside the static content root",
+                ))
+            }
+            // As in nginx, a root that is not there serves nothing until it
+            // is; what is made there later is still checked as it is served.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => joined,
+            Err(_) => return Err(invalid("root directory cannot be read")),
+        };
         if policy.index_files.iter().any(|name| !is_file_name(name)) {
             return Err(invalid("index files must be plain file names"));
         }
@@ -444,13 +448,41 @@ mod tests {
             spa_fallback: false,
         };
         assert!(StaticContent::compile(&policy("site"), Some(base.path())).is_ok());
-        for root in ["../site", "/etc", "missing", "", "site/../site"] {
+        for root in ["../site", "/etc", "", "site/../site"] {
             assert!(
                 StaticContent::compile(&policy(root), Some(base.path())).is_err(),
                 "{root}"
             );
         }
         assert!(StaticContent::compile(&policy("site"), None).is_err());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_root_that_is_not_there_yet_serves_nothing_until_it_is() {
+        use std::os::unix::fs::symlink;
+        let base = tempfile::tempdir().unwrap();
+        let policy = |root: &str| StaticContentPolicy {
+            id: "static".into(),
+            root: root.into(),
+            index_files: vec!["index.html".into()],
+            spa_fallback: false,
+        };
+        let content = StaticContent::compile(&policy("later"), Some(base.path())).unwrap();
+        let page = vec!["page.html".to_owned()];
+        assert!(matches!(content.locate(&page).await, Located::Missing));
+        std::fs::create_dir(base.path().join("later")).unwrap();
+        std::fs::write(base.path().join("later/page.html"), "page").unwrap();
+        assert!(matches!(content.locate(&page).await, Located::File(..)));
+
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("page.html"), "secret").unwrap();
+        let linked = StaticContent::compile(&policy("linked"), Some(base.path())).unwrap();
+        symlink(outside.path(), base.path().join("linked")).unwrap();
+        assert!(
+            matches!(linked.locate(&page).await, Located::Missing),
+            "a root made a link out later still leads nowhere"
+        );
     }
 
     #[cfg(unix)]
