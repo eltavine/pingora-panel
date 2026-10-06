@@ -356,7 +356,7 @@ trait GatewayEngine {
 
 | Product | IR | Adapter | Pinned Pingora | 本地 patch | Upstream canary | 状态 |
 |---|---|---|---|---|---|---|
-| 0.1 | v1 | pingora-v1 | 0.9.0 / exact commit | 4 个（[记录](docs/upstream-patches.md)） | `main` scheduled canary | Implemented |
+| 0.1 | v1 | pingora-v1 | 0.9.0 / exact commit | 5 个（[记录](docs/upstream-patches.md)） | `main` scheduled canary | Implemented |
 
 每次升级必须记录 API 变化、语义变化、性能变化、安全公告、迁移步骤和回滚办法。缓存等上游标记为 experimental/volatile 的 API 必须再包一层 capability，不得成为公共稳定承诺的直接依据。
 

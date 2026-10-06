@@ -79,6 +79,29 @@ git diff 4487f7b2 HEAD -- 'pingora*' tinyufo
 - **Goes when:** the minimum Rust version reaches 1.91, or upstream
   bounds the requirement.
 
+### Upgraded HTTP/1 tunnels past the request's own body end
+
+- **Change:** `proxy_handle_upstream` in `pingora-proxy/src/proxy_h1.rs`
+  ends an upgraded tunnel on the end of the upgraded body or a closed
+  pipe, not on the end of the upgrade request's own body (`1b92f9ba`).
+- **Why:** the end of an upgrade request's empty body reaches the
+  upstream half as a plain `Body` task. When the upstream's 101 is read
+  first, as a fast upstream or a busy runtime makes likely, that task was
+  taken for the end of the tunnel: the client got the 101 and then the end
+  of the connection, and nothing it sent after the handshake reached the
+  upstream.
+- **Upstream:** [#946](https://github.com/cloudflare/pingora/issues/946);
+  [#947](https://github.com/cloudflare/pingora/pull/947) and
+  [#1016](https://github.com/cloudflare/pingora/pull/1016) propose fixes.
+  All are open.
+- **Affected versions:** 0.8.0, which switches the body mode on a 101,
+  through 0.9.0.
+- **Tests:** `upgraded_tunnels_outlive_a_request_body_end_read_after_the_101`
+  in `pingora-proxy`, and `websocket_upgrades_go_through_beyond_body_limits`
+  in `gateway-pingora`.
+- **Goes when:** an upstream release keeps the tunnel open whichever of
+  the two comes first.
+
 ## Test and documentation changes
 
 These change no behaviour, so they have no upstream issue; they go with
