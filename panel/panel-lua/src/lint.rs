@@ -754,19 +754,19 @@ local s = "quoted = 1" .. [[long = 2]]
     #[test]
     fn requires_are_checked_against_the_modules_there_are() {
         let result = lint(
-            &Source::new("main.conf", "local a = require \"cjson\"\nlocal b = require(\"local.helper\")\nlocal c = require('resty.redis')\nlocal d = require(name)\n", 10),
+            &Source::new("main.conf", "local a = require \"cjson\"\nlocal b = require(\"local.helper\")\nlocal c = require('resty.openidc')\nlocal d = require(name)\n", 10),
             Role::Handler(Phase::Access),
             &|name| name == "local.helper",
         );
         assert_eq!(
             result.requires.into_iter().collect::<Vec<_>>(),
-            ["cjson", "local.helper", "resty.redis"]
+            ["cjson", "local.helper", "resty.openidc"]
         );
         assert!(result.dynamic_require);
         assert_eq!(result.findings.len(), 1);
         assert_eq!(result.findings[0].kind, FindingKind::UnknownModule);
         assert_eq!(result.findings[0].line, 12);
-        assert!(result.findings[0].message.contains("\"resty.redis\""));
+        assert!(result.findings[0].message.contains("\"resty.openidc\""));
     }
 
     #[test]

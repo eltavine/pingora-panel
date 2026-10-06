@@ -242,7 +242,11 @@ collected, as lua-resty-lock's are, lua-resty-limit-traffic's
 `resty.limit.req`, `resty.limit.conn`, `resty.limit.count` and
 `resty.limit.traffic`, the leaky bucket's state of each key packed into
 its dictionary value rather than written through the FFI,
-lua-tablepool's `tablepool`, and
+lua-tablepool's `tablepool`, `resty.redis`, lua-resty-redis's client with
+its replies, pipelines, transactions, Pub/Sub, module prefixes and connect
+options (`db`, `password` and `username`, with pools named after the
+database and user), whose `ssl` handshakes verify the server unless told
+not to, as the cosockets under it do, and
 `ngx.ssl` with `ngx.ssl.clienthello`, `ngx.ssl.session`,
 `ngx.ssl.proxysslcert` and `ngx.ssl.proxysslverify`, `ngx.proxyssl` and
 `ngx.ocsp`. `resty.core.base` gives libraries
