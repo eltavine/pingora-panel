@@ -34,7 +34,7 @@ pub use lint::{lint, Finding, FindingKind, Lint, Role};
 pub use program::{compile, Diagnostic, HandlerId, Program, ProgramBuilder, SharedDict, Source};
 pub use runtime::{Handler, Host, NoHost, Runtime, Scripts, Settings};
 pub use shared::SharedStore;
-pub use ssl::{ClientAuth, Handshake};
+pub use ssl::{ClientAuth, Handshake, UpstreamTls};
 pub use stream::Output;
 pub use timer::TimerRun;
 pub use tls::{TlsId, TlsTerms};

@@ -58,6 +58,22 @@ pub struct Handshake {
     pub client_chain: Vec<Vec<u8>>,
 }
 
+/// A request's TLS connection to its upstream, as
+/// `proxy_ssl_verify_by_lua` sees and judges it.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct UpstreamTls {
+    /// The certificates the upstream presented, its own first; none where
+    /// the gateway's Pingora keeps none.
+    pub chain: Vec<Vec<u8>>,
+    /// The version the connection uses, by its number on the wire.
+    pub version: Option<u16>,
+    /// How the chain verified, as an OpenSSL verify code: 0 when it did.
+    pub verify_result: i64,
+    /// What the script decided with `set_verify_result`.
+    pub verdict: Option<i64>,
+}
+
 /// The client certificate `ngx.ssl.verify_client` asks for.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[non_exhaustive]

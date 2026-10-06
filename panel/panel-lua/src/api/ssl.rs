@@ -214,6 +214,100 @@ pub(super) fn proxy_certificate(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Tab
     Ok(module)
 }
 
+/// The `ngx.ssl.proxysslverify` module.
+pub(super) fn proxy_verify(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
+    let module = lua.create_table()?;
+    let verify = Some(Phase::ProxySslVerify);
+    define(
+        lua,
+        &module,
+        slot,
+        "get_verify_result",
+        move |_, slot, ()| {
+            let result = with(slot, verify, |exchange| exchange.upstream_tls.verify_result)?;
+            Ok(results([Value::Integer(result)]))
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "get_verify_cert",
+        move |lua, slot, ()| {
+            let chain = with(slot, verify, |exchange| {
+                exchange.upstream_tls.chain.concat()
+            })?;
+            if chain.is_empty() {
+                return failed(
+                lua,
+                1,
+                "the upstream's certificate is not known: this Pingora keeps none of its TLS connections' certificates",
+            );
+            }
+            Ok(results([text(lua, chain)?]))
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "set_verify_result",
+        move |_, slot, code: Option<i64>| {
+            with(slot, verify, |exchange| {
+                exchange.upstream_tls.verdict = Some(code.unwrap_or(0));
+            })?;
+            Ok(done())
+        },
+    )?;
+    Ok(module)
+}
+
+/// The `ngx.proxyssl` module: the version of a request's TLS connection to
+/// its upstream.
+pub(super) fn proxy_tls(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
+    let module = lua.create_table()?;
+    for (name, version) in [
+        ("SSL3_VERSION", 0x0300),
+        ("TLS1_VERSION", 0x0301),
+        ("TLS1_1_VERSION", 0x0302),
+        ("TLS1_2_VERSION", 0x0303),
+        ("TLS1_3_VERSION", 0x0304),
+    ] {
+        module.raw_set(name, version)?;
+    }
+    define(
+        lua,
+        &module,
+        slot,
+        "get_tls1_version",
+        |lua, slot, ()| match with(slot, None, |exchange| exchange.upstream_tls.version)? {
+            Some(version) => Ok(results([Value::Integer(i64::from(version))])),
+            None => failed(
+                lua,
+                1,
+                "the request has no TLS connection to its upstream yet",
+            ),
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "get_tls1_version_str",
+        |lua, slot, ()| match with(slot, None, |exchange| exchange.upstream_tls.version)?
+            .and_then(version_name)
+        {
+            Some(name) => Ok(results([text(lua, name)?])),
+            None => failed(
+                lua,
+                1,
+                "the request has no TLS connection to its upstream yet",
+            ),
+        },
+    )?;
+    Ok(module)
+}
+
 /// The `ngx.ssl` module.
 pub(super) fn module(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
     let module = lua.create_table()?;

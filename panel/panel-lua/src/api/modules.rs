@@ -227,7 +227,7 @@ fn panel_v1(lua: &Lua, module_meta: &Table) -> mlua::Result<Value> {
 }
 
 /// OpenResty's modules that scripts may not load, and why.
-const REFUSED: [(&str, &str); 4] = [
+const REFUSED: [(&str, &str); 2] = [
     (
         "ngx.pipe",
         "it would start processes on the gateway's host, outside the sandbox",
@@ -235,14 +235,6 @@ const REFUSED: [(&str, &str); 4] = [
     (
         "ffi",
         "native code called through an FFI would run outside the sandbox",
-    ),
-    (
-        "ngx.ssl.proxysslverify",
-        "Pingora's TLS connections to upstreams keep no server certificate for a script to verify",
-    ),
-    (
-        "ngx.proxyssl",
-        "Pingora's TLS connections to upstreams keep nothing of their handshake for a script to read",
     ),
 ];
 
@@ -280,7 +272,7 @@ pub(crate) fn refusal(name: &str) -> Option<&'static str> {
 }
 
 /// The modules OpenResty scripts commonly load that come with the gateway.
-pub(crate) const BUILT_IN: [&str; 54] = [
+pub(crate) const BUILT_IN: [&str; 56] = [
     "panel.v1",
     "cjson",
     "cjson.safe",
@@ -335,6 +327,8 @@ pub(crate) const BUILT_IN: [&str; 54] = [
     "ngx.ssl.session",
     "ngx.ocsp",
     "ngx.ssl.proxysslcert",
+    "ngx.ssl.proxysslverify",
+    "ngx.proxyssl",
 ];
 
 fn built_in(
@@ -424,6 +418,8 @@ fn built_in(
         "ngx.ssl.session" => Value::Table(super::ssl::session(lua, slot)?),
         "ngx.ocsp" => Value::Table(super::ssl::ocsp(lua, slot)?),
         "ngx.ssl.proxysslcert" => Value::Table(super::ssl::proxy_certificate(lua, slot)?),
+        "ngx.ssl.proxysslverify" => Value::Table(super::ssl::proxy_verify(lua, slot)?),
+        "ngx.proxyssl" => Value::Table(super::ssl::proxy_tls(lua, slot)?),
         "ngx.resp" | "ngx.req" => {
             let module = lua.create_table()?;
             let table: Table = ngx.raw_get(&name[4..])?;

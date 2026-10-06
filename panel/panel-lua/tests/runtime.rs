@@ -2564,8 +2564,9 @@ async fn resty_core_modules_load_as_lua_resty_core_gives_them() {
             base.allows_subsystem("http", "stream")
             assert(not pcall(base.allows_subsystem, "stream"))
             assert(base.FFI_OK == 0 and base.FFI_DECLINED == -5)
-            local ok, err = pcall(require, "ngx.ssl.proxysslverify")
-            assert(not ok and tostring(err):find("no server certificate"), err)
+            local verify = require "ngx.ssl.proxysslverify"
+            local ok, err = pcall(verify.get_verify_result)
+            assert(not ok and tostring(err):find("API disabled in the current context"), err)
             ngx.say("ok")
         "#]),
     );
@@ -2573,4 +2574,34 @@ async fn resty_core_modules_load_as_lua_resty_core_gives_them() {
     let outcome = run(&mut scripts, handler(lua.handlers[0], Phase::Content)).await;
     assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
     assert_eq!(scripts.exchange().response.body, b"ok\n");
+}
+
+#[tokio::test]
+async fn proxy_verify_handlers_judge_the_upstream_certificate() {
+    let lua = start(
+        1,
+        handlers(&[r#"
+            local verify = require "ngx.ssl.proxysslverify"
+            local proxyssl = require "ngx.proxyssl"
+            assert(ngx.get_phase() == "proxy_ssl_verify")
+            assert(verify.get_verify_result() == 20)
+            assert(verify.get_verify_cert() == "\1\2\3\4")
+            assert(proxyssl.get_tls1_version() == proxyssl.TLS1_3_VERSION)
+            assert(proxyssl.get_tls1_version_str() == "TLSv1.3")
+            assert(ngx.var.host == "shop.example")
+            assert(verify.set_verify_result(0))
+        "#]),
+    );
+    let mut exchange = request("GET", "/", &[("host", "shop.example")]);
+    exchange.upstream_tls.chain = vec![vec![1, 2], vec![3, 4]];
+    exchange.upstream_tls.version = Some(0x0304);
+    exchange.upstream_tls.verify_result = 20;
+    let mut scripts = lua.runtime.scripts(exchange);
+    let outcome = run(
+        &mut scripts,
+        handler(lua.handlers[0], Phase::ProxySslVerify),
+    )
+    .await;
+    assert_eq!(outcome, Outcome::Continue, "{:?}", scripts.exchange().logs);
+    assert_eq!(scripts.exchange().upstream_tls.verdict, Some(0));
 }

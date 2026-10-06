@@ -41,10 +41,13 @@ pub enum Phase {
     /// `proxy_ssl_certificate_by_lua`: the certificate a request's TLS
     /// connection to its upstream presents when asked for one.
     ProxySslCertificate,
+    /// `proxy_ssl_verify_by_lua`: whether a request's new TLS connection to
+    /// its upstream may carry it, by the certificate the upstream presented.
+    ProxySslVerify,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 20] = [
+    pub const ALL: [Phase; 21] = [
         Phase::Init,
         Phase::InitWorker,
         Phase::ServerRewrite,
@@ -65,6 +68,7 @@ impl Phase {
         Phase::SslSessionFetch,
         Phase::SslSessionStore,
         Phase::ProxySslCertificate,
+        Phase::ProxySslVerify,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -89,6 +93,7 @@ impl Phase {
             Phase::SslSessionFetch => "ssl_session_fetch",
             Phase::SslSessionStore => "ssl_session_store",
             Phase::ProxySslCertificate => "proxy_ssl_cert",
+            Phase::ProxySslVerify => "proxy_ssl_verify",
         }
     }
 
@@ -351,6 +356,9 @@ pub struct Exchange {
     pub(crate) default_type: bool,
     /// The TLS handshake `ssl_*_by_lua` handlers run in.
     pub handshake: Handshake,
+    /// The request's TLS connection to its upstream, as
+    /// `proxy_ssl_verify_by_lua` sees and judges it.
+    pub upstream_tls: crate::ssl::UpstreamTls,
     /// The response header went to the client while a handler ran.
     pub(crate) streaming: bool,
 }
@@ -380,6 +388,7 @@ impl Exchange {
             named: None,
             default_type: true,
             handshake: Handshake::default(),
+            upstream_tls: crate::ssl::UpstreamTls::default(),
             streaming: false,
         }
     }
