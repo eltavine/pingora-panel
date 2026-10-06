@@ -511,6 +511,10 @@ impl PanelProxy {
                 .server_name
                 .clone_from(&handshake.server_name);
             exchange.handshake.version = handshake.version.map(TlsVersion::number);
+            if let Some((verified, chain)) = &handshake.client {
+                exchange.handshake.client_verify = Some(verified.clone());
+                exchange.handshake.client_chain.clone_from(chain);
+            }
         }
         if let Some(digest) = session
             .digest()

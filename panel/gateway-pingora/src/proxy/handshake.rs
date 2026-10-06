@@ -7,7 +7,10 @@
 
 use super::{lua_phases::Report, ListenerContext};
 use crate::{
-    adapter::ActiveSnapshot, certificates::ChosenCertificates, listeners::SESSION_CACHE, lua::Hook,
+    adapter::ActiveSnapshot,
+    certificates::{ChosenCertificates, ClientTerms},
+    listeners::SESSION_CACHE,
+    lua::Hook,
 };
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -328,23 +331,45 @@ impl PreTlsProcess for HandshakeScripts {
         let handshake = std::mem::take(&mut scripts.exchange().handshake);
         match certified(&handshake) {
             Ok(Some(key)) => self.chosen.choose(key),
+            // A response stapled to the TLS profile's certificate.
             Ok(None) => {
-                // A response stapled to the TLS profile's certificate.
-                let Some(response) = &handshake.ocsp else {
-                    return Ok(());
-                };
-                let certificates = snapshot.certificates.load();
-                let presented = certificates.presented(listener, handshake.server_name.as_deref());
-                if let Some(certificate) = presented {
-                    let mut key = CertifiedKey::clone(&certificate.key);
-                    key.ocsp = Some(response.to_vec());
-                    self.chosen.choose(Some(Arc::new(key)));
+                if let Some(response) = &handshake.ocsp {
+                    let certificates = snapshot.certificates.load();
+                    let presented =
+                        certificates.presented(listener, handshake.server_name.as_deref());
+                    if let Some(certificate) = presented {
+                        let mut key = CertifiedKey::clone(&certificate.key);
+                        key.ocsp = Some(response.to_vec());
+                        self.chosen.choose(Some(Arc::new(key)));
+                    }
                 }
             }
             Err(message) => {
                 report.write(hook, "", "error", &message);
                 return Err(ended());
             }
+        }
+        if let Some(asked) = &handshake.client_auth {
+            let mut roots = rustls::RootCertStore::empty();
+            let (_, refused) = roots.add_parsable_certificates(
+                asked
+                    .authorities
+                    .iter()
+                    .map(|certificate| CertificateDer::from(certificate.clone())),
+            );
+            if roots.is_empty() || refused > 0 {
+                report.write(
+                    hook,
+                    "",
+                    "error",
+                    "verify_client was given certificates that cannot be trusted to issue clients'",
+                );
+                return Err(ended());
+            }
+            self.chosen.ask_clients(ClientTerms {
+                roots: Arc::new(roots),
+                depth: asked.depth,
+            });
         }
         Ok(())
     }

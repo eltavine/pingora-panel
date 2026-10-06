@@ -159,15 +159,18 @@ impl ListenerPlan {
         self.server_config_with(
             resolver,
             rustls::server::ServerSessionMemoryCache::new(SESSION_CACHE),
+            rustls::server::WebPkiClientVerifier::no_client_auth(),
         )
     }
 
     /// [`Self::server_config`], resuming sessions from `sessions` when the
-    /// listener resumes them.
+    /// listener resumes them, and asking clients for certificates as
+    /// `clients` says.
     pub(crate) fn server_config_with(
         &self,
         resolver: Arc<dyn ResolvesServerCert>,
         sessions: Arc<dyn rustls::server::StoresServerSessions>,
+        clients: Arc<dyn rustls::server::danger::ClientCertVerifier>,
     ) -> Result<Arc<ServerConfig>> {
         let invalid = |detail: String| {
             PanelError::validation_failed(format!("listener {}: {detail}", self.id))
@@ -212,7 +215,7 @@ impl ListenerPlan {
         }))
         .with_protocol_versions(&versions)
         .map_err(|error| invalid(format!("TLS settings do not fit together: {error}")))?
-        .with_no_client_auth()
+        .with_client_cert_verifier(clients)
         .with_cert_resolver(resolver);
         config.alpn_protocols = match (self.alpn_http1, self.alpn_http2) {
             (true, true) => vec![b"h2".to_vec(), b"http/1.1".to_vec()],

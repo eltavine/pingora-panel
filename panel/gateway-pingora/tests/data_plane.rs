@@ -3783,3 +3783,138 @@ async fn proxy_certificate_scripts_present_their_certificate_to_upstreams() {
     assert_eq!(refused.status, 502);
     gateway.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn certificate_scripts_verify_clients_and_requests_read_how() {
+    use panel_ir::{LuaHandler, LUA_SCRIPTS_CAPABILITY};
+    use rcgen::{
+        BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose,
+        IsCa, Issuer, KeyPair,
+    };
+
+    let upstream = echo_upstream().await;
+    let secrets = tempfile::tempdir().unwrap();
+    let served = rcgen::generate_simple_self_signed(vec!["shop.example".into()]).unwrap();
+    std::fs::write(
+        secrets.path().join("edge.crt"),
+        pem("CERTIFICATE", served.cert.der()),
+    )
+    .unwrap();
+    std::fs::write(
+        secrets.path().join("edge.key"),
+        pem("PRIVATE KEY", &served.signing_key.serialize_der()),
+    )
+    .unwrap();
+    let ca_key = KeyPair::generate().unwrap();
+    let mut ca = CertificateParams::new(Vec::<String>::new()).unwrap();
+    ca.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    let ca_cert = ca.self_signed(&ca_key).unwrap();
+    let issuer = Issuer::from_params(&ca, &ca_key);
+    let client_key = KeyPair::generate().unwrap();
+    let mut client = CertificateParams::new(vec!["client.example".into()]).unwrap();
+    client.distinguished_name = DistinguishedName::new();
+    client
+        .distinguished_name
+        .push(DnType::OrganizationName, "Shop");
+    client
+        .distinguished_name
+        .push(DnType::CommonName, "shop client");
+    client.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+    let client_cert = client.signed_by(&client_key, &issuer).unwrap();
+    let stranger = rcgen::generate_simple_self_signed(vec!["stranger.example".into()]).unwrap();
+
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot.tls_profiles.push(TlsProfile {
+        id: "edge".into(),
+        certificate_secret_id: "edge.crt".into(),
+        private_key_secret_id: "edge.key".into(),
+        min_protocol: "TLSv1.2".into(),
+        max_protocol: None,
+        cipher_suites: Vec::new(),
+        session_resumption: false,
+        alpn: BTreeSet::new(),
+    });
+    let mut listener = ListenerRef::new("https", listen.to_string());
+    listener.tls_profile_id = Some("edge".into());
+    snapshot.listeners.push(listener);
+    snapshot
+        .required_capabilities
+        .push(CapabilityRequirement::new(LUA_SCRIPTS_CAPABILITY, "1"));
+    snapshot.lua.scripts = vec![
+        lua_script(
+            "ask",
+            &format!(
+                "local ssl = require 'ngx.ssl' \
+                 assert(ssl.verify_client(assert(ssl.parse_pem_cert([==[{}]==])), 1))",
+                pem("CERTIFICATE", ca_cert.der())
+            ),
+        ),
+        lua_script(
+            "who",
+            "ngx.print(ngx.var.ssl_client_verify, '|', tostring(ngx.var.ssl_client_s_dn))",
+        ),
+    ];
+    let mut shop = site(&["shop.example"]);
+    shop.lua.ssl_cert = Some(LuaHandler::new("ask"));
+    snapshot.sites.push(shop);
+    snapshot.upstream_pools.push(pool("app", &[upstream]));
+    snapshot.routes.push(route(
+        "who",
+        1,
+        prefix("/"),
+        RouteAction::Lua {
+            handler: LuaHandler::new("who"),
+        },
+    ));
+    let gateway = Gateway::start(
+        AdapterOptions::default().with_secrets(Arc::new(DirectorySecrets::new(secrets.path()))),
+        snapshot,
+    )
+    .await;
+    wait_for(listen).await;
+
+    let mut roots = rustls::RootCertStore::empty();
+    roots.add(served.cert.der().clone()).unwrap();
+    let builder = || {
+        rustls::ClientConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_root_certificates(roots.clone())
+    };
+    let ask = |config: rustls::ClientConfig| async move {
+        let stream = TcpStream::connect(listen).await.unwrap();
+        let mut stream = tokio_rustls::TlsConnector::from(Arc::new(config))
+            .connect(
+                rustls_pki_types::ServerName::try_from("shop.example").unwrap(),
+                stream,
+            )
+            .await
+            .unwrap();
+        let response = exchange(
+            &mut stream,
+            "GET / HTTP/1.1\r\nhost: shop.example\r\nconnection: close\r\n\r\n",
+        )
+        .await;
+        String::from_utf8(response.body).unwrap()
+    };
+    let certified = builder()
+        .with_client_auth_cert(
+            vec![client_cert.der().clone()],
+            rustls_pki_types::PrivatePkcs8KeyDer::from(client_key.serialize_der()).into(),
+        )
+        .unwrap();
+    assert_eq!(ask(certified).await, "SUCCESS|CN=shop client,O=Shop");
+    assert_eq!(ask(builder().with_no_client_auth()).await, "NONE|nil");
+    let strange = builder()
+        .with_client_auth_cert(
+            vec![stranger.cert.der().clone()],
+            rustls_pki_types::PrivatePkcs8KeyDer::from(stranger.signing_key.serialize_der()).into(),
+        )
+        .unwrap();
+    let said = ask(strange).await;
+    assert!(said.starts_with("FAILED:"), "{said}");
+    gateway.stop().await;
+}

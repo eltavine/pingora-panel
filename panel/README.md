@@ -1397,8 +1397,10 @@ configuration replaces it. `ssl_client_hello_by_lua*` and
 `ssl_certificate_by_lua*` in `http` or a server run as a TLS handshake
 begins, for the server its server name selects: `ngx.ssl.clienthello`
 reads the client's hello, `ngx.ssl` presents a certificate of the script's
-in place of the TLS profile's, `ngx.ocsp` checks and staples OCSP
-responses, and `ngx.exit(ngx.ERROR)` ends the handshake. `ssl_session_fetch_by_lua*` and `ssl_session_store_by_lua*` in
+in place of the TLS profile's or asks the client for one with
+`verify_client`, whose result requests read as `$ssl_client_verify`,
+`ngx.ocsp` checks and staples OCSP responses, and `ngx.exit(ngx.ERROR)`
+ends the handshake. `ssl_session_fetch_by_lua*` and `ssl_session_store_by_lua*` in
 `http` keep TLS sessions where scripts choose, with `ngx.ssl.session`, so
 any listener, or another gateway, resumes them, and
 `proxy_ssl_certificate_by_lua*` chooses the certificate a route's TLS

@@ -211,9 +211,9 @@ fn load_profile(profile: &TlsProfile, secrets: &dyn SecretSource) -> Result<Serv
     })
 }
 
-/// The certificates `ssl_certificate_by_lua` chose, by the task of the
-/// handshake they are for: rustls asks for its certificate in the task
-/// that ran the scripts. `None` presents none, and the handshake fails.
+/// What `ssl_certificate_by_lua` chose for a handshake, by the task of the
+/// handshake: rustls asks for its certificate, and whether to ask the
+/// client for one, in the task that ran the scripts.
 #[derive(Default)]
 pub(crate) struct ChosenCertificates {
     pending: AtomicUsize,
@@ -222,45 +222,230 @@ pub(crate) struct ChosenCertificates {
 
 struct Choice {
     at: Instant,
-    key: Option<Arc<CertifiedKey>>,
+    /// The certificate presented; `Some(None)` presents none, and the
+    /// handshake fails.
+    key: Option<Option<Arc<CertifiedKey>>>,
+    /// What verifies the client's certificate, when scripts ask for one.
+    clients: Option<Arc<ClientTerms>>,
+    /// How it verified, as `$ssl_client_verify` says.
+    verified: Option<String>,
+}
+
+/// What a client's certificate is verified against (`verify_client`).
+pub(crate) struct ClientTerms {
+    pub roots: Arc<rustls::RootCertStore>,
+    pub depth: usize,
 }
 
 impl ChosenCertificates {
-    /// Presents `key` in the current task's handshake.
-    pub(crate) fn choose(&self, key: Option<Arc<CertifiedKey>>) {
+    fn update(&self, change: impl FnOnce(&mut Choice)) {
         let Some(task) = tokio::task::try_id() else {
             return;
         };
         let now = Instant::now();
         let mut by_task = self.by_task.lock();
         by_task.retain(|_, choice| now.duration_since(choice.at) < CHOSEN_FOR);
-        by_task.insert(task, Choice { at: now, key });
+        change(by_task.entry(task).or_insert_with(|| Choice {
+            at: now,
+            key: None,
+            clients: None,
+            verified: None,
+        }));
         self.pending.store(by_task.len(), Ordering::Release);
     }
 
-    /// What scripts chose for the current task's handshake, if they ran.
-    fn chosen(&self) -> Option<Option<Arc<CertifiedKey>>> {
+    fn read<T>(&self, read: impl FnOnce(&Choice) -> Option<T>) -> Option<T> {
         if self.pending.load(Ordering::Acquire) == 0 {
             return None;
         }
         let task = tokio::task::try_id()?;
-        self.by_task
-            .lock()
-            .get(&task)
-            .map(|choice| choice.key.clone())
+        self.by_task.lock().get(&task).and_then(read)
     }
 
-    /// Forgets the choice once the current task's handshake is done.
-    fn finished(&self) {
+    /// Presents `key` in the current task's handshake.
+    pub(crate) fn choose(&self, key: Option<Arc<CertifiedKey>>) {
+        self.update(|choice| choice.key = Some(key));
+    }
+
+    /// Asks the client of the current task's handshake for a certificate,
+    /// verified on `terms`.
+    pub(crate) fn ask_clients(&self, terms: ClientTerms) {
+        self.update(|choice| choice.clients = Some(Arc::new(terms)));
+    }
+
+    /// What scripts chose to present in the current task's handshake.
+    fn chosen(&self) -> Option<Option<Arc<CertifiedKey>>> {
+        self.read(|choice| choice.key.clone())
+    }
+
+    fn client_terms(&self) -> Option<Arc<ClientTerms>> {
+        self.read(|choice| choice.clients.clone())
+    }
+
+    fn verified(&self, result: String) {
+        self.update(|choice| choice.verified = Some(result));
+    }
+
+    /// Forgets the choice once the current task's handshake is done,
+    /// saying how the client's certificate verified when one was asked for.
+    /// A resumed session's certificate, which rustls does not verify again,
+    /// is verified here.
+    fn finished(&self, chain: &[CertificateDer<'_>]) -> Option<String> {
         if self.pending.load(Ordering::Acquire) == 0 {
-            return;
+            return None;
         }
-        let Some(task) = tokio::task::try_id() else {
-            return;
+        let task = tokio::task::try_id()?;
+        let choice = {
+            let mut by_task = self.by_task.lock();
+            let choice = by_task.remove(&task);
+            self.pending.store(by_task.len(), Ordering::Release);
+            choice?
         };
-        let mut by_task = self.by_task.lock();
-        by_task.remove(&task);
-        self.pending.store(by_task.len(), Ordering::Release);
+        let terms = choice.clients?;
+        Some(match (choice.verified, chain.split_first()) {
+            (Some(verified), _) => verified,
+            (None, Some((end_entity, intermediates))) => client_verification(
+                &terms,
+                &Arc::new(rustls::crypto::ring::default_provider()),
+                end_entity,
+                intermediates,
+                rustls_pki_types::UnixTime::now(),
+            ),
+            (None, None) => "NONE".into(),
+        })
+    }
+}
+
+/// How a client's chain verifies on `terms`, as `$ssl_client_verify`
+/// says it.
+fn client_verification(
+    terms: &ClientTerms,
+    provider: &Arc<rustls::crypto::CryptoProvider>,
+    end_entity: &CertificateDer<'_>,
+    intermediates: &[CertificateDer<'_>],
+    now: rustls_pki_types::UnixTime,
+) -> String {
+    let counted = intermediates
+        .iter()
+        .filter(|certificate| !self_issued(certificate))
+        .count();
+    if counted > terms.depth {
+        return format!(
+            "FAILED:certificate chain too long: {counted} intermediate certificates where the depth allows {}",
+            terms.depth
+        );
+    }
+    let verified = rustls::server::WebPkiClientVerifier::builder_with_provider(
+        Arc::clone(&terms.roots),
+        Arc::clone(provider),
+    )
+    .build()
+    .map_err(|error| error.to_string())
+    .and_then(|verifier| {
+        verifier
+            .verify_client_cert(end_entity, intermediates, now)
+            .map_err(|error| error.to_string())
+    });
+    match verified {
+        Ok(_) => "SUCCESS".to_owned(),
+        Err(error) => format!("FAILED:{error}"),
+    }
+}
+
+/// Asks clients for a certificate where `ssl_certificate_by_lua` called
+/// `verify_client`, and verifies it there, as nginx does, without ending
+/// the handshake when it does not verify: `$ssl_client_verify` says how it
+/// went.
+#[derive(Debug)]
+pub(crate) struct ScriptedClients {
+    chosen: Arc<ChosenCertificates>,
+    provider: Arc<rustls::crypto::CryptoProvider>,
+}
+
+impl ScriptedClients {
+    pub(crate) fn new(chosen: Arc<ChosenCertificates>) -> Self {
+        Self {
+            chosen,
+            provider: Arc::new(rustls::crypto::ring::default_provider()),
+        }
+    }
+}
+
+impl fmt::Debug for ChosenCertificates {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ChosenCertificates")
+            .finish_non_exhaustive()
+    }
+}
+
+/// Whether `certificate` names itself as its issuer.
+fn self_issued(certificate: &[u8]) -> bool {
+    x509_parser::parse_x509_certificate(certificate)
+        .is_ok_and(|(_, certificate)| certificate.issuer() == certificate.subject())
+}
+
+impl rustls::server::danger::ClientCertVerifier for ScriptedClients {
+    fn offer_client_auth(&self) -> bool {
+        self.chosen.client_terms().is_some()
+    }
+
+    fn client_auth_mandatory(&self) -> bool {
+        false
+    }
+
+    fn root_hint_subjects(&self) -> &[rustls::DistinguishedName] {
+        &[]
+    }
+
+    fn verify_client_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        intermediates: &[CertificateDer<'_>],
+        now: rustls_pki_types::UnixTime,
+    ) -> std::result::Result<rustls::server::danger::ClientCertVerified, rustls::Error> {
+        let result = match self.chosen.client_terms() {
+            None => "FAILED:no client certificate was asked for".to_owned(),
+            Some(terms) => {
+                client_verification(&terms, &self.provider, end_entity, intermediates, now)
+            }
+        };
+        self.chosen.verified(result);
+        Ok(rustls::server::danger::ClientCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        certificate: &CertificateDer<'_>,
+        signature: &rustls::DigitallySignedStruct,
+    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(
+            message,
+            certificate,
+            signature,
+            &self.provider.signature_verification_algorithms,
+        )
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        certificate: &CertificateDer<'_>,
+        signature: &rustls::DigitallySignedStruct,
+    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(
+            message,
+            certificate,
+            signature,
+            &self.provider.signature_verification_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        self.provider
+            .signature_verification_algorithms
+            .supported_schemes()
     }
 }
 
@@ -314,6 +499,9 @@ impl ResolvesServerCert for ListenerCertificates {
 pub(crate) struct Handshake {
     pub server_name: Option<String>,
     pub version: Option<TlsVersion>,
+    /// How the client's certificate verified, where scripts asked for
+    /// one, and the certificates it presented.
+    pub client: Option<(String, Vec<Vec<u8>>)>,
 }
 
 /// Keeps what a completed handshake negotiated for the requests on its
@@ -330,14 +518,23 @@ impl TlsAccept for HandshakeRecorder {
         &self,
         tls: &TlsRef,
     ) -> Option<Arc<dyn Any + Send + Sync>> {
-        self.chosen.finished();
+        let presented = tls.peer_cert_chain_der().unwrap_or_default();
+        let verified = self.chosen.finished(presented);
         let version = tls.version().and_then(TlsVersion::parse);
         if let Some((metrics, listener)) = &self.metrics {
             metrics.handshake(listener, version);
         }
+        let client = verified.map(|verified| {
+            let chain = presented
+                .iter()
+                .map(|certificate| certificate.to_vec())
+                .collect();
+            (verified, chain)
+        });
         Some(Arc::new(Handshake {
             server_name: tls.server_name().map(str::to_ascii_lowercase),
             version,
+            client,
         }))
     }
 }

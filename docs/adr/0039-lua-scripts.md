@@ -126,12 +126,20 @@ validity give or take five minutes, as OpenSSL allows — and in
 the script's or the TLS profile's. The handlers have the functions
 lua-nginx-module allows there (`ngx.exit`, `ngx.sleep`, cosockets, light
 threads, timers and `ngx.semaphore`), and neither `ngx.ctx` nor `ngx.var`.
-The functions that need OpenSSL return `nil` and why: `verify_client` and
-`clienthello.set_protocols`, since rustls asks every connection to a
-listener for a client certificate or none and offers them all the same
-versions; `get_session_master_key`, which would give scripts what decrypts
-the connection; and `get_req_ssl_pointer` and its kin, which hand out
-OpenSSL handles for the FFI scripts do not have.
+`verify_client` asks the client for a certificate and verifies it on the
+authorities it is given, with at most as many intermediates as its depth
+(1 unless given), and as in nginx a certificate that does not verify ends
+no handshake: the connection's requests read `$ssl_client_verify`
+(`SUCCESS`, `FAILED:` and why, or `NONE`), `$ssl_client_raw_cert`,
+`$ssl_client_cert`, `$ssl_client_s_dn` and `$ssl_client_i_dn` as RFC 2253
+writes them, `$ssl_client_serial` and `$ssl_client_fingerprint`, and a
+resumed session's certificate is verified again on the same terms. rustls
+names acceptable authorities for a whole listener, so none are named to
+the client. The functions that need OpenSSL return `nil` and why:
+`clienthello.set_protocols`, since rustls offers every connection to a
+listener the same versions; `get_session_master_key`, which would give
+scripts what decrypts the connection; and `get_req_ssl_pointer` and its
+kin, which hand out OpenSSL handles for the FFI scripts do not have.
 `ssl_session_fetch_by_lua*` and `ssl_session_store_by_lua*` share
 sessions beyond one listener. rustls keeps each listener's sessions; a
 hello that offers to resume one the listener does not hold — by its first

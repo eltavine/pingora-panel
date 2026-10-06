@@ -8,7 +8,7 @@
 use crate::{
     acme::ChallengeDirectory,
     adapter::{ActiveSnapshot, PingoraGatewayAdapter},
-    certificates::{ChosenCertificates, HandshakeRecorder, ListenerCertificates},
+    certificates::{ChosenCertificates, HandshakeRecorder, ListenerCertificates, ScriptedClients},
     head_deadline::{Connections, HeadDeadline},
     listeners::{self, ListenerPlan, SocketKey},
     log_files::Logs,
@@ -454,9 +454,10 @@ impl Generation {
                     Arc::new(ListenerCertificates::new(
                         Arc::clone(&active),
                         plan.id.clone(),
-                        chosen,
+                        Arc::clone(&chosen),
                     )),
                     sessions,
+                    Arc::new(ScriptedClients::new(chosen)),
                 )?;
                 let settings = TlsSettings::from_server_config(config, Some(Box::new(handshakes)));
                 let mut endpoints = Listeners::new();
