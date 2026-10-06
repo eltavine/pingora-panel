@@ -1426,6 +1426,7 @@ that mean one thing in every phase.
 | `lua_regex_cache_max_entries` | `1024` | compiled `ngx.re` expressions each VM keeps, none at `0` (`http` only) |
 | `lua_regex_match_limit` | PCRE2's | backtracking a match may do before it fails (`http` only) |
 | `lua_worker_thread_vm_pool_size` | `10` | VMs `ngx.run_worker_thread` runs module functions on at once (`http` only) |
+| `lua_capture_error_log` | none | what each VM's scripts log, kept up to this size for `ngx.errlog.get_logs` (`http` only) |
 | `lua_allow` | `none` | `body`, `upstream` (balancers), `network` (cosockets) |
 | `lua_on_error` | `fail` | what a failed run does |
 | `lua_log_level` | `notice` | the least severe `ngx.log` messages kept |

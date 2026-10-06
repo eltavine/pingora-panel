@@ -378,6 +378,10 @@ pub struct LuaProgram {
     /// `lua_worker_thread_vm_pool_size` sets them; zero for 10.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub worker_thread_vm_pool_size: u64,
+    /// Bytes of what each VM's scripts log that `ngx.errlog` reads back, as
+    /// `lua_capture_error_log` sets them; none kept at zero.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub capture_error_log_bytes: u64,
 }
 
 impl LuaProgram {

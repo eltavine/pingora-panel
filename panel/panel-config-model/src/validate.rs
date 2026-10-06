@@ -620,6 +620,19 @@ fn validate_lua(model: &ConfigModel, report: &mut Report) {
             ),
         );
     }
+    if lua.capture_error_log_bytes.is_some_and(|bytes| {
+        !(panel_engine::LEAST_LUA_ERROR_LOG_BYTES..=panel_engine::MOST_LUA_ERROR_LOG_BYTES)
+            .contains(&bytes)
+    }) {
+        report.error(
+            "lua",
+            format!(
+                "lua_capture_error_log is not {} to {} bytes",
+                panel_engine::LEAST_LUA_ERROR_LOG_BYTES,
+                panel_engine::MOST_LUA_ERROR_LOG_BYTES
+            ),
+        );
+    }
     if lua
         .worker_thread_vm_pool_size
         .is_some_and(|vms| !(1..=panel_engine::MOST_LUA_WORKER_VMS).contains(&vms))

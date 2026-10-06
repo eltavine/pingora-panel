@@ -2074,3 +2074,51 @@ async fn resty_core_modules_and_lrucache_work_as_in_openresty() {
         2
     );
 }
+
+#[tokio::test]
+async fn errlog_reads_back_what_scripts_logged() {
+    let lua = start(1, |builder| {
+        builder.capture_error_log(4096);
+        vec![builder.handler(&source(
+            r#"
+            local errlog = require "ngx.errlog"
+            ngx.log(ngx.ERR, "first")
+            errlog.raw_log(ngx.WARN, "plain")
+            local logs = assert(errlog.get_logs(10))
+            assert(#logs == 6, #logs)
+            assert(logs[1] == ngx.ERR and type(logs[2]) == "number" and logs[3]:find("first$"))
+            assert(logs[4] == ngx.WARN and logs[6] == "plain", logs[6])
+            assert(#assert(errlog.get_logs()) == 0)
+            assert(errlog.get_sys_filter_level() == ngx.DEBUG)
+            ngx.say("ok")
+            "#,
+        ))]
+    });
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = run(&mut scripts, handler(lua.handlers[0], Phase::Content)).await;
+    assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+    assert_eq!(scripts.exchange().response.body, b"ok\n");
+    assert!(scripts
+        .exchange()
+        .logs
+        .iter()
+        .any(|entry| entry.message == "plain"));
+
+    let unconfigured = start(
+        1,
+        handlers(&[r#"
+            local logs, err = require("ngx.errlog").get_logs()
+            ngx.say(tostring(logs), " ", err)
+        "#]),
+    );
+    let mut scripts = unconfigured.runtime.scripts(request("GET", "/", &[]));
+    run(
+        &mut scripts,
+        handler(unconfigured.handlers[0], Phase::Content),
+    )
+    .await;
+    assert_eq!(
+        scripts.exchange().response.body,
+        b"nil the 'lua_capture_error_log' directive is not configured\n"
+    );
+}

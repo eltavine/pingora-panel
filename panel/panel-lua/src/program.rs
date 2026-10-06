@@ -122,6 +122,9 @@ pub struct Program {
     pub(crate) worker_vms: usize,
     /// The client settings of the TLS terms handlers name, by `TlsId`.
     pub(crate) tls: Vec<crate::tls::TlsConfigs>,
+    /// Bytes of what each VM's scripts log that `ngx.errlog` reads back;
+    /// none kept at zero.
+    pub(crate) error_log: usize,
 }
 
 impl Program {
@@ -236,6 +239,14 @@ impl ProgramBuilder {
             }
         };
         crate::tls::TlsId(u32::try_from(index).unwrap_or(u32::MAX))
+    }
+
+    /// The bytes of what its scripts log each VM keeps for
+    /// `ngx.errlog.get_logs`, as `lua_capture_error_log` sets them; zero
+    /// keeps none.
+    pub fn capture_error_log(&mut self, bytes: usize) -> &mut Self {
+        self.program.error_log = bytes;
+        self
     }
 
     /// Limits for `init_by_lua` and `init_worker_by_lua`.

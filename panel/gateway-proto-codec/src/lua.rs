@@ -44,6 +44,7 @@ pub(super) fn decode_program(value: Option<wire::LuaProgram>) -> Result<LuaProgr
         regex_match_limit: value.regex_match_limit,
         access_first: value.access_first,
         worker_thread_vm_pool_size: value.worker_thread_vm_pool_size,
+        capture_error_log_bytes: value.capture_error_log_bytes,
     })
 }
 
@@ -83,6 +84,7 @@ pub(super) fn encode_program(value: &LuaProgram) -> Option<wire::LuaProgram> {
         regex_match_limit: value.regex_match_limit,
         access_first: value.access_first,
         worker_thread_vm_pool_size: value.worker_thread_vm_pool_size,
+        capture_error_log_bytes: value.capture_error_log_bytes,
     })
 }
 

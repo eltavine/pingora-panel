@@ -327,6 +327,7 @@ impl Vm {
             program.regex_match_limit,
         ));
         lua.set_app_data(crate::tls::TlsTable(program.tls.clone().into()));
+        lua.set_app_data(api::ErrorLog::new(program.error_log));
         let slot = Arc::new(Slot::new(index));
         {
             let slot = Arc::clone(&slot);

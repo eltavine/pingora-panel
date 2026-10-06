@@ -552,6 +552,7 @@ fn lua_programs_and_handlers_round_trip_and_unknown_kinds_are_refused() {
         regex_match_limit: 100_000,
         access_first: true,
         worker_thread_vm_pool_size: 4,
+        capture_error_log_bytes: 32 << 10,
     };
     let site_id = SiteId::new("site").unwrap();
     let mut site = SiteSpec::new(

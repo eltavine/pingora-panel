@@ -152,7 +152,6 @@ pub(crate) const INERT: &[(&str, &str)] = &[
     ("lua_malloc_trim", "the gateway's allocator returns freed memory to the system itself"),
     ("lua_sa_restart", "scripts make no system calls a signal could interrupt"),
     ("lua_thread_cache_max_entries", "VMs reuse coroutines without a cache to size"),
-    ("lua_capture_error_log", "ngx.errlog is not available, and what scripts log goes to the gateway's error log"),
     ("rewrite_by_lua_no_postpone", "nothing else runs in the rewrite phase for rewrite_by_lua to wait for"),
     ("precontent_by_lua_no_postpone", "nothing else runs in the precontent phase for precontent_by_lua to wait for"),
     ("lua_http10_buffering", "the answers of scripts are always buffered and sent with a Content-Length"),
@@ -185,6 +184,7 @@ pub(super) const HTTP: &[&str] = &[
     "lua_regex_cache_max_entries",
     "lua_regex_match_limit",
     "lua_worker_thread_vm_pool_size",
+    "lua_capture_error_log",
     "init_by_lua_block",
     "init_by_lua_file",
     "init_worker_by_lua_block",
@@ -574,6 +574,9 @@ impl<'a> Lowerer<'a> {
             }
             "lua_memory_limit" => {
                 self.lua.memory_limit_bytes = self.size(file, &directive.args[0]);
+            }
+            "lua_capture_error_log" => {
+                self.lua.capture_error_log_bytes = self.size(file, &directive.args[0]);
             }
             "access_by_lua_no_postpone" => {
                 self.lua.access_no_postpone = self.bool_arg(file, &directive.args[0]);

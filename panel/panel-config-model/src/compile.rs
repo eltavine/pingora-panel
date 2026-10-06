@@ -439,6 +439,7 @@ impl Compiler<'_> {
         program.regex_match_limit = config.regex_match_limit.unwrap_or(0);
         program.access_first = config.access_no_postpone.unwrap_or(false);
         program.worker_thread_vm_pool_size = config.worker_thread_vm_pool_size.unwrap_or(0);
+        program.capture_error_log_bytes = config.capture_error_log_bytes.unwrap_or(0);
         self.snapshot.lua = program;
         self.capabilities.insert(LUA_SCRIPTS_CAPABILITY);
     }

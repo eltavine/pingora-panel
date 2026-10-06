@@ -29,6 +29,9 @@ pub const MOST_LUA_SOCKET_BUFFER: u64 = 16 << 20;
 pub const MOST_LUA_SOCKET_POOL: u64 = 1 << 16;
 /// The most VMs `lua_worker_thread_vm_pool_size` may allow.
 pub const MOST_LUA_WORKER_VMS: u64 = 1024;
+/// What `lua_capture_error_log` may keep for each VM.
+pub const LEAST_LUA_ERROR_LOG_BYTES: u64 = 1 << 10;
+pub const MOST_LUA_ERROR_LOG_BYTES: u64 = 256 << 20;
 /// The most variables a site or a route may set.
 pub const MOST_LUA_VARIABLES: usize = 256;
 /// The most intermediate certificates `lua_ssl_verify_depth` may allow, as
@@ -352,6 +355,17 @@ pub fn problems(snapshot: &RuntimeSnapshot) -> Vec<(String, String)> {
         found.push((
             "lua".into(),
             format!("lua_regex_cache_max_entries is over {MOST_LUA_REGEX_CACHE}"),
+        ));
+    }
+    if program.capture_error_log_bytes != 0
+        && !(LEAST_LUA_ERROR_LOG_BYTES..=MOST_LUA_ERROR_LOG_BYTES)
+            .contains(&program.capture_error_log_bytes)
+    {
+        found.push((
+            "lua".into(),
+            format!(
+                "lua_capture_error_log is not {LEAST_LUA_ERROR_LOG_BYTES} to {MOST_LUA_ERROR_LOG_BYTES} bytes"
+            ),
         ));
     }
     if program.worker_thread_vm_pool_size > MOST_LUA_WORKER_VMS {

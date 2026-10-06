@@ -211,7 +211,7 @@ fn panel_v1(lua: &Lua, module_meta: &Table) -> mlua::Result<Value> {
 }
 
 /// The modules OpenResty scripts commonly load that come with the gateway.
-pub(crate) const BUILT_IN: [&str; 28] = [
+pub(crate) const BUILT_IN: [&str; 29] = [
     "panel.v1",
     "cjson",
     "cjson.safe",
@@ -240,6 +240,7 @@ pub(crate) const BUILT_IN: [&str; 28] = [
     "ngx.process",
     "resty.lrucache",
     "resty.lrucache.pureffi",
+    "ngx.errlog",
 ];
 
 fn built_in(
@@ -319,6 +320,7 @@ fn built_in(
         "resty.sha384" => hasher::<Sha384>(lua)?,
         "resty.sha512" => hasher::<Sha512>(lua)?,
         "ngx.re" => ngx.raw_get("re")?,
+        "ngx.errlog" => Value::Table(super::errlog::module(lua, slot)?),
         "ngx.resp" | "ngx.req" => {
             let module = lua.create_table()?;
             let table: Table = ngx.raw_get(&name[4..])?;

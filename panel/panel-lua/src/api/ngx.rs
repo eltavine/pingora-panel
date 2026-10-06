@@ -284,6 +284,7 @@ fn log(lua: &Lua, slot: &Arc<Slot>, print: bool) -> mlua::Result<mlua::Function>
                 },
             }
         }
+        super::errlog::capture(lua, level, &message);
         cell.exchange.lock().log(level, message);
         Ok(())
     })

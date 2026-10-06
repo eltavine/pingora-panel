@@ -4,6 +4,7 @@
 mod bit;
 mod codec;
 pub(crate) mod contexts;
+mod errlog;
 mod json;
 mod location;
 mod modules;
@@ -20,6 +21,7 @@ mod udp;
 mod var;
 
 pub(crate) use contexts::Api;
+pub(crate) use errlog::ErrorLog;
 pub(crate) use modules::BUILT_IN as BUILT_IN_MODULES;
 pub(crate) use ngx::UNAVAILABLE;
 pub(crate) use re::{Regexes, CACHE_ENTRIES as REGEX_CACHE_ENTRIES};

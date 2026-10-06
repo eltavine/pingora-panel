@@ -130,7 +130,11 @@ which refuses `enable_privileged_agent` because a privileged agent would
 run scripts with the gateway's own privileges outside the sandbox and
 `signal_graceful_exit` because scripts do not stop workers, and
 `resty.lrucache` (with `resty.lrucache.pureffi`), each VM holding its own
-caches, so the library scripts vendor for its FFI needs no FFI. Errors the runtime's functions raise reach `pcall` as
+caches, so the library scripts vendor for its FFI needs no FFI.
+`lua_capture_error_log` keeps, for each VM, what its scripts log up to the
+size given, oldest messages dropped first, for `ngx.errlog.get_logs`;
+`ngx.errlog` also has `raw_log`, `set_filter_level` in `init_by_lua` and
+`get_sys_filter_level`. Errors the runtime's functions raise reach `pcall` as
 strings, as a C function's do. Every `ngx` function either follows its documentation or
 raises an error naming it, and checking the configuration lists each place a
 script uses a function this gateway does not provide.
@@ -143,8 +147,8 @@ honour for TCP, are refused.
 `lua_transform_underscores_in_response_headers`, `lua_use_default_type` and
 `lua_need_request_body` apply as in lua-nginx-module. Directives with nothing to tune here —
 `lua_load_resty_core`, `lua_malloc_trim`, `lua_sa_restart`,
-`lua_thread_cache_max_entries`, `lua_capture_error_log`,
-`lua_http10_buffering`, `rewrite_by_lua_no_postpone`,
+`lua_thread_cache_max_entries`, `lua_http10_buffering`,
+`rewrite_by_lua_no_postpone`,
 `precontent_by_lua_no_postpone`,
 `lua_upstream_skip_openssl_default_verify` and `balancer_keepalive` — are
 read with a warning saying why, so configurations written for OpenResty

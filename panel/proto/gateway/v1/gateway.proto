@@ -758,6 +758,9 @@ message LuaProgram {
   // The VMs ngx.run_worker_thread may run on at once
   // (lua_worker_thread_vm_pool_size); zero keeps 10.
   uint64 worker_thread_vm_pool_size = 13;
+  // Bytes of what each VM's scripts log that ngx.errlog reads back
+  // (lua_capture_error_log); none kept at zero.
+  uint64 capture_error_log_bytes = 14;
 }
 
 message ValidateRequest {
