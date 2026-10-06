@@ -172,8 +172,12 @@ does, with the `method`, `args`, `body`, `vars`, `copy_all_vars`,
 and with `ctx` its scripts run on the VM of the script that made it with
 that table as their `ngx.ctx`. As in nginx, subrequests skip the access
 phase, are not logged, see `ngx.is_subrequest` true and may nest fifty
-deep; `capture_multi` runs its subrequests at once. Named locations, the
-raw request socket of `ngx.req.socket(true)` and body files are not
+deep; `capture_multi` runs its subrequests at once. A named location
+(`location @name`, or `match named <name>` in a route) takes no request
+path: `ngx.exec("@name")` sends the request there with its URI and
+arguments as they are, starting at the route's rewrite phase as nginx's
+named locations do, and a name no route has is answered 500. The raw
+request socket of `ngx.req.socket(true)` and body files are not
 available.
 
 **Native API.** Next to `ngx`, `require("panel.v1")` returns the

@@ -193,6 +193,8 @@ pub(crate) struct RequestContext {
     variables: HashMap<String, String>,
     /// What a script's subrequest keeps of the script that made it.
     subrequest: Option<crate::subrequests::Subrequest>,
+    /// The named location `ngx.exec("@name")` sent the request to.
+    named: Option<String>,
 }
 
 impl RequestContext {
@@ -309,6 +311,7 @@ impl ProxyHttp for PanelProxy {
             lua_peer: None,
             variables: HashMap::new(),
             subrequest: None,
+            named: None,
         }
     }
 
@@ -439,19 +442,27 @@ impl ProxyHttp for PanelProxy {
         }
         let mut changes_left = MOST_URI_CHANGES;
         'request: loop {
+            // A named location starts at its own rewrite phase, as nginx's
+            // does: the server's variables and handler do not run again.
+            let named = ctx.named.take();
             let site_path = panel_routing::path::normalize(session.req_header().uri.path())
                 .map_or_else(
                     || session.req_header().uri.path().to_owned(),
                     |path| path.into_owned(),
                 );
             self.lua_prepare_header_filter(session, ctx, &site_path, host_name);
+            let site_variables = if named.is_some() {
+                &[][..]
+            } else {
+                &site.lua.variables[..]
+            };
             if let LuaStep::Done = self
-                .lua_variables(session, ctx, &site.lua.variables, &site_path, host_name)
+                .lua_variables(session, ctx, site_variables, &site_path, host_name)
                 .await?
             {
                 return Ok(true);
             }
-            if let Some(hook) = site.lua.server_rewrite.clone() {
+            if let Some(hook) = site.lua.server_rewrite.clone().filter(|_| named.is_none()) {
                 match self
                     .lua_request(session, ctx, &hook, &site_path, host_name, true)
                     .await?
@@ -485,8 +496,18 @@ impl ProxyHttp for PanelProxy {
                 path: &path,
                 client: ctx.client,
             };
-            let Some(mut route_index) = routing.select(site_index, &request) else {
-                responses::plain(session, 404, "not found", &[]).await?;
+            let found = match &named {
+                Some(name) => routing.named(site_index, name),
+                None => routing.select(site_index, &request),
+            };
+            let Some(mut route_index) = found else {
+                match &named {
+                    Some(name) => {
+                        let message = format!("could not find named location \"@{name}\"");
+                        responses::plain(session, 500, &message, &[]).await?;
+                    }
+                    None => responses::plain(session, 404, "not found", &[]).await?,
+                }
                 return Ok(true);
             };
             ctx.route = Some(route_index);

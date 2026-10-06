@@ -276,6 +276,11 @@ impl RoutingTable {
     pub(crate) fn select(&self, site: usize, request: &impl Request) -> Option<usize> {
         self.router.site(site).select(request)
     }
+
+    /// The named location `name` of the site at `site`.
+    pub(crate) fn named(&self, site: usize, name: &str) -> Option<usize> {
+        self.router.site(site).named(name)
+    }
 }
 
 impl SiteRoutes {

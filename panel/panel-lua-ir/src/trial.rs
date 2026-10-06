@@ -547,7 +547,11 @@ async fn pipeline(
     let site_hooks = index.sites.get(site.id.as_str());
     let mut changes_left = MOST_URI_CHANGES;
     'request: loop {
-        let variables = site_hooks.map_or(&[][..], |hooks| &hooks.variables);
+        // A named location starts at its own rewrite phase.
+        let mut named = runner.scripts.exchange().take_named();
+        let variables = site_hooks
+            .filter(|_| named.is_none())
+            .map_or(&[][..], |hooks| &hooks.variables);
         match runner.variables(variables).await {
             Next::Go => {}
             Next::Answer => {
@@ -561,7 +565,10 @@ async fn pipeline(
                 return Ok(());
             }
         }
-        if let Some(hook) = site_hooks.and_then(|hooks| hooks.server_rewrite.as_ref()) {
+        if let Some(hook) = site_hooks
+            .filter(|_| named.is_none())
+            .and_then(|hooks| hooks.server_rewrite.as_ref())
+        {
             match runner.run(hook).await {
                 Next::Go => {}
                 Next::Redirect => {
@@ -588,7 +595,20 @@ async fn pipeline(
                 routing_request(&runner.scripts.exchange(), &host).ok_or_else(|| {
                     PanelError::invalid_argument("a script set a path that is not absolute")
                 })?;
-            route = site.select(&simulated).map(|position| site.route(position));
+            route = match named.take() {
+                Some(name) => {
+                    let Some(position) = site.named(&name) else {
+                        runner.answer(500);
+                        runner.scripts.exchange().response.body =
+                            format!("could not find named location \"@{name}\"").into_bytes();
+                        runner.respond(site_hooks).await;
+                        runner.log(site_hooks).await;
+                        return Ok(());
+                    };
+                    Some(site.route(position))
+                }
+                None => site.select(&simulated).map(|position| site.route(position)),
+            };
             runner.trial.route = route.map(|route| route.id.as_str().to_owned());
             let hooks = route.and_then(|route| index.routes.get(route.id.as_str()));
             let variables = hooks.map_or(&[][..], |hooks| &hooks.variables);
@@ -987,6 +1007,45 @@ mod tests {
             ]
         );
         assert_eq!(trial.request.unwrap().headers["x-tenant"], "k:b");
+    }
+
+    #[tokio::test]
+    async fn exec_to_a_named_location_skips_the_server_rewrite() {
+        let mut snapshot = snapshot();
+        snapshot.lua.scripts.extend([
+            script("named", "ngx.exec('@later')"),
+            script("later", "ngx.say('later ', ngx.var.uri)"),
+            script("server", "ngx.req.set_header('X-Server', '1')"),
+        ]);
+        snapshot.sites[0].lua.server_rewrite = Some(LuaHandler::new("server"));
+        snapshot.routes[0].action = RouteAction::Lua {
+            handler: LuaHandler::new("named"),
+        };
+        snapshot.routes[0].lua.access = None;
+        snapshot.routes.push(RouteSpec::new(
+            RouteId::new("later").unwrap(),
+            SiteId::new("shop").unwrap(),
+            20,
+            RouteMatcher::Named {
+                name: "later".into(),
+            },
+            RouteAction::Lua {
+                handler: LuaHandler::new("later"),
+            },
+        ));
+        let trial = try_request(
+            &snapshot,
+            TrialScript::Configured,
+            request("/x", &[]),
+            TrialResponse::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(trial.route.as_deref(), Some("later"));
+        let ran: Vec<_> = trial.runs.iter().map(|run| run.script.as_str()).collect();
+        assert_eq!(ran[..3], ["server", "named", "later"]);
+        let (_, _, body) = trial.response.unwrap();
+        assert_eq!(&body[..], b"later /x\n");
     }
 
     #[tokio::test]

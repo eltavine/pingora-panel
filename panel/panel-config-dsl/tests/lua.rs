@@ -1036,3 +1036,41 @@ http {
         .unwrap()
         .contains("    lua_check_client_abort on;\n"));
 }
+
+#[test]
+fn named_locations_read_compile_and_print() {
+    let lowered = read(&Sources::single(
+        r#"language_version 1;
+http {
+    server s {
+        server_name s.example;
+        content_by_lua_block { ngx.exec("@fallback") }
+        location @fallback {
+            content_by_lua_block { ngx.say("fallback") }
+        }
+    }
+}
+"#,
+    ));
+    assert!(lowered.is_valid(), "{:#?}", lowered.diagnostics);
+    let route = &lowered.model.sites[0].routes[0];
+    assert_eq!(route.named.as_deref(), Some("fallback"));
+    let snapshot = compile(&lowered.model, RevisionId::new(1)).unwrap();
+    assert!(snapshot.routes.iter().any(|route| matches!(
+        &route.matcher,
+        panel_ir::RouteMatcher::Named { name } if name == "fallback"
+    )));
+    assert!(snapshot
+        .required_capabilities
+        .iter()
+        .any(|capability| capability.name == "route.named"));
+    let printed = print_sources(&lowered.model);
+    let main = printed.get("main.conf").unwrap();
+    assert!(
+        main.contains("            match named fallback;\n"),
+        "{main}"
+    );
+    let again = read(&printed);
+    assert!(again.is_valid(), "{:#?}", again.diagnostics);
+    assert_eq!(again.model.sites[0].routes[0].named, route.named);
+}

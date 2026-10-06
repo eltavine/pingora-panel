@@ -304,6 +304,10 @@ http {
         location / {
             proxy_pass http://app;
         }
+
+        location @fallback {
+            content_by_lua_block { ngx.say("fallback") }
+        }
     }
 }
 "#;
@@ -328,6 +332,7 @@ http {
         "        balancer_by_lua_file lua/pick.lua;\n",
         "        access_by_lua_file lua/auth.lua;\n",
         "            set_by_lua_block $x { return 1 }\n",
+        "            match named fallback;\n",
         "            set_by_lua_block $y $host $x { return ngx.arg[1] .. ngx.arg[2] }\n",
         "            set_by_lua_file $z lua/pick.lua $host;\n",
         "            header_filter_by_lua_block { ngx.header[\"X-Hello\"] = \"1\" }\n",

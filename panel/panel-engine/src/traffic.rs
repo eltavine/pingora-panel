@@ -221,6 +221,7 @@ pub(crate) fn validate_traffic(snapshot: &RuntimeSnapshot, diagnostics: &mut Vec
     }
 
     let mut route_names = BTreeSet::new();
+    let mut named_locations = BTreeSet::new();
     for route in &snapshot.routes {
         let resource = route.id.as_str();
         if let Some(name) = &route.name {
@@ -259,6 +260,36 @@ pub(crate) fn validate_traffic(snapshot: &RuntimeSnapshot, diagnostics: &mut Vec
                     report(
                         resource,
                         format!("route {} regex does not compile: {error}", route.id),
+                    );
+                }
+            }
+            RouteMatcher::Named { name } => {
+                let valid = !name.is_empty()
+                    && name.len() <= 128
+                    && name.bytes().all(|byte| {
+                        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.')
+                    });
+                if !valid {
+                    report(
+                        resource,
+                        format!("route {} named location {name:?} is not a name", route.id),
+                    );
+                } else if !named_locations.insert((&route.site_id, name.as_str())) {
+                    report(
+                        resource,
+                        format!(
+                            "named location @{name} is defined more than once in site {}",
+                            route.site_id
+                        ),
+                    );
+                }
+                if !route.conditions.is_empty() {
+                    report(
+                        resource,
+                        format!(
+                            "route {} is a named location and matches no conditions",
+                            route.id
+                        ),
                     );
                 }
             }

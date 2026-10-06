@@ -215,6 +215,7 @@ fn routes_from(inputs: Vec<RouteInput>, existing: &[Route]) -> Vec<Route> {
                 .and_then(|id| existing.iter().find(|route| route.id == id));
             Route {
                 lua: kept.map(|route| route.lua.clone()).unwrap_or_default(),
+                named: kept.and_then(|route| route.named.clone()),
                 id: kept.map_or_else(Uuid::now_v7, |route| route.id),
                 name: input.name,
                 enabled: input.enabled,
@@ -506,6 +507,7 @@ impl ConfigModel {
         let access_log = input.access_log.unwrap_or_else(|| slot.access_log.clone());
         *slot = Route {
             lua: std::mem::take(&mut slot.lua),
+            named: slot.named.take(),
             id: route,
             name: input.name,
             enabled: input.enabled,

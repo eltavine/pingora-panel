@@ -85844,6 +85844,13 @@
               "null"
             ]
           },
+          "named": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A named location (`location @name`): no request path reaches the\nroute, only an internal redirect to `@name` such as\n`ngx.exec(\"@name\")`, and its match is not used."
+          },
           "priority": {
             "type": "integer",
             "format": "int32",

@@ -148,6 +148,8 @@ enum PathMatcher {
     Prefix(String),
     Glob(GlobMatcher),
     Regex(Regex),
+    /// A named location, which no path reaches.
+    Named(String),
 }
 
 /// Explicit priority is authoritative. Ties prefer the more specific path
@@ -258,6 +260,13 @@ impl SiteRouting {
             .is_none_or(|listeners| listeners.contains(listener))
     }
 
+    /// The named location `name`, which only an internal redirect reaches.
+    pub fn named(&self, name: &str) -> Option<usize> {
+        self.routes
+            .iter()
+            .position(|route| matches!(&route.path, PathMatcher::Named(known) if known == name))
+    }
+
     /// The first route that takes `request`.
     pub fn select(&self, request: &impl Request) -> Option<usize> {
         self.routes.iter().position(|route| route.matches(request))
@@ -346,7 +355,7 @@ impl PathMatcher {
             Self::Glob(glob) => (3, glob.glob().glob().len()),
             Self::Regex(regex) => (2, regex.as_str().len()),
             Self::Prefix(prefix) => (1, prefix.len()),
-            Self::Any => (0, 0),
+            Self::Any | Self::Named(_) => (0, 0),
         }
     }
 
@@ -362,6 +371,7 @@ impl PathMatcher {
             }
             Self::Glob(glob) => glob.is_match(path),
             Self::Regex(regex) => regex.is_match(path),
+            Self::Named(_) => false,
         }
     }
 }
@@ -374,6 +384,7 @@ impl fmt::Display for PathMatcher {
             Self::Prefix(prefix) => write!(formatter, "prefix {prefix}"),
             Self::Glob(glob) => write!(formatter, "glob {}", glob.glob().glob()),
             Self::Regex(regex) => write!(formatter, "regex {}", regex.as_str()),
+            Self::Named(name) => write!(formatter, "named @{name}"),
         }
     }
 }
@@ -425,6 +436,7 @@ fn compile_matcher(
                 .map_err(|error| invalid(error.to_string()))?;
             (None, PathMatcher::Regex(regex))
         }
+        RouteMatcher::Named { name } => (None, PathMatcher::Named(name.clone())),
     })
 }
 

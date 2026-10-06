@@ -193,7 +193,7 @@ panel-events = { version = "=0.1.0", path = "panel-events" }
 panel-event-contracts = { version = "=0.1.0", path = "panel-event-contracts" }
 panel-health = { version = "=0.1.0", path = "panel-health" }
 panel-gateway-runtime = { version = "=0.2.0", path = "panel-gateway-runtime" }
-panel-ir = { version = "=0.10.0", path = "panel-ir" }
+panel-ir = { version = "=0.11.0", path = "panel-ir" }
 panel-jetstream = { version = "=0.1.0", path = "panel-jetstream" }
 panel-jobs = { version = "=0.1.0", path = "panel-jobs" }
 panel-schedule = { version = "=0.1.0", path = "panel-schedule" }

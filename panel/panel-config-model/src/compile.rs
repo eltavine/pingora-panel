@@ -23,6 +23,9 @@ use panel_ir::{
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
+/// Required by snapshots with named locations.
+pub const NAMED_ROUTE_CAPABILITY: &str = "route.named";
+
 /// The site action runs after every route the operator defined.
 const SITE_ACTION_PRIORITY: u32 = u32::MAX;
 
@@ -316,26 +319,30 @@ impl Compiler<'_> {
 
     fn route(&mut self, site: &Site, route: &Route, site_scope: &LuaScope) {
         let resource = format!("sites/{}/routes/{}", site.id, route.id);
-        let matcher = match route.matcher.kind {
-            MatchKind::Exact => {
+        let matcher = match (&route.named, route.matcher.kind) {
+            (Some(name), _) => {
+                self.capabilities.insert(NAMED_ROUTE_CAPABILITY);
+                RouteMatcher::Named { name: name.clone() }
+            }
+            (None, MatchKind::Exact) => {
                 self.capabilities.insert("route.exact-path");
                 RouteMatcher::ExactPath {
                     path: route.matcher.path.clone(),
                 }
             }
-            MatchKind::Glob => {
+            (None, MatchKind::Glob) => {
                 self.capabilities.insert("route.glob");
                 RouteMatcher::Glob {
                     pattern: route.matcher.path.clone(),
                 }
             }
-            MatchKind::Regex => {
+            (None, MatchKind::Regex) => {
                 self.capabilities.insert("route.regex");
                 RouteMatcher::Regex {
                     pattern: route.matcher.path.clone(),
                 }
             }
-            MatchKind::Prefix => {
+            (None, MatchKind::Prefix) => {
                 let Ok(path) = PathPrefix::new(&route.matcher.path) else {
                     self.fail(
                         resource,
@@ -637,6 +644,7 @@ mod tests {
             }],
             routes: vec![Route {
                 lua: Default::default(),
+                named: None,
                 id: Uuid::now_v7(),
                 name: Some("assets".into()),
                 enabled: true,

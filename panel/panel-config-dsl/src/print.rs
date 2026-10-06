@@ -717,6 +717,9 @@ fn route(route: &Route, model: &ConfigModel) -> Directive {
     if let Some(host) = &matcher.host {
         args.push(format!("host={host}"));
     }
+    if let Some(name) = &route.named {
+        args = vec!["named".to_owned(), expanded(name)];
+    }
     body.push(Directive::simple("match", args));
     body.extend(matcher.conditions.iter().map(condition));
     body.push(Directive::simple("priority", [route.priority.to_string()]));

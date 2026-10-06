@@ -496,6 +496,11 @@ pub enum RouteMatcher {
     Regex {
         pattern: String,
     },
+    /// A named location (`location @name`): no request path reaches it,
+    /// only an internal redirect such as `ngx.exec("@name")`.
+    Named {
+        name: String,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

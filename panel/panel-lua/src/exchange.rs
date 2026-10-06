@@ -321,6 +321,8 @@ pub struct Exchange {
     pub(crate) eof: bool,
     /// A script's subrequest (`ngx.location.capture`) runs the handlers.
     pub(crate) subrequest: bool,
+    /// The named location `ngx.exec("@name")` redirected to.
+    pub(crate) named: Option<String>,
     /// What the last run's handler says of `lua_use_default_type`.
     pub(crate) default_type: bool,
 }
@@ -347,6 +349,7 @@ impl Exchange {
             client_closed: false,
             eof: false,
             subrequest: false,
+            named: None,
             default_type: true,
         }
     }
@@ -378,6 +381,11 @@ impl Exchange {
     /// from `server_rewrite`, with the URI and arguments it now has.
     pub fn redirected(&self) -> bool {
         matches!(self.exit, Some(Exit::Exec))
+    }
+
+    /// The named location the last run redirected to, taken once.
+    pub fn take_named(&mut self) -> Option<String> {
+        self.named.take()
     }
 
     /// Whether a handler has started sending the response.

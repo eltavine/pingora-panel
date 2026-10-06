@@ -503,6 +503,7 @@ impl PanelProxy {
                         .flatten();
                     lua::apply_request(session.req_header_mut(), &mut exchange)
                         .map_err(internal)?;
+                    ctx.named = exchange.take_named();
                     (changes.jump, exchange.redirected(), body)
                 };
                 if body.is_some() {

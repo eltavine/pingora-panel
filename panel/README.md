@@ -311,12 +311,14 @@ value that applies there and whether it is written in the block, inherited
 from where, or a default; settings that have no effect where they are
 written are warnings. Redirect targets and response bodies are templates
 the gateway fills in per request: `$host`, `$uri`, `$method`, `$scheme`,
-`$client_ip`, `$request_id`, `$upstream_addr`, `$http_<name>` and
-`$cookie_<name>`, with `$$` for a literal dollar; gateways that cannot
+`$client_ip`, `$request_id`, `$upstream_addr`, `$http_<name>`,
+`$cookie_<name>` and `${lua:name}`, what `set` or a script last gave a
+variable, with `$$` for a literal dollar; gateways that cannot
 evaluate them refuse the snapshot. `POST /api/v1/config/import/nginx`
 converts the documented NGINX subset — `server`, `listen`, `server_name`,
-`location`, `proxy_pass`, `root`, `index`, `try_files`, `return` and
-`upstream` — and reports every directive it did not carry over at its
+`location`, named ones included, `proxy_pass`, `root`, `index`,
+`try_files`, `return` and `upstream` — and reports every directive it did
+not carry over at its
 position. Every apply records a revision with its files, author, note and
 outcome under `/api/v1/revisions`; a revision can be compared with another,
 the active one or the draft, annotated, and restored into the draft.

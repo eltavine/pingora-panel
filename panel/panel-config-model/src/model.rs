@@ -332,6 +332,11 @@ pub struct Route {
     /// The Lua handlers and terms of the route's requests, over its site's.
     #[serde(default, skip_serializing_if = "LuaScope::is_empty")]
     pub lua: LuaScope,
+    /// A named location (`location @name`): no request path reaches the
+    /// route, only an internal redirect to `@name` such as
+    /// `ngx.exec("@name")`, and its match is not used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub named: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

@@ -355,10 +355,24 @@ fn exec(slot: &Slot, uri: &[u8], args: Value) -> mlua::Result<()> {
             "bad argument #1 to 'exec' (uri should not be empty)",
         ));
     }
-    if uri.starts_with('@') {
-        return Err(refused(
-            "ngx.exec takes a path: there are no named locations in Pingora Panel",
-        ));
+    // A named location keeps the URI and arguments; `args` is ignored.
+    if let Some(name) = uri.strip_prefix('@') {
+        if name.is_empty() {
+            return Err(mlua::Error::runtime(
+                "bad argument #1 to 'exec' (the named location has no name)",
+            ));
+        }
+        return exchange(slot, Api::Exec, |exchange| {
+            if exchange.headers_sent {
+                return Err(mlua::Error::runtime(
+                    "attempt to call ngx.exec after sending out response headers",
+                ));
+            }
+            exchange.named = Some(name.to_owned());
+            exchange.internal = true;
+            exchange.exit = Some(Exit::Exec);
+            Ok(())
+        });
     }
     if uri.bytes().any(|byte| byte.is_ascii_control()) {
         return Err(refused("the URI cannot hold control characters"));

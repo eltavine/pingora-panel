@@ -371,6 +371,7 @@ fn decode_matcher(value: wire::RouteMatcher) -> Result<RouteMatcher> {
         Kind::ExactPath(path) => Ok(RouteMatcher::ExactPath { path }),
         Kind::Glob(pattern) => Ok(RouteMatcher::Glob { pattern }),
         Kind::Regex(pattern) => Ok(RouteMatcher::Regex { pattern }),
+        Kind::Named(name) => Ok(RouteMatcher::Named { name }),
         Kind::HostPathPrefix(matcher) => Ok(RouteMatcher::HostPathPrefix {
             host: NormalizedHost::new(matcher.host).map_err(domain_error)?,
             path: PathPrefix::new(matcher.path).map_err(domain_error)?,
@@ -386,6 +387,7 @@ fn encode_matcher(value: &RouteMatcher) -> wire::RouteMatcher {
         RouteMatcher::ExactPath { path } => Kind::ExactPath(path.clone()),
         RouteMatcher::Glob { pattern } => Kind::Glob(pattern.clone()),
         RouteMatcher::Regex { pattern } => Kind::Regex(pattern.clone()),
+        RouteMatcher::Named { name } => Kind::Named(name.clone()),
         RouteMatcher::HostPathPrefix { host, path } => {
             Kind::HostPathPrefix(wire::HostPathPrefixMatcher {
                 host: host.as_str().into(),

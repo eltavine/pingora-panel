@@ -1324,11 +1324,25 @@ async fn exec_redirects_internally_and_ends_the_handler() {
     assert_eq!(scripts.exchange().response.body, b"true\n");
     assert!(!scripts.exchange().redirected());
 
-    for (index, wanted) in [
-        (2, "after sending out response headers"),
-        (3, "no named locations"),
-        (4, "unsafe uri"),
-    ] {
+    let mut scripts = lua.runtime.scripts(request("GET", "/kept?z=1", &[]));
+    assert_eq!(
+        run(&mut scripts, handler(lua.handlers[3], Phase::Content)).await,
+        Outcome::Continue
+    );
+    {
+        let mut exchange = scripts.exchange();
+        assert!(exchange.redirected());
+        assert_eq!(exchange.take_named().as_deref(), Some("named"));
+        assert_eq!(
+            (
+                exchange.request.uri.as_str(),
+                exchange.request.args.as_deref()
+            ),
+            ("/kept", Some("z=1"))
+        );
+    }
+
+    for (index, wanted) in [(2, "after sending out response headers"), (4, "unsafe uri")] {
         let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
         let Outcome::Failed(failure) =
             run(&mut scripts, handler(lua.handlers[index], Phase::Content)).await

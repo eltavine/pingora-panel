@@ -270,6 +270,8 @@ message RouteMatcher {
     string glob = 4;
     string regex = 5;
     HostPathPrefixMatcher host_path_prefix = 6;
+    // A named location, reached only by an internal redirect to it.
+    string named = 7;
   }
 }
 

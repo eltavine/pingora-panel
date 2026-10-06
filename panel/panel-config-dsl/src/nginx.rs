@@ -953,13 +953,7 @@ impl<'a> Importer<'a> {
             ["^~", path] => ("prefix", (*path).to_owned(), (1, -(path.len() as i64))),
             ["~", path] => ("regex", (*path).to_owned(), (2, 0)),
             ["~*", path] => ("regex", format!("(?i){path}"), (2, 0)),
-            [path] if path.starts_with('@') => {
-                self.unsupported(
-                    located,
-                    format!("the named location {path:?} is not supported"),
-                );
-                return None;
-            }
+            [path] if path.starts_with('@') => ("named", path[1..].to_owned(), (4, 0)),
             [path] => ("prefix", (*path).to_owned(), (3, -(path.len() as i64))),
             _ => {
                 self.unsupported(located, "this 'location' is not supported".into());

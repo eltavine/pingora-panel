@@ -480,6 +480,25 @@ fn validate_route(
     {
         report.error(&resource, format!("the route {problem}"));
     }
+    if let Some(name) = &route.named {
+        let valid = !name.is_empty()
+            && name.len() <= 128
+            && name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'));
+        if !valid {
+            report.error(
+                &resource,
+                format!("{name:?} is not a named location's name"),
+            );
+        }
+        if !route.matcher.conditions.is_empty() || route.matcher.host.is_some() {
+            report.error(
+                &resource,
+                "a named location is reached by name and matches no host or conditions",
+            );
+        }
+    }
     if let Some(host) = &route.matcher.host {
         if route.matcher.kind != MatchKind::Prefix {
             report.error(&resource, "a host restriction needs a prefix match");
@@ -1460,6 +1479,7 @@ mod tests {
         shop.domains[1].redirect = true;
         shop.routes.push(Route {
             lua: Default::default(),
+            named: None,
             id: Uuid::now_v7(),
             name: None,
             enabled: true,

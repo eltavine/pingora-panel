@@ -57,6 +57,7 @@ const CAPABILITIES: &[&str] = &[
     "route.conditions",
     "route.exact-path",
     "route.glob",
+    "route.named",
     "route.host",
     "route.path-prefix",
     "route.regex",

@@ -20,6 +20,7 @@ impl<'a> Lowerer<'a> {
         let mut draft = RouteDraft {
             route: Route {
                 lua: Default::default(),
+                named: None,
                 id,
                 name: None,
                 enabled: true,
@@ -47,6 +48,7 @@ impl<'a> Lowerer<'a> {
                 [modifier, path] => (Some(modifier), path),
                 _ => return None,
             };
+            let named = modifier.is_none() && path.value.starts_with('@');
             let (kind, prefix) = match modifier.map(|modifier| modifier.value.as_str()) {
                 None | Some("^~") => (MatchKind::Prefix, ""),
                 Some("=") => (MatchKind::Exact, ""),
@@ -63,12 +65,16 @@ impl<'a> Lowerer<'a> {
                     return None;
                 }
             };
-            draft.route.matcher = RouteMatch {
-                kind,
-                path: format!("{prefix}{}", path.value),
-                host: None,
-                conditions: Vec::new(),
-            };
+            if named {
+                draft.route.named = Some(path.value[1..].to_owned());
+            } else {
+                draft.route.matcher = RouteMatch {
+                    kind,
+                    path: format!("{prefix}{}", path.value),
+                    host: None,
+                    conditions: Vec::new(),
+                };
+            }
             matched = true;
         } else if let Some(name) = directive.args.first() {
             draft.route.name = Some(Self::literal(name));
@@ -101,6 +107,13 @@ impl<'a> Lowerer<'a> {
                                     );
                                     return;
                                 };
+                                if kind_arg.value == "named" {
+                                    if let Some(name) = lowerer.value(file, path_arg) {
+                                        draft.route.named = Some(name);
+                                        matched = true;
+                                    }
+                                    return;
+                                }
                                 let kind = match kind_arg.value.as_str() {
                                     "exact" => MatchKind::Exact,
                                     "prefix" => MatchKind::Prefix,
@@ -112,7 +125,7 @@ impl<'a> Lowerer<'a> {
                                             kind_arg.span,
                                             codes::TYPE,
                                             format!(
-                                                "{other:?} is not exact, prefix, glob or regex"
+                                                "{other:?} is not exact, prefix, glob, regex or named"
                                             ),
                                         );
                                         return;

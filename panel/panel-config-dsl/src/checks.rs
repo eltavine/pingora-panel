@@ -56,6 +56,9 @@ fn covers(first: &Route, later: &Route) -> bool {
         return false;
     }
     let (a, b) = (&first.matcher, &later.matcher);
+    if first.named.is_some() || later.named.is_some() {
+        return false;
+    }
     match (a.kind, b.kind) {
         (MatchKind::Prefix, MatchKind::Prefix) => under(prefix(&b.path), prefix(&a.path)),
         (MatchKind::Prefix, MatchKind::Exact) => under(&b.path, prefix(&a.path)),
@@ -210,6 +213,7 @@ mod tests {
     fn route(name: &str, priority: u32, kind: MatchKind, path: &str, host: Option<&str>) -> Route {
         Route {
             lua: Default::default(),
+            named: None,
             id: Uuid::now_v7(),
             name: Some(name.into()),
             enabled: true,

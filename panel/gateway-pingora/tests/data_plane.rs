@@ -2968,3 +2968,66 @@ async fn scripts_capture_subrequests_through_the_gateway() {
     );
     gateway.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn exec_reaches_named_locations_that_no_path_does() {
+    use panel_ir::{LuaHandler, LUA_SCRIPTS_CAPABILITY};
+
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    snapshot.required_capabilities.extend([
+        CapabilityRequirement::new(LUA_SCRIPTS_CAPABILITY, "1"),
+        CapabilityRequirement::new("route.named", "1"),
+    ]);
+    snapshot.lua.scripts = vec![
+        lua_script("start", "ngx.exec('@fallback')"),
+        lua_script("missing", "ngx.exec('@nowhere')"),
+        lua_script(
+            "fallback",
+            "ngx.say('fallback ', ngx.var.uri, ' ', ngx.var.args)",
+        ),
+    ];
+    snapshot.sites.push(site(&["shop.test"]));
+    for (id, priority, path, script) in [
+        ("start", 1, "/start", "start"),
+        ("missing", 2, "/missing", "missing"),
+    ] {
+        snapshot.routes.push(route(
+            id,
+            priority,
+            prefix(path),
+            RouteAction::Lua {
+                handler: LuaHandler::new(script),
+            },
+        ));
+    }
+    snapshot.routes.push(route(
+        "fallback",
+        3,
+        RouteMatcher::Named {
+            name: "fallback".into(),
+        },
+        RouteAction::Lua {
+            handler: LuaHandler::new("fallback"),
+        },
+    ));
+    let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
+    wait_for(listen).await;
+    let reached = get(listen, Some("shop.test"), "/start?a=1", "").await;
+    assert_eq!(reached.status, 200);
+    assert_eq!(
+        String::from_utf8_lossy(&reached.body),
+        "fallback /start a=1\n"
+    );
+    assert_eq!(
+        get(listen, Some("shop.test"), "/fallback", "").await.status,
+        404
+    );
+    let missing = get(listen, Some("shop.test"), "/missing", "").await;
+    assert_eq!(missing.status, 500);
+    assert!(String::from_utf8_lossy(&missing.body).contains("could not find named location"));
+    gateway.stop().await;
+}
