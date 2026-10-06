@@ -10,6 +10,7 @@ use super::{client_address, ListenerContext, PanelProxy, RequestContext};
 use crate::{
     access_log::{self, LuaPlace},
     adapter::PreparedPingoraSnapshot,
+    certificates::{Handshake, TlsVersion},
     log_files::Destination,
     lua::{self, Hook, Hooks, LuaPlan, SessionHost, Variable, PROXIED_BODY_LIMIT},
     responses,
@@ -98,9 +99,22 @@ pub(super) struct Report {
 }
 
 impl Report {
-    /// Counts and measures a run, and writes what its script logged, its
-    /// failure, a slow run and, when debugging, the run itself.
-    fn finished(&self, hook: &Hook, scripts: &Scripts, outcome: &Outcome, elapsed: Duration) {
+    /// Where the runs of a site's scripts that run for no request go.
+    pub(super) fn site(
+        listener: Arc<ListenerContext>,
+        snapshot: Arc<PreparedPingoraSnapshot>,
+        site: usize,
+    ) -> Self {
+        Self {
+            listener,
+            snapshot,
+            site: Some(site),
+            route: None,
+        }
+    }
+
+    /// Writes `message` of `hook`'s script, which ran for `request_id`.
+    pub(super) fn write(&self, hook: &Hook, request_id: &str, level: &str, message: &str) {
         let phase = hook.phase().name();
         let labels = &self.snapshot.labels;
         let site = self.site.and_then(|site| labels.site(site));
@@ -108,13 +122,52 @@ impl Report {
             .site
             .zip(self.route)
             .and_then(|(site, route)| labels.route(site, route));
+        if level == "error" || level == "warn" {
+            tracing::warn!(event = "lua", phase, script = %hook.script, level, message);
+        } else {
+            tracing::debug!(event = "lua", phase, script = %hook.script, level, message);
+        }
+        if let Some(logs) = &self.listener.logs {
+            let place = LuaPlace {
+                request_id: (!request_id.is_empty()).then_some(request_id),
+                listener: &self.listener.id,
+                site: site.as_deref(),
+                route: route.as_deref(),
+                phase,
+                script: &hook.script,
+            };
+            let logging = &self.snapshot.logging;
+            logs.send(
+                Destination::Errors,
+                access_log::lua(&place, level, message, logging, Utc::now()),
+                logging.files,
+            );
+        }
+    }
+
+    /// Counts and measures a run, and writes what its script logged, its
+    /// failure, a slow run and, when debugging, the run itself.
+    pub(super) fn finished(
+        &self,
+        hook: &Hook,
+        scripts: &Scripts,
+        outcome: &Outcome,
+        elapsed: Duration,
+    ) {
+        let phase = hook.phase().name();
         let slow = elapsed >= hook.slow;
         let result = match outcome {
             Outcome::Failed(failure) => failure.kind.name(),
             _ => "ok",
         };
         if let Some(metrics) = &self.listener.metrics {
-            metrics.lua_run(site.clone(), route.clone(), phase, result, elapsed, slow);
+            let labels = &self.snapshot.labels;
+            let site = self.site.and_then(|site| labels.site(site));
+            let route = self
+                .site
+                .zip(self.route)
+                .and_then(|(site, route)| labels.route(site, route));
+            metrics.lua_run(site, route, phase, result, elapsed, slow);
         }
         let (logs, dropped, request_id) = {
             let mut exchange = scripts.exchange();
@@ -124,29 +177,7 @@ impl Report {
                 exchange.connection.request_id.clone(),
             )
         };
-        let place = LuaPlace {
-            request_id: (!request_id.is_empty()).then_some(request_id.as_str()),
-            listener: &self.listener.id,
-            site: site.as_deref(),
-            route: route.as_deref(),
-            phase,
-            script: &hook.script,
-        };
-        let logging = &self.snapshot.logging;
-        let write = |level: &str, message: &str| {
-            if level == "error" || level == "warn" {
-                tracing::warn!(event = "lua", phase, script = %hook.script, level, message);
-            } else {
-                tracing::debug!(event = "lua", phase, script = %hook.script, level, message);
-            }
-            if let Some(logs) = &self.listener.logs {
-                logs.send(
-                    Destination::Errors,
-                    access_log::lua(&place, level, message, logging, Utc::now()),
-                    logging.files,
-                );
-            }
-        };
+        let write = |level: &str, message: &str| self.write(hook, &request_id, level, message);
         for entry in &logs {
             write(entry.level.name(), &entry.message);
         }
@@ -338,7 +369,7 @@ impl PanelProxy {
             .server_addr()
             .and_then(|address| address.as_inet())
             .copied();
-        let exchange = lua::exchange(
+        let mut exchange = lua::exchange(
             session.req_header(),
             path,
             client,
@@ -347,6 +378,17 @@ impl PanelProxy {
             host,
             ctx.started,
         );
+        if let Some(handshake) = session
+            .digest()
+            .and_then(|digest| digest.ssl_digest.as_ref())
+            .and_then(|digest| digest.extension.get::<Handshake>())
+        {
+            exchange
+                .handshake
+                .server_name
+                .clone_from(&handshake.server_name);
+            exchange.handshake.version = handshake.version.map(TlsVersion::number);
+        }
         let scripts = match ctx.subrequest.as_ref() {
             Some(subrequest) => {
                 let scripts = match &subrequest.share {

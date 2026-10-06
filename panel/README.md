@@ -1393,7 +1393,12 @@ Handlers run in `server_rewrite`, `rewrite`, `access`, `precontent`,
 and `log`; a route's handler replaces its server's and a server's the one
 in `http`, as NGINX inherits them. `init_by_lua*` and `init_worker_by_lua*`
 run once in each VM, and `exit_worker_by_lua*` once in each when a new
-configuration replaces it. The code of a `*_by_lua_block` is read with Lua's
+configuration replaces it. `ssl_client_hello_by_lua*` and
+`ssl_certificate_by_lua*` in `http` or a server run as a TLS handshake
+begins, for the server its server name selects: `ngx.ssl.clienthello`
+reads the client's hello, `ngx.ssl` presents a certificate of the script's
+in place of the TLS profile's, and `ngx.exit(ngx.ERROR)` ends the
+handshake. The code of a `*_by_lua_block` is read with Lua's
 lexical rules and kept as it is written. `lua off;` keeps every script
 checked without running any.
 

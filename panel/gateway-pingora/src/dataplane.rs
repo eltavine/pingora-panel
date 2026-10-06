@@ -8,7 +8,7 @@
 use crate::{
     acme::ChallengeDirectory,
     adapter::{ActiveSnapshot, PingoraGatewayAdapter},
-    certificates::{HandshakeRecorder, ListenerCertificates},
+    certificates::{ChosenCertificates, HandshakeRecorder, ListenerCertificates},
     head_deadline::{Connections, HeadDeadline},
     listeners::{self, ListenerPlan, SocketKey},
     log_files::Logs,
@@ -18,7 +18,7 @@ use crate::{
 use panel_errors::{PanelError, Result};
 use pingora_core::{
     apps::HttpServerOptions,
-    listeners::tls::TlsSettings,
+    listeners::{tls::TlsSettings, Listeners},
     server::configuration::ServerConf,
     services::{listening::Service, Service as _},
 };
@@ -420,7 +420,11 @@ impl Generation {
                 metrics.as_ref().map(|metrics| metrics.connections(&label)),
             ));
             tracked.push(Arc::clone(&connections));
-            let handshakes = HandshakeRecorder(metrics.clone().map(|metrics| (metrics, label)));
+            let chosen = Arc::new(ChosenCertificates::default());
+            let handshakes = HandshakeRecorder {
+                metrics: metrics.clone().map(|metrics| (metrics, label)),
+                chosen: Arc::clone(&chosen),
+            };
             let proxy = PanelProxy::new(
                 ListenerContext {
                     id: plan.id.clone(),
@@ -435,26 +439,31 @@ impl Generation {
                 Arc::clone(&active),
                 Arc::clone(&in_flight),
             );
+            let scripts = proxy.handshake_scripts(Arc::clone(&chosen));
             let mut server_options = HttpServerOptions::default();
             server_options.h2c = plan.http2 && !plan.tls;
             let mut proxy = HttpProxy::new(proxy, Arc::clone(&conf));
             proxy.server_options = Some(server_options);
             proxy.handle_init_modules();
-            let mut service = Service::new(
-                format!("listener {}", plan.id),
-                HeadDeadline::new(proxy, plan.head_timeout, connections, serve.clone()),
-            );
+            let name = format!("listener {}", plan.id);
+            let app = HeadDeadline::new(proxy, plan.head_timeout, connections, serve.clone());
             let address = plan.socket.address.to_string();
-            if plan.tls {
+            let mut service = if plan.tls {
                 let config = plan.server_config(Arc::new(ListenerCertificates::new(
                     Arc::clone(&active),
                     plan.id.clone(),
+                    chosen,
                 )))?;
                 let settings = TlsSettings::from_server_config(config, Some(Box::new(handshakes)));
-                service.add_tls_with_settings(&address, None, settings);
+                let mut endpoints = Listeners::new();
+                endpoints.set_pre_tls_callback(Arc::new(scripts));
+                endpoints.add_tls_with_settings(&address, None, settings);
+                Service::with_listeners(name, endpoints, app)
             } else {
+                let mut service = Service::new(name, app);
                 service.add_tcp(&address);
-            }
+                service
+            };
             let fds = inherited(&address, socket)?;
             let shutdown = accept.clone();
             listening.push(runtime.spawn(async move {

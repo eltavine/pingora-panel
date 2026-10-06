@@ -3031,3 +3031,126 @@ async fn exec_reaches_named_locations_that_no_path_does() {
     assert!(String::from_utf8_lossy(&missing.body).contains("could not find named location"));
     gateway.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn handshake_scripts_refuse_hellos_and_present_their_certificates() {
+    use panel_ir::{LuaHandler, LUA_SCRIPTS_CAPABILITY};
+
+    let upstream = echo_upstream().await;
+    let secrets = tempfile::tempdir().unwrap();
+    let names = ["example.com", "scripted.example", "blocked.example"];
+    let profile = rcgen::generate_simple_self_signed(names.map(String::from).to_vec()).unwrap();
+    let scripted = rcgen::generate_simple_self_signed(vec!["scripted.example".into()]).unwrap();
+    std::fs::write(
+        secrets.path().join("edge.crt"),
+        pem("CERTIFICATE", profile.cert.der()),
+    )
+    .unwrap();
+    std::fs::write(
+        secrets.path().join("edge.key"),
+        pem("PRIVATE KEY", &profile.signing_key.serialize_der()),
+    )
+    .unwrap();
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot.tls_profiles.push(TlsProfile {
+        id: "edge".into(),
+        certificate_secret_id: "edge.crt".into(),
+        private_key_secret_id: "edge.key".into(),
+        min_protocol: "TLSv1.2".into(),
+        max_protocol: None,
+        cipher_suites: Vec::new(),
+        session_resumption: true,
+        alpn: BTreeSet::new(),
+    });
+    let mut listener = ListenerRef::new("https", listen.to_string());
+    listener.tls_profile_id = Some("edge".into());
+    snapshot.listeners.push(listener);
+    snapshot
+        .required_capabilities
+        .push(CapabilityRequirement::new(LUA_SCRIPTS_CAPABILITY, "1"));
+    snapshot.lua.scripts = vec![
+        lua_script(
+            "hello",
+            r#"
+            local clienthello = require "ngx.ssl.clienthello"
+            if clienthello.get_client_hello_server_name() == "blocked.example" then
+                return ngx.exit(ngx.ERROR)
+            end
+            "#,
+        ),
+        lua_script(
+            "certificate",
+            &format!(
+                r#"
+                local ssl = require "ngx.ssl"
+                if ssl.server_name() ~= "scripted.example" then
+                    return
+                end
+                assert(ssl.clear_certs())
+                assert(ssl.set_cert(assert(ssl.parse_pem_cert([==[{}]==]))))
+                assert(ssl.set_priv_key(assert(ssl.parse_pem_priv_key([==[{}]==]))))
+                "#,
+                pem("CERTIFICATE", scripted.cert.der()),
+                pem("PRIVATE KEY", &scripted.signing_key.serialize_der()),
+            ),
+        ),
+    ];
+    let mut site = site(&names);
+    site.lua.ssl_client_hello = Some(LuaHandler::new("hello"));
+    site.lua.ssl_cert = Some(LuaHandler::new("certificate"));
+    snapshot.sites.push(site);
+    snapshot.upstream_pools.push(pool("app", &[upstream]));
+    snapshot
+        .routes
+        .push(route("app", 1, prefix("/"), proxy("app")));
+    let gateway = Gateway::start(
+        AdapterOptions::default().with_secrets(Arc::new(DirectorySecrets::new(secrets.path()))),
+        snapshot,
+    )
+    .await;
+    wait_for(listen).await;
+
+    let mut roots = rustls::RootCertStore::empty();
+    for certified in [&profile, &scripted] {
+        roots.add(certified.cert.der().clone()).unwrap();
+    }
+    let config = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .unwrap()
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
+    let connect = |name: &'static str| {
+        let connector = connector.clone();
+        async move {
+            let stream = TcpStream::connect(listen).await.unwrap();
+            connector
+                .connect(
+                    rustls_pki_types::ServerName::try_from(name).unwrap(),
+                    stream,
+                )
+                .await
+        }
+    };
+    let presented = |stream: &tokio_rustls::client::TlsStream<TcpStream>| {
+        stream.get_ref().1.peer_certificates().unwrap()[0].to_vec()
+    };
+
+    let stream = connect("example.com").await.unwrap();
+    assert_eq!(presented(&stream), profile.cert.der().to_vec());
+    let mut stream = connect("scripted.example").await.unwrap();
+    assert_eq!(presented(&stream), scripted.cert.der().to_vec());
+    let response = exchange(
+        &mut stream,
+        "GET / HTTP/1.1\r\nhost: scripted.example\r\nconnection: close\r\n\r\n",
+    )
+    .await;
+    assert_eq!(response.status, 200);
+    assert!(connect("blocked.example").await.is_err());
+    let stream = connect("example.com").await.unwrap();
+    assert_eq!(presented(&stream), profile.cert.der().to_vec());
+    gateway.stop().await;
+}

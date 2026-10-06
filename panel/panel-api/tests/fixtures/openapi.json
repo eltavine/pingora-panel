@@ -83570,6 +83570,17 @@
             "description": "`lua_socket_send_timeout`, in milliseconds.",
             "minimum": 0
           },
+          "ssl_cert": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LuaCode",
+                "description": "As a TLS handshake chooses the certificate it presents; `http` and\nsites only."
+              }
+            ]
+          },
           "ssl_certificate": {
             "type": [
               "string",
@@ -83593,6 +83604,17 @@
               "type": "string"
             },
             "description": "`lua_ssl_ciphers`: IANA names of the TLS 1.2 suites offered; all\nwhen empty."
+          },
+          "ssl_client_hello": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LuaCode",
+                "description": "As a TLS handshake's hello arrives, for the site its server name\nselects; `http` and sites only."
+              }
+            ]
           },
           "ssl_crl": {
             "type": [
@@ -84130,7 +84152,7 @@
           },
           "phase": {
             "type": "string",
-            "description": "`set`, `server_rewrite`, `rewrite`, `access`, `precontent`,\n`content`, `balancer`, `header_filter`, `body_filter` or `log`."
+            "description": "`set`, `server_rewrite`, `rewrite`, `access`, `precontent`,\n`content`, `balancer`, `header_filter`, `body_filter`, `log`,\n`ssl_client_hello` or `ssl_cert`."
           },
           "time_limit_ms": {
             "type": [

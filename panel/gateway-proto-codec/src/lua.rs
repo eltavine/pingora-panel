@@ -264,6 +264,8 @@ pub(super) fn decode_handlers(value: Option<wire::LuaHandlers>) -> Result<LuaHan
         header_filter: handler(value.header_filter)?,
         body_filter: handler(value.body_filter)?,
         log: handler(value.log)?,
+        ssl_client_hello: handler(value.ssl_client_hello)?,
+        ssl_cert: handler(value.ssl_cert)?,
         variables: value
             .variables
             .into_iter()
@@ -292,6 +294,8 @@ pub(super) fn encode_handlers(value: &LuaHandlers) -> Option<wire::LuaHandlers> 
         header_filter: handler(&value.header_filter),
         body_filter: handler(&value.body_filter),
         log: handler(&value.log),
+        ssl_client_hello: handler(&value.ssl_client_hello),
+        ssl_cert: handler(&value.ssl_cert),
         variables: value
             .variables
             .iter()

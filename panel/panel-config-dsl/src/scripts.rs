@@ -199,6 +199,8 @@ fn phase(name: &str) -> Phase {
         "balancer" => Phase::Balancer,
         "header_filter" => Phase::HeaderFilter,
         "body_filter" => Phase::BodyFilter,
+        "ssl_client_hello" => Phase::SslClientHello,
+        "ssl_cert" => Phase::SslCertificate,
         _ => Phase::Log,
     }
 }

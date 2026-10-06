@@ -462,7 +462,7 @@ pub async fn try_request(
             "the target must be an absolute path, such as /api/items?tag=new",
         ));
     }
-    let exchange = Exchange::new(
+    let mut exchange = Exchange::new(
         Request {
             method: request.method.clone(),
             uri: percent_decode_str(raw_path)
@@ -483,6 +483,15 @@ pub async fn try_request(
             started: SystemTime::now(),
         },
     );
+    let handshake_phase = only
+        .as_ref()
+        .is_some_and(|hook| matches!(hook.phase(), Phase::SslClientHello | Phase::SslCertificate));
+    if request.tls || handshake_phase {
+        let handshake = &mut exchange.handshake;
+        handshake.server_name = Some(request.host.to_ascii_lowercase());
+        handshake.versions = vec![0x0304, 0x0303];
+        handshake.version = Some(0x0304);
+    }
     let mut trial = Trial {
         init_logs,
         ..Trial::default()

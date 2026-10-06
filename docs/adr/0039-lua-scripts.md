@@ -60,6 +60,8 @@ inheritance, where a directive in an inner block replaces the outer one:
 | `header_filter_by_lua_block`, `_file` | on the response header, before it is sent | `http`, `server`, `route` |
 | `body_filter_by_lua_block`, `_file` | on each chunk of the response body | `http`, `server`, `route` |
 | `log_by_lua_block`, `_file` | after the response is sent | `http`, `server`, `route` |
+| `ssl_client_hello_by_lua_block`, `_file` | as a TLS handshake's hello arrives, for the server its server name selects | `http`, `server` |
+| `ssl_certificate_by_lua_block`, `_file` | as a TLS handshake chooses the certificate it presents | `http`, `server` |
 | `lua_shared_dict <name> <size>` | declares a dictionary every VM shares | `http` |
 
 The body of a `*_by_lua_block` directive is read with Lua's lexical rules,
@@ -84,6 +86,37 @@ are filled in, which they name as `${lua:name}`; `$name` is written so
 there, and `${lua:name}` also reads what a script gave any other variable.
 Where a value must be known before requests, a constant stays the text it
 was set to, and a variable only scripts set cannot be used.
+
+**TLS handshakes.** `ssl_client_hello_by_lua*` and
+`ssl_certificate_by_lua*` run before rustls answers the client's hello,
+through Pingora's hook for what arrives ahead of TLS: the gateway reads
+the records that hold the hello, gives them back to the handshake as they
+were, and runs the handlers of the server the hello's server name selects,
+or of the listener's default server when it names none. nginx runs
+`ssl_client_hello_by_lua*` with the default server's configuration, since
+OpenSSL calls it before the server name is known; here the name is known,
+so a server's handler applies to its own names. A listener none of whose
+servers have such handlers reads nothing ahead of rustls. In
+`ssl_client_hello_by_lua*`, `ngx.ssl.clienthello` reads the hello's server
+name, versions, cipher suites and extensions, GREASE values (RFC 8701) left
+out as OpenSSL leaves them out. `ngx.ssl` reads the server name, the
+addresses, the version and the client's random in any phase, converts and
+parses PEM and DER certificates and keys, and in `ssl_certificate_by_lua*`
+presents the chain and key set with `set_der_cert` and `set_der_priv_key`,
+or `set_cert` and `set_priv_key`, in place of the TLS profile's after
+`clear_certs`. `ngx.exit(ngx.ERROR)` ends the handshake, as does a failed
+handler unless `lua_on_error continue`, and a certificate without its key
+or with a key that does not match it; the handlers have the functions
+lua-nginx-module allows there (`ngx.exit`, `ngx.sleep`, cosockets, light
+threads, timers and `ngx.semaphore`), and neither `ngx.ctx` nor `ngx.var`.
+The functions that need OpenSSL return `nil` and why: `verify_client` and
+`clienthello.set_protocols`, since rustls asks every connection to a
+listener for a client certificate or none and offers them all the same
+versions; `get_session_master_key`, which would give scripts what decrypts
+the connection; and `get_req_ssl_pointer` and its kin, which hand out
+OpenSSL handles for the FFI scripts do not have.
+`ssl_session_fetch_by_lua*` and `ssl_session_store_by_lua*` are refused:
+sessions resume from the gateway's own cache.
 
 `ngx` is lua-nginx-module's API with its documented semantics, in the phases
 where lua-nginx-module allows each function: `ngx.var`, `ngx.ctx`,
@@ -130,7 +163,8 @@ which refuses `enable_privileged_agent` because a privileged agent would
 run scripts with the gateway's own privileges outside the sandbox and
 `signal_graceful_exit` because scripts do not stop workers, and
 `resty.lrucache` (with `resty.lrucache.pureffi`), each VM holding its own
-caches, so the library scripts vendor for its FFI needs no FFI.
+caches, so the library scripts vendor for its FFI needs no FFI, and
+`ngx.ssl` with `ngx.ssl.clienthello`.
 `lua_capture_error_log` keeps, for each VM, what its scripts log up to the
 size given, oldest messages dropped first, for `ngx.errlog.get_logs`;
 `ngx.errlog` also has `raw_log`, `set_filter_level` in `init_by_lua` and

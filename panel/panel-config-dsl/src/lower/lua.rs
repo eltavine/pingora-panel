@@ -26,6 +26,10 @@ pub(super) const SCOPE: &[&str] = &[
     "body_filter_by_lua_file",
     "log_by_lua_block",
     "log_by_lua_file",
+    "ssl_client_hello_by_lua_block",
+    "ssl_client_hello_by_lua_file",
+    "ssl_certificate_by_lua_block",
+    "ssl_certificate_by_lua_file",
     "lua_time_limit",
     "lua_work_limit",
     "lua_allow",
@@ -64,6 +68,14 @@ pub(crate) const GROUPS: &[&[&str]] = &[
     &["header_filter_by_lua_block", "header_filter_by_lua_file"],
     &["body_filter_by_lua_block", "body_filter_by_lua_file"],
     &["log_by_lua_block", "log_by_lua_file"],
+    &[
+        "ssl_client_hello_by_lua_block",
+        "ssl_client_hello_by_lua_file",
+    ],
+    &[
+        "ssl_certificate_by_lua_block",
+        "ssl_certificate_by_lua_file",
+    ],
     &["lua_time_limit"],
     &["lua_work_limit"],
     &["lua_allow"],
@@ -198,6 +210,9 @@ fn phase(name: &str) -> Option<&'static str> {
     let stem = name
         .strip_suffix("_by_lua_block")
         .or_else(|| name.strip_suffix("_by_lua_file"))?;
+    if stem == "ssl_certificate" {
+        return Some("ssl_cert");
+    }
     [
         "server_rewrite",
         "rewrite",
@@ -208,6 +223,7 @@ fn phase(name: &str) -> Option<&'static str> {
         "header_filter",
         "body_filter",
         "log",
+        "ssl_client_hello",
         "init",
         "init_worker",
         "exit_worker",
@@ -371,6 +387,8 @@ impl<'a> Lowerer<'a> {
                 Some("header_filter") => &mut scope.header_filter,
                 Some("body_filter") => &mut scope.body_filter,
                 Some("log") => &mut scope.log,
+                Some("ssl_client_hello") => &mut scope.ssl_client_hello,
+                Some("ssl_cert") => &mut scope.ssl_cert,
                 _ => unreachable!("only handler blocks take no argument"),
             };
             self.lua_handler(file, directive, slot, place);
@@ -390,6 +408,8 @@ impl<'a> Lowerer<'a> {
                     Some("header_filter") => &mut scope.header_filter,
                     Some("body_filter") => &mut scope.body_filter,
                     Some("log") => &mut scope.log,
+                    Some("ssl_client_hello") => &mut scope.ssl_client_hello,
+                    Some("ssl_cert") => &mut scope.ssl_cert,
                     _ => unreachable!("the scope takes no other handler"),
                 };
                 self.lua_handler(file, directive, slot, place);

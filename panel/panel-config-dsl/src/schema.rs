@@ -412,6 +412,18 @@ pub static DIRECTIVES: &[DirectiveSpec] = &[
     spec!("server_rewrite_by_lua_file" in &[Http, Server], None, 1..Some(1), false,
         "server_rewrite_by_lua_file lua/<file>.lua;", "Runs a file before the route is chosen.",
         inherits "A server's replaces the one in http."),
+    spec!("ssl_client_hello_by_lua_block" in &[Http, Server], None, 0..Some(0), false,
+        "ssl_client_hello_by_lua_block { ... }", "Runs as a TLS handshake's hello arrives, for the server its server name selects; ngx.ssl.clienthello reads the hello and ngx.exit(ngx.ERROR) ends the handshake.",
+        inherits "A server's replaces the one in http."),
+    spec!("ssl_client_hello_by_lua_file" in &[Http, Server], None, 1..Some(1), false,
+        "ssl_client_hello_by_lua_file lua/<file>.lua;", "Runs a file as a TLS handshake's hello arrives.",
+        inherits "A server's replaces the one in http."),
+    spec!("ssl_certificate_by_lua_block" in &[Http, Server], None, 0..Some(0), false,
+        "ssl_certificate_by_lua_block { ... }", "Runs as a TLS handshake chooses its certificate; ngx.ssl sets the chain and key presented in place of the TLS profile's.",
+        inherits "A server's replaces the one in http."),
+    spec!("ssl_certificate_by_lua_file" in &[Http, Server], None, 1..Some(1), false,
+        "ssl_certificate_by_lua_file lua/<file>.lua;", "Runs a file as a TLS handshake chooses its certificate.",
+        inherits "A server's replaces the one in http."),
     spec!("rewrite_by_lua_block" in LUA_CONTEXTS, None, 0..Some(0), false,
         "rewrite_by_lua_block { ... }", "Runs after the route is chosen, before security policies; ngx.req.set_uri(uri, true) chooses the route again.",
         inherits "A route's replaces its server's, and a server's the one in http."),
@@ -596,8 +608,8 @@ pub fn refusal(name: &str) -> Option<String> {
         "lua_package_path" | "lua_package_cpath" => {
             "require loads the built-in modules and the files under lua/, and nothing else"
         }
-        _ if name.starts_with("ssl_") && name.contains("_by_lua") => {
-            "TLS handshakes run no script; certificates come from TLS profiles"
+        _ if name.starts_with("ssl_session_") && name.contains("_by_lua") => {
+            "TLS sessions are resumed from the gateway's own cache, which scripts do not fill"
         }
         "lua_socket_send_lowat" => {
             "Linux, which the gateway runs on, sets no send low-water mark for TCP sockets"
@@ -678,7 +690,9 @@ mod tests {
             Some("write the code in braces, as access_by_lua_block { ... }")
         );
         assert!(refusal("lua_package_path").unwrap().contains("lua/"));
-        assert!(refusal("ssl_certificate_by_lua_block").is_some());
+        assert!(refusal("ssl_session_fetch_by_lua_block").is_some());
+        assert!(lookup("ssl_certificate_by_lua_block", Server).is_some());
+        assert!(lookup("ssl_client_hello_by_lua_file", Http).is_some());
         assert!(refusal("lua_socket_send_lowat").unwrap().contains("Linux"));
         assert!(refusal("lua_socket_connect_timeout").is_none());
         assert!(lookup("lua_socket_connect_timeout", Route).is_some());

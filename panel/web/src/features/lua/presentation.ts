@@ -1,8 +1,10 @@
 import type { HeaderLine, LuaRunOutcome, LuaScriptInfo } from '@/api/generated'
 import type { StatusTone } from '@/components/StatusIndicator.vue'
 
-/** The phases a script can be tested in, in the order a request runs them. */
+/** The phases a script can be tested in, in the order a connection and its requests run them. */
 export const PHASES = [
+  'ssl_client_hello',
+  'ssl_cert',
   'set',
   'server_rewrite',
   'rewrite',

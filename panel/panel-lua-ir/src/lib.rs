@@ -60,6 +60,7 @@ pub struct Variable {
 
 /// The hooks a site or route runs, by phase.
 #[derive(Clone, Debug, Default)]
+#[non_exhaustive]
 pub struct Hooks {
     pub server_rewrite: Option<Hook>,
     pub rewrite: Option<Hook>,
@@ -68,6 +69,10 @@ pub struct Hooks {
     pub header_filter: Option<Hook>,
     pub body_filter: Option<Hook>,
     pub log: Option<Hook>,
+    /// A site's, as a TLS handshake's hello arrives.
+    pub ssl_client_hello: Option<Hook>,
+    /// A site's, as a TLS handshake chooses its certificate.
+    pub ssl_cert: Option<Hook>,
     /// Set in order before the site's server rewrite or the route's rewrite
     /// hook.
     pub variables: Vec<Variable>,
@@ -84,6 +89,8 @@ impl Hooks {
             Phase::HeaderFilter => self.header_filter.as_ref(),
             Phase::BodyFilter => self.body_filter.as_ref(),
             Phase::Log => self.log.as_ref(),
+            Phase::SslClientHello => self.ssl_client_hello.as_ref(),
+            Phase::SslCertificate => self.ssl_cert.as_ref(),
             _ => None,
         }
     }
@@ -279,6 +286,8 @@ impl Compiler<'_> {
             header_filter: hook(&handlers.header_filter, Phase::HeaderFilter)?,
             body_filter: hook(&handlers.body_filter, Phase::BodyFilter)?,
             log: hook(&handlers.log, Phase::Log)?,
+            ssl_client_hello: hook(&handlers.ssl_client_hello, Phase::SslClientHello)?,
+            ssl_cert: hook(&handlers.ssl_cert, Phase::SslCertificate)?,
             variables: handlers
                 .variables
                 .iter()

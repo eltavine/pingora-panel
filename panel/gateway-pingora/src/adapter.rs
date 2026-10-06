@@ -165,6 +165,8 @@ pub struct PreparedPingoraSnapshot {
     pub(crate) logging: LoggingPlan,
     /// The VMs of the snapshot's scripts.
     pub(crate) lua: Option<Arc<LuaPlan>>,
+    /// The TLS listeners some of whose sites run TLS handshake scripts.
+    pub(crate) scripted_handshakes: HashSet<String>,
 }
 
 impl Default for PingoraGatewayAdapter {
@@ -462,6 +464,17 @@ impl PingoraGatewayAdapter {
         )?;
         let labels = SnapshotLabels::new(&routing, &pools);
         let logging = LoggingPlan::new(&snapshot.logging, Some(snapshot.revision_id.get()));
+        let scripted_handshakes = listeners
+            .iter()
+            .filter(|plan| plan.tls)
+            .filter(|plan| {
+                routing.sites().iter().enumerate().any(|(index, site)| {
+                    routing.serves(index, &plan.id)
+                        && (site.lua.ssl_client_hello.is_some() || site.lua.ssl_cert.is_some())
+                })
+            })
+            .map(|plan| plan.id.clone())
+            .collect();
         Ok(PreparedPingoraSnapshot {
             snapshot,
             routing,
@@ -474,6 +487,7 @@ impl PingoraGatewayAdapter {
             labels,
             logging,
             lua,
+            scripted_handshakes,
         })
     }
 

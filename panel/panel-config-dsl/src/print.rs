@@ -81,6 +81,10 @@ fn expanded(value: &str) -> String {
 
 /// The directive that runs `code` in `phase`.
 fn lua_handler(phase: &str, code: &LuaCode) -> Directive {
+    let phase = match phase {
+        "ssl_cert" => "ssl_certificate",
+        phase => phase,
+    };
     match code {
         LuaCode::Inline { code, .. } => {
             Directive::with_lua(&format!("{phase}_by_lua_block"), code.clone())

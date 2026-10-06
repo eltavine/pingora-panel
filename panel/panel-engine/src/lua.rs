@@ -309,10 +309,10 @@ pub fn problems(snapshot: &RuntimeSnapshot) -> Vec<(String, String)> {
     for route in &snapshot.routes {
         check_variables(&mut found, route.id.as_str(), &route.lua.variables);
         for (phase, value) in route.lua.iter() {
-            if phase == "server_rewrite" {
+            if matches!(phase, "server_rewrite" | "ssl_client_hello" | "ssl_cert") {
                 found.push((
                     route.id.as_str().into(),
-                    "a route cannot have a server_rewrite handler; sites do".into(),
+                    format!("a route cannot have a {phase} handler; sites do"),
                 ));
             }
             check_handler(&mut found, &ids, route.id.as_str().into(), phase, value);

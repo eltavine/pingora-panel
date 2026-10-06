@@ -5,7 +5,7 @@ use crate::{
     access_log::{self, AccessPlan, LoggingPlan, Served},
     acme::ChallengeDirectory,
     adapter::{ActiveSnapshot, PreparedPingoraSnapshot},
-    certificates::Handshake,
+    certificates::{ChosenCertificates, Handshake},
     forwarding::{self, Forwarding},
     head_deadline::Connections,
     hosts::{self, HostError, RequestHost},
@@ -45,8 +45,10 @@ use std::{
     time::Instant,
 };
 
+mod handshake;
 mod lua_phases;
 
+pub(crate) use handshake::HandshakeScripts;
 use lua_phases::LuaStep;
 
 const REDIRECT_STATUS: u16 = 308;
@@ -125,6 +127,16 @@ impl PanelProxy {
             listener: Arc::new(listener),
             active,
             in_flight,
+        }
+    }
+
+    /// What runs the handshake scripts of the listener's sites, presenting
+    /// the certificates they choose through `chosen`.
+    pub(crate) fn handshake_scripts(&self, chosen: Arc<ChosenCertificates>) -> HandshakeScripts {
+        HandshakeScripts {
+            listener: Arc::clone(&self.listener),
+            active: Arc::clone(&self.active),
+            chosen,
         }
     }
 }

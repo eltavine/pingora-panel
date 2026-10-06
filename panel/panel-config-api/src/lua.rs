@@ -69,7 +69,8 @@ pub struct LuaTestUpstream {
 pub struct LuaTestScript {
     pub code: String,
     /// `set`, `server_rewrite`, `rewrite`, `access`, `precontent`,
-    /// `content`, `balancer`, `header_filter`, `body_filter` or `log`.
+    /// `content`, `balancer`, `header_filter`, `body_filter`, `log`,
+    /// `ssl_client_hello` or `ssl_cert`.
     pub phase: String,
     #[serde(default)]
     pub allow: LuaPermissions,

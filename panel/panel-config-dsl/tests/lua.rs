@@ -779,6 +779,86 @@ http {
 }
 
 #[test]
+fn handshake_handlers_read_compile_print_and_stay_off_routes() {
+    let sources = Sources::single(
+        r#"language_version 1;
+http {
+    ssl_client_hello_by_lua_block {
+        local name = require("ngx.ssl.clienthello").get_client_hello_server_name()
+    }
+    server s {
+        server_name s.example;
+        ssl_certificate_by_lua_block {
+            local ssl = require "ngx.ssl"
+        }
+        respond 404;
+        route r {
+            match prefix /;
+            respond 200;
+        }
+    }
+}
+"#,
+    );
+    let lowered = read(&sources);
+    assert!(lowered.is_valid(), "{:#?}", lowered.diagnostics);
+    assert!(lowered.model.lua.http.ssl_client_hello.is_some());
+    assert!(lowered.model.sites[0].lua.ssl_cert.is_some());
+    let snapshot = compile(&lowered.model, RevisionId::new(1)).unwrap();
+    assert!(snapshot.sites[0].lua.ssl_client_hello.is_some());
+    assert!(snapshot.sites[0].lua.ssl_cert.is_some());
+    assert!(snapshot.routes[0].lua.ssl_cert.is_none());
+    let printed = print_sources(&lowered.model);
+    let main = printed.get("main.conf").unwrap();
+    assert!(
+        main.contains("    ssl_client_hello_by_lua_block {\n"),
+        "{main}"
+    );
+    assert!(
+        main.contains("        ssl_certificate_by_lua_block {\n"),
+        "{main}"
+    );
+
+    let misplaced = read(&Sources::single(
+        r#"language_version 1;
+http {
+    server s {
+        server_name s.example;
+        route r {
+            match prefix /;
+            ssl_certificate_by_lua_block { }
+            respond 200;
+        }
+    }
+    ssl_session_fetch_by_lua_block { }
+}
+"#,
+    ));
+    let found = messages(&misplaced);
+    assert!(
+        has(
+            &found,
+            codes::CONTEXT,
+            "main.conf:7",
+            "'ssl_certificate_by_lua_block' is not allowed in route"
+        ),
+        "{found:#?}"
+    );
+    assert!(
+        misplaced.diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("ssl_session_fetch_by_lua_block")
+                && diagnostic
+                    .help
+                    .as_deref()
+                    .is_some_and(|help| help.contains("cache"))
+        }),
+        "{found:#?}"
+    );
+}
+
+#[test]
 fn set_and_set_by_lua_give_variables_templates_read_per_request() {
     let mut sources = Sources::single(
         r#"language_version 1;

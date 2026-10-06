@@ -816,6 +816,12 @@ fn check_lua_scope(scope: &LuaScope, resource: &str, route: bool, report: &mut R
             "server_rewrite handlers run before the route is chosen, so a route cannot have one",
         );
     }
+    if route && (scope.ssl_client_hello.is_some() || scope.ssl_cert.is_some()) {
+        report.error(
+            resource,
+            "TLS handshake handlers run before any request, so a route cannot have one",
+        );
+    }
     for (term, value, most) in [
         (
             "time limit",

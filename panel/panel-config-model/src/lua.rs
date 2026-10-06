@@ -128,6 +128,14 @@ pub struct LuaScope {
     pub body_filter: Option<LuaCode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub log: Option<LuaCode>,
+    /// As a TLS handshake's hello arrives, for the site its server name
+    /// selects; `http` and sites only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssl_client_hello: Option<LuaCode>,
+    /// As a TLS handshake chooses the certificate it presents; `http` and
+    /// sites only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssl_cert: Option<LuaCode>,
     /// Wall-clock milliseconds a run may take, waits included.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub time_limit_ms: Option<u64>,
@@ -227,6 +235,8 @@ impl LuaScope {
             header_filter: pick(&self.header_filter, &outer.header_filter),
             body_filter: pick(&self.body_filter, &outer.body_filter),
             log: pick(&self.log, &outer.log),
+            ssl_client_hello: pick(&self.ssl_client_hello, &outer.ssl_client_hello),
+            ssl_cert: pick(&self.ssl_cert, &outer.ssl_cert),
             time_limit_ms: pick(&self.time_limit_ms, &outer.time_limit_ms),
             work_limit: pick(&self.work_limit, &outer.work_limit),
             allow: pick(&self.allow, &outer.allow),
@@ -282,6 +292,8 @@ impl LuaScope {
             ("header_filter", &self.header_filter),
             ("body_filter", &self.body_filter),
             ("log", &self.log),
+            ("ssl_client_hello", &self.ssl_client_hello),
+            ("ssl_cert", &self.ssl_cert),
         ]
         .into_iter()
         .filter_map(|(phase, code)| code.as_ref().map(|code| (phase, code)))
@@ -301,6 +313,8 @@ impl LuaScope {
             &mut self.header_filter,
             &mut self.body_filter,
             &mut self.log,
+            &mut self.ssl_client_hello,
+            &mut self.ssl_cert,
         ]
         .into_iter()
         .flatten()
@@ -729,7 +743,8 @@ pub(crate) fn variables<'v>(
         .collect()
 }
 
-/// The handlers `scope` runs; a route's never include `server_rewrite`.
+/// The handlers `scope` runs; a route's never include `server_rewrite` or
+/// the TLS handshake's.
 pub(crate) fn handlers(
     scope: &LuaScope,
     scripts: &mut Scripts,
@@ -752,6 +767,16 @@ pub(crate) fn handlers(
         header_filter: compile(&scope.header_filter),
         body_filter: compile(&scope.body_filter),
         log: compile(&scope.log),
+        ssl_client_hello: if route {
+            None
+        } else {
+            compile(&scope.ssl_client_hello)
+        },
+        ssl_cert: if route {
+            None
+        } else {
+            compile(&scope.ssl_cert)
+        },
         variables: Vec::new(),
     }
 }

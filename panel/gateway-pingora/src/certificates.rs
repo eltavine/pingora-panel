@@ -12,7 +12,19 @@ use rustls::{
 };
 use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
 use sha2::{Digest, Sha256};
-use std::{any::Any, collections::HashMap, fmt, sync::Arc};
+use std::{
+    any::Any,
+    collections::HashMap,
+    fmt,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
+};
+
+/// How long a certificate scripts chose waits for its handshake to finish.
+const CHOSEN_FOR: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) enum TlsVersion {
@@ -33,6 +45,14 @@ impl TlsVersion {
             "tls1.2" => Some(Self::Tls12),
             "tls1.3" => Some(Self::Tls13),
             _ => None,
+        }
+    }
+
+    /// The version's number on the wire.
+    pub(crate) const fn number(self) -> u16 {
+        match self {
+            Self::Tls12 => 0x0303,
+            Self::Tls13 => 0x0304,
         }
     }
 }
@@ -191,15 +211,78 @@ fn load_profile(profile: &TlsProfile, secrets: &dyn SecretSource) -> Result<Serv
     })
 }
 
-/// Serves the certificate the active snapshot assigns to each handshake.
+/// The certificates `ssl_certificate_by_lua` chose, by the task of the
+/// handshake they are for: rustls asks for its certificate in the task
+/// that ran the scripts. `None` presents none, and the handshake fails.
+#[derive(Default)]
+pub(crate) struct ChosenCertificates {
+    pending: AtomicUsize,
+    by_task: parking_lot::Mutex<HashMap<tokio::task::Id, Choice>>,
+}
+
+struct Choice {
+    at: Instant,
+    key: Option<Arc<CertifiedKey>>,
+}
+
+impl ChosenCertificates {
+    /// Presents `key` in the current task's handshake.
+    pub(crate) fn choose(&self, key: Option<Arc<CertifiedKey>>) {
+        let Some(task) = tokio::task::try_id() else {
+            return;
+        };
+        let now = Instant::now();
+        let mut by_task = self.by_task.lock();
+        by_task.retain(|_, choice| now.duration_since(choice.at) < CHOSEN_FOR);
+        by_task.insert(task, Choice { at: now, key });
+        self.pending.store(by_task.len(), Ordering::Release);
+    }
+
+    /// What scripts chose for the current task's handshake, if they ran.
+    fn chosen(&self) -> Option<Option<Arc<CertifiedKey>>> {
+        if self.pending.load(Ordering::Acquire) == 0 {
+            return None;
+        }
+        let task = tokio::task::try_id()?;
+        self.by_task
+            .lock()
+            .get(&task)
+            .map(|choice| choice.key.clone())
+    }
+
+    /// Forgets the choice once the current task's handshake is done.
+    fn finished(&self) {
+        if self.pending.load(Ordering::Acquire) == 0 {
+            return;
+        }
+        let Some(task) = tokio::task::try_id() else {
+            return;
+        };
+        let mut by_task = self.by_task.lock();
+        by_task.remove(&task);
+        self.pending.store(by_task.len(), Ordering::Release);
+    }
+}
+
+/// Serves the certificate the active snapshot assigns to each handshake,
+/// unless scripts chose another.
 pub(crate) struct ListenerCertificates {
     active: ActiveSnapshot,
     listener: String,
+    chosen: Arc<ChosenCertificates>,
 }
 
 impl ListenerCertificates {
-    pub(crate) fn new(active: ActiveSnapshot, listener: String) -> Self {
-        Self { active, listener }
+    pub(crate) fn new(
+        active: ActiveSnapshot,
+        listener: String,
+        chosen: Arc<ChosenCertificates>,
+    ) -> Self {
+        Self {
+            active,
+            listener,
+            chosen,
+        }
     }
 }
 
@@ -214,6 +297,9 @@ impl fmt::Debug for ListenerCertificates {
 
 impl ResolvesServerCert for ListenerCertificates {
     fn resolve(&self, hello: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {
+        if let Some(chosen) = self.chosen.chosen() {
+            return chosen;
+        }
         let active = self.active.load();
         let name = hello.server_name().map(str::to_ascii_lowercase);
         let certificates = active.as_ref()?.certificates.load();
@@ -233,7 +319,10 @@ pub(crate) struct Handshake {
 /// Keeps what a completed handshake negotiated for the requests on its
 /// connection, and counts the handshake for the listener when the gateway
 /// is measured.
-pub(crate) struct HandshakeRecorder(pub Option<(GatewayMetrics, Arc<str>)>);
+pub(crate) struct HandshakeRecorder {
+    pub metrics: Option<(GatewayMetrics, Arc<str>)>,
+    pub chosen: Arc<ChosenCertificates>,
+}
 
 #[async_trait]
 impl TlsAccept for HandshakeRecorder {
@@ -241,8 +330,9 @@ impl TlsAccept for HandshakeRecorder {
         &self,
         tls: &TlsRef,
     ) -> Option<Arc<dyn Any + Send + Sync>> {
+        self.chosen.finished();
         let version = tls.version().and_then(TlsVersion::parse);
-        if let Some((metrics, listener)) = &self.0 {
+        if let Some((metrics, listener)) = &self.metrics {
             metrics.handshake(listener, version);
         }
         Some(Arc::new(Handshake {

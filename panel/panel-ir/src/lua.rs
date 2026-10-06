@@ -289,6 +289,14 @@ pub struct LuaHandlers {
     pub body_filter: Option<LuaHandler>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub log: Option<LuaHandler>,
+    /// As a TLS handshake's hello arrives, for the site its server name
+    /// selects; a site's only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssl_client_hello: Option<LuaHandler>,
+    /// As a TLS handshake chooses the certificate it presents; a site's
+    /// only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssl_cert: Option<LuaHandler>,
     /// Set in order as the site's server rewrite phase or the route's
     /// rewrite phase begins, before its handler.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -311,6 +319,8 @@ impl LuaHandlers {
             ("header_filter", &self.header_filter),
             ("body_filter", &self.body_filter),
             ("log", &self.log),
+            ("ssl_client_hello", &self.ssl_client_hello),
+            ("ssl_cert", &self.ssl_cert),
         ]
         .into_iter()
         .filter_map(|(phase, handler)| handler.as_ref().map(|handler| (phase, handler)))
