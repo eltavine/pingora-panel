@@ -177,29 +177,25 @@ pub(crate) fn lex(text: &str) -> Lexed {
             let starts = statement;
             statement = matches!(c, ';' | '{' | '}');
             if !starts && c == '{' {
+                // The statement's first word names the directive; its
+                // arguments may come between the name and the code.
                 if let Some(name) = lexed
                     .tokens
                     .iter()
                     .rev()
-                    .find(|token| token.kind != TokenKind::Comment)
+                    .filter(|token| token.kind != TokenKind::Comment)
+                    .take_while(|token| {
+                        !matches!(
+                            token.kind,
+                            TokenKind::Semicolon
+                                | TokenKind::Open
+                                | TokenKind::Close
+                                | TokenKind::Lua
+                        )
+                    })
+                    .last()
                 {
-                    let is_name = name.kind == TokenKind::Word
-                        && takes_lua(&name.value)
-                        && lexed
-                            .tokens
-                            .iter()
-                            .rev()
-                            .filter(|token| token.kind != TokenKind::Comment)
-                            .nth(1)
-                            .is_none_or(|before| {
-                                matches!(
-                                    before.kind,
-                                    TokenKind::Semicolon
-                                        | TokenKind::Open
-                                        | TokenKind::Close
-                                        | TokenKind::Lua
-                                )
-                            });
+                    let is_name = name.kind == TokenKind::Word && takes_lua(&name.value);
                     if is_name {
                         match lua_end(text, start) {
                             Ok(close) => {
@@ -470,6 +466,17 @@ mod tests {
             .tokens
             .iter()
             .all(|token| token.kind != TokenKind::Lua));
+        let lexed = lex("set_by_lua_block $x $arg_a { return ngx.arg[1]; }");
+        let kinds: Vec<_> = lexed.tokens.iter().map(|token| token.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Word,
+                TokenKind::Word,
+                TokenKind::Word,
+                TokenKind::Lua
+            ]
+        );
         let lexed = lex("content_by_lua_block { ngx.say(\"open) }");
         assert_eq!(lexed.errors[0].1, "the Lua string is not closed");
         let lexed = lex("content_by_lua_block { ngx.say(\"open)\n}");
