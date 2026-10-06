@@ -216,9 +216,14 @@ run scripts with the gateway's own privileges outside the sandbox and
 `resty.lrucache` (with `resty.lrucache.pureffi`), each VM holding its own
 caches, so the library scripts vendor for its FFI needs no FFI, and
 `ngx.ssl` with `ngx.ssl.clienthello`, `ngx.ssl.session` and
-`ngx.ssl.proxysslcert`, and `ngx.ocsp`. `require` refuses `ngx.pipe`,
-which would start processes on the gateway's host, and LuaJIT's `ffi`,
-whose native calls would leave the sandbox, saying so; the configuration
+`ngx.ssl.proxysslcert`, and `ngx.ocsp`. `resty.core.base` gives libraries
+its table helpers, status codes, subsystem check and table references, and
+the other `resty.core` modules load and do nothing, since the `ngx` they
+would replace with FFI functions is native here. `require` refuses
+`ngx.pipe`, which would start processes on the gateway's host, LuaJIT's
+`ffi`, whose native calls would leave the sandbox, and
+`ngx.ssl.proxysslverify` and `ngx.proxyssl`, which read upstream TLS
+connections Pingora keeps no handshake of, saying so; the configuration
 check reports them where they are required.
 `lua_capture_error_log` keeps, for each VM, what its scripts log up to the
 size given, oldest messages dropped first, for `ngx.errlog.get_logs`;

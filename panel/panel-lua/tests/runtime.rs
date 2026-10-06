@@ -2544,3 +2544,33 @@ async fn requests_read_the_client_certificate_their_connection_verified() {
     run(&mut plain, handler(lua.handlers[1], Phase::Content)).await;
     assert_eq!(plain.exchange().response.body, b"NONE nil\n");
 }
+
+#[tokio::test]
+async fn resty_core_modules_load_as_lua_resty_core_gives_them() {
+    let lua = start(
+        1,
+        handlers(&[r#"
+            local base = require "resty.core.base"
+            assert(require("resty.core").version and require("resty.core.regex").version)
+            local tab = base.new_tab(4, 0)
+            tab[1] = "x"
+            base.clear_tab(tab)
+            assert(next(tab) == nil)
+            local refs = {}
+            local first = base.ref_in_table(refs, "a")
+            local second = base.ref_in_table(refs, "b")
+            base.unref_in_table(refs, first)
+            assert(base.ref_in_table(refs, "c") == first and refs[second] == "b")
+            base.allows_subsystem("http", "stream")
+            assert(not pcall(base.allows_subsystem, "stream"))
+            assert(base.FFI_OK == 0 and base.FFI_DECLINED == -5)
+            local ok, err = pcall(require, "ngx.ssl.proxysslverify")
+            assert(not ok and tostring(err):find("no server certificate"), err)
+            ngx.say("ok")
+        "#]),
+    );
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = run(&mut scripts, handler(lua.handlers[0], Phase::Content)).await;
+    assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+    assert_eq!(scripts.exchange().response.body, b"ok\n");
+}

@@ -73,6 +73,17 @@ fn load(
     if name == "panel.v1" {
         return panel_v1(lua, module_meta);
     }
+    if name == "resty.core.base" {
+        let env = lua.create_table()?;
+        env.set_metatable(Some(module_meta.clone()))?;
+        env.set_safeenv(true);
+        return lua
+            .load(include_str!("resty_core_base.lua"))
+            .set_name("=resty.core.base")
+            .set_environment(env)
+            .into_function()?
+            .call::<Value>(());
+    }
     if name == "resty.lrucache" || name == "resty.lrucache.pureffi" {
         let env = lua.create_table()?;
         env.set_metatable(Some(module_meta.clone()))?;
@@ -216,7 +227,7 @@ fn panel_v1(lua: &Lua, module_meta: &Table) -> mlua::Result<Value> {
 }
 
 /// OpenResty's modules that scripts may not load, and why.
-const REFUSED: [(&str, &str); 2] = [
+const REFUSED: [(&str, &str); 4] = [
     (
         "ngx.pipe",
         "it would start processes on the gateway's host, outside the sandbox",
@@ -225,6 +236,39 @@ const REFUSED: [(&str, &str); 2] = [
         "ffi",
         "native code called through an FFI would run outside the sandbox",
     ),
+    (
+        "ngx.ssl.proxysslverify",
+        "Pingora's TLS connections to upstreams keep no server certificate for a script to verify",
+    ),
+    (
+        "ngx.proxyssl",
+        "Pingora's TLS connections to upstreams keep nothing of their handshake for a script to read",
+    ),
+];
+
+/// lua-resty-core's modules besides `resty.core.base`, which replace `ngx`
+/// functions with FFI ones there and leave nothing to do here.
+const RESTY_CORE: [&str; 20] = [
+    "resty.core",
+    "resty.core.base64",
+    "resty.core.coroutine",
+    "resty.core.ctx",
+    "resty.core.exit",
+    "resty.core.hash",
+    "resty.core.misc",
+    "resty.core.ndk",
+    "resty.core.param",
+    "resty.core.phase",
+    "resty.core.regex",
+    "resty.core.request",
+    "resty.core.response",
+    "resty.core.shdict",
+    "resty.core.socket",
+    "resty.core.time",
+    "resty.core.uri",
+    "resty.core.utils",
+    "resty.core.var",
+    "resty.core.worker",
 ];
 
 /// Why scripts may not load `name`, an OpenResty module.
@@ -236,7 +280,7 @@ pub(crate) fn refusal(name: &str) -> Option<&'static str> {
 }
 
 /// The modules OpenResty scripts commonly load that come with the gateway.
-pub(crate) const BUILT_IN: [&str; 34] = [
+pub(crate) const BUILT_IN: [&str; 54] = [
     "panel.v1",
     "cjson",
     "cjson.safe",
@@ -248,6 +292,26 @@ pub(crate) const BUILT_IN: [&str; 34] = [
     "table.isarray",
     "table.clone",
     "resty.core",
+    "resty.core.base",
+    "resty.core.base64",
+    "resty.core.coroutine",
+    "resty.core.ctx",
+    "resty.core.exit",
+    "resty.core.hash",
+    "resty.core.misc",
+    "resty.core.ndk",
+    "resty.core.param",
+    "resty.core.phase",
+    "resty.core.regex",
+    "resty.core.request",
+    "resty.core.response",
+    "resty.core.shdict",
+    "resty.core.socket",
+    "resty.core.time",
+    "resty.core.uri",
+    "resty.core.utils",
+    "resty.core.var",
+    "resty.core.worker",
     "resty.string",
     "resty.random",
     "resty.md5",
@@ -311,7 +375,11 @@ fn built_in(
             }
             Ok(count == table.raw_len())
         })?),
-        name if name == "resty.core" || name.starts_with("resty.core.") => Value::Boolean(true),
+        name if RESTY_CORE.contains(&name) => {
+            let module = lua.create_table()?;
+            module.raw_set("version", "0.1.31")?;
+            Value::Table(module)
+        }
         "resty.string" => {
             let module = lua.create_table()?;
             module.raw_set(
