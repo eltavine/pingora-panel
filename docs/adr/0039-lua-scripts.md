@@ -251,7 +251,10 @@ database and user), whose `ssl` handshakes verify the server unless told
 not to, as the cosockets under it do, `resty.dns.resolver`, lua-resty-dns's
 resolver under the network permission, whose messages hickory-proto makes
 and reads, retrying the next nameserver after a timeout and over TCP when
-an answer is truncated, and whose `compress_ipv6_addr` follows RFC 5952, and
+an answer is truncated, and whose `compress_ipv6_addr` follows RFC 5952,
+`resty.upload`, lua-resty-upload's reader of multipart bodies (RFC 2046,
+RFC 7578) over the request socket, whose `preserve_body` gives the
+request back the body as it arrived, and
 `ngx.ssl` with `ngx.ssl.clienthello`, `ngx.ssl.session`,
 `ngx.ssl.proxysslcert` and `ngx.ssl.proxysslverify`, `ngx.proxyssl` and
 `ngx.ocsp`. `resty.core.base` gives libraries

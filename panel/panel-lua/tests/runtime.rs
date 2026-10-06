@@ -1487,6 +1487,79 @@ impl Host for Pieces {
 }
 
 #[tokio::test]
+async fn uploads_stream_multipart_parts_as_lua_resty_upload_does() {
+    let lua = start(
+        1,
+        handlers(&[
+            r#"
+            local upload = require "resty.upload"
+            local cjson = require "cjson"
+            local form = assert(upload:new(5, nil, true))
+            form:set_timeout(1000)
+            while true do
+                local typ, res, err = form:read()
+                assert(typ, err)
+                ngx.say(cjson.encode({ typ, res }))
+                if typ == "eof" then
+                    break
+                end
+            end
+            ngx.say(cjson.encode({ form:read() }))
+            ngx.say(#ngx.req.get_body_data())
+            "#,
+            r#"
+            local upload = require "resty.upload"
+            local nothing, err = upload:new()
+            ngx.say(tostring(nothing), " ", err)
+            "#,
+        ]),
+    );
+    let body: [&'static [u8]; 4] = [
+        b"--AaB03x\r\nContent-Disposition: form-data; name=\"file1\"; filename=\"a.txt\"\r\nContent-Type: text/plain\r\n\r\nHel",
+        b"lo, world\r\n--AaB",
+        b"03x\r\nContent-Disposition: form-data; name=\"test\"\r\n\r\nvalue\r\n\r",
+        b"\n--AaB03x--\r\n",
+    ];
+    let whole: usize = body.iter().map(|piece| piece.len()).sum();
+    let mut granted = handler(lua.handlers[0], Phase::Content);
+    granted.permissions.body = true;
+    let form = [("content-type", "multipart/form-data; boundary=\"AaB03x\"")];
+    let mut scripts = lua.runtime.scripts(request("POST", "/upload", &form));
+    let outcome = scripts.run(granted, &mut Pieces(body.into())).await;
+    assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+    let printed = String::from_utf8(scripts.exchange().response.body.clone()).unwrap();
+    let expected = [
+        r#"["header",["Content-Disposition","form-data; name=\"file1\"; filename=\"a.txt\"","Content-Disposition: form-data; name=\"file1\"; filename=\"a.txt\""]]"#,
+        r#"["header",["Content-Type","text\/plain","Content-Type: text\/plain"]]"#,
+        r#"["body","Hello"]"#,
+        r#"["body",", wor"]"#,
+        r#"["body","ld"]"#,
+        r#"["part_end"]"#,
+        r#"["header",["Content-Disposition","form-data; name=\"test\"","Content-Disposition: form-data; name=\"test\""]]"#,
+        r#"["body","value"]"#,
+        r#"["body","\r\n"]"#,
+        r#"["part_end"]"#,
+        r#"["eof"]"#,
+        r#"["eof"]"#,
+    ];
+    assert_eq!(printed, format!("{}\n{whole}\n", expected.join("\n")));
+
+    for (headers, expected) in [
+        (&[][..], "nil no Content-Type header\n"),
+        (
+            &[("content-type", "multipart/form-data")][..],
+            "nil no boundary defined in Content-Type\n",
+        ),
+    ] {
+        let mut granted = handler(lua.handlers[1], Phase::Content);
+        granted.permissions.body = true;
+        let mut scripts = lua.runtime.scripts(request("POST", "/upload", headers));
+        run(&mut scripts, granted).await;
+        assert_eq!(scripts.exchange().response.body, expected.as_bytes());
+    }
+}
+
+#[tokio::test]
 async fn request_sockets_stream_the_body_across_its_pieces() {
     let lua = start(
         1,
