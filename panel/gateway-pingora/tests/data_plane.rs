@@ -2683,3 +2683,45 @@ async fn snapshots_whose_scripts_do_not_compile_are_refused() {
         "{error:?}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn access_handlers_run_before_security_policies_when_not_postponed() {
+    use panel_ir::{LuaHandler, LUA_SCRIPTS_CAPABILITY};
+
+    for (first, status, answer) in [(false, 403, None), (true, 200, Some("lua first\n"))] {
+        let listen = free_address();
+        let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+        snapshot
+            .listeners
+            .push(ListenerRef::new("http", listen.to_string()));
+        snapshot.required_capabilities.extend([
+            CapabilityRequirement::new(LUA_SCRIPTS_CAPABILITY, "1"),
+            CapabilityRequirement::new(REQUEST_SECURITY_CAPABILITY, "1"),
+        ]);
+        snapshot.lua.scripts = vec![lua_script("early", "ngx.say('lua first')")];
+        snapshot.lua.access_first = first;
+        snapshot.sites.push(site(&["shop.test"]));
+        let mut gated = route(
+            "gated",
+            1,
+            prefix("/"),
+            RouteAction::respond(200, Some("after the policy".into())),
+        );
+        gated.security_policy_id = Some("closed".into());
+        gated.lua.access = Some(LuaHandler::new("early"));
+        snapshot.routes.push(gated);
+        snapshot.security_policies.push(SecurityPolicy {
+            id: "closed".into(),
+            denied_path_prefixes: vec!["/".into()],
+            ..SecurityPolicy::default()
+        });
+        let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
+        wait_for(listen).await;
+        let response = get(listen, Some("shop.test"), "/", "").await;
+        assert_eq!(response.status, status, "access first: {first}");
+        if let Some(answer) = answer {
+            assert_eq!(String::from_utf8_lossy(&response.body), answer);
+        }
+        gateway.stop().await;
+    }
+}

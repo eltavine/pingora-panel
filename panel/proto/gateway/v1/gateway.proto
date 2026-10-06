@@ -707,6 +707,9 @@ message LuaProgram {
   // PCRE2's match limit for ngx.re (lua_regex_match_limit); zero keeps
   // PCRE2's own.
   uint64 regex_match_limit = 10;
+  // Access handlers run before the security policies
+  // (access_by_lua_no_postpone on).
+  bool access_first = 11;
 }
 
 message ValidateRequest {

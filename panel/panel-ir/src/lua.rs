@@ -281,6 +281,10 @@ pub struct LuaProgram {
     /// zero for PCRE2's own.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub regex_match_limit: u64,
+    /// Access handlers run before the security policies, as
+    /// `access_by_lua_no_postpone on` has them.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub access_first: bool,
 }
 
 impl LuaProgram {

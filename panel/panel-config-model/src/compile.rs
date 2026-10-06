@@ -404,6 +404,7 @@ impl Compiler<'_> {
         program.max_running_timers = config.max_running_timers.unwrap_or(0);
         program.regex_cache_max_entries = config.regex_cache_max_entries;
         program.regex_match_limit = config.regex_match_limit.unwrap_or(0);
+        program.access_first = config.access_no_postpone.unwrap_or(false);
         self.snapshot.lua = program;
         self.capabilities.insert(LUA_SCRIPTS_CAPABILITY);
     }

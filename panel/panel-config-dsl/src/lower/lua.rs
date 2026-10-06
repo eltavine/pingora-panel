@@ -146,6 +146,7 @@ pub(super) const HTTP: &[&str] = &[
     "lua",
     "lua_shared_dict",
     "lua_memory_limit",
+    "access_by_lua_no_postpone",
     "lua_max_pending_timers",
     "lua_max_running_timers",
     "lua_regex_cache_max_entries",
@@ -435,6 +436,9 @@ impl<'a> Lowerer<'a> {
             }
             "lua_memory_limit" => {
                 self.lua.memory_limit_bytes = self.size(file, &directive.args[0]);
+            }
+            "access_by_lua_no_postpone" => {
+                self.lua.access_no_postpone = self.bool_arg(file, &directive.args[0]);
             }
             "lua_max_pending_timers"
             | "lua_max_running_timers"

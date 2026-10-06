@@ -258,6 +258,10 @@ pub struct LuaConfig {
     /// keeps PCRE2's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub regex_match_limit: Option<u64>,
+    /// `access_by_lua_no_postpone`: access handlers run before the
+    /// security policies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_no_postpone: Option<bool>,
     /// What every site runs, and the terms of every handler; balancers and
     /// `init` run on these terms.
     #[serde(default, skip_serializing_if = "LuaScope::is_empty")]

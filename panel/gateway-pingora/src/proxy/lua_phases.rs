@@ -255,7 +255,7 @@ fn put_scripts(session: &mut Session, scripts: Scripts) {
 }
 
 impl PanelProxy {
-    fn lua_plan(ctx: &RequestContext) -> Option<Arc<LuaPlan>> {
+    pub(super) fn lua_plan(ctx: &RequestContext) -> Option<Arc<LuaPlan>> {
         ctx.snapshot
             .as_ref()?
             .lua

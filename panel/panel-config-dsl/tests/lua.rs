@@ -13,7 +13,7 @@ const MAIN: &str = r#"language_version 1;
 
 http {
     lua_shared_dict hits 1m;
-    lua_memory_limit 32m; lua_max_pending_timers 64; lua_max_running_timers 8; lua_regex_cache_max_entries 0; lua_regex_match_limit 100000;
+    lua_memory_limit 32m; access_by_lua_no_postpone on; lua_max_pending_timers 64; lua_max_running_timers 8; lua_regex_cache_max_entries 0; lua_regex_match_limit 100000;
     lua_time_limit 50ms;
     lua_allow upstream;
     init_by_lua_block {
@@ -118,6 +118,7 @@ fn lua_directives_read_into_the_model_at_each_level() {
         ),
         (Some(64), Some(8), Some(0), Some(100_000))
     );
+    assert_eq!(lua.access_no_postpone, Some(true));
     assert_eq!(
         (
             lua.shared_dicts[0].name.as_str(),
@@ -178,6 +179,7 @@ fn lua_directives_read_into_the_model_at_each_level() {
     let init = snapshot.lua.init.as_ref().unwrap();
     let script = snapshot.lua.script(&init.script_id).unwrap();
     assert_eq!((script.file.as_str(), script.line), ("main.conf", 8));
+    assert!(snapshot.lua.access_first);
     let filter = snapshot.sites[0].lua.header_filter.as_ref().unwrap();
     assert_eq!(
         (
@@ -205,7 +207,7 @@ fn lua_prints_back_as_written() {
     let second = read(&printed);
     assert!(second.is_valid(), "{:#?}\n{main}", second.diagnostics);
     for expected in [
-        "    lua_memory_limit 32m;\n    lua_max_pending_timers 64;\n    lua_max_running_timers 8;\n    lua_regex_cache_max_entries 0;\n    lua_regex_match_limit 100000;\n    lua_shared_dict hits 1m;\n    lua_time_limit 50ms;\n    lua_allow upstream;\n    init_by_lua_block {\n        local limits",
+        "    lua_memory_limit 32m;\n    access_by_lua_no_postpone on;\n    lua_max_pending_timers 64;\n    lua_max_running_timers 8;\n    lua_regex_cache_max_entries 0;\n    lua_regex_match_limit 100000;\n    lua_shared_dict hits 1m;\n    lua_time_limit 50ms;\n    lua_allow upstream;\n    init_by_lua_block {\n        local limits",
         "    access_by_lua_file lua/auth.lua;\n    log_by_lua_block { local n",
         "        balancer_by_lua_file lua/pick.lua;\n",
         "        lua_on_error continue;\n        lua_log_level warn;\n        lua_socket_read_timeout 5s;\n        lua_socket_pool_size 10;\n        lua_socket_log_errors off;\n        lua_transform_underscores_in_response_headers off;\n        lua_use_default_type off;\n        header_filter_by_lua_block {\n",

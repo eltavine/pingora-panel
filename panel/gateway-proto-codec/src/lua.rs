@@ -41,6 +41,7 @@ pub(super) fn decode_program(value: Option<wire::LuaProgram>) -> Result<LuaProgr
         max_running_timers: value.max_running_timers,
         regex_cache_max_entries: value.regex_cache_max_entries,
         regex_match_limit: value.regex_match_limit,
+        access_first: value.access_first,
     })
 }
 
@@ -77,6 +78,7 @@ pub(super) fn encode_program(value: &LuaProgram) -> Option<wire::LuaProgram> {
         max_running_timers: value.max_running_timers,
         regex_cache_max_entries: value.regex_cache_max_entries,
         regex_match_limit: value.regex_match_limit,
+        access_first: value.access_first,
     })
 }
 

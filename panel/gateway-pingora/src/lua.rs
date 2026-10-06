@@ -47,6 +47,9 @@ pub(crate) struct LuaPlan {
     pub runtime: Runtime,
     /// `lua off`: scripts stay but none runs.
     pub disabled: bool,
+    /// `access_by_lua_no_postpone on`: access handlers run before the
+    /// security policies.
+    pub access_first: bool,
 }
 
 impl std::fmt::Debug for LuaPlan {
@@ -91,6 +94,7 @@ pub(crate) fn compile(
         Some(Arc::new(LuaPlan {
             runtime,
             disabled: compiled.disabled,
+            access_first: snapshot.lua.access_first,
         })),
         compiled.index,
     ))

@@ -1406,6 +1406,7 @@ that mean one thing in every phase.
 | `lua_time_limit` | `100ms` | wall-clock time of a run |
 | `lua_work_limit` | `10000000` | function calls and loop iterations of a run |
 | `lua_memory_limit` | `64m` | memory of each VM (`http` only) |
+| `access_by_lua_no_postpone` | `off` | access handlers run before the security policies instead of after them (`http` only) |
 | `lua_max_pending_timers` | `1024` | timers each VM holds waiting (`http` only) |
 | `lua_max_running_timers` | `256` | timers each VM runs at once (`http` only) |
 | `lua_regex_cache_max_entries` | `1024` | compiled `ngx.re` expressions each VM keeps, none at `0` (`http` only) |

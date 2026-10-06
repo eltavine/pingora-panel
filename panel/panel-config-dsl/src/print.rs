@@ -113,6 +113,12 @@ pub(crate) fn lua_http(lua: &LuaConfig) -> Vec<Directive> {
     if let Some(bytes) = lua.memory_limit_bytes {
         body.push(Directive::simple("lua_memory_limit", [print_size(bytes)]));
     }
+    if let Some(on) = lua.access_no_postpone {
+        body.push(Directive::simple(
+            "access_by_lua_no_postpone",
+            [crate::values::print_bool(on)],
+        ));
+    }
     for (name, value) in [
         ("lua_max_pending_timers", lua.max_pending_timers),
         ("lua_max_running_timers", lua.max_running_timers),

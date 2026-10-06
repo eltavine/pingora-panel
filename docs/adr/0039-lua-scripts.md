@@ -175,6 +175,10 @@ scripts call bound their own work: regular expressions with PCRE2's match
 limit, JSON and bodies with size limits. Handlers that can only run to
 completion, such as `body_filter_by_lua`, are not suspended.
 
+Access handlers run after the security policies of their site and
+route, as access modules run before `access_by_lua` in NGINX;
+`access_by_lua_no_postpone on` runs them first.
+
 **Permissions.** Reading and changing the request and response, `ngx.ctx`,
 logs, time, JSON, regular expressions, digests and random values are always
 available. `lua_allow` grants a site's or route's scripts more: `body` to

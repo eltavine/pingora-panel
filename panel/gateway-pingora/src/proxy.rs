@@ -15,7 +15,7 @@ use crate::{
     request_identity,
     resilience::Busy,
     responses,
-    routing::{RouteTarget, SiteRoutes},
+    routing::{CompiledRoute, RouteTarget, SiteRoutes},
     security::{Admission, Candidate, ClientResolution, Refusal},
     static_files,
     telemetry::{self, GatewayMetrics},
@@ -512,34 +512,13 @@ impl ProxyHttp for PanelProxy {
             }
             let route = site.route(route_index);
             self.lua_prepare_header_filter(session, ctx, &path, host_name);
-            let gates: Vec<usize> = site.security.into_iter().chain(route.security).collect();
-            if !gates.is_empty() {
-                let mut admission = Admission::default();
-                let candidate = Candidate {
-                    client: ctx.client.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
-                    header: session.req_header(),
-                    path: &path,
-                    host: host_name,
-                    route: route.id.as_str(),
-                };
-                let mut refused = None;
-                for index in gates {
-                    if let Err(refusal) = snapshot.policies[index]
-                        .check(&candidate, &mut admission)
-                        .await
-                    {
-                        refused = Some(refusal);
-                        break;
-                    }
-                }
-                if let Some(refusal) = refused {
-                    refuse(session, refusal).await?;
-                    return Ok(true);
-                }
-                if let Some(timeout) = admission.body_timeout {
-                    session.set_read_timeout(Some(timeout));
-                }
-                ctx.admission = admission;
+            // access_by_lua_no_postpone: the access handler goes before the
+            // security policies instead of after them.
+            let access_first = Self::lua_plan(ctx).is_some_and(|plan| plan.access_first);
+            if !access_first
+                && Self::admit(session, ctx, &snapshot, site, route, &path, host_name).await?
+            {
+                return Ok(true);
             }
             if let Some(hook) = route.lua.access.clone() {
                 let proxied = matches!(route.target, RouteTarget::Proxy(_));
@@ -556,6 +535,11 @@ impl ProxyHttp for PanelProxy {
                     }
                     LuaStep::Go { .. } => {}
                 }
+            }
+            if access_first
+                && Self::admit(session, ctx, &snapshot, site, route, &path, host_name).await?
+            {
+                return Ok(true);
             }
             let http: Vec<&HttpPolicy> = site
                 .http
@@ -1108,6 +1092,50 @@ impl ProxyHttp for PanelProxy {
 }
 
 impl PanelProxy {
+    /// Checks the request against the security policies of its site and
+    /// route. Returns whether one refused it, answering it.
+    async fn admit(
+        session: &mut Session,
+        ctx: &mut RequestContext,
+        snapshot: &PreparedPingoraSnapshot,
+        site: &SiteRoutes,
+        route: &CompiledRoute,
+        path: &str,
+        host_name: &str,
+    ) -> pingora_core::Result<bool> {
+        let gates: Vec<usize> = site.security.into_iter().chain(route.security).collect();
+        if gates.is_empty() {
+            return Ok(false);
+        }
+        let mut admission = Admission::default();
+        let candidate = Candidate {
+            client: ctx.client.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+            header: session.req_header(),
+            path,
+            host: host_name,
+            route: route.id.as_str(),
+        };
+        let mut refused = None;
+        for index in gates {
+            if let Err(refusal) = snapshot.policies[index]
+                .check(&candidate, &mut admission)
+                .await
+            {
+                refused = Some(refusal);
+                break;
+            }
+        }
+        if let Some(refusal) = refused {
+            refuse(session, refusal).await?;
+            return Ok(true);
+        }
+        if let Some(timeout) = admission.body_timeout {
+            session.set_read_timeout(Some(timeout));
+        }
+        ctx.admission = admission;
+        Ok(false)
+    }
+
     /// Forgets what the route a request took prepared, before the request
     /// starts over after `ngx.exec`; answers 500 instead once the request
     /// has changed its URI too often. Returns whether it starts over.
