@@ -262,7 +262,11 @@ results, authenticating with `mysql_native_password`, and with
 `caching_sha2_password` and `sha256_password` by their scramble or, over
 TLS, the password itself (encrypting it with the server's RSA key, MariaDB's
 `client_ed25519` and the pre-4.1 `mysql_old_password` are refused saying
-so), and
+so), `ngx.upstream`, lua-upstream-nginx-module's view of the
+configuration's upstream pools, whose `set_peer_down`, under the upstream
+permission, takes a peer out of rotation for every request of the
+configuration until a script puts it back, next to the gateway's own
+health checks, drains and passive ejection, and
 `ngx.ssl` with `ngx.ssl.clienthello`, `ngx.ssl.session`,
 `ngx.ssl.proxysslcert` and `ngx.ssl.proxysslverify`, `ngx.proxyssl` and
 `ngx.ocsp`. `resty.core.base` gives libraries

@@ -21,6 +21,7 @@ mod ssl;
 mod stream;
 mod timer;
 mod tls;
+mod upstreams;
 mod vm;
 mod worker;
 mod x509;
@@ -38,6 +39,7 @@ pub use ssl::{ClientAuth, Handshake, UpstreamTls};
 pub use stream::Output;
 pub use timer::TimerRun;
 pub use tls::{TlsId, TlsTerms};
+pub use upstreams::{NoUpstreams, UpstreamPeer, UpstreamServer, Upstreams};
 
 /// `ngx` functions lua-nginx-module has and this runtime does not provide.
 pub fn unavailable_functions() -> &'static [&'static str] {

@@ -148,8 +148,11 @@ impl WorkerThreads {
             &self.dicts,
             &self.settings,
             0,
-            Arc::clone(&self.timers),
-            Arc::downgrade(self),
+            crate::vm::Shared {
+                timers: Arc::clone(&self.timers),
+                worker_threads: Arc::downgrade(self),
+                upstreams: Arc::new(crate::upstreams::NoUpstreams),
+            },
             true,
         );
         made.map(|(vm, _)| vm).map_err(|error| {

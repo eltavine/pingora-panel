@@ -22,7 +22,10 @@ mod ssl;
 mod thread;
 mod time;
 mod udp;
+mod upstream;
 mod var;
+
+pub(crate) use upstream::Handle as UpstreamsHandle;
 
 pub(crate) use contexts::Api;
 pub(crate) use errlog::ErrorLog;

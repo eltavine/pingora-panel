@@ -48,6 +48,8 @@ pub(crate) struct EndpointState {
     consecutive_failures: AtomicU32,
     ejected_until_ms: AtomicU64,
     drained: AtomicBool,
+    /// `ngx.upstream.set_peer_down` took the endpoint out of rotation.
+    scripted_down: AtomicBool,
     latency_us: AtomicU64,
 }
 
@@ -104,7 +106,7 @@ impl EndpointStates {
         Arc::clone(self.pools.lock().entry(pool.to_owned()).or_default())
     }
 
-    fn state(&self, pool: &str, endpoint: &str) -> Arc<EndpointState> {
+    pub(crate) fn state(&self, pool: &str, endpoint: &str) -> Arc<EndpointState> {
         Arc::clone(
             self.states
                 .lock()
@@ -165,6 +167,7 @@ pub(crate) struct EndpointRuntime {
 impl EndpointRuntime {
     fn available(&self, now_ms: u64, max_connections: Option<u32>) -> bool {
         !self.state.drained.load(Relaxed)
+            && !self.state.scripted_down.load(Relaxed)
             && self.state.ejected_until_ms.load(Relaxed) <= now_ms
             && max_connections.is_none_or(|max| self.state.in_flight.load(Relaxed) < max)
     }
@@ -779,6 +782,147 @@ pub(crate) fn now_ms() -> u64 {
 
 fn pingora_error(error: Box<Error>) -> PanelError {
     PanelError::internal(format!("Pingora upstream setup failed: {error}"))
+}
+
+struct ScriptEndpoint {
+    id: String,
+    name: String,
+    weight: u32,
+    backup: bool,
+    enabled: bool,
+}
+
+struct ScriptPool {
+    id: String,
+    max_fails: u32,
+    fail_timeout: u32,
+    endpoints: Vec<ScriptEndpoint>,
+}
+
+/// What `ngx.upstream` sees of a snapshot's upstreams: their endpoints as
+/// configured, and the state they share with the pools that serve them,
+/// so a peer a script takes down leaves rotation as soon as the snapshot
+/// serves.
+pub(crate) struct ScriptUpstreams {
+    pools: Vec<ScriptPool>,
+    states: Arc<EndpointStates>,
+}
+
+impl ScriptUpstreams {
+    pub(crate) fn new(specs: &[UpstreamPoolSpec], states: Arc<EndpointStates>) -> Self {
+        let pools = specs
+            .iter()
+            .map(|spec| ScriptPool {
+                id: spec.id.as_str().to_owned(),
+                max_fails: spec
+                    .passive_health
+                    .as_ref()
+                    .map_or(0, |policy| policy.failure_threshold),
+                fail_timeout: spec.passive_health.as_ref().map_or(0, |policy| {
+                    u32::try_from(policy.ejection_ms / 1000).unwrap_or(u32::MAX)
+                }),
+                endpoints: spec
+                    .endpoints
+                    .iter()
+                    .map(|endpoint| {
+                        let host = endpoint.address.host();
+                        let port = endpoint.address.port();
+                        ScriptEndpoint {
+                            id: endpoint.id.as_str().to_owned(),
+                            name: if host.contains(':') {
+                                format!("[{host}]:{port}")
+                            } else {
+                                format!("{host}:{port}")
+                            },
+                            weight: endpoint.weight,
+                            backup: endpoint.backup,
+                            enabled: endpoint.enabled,
+                        }
+                    })
+                    .collect(),
+            })
+            .collect();
+        Self { pools, states }
+    }
+
+    fn pool(&self, name: &str) -> Option<&ScriptPool> {
+        self.pools.iter().find(|pool| pool.id == name)
+    }
+
+    /// The endpoints of one tier, which peer IDs number.
+    fn tier(pool: &ScriptPool, backup: bool) -> impl Iterator<Item = &ScriptEndpoint> {
+        pool.endpoints
+            .iter()
+            .filter(move |endpoint| endpoint.backup == backup)
+    }
+}
+
+impl panel_lua::Upstreams for ScriptUpstreams {
+    fn names(&self) -> Vec<String> {
+        self.pools.iter().map(|pool| pool.id.clone()).collect()
+    }
+
+    fn servers(&self, upstream: &str) -> Option<Vec<panel_lua::UpstreamServer>> {
+        let pool = self.pool(upstream)?;
+        Some(
+            pool.endpoints
+                .iter()
+                .map(|endpoint| {
+                    let mut server = panel_lua::UpstreamServer::default();
+                    server.addr.clone_from(&endpoint.name);
+                    server.name.clone_from(&endpoint.name);
+                    server.weight = endpoint.weight;
+                    server.max_fails = pool.max_fails;
+                    server.fail_timeout = pool.fail_timeout;
+                    server.backup = endpoint.backup;
+                    server.down = !endpoint.enabled;
+                    server
+                })
+                .collect(),
+        )
+    }
+
+    fn peers(&self, upstream: &str, backup: bool) -> Option<Vec<panel_lua::UpstreamPeer>> {
+        let pool = self.pool(upstream)?;
+        Some(
+            Self::tier(pool, backup)
+                .enumerate()
+                .map(|(id, endpoint)| {
+                    let state = self.states.state(&pool.id, &endpoint.id);
+                    let mut peer = panel_lua::UpstreamPeer::default();
+                    peer.id = id;
+                    peer.name.clone_from(&endpoint.name);
+                    peer.weight = endpoint.weight;
+                    peer.fails = state.consecutive_failures.load(Relaxed);
+                    peer.max_fails = pool.max_fails;
+                    peer.fail_timeout = pool.fail_timeout;
+                    peer.down = !endpoint.enabled || state.scripted_down.load(Relaxed);
+                    peer.conns = state.in_flight.load(Relaxed);
+                    peer
+                })
+                .collect(),
+        )
+    }
+
+    fn set_peer_down(
+        &self,
+        upstream: &str,
+        backup: bool,
+        id: usize,
+        down: bool,
+    ) -> std::result::Result<(), String> {
+        let pool = self
+            .pool(upstream)
+            .ok_or_else(|| "upstream not found".to_owned())?;
+        let endpoint = Self::tier(pool, backup)
+            .nth(id)
+            .ok_or_else(|| "bad peer id".to_owned())?;
+        self.states
+            .state(&pool.id, &endpoint.id)
+            .scripted_down
+            .store(down, Relaxed);
+        Ok(())
+    }
 }
 
 #[cfg(test)]

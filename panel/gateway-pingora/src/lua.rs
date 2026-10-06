@@ -66,26 +66,34 @@ impl std::fmt::Debug for LuaPlan {
 }
 
 /// Compiles `snapshot`'s scripts and starts `vms` VMs for them, with the
-/// secrets cosockets' TLS terms name read from `secrets`. Syntax errors,
-/// unreadable TLS terms and failing `init_by_lua` refuse the snapshot.
+/// secrets cosockets' TLS terms name read from `secrets` and the snapshot's
+/// upstreams, whose endpoint state `endpoints` holds, for `ngx.upstream`.
+/// Syntax errors, unreadable TLS terms and failing `init_by_lua` refuse the
+/// snapshot.
 pub(crate) fn compile(
     snapshot: &RuntimeSnapshot,
     store: &SharedStore,
     vms: usize,
     secrets: &dyn crate::secrets::SecretSource,
+    endpoints: Arc<crate::upstream::EndpointStates>,
 ) -> Result<(Option<Arc<LuaPlan>>, HookIndex)> {
     let read = |id: &str| secrets.read(id);
     let Some(compiled) = panel_lua_ir::compile_with_secrets(snapshot, vms, Some(&read))? else {
         return Ok((None, HookIndex::default()));
     };
+    let upstreams = Arc::new(crate::upstream::ScriptUpstreams::new(
+        &snapshot.upstream_pools,
+        endpoints,
+    ));
     let (runtime, logs) =
-        Runtime::start(&compiled.program, &compiled.settings, store).map_err(|failure| {
-            PanelError::validation_failed(format!(
-                "init_by_lua failed ({}): {}",
-                failure.kind.name(),
-                failure.message
-            ))
-        })?;
+        Runtime::start_with_upstreams(&compiled.program, &compiled.settings, store, upstreams)
+            .map_err(|failure| {
+                PanelError::validation_failed(format!(
+                    "init_by_lua failed ({}): {}",
+                    failure.kind.name(),
+                    failure.message
+                ))
+            })?;
     for entry in logs {
         tracing::info!(event = "lua_log", phase = "init", level = entry.level.name(), message = %entry.message);
     }

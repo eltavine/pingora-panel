@@ -396,6 +396,7 @@ impl PingoraGatewayAdapter {
         let limits = Arc::clone(&self.limits);
         let lua_dicts = Arc::clone(&self.lua_dicts);
         let lua_vms = self.options.lua_vms;
+        let endpoints = Arc::clone(&self.endpoints);
         let (certificates, statics, policies, (lua, lua_hooks)) =
             tokio::task::spawn_blocking(move || {
                 let certificates = CertificateIndex::build(&blocking, secrets.as_ref())?;
@@ -409,7 +410,8 @@ impl PingoraGatewayAdapter {
                     .iter()
                     .map(|policy| SecurityGate::compile(policy, secrets.as_ref(), &limits))
                     .collect::<Result<Vec<_>>>()?;
-                let lua = lua::compile(&blocking, &lua_dicts, lua_vms, secrets.as_ref())?;
+                let lua =
+                    lua::compile(&blocking, &lua_dicts, lua_vms, secrets.as_ref(), endpoints)?;
                 Ok::<_, PanelError>((certificates, statics, policies, lua))
             })
             .await

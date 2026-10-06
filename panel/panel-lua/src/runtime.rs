@@ -190,6 +190,17 @@ impl Runtime {
         settings: &Settings,
         store: &SharedStore,
     ) -> Result<(Self, Vec<LogEntry>), Failure> {
+        Self::start_with_upstreams(program, settings, store, Arc::new(crate::NoUpstreams))
+    }
+
+    /// Starts the VMs as `start` does, with `upstreams` as what
+    /// `ngx.upstream` reads and takes down.
+    pub fn start_with_upstreams(
+        program: &Program,
+        settings: &Settings,
+        store: &SharedStore,
+        upstreams: Arc<dyn crate::Upstreams>,
+    ) -> Result<(Self, Vec<LogEntry>), Failure> {
         let dicts = store.resolve(&program.dicts);
         let (closing, closed) = tokio::sync::watch::channel(());
         let reports = Arc::new(TimerReports::default());
@@ -235,8 +246,11 @@ impl Runtime {
                 &dicts,
                 settings,
                 index,
-                vm_timers,
-                Arc::downgrade(&workers),
+                crate::vm::Shared {
+                    timers: vm_timers,
+                    worker_threads: Arc::downgrade(&workers),
+                    upstreams: Arc::clone(&upstreams),
+                },
                 false,
             );
             let (vm, mut logged) = match started {

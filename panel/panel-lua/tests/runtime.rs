@@ -3137,3 +3137,91 @@ async fn aes_encrypts_as_lua_resty_string_does_with_openssl() {
     assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
     assert_eq!(scripts.exchange().response.body, b"ok\n");
 }
+
+/// One upstream with a primary and a backup peer, remembering what
+/// scripts take down.
+#[derive(Default)]
+struct TwoPeers(parking_lot::Mutex<[bool; 2]>);
+
+impl panel_lua::Upstreams for TwoPeers {
+    fn names(&self) -> Vec<String> {
+        vec!["app".into()]
+    }
+
+    fn servers(&self, upstream: &str) -> Option<Vec<panel_lua::UpstreamServer>> {
+        (upstream == "app").then(|| {
+            [false, true]
+                .into_iter()
+                .map(|backup| {
+                    let mut server = panel_lua::UpstreamServer::default();
+                    server.name = if backup { "10.0.0.2:80" } else { "10.0.0.1:80" }.into();
+                    server.addr.clone_from(&server.name);
+                    server.backup = backup;
+                    server.weight = 1;
+                    server
+                })
+                .collect()
+        })
+    }
+
+    fn peers(&self, upstream: &str, backup: bool) -> Option<Vec<panel_lua::UpstreamPeer>> {
+        (upstream == "app").then(|| {
+            let mut peer = panel_lua::UpstreamPeer::default();
+            peer.name = if backup { "10.0.0.2:80" } else { "10.0.0.1:80" }.into();
+            peer.down = self.0.lock()[usize::from(backup)];
+            vec![peer]
+        })
+    }
+
+    fn set_peer_down(
+        &self,
+        upstream: &str,
+        backup: bool,
+        id: usize,
+        down: bool,
+    ) -> Result<(), String> {
+        if upstream != "app" {
+            return Err("upstream not found".into());
+        }
+        if id != 0 {
+            return Err("bad peer id".into());
+        }
+        self.0.lock()[usize::from(backup)] = down;
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn upstream_scripts_read_peers_and_take_them_down() {
+    let (program, ids) = program(handlers(&[r#"
+        local upstream = require "ngx.upstream"
+        assert(upstream.current_upstream_name() == "app")
+        local servers = assert(upstream.get_servers("app"))
+        assert(servers[2].backup == true and servers[1].backup == nil)
+        assert(upstream.set_peer_down("app", true, 0, true))
+        assert(upstream.get_backup_peers("app")[1].down == true)
+        assert(upstream.get_primary_peers("app")[1].down == nil)
+        local nothing, err = upstream.set_peer_down("app", false, 3, true)
+        assert(nothing == nil and err == "bad peer id", err)
+        assert(select(2, upstream.get_primary_peers("nowhere")) == "upstream not found")
+    "#]));
+    let peers = std::sync::Arc::new(TwoPeers::default());
+    let (runtime, _) = Runtime::start_with_upstreams(
+        &program,
+        &Settings {
+            vms: 1,
+            memory: 16 << 20,
+        },
+        &SharedStore::default(),
+        peers.clone(),
+    )
+    .unwrap();
+    let mut exchange = request("GET", "/", &[]);
+    exchange.balancer.upstream = "app".into();
+    let mut granted = handler(ids[0], Phase::Balancer);
+    granted.permissions.upstream = true;
+    let mut scripts = runtime.scripts(exchange);
+    let outcome = run(&mut scripts, granted).await;
+    assert_eq!(outcome, Outcome::Continue, "{:?}", scripts.exchange().logs);
+    assert_eq!(*peers.0.lock(), [false, true]);
+}

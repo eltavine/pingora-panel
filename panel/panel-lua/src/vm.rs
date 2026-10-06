@@ -332,17 +332,29 @@ impl fmt::Debug for Vm {
     }
 }
 
+/// What a VM shares with the runtime that starts it.
+pub(crate) struct Shared {
+    pub timers: Arc<Timers>,
+    pub worker_threads: std::sync::Weak<crate::worker::WorkerThreads>,
+    pub upstreams: Arc<dyn crate::upstreams::Upstreams>,
+}
+
 impl Vm {
     pub fn new(
         program: &Program,
         dicts: &HashMap<String, Arc<Dict>>,
         settings: &Settings,
         index: usize,
-        timers: Arc<Timers>,
-        worker_threads: std::sync::Weak<crate::worker::WorkerThreads>,
+        shared: Shared,
         worker: bool,
     ) -> mlua::Result<(Self, Vec<crate::exchange::LogEntry>)> {
+        let Shared {
+            timers,
+            worker_threads,
+            upstreams,
+        } = shared;
         let lua = Lua::new_with(StdLib::ALL_SAFE, LuaOptions::new())?;
+        lua.set_app_data(api::UpstreamsHandle(upstreams));
         lua.set_app_data(api::Regexes::new(
             program.regex_cache.unwrap_or(api::REGEX_CACHE_ENTRIES),
             program.regex_match_limit,
