@@ -254,7 +254,9 @@ and reads, retrying the next nameserver after a timeout and over TCP when
 an answer is truncated, and whose `compress_ipv6_addr` follows RFC 5952,
 `resty.upload`, lua-resty-upload's reader of multipart bodies (RFC 2046,
 RFC 7578) over the request socket, whose `preserve_body` gives the
-request back the body as it arrived, and
+request back the body as it arrived, `resty.memcached`,
+lua-resty-memcached's client of the memcached text protocol with its key
+escaping and pipelines, and
 `ngx.ssl` with `ngx.ssl.clienthello`, `ngx.ssl.session`,
 `ngx.ssl.proxysslcert` and `ngx.ssl.proxysslverify`, `ngx.proxyssl` and
 `ngx.ocsp`. `resty.core.base` gives libraries

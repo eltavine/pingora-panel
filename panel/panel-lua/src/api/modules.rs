@@ -253,7 +253,7 @@ const RESTY_CORE: [&str; 20] = [
 ];
 
 /// The built-in modules written in Lua, and their sources.
-const IN_LUA: [(&str, &str); 13] = [
+const IN_LUA: [(&str, &str); 14] = [
     ("resty.core.base", include_str!("resty_core_base.lua")),
     ("resty.lrucache", include_str!("lrucache.lua")),
     ("resty.lrucache.pureffi", include_str!("lrucache.lua")),
@@ -264,6 +264,7 @@ const IN_LUA: [(&str, &str); 13] = [
     ("resty.limit.traffic", include_str!("limit_traffic.lua")),
     ("resty.redis", include_str!("redis.lua")),
     ("resty.upload", include_str!("upload.lua")),
+    ("resty.memcached", include_str!("memcached.lua")),
     (
         "resty.websocket.protocol",
         include_str!("websocket_protocol.lua"),
@@ -287,7 +288,7 @@ pub(crate) fn refusal(name: &str) -> Option<&'static str> {
 }
 
 /// The modules OpenResty scripts commonly load that come with the gateway.
-pub(crate) const BUILT_IN: [&str; 69] = [
+pub(crate) const BUILT_IN: [&str; 70] = [
     "panel.v1",
     "cjson",
     "cjson.safe",
@@ -349,6 +350,7 @@ pub(crate) const BUILT_IN: [&str; 69] = [
     "resty.redis",
     "resty.dns.resolver",
     "resty.upload",
+    "resty.memcached",
     "ngx.errlog",
     "ngx.ssl",
     "ngx.ssl.clienthello",
