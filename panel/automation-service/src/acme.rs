@@ -941,6 +941,15 @@ impl AcmeAutomation {
             .await?;
         let accepted = accept(&issued.chain, &issued.key, Utc::now())?;
         let renew_after = renewal_time(&accepted.details);
+        // A certificate reads as issued once the inventory holds it, so it is
+        // due again from its renewal time before then; a failure to store it
+        // sets the time of the next attempt instead.
+        sqlx::query("UPDATE acme_certificates SET renew_after = ?2 WHERE certificate_id = ?1")
+            .bind(id.as_str())
+            .bind(renew_after)
+            .execute(self.database.pool())
+            .await
+            .map_err(storage_error)?;
         self.inventory.store_issued(cause, id, accepted).await?;
         Ok(renew_after)
     }
