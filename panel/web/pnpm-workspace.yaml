@@ -1,3 +1,8 @@
 allowBuilds:
   # Vue 3 needs no install-time switch; every other build script stays blocked.
   vue-demi: false
+
+overrides:
+  # @hey-api/json-schema-ref-parser pins js-yaml 4.2.0, whose merge keys and
+  # !!omap can drive parsing to quadratic CPU use.
+  js-yaml: ^4.3.2
