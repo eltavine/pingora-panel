@@ -1423,7 +1423,9 @@ Scripts are files of the configuration: `*_by_lua_file` names a file under
 `lua/`, and `require("a.b")` loads a built-in module (`cjson`, `bit`,
 `resty.string`, `resty.sha256`, `resty.lrucache`, `ngx.re`, `ngx.balancer`,
 `ngx.ssl`, `resty.core.base`, `resty.websocket.server`,
-`resty.websocket.client`, `resty.lock` and others) or `lua/a/b.lua`;
+`resty.websocket.client`, `resty.lock`, `resty.limit.req`,
+`resty.limit.conn`, `resty.limit.count`, `resty.limit.traffic`,
+`tablepool` and others) or `lua/a/b.lua`;
 `ngx.pipe` and `ffi` are refused, since they would start processes or run
 native code outside the sandbox. The WebSocket modules keep
 lua-resty-websocket's API without its FFI, answer with a single

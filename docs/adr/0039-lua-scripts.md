@@ -235,7 +235,11 @@ server's `Sec-WebSocket-Accept`, as RFC 6455 requires and the library does
 not, `resty.lock`, whose locks keep a token of their own in their key, so
 that releasing or extending a lock that expired leaves alone the lock
 another took since, and which are released when their object is
-collected, as lua-resty-lock's are, and
+collected, as lua-resty-lock's are, lua-resty-limit-traffic's
+`resty.limit.req`, `resty.limit.conn`, `resty.limit.count` and
+`resty.limit.traffic`, the leaky bucket's state of each key packed into
+its dictionary value rather than written through the FFI,
+lua-tablepool's `tablepool`, and
 `ngx.ssl` with `ngx.ssl.clienthello`, `ngx.ssl.session`,
 `ngx.ssl.proxysslcert` and `ngx.ssl.proxysslverify`, `ngx.proxyssl` and
 `ngx.ocsp`. `resty.core.base` gives libraries

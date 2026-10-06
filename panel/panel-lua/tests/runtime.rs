@@ -2906,3 +2906,92 @@ async fn locks_wait_for_each_other_and_release_only_their_own() {
     assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
     assert_eq!(scripts.exchange().response.body, b"nil\n");
 }
+
+#[tokio::test]
+async fn limiters_delay_and_refuse_as_lua_resty_limit_traffic_does() {
+    let (program, ids) = program(|builder| {
+        builder.shared_dict("limits", 1 << 20);
+        vec![builder.handler(&source(
+            r#"
+            local req = require "resty.limit.req"
+            local conn = require "resty.limit.conn"
+            local count = require "resty.limit.count"
+            local traffic = require "resty.limit.traffic"
+            local limits = ngx.shared.limits
+            local function near(value, wanted)
+                return math.abs(value - wanted) < 0.05
+            end
+
+            assert(select(2, req.new("missing", 1, 1)) == "shared dict not found")
+            local rate = assert(req.new("limits", 2, 1))
+            local delay, excess = rate:incoming("ip", true)
+            assert(delay == 0 and excess == 0, delay)
+            delay, excess = rate:incoming("ip", true)
+            assert(near(delay, 0.5) and near(excess, 1), delay)
+            local nothing, err = rate:incoming("ip", true)
+            assert(nothing == nil and err == "rejected", err)
+            assert(rate:uncommit("ip"))
+            assert(near(rate:incoming("ip", false), 0.5))
+            assert(near(rate:incoming("ip", false), 0.5), "not committed")
+            rate:set_burst(5)
+            assert(rate:incoming("ip", true))
+            limits:set("abused", "x")
+            assert(select(2, rate:incoming("abused", true)) == "shdict abused by other users")
+
+            local at_once = assert(conn.new("limits", 1, 1, 0.5))
+            delay = at_once:incoming("c", true)
+            assert(delay == 0 and at_once:is_committed())
+            delay = at_once:incoming("c", true)
+            assert(delay == 0.5)
+            nothing, err = at_once:incoming("c", true)
+            assert(nothing == nil and err == "rejected" and not at_once:is_committed())
+            assert(limits:get("c") == 2)
+            assert(at_once:leaving("c", 0.1) == 1)
+            assert(near(at_once:incoming("c", false), 0.3) and limits:get("c") == 1)
+            assert(at_once:uncommit("c") == 0)
+
+            local window = assert(count.new("limits", 2, 60))
+            delay, excess = window:incoming("n", true)
+            assert(delay == 0 and excess == 1)
+            assert(select(2, window:incoming("n", true)) == 0)
+            assert(select(2, window:incoming("n", true)) == "rejected")
+            assert(window:uncommit("n") == 0)
+            assert(select(2, window:incoming("n", false)) == "rejected")
+
+            local states = {}
+            local per_second = assert(req.new("limits", 100, 0))
+            local concurrent = assert(conn.new("limits", 10, 0, 0.5))
+            assert(traffic.combine({ per_second, concurrent }, { "t1", "t2" }, states) == 0)
+            assert(states[1] == 0 and states[2] == 1)
+            local closed = assert(count.new("limits", 1, 60))
+            assert(closed:incoming("t3", true))
+            nothing, err = traffic.combine({ concurrent, closed }, { "t2", "t3" })
+            assert(nothing == nil and err == "rejected" and limits:get("t2") == 1)
+
+            local tablepool = require "tablepool"
+            local pooled = tablepool.fetch("tag", 4, 0)
+            pooled[1] = "x"
+            tablepool.release("tag", pooled)
+            local again = tablepool.fetch("tag", 0, 0)
+            assert(again == pooled and next(again) == nil)
+            tablepool.release("tag", { 1 }, true)
+            assert(tablepool.fetch("tag")[1] == 1)
+            assert(not pcall(tablepool.release, "tag", nil))
+            ngx.say("ok")
+            "#,
+        ))]
+    });
+    let (runtime, _) = Runtime::start(
+        &program,
+        &Settings {
+            vms: 1,
+            memory: 16 << 20,
+        },
+        &SharedStore::default(),
+    )
+    .unwrap();
+    let mut scripts = runtime.scripts(request("GET", "/", &[]));
+    let outcome = run(&mut scripts, handler(ids[0], Phase::Content)).await;
+    assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+    assert_eq!(scripts.exchange().response.body, b"ok\n");
+}
