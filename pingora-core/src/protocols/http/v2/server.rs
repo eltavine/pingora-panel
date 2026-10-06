@@ -1853,23 +1853,25 @@ mod test {
         let digest = Arc::new(Digest::default());
 
         // The malformed stream is reset during acceptance, so it is reported as
-        // rejected rather than surfaced to the application as a session.
-        let accepted = HttpSession::from_h2_conn(&mut connection, digest.clone())
+        // rejected rather than surfaced to the application as a session. From
+        // 0.4.20 on, h2 resets it before Pingora sees it, and only the
+        // connection's close is reported.
+        loop {
+            let accepted = timeout(
+                Duration::from_secs(1),
+                HttpSession::from_h2_conn(&mut connection, digest.clone()),
+            )
             .await
-            .unwrap();
-        assert!(
-            matches!(accepted, Some(H2Accept::Rejected)),
-            "malformed request must not surface as a session"
-        );
-
-        let done = timeout(
-            Duration::from_secs(1),
-            HttpSession::from_h2_conn(&mut connection, digest),
-        )
-        .await
-        .expect("from_h2_conn hung after rejecting malformed request")
-        .expect("from_h2_conn returned an error after rejecting malformed request");
-        assert!(done.is_none(), "connection should close after rejection");
+            .expect("from_h2_conn hung after rejecting malformed request")
+            .expect("from_h2_conn returned an error after rejecting malformed request");
+            match accepted {
+                Some(H2Accept::Rejected) => {}
+                Some(H2Accept::Session(_)) => {
+                    panic!("malformed request must not surface as a session")
+                }
+                None => break,
+            }
+        }
 
         client_task.await.unwrap();
     }
@@ -1906,7 +1908,7 @@ mod test {
         let digest = Arc::new(Digest::default());
         let mut malformed_streams = MAX_MALFORMED_STREAMS_PER_CONN - 1;
 
-        let err = match HttpSession::from_h2_conn_with_malformed_budget(
+        match HttpSession::from_h2_conn_with_malformed_budget(
             &mut connection,
             digest,
             &mut malformed_streams,
@@ -1914,12 +1916,14 @@ mod test {
         .await
         {
             Ok(Some(_)) => panic!("malformed request must not surface as a session"),
-            Ok(None) => panic!("connection ended before malformed budget was exhausted"),
-            Err(err) => err,
-        };
-
-        assert_eq!(err.etype(), &ErrorType::H2Error);
-        assert_eq!(malformed_streams, MAX_MALFORMED_STREAMS_PER_CONN);
+            // From 0.4.20 on, h2 resets the stream before Pingora sees it, so
+            // it costs nothing of the budget.
+            Ok(None) => assert_eq!(malformed_streams, MAX_MALFORMED_STREAMS_PER_CONN - 1),
+            Err(err) => {
+                assert_eq!(err.etype(), &ErrorType::H2Error);
+                assert_eq!(malformed_streams, MAX_MALFORMED_STREAMS_PER_CONN);
+            }
+        }
 
         drop(connection);
         client_task.await.unwrap();

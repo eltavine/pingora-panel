@@ -111,6 +111,7 @@ the next upstream merge that makes them unnecessary.
 |---|---|---|
 | `pingora-load-balancing/src/health_check.rs` tests | TCP and HTTP checks probe a local listener instead of `1.1.1.1` | The tests pass without internet access |
 | `pingora-proxy/tests` | The client binds `127.0.0.1` instead of `127.0.0.2`; a cache range test compares origin request identifiers the origin's `nginx.conf` counts, instead of timestamps | macOS has no `127.0.0.2` alias; two requests can share a timestamp |
+| `pingora-core/src/protocols/http/v2/server.rs` tests | The two conflicting `Content-Length` tests also accept h2 resetting the stream before Pingora sees it, which then never surfaces nor counts against the malformed-stream budget | h2 0.4.20 rejects duplicate `Content-Length` values that differ itself |
 | `pingora-ketama/test-data/trace.sh` | Unused loop variable and missing final newline | ShellCheck |
 | Rustdoc in `pingora-cache`, `pingora-core`, `pingora-foundations`, `pingora-pool` and `pingora-proxy` | Links to private or feature-gated items written as code | Documentation builds with warnings denied |
 | `pingora-cache/src/key.rs` | A block comment written as line comments | Rustfmt nightlies format it alike |
