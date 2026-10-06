@@ -68,8 +68,12 @@ inheritance, where a directive in an inner block replaces the outer one:
 
 The body of a `*_by_lua_block` directive is read with Lua's lexical rules,
 as ngx_lua reads it, so braces inside strings, long brackets and comments
-do not end it, and it is printed back unchanged. The NGINX importer carries
-these directives over.
+do not end it, and it is printed back unchanged. The forms that take their
+code as a string, which lua-nginx-module discourages — `init_by_lua`,
+`init_worker_by_lua`, `set_by_lua`, `rewrite_by_lua`, `access_by_lua`,
+`content_by_lua`, `header_filter_by_lua`, `body_filter_by_lua` and
+`log_by_lua` — are read as the block they stand for, with a warning, and
+printed as it. The NGINX importer carries these directives over.
 
 **Variables.** `set` and `set_by_lua*` give the request variables in
 nginx's order: those of `http` and a server as the server's

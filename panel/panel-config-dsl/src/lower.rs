@@ -277,8 +277,20 @@ impl<'a> Lowerer<'a> {
             if source::is_lua(path) {
                 continue;
             }
-            let parsed = panel_dsl::parse(path, text);
+            let mut parsed = panel_dsl::parse(path, text);
             lowerer.diagnostics.extend(parsed.diagnostics);
+            let mut strings = Vec::new();
+            lua::block_forms(&mut parsed.document.directives, &mut strings);
+            for (name, span) in strings {
+                let diagnostic = Diagnostic::warning(
+                    codes::DEPRECATED,
+                    format!("'{name}' takes its code as a string; it is read as '{name}_block'"),
+                )
+                .with_help(format!(
+                    "write it as `{name}_block {{ ... }}`, as lua-nginx-module recommends and the configuration is printed"
+                ));
+                lowerer.report(diagnostic, path, span);
+            }
             lowerer
                 .documents
                 .insert(path.to_owned(), Rc::new(parsed.document));

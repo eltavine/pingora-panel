@@ -321,9 +321,9 @@ http {
             "'lua_package_path' is not available",
         ),
         (
-            codes::UNKNOWN_DIRECTIVE,
+            codes::CONTEXT,
             "main.conf:4",
-            "'content_by_lua' is not available",
+            "'content_by_lua_block' is not allowed in http",
         ),
         (
             codes::TYPE,
@@ -394,7 +394,7 @@ http {
         .and_then(|diagnostic| diagnostic.help);
     assert_eq!(
         help.as_deref(),
-        Some("write the code in braces, as content_by_lua_block { ... }")
+        Some("write it as `content_by_lua_block { ... }`, as lua-nginx-module recommends and the configuration is printed")
     );
 }
 
@@ -1187,4 +1187,61 @@ http {
     let again = read(&printed);
     assert!(again.is_valid(), "{:#?}", again.diagnostics);
     assert_eq!(again.model.sites[0].routes[0].named, route.named);
+}
+
+#[test]
+fn directives_that_take_code_as_a_string_read_as_blocks() {
+    let sources = Sources::single(
+        r#"language_version 1;
+http {
+    server s {
+        server_name s.example;
+        set_by_lua $tenant 'return ngx.arg[1] .. "!"' $host;
+        access_by_lua 'if ngx.var.arg_deny then return ngx.exit(403) end';
+        respond 200 "body=$tenant";
+    }
+}
+"#,
+    );
+    let lowered = read(&sources);
+    assert!(lowered.is_valid(), "{:#?}", lowered.diagnostics);
+    let found = messages(&lowered);
+    assert!(
+        has(
+            &found,
+            codes::DEPRECATED,
+            "main.conf:5",
+            "'set_by_lua' takes its code as a string"
+        ),
+        "{found:#?}"
+    );
+    assert!(
+        has(
+            &found,
+            codes::DEPRECATED,
+            "main.conf:6",
+            "it is read as 'access_by_lua_block'"
+        ),
+        "{found:#?}"
+    );
+    let site = &lowered.model.sites[0];
+    let Some(LuaCode::Inline { code, .. }) = &site.lua.access else {
+        panic!("{:?}", site.lua.access);
+    };
+    assert_eq!(code, "if ngx.var.arg_deny then return ngx.exit(403) end");
+    let tenant = &site.lua.variables[0];
+    assert_eq!(tenant.name, "tenant");
+    assert_eq!(tenant.args, ["$host"]);
+    assert!(
+        matches!(&tenant.code, Some(LuaCode::Inline { code, .. }) if code == r#"return ngx.arg[1] .. "!""#)
+    );
+    let printed = print_sources(&lowered.model);
+    let main = printed.get("main.conf").unwrap();
+    assert!(main.contains("access_by_lua_block {"), "{main}");
+    assert!(main.contains("set_by_lua_block $tenant $host {"), "{main}");
+
+    let refused = read(&Sources::single(
+        "language_version 1;\nhttp {\n    server_rewrite_by_lua 'x';\n}\n",
+    ));
+    assert!(!refused.is_valid());
 }

@@ -7,7 +7,7 @@ use panel_config_model::{
     Action, LuaCode, LuaFallback, LuaLogLevel, LuaPermissions, LuaScope, LuaSharedDict,
     LuaVariable, LUA_DIRECTORY,
 };
-use panel_dsl::Directive;
+use panel_dsl::{Body, Directive, LuaBlock, Span};
 use panel_errors::Diagnostic;
 
 /// Directives that set a handler or a term of `http`, a server or a route.
@@ -208,6 +208,46 @@ pub(super) const HTTP: &[&str] = &[
     "ssl_session_store_by_lua_block",
     "ssl_session_store_by_lua_file",
 ];
+
+/// lua-nginx-module's directives that take their code as a string, which
+/// it discourages, and the argument the code is.
+const STRING_FORMS: [(&str, usize); 9] = [
+    ("init_by_lua", 0),
+    ("init_worker_by_lua", 0),
+    ("set_by_lua", 1),
+    ("rewrite_by_lua", 0),
+    ("access_by_lua", 0),
+    ("content_by_lua", 0),
+    ("header_filter_by_lua", 0),
+    ("body_filter_by_lua", 0),
+    ("log_by_lua", 0),
+];
+
+/// Turns the directives in `directives` that take their code as a string
+/// into the `*_by_lua_block` they stand for, giving the name and place of
+/// each.
+pub(super) fn block_forms(directives: &mut [Directive], found: &mut Vec<(String, Span)>) {
+    for directive in directives {
+        if let Body::Block(block) = &mut directive.body {
+            block_forms(&mut block.directives, found);
+            continue;
+        }
+        let name = directive.name.value.clone();
+        let Some((_, at)) = STRING_FORMS.iter().find(|(form, _)| *form == name) else {
+            continue;
+        };
+        if !matches!(directive.body, Body::Semicolon) || directive.args.len() <= *at {
+            continue;
+        }
+        let code = directive.args.remove(*at);
+        found.push((name.clone(), directive.name.span));
+        directive.name.value = format!("{name}_block");
+        directive.body = Body::Lua(LuaBlock {
+            code: code.value,
+            span: code.span,
+        });
+    }
+}
 
 /// The phase a handler directive runs in.
 fn phase(name: &str) -> Option<&'static str> {
