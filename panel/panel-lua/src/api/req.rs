@@ -180,14 +180,17 @@ pub(super) fn table(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
         lua.create_function(move |lua, max: Option<usize>| {
             let cell = cell(&s, Api::ReqGetBodyData)?;
             require_permission(&cell, Api::ReqGetBodyData, |granted| granted.body, "body")?;
+            // nil for a body that is not read or is empty, as in
+            // lua-nginx-module.
             let body = cell.exchange.lock().request.body.clone();
-            body.map(|body| {
-                let end = max
-                    .filter(|max| *max > 0)
-                    .map_or(body.len(), |max| max.min(body.len()));
-                lua.create_string(&body[..end])
-            })
-            .transpose()
+            body.filter(|body| !body.is_empty())
+                .map(|body| {
+                    let end = max
+                        .filter(|max| *max > 0)
+                        .map_or(body.len(), |max| max.min(body.len()));
+                    lua.create_string(&body[..end])
+                })
+                .transpose()
         })?,
     )?;
     let s = Arc::clone(slot);
