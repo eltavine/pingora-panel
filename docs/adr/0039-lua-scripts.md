@@ -235,13 +235,14 @@ script uses a function this gateway does not provide.
 
 What runs differently: LuaJIT's `ffi` and `jit` modules, `goto` (Luau has
 `continue`), `string.dump` and bytecode, `setfenv`, `getfenv` and `module`
-are not available; `lua_package_path`, `lua_package_cpath`,
-`lua_code_cache off` and `lua_socket_send_lowat`, which Linux does not
-honour for TCP, are refused.
+are not available; `lua_package_path`, `lua_package_cpath` and
+`lua_code_cache off` are refused.
 `lua_transform_underscores_in_response_headers`, `lua_use_default_type` and
 `lua_need_request_body` apply as in lua-nginx-module. Directives with nothing to tune here —
 `lua_load_resty_core`, `lua_malloc_trim`, `lua_sa_restart`,
-`lua_thread_cache_max_entries`, `lua_http10_buffering`,
+`lua_thread_cache_max_entries`, `lua_http10_buffering` (answers to
+HTTP/1.0 requests are buffered and carry a Content-Length, as `on` has
+them), `lua_socket_send_lowat` (Linux sets no send low-water mark for TCP),
 `rewrite_by_lua_no_postpone`,
 `precontent_by_lua_no_postpone`,
 `lua_upstream_skip_openssl_default_verify` and `balancer_keepalive` — are

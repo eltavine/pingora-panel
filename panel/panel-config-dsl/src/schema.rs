@@ -558,7 +558,9 @@ pub static DIRECTIVES: &[DirectiveSpec] = &[
         "lua_check_client_abort on|off;", "Whether rewrite, access and content handlers watch for the client closing the connection: the function ngx.on_abort registered runs as a light thread, or the run stops.",
         inherits "off when not written; a route's replaces its server's, and a server's the one in http."),
     spec!("lua_http10_buffering" in LUA_CONTEXTS, None, 1..Some(1), false,
-        "lua_http10_buffering on|off;", "Accepted from OpenResty without effect: the answers of scripts are always buffered and sent with a Content-Length."),
+        "lua_http10_buffering on|off;", "Accepted from OpenResty without effect: answers to HTTP/1.0 requests are always buffered and sent with a Content-Length, as on has them."),
+    spec!("lua_socket_send_lowat" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "lua_socket_send_lowat <size>;", "Accepted from OpenResty without effect: Linux, which the gateway runs on, sets no send low-water mark for TCP sockets."),
     spec!("lua_upstream_skip_openssl_default_verify" in LUA_CONTEXTS, None, 1..Some(1), false,
         "lua_upstream_skip_openssl_default_verify on|off;", "Accepted from OpenResty without effect: cosockets verify certificates with the system's trusted roots, not OpenSSL's defaults."),
     spec!("balancer_keepalive" in &[Upstream], None, 1..Some(1), false,
@@ -624,9 +626,6 @@ pub fn refusal(name: &str) -> Option<String> {
         }
         "proxy_ssl_verify_by_lua_block" | "proxy_ssl_verify_by_lua_file" => {
             "Pingora's TLS connections to upstreams keep no server certificate for a script to verify; the route's upstream TLS terms verify it"
-        }
-        "lua_socket_send_lowat" => {
-            "Linux, which the gateway runs on, sets no send low-water mark for TCP sockets"
         }
         "lua_ssl_key_log" => {
             "TLS session keys are never written out, so no capture can be decrypted with them"
@@ -707,7 +706,8 @@ mod tests {
         assert!(lookup("ssl_session_fetch_by_lua_block", Http).is_some());
         assert!(lookup("ssl_certificate_by_lua_block", Server).is_some());
         assert!(lookup("ssl_client_hello_by_lua_file", Http).is_some());
-        assert!(refusal("lua_socket_send_lowat").unwrap().contains("Linux"));
+        assert!(refusal("lua_socket_send_lowat").is_none());
+        assert!(lookup("lua_socket_send_lowat", Route).is_some());
         assert!(refusal("lua_socket_connect_timeout").is_none());
         assert!(lookup("lua_socket_connect_timeout", Route).is_some());
         assert!(refusal("access_by_lua_block").is_none());

@@ -288,8 +288,10 @@ impl Host for StreamingHost<'_> {
         self.host.capture(requests).await
     }
 
+    /// Answers to HTTP/1.0 requests are buffered, so that they carry a
+    /// Content-Length, as nginx's `lua_http10_buffering on` has them.
     fn streams(&self) -> bool {
-        true
+        self.host.session.req_header().version != http::Version::HTTP_10
     }
 
     async fn send(&mut self, output: Output) -> Result<(), String> {

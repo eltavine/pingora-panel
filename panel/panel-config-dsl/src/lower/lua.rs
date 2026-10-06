@@ -172,7 +172,8 @@ pub(crate) const INERT: &[(&str, &str)] = &[
     ("lua_thread_cache_max_entries", "VMs reuse coroutines without a cache to size"),
     ("rewrite_by_lua_no_postpone", "nothing else runs in the rewrite phase for rewrite_by_lua to wait for"),
     ("precontent_by_lua_no_postpone", "nothing else runs in the precontent phase for precontent_by_lua to wait for"),
-    ("lua_http10_buffering", "the answers of scripts are always buffered and sent with a Content-Length"),
+    ("lua_http10_buffering", "answers to HTTP/1.0 requests are always buffered and sent with a Content-Length, as on has them"),
+    ("lua_socket_send_lowat", "Linux, which the gateway runs on, sets no send low-water mark for TCP sockets"),
     ("lua_upstream_skip_openssl_default_verify", "cosockets verify certificates with the system's trusted roots, not OpenSSL's defaults"),
     ("balancer_keepalive", "the gateway pools connections to upstream nodes itself, and keepalive on|off turns reuse on or off"),
 ];
