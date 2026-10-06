@@ -26,6 +26,8 @@ use panel_lua::{
 };
 use pingora_core::{
     modules::http::{HttpModule, HttpModuleBuilder, Module},
+    upstreams::peer::HttpPeer,
+    utils::tls::CertKey,
     Error, ErrorType,
 };
 use pingora_http::ResponseHeader;
@@ -230,6 +232,32 @@ impl Report {
             );
         }
     }
+}
+
+/// Why `chain` and `key` cannot be presented, if they cannot.
+fn unusable(chain: &[Vec<u8>], key: &[u8]) -> Option<String> {
+    if chain
+        .iter()
+        .any(|certificate| x509_parser::parse_x509_certificate(certificate).is_err())
+    {
+        return Some("the certificate chain holds what is not an X.509 certificate".into());
+    }
+    let key = match rustls_pki_types::PrivateKeyDer::try_from(key.to_vec()) {
+        Ok(key) => key,
+        Err(error) => return Some(format!("the private key cannot be used: {error}")),
+    };
+    let signing = match rustls::crypto::ring::sign::any_supported_type(&key) {
+        Ok(signing) => signing,
+        Err(error) => return Some(format!("the private key cannot be used: {error}")),
+    };
+    let chain = chain
+        .iter()
+        .map(|certificate| rustls_pki_types::CertificateDer::from(certificate.clone()))
+        .collect();
+    rustls::sign::CertifiedKey::new(chain, signing)
+        .keys_match()
+        .err()
+        .map(|error| format!("the private key does not match the certificate: {error}"))
 }
 
 /// A client's request as a handler that may answer it runs: what the
@@ -774,6 +802,72 @@ impl PanelProxy {
             session.write_response_body(Some(body), true).await?;
         }
         Ok(())
+    }
+
+    /// `proxy_ssl_certificate_by_lua`: the certificate the request's TLS
+    /// connection to `peer` presents when the upstream asks for one.
+    pub(super) async fn lua_upstream_certificate(
+        &self,
+        session: &mut Session,
+        ctx: &mut RequestContext,
+        peer: &mut HttpPeer,
+    ) -> pingora_core::Result<()> {
+        if !peer.is_tls() {
+            return Ok(());
+        }
+        let Some(hook) = Self::lua_hook(ctx, |hooks| &hooks.proxy_ssl_cert) else {
+            return Ok(());
+        };
+        let (Some(plan), Some(report)) = (Self::lua_plan(ctx), self.report(ctx)) else {
+            return Ok(());
+        };
+        let path = normalized(session);
+        let mut scripts = self.lua_scripts(session, ctx, &plan, &path, "");
+        let started = Instant::now();
+        let outcome = scripts.run(hook.handler, &mut NoHost).await;
+        report.finished(&hook, &scripts, &outcome, started.elapsed());
+        let (chain, key, cleared, request_id) = {
+            let mut exchange = scripts.exchange();
+            let request_id = exchange.connection.request_id.clone();
+            let handshake = &mut exchange.handshake;
+            (
+                handshake.chain.take(),
+                handshake.key.take(),
+                std::mem::take(&mut handshake.cleared),
+                request_id,
+            )
+        };
+        put_scripts(session, scripts);
+        let refused = || failed(502, "proxy SSL certificate");
+        match outcome {
+            Outcome::Abort => return Err(refused()),
+            Outcome::Failed(_) => {
+                return match fallback_status(&hook, 502) {
+                    None => Ok(()),
+                    Some(status) => Err(failed(status, "proxy SSL certificate")),
+                }
+            }
+            Outcome::Continue | Outcome::Respond => {}
+        }
+        let problem = match (chain, key) {
+            (Some(chain), Some(key)) => match unusable(&chain, &key) {
+                None => {
+                    peer.client_cert_key = Some(Arc::new(CertKey::new(chain, key)));
+                    return Ok(());
+                }
+                Some(problem) => problem,
+            },
+            (None, None) => {
+                if cleared {
+                    peer.client_cert_key = None;
+                }
+                return Ok(());
+            }
+            (Some(_), None) => "the script set a certificate without its private key".into(),
+            (None, Some(_)) => "the script set a private key without its certificate".into(),
+        };
+        report.write(&hook, &request_id, "error", &problem);
+        Err(refused())
     }
 
     /// Runs the body filter on a piece of the response body. A filter that

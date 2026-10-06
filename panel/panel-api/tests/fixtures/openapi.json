@@ -83478,6 +83478,17 @@
               }
             ]
           },
+          "proxy_ssl_cert": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LuaCode",
+                "description": "As a request's TLS connection to its upstream chooses the\ncertificate it presents when asked for one."
+              }
+            ]
+          },
           "rewrite": {
             "oneOf": [
               {
@@ -84152,7 +84163,7 @@
           },
           "phase": {
             "type": "string",
-            "description": "`set`, `server_rewrite`, `rewrite`, `access`, `precontent`,\n`content`, `balancer`, `header_filter`, `body_filter`, `log`,\n`ssl_client_hello`, `ssl_cert`, `ssl_session_fetch` or\n`ssl_session_store`."
+            "description": "`set`, `server_rewrite`, `rewrite`, `access`, `precontent`,\n`content`, `balancer`, `header_filter`, `body_filter`, `log`,\n`ssl_client_hello`, `ssl_cert`, `ssl_session_fetch`,\n`ssl_session_store` or `proxy_ssl_cert`."
           },
           "time_limit_ms": {
             "type": [

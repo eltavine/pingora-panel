@@ -856,6 +856,8 @@ impl ProxyHttp for PanelProxy {
                 ctx.lease = None;
                 ctx.failure_recorded = true;
                 ctx.sent_at = Some(Instant::now());
+                self.lua_upstream_certificate(session, ctx, &mut peer)
+                    .await?;
                 return Ok(Box::new(peer));
             }
         }
@@ -870,9 +872,10 @@ impl ProxyHttp for PanelProxy {
         ctx.endpoint = Some(endpoint);
         ctx.failure_recorded = false;
         ctx.sent_at = Some(Instant::now());
-        Ok(Box::new(
-            pool.peer(endpoint, is_upgrade_req(session.req_header())),
-        ))
+        let mut peer = pool.peer(endpoint, is_upgrade_req(session.req_header()));
+        self.lua_upstream_certificate(session, ctx, &mut peer)
+            .await?;
+        Ok(Box::new(peer))
     }
 
     async fn upstream_request_filter(

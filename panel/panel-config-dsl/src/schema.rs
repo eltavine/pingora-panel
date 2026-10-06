@@ -432,6 +432,12 @@ pub static DIRECTIVES: &[DirectiveSpec] = &[
     spec!("ssl_certificate_by_lua_file" in &[Http, Server], None, 1..Some(1), false,
         "ssl_certificate_by_lua_file lua/<file>.lua;", "Runs a file as a TLS handshake chooses its certificate.",
         inherits "A server's replaces the one in http."),
+    spec!("proxy_ssl_certificate_by_lua_block" in LUA_CONTEXTS, None, 0..Some(0), false,
+        "proxy_ssl_certificate_by_lua_block { ... }", "Chooses the certificate a request's TLS connection to its upstream presents when asked for one, with ngx.ssl.proxysslcert; it runs as the upstream is chosen.",
+        inherits "A route's replaces its server's, and a server's the one in http."),
+    spec!("proxy_ssl_certificate_by_lua_file" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "proxy_ssl_certificate_by_lua_file lua/<file>.lua;", "Chooses with a file's script the certificate a TLS connection to the upstream presents.",
+        inherits "A route's replaces its server's, and a server's the one in http."),
     spec!("rewrite_by_lua_block" in LUA_CONTEXTS, None, 0..Some(0), false,
         "rewrite_by_lua_block { ... }", "Runs after the route is chosen, before security policies; ngx.req.set_uri(uri, true) chooses the route again.",
         inherits "A route's replaces its server's, and a server's the one in http."),
@@ -615,6 +621,9 @@ pub fn refusal(name: &str) -> Option<String> {
     let reason = match name {
         "lua_package_path" | "lua_package_cpath" => {
             "require loads the built-in modules and the files under lua/, and nothing else"
+        }
+        "proxy_ssl_verify_by_lua_block" | "proxy_ssl_verify_by_lua_file" => {
+            "Pingora's TLS connections to upstreams keep no server certificate for a script to verify; the route's upstream TLS terms verify it"
         }
         "lua_socket_send_lowat" => {
             "Linux, which the gateway runs on, sets no send low-water mark for TCP sockets"

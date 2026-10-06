@@ -3175,7 +3175,10 @@ async fn handler_output_streams_through_the_filters_as_it_is_flushed() {
              for _ = 1, 400 do if ngx.shared.gate:get('open') then break end ngx.sleep(0.025) end \
              ngx.say('data: two\\n')",
         ),
-        lua_script("open", "ngx.shared.gate:set('open', true) ngx.say('opened')"),
+        lua_script(
+            "open",
+            "ngx.shared.gate:set('open', true) ngx.say('opened')",
+        ),
         lua_script("header", "ngx.header['X-Seen'] = tostring(ngx.ctx.n)"),
         lua_script(
             "body",
@@ -3239,13 +3242,8 @@ async fn handler_output_streams_through_the_filters_as_it_is_flushed() {
     }
     let mut seen = Vec::new();
     // The first event arrives while the handler still waits for the gate.
-    let (found, head) = read_until(
-        &mut stream,
-        &mut seen,
-        "DATA: ONE",
-        Duration::from_secs(10),
-    )
-    .await;
+    let (found, head) =
+        read_until(&mut stream, &mut seen, "DATA: ONE", Duration::from_secs(10)).await;
     assert!(found, "{head}");
     assert!(head.contains("transfer-encoding: chunked"), "{head}");
     assert!(head.contains("x-seen: 7"), "{head}");
@@ -3611,5 +3609,158 @@ async fn certificate_scripts_staple_ocsp_responses() {
     )
     .await;
     assert_eq!(response.status, 200);
+    gateway.stop().await;
+}
+
+/// An HTTPS upstream that takes only clients with a certificate `ca`
+/// issued, and says whether the client presented one.
+async fn certified_upstream(
+    chain: Vec<rustls_pki_types::CertificateDer<'static>>,
+    key: rustls_pki_types::PrivateKeyDer<'static>,
+    ca: rustls_pki_types::CertificateDer<'static>,
+) -> SocketAddr {
+    let mut roots = rustls::RootCertStore::empty();
+    roots.add(ca).unwrap();
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let verifier = rustls::server::WebPkiClientVerifier::builder_with_provider(
+        Arc::new(roots),
+        Arc::clone(&provider),
+    )
+    .build()
+    .unwrap();
+    let config = rustls::ServerConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_client_cert_verifier(verifier)
+        .with_single_cert(chain, key)
+        .unwrap();
+    let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let Ok((stream, _)) = listener.accept().await else {
+                return;
+            };
+            let acceptor = acceptor.clone();
+            tokio::spawn(async move {
+                let Ok(mut stream) = acceptor.accept(stream).await else {
+                    return;
+                };
+                let mut seen = Vec::new();
+                let mut buffer = [0u8; 4096];
+                while !seen.windows(4).any(|window| window == b"\r\n\r\n") {
+                    match stream.read(&mut buffer).await {
+                        Ok(0) | Err(_) => return,
+                        Ok(read) => seen.extend_from_slice(&buffer[..read]),
+                    }
+                }
+                let body = if stream.get_ref().1.peer_certificates().is_some() {
+                    "certified"
+                } else {
+                    "anonymous"
+                };
+                let answer = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(answer.as_bytes()).await;
+                let _ = stream.shutdown().await;
+            });
+        }
+    });
+    address
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn proxy_certificate_scripts_present_their_certificate_to_upstreams() {
+    use panel_ir::{LuaHandler, LUA_SCRIPTS_CAPABILITY};
+    use rcgen::{
+        BasicConstraints, CertificateParams, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
+    };
+
+    let ca_key = KeyPair::generate().unwrap();
+    let mut ca = CertificateParams::new(Vec::<String>::new()).unwrap();
+    ca.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    let ca_cert = ca.self_signed(&ca_key).unwrap();
+    let issuer = Issuer::from_params(&ca, &ca_key);
+    let issue = |name: &str, usage: ExtendedKeyUsagePurpose| {
+        let key = KeyPair::generate().unwrap();
+        let mut params = CertificateParams::new(vec![name.to_owned()]).unwrap();
+        params.extended_key_usages = vec![usage];
+        (params.signed_by(&key, &issuer).unwrap(), key)
+    };
+    let (server, server_key) = issue("upstream.example", ExtendedKeyUsagePurpose::ServerAuth);
+    let (client, client_key) = issue("gateway.example", ExtendedKeyUsagePurpose::ClientAuth);
+    let upstream = certified_upstream(
+        vec![server.der().clone()],
+        rustls_pki_types::PrivatePkcs8KeyDer::from(server_key.serialize_der()).into(),
+        ca_cert.der().clone(),
+    )
+    .await;
+    let secrets = tempfile::tempdir().unwrap();
+    std::fs::write(
+        secrets.path().join("upstream-ca.pem"),
+        pem("CERTIFICATE", ca_cert.der()),
+    )
+    .unwrap();
+
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    snapshot
+        .required_capabilities
+        .push(CapabilityRequirement::new(LUA_SCRIPTS_CAPABILITY, "1"));
+    let hex = |der: &[u8]| {
+        der.iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    };
+    snapshot.lua.scripts = vec![lua_script(
+        "client",
+        &format!(
+            "local proxy = require 'ngx.ssl.proxysslcert' \
+             local ssl = require 'ngx.ssl' \
+             local function bytes(hex) \
+               return (hex:gsub('%x%x', function(pair) return string.char(tonumber(pair, 16)) end)) \
+             end \
+             assert(proxy.set_der_cert(bytes('{}'))) \
+             assert(proxy.set_der_priv_key(bytes('{}')))",
+            hex(client.der()),
+            hex(&client_key.serialize_der()),
+        ),
+    )];
+    snapshot.sites.push(site(&["shop.test"]));
+    let mut secure = pool("secure", &[upstream]);
+    secure.endpoints[0].address =
+        EndpointAddress::new(upstream.ip().to_string(), upstream.port(), true).unwrap();
+    secure.tls.sni = Some("upstream.example".into());
+    secure.tls.ca_secret_id = Some("upstream-ca.pem".into());
+    snapshot.upstream_pools.push(secure);
+    let mut certified = route("certified", 1, prefix("/certified"), proxy("secure"));
+    certified.lua.proxy_ssl_cert = Some(LuaHandler::new("client"));
+    snapshot.routes.extend([
+        certified,
+        route("anonymous", 2, prefix("/"), proxy("secure")),
+    ]);
+    let gateway = Gateway::start(
+        AdapterOptions::default().with_secrets(Arc::new(DirectorySecrets::new(secrets.path()))),
+        snapshot,
+    )
+    .await;
+    wait_for(listen).await;
+
+    let presented = get(listen, Some("shop.test"), "/certified", "").await;
+    assert_eq!(
+        presented.status,
+        200,
+        "{}",
+        String::from_utf8_lossy(&presented.body)
+    );
+    assert_eq!(presented.body, b"certified");
+    let refused = get(listen, Some("shop.test"), "/anonymous", "").await;
+    assert_eq!(refused.status, 502);
     gateway.stop().await;
 }

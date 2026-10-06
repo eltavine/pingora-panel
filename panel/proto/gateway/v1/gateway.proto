@@ -717,6 +717,9 @@ message LuaHandlers {
   LuaHandler ssl_client_hello = 9;
   // As a TLS handshake chooses the certificate it presents; a site's only.
   LuaHandler ssl_cert = 10;
+  // As a request's TLS connection to its upstream chooses the certificate
+  // it presents when asked for one.
+  LuaHandler proxy_ssl_cert = 11;
 }
 
 // A variable of the request templates name as ${lua:NAME}.

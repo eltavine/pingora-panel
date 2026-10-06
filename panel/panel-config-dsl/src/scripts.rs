@@ -203,6 +203,7 @@ fn phase(name: &str) -> Phase {
         "ssl_cert" => Phase::SslCertificate,
         "ssl_session_fetch" => Phase::SslSessionFetch,
         "ssl_session_store" => Phase::SslSessionStore,
+        "proxy_ssl_cert" => Phase::ProxySslCertificate,
         _ => Phase::Log,
     }
 }

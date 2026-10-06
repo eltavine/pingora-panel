@@ -1400,7 +1400,9 @@ reads the client's hello, `ngx.ssl` presents a certificate of the script's
 in place of the TLS profile's, `ngx.ocsp` checks and staples OCSP
 responses, and `ngx.exit(ngx.ERROR)` ends the handshake. `ssl_session_fetch_by_lua*` and `ssl_session_store_by_lua*` in
 `http` keep TLS sessions where scripts choose, with `ngx.ssl.session`, so
-any listener, or another gateway, resumes them. The code of a
+any listener, or another gateway, resumes them, and
+`proxy_ssl_certificate_by_lua*` chooses the certificate a route's TLS
+connections to its upstream present. The code of a
 `*_by_lua_block` is read with Lua's lexical rules and kept as it is
 written; `access_by_lua '...'` and the other forms that take code as a
 string read as their blocks, with a warning. `lua off;` keeps every

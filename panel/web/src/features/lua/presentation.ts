@@ -14,6 +14,7 @@ export const PHASES = [
   'precontent',
   'content',
   'balancer',
+  'proxy_ssl_cert',
   'header_filter',
   'body_filter',
   'log',

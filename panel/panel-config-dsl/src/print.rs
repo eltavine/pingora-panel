@@ -83,6 +83,7 @@ fn expanded(value: &str) -> String {
 fn lua_handler(phase: &str, code: &LuaCode) -> Directive {
     let phase = match phase {
         "ssl_cert" => "ssl_certificate",
+        "proxy_ssl_cert" => "proxy_ssl_certificate",
         phase => phase,
     };
     match code {

@@ -64,6 +64,7 @@ inheritance, where a directive in an inner block replaces the outer one:
 | `ssl_certificate_by_lua_block`, `_file` | as a TLS handshake chooses the certificate it presents | `http`, `server` |
 | `ssl_session_fetch_by_lua_block`, `_file` | as a TLS handshake offers to resume a session the listener does not hold | `http` |
 | `ssl_session_store_by_lua_block`, `_file` | as a TLS handshake makes a session | `http` |
+| `proxy_ssl_certificate_by_lua_block`, `_file` | as a request's TLS connection to its upstream chooses the certificate it presents when asked for one | `http`, `server`, `route` |
 | `lua_shared_dict <name> <size>` | declares a dictionary every VM shares | `http` |
 
 The body of a `*_by_lua_block` directive is read with Lua's lexical rules,
@@ -142,6 +143,19 @@ serialized form is rustls', so gateways that share sessions run the same
 version, and sessions resume only on listeners whose TLS profile resumes
 them.
 
+`proxy_ssl_certificate_by_lua*` chooses, with `ngx.ssl.proxysslcert`, the
+certificate a request's TLS connection to its upstream presents when the
+upstream asks for one: it runs as the upstream endpoint is chosen, before
+Pingora connects, and what it sets — checked to be X.509 with a key that
+matches — is presented, while `clear_certs` alone presents none. nginx
+runs it in the handshake, only when asked; here it may run for a request
+that reuses a connection, which Pingora keeps apart by the certificate it
+presented. It may be written in `http` and servers as well as routes,
+inherited as the other handlers are, and a failure answers 502 unless
+`lua_on_error` says otherwise. `proxy_ssl_verify_by_lua*` is refused:
+Pingora's TLS connections to upstreams keep no server certificate for a
+script to read, so a route's upstream TLS terms verify it.
+
 `ngx` is lua-nginx-module's API with its documented semantics, in the phases
 where lua-nginx-module allows each function: `ngx.var`, `ngx.ctx`,
 `ngx.req`, `ngx.resp`, `ngx.header`, `ngx.status`, `ngx.exit`,
@@ -189,8 +203,8 @@ run scripts with the gateway's own privileges outside the sandbox and
 `signal_graceful_exit` because scripts do not stop workers, and
 `resty.lrucache` (with `resty.lrucache.pureffi`), each VM holding its own
 caches, so the library scripts vendor for its FFI needs no FFI, and
-`ngx.ssl` with `ngx.ssl.clienthello` and `ngx.ssl.session`, and
-`ngx.ocsp`. `require` refuses `ngx.pipe`,
+`ngx.ssl` with `ngx.ssl.clienthello`, `ngx.ssl.session` and
+`ngx.ssl.proxysslcert`, and `ngx.ocsp`. `require` refuses `ngx.pipe`,
 which would start processes on the gateway's host, and LuaJIT's `ffi`,
 whose native calls would leave the sandbox, saying so; the configuration
 check reports them where they are required.

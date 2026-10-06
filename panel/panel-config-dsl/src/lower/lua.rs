@@ -30,6 +30,8 @@ pub(super) const SCOPE: &[&str] = &[
     "ssl_client_hello_by_lua_file",
     "ssl_certificate_by_lua_block",
     "ssl_certificate_by_lua_file",
+    "proxy_ssl_certificate_by_lua_block",
+    "proxy_ssl_certificate_by_lua_file",
     "lua_time_limit",
     "lua_work_limit",
     "lua_allow",
@@ -75,6 +77,10 @@ pub(crate) const GROUPS: &[&[&str]] = &[
     &[
         "ssl_certificate_by_lua_block",
         "ssl_certificate_by_lua_file",
+    ],
+    &[
+        "proxy_ssl_certificate_by_lua_block",
+        "proxy_ssl_certificate_by_lua_file",
     ],
     &["lua_time_limit"],
     &["lua_work_limit"],
@@ -254,8 +260,10 @@ fn phase(name: &str) -> Option<&'static str> {
     let stem = name
         .strip_suffix("_by_lua_block")
         .or_else(|| name.strip_suffix("_by_lua_file"))?;
-    if stem == "ssl_certificate" {
-        return Some("ssl_cert");
+    match stem {
+        "ssl_certificate" => return Some("ssl_cert"),
+        "proxy_ssl_certificate" => return Some("proxy_ssl_cert"),
+        _ => {}
     }
     [
         "server_rewrite",
@@ -435,6 +443,7 @@ impl<'a> Lowerer<'a> {
                 Some("log") => &mut scope.log,
                 Some("ssl_client_hello") => &mut scope.ssl_client_hello,
                 Some("ssl_cert") => &mut scope.ssl_cert,
+                Some("proxy_ssl_cert") => &mut scope.proxy_ssl_cert,
                 _ => unreachable!("only handler blocks take no argument"),
             };
             self.lua_handler(file, directive, slot, place);
@@ -456,6 +465,7 @@ impl<'a> Lowerer<'a> {
                     Some("log") => &mut scope.log,
                     Some("ssl_client_hello") => &mut scope.ssl_client_hello,
                     Some("ssl_cert") => &mut scope.ssl_cert,
+                    Some("proxy_ssl_cert") => &mut scope.proxy_ssl_cert,
                     _ => unreachable!("the scope takes no other handler"),
                 };
                 self.lua_handler(file, directive, slot, place);

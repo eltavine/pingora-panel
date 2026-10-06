@@ -1245,3 +1245,52 @@ http {
     ));
     assert!(!refused.is_valid());
 }
+
+#[test]
+fn proxy_certificate_handlers_read_compile_and_print_where_routes_proxy() {
+    let sources = Sources::single(
+        r#"language_version 1;
+http {
+    upstream secure {
+        server 10.0.0.1:443 tls;
+    }
+    server s {
+        server_name s.example;
+        respond 404;
+        route r {
+            match prefix /;
+            proxy_ssl_certificate_by_lua_block {
+                local proxy = require "ngx.ssl.proxysslcert"
+            }
+            proxy secure;
+        }
+    }
+}
+"#,
+    );
+    let lowered = read(&sources);
+    assert!(lowered.is_valid(), "{:#?}", lowered.diagnostics);
+    assert!(lowered.model.sites[0].routes[0]
+        .lua
+        .proxy_ssl_cert
+        .is_some());
+    let snapshot = compile(&lowered.model, RevisionId::new(1)).unwrap();
+    assert!(snapshot.routes[0].lua.proxy_ssl_cert.is_some());
+    let printed = print_sources(&lowered.model);
+    let main = printed.get("main.conf").unwrap();
+    assert!(
+        main.contains("            proxy_ssl_certificate_by_lua_block {\n"),
+        "{main}"
+    );
+
+    let verify = read(&Sources::single(
+        "language_version 1;\nhttp {\n    proxy_ssl_verify_by_lua_block { }\n}\n",
+    ));
+    assert!(verify.diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains("proxy_ssl_verify_by_lua_block")
+            && diagnostic
+                .help
+                .as_deref()
+                .is_some_and(|help| help.contains("upstream TLS terms"))
+    }));
+}
