@@ -83443,6 +83443,13 @@
               }
             ]
           },
+          "need_request_body": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "`lua_need_request_body`."
+          },
           "on_error": {
             "oneOf": [
               {

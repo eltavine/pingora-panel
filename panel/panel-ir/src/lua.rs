@@ -174,6 +174,10 @@ pub struct LuaHandler {
     /// (`lua_use_default_type off`).
     #[serde(default, skip_serializing_if = "is_false")]
     pub no_default_type: bool,
+    /// The request body is read before the handler runs
+    /// (`lua_need_request_body on`).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub read_body_first: bool,
 }
 
 impl LuaHandler {
@@ -190,6 +194,7 @@ impl LuaHandler {
             sockets: LuaSockets::default(),
             keep_underscores: false,
             no_default_type: false,
+            read_body_first: false,
         }
     }
 }

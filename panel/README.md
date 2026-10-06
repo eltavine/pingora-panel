@@ -1422,6 +1422,7 @@ that mean one thing in every phase.
 | `lua_socket_log_errors` | `on` | cosocket failures in the error log |
 | `lua_transform_underscores_in_response_headers` | `on` | `ngx.header.x_trace_id` sets `X-Trace-Id` |
 | `lua_use_default_type` | `on` | answers without a `Content-Type` get `text/plain; charset=utf-8` |
+| `lua_need_request_body` | `off` | the request body is read before rewrite, access and content handlers run |
 
 The sandbox has no `io`, `os.execute`, native libraries, FFI or bytecode
 loading; globals are read-only and a request's writes stay with it. A run

@@ -161,7 +161,7 @@ panel-control-runtime = { version = "=0.1.0", path = "panel-control-runtime" }
 panel-contracts = { version = "=0.1.0", path = "panel-contracts" }
 panel-config-domain = { version = "=0.1.0", path = "panel-config-domain" }
 panel-config-json = { version = "=0.1.0", path = "panel-config-json" }
-panel-config-model = { version = "=0.5.0", path = "panel-config-model" }
+panel-config-model = { version = "=0.6.0", path = "panel-config-model" }
 panel-config-api = { version = "=0.2.0", path = "panel-config-api" }
 panel-certificate-api = { version = "=0.1.0", path = "panel-certificate-api" }
 panel-dsl = { version = "=0.2.0", path = "panel-dsl" }
@@ -193,7 +193,7 @@ panel-events = { version = "=0.1.0", path = "panel-events" }
 panel-event-contracts = { version = "=0.1.0", path = "panel-event-contracts" }
 panel-health = { version = "=0.1.0", path = "panel-health" }
 panel-gateway-runtime = { version = "=0.2.0", path = "panel-gateway-runtime" }
-panel-ir = { version = "=0.6.0", path = "panel-ir" }
+panel-ir = { version = "=0.7.0", path = "panel-ir" }
 panel-jetstream = { version = "=0.1.0", path = "panel-jetstream" }
 panel-jobs = { version = "=0.1.0", path = "panel-jobs" }
 panel-schedule = { version = "=0.1.0", path = "panel-schedule" }

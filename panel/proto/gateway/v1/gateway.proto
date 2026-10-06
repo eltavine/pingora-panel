@@ -670,6 +670,9 @@ message LuaHandler {
   bool keep_underscores = 10;
   // An answer without a Content-Type gets none (lua_use_default_type off).
   bool no_default_type = 11;
+  // The request body is read before the handler runs
+  // (lua_need_request_body on).
+  bool read_body_first = 12;
 }
 
 // The handlers a site or route runs, by phase.

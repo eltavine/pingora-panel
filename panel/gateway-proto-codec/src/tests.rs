@@ -568,6 +568,7 @@ fn lua_programs_and_handlers_round_trip_and_unknown_kinds_are_refused() {
     access.sockets.quiet = true;
     access.keep_underscores = true;
     access.no_default_type = true;
+    access.read_body_first = true;
     access.allow = LuaPermissions {
         body: true,
         upstream: false,

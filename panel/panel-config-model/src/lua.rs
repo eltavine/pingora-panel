@@ -126,6 +126,9 @@ pub struct LuaScope {
     /// `lua_use_default_type`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub use_default_type: Option<bool>,
+    /// `lua_need_request_body`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub need_request_body: Option<bool>,
 }
 
 impl LuaScope {
@@ -173,6 +176,7 @@ impl LuaScope {
             socket_log_errors: pick(&self.socket_log_errors, &outer.socket_log_errors),
             transform_underscores: pick(&self.transform_underscores, &outer.transform_underscores),
             use_default_type: pick(&self.use_default_type, &outer.use_default_type),
+            need_request_body: pick(&self.need_request_body, &outer.need_request_body),
         }
     }
 
@@ -221,6 +225,7 @@ impl LuaScope {
             || self.socket_log_errors.is_some()
             || self.transform_underscores.is_some()
             || self.use_default_type.is_some()
+            || self.need_request_body.is_some()
     }
 }
 
@@ -556,6 +561,7 @@ pub(crate) fn handler(id: String, scope: &LuaScope) -> LuaHandler {
     };
     handler.keep_underscores = scope.transform_underscores == Some(false);
     handler.no_default_type = scope.use_default_type == Some(false);
+    handler.read_body_first = scope.need_request_body == Some(true);
     handler
 }
 

@@ -183,6 +183,7 @@ pub(super) fn decode_handler(value: wire::LuaHandler) -> Result<LuaHandler> {
             .unwrap_or_default(),
         keep_underscores: value.keep_underscores,
         no_default_type: value.no_default_type,
+        read_body_first: value.read_body_first,
     })
 }
 
@@ -211,6 +212,7 @@ pub(super) fn encode_handler(value: &LuaHandler) -> wire::LuaHandler {
         }),
         keep_underscores: value.keep_underscores,
         no_default_type: value.no_default_type,
+        read_body_first: value.read_body_first,
     }
 }
 

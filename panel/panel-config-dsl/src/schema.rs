@@ -518,6 +518,9 @@ pub static DIRECTIVES: &[DirectiveSpec] = &[
         "lua_upstream_skip_openssl_default_verify on|off;", "Accepted from OpenResty without effect: cosockets verify certificates with the system's trusted roots, not OpenSSL's defaults."),
     spec!("balancer_keepalive" in &[Upstream], None, 1..Some(1), false,
         "balancer_keepalive <count>;", "Accepted from OpenResty without effect: the gateway pools connections to upstream nodes itself, and keepalive on|off turns reuse on or off."),
+    spec!("lua_need_request_body" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "lua_need_request_body on|off;", "Whether the request body is read before a rewrite, access or content handler runs, so scripts find it without ngx.req.read_body().",
+        inherits "off when not written; a route's replaces its server's, and a server's the one in http."),
     spec!("lua_code_cache" in LUA_CONTEXTS, None, 1..Some(1), false,
         "lua_code_cache on;", "Accepted from OpenResty: scripts are compiled once per activation, so off is refused."),
     DirectiveSpec {
@@ -559,7 +562,6 @@ pub fn refusal(name: &str) -> Option<String> {
         "exit_worker_by_lua_block" | "exit_worker_by_lua_file" => {
             "VMs run no script when they stop"
         }
-        "lua_need_request_body" => "ngx.req.read_body() reads the body where a script needs it",
         _ if name.starts_with("ssl_") && name.contains("_by_lua") => {
             "TLS handshakes run no script; certificates come from TLS profiles"
         }

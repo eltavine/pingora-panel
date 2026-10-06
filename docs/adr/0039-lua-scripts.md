@@ -109,8 +109,8 @@ What runs differently: LuaJIT's `ffi` and `jit` modules, `goto` (Luau has
 are not available; `lua_package_path`, `lua_package_cpath`,
 `lua_code_cache off` and `lua_socket_send_lowat`, which Linux does not
 honour for TCP, are refused.
-`lua_transform_underscores_in_response_headers` and `lua_use_default_type`
-apply as in lua-nginx-module. Directives with nothing to tune here —
+`lua_transform_underscores_in_response_headers`, `lua_use_default_type` and
+`lua_need_request_body` apply as in lua-nginx-module. Directives with nothing to tune here —
 `lua_load_resty_core`, `lua_malloc_trim`, `lua_sa_restart`,
 `lua_thread_cache_max_entries`, `lua_worker_thread_vm_pool_size`,
 `lua_capture_error_log`, `lua_check_client_abort`, `lua_http10_buffering`,

@@ -83,6 +83,9 @@ pub struct Handler {
     /// An answer without a `Content-Type` gets the default one, as
     /// `lua_use_default_type on` does.
     pub default_type: bool,
+    /// The request body is read before a rewrite, access or content
+    /// handler runs, as `lua_need_request_body on` does.
+    pub read_body_first: bool,
 }
 
 impl Handler {
@@ -98,6 +101,7 @@ impl Handler {
             sockets: Sockets::default(),
             transform_underscores: true,
             default_type: true,
+            read_body_first: false,
         }
     }
 }
@@ -249,6 +253,23 @@ impl Scripts {
     /// Runs `handler`. A run that fails leaves the exchange as it was before
     /// it, but for what the script logged.
     pub async fn run(&mut self, handler: Handler, host: &mut (dyn Host + Send)) -> Outcome {
+        if handler.read_body_first
+            && matches!(
+                handler.phase,
+                Phase::ServerRewrite | Phase::Rewrite | Phase::Access | Phase::Content
+            )
+            && self.exchange.lock().request.body.is_none()
+        {
+            match host.read_body(crate::api::MAX_BODY).await {
+                Ok(body) => self.exchange.lock().request.body = Some(body),
+                Err(error) => {
+                    return Outcome::Failed(Failure {
+                        kind: FailureKind::Error,
+                        message: error,
+                    })
+                }
+            }
+        }
         let (index, cell) = self.bind();
         let runtime = Arc::clone(&self.runtime);
         let vm = &runtime.vms[index];

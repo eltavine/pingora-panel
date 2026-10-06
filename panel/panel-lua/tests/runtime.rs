@@ -1520,3 +1520,15 @@ async fn request_sockets_stream_the_body_across_its_pieces() {
         b"nil raw request sockets are not available\n"
     );
 }
+
+#[tokio::test]
+async fn handlers_can_find_the_body_read_before_they_run() {
+    let lua = start(1, handlers(&["ngx.say(ngx.req.get_body_data())"]));
+    let mut eager = handler(lua.handlers[0], Phase::Access);
+    eager.permissions.body = true;
+    eager.read_body_first = true;
+    let mut scripts = lua.runtime.scripts(request("POST", "/", &[]));
+    let outcome = scripts.run(eager, &mut Body("name=ann")).await;
+    assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+    assert_eq!(scripts.exchange().response.body, b"name=ann\n");
+}

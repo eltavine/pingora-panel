@@ -40,6 +40,7 @@ pub(super) const SCOPE: &[&str] = &[
     "lua_socket_log_errors",
     "lua_transform_underscores_in_response_headers",
     "lua_use_default_type",
+    "lua_need_request_body",
     "lua_code_cache",
 ];
 
@@ -68,6 +69,7 @@ pub(crate) const GROUPS: &[&[&str]] = &[
     &["lua_socket_log_errors"],
     &["lua_transform_underscores_in_response_headers"],
     &["lua_use_default_type"],
+    &["lua_need_request_body"],
 ];
 
 /// What each term is when no block around a handler writes it.
@@ -88,6 +90,7 @@ pub(crate) const DEFAULTS: &[(&str, &str)] = &[
     ("lua_socket_log_errors", "on"),
     ("lua_transform_underscores_in_response_headers", "on"),
     ("lua_use_default_type", "on"),
+    ("lua_need_request_body", "off"),
 ];
 
 /// The directives that set the terms handlers run on.
@@ -108,6 +111,7 @@ pub(crate) const TERMS: &[&str] = &[
     "lua_socket_log_errors",
     "lua_transform_underscores_in_response_headers",
     "lua_use_default_type",
+    "lua_need_request_body",
 ];
 
 /// OpenResty directives with nothing to tune here, and why. They are read
@@ -351,6 +355,7 @@ impl<'a> Lowerer<'a> {
                 scope.transform_underscores = self.bool_arg(file, arg);
             }
             "lua_use_default_type" => scope.use_default_type = self.bool_arg(file, arg),
+            "lua_need_request_body" => scope.need_request_body = self.bool_arg(file, arg),
             "lua_allow" => scope.allow = self.lua_allow(file, directive),
             "lua_on_error" => {
                 let Some(value) = self.value(file, arg) else {
@@ -588,6 +593,7 @@ pub(crate) fn print_terms(scope: &LuaScope) -> Vec<(&'static str, Vec<String>)> 
             scope.transform_underscores,
         ),
         ("lua_use_default_type", scope.use_default_type),
+        ("lua_need_request_body", scope.need_request_body),
     ] {
         if let Some(on) = on {
             terms.push((name, vec![values::print_bool(on).to_owned()]));
