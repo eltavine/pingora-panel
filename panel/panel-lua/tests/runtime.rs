@@ -2201,7 +2201,8 @@ async fn ssl_handlers_read_the_hello_and_choose_the_certificate() {
         local nothing, err = ssl.set_der_cert("not DER")
         assert(nothing == nil and err, err)
         local ok, err = ssl.verify_client()
-        assert(ok == nil and err:find("TLS profiles"), err)
+        assert(ok == nil and err:find("trusted"), err)
+        assert(ssl.verify_client(assert(ssl.parse_der_cert(certificate)), 2))
         local secret, err = ssl.get_session_master_key()
         assert(secret == nil and err:find("decrypt"), err)
         local address, kind = ssl.raw_client_addr()
@@ -2229,6 +2230,9 @@ async fn ssl_handlers_read_the_hello_and_choose_the_certificate() {
         let exchange = scripts.exchange();
         let handshake = &exchange.handshake;
         assert!(handshake.cleared);
+        let asked = handshake.client_auth.as_ref().unwrap();
+        assert_eq!(asked.depth, 2);
+        assert_eq!(asked.authorities, [certified.cert.der().to_vec()]);
         assert_eq!(
             handshake.chain.as_deref(),
             Some(&[certified.cert.der().to_vec()][..])
@@ -2493,4 +2497,50 @@ async fn proxy_certificate_handlers_choose_what_the_upstream_connection_presents
         Some(&[certified.cert.der().to_vec()][..])
     );
     assert!(exchange.handshake.cleared && exchange.handshake.key.is_some());
+}
+
+#[tokio::test]
+async fn requests_read_the_client_certificate_their_connection_verified() {
+    use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
+    let key = KeyPair::generate().unwrap();
+    let mut params = CertificateParams::new(vec!["client.example".into()]).unwrap();
+    params.distinguished_name = DistinguishedName::new();
+    params
+        .distinguished_name
+        .push(DnType::OrganizationName, "Shop, Inc");
+    params
+        .distinguished_name
+        .push(DnType::CommonName, "shop client");
+    params.serial_number = Some(vec![0x0a, 0xbc].into());
+    let certificate = params.self_signed(&key).unwrap();
+    let lua = start(
+        1,
+        handlers(&[
+            r#"
+            ngx.say(ngx.var.ssl_client_verify)
+            ngx.say(ngx.var.ssl_client_s_dn)
+            ngx.say(ngx.var.ssl_client_i_dn)
+            ngx.say(ngx.var.ssl_client_serial)
+            ngx.say(#ngx.var.ssl_client_fingerprint)
+            ngx.say(ngx.var.ssl_client_raw_cert:sub(1, 27))
+            ngx.say(select(2, ngx.var.ssl_client_cert:gsub("\n\t", "")) > 0)
+        "#,
+            r#"ngx.say(ngx.var.ssl_client_verify, " ", tostring(ngx.var.ssl_client_s_dn))"#,
+        ]),
+    );
+    let mut exchange = request("GET", "/", &[]);
+    exchange.handshake.client_verify = Some("SUCCESS".into());
+    exchange.handshake.client_chain = vec![certificate.der().to_vec()];
+    let mut scripts = lua.runtime.scripts(exchange);
+    let outcome = run(&mut scripts, handler(lua.handlers[0], Phase::Content)).await;
+    assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+    let said = String::from_utf8(scripts.exchange().response.body.clone()).unwrap();
+    assert_eq!(
+        said,
+        "SUCCESS\nCN=shop client,O=Shop\\, Inc\nCN=shop client,O=Shop\\, Inc\n0ABC\n40\n-----BEGIN CERTIFICATE-----\ntrue\n"
+    );
+
+    let mut plain = lua.runtime.scripts(request("GET", "/", &[]));
+    run(&mut plain, handler(lua.handlers[1], Phase::Content)).await;
+    assert_eq!(plain.exchange().response.body, b"NONE nil\n");
 }

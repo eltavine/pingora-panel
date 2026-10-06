@@ -102,6 +102,31 @@ fn seconds(time: SystemTime) -> f64 {
         .map_or(0.0, |since| since.as_millis() as f64 / 1000.0)
 }
 
+/// What the `$ssl_client_*` variable `name` says of the client's
+/// certificate.
+fn client_certificate(der: &[u8], name: &str) -> Option<Vec<u8>> {
+    use crate::x509::{distinguished_name, pem, Certificate};
+    use sha1::{Digest, Sha1};
+    let certificate = Certificate::parse(der)?;
+    let text = match name {
+        "ssl_client_raw_cert" => pem(der),
+        // Each line but the first goes on after a tab, as nginx writes it.
+        "ssl_client_cert" => {
+            let pem = pem(der);
+            let body = pem.strip_suffix('\n').unwrap_or(&pem);
+            format!("{}\n", body.replace('\n', "\n\t"))
+        }
+        "ssl_client_s_dn" => distinguished_name(certificate.subject)?,
+        "ssl_client_i_dn" => distinguished_name(certificate.issuer)?,
+        "ssl_client_serial" => certificate.serial_hex(),
+        _ => Sha1::digest(der)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+    };
+    Some(text.into_bytes())
+}
+
 pub(crate) fn variable(exchange: &Exchange, name: &str) -> Option<Vec<u8>> {
     let request = &exchange.request;
     let connection = &exchange.connection;
@@ -167,6 +192,21 @@ pub(crate) fn variable(exchange: &Exchange, name: &str) -> Option<Vec<u8>> {
             .server_name
             .clone()
             .map(String::into_bytes),
+        "ssl_client_verify" if connection.tls => text(
+            exchange
+                .handshake
+                .client_verify
+                .clone()
+                .unwrap_or_else(|| "NONE".into()),
+        ),
+        "ssl_client_raw_cert"
+        | "ssl_client_cert"
+        | "ssl_client_s_dn"
+        | "ssl_client_i_dn"
+        | "ssl_client_serial"
+        | "ssl_client_fingerprint" => {
+            client_certificate(exchange.handshake.client_chain.first()?, name)
+        }
         "request_method" => text(request.method.clone()),
         "request_id" => text(connection.request_id.clone()),
         "request" => text(format!(

@@ -48,6 +48,25 @@ pub struct Handshake {
     /// The OCSP response stapled to the certificate presented
     /// (`ngx.ocsp.set_ocsp_status_resp`).
     pub ocsp: Option<Bytes>,
+    /// The client certificate `ngx.ssl.verify_client` asks for.
+    pub client_auth: Option<ClientAuth>,
+    /// How the client's certificate verified, as `$ssl_client_verify` says
+    /// on the connection's requests: `SUCCESS`, `FAILED:` and why, or
+    /// `NONE`.
+    pub client_verify: Option<String>,
+    /// The certificates the client presented, its own first.
+    pub client_chain: Vec<Vec<u8>>,
+}
+
+/// The client certificate `ngx.ssl.verify_client` asks for.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct ClientAuth {
+    /// The DER certificates trusted to issue it.
+    pub authorities: Vec<Vec<u8>>,
+    /// The most intermediate certificates its chain may have, not counting
+    /// those that issued themselves.
+    pub depth: usize,
 }
 
 struct Reader<'a>(&'a [u8]);

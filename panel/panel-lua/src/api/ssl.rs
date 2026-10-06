@@ -24,8 +24,6 @@ use std::{
 /// response.
 const STATUS_REQUEST: u16 = 5;
 
-const NO_CLIENT_AUTH: &str = "client certificates are requested by TLS profiles: the gateway's \
-                              TLS asks every connection to a listener for one, or none";
 const NO_PROTOCOLS: &str = "protocol versions come from TLS profiles: the gateway's TLS offers \
                             a listener's versions to every connection";
 const NO_SECRETS: &str =
@@ -225,9 +223,36 @@ pub(super) fn module(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
         &module,
         slot,
         "verify_client",
-        |lua, slot, _: Variadic<Value>| {
+        |lua,
+         slot,
+         (client, depth, trusted): (
+            Option<UserDataRef<Chain>>,
+            Option<i64>,
+            Option<UserDataRef<Chain>>,
+        )| {
             with(slot, Some(Phase::SslCertificate), |_| ())?;
-            failed(lua, 1, NO_CLIENT_AUTH)
+            let authorities: Vec<Vec<u8>> = [&client, &trusted]
+                .into_iter()
+                .flatten()
+                .flat_map(|chain| chain.0.iter().cloned())
+                .collect();
+            if authorities.is_empty() {
+                return failed(
+                    lua,
+                    1,
+                    "no certificate is trusted to issue clients': give client_certs or trusted_certs",
+                );
+            }
+            let depth = usize::try_from(depth.unwrap_or(1)).map_err(|_| {
+                mlua::Error::runtime(
+                    "bad argument #2 to 'verify_client' (depth must not be negative)",
+                )
+            })?;
+            with(slot, Some(Phase::SslCertificate), |exchange| {
+                exchange.handshake.client_auth =
+                    Some(crate::ssl::ClientAuth { authorities, depth });
+            })?;
+            Ok(done())
         },
     )?;
     define(

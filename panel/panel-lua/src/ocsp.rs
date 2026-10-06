@@ -2,7 +2,7 @@
 //! names, the request that asks it about the certificate, and whether its
 //! response vouches for the certificate now.
 
-use crate::tls::der;
+use crate::x509::{bits, element, elements, tlv, Certificate, Element};
 use sha1::{Digest, Sha1};
 use sha2::Sha256;
 
@@ -21,128 +21,7 @@ const OCSP_SIGNING: &[u8] = &[0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x09];
 /// them.
 const SKEW: i64 = 300;
 
-struct Element<'a> {
-    tag: u8,
-    content: &'a [u8],
-    whole: &'a [u8],
-}
-
-fn element(input: &[u8]) -> Option<(Element<'_>, &[u8])> {
-    let (tag, content, rest) = der(input)?;
-    let whole = &input[..input.len() - rest.len()];
-    Some((
-        Element {
-            tag,
-            content,
-            whole,
-        },
-        rest,
-    ))
-}
-
-fn elements(mut content: &[u8]) -> Option<Vec<Element<'_>>> {
-    let mut found = Vec::new();
-    while !content.is_empty() {
-        let (next, rest) = element(content)?;
-        found.push(next);
-        content = rest;
-    }
-    Some(found)
-}
-
-/// What a BIT STRING holds, when it uses every bit of its last byte.
-fn bits<'a>(element: &Element<'a>) -> Option<&'a [u8]> {
-    let (&unused, bits) = element.content.split_first()?;
-    (element.tag == 0x03 && unused == 0).then_some(bits)
-}
-
-/// An element with `tag` around `content`.
-pub(crate) fn tlv(tag: u8, content: &[u8]) -> Vec<u8> {
-    let mut encoded = vec![tag];
-    match content.len() {
-        length @ 0..=0x7f => encoded.push(length as u8),
-        length => {
-            let bytes: Vec<u8> = length
-                .to_be_bytes()
-                .into_iter()
-                .skip_while(|byte| *byte == 0)
-                .collect();
-            encoded.push(0x80 | bytes.len() as u8);
-            encoded.extend(bytes);
-        }
-    }
-    encoded.extend_from_slice(content);
-    encoded
-}
-
-/// What OCSP reads of a certificate.
-struct Certificate<'a> {
-    tbs: &'a [u8],
-    serial: &'a [u8],
-    issuer: &'a [u8],
-    subject: &'a [u8],
-    key_algorithm: &'a [u8],
-    key: &'a [u8],
-    extensions: Option<&'a [u8]>,
-    signature_algorithm: &'a [u8],
-    signature: &'a [u8],
-}
-
 impl<'a> Certificate<'a> {
-    fn parse(certificate: &'a [u8]) -> Option<Self> {
-        let (outer, _) = element(certificate)?;
-        let parts = elements(outer.content)?;
-        let [tbs, algorithm, signature] = parts.as_slice() else {
-            return None;
-        };
-        let mut fields = elements(tbs.content)?.into_iter().peekable();
-        if fields.peek()?.tag == 0xa0 {
-            fields.next();
-        }
-        let serial = fields.next()?;
-        let _signature = fields.next()?;
-        let issuer = fields.next()?;
-        let _validity = fields.next()?;
-        let subject = fields.next()?;
-        let key_info = fields.next()?;
-        let mut extensions = None;
-        for field in fields {
-            if field.tag == 0xa3 {
-                extensions = Some(element(field.content)?.0.content);
-            }
-        }
-        let key_parts = elements(key_info.content)?;
-        let [key_algorithm, key] = key_parts.as_slice() else {
-            return None;
-        };
-        Some(Self {
-            tbs: tbs.whole,
-            serial: serial.content,
-            issuer: issuer.whole,
-            subject: subject.whole,
-            key_algorithm: key_algorithm.content,
-            key: bits(key)?,
-            extensions,
-            signature_algorithm: algorithm.content,
-            signature: bits(signature)?,
-        })
-    }
-
-    /// The value of the extension `id`.
-    fn extension(&self, id: &[u8]) -> Option<&'a [u8]> {
-        for extension in elements(self.extensions?)? {
-            let parts = elements(extension.content)?;
-            let (name, rest) = parts.split_first()?;
-            if name.tag == 0x06 && name.content == id {
-                return rest
-                    .last()
-                    .filter(|value| value.tag == 0x04)
-                    .map(|value| value.content);
-            }
-        }
-        None
-    }
-
     /// The OCSP responder its authority information access names.
     fn responder(&self) -> Option<&'a [u8]> {
         let (access, _) = element(self.extension(AUTHORITY_INFO_ACCESS)?)?;

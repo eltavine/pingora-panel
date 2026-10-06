@@ -23,6 +23,7 @@ mod timer;
 mod tls;
 mod vm;
 mod worker;
+mod x509;
 
 pub use capture::{Capture, Captured, Share, MOST_CAPTURES, MOST_DEPTH};
 pub use exchange::{
@@ -33,7 +34,7 @@ pub use lint::{lint, Finding, FindingKind, Lint, Role};
 pub use program::{compile, Diagnostic, HandlerId, Program, ProgramBuilder, SharedDict, Source};
 pub use runtime::{Handler, Host, NoHost, Runtime, Scripts, Settings};
 pub use shared::SharedStore;
-pub use ssl::Handshake;
+pub use ssl::{ClientAuth, Handshake};
 pub use stream::Output;
 pub use timer::TimerRun;
 pub use tls::{TlsId, TlsTerms};
