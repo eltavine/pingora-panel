@@ -1,2 +1,7 @@
 [resolver]
 incompatible-rust-versions = "fallback"
+
+[env]
+# PCRE2, which the Lua runtime's ngx.re uses, is built in rather than taken
+# from the build machine, so binaries do not need the library where they run.
+PCRE2_SYS_STATIC = "1"
