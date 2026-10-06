@@ -534,7 +534,7 @@ impl Checker<'_> {
                     (Kind::Symbol, ")" | "}" | "]") => nesting -= 1,
                     (Kind::Name, _) if nesting == 0 && self.is_name(index) => {
                         let after = self.at(index.saturating_sub(1));
-                        if !after.is_some_and(|before| before.text == ":") {
+                        if after.is_none_or(|before| before.text != ":") {
                             locals.push(token.text.clone());
                         }
                     }
