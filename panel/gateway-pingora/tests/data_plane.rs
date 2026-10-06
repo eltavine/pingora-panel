@@ -2433,6 +2433,15 @@ fn lua_script(id: &str, source: &str) -> panel_ir::LuaScript {
     }
 }
 
+/// A handler for `script_id` with time to spare on a loaded machine, which
+/// can hold a run past the default limit; in a handshake that ends the
+/// handshake.
+fn patient_handler(script_id: &str) -> panel_ir::LuaHandler {
+    let mut handler = panel_ir::LuaHandler::new(script_id);
+    handler.time_limit_ms = 10_000;
+    handler
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn lua_handlers_rewrite_answer_filter_and_choose_peers() {
     use panel_ir::{LuaFallback, LuaHandler, LuaSharedDict, LUA_SCRIPTS_CAPABILITY};
@@ -3035,7 +3044,7 @@ async fn exec_reaches_named_locations_that_no_path_does() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn handshake_scripts_refuse_hellos_and_present_their_certificates() {
-    use panel_ir::{LuaHandler, LUA_SCRIPTS_CAPABILITY};
+    use panel_ir::LUA_SCRIPTS_CAPABILITY;
 
     let upstream = echo_upstream().await;
     let secrets = tempfile::tempdir().unwrap();
@@ -3098,8 +3107,8 @@ async fn handshake_scripts_refuse_hellos_and_present_their_certificates() {
         ),
     ];
     let mut site = site(&names);
-    site.lua.ssl_client_hello = Some(LuaHandler::new("hello"));
-    site.lua.ssl_cert = Some(LuaHandler::new("certificate"));
+    site.lua.ssl_client_hello = Some(patient_handler("hello"));
+    site.lua.ssl_cert = Some(patient_handler("certificate"));
     snapshot.sites.push(site);
     snapshot.upstream_pools.push(pool("app", &[upstream]));
     snapshot
@@ -3665,8 +3674,8 @@ async fn session_scripts_resume_sessions_another_listener_made() {
         name: "sessions".into(),
         capacity_bytes: 1 << 20,
     }];
-    snapshot.lua.ssl_session_store = Some(LuaHandler::new("store"));
-    snapshot.lua.ssl_session_fetch = Some(LuaHandler::new("fetch"));
+    snapshot.lua.ssl_session_store = Some(patient_handler("store"));
+    snapshot.lua.ssl_session_fetch = Some(patient_handler("fetch"));
     snapshot.sites.push(site(&["shop.example"]));
     snapshot.upstream_pools.push(pool("app", &[upstream]));
     snapshot.routes.extend([
@@ -3838,7 +3847,7 @@ async fn certificate_scripts_staple_ocsp_responses() {
         ),
     ];
     let mut shop = site(&["shop.example"]);
-    shop.lua.ssl_cert = Some(LuaHandler::new("staple"));
+    shop.lua.ssl_cert = Some(patient_handler("staple"));
     snapshot.sites.push(shop);
     snapshot.upstream_pools.push(pool("app", &[upstream]));
     snapshot.routes.extend([
@@ -3963,7 +3972,7 @@ async fn certified_upstream(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn proxy_certificate_scripts_present_their_certificate_to_upstreams() {
-    use panel_ir::{LuaHandler, LUA_SCRIPTS_CAPABILITY};
+    use panel_ir::LUA_SCRIPTS_CAPABILITY;
     use rcgen::{
         BasicConstraints, CertificateParams, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
     };
@@ -4029,7 +4038,7 @@ async fn proxy_certificate_scripts_present_their_certificate_to_upstreams() {
     secure.tls.ca_secret_id = Some("upstream-ca.pem".into());
     snapshot.upstream_pools.push(secure);
     let mut certified = route("certified", 1, prefix("/certified"), proxy("secure"));
-    certified.lua.proxy_ssl_cert = Some(LuaHandler::new("client"));
+    certified.lua.proxy_ssl_cert = Some(patient_handler("client"));
     snapshot.routes.extend([
         certified,
         route("anonymous", 2, prefix("/"), proxy("secure")),
@@ -4056,7 +4065,7 @@ async fn proxy_certificate_scripts_present_their_certificate_to_upstreams() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn certificate_scripts_verify_clients_and_requests_read_how() {
-    use panel_ir::{LuaHandler, LUA_SCRIPTS_CAPABILITY};
+    use panel_ir::LUA_SCRIPTS_CAPABILITY;
     use rcgen::{
         BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose,
         IsCa, Issuer, KeyPair,
@@ -4126,7 +4135,7 @@ async fn certificate_scripts_verify_clients_and_requests_read_how() {
         ),
     ];
     let mut shop = site(&["shop.example"]);
-    shop.lua.ssl_cert = Some(LuaHandler::new("ask"));
+    shop.lua.ssl_cert = Some(patient_handler("ask"));
     snapshot.sites.push(shop);
     snapshot.upstream_pools.push(pool("app", &[upstream]));
     snapshot.routes.push(route(
@@ -4134,7 +4143,7 @@ async fn certificate_scripts_verify_clients_and_requests_read_how() {
         1,
         prefix("/"),
         RouteAction::Lua {
-            handler: LuaHandler::new("who"),
+            handler: patient_handler("who"),
         },
     ));
     let gateway = Gateway::start(
@@ -4237,7 +4246,7 @@ async fn tls_upstream(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn proxy_verify_scripts_judge_upstream_certificates() {
-    use panel_ir::{LuaHandler, LUA_SCRIPTS_CAPABILITY};
+    use panel_ir::LUA_SCRIPTS_CAPABILITY;
 
     // Against an unpatched Pingora the upstream's chain is not kept, so the
     // pinning script cannot find what it pins.
@@ -4288,9 +4297,9 @@ async fn proxy_verify_scripts_judge_upstream_certificates() {
         snapshot.upstream_pools.push(secure);
     }
     let mut pinned = route("pinned", 1, prefix("/pinned"), proxy("pinned"));
-    pinned.lua.proxy_ssl_verify = Some(LuaHandler::new("pin"));
+    pinned.lua.proxy_ssl_verify = Some(patient_handler("pin"));
     let mut refused = route("refused", 2, prefix("/"), proxy("refused"));
-    refused.lua.proxy_ssl_verify = Some(LuaHandler::new("refuse"));
+    refused.lua.proxy_ssl_verify = Some(patient_handler("refuse"));
     snapshot.routes.extend([pinned, refused]);
     let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
     wait_for(listen).await;
