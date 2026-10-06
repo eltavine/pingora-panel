@@ -24,8 +24,9 @@ const fn bits(phases: &[Phase]) -> u32 {
 
 use Phase::{
     Access as AC, Balancer as BL, BodyFilter as BF, Content as CT, HeaderFilter as HF,
-    InitWorker as IW, Log as LG, Rewrite as RW, Set as ST, SslCertificate as SC,
-    SslClientHello as SH, SslSessionFetch as SF, SslSessionStore as SS, Timer as TM,
+    InitWorker as IW, Log as LG, ProxySslCertificate as PC, Rewrite as RW, Set as ST,
+    SslCertificate as SC, SslClientHello as SH, SslSessionFetch as SF, SslSessionStore as SS,
+    Timer as TM,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -208,20 +209,20 @@ impl Api {
     pub(crate) const fn phases(self) -> u32 {
         match self {
             Api::Arg => bits(&[ST, BF]),
-            Api::Ctx => bits(&[IW, ST, RW, AC, CT, BL, HF, BF, LG, TM]),
-            Api::Timer => bits(&[IW, ST, RW, AC, CT, BL, HF, BF, LG, TM, SC, SH, SF, SS]),
+            Api::Ctx => bits(&[IW, ST, RW, AC, CT, BL, HF, BF, LG, TM, PC]),
+            Api::Timer => bits(&[IW, ST, RW, AC, CT, BL, HF, BF, LG, TM, SC, SH, SF, SS, PC]),
             Api::Eof | Api::Flush | Api::Output | Api::Redirect | Api::SendHeaders => {
                 bits(&[RW, AC, CT])
             }
             Api::ReqReadBody | Api::ReqDiscardBody => bits(&[RW, AC, CT]),
             Api::HeadersSent => bits(&[ST, RW, AC, CT]),
-            Api::Exit => bits(&[RW, AC, CT, BL, HF, TM, SC, SH, SF, SS]),
+            Api::Exit => bits(&[RW, AC, CT, BL, HF, TM, SC, SH, SF, SS, PC]),
             Api::Header => bits(&[RW, AC, CT, HF, BF, LG]),
             Api::Status | Api::IsSubrequest | Api::ReqIsInternal | Api::ReqStartTime => {
                 bits(&[ST, RW, AC, CT, HF, BF, LG])
             }
-            Api::Sleep => bits(&[RW, AC, CT, TM, SC, SH, SF]),
-            Api::Var => bits(&[ST, RW, AC, CT, BL, HF, BF, LG]),
+            Api::Sleep => bits(&[RW, AC, CT, TM, SC, SH, SF, PC]),
+            Api::Var => bits(&[ST, RW, AC, CT, BL, HF, BF, LG, PC]),
             Api::ReqClearHeader | Api::ReqSetHeader | Api::ReqSetUri | Api::ReqSetUriArgs => {
                 bits(&[ST, RW, AC, CT, HF, BF])
             }
@@ -235,7 +236,7 @@ impl Api {
             Api::RespGetHeaders => bits(&[ST, RW, AC, CT, BL, HF, BF, LG]),
             Api::Balancer => bits(&[BL]),
             Api::Socket | Api::Thread | Api::Udp | Api::SemaphoreWait => {
-                bits(&[RW, AC, CT, TM, SC, SH, SF])
+                bits(&[RW, AC, CT, TM, SC, SH, SF, PC])
             }
             Api::ReqInitBody | Api::ReqAppendBody | Api::ReqFinishBody => bits(&[ST, RW, AC, CT]),
             Api::ReqGetBodyFile
@@ -275,5 +276,6 @@ pub(crate) const fn context(phase: Phase) -> &'static str {
         Phase::SslClientHello => "ssl_client_hello_by_lua*",
         Phase::SslSessionFetch => "ssl_session_fetch_by_lua*",
         Phase::SslSessionStore => "ssl_session_store_by_lua*",
+        Phase::ProxySslCertificate => "proxy_ssl_certificate_by_lua*",
     }
 }

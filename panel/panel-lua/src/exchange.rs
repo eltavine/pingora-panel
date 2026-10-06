@@ -38,10 +38,13 @@ pub enum Phase {
     SslSessionFetch,
     /// `ssl_session_store_by_lua`: a session a handshake made.
     SslSessionStore,
+    /// `proxy_ssl_certificate_by_lua`: the certificate a request's TLS
+    /// connection to its upstream presents when asked for one.
+    ProxySslCertificate,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 19] = [
+    pub const ALL: [Phase; 20] = [
         Phase::Init,
         Phase::InitWorker,
         Phase::ServerRewrite,
@@ -61,6 +64,7 @@ impl Phase {
         Phase::SslClientHello,
         Phase::SslSessionFetch,
         Phase::SslSessionStore,
+        Phase::ProxySslCertificate,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -84,6 +88,7 @@ impl Phase {
             Phase::SslClientHello => "ssl_client_hello",
             Phase::SslSessionFetch => "ssl_session_fetch",
             Phase::SslSessionStore => "ssl_session_store",
+            Phase::ProxySslCertificate => "proxy_ssl_cert",
         }
     }
 

@@ -2451,3 +2451,46 @@ async fn cosockets_bind_their_local_address_and_give_their_descriptor() {
     assert_eq!(scripts.exchange().response.body, b"ok\n");
     assert_eq!(accepted.await.unwrap().ip().to_string(), "127.0.0.1");
 }
+
+#[tokio::test]
+async fn proxy_certificate_handlers_choose_what_the_upstream_connection_presents() {
+    let certified = rcgen::generate_simple_self_signed(vec!["client.example".into()]).unwrap();
+    let hex = |der: &[u8]| {
+        der.iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    };
+    let script = format!(
+        r#"
+        local proxy = require "ngx.ssl.proxysslcert"
+        local ssl = require "ngx.ssl"
+        local function bytes(hex)
+            return (hex:gsub("%x%x", function(pair) return string.char(tonumber(pair, 16)) end))
+        end
+        assert(ngx.get_phase() == "proxy_ssl_cert")
+        assert(ngx.var.host == "shop.example", ngx.var.host)
+        assert(not pcall(ssl.clear_certs))
+        assert(proxy.clear_certs())
+        assert(proxy.set_cert(assert(ssl.parse_der_cert(bytes("{}")))))
+        assert(proxy.set_priv_key(assert(ssl.parse_der_priv_key(bytes("{}")))))
+        "#,
+        hex(certified.cert.der()),
+        hex(&certified.signing_key.serialize_der()),
+    );
+    let lua = start(1, handlers(&[&script]));
+    let mut scripts = lua
+        .runtime
+        .scripts(request("GET", "/", &[("host", "shop.example")]));
+    let outcome = run(
+        &mut scripts,
+        handler(lua.handlers[0], Phase::ProxySslCertificate),
+    )
+    .await;
+    assert_eq!(outcome, Outcome::Continue, "{:?}", scripts.exchange().logs);
+    let exchange = scripts.exchange();
+    assert_eq!(
+        exchange.handshake.chain.as_deref(),
+        Some(&[certified.cert.der().to_vec()][..])
+    );
+    assert!(exchange.handshake.cleared && exchange.handshake.key.is_some());
+}

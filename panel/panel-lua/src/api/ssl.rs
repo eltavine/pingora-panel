@@ -134,11 +134,17 @@ fn address(lua: &Lua, address: Option<SocketAddr>) -> mlua::Result<MultiValue> {
     }
 }
 
-/// The `ngx.ssl` module.
-pub(super) fn module(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
-    let module = lua.create_table()?;
-    define(lua, &module, slot, "clear_certs", |_, slot, ()| {
-        with(slot, Some(Phase::SslCertificate), |exchange| {
+/// The functions that set the certificate a handshake of `phase` presents:
+/// `clear_certs`, `set_der_cert`, `set_der_priv_key`, `set_cert` and
+/// `set_priv_key`.
+fn certificate_setters(
+    lua: &Lua,
+    module: &Table,
+    slot: &Arc<Slot>,
+    phase: Phase,
+) -> mlua::Result<()> {
+    define(lua, module, slot, "clear_certs", move |_, slot, ()| {
+        with(slot, Some(phase), |exchange| {
             let handshake = &mut exchange.handshake;
             handshake.cleared = true;
             handshake.chain = None;
@@ -148,11 +154,11 @@ pub(super) fn module(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
     })?;
     define(
         lua,
-        &module,
+        module,
         slot,
         "set_der_cert",
-        |lua, slot, der: mlua::LuaString| {
-            let set = with(slot, Some(Phase::SslCertificate), |exchange| {
+        move |lua, slot, der: mlua::LuaString| {
+            let set = with(slot, Some(phase), |exchange| {
                 der_chain(&der.as_bytes()).map(|chain| exchange.handshake.chain = Some(chain))
             })?;
             set.map_or_else(
@@ -163,11 +169,11 @@ pub(super) fn module(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
     )?;
     define(
         lua,
-        &module,
+        module,
         slot,
         "set_der_priv_key",
-        |lua, slot, der: mlua::LuaString| {
-            let set = with(slot, Some(Phase::SslCertificate), |exchange| {
+        move |lua, slot, der: mlua::LuaString| {
+            let set = with(slot, Some(phase), |exchange| {
                 der_key(&der.as_bytes()).map(|key| exchange.handshake.key = Some(key))
             })?;
             set.map_or_else(
@@ -178,11 +184,11 @@ pub(super) fn module(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
     )?;
     define(
         lua,
-        &module,
+        module,
         slot,
         "set_cert",
-        |_, slot, chain: UserDataRef<Chain>| {
-            with(slot, Some(Phase::SslCertificate), |exchange| {
+        move |_, slot, chain: UserDataRef<Chain>| {
+            with(slot, Some(phase), |exchange| {
                 exchange.handshake.chain = Some(chain.0.clone());
             })?;
             Ok(done())
@@ -190,16 +196,30 @@ pub(super) fn module(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
     )?;
     define(
         lua,
-        &module,
+        module,
         slot,
         "set_priv_key",
-        |_, slot, key: UserDataRef<Key>| {
-            with(slot, Some(Phase::SslCertificate), |exchange| {
+        move |_, slot, key: UserDataRef<Key>| {
+            with(slot, Some(phase), |exchange| {
                 exchange.handshake.key = Some(key.0.clone());
             })?;
             Ok(done())
         },
     )?;
+    Ok(())
+}
+
+/// The `ngx.ssl.proxysslcert` module.
+pub(super) fn proxy_certificate(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
+    let module = lua.create_table()?;
+    certificate_setters(lua, &module, slot, Phase::ProxySslCertificate)?;
+    Ok(module)
+}
+
+/// The `ngx.ssl` module.
+pub(super) fn module(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
+    let module = lua.create_table()?;
+    certificate_setters(lua, &module, slot, Phase::SslCertificate)?;
     define(
         lua,
         &module,
