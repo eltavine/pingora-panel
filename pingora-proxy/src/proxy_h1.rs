@@ -325,12 +325,21 @@ where
                 },
 
                 body = rx.recv(), if !request_done => {
+                    // Downstream marks its tasks `UpgradedBody` only once it has written the
+                    // 101, so the end of the upgrade request's own body comes as `Body`, and
+                    // may come after the 101 was read here.
+                    let request_body = matches!(body, Some(HttpTask::Body(..)));
                     match send_body_to1(client_session, body).await {
                         Ok(send_done) => {
                             request_done = send_done;
                             // An upgraded request is terminated when either side is done
                             if request_done && client_session.was_upgraded() {
-                                response_done = true;
+                                if request_body {
+                                    // the request ended, not the tunnel
+                                    request_done = false;
+                                } else {
+                                    response_done = true;
+                                }
                             }
                         },
                         Err(e) => {
@@ -1164,7 +1173,7 @@ pub(crate) async fn send_body_to1(
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use tokio::io::AsyncWriteExt;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     struct ResponseFilter101;
 
@@ -1270,5 +1279,65 @@ mod tests {
 
         assert_eq!(err.etype(), &InvalidHTTPHeader);
         assert_eq!(err.esource(), &ErrorSource::Upstream);
+    }
+
+    #[tokio::test]
+    async fn upgraded_tunnels_outlive_a_request_body_end_read_after_the_101() {
+        let proxy = HttpProxy::new(ResponseFilter101, Arc::new(ServerConf::default()));
+        let (mut origin, stream) = tokio::io::duplex(1024);
+        let mut client_session =
+            HttpSessionV1::new(Box::new(stream) as pingora_core::protocols::Stream);
+        let mut request = RequestHeader::build("GET", b"/", None).unwrap();
+        request.insert_header("Host", "example.com").unwrap();
+        request.insert_header("Upgrade", "websocket").unwrap();
+        request.insert_header("Connection", "Upgrade").unwrap();
+        client_session
+            .write_request_header(Box::new(request))
+            .await
+            .unwrap();
+        origin
+            .write_all(
+                b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n",
+            )
+            .await
+            .unwrap();
+
+        let (to_downstream, mut from_upstream) = mpsc::channel(4);
+        let (to_upstream, from_downstream) = mpsc::channel(4);
+        let tunnel = proxy.proxy_handle_upstream(
+            &mut client_session,
+            to_downstream,
+            from_downstream,
+            Arc::new(AtomicU8::new(PipeState::Active as u8)),
+        );
+        let downstream = async {
+            let Some(HttpTask::Header(header, _)) = from_upstream.recv().await else {
+                panic!("the 101 should go downstream first");
+            };
+            assert_eq!(header.status, http::StatusCode::SWITCHING_PROTOCOLS);
+            // the end of the upgrade request's empty body, read after the 101
+            to_upstream.send(HttpTask::Body(None, true)).await.unwrap();
+            to_upstream
+                .send(HttpTask::UpgradedBody(
+                    Some(Bytes::from_static(b"ping")),
+                    false,
+                ))
+                .await
+                .unwrap();
+            let mut wire = Vec::new();
+            while !wire.ends_with(b"ping") {
+                let mut read = [0; 256];
+                let n = origin.read(&mut read).await.unwrap();
+                assert_ne!(n, 0, "the origin should get what follows the 101");
+                wire.extend_from_slice(&read[..n]);
+            }
+            drop(to_upstream);
+        };
+        tokio::pin!(tunnel);
+        tokio::select! {
+            ended = &mut tunnel => panic!("the tunnel ended with the request's body: {ended:?}"),
+            () = downstream => {}
+        }
+        tunnel.await.unwrap();
     }
 }
