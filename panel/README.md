@@ -1426,7 +1426,8 @@ Scripts are files of the configuration: `*_by_lua_file` names a file under
 `resty.websocket.client`, `resty.lock`, `resty.limit.req`,
 `resty.limit.conn`, `resty.limit.count`, `resty.limit.traffic`,
 `tablepool`, `resty.redis`, `resty.memcached`, `resty.mysql`,
-`resty.dns.resolver`, `resty.upload` and others) or `lua/a/b.lua`;
+`resty.dns.resolver`, `resty.upload`, `ngx.upstream`,
+`resty.upstream.healthcheck` and others) or `lua/a/b.lua`;
 `ngx.pipe` and `ffi` are refused, since they would start processes or run
 native code outside the sandbox. The WebSocket modules keep
 lua-resty-websocket's API without its FFI, answer with a single

@@ -3494,6 +3494,123 @@ async fn websocket_scripts_serve_and_open_websockets() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn health_check_scripts_take_failing_peers_out_of_rotation() {
+    use panel_ir::{LuaHandler, LuaSharedDict, LUA_SCRIPTS_CAPABILITY};
+
+    let (good, _) = status_upstream(Arc::new(AtomicU16::new(200)), Duration::ZERO).await;
+    let failing = Arc::new(AtomicU16::new(500));
+    let (bad, _) = status_upstream(Arc::clone(&failing), Duration::ZERO).await;
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    snapshot
+        .required_capabilities
+        .push(CapabilityRequirement::new(LUA_SCRIPTS_CAPABILITY, "1"));
+    snapshot.lua.scripts = vec![
+        lua_script(
+            "checker",
+            r#"
+            local hc = require "resty.upstream.healthcheck"
+            assert(select(2, hc.spawn_checker({ type = "tcp" })) == 'only "http" and "https" type are supported')
+            assert(select(2, hc.spawn_checker({ type = "http", http_req = "x", shm = "healthcheck", upstream = "nowhere" }))
+                == "failed to get primary peers: upstream not found")
+            assert(hc.spawn_checker({
+                shm = "healthcheck",
+                upstream = "app",
+                type = "http",
+                http_req = "GET /status HTTP/1.0\r\nHost: app\r\n\r\n",
+                interval = 100,
+                timeout = 500,
+                fall = 2,
+                rise = 2,
+                valid_statuses = { 200 },
+                concurrency = 2,
+            }))
+            "#,
+        ),
+        lua_script(
+            "status",
+            r#"
+            local hc = require "resty.upstream.healthcheck"
+            local upstream = require "ngx.upstream"
+            local names = upstream.get_upstreams()
+            assert(#names == 1 and names[1] == "app")
+            local servers = assert(upstream.get_servers("app"))
+            assert(#servers == 2 and servers[1].weight == 1 and servers[1].name == servers[1].addr)
+            assert(select(2, upstream.get_servers("nowhere")) == "upstream not found")
+            assert(#assert(upstream.get_backup_peers("app")) == 0)
+            local ok, err = pcall(upstream.set_peer_down, "app", false, 0, true)
+            assert(not ok and tostring(err):find("lua_allow upstream"), err)
+            ngx.print(hc.status_page())
+            ngx.print(hc.prometheus_status_page())
+            "#,
+        ),
+    ];
+    snapshot.lua.shared_dicts.push(LuaSharedDict {
+        name: "healthcheck".into(),
+        capacity_bytes: 1 << 20,
+    });
+    let mut checker = LuaHandler::new("checker");
+    checker.allow.network = true;
+    checker.allow.upstream = true;
+    snapshot.lua.init_worker = Some(checker);
+    snapshot.sites.push(site(&["shop.test"]));
+    snapshot.upstream_pools.push(pool("app", &[good, bad]));
+    snapshot.routes.push(route(
+        "status",
+        1,
+        prefix("/status"),
+        RouteAction::Lua {
+            handler: LuaHandler::new("status"),
+        },
+    ));
+    snapshot
+        .routes
+        .push(route("app", 2, prefix("/"), proxy("app")));
+    let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
+    wait_for(listen).await;
+
+    let status = |wanted: String| async move {
+        let mut text = String::new();
+        for _ in 0..100 {
+            let page = get(listen, Some("shop.test"), "/status", "").await;
+            text = String::from_utf8_lossy(&page.body).into_owned();
+            if text.contains(&wanted) {
+                return text;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("the status page never showed {wanted}: {text}");
+    };
+    let down = status(format!("        {bad} DOWN\n")).await;
+    assert!(
+        down.starts_with(&format!(
+            "Upstream app\n    Primary Peers\n        {good} UP\n        {bad} DOWN\n    Backup Peers\n"
+        )),
+        "{down}"
+    );
+    assert!(
+        down.contains(&format!(
+            "nginx_upstream_status_info{{name=\"app\",endpoint=\"{bad}\",status=\"DOWN\",role=\"PRIMARY\"}} 1\n"
+        )),
+        "{down}"
+    );
+    assert!(
+        down.contains("nginx_upstream_status_info{name=\"app\",status=\"UP\"} 1\n"),
+        "{down}"
+    );
+    for _ in 0..6 {
+        let answer = get(listen, Some("shop.test"), "/", "").await;
+        assert_eq!(answer.body, format!("200 from {good}").as_bytes());
+    }
+    failing.store(200, SeqCst);
+    status(format!("        {bad} UP\n")).await;
+    gateway.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn session_scripts_resume_sessions_another_listener_made() {
     use panel_ir::{LuaHandler, LuaSharedDict, LUA_SCRIPTS_CAPABILITY};
 
