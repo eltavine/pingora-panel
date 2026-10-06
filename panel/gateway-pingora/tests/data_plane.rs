@@ -3171,20 +3171,35 @@ async fn handler_output_streams_through_the_filters_as_it_is_flushed() {
         lua_script(
             "events",
             "ngx.header['Content-Type'] = 'text/event-stream' ngx.ctx.n = 7 \
-             ngx.say('data: one\\n') assert(ngx.flush(true)) ngx.sleep(1.5) ngx.say('data: two\\n')",
+             ngx.say('data: one\\n') assert(ngx.flush(true)) \
+             for _ = 1, 400 do if ngx.shared.gate:get('open') then break end ngx.sleep(0.025) end \
+             ngx.say('data: two\\n')",
         ),
+        lua_script("open", "ngx.shared.gate:set('open', true) ngx.say('opened')"),
         lua_script("header", "ngx.header['X-Seen'] = tostring(ngx.ctx.n)"),
         lua_script(
             "body",
             "if ngx.arg[1] then ngx.arg[1] = string.upper(ngx.arg[1]) end",
         ),
     ];
+    snapshot.lua.shared_dicts = vec![panel_ir::LuaSharedDict {
+        name: "gate".into(),
+        capacity_bytes: 1 << 20,
+    }];
     snapshot.sites.push(site(&["shop.test"]));
     let mut events = LuaHandler::new("events");
-    events.time_limit_ms = 10_000;
+    events.time_limit_ms = 20_000;
+    snapshot.routes.push(route(
+        "open",
+        1,
+        prefix("/open"),
+        RouteAction::Lua {
+            handler: LuaHandler::new("open"),
+        },
+    ));
     let mut streamed = route(
         "events",
-        1,
+        2,
         prefix("/"),
         RouteAction::Lua { handler: events },
     );
@@ -3223,12 +3238,12 @@ async fn handler_output_streams_through_the_filters_as_it_is_flushed() {
         )
     }
     let mut seen = Vec::new();
-    // The first event arrives while the handler still sleeps.
+    // The first event arrives while the handler still waits for the gate.
     let (found, head) = read_until(
         &mut stream,
         &mut seen,
         "DATA: ONE",
-        Duration::from_millis(1000),
+        Duration::from_secs(10),
     )
     .await;
     assert!(found, "{head}");
@@ -3236,11 +3251,13 @@ async fn handler_output_streams_through_the_filters_as_it_is_flushed() {
     assert!(head.contains("x-seen: 7"), "{head}");
     assert!(head.contains("content-type: text/event-stream"), "{head}");
     assert!(!head.contains("data: two"), "{head}");
+    let opened = get(listen, Some("shop.test"), "/open", "").await;
+    assert_eq!(opened.status, 200);
     let (found, whole) = read_until(
         &mut stream,
         &mut seen,
         "\r\n0\r\n\r\n",
-        Duration::from_secs(5),
+        Duration::from_secs(10),
     )
     .await;
     assert!(found, "{whole}");
@@ -3462,3 +3479,4 @@ async fn session_scripts_resume_sessions_another_listener_made() {
     );
     gateway.stop().await;
 }
+
