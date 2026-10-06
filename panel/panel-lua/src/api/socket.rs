@@ -19,12 +19,13 @@ use rustls::pki_types::ServerName;
 use std::{
     collections::HashMap,
     future::Future,
+    net::{IpAddr, SocketAddr},
     sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
+    net::{TcpSocket as LocalSocket, TcpStream},
     sync::oneshot,
 };
 use tokio_rustls::{client::TlsStream, TlsConnector};
@@ -226,6 +227,8 @@ pub(crate) struct TcpSocket {
     /// `ngx.req.socket(true)`: the client's connection, which it neither
     /// connects nor keeps.
     raw: bool,
+    /// The local address `bind` gave connections.
+    local: Option<IpAddr>,
     tls: Option<crate::tls::TlsId>,
 }
 
@@ -246,6 +249,7 @@ impl TcpSocket {
             reused: 0,
             request: false,
             raw: false,
+            local: None,
             tls: sockets.tls,
         }
     }
@@ -323,12 +327,26 @@ impl TcpSocket {
             self.reused = reused;
             return Ok(results([Value::Integer(1)]));
         }
-        match within(
-            self.connect_timeout,
-            TcpStream::connect((host.as_str(), port)),
-        )
-        .await
-        {
+        let local = self.local;
+        let connecting = async move {
+            let Some(local) = local else {
+                return TcpStream::connect((host.as_str(), port)).await;
+            };
+            let target = tokio::net::lookup_host((host.as_str(), port))
+                .await?
+                .find(|target| target.is_ipv4() == local.is_ipv4())
+                .ok_or_else(|| {
+                    std::io::Error::other("no address of the host is of the bound address's family")
+                })?;
+            let socket = if local.is_ipv4() {
+                LocalSocket::new_v4()?
+            } else {
+                LocalSocket::new_v6()?
+            };
+            socket.bind(SocketAddr::new(local, 0))?;
+            socket.connect(target).await
+        };
+        match within(self.connect_timeout, connecting).await {
             Ok(stream) => {
                 let _ = stream.set_nodelay(true);
                 self.stream = Some(Stream::Plain(stream));
@@ -718,6 +736,32 @@ impl UserData for TcpSocket {
             },
         );
         methods.add_method("getreusedtimes", |_, this, ()| Ok(this.reused));
+        methods.add_method_mut("bind", |lua, this, address: String| {
+            if let Some(refused) = this.own_connection(lua) {
+                return refused;
+            }
+            match address.parse::<IpAddr>() {
+                Ok(local) => {
+                    this.local = Some(local);
+                    Ok(results([Value::Integer(1)]))
+                }
+                Err(_) => failed(lua, "bad address"),
+            }
+        });
+        methods.add_method("getfd", |lua, this, ()| {
+            let fd = match &this.stream {
+                Some(Stream::Plain(stream)) => descriptor(stream),
+                Some(Stream::Tls(stream)) => descriptor(stream.get_ref().0),
+                Some(Stream::Request(_) | Stream::Raw(_)) => {
+                    return failed(lua, "not supported on the request socket")
+                }
+                None => return failed(lua, "closed"),
+            };
+            match fd {
+                Some(fd) => Ok(results([Value::Integer(fd)])),
+                None => failed(lua, "file descriptors are not available on this system"),
+            }
+        });
         methods.add_method_mut("close", |lua, this, ()| {
             if this.stream.take().is_none() {
                 return failed(lua, "closed");
@@ -726,6 +770,21 @@ impl UserData for TcpSocket {
             Ok(results([Value::Integer(1)]))
         });
         methods.add_method("setoption", |_, _, _: MultiValue| Ok(1));
+    }
+}
+
+/// The number of the descriptor `stream` holds, where descriptors are
+/// numbers.
+fn descriptor(stream: &TcpStream) -> Option<i64> {
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        Some(i64::from(stream.as_raw_fd()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = stream;
+        None
     }
 }
 

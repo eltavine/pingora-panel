@@ -2419,3 +2419,35 @@ async fn session_handlers_read_and_give_sessions() {
     .await;
     assert_eq!(outcome, Outcome::Continue, "{:?}", scripts.exchange().logs);
 }
+
+#[tokio::test]
+async fn cosockets_bind_their_local_address_and_give_their_descriptor() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let accepted = tokio::spawn(async move { listener.accept().await.unwrap().1 });
+    let lua = start(
+        1,
+        handlers(&[&format!(
+            r#"
+            local sock = ngx.socket.tcp()
+            local nothing, err = sock:bind("not an address")
+            assert(nothing == nil and err == "bad address", err)
+            assert(sock:bind("127.0.0.1"))
+            assert(sock:connect("127.0.0.1", {port}))
+            local fd = assert(sock:getfd())
+            assert(math.type and math.type(fd) == "integer" or type(fd) == "number")
+            sock:close()
+            local closed, why = sock:getfd()
+            assert(closed == nil and why == "closed", why)
+            ngx.say("ok")
+            "#
+        )]),
+    );
+    let mut granted = handler(lua.handlers[0], Phase::Content);
+    granted.permissions.network = true;
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = run(&mut scripts, granted).await;
+    assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+    assert_eq!(scripts.exchange().response.body, b"ok\n");
+    assert_eq!(accepted.await.unwrap().ip().to_string(), "127.0.0.1");
+}
