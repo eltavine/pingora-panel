@@ -1,0 +1,456 @@
+//! `ngx.ssl` and `ngx.ssl.clienthello`: what scripts read of the TLS
+//! handshake they run in, and the certificate they present instead of the
+//! gateway's.
+
+use super::{failed, results};
+use crate::{
+    exchange::{Exchange, Phase},
+    ssl::{grease, version_name, SUPPORTED_VERSIONS},
+    tls::der,
+    vm::Slot,
+};
+use mlua::{FromLuaMulti, Lua, MultiValue, Table, UserData, UserDataRef, Value, Variadic};
+use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
+use std::{net::SocketAddr, sync::Arc};
+
+const NO_CLIENT_AUTH: &str = "client certificates are requested by TLS profiles: the gateway's \
+                              TLS asks every connection to a listener for one, or none";
+const NO_PROTOCOLS: &str = "protocol versions come from TLS profiles: the gateway's TLS offers \
+                            a listener's versions to every connection";
+const NO_SECRETS: &str =
+    "scripts are not given the connection's secrets: they would let them decrypt it";
+const NO_HANDLES: &str =
+    "scripts are not given TLS handles: the gateway's TLS is not OpenSSL, and scripts have no FFI";
+const NOT_KEPT: &str = "the gateway's TLS does not keep this for scripts";
+
+/// A certificate chain `parse_pem_cert` or `parse_der_cert` read.
+struct Chain(Vec<Vec<u8>>);
+
+impl UserData for Chain {}
+
+/// A private key `parse_pem_priv_key` or `parse_der_priv_key` read.
+struct Key(Vec<u8>);
+
+impl UserData for Key {}
+
+/// Runs `action` on the exchange whose code runs, in `only` if given.
+fn with<R>(
+    slot: &Slot,
+    only: Option<Phase>,
+    action: impl FnOnce(&mut Exchange) -> R,
+) -> mlua::Result<R> {
+    let Some(cell) = slot.cell() else {
+        return Err(mlua::Error::runtime("no request found"));
+    };
+    let mut exchange = cell.exchange.lock();
+    if only.is_some_and(|phase| phase != exchange.phase) {
+        return Err(mlua::Error::runtime("API disabled in the current context"));
+    }
+    Ok(action(&mut exchange))
+}
+
+fn define<A, F>(
+    lua: &Lua,
+    table: &Table,
+    slot: &Arc<Slot>,
+    name: &str,
+    function: F,
+) -> mlua::Result<()>
+where
+    A: FromLuaMulti,
+    F: Fn(&Lua, &Slot, A) -> mlua::Result<MultiValue> + Send + 'static,
+{
+    let slot = Arc::clone(slot);
+    table.raw_set(
+        name,
+        lua.create_function(move |lua, args: A| function(lua, &slot, args))?,
+    )
+}
+
+fn done() -> MultiValue {
+    results([Value::Boolean(true)])
+}
+
+fn text(lua: &Lua, bytes: impl AsRef<[u8]>) -> mlua::Result<Value> {
+    Ok(Value::String(lua.create_string(bytes)?))
+}
+
+/// The certificates of a DER chain, one after the other.
+fn der_chain(mut rest: &[u8]) -> Option<Vec<Vec<u8>>> {
+    let mut certificates = Vec::new();
+    while !rest.is_empty() {
+        let (tag, _, after) = der(rest)?;
+        if tag != 0x30 {
+            return None;
+        }
+        certificates.push(rest[..rest.len() - after.len()].to_vec());
+        rest = after;
+    }
+    (!certificates.is_empty()).then_some(certificates)
+}
+
+fn pem_chain(pem: &[u8]) -> Option<Vec<Vec<u8>>> {
+    let certificates = CertificateDer::pem_slice_iter(pem)
+        .map(|certificate| certificate.map(|certificate| certificate.to_vec()))
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    (!certificates.is_empty()).then_some(certificates)
+}
+
+fn pem_key(pem: &[u8]) -> Option<Vec<u8>> {
+    PrivateKeyDer::from_pem_slice(pem)
+        .ok()
+        .map(|key| key.secret_der().to_vec())
+}
+
+fn der_key(der: &[u8]) -> Option<Vec<u8>> {
+    PrivateKeyDer::try_from(der)
+        .ok()
+        .map(|key| key.secret_der().to_vec())
+}
+
+fn address(lua: &Lua, address: Option<SocketAddr>) -> mlua::Result<MultiValue> {
+    match address {
+        Some(SocketAddr::V4(address)) => Ok(results([
+            text(lua, address.ip().octets())?,
+            text(lua, "inet")?,
+        ])),
+        Some(SocketAddr::V6(address)) => Ok(results([
+            text(lua, address.ip().octets())?,
+            text(lua, "inet6")?,
+        ])),
+        None => failed(lua, 2, "the address is not known"),
+    }
+}
+
+/// The `ngx.ssl` module.
+pub(super) fn module(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
+    let module = lua.create_table()?;
+    define(lua, &module, slot, "clear_certs", |_, slot, ()| {
+        with(slot, Some(Phase::SslCertificate), |exchange| {
+            let handshake = &mut exchange.handshake;
+            handshake.cleared = true;
+            handshake.chain = None;
+            handshake.key = None;
+        })?;
+        Ok(done())
+    })?;
+    define(
+        lua,
+        &module,
+        slot,
+        "set_der_cert",
+        |lua, slot, der: mlua::LuaString| {
+            let set = with(slot, Some(Phase::SslCertificate), |exchange| {
+                der_chain(&der.as_bytes()).map(|chain| exchange.handshake.chain = Some(chain))
+            })?;
+            set.map_or_else(
+                || failed(lua, 1, "the DER certificate chain cannot be read"),
+                |()| Ok(done()),
+            )
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "set_der_priv_key",
+        |lua, slot, der: mlua::LuaString| {
+            let set = with(slot, Some(Phase::SslCertificate), |exchange| {
+                der_key(&der.as_bytes()).map(|key| exchange.handshake.key = Some(key))
+            })?;
+            set.map_or_else(
+                || failed(lua, 1, "the DER private key cannot be read"),
+                |()| Ok(done()),
+            )
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "set_cert",
+        |_, slot, chain: UserDataRef<Chain>| {
+            with(slot, Some(Phase::SslCertificate), |exchange| {
+                exchange.handshake.chain = Some(chain.0.clone());
+            })?;
+            Ok(done())
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "set_priv_key",
+        |_, slot, key: UserDataRef<Key>| {
+            with(slot, Some(Phase::SslCertificate), |exchange| {
+                exchange.handshake.key = Some(key.0.clone());
+            })?;
+            Ok(done())
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "verify_client",
+        |lua, slot, _: Variadic<Value>| {
+            with(slot, Some(Phase::SslCertificate), |_| ())?;
+            failed(lua, 1, NO_CLIENT_AUTH)
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "cert_pem_to_der",
+        |lua, _, pem: mlua::LuaString| match pem_chain(&pem.as_bytes()) {
+            Some(chain) => Ok(results([text(lua, chain.concat())?])),
+            None => failed(lua, 1, "the PEM certificate chain cannot be read"),
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "priv_key_pem_to_der",
+        |lua, _, (pem, _): (mlua::LuaString, Option<mlua::LuaString>)| match pem_key(
+            &pem.as_bytes(),
+        ) {
+            Some(key) => Ok(results([text(lua, key)?])),
+            None => failed(lua, 1, "the PEM private key cannot be read"),
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "parse_pem_cert",
+        |lua, _, pem: mlua::LuaString| match pem_chain(&pem.as_bytes()) {
+            Some(chain) => Ok(results([Value::UserData(
+                lua.create_userdata(Chain(chain))?,
+            )])),
+            None => failed(lua, 1, "the PEM certificate chain cannot be read"),
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "parse_der_cert",
+        |lua, _, der: mlua::LuaString| match der_chain(&der.as_bytes()) {
+            Some(chain) => Ok(results([Value::UserData(
+                lua.create_userdata(Chain(chain))?,
+            )])),
+            None => failed(lua, 1, "the DER certificate chain cannot be read"),
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "parse_pem_priv_key",
+        |lua, _, pem: mlua::LuaString| match pem_key(&pem.as_bytes()) {
+            Some(key) => Ok(results([Value::UserData(lua.create_userdata(Key(key))?)])),
+            None => failed(lua, 1, "the PEM private key cannot be read"),
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "parse_der_priv_key",
+        |lua, _, der: mlua::LuaString| match der_key(&der.as_bytes()) {
+            Some(key) => Ok(results([Value::UserData(lua.create_userdata(Key(key))?)])),
+            None => failed(lua, 1, "the DER private key cannot be read"),
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "server_name",
+        |lua, slot, ()| match with(slot, None, |exchange| {
+            exchange.handshake.server_name.clone()
+        })? {
+            Some(name) => Ok(results([text(lua, name)?])),
+            None => Ok(results([Value::Nil])),
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "server_port",
+        |lua, slot, ()| match with(slot, None, |exchange| {
+            exchange.connection.server.map(|server| server.port())
+        })? {
+            Some(port) => Ok(results([Value::Integer(i64::from(port))])),
+            None => failed(lua, 1, "the server port is not known"),
+        },
+    )?;
+    define(lua, &module, slot, "raw_server_addr", |lua, slot, ()| {
+        address(
+            lua,
+            with(slot, None, |exchange| exchange.connection.server)?,
+        )
+    })?;
+    define(lua, &module, slot, "raw_client_addr", |lua, slot, ()| {
+        address(
+            lua,
+            with(slot, None, |exchange| exchange.connection.client)?,
+        )
+    })?;
+    define(
+        lua,
+        &module,
+        slot,
+        "get_tls1_version",
+        |lua, slot, ()| match with(slot, None, |exchange| exchange.handshake.version)? {
+            Some(version) => Ok(results([Value::Integer(i64::from(version))])),
+            None => failed(lua, 1, "the TLS version is not known"),
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "get_tls1_version_str",
+        |lua, slot, ()| match with(slot, None, |exchange| exchange.handshake.version)?
+            .and_then(version_name)
+        {
+            Some(name) => Ok(results([text(lua, name)?])),
+            None => failed(lua, 1, "unknown version"),
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "get_client_random",
+        |lua, slot, wanted: Option<usize>| {
+            let random = with(slot, None, |exchange| exchange.handshake.random.clone())?;
+            match wanted.unwrap_or(random.len()) {
+                0 => Ok(results([Value::Integer(random.len() as i64)])),
+                wanted => Ok(results([text(lua, &random[..wanted.min(random.len())])?])),
+            }
+        },
+    )?;
+    for (name, reason) in [
+        ("get_session_master_key", NO_SECRETS),
+        ("get_req_ssl_pointer", NO_HANDLES),
+        ("get_upstream_ssl_pointer", NO_HANDLES),
+        ("ssl_session_reused", NO_HANDLES),
+        ("export_keying_material", NOT_KEPT),
+        ("get_server_random", NOT_KEPT),
+        ("get_req_shared_ssl_ciphers", NOT_KEPT),
+    ] {
+        define(
+            lua,
+            &module,
+            slot,
+            name,
+            move |lua, _, _: Variadic<Value>| failed(lua, 1, reason),
+        )?;
+    }
+    Ok(module)
+}
+
+/// The `ngx.ssl.clienthello` module.
+pub(super) fn client_hello(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
+    let module = lua.create_table()?;
+    let hello = Some(Phase::SslClientHello);
+    define(
+        lua,
+        &module,
+        slot,
+        "get_client_hello_server_name",
+        move |lua, slot, ()| match with(slot, hello, |exchange| {
+            exchange.handshake.server_name.clone()
+        })? {
+            Some(name) => Ok(results([text(lua, name)?])),
+            None => Ok(results([Value::Nil])),
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "get_supported_versions",
+        move |lua, slot, ()| {
+            let versions = with(slot, hello, |exchange| {
+                let handshake = &exchange.handshake;
+                handshake
+                    .extensions
+                    .iter()
+                    .any(|(kind, _)| *kind == SUPPORTED_VERSIONS)
+                    .then(|| handshake.versions.clone())
+            })?;
+            let Some(versions) = versions else {
+                return Ok(results([Value::Nil]));
+            };
+            let names = lua.create_sequence_from(versions.into_iter().filter_map(version_name))?;
+            Ok(results([Value::Table(names)]))
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "get_client_hello_ciphers",
+        move |lua, slot, ()| {
+            let ciphers = with(slot, hello, |exchange| exchange.handshake.ciphers.clone())?;
+            let ciphers = ciphers.into_iter().filter(|cipher| !grease(*cipher));
+            Ok(results([Value::Table(lua.create_sequence_from(ciphers)?)]))
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "get_client_hello_ext_present",
+        move |lua, slot, ()| {
+            let kinds = with(slot, hello, |exchange| {
+                exchange
+                    .handshake
+                    .extensions
+                    .iter()
+                    .map(|(kind, _)| *kind)
+                    .filter(|kind| !grease(*kind))
+                    .collect::<Vec<_>>()
+            })?;
+            Ok(results([Value::Table(lua.create_sequence_from(kinds)?)]))
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "get_client_hello_ext",
+        move |lua, slot, wanted: u16| {
+            let data = with(slot, hello, |exchange| {
+                exchange
+                    .handshake
+                    .extensions
+                    .iter()
+                    .find(|(kind, _)| *kind == wanted)
+                    .map(|(_, data)| data.clone())
+            })?;
+            match data {
+                Some(data) => Ok(results([text(lua, data)?])),
+                None => Ok(results([Value::Nil])),
+            }
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "set_protocols",
+        move |lua, slot, _: Variadic<Value>| {
+            with(slot, hello, |_| ())?;
+            failed(lua, 1, NO_PROTOCOLS)
+        },
+    )?;
+    Ok(module)
+}

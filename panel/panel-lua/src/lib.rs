@@ -16,6 +16,7 @@ mod lint;
 mod program;
 mod runtime;
 mod shared;
+mod ssl;
 mod timer;
 mod tls;
 mod vm;
@@ -30,6 +31,7 @@ pub use lint::{lint, Finding, FindingKind, Lint, Role};
 pub use program::{compile, Diagnostic, HandlerId, Program, ProgramBuilder, SharedDict, Source};
 pub use runtime::{Handler, Host, NoHost, Runtime, Scripts, Settings};
 pub use shared::SharedStore;
+pub use ssl::Handshake;
 pub use timer::TimerRun;
 pub use tls::{TlsId, TlsTerms};
 

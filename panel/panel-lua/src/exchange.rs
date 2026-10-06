@@ -1,6 +1,7 @@
 //! What a handler sees of the request it runs for and what it changes: plain
 //! data the gateway fills in before a run and reads back after it.
 
+use crate::ssl::Handshake;
 use bytes::Bytes;
 use http::HeaderMap;
 use std::{collections::HashMap, net::SocketAddr, time::Duration, time::SystemTime};
@@ -27,10 +28,15 @@ pub enum Phase {
     WorkerThread,
     /// `set_by_lua`: what a variable is set to as its block is reached.
     Set,
+    /// `ssl_certificate_by_lua`: the certificate a TLS handshake presents.
+    SslCertificate,
+    /// `ssl_client_hello_by_lua`: a TLS handshake as the client's hello
+    /// arrives.
+    SslClientHello,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 15] = [
+    pub const ALL: [Phase; 17] = [
         Phase::Init,
         Phase::InitWorker,
         Phase::ServerRewrite,
@@ -46,6 +52,8 @@ impl Phase {
         Phase::ExitWorker,
         Phase::WorkerThread,
         Phase::Set,
+        Phase::SslCertificate,
+        Phase::SslClientHello,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -65,11 +73,13 @@ impl Phase {
             Phase::ExitWorker => "exit_worker",
             Phase::WorkerThread => "worker_thread",
             Phase::Set => "set",
+            Phase::SslCertificate => "ssl_cert",
+            Phase::SslClientHello => "ssl_client_hello",
         }
     }
 
-    pub(crate) const fn bit(self) -> u16 {
-        1 << self as u16
+    pub(crate) const fn bit(self) -> u32 {
+        1 << self as u32
     }
 
     /// Whether a handler of this phase may answer the request itself.
@@ -325,6 +335,8 @@ pub struct Exchange {
     pub(crate) named: Option<String>,
     /// What the last run's handler says of `lua_use_default_type`.
     pub(crate) default_type: bool,
+    /// The TLS handshake `ssl_*_by_lua` handlers run in.
+    pub handshake: Handshake,
 }
 
 impl Exchange {
@@ -351,6 +363,7 @@ impl Exchange {
             subrequest: false,
             named: None,
             default_type: true,
+            handshake: Handshake::default(),
         }
     }
 

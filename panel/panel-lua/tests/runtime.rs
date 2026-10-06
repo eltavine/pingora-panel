@@ -2122,3 +2122,126 @@ async fn errlog_reads_back_what_scripts_logged() {
         b"nil the 'lua_capture_error_log' directive is not configured\n"
     );
 }
+
+/// A ClientHello for `shop.example` offering TLS 1.3 and 1.2, and a GREASE
+/// cipher.
+fn client_hello() -> Vec<u8> {
+    let name = b"shop.example";
+    let mut extensions = vec![0, 0];
+    extensions.extend((name.len() as u16 + 5).to_be_bytes());
+    extensions.extend((name.len() as u16 + 3).to_be_bytes());
+    extensions.push(0);
+    extensions.extend((name.len() as u16).to_be_bytes());
+    extensions.extend(name);
+    extensions.extend([0, 43, 0, 5, 4, 0x03, 0x04, 0x03, 0x03]);
+    let mut body = vec![0x03, 0x03];
+    body.extend([7u8; 32]);
+    body.push(0);
+    body.extend([0, 6, 0x3a, 0x3a, 0x13, 0x01, 0xc0, 0x2f, 1, 0]);
+    body.extend((extensions.len() as u16).to_be_bytes());
+    body.extend(extensions);
+    let mut message = vec![1];
+    message.extend(&(body.len() as u32).to_be_bytes()[1..]);
+    message.extend(body);
+    message
+}
+
+#[tokio::test]
+async fn ssl_handlers_read_the_hello_and_choose_the_certificate() {
+    let certified = rcgen::generate_simple_self_signed(vec!["shop.example".into()]).unwrap();
+    let hex = |der: &[u8]| {
+        der.iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    };
+    let certificate = hex(certified.cert.der());
+    let key = hex(&certified.signing_key.serialize_der());
+    let hello = r#"
+        local clienthello = require "ngx.ssl.clienthello"
+        local ssl = require "ngx.ssl"
+        assert(ngx.get_phase() == "ssl_client_hello")
+        assert(clienthello.get_client_hello_server_name() == "shop.example")
+        local versions = assert(clienthello.get_supported_versions())
+        assert(#versions == 2 and versions[1] == "TLSv1.3" and versions[2] == "TLSv1.2")
+        local ciphers = clienthello.get_client_hello_ciphers()
+        assert(#ciphers == 2 and ciphers[1] == 4865 and ciphers[2] == 49199, #ciphers)
+        local present = clienthello.get_client_hello_ext_present()
+        assert(#present == 2 and present[1] == 0 and present[2] == 43)
+        assert(#clienthello.get_client_hello_ext(0) == 17)
+        assert(clienthello.get_client_hello_ext(16) == nil)
+        assert(ssl.server_name() == "shop.example")
+        assert(ssl.get_tls1_version() == 0x0304 and ssl.get_tls1_version_str() == "TLSv1.3")
+        assert(ssl.get_client_random(0) == 32 and #ssl.get_client_random(8) == 8)
+        local ok, err = pcall(ssl.clear_certs)
+        assert(not ok and err:find("API disabled in the current context"), err)
+        assert(not pcall(function() return ngx.ctx end))
+        local ok, err = clienthello.set_protocols({ "TLSv1.2" })
+        assert(ok == nil and err:find("TLS profiles"), err)
+    "#;
+    let choose = format!(
+        r#"
+        local ssl = require "ngx.ssl"
+        local function bytes(hex)
+            return (hex:gsub("%x%x", function(pair) return string.char(tonumber(pair, 16)) end))
+        end
+        local function pem(label, der)
+            return "-----BEGIN " .. label .. "-----\n" .. ngx.encode_base64(der)
+                .. "\n-----END " .. label .. "-----\n"
+        end
+        assert(ngx.get_phase() == "ssl_cert")
+        assert(not pcall(require("ngx.ssl.clienthello").get_client_hello_server_name))
+        assert(ssl.clear_certs())
+        local certificate, key = bytes("{certificate}"), bytes("{key}")
+        local der = assert(ssl.cert_pem_to_der(pem("CERTIFICATE", certificate)))
+        assert(der == certificate)
+        assert(ssl.set_der_cert(der))
+        assert(ssl.priv_key_pem_to_der(pem("PRIVATE KEY", key)) == key)
+        assert(ssl.parse_der_cert(der) and ssl.parse_der_priv_key(key))
+        assert(ssl.set_priv_key(assert(ssl.parse_pem_priv_key(pem("PRIVATE KEY", key)))))
+        local nothing, err = ssl.set_der_cert("not DER")
+        assert(nothing == nil and err, err)
+        local ok, err = ssl.verify_client()
+        assert(ok == nil and err:find("TLS profiles"), err)
+        local secret, err = ssl.get_session_master_key()
+        assert(secret == nil and err:find("decrypt"), err)
+        local address, kind = ssl.raw_client_addr()
+        assert(kind == "inet" and #address == 4, kind)
+        ngx.sleep(0)
+        "#
+    );
+    let lua = start(1, handlers(&[hello, &choose, "ngx.exit(ngx.ERROR)"]));
+    let mut exchange = request("GET", "/", &[]);
+    exchange.handshake = panel_lua::Handshake::parse(&client_hello()).unwrap();
+    let mut scripts = lua.runtime.scripts(exchange);
+    let outcome = run(
+        &mut scripts,
+        handler(lua.handlers[0], Phase::SslClientHello),
+    )
+    .await;
+    assert_eq!(outcome, Outcome::Continue, "{:?}", scripts.exchange().logs);
+    let outcome = run(
+        &mut scripts,
+        handler(lua.handlers[1], Phase::SslCertificate),
+    )
+    .await;
+    assert_eq!(outcome, Outcome::Continue, "{:?}", scripts.exchange().logs);
+    {
+        let exchange = scripts.exchange();
+        let handshake = &exchange.handshake;
+        assert!(handshake.cleared);
+        assert_eq!(
+            handshake.chain.as_deref(),
+            Some(&[certified.cert.der().to_vec()][..])
+        );
+        assert_eq!(
+            handshake.key.as_deref(),
+            Some(&certified.signing_key.serialize_der()[..])
+        );
+    }
+    let outcome = run(
+        &mut scripts,
+        handler(lua.handlers[2], Phase::SslCertificate),
+    )
+    .await;
+    assert_eq!(outcome, Outcome::Abort);
+}

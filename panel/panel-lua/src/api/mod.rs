@@ -15,6 +15,7 @@ mod resp;
 mod semaphore;
 mod shared;
 mod socket;
+mod ssl;
 mod thread;
 mod time;
 mod udp;

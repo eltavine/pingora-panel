@@ -173,7 +173,7 @@ impl ServerCertVerifier for Depth {
 }
 
 /// One DER value: its tag, its contents and what follows it.
-fn der(input: &[u8]) -> Option<(u8, &[u8], &[u8])> {
+pub(crate) fn der(input: &[u8]) -> Option<(u8, &[u8], &[u8])> {
     let (&tag, rest) = input.split_first()?;
     let (&first, rest) = rest.split_first()?;
     let (length, rest) = if first < 0x80 {
