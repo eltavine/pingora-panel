@@ -23,7 +23,7 @@ path = "src/trainer.rs"
 
 [dependencies]
 zstd = "0.13.1"
-zstd-safe = { version = "7.1.0", features = ["std"] }
+zstd-safe = { version = "8.0.0", features = ["std"] }
 http = { workspace = true }
 bytes = { workspace = true }
 httparse = { workspace = true }
