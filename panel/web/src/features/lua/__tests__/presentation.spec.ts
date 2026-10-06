@@ -66,7 +66,11 @@ describe('Lua presentation', () => {
   it('groups built-in modules by library, the libraries scripts load from first', () => {
     const scripts = [script('lua/a.lua', 'lua/a.lua', 1, ['resty.limit.req', 'resty.redis'])]
     expect(moduleGroups(modules.built_in, scripts)).toEqual([
-      { library: 'lua-resty-limit-traffic', modules: ['resty.limit.req', 'resty.limit.conn'], loaded: 1 },
+      {
+        library: 'lua-resty-limit-traffic',
+        modules: ['resty.limit.req', 'resty.limit.conn'],
+        loaded: 1,
+      },
       { library: 'lua-resty-redis', modules: ['resty.redis'], loaded: 1 },
       { library: 'lua-cjson', modules: ['cjson'], loaded: 0 },
     ])
