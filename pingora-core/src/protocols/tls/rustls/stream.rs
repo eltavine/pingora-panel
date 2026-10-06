@@ -164,6 +164,10 @@ where
     T: AsyncRead + AsyncWrite + Unpin + Send,
 {
     /// Connect to the remote TLS server as a client
+    ///
+    /// The server's certificate chain, its own first, is kept in the
+    /// digest's extension as a `Vec<CertificateDer<'static>>`, so callers
+    /// that only see the digest can still inspect what the server presented.
     pub(crate) async fn connect(&mut self) -> Result<()> {
         let handshake_start = Instant::now();
         self.tls.connect().await?;
@@ -171,6 +175,14 @@ where
         self.timing.established_ts = SystemTime::now();
         self.digest = self.tls.digest();
         self.ssl = self.tls.tls_ref();
+        let chain = self
+            .ssl
+            .as_ref()
+            .and_then(|ssl| ssl.peer_cert_chain_der())
+            .map(<[_]>::to_vec);
+        if let (Some(digest), Some(chain)) = (self.ssl_digest_mut(), chain) {
+            digest.extension.set(Arc::new(chain));
+        }
         Ok(())
     }
 
