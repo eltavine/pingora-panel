@@ -1421,7 +1421,7 @@ in, written `${lua:name}`.
 
 Scripts are files of the configuration: `*_by_lua_file` names a file under
 `lua/`, and `require("a.b")` loads a built-in module (`cjson`, `bit`,
-`resty.string`, `resty.sha256`, `resty.lrucache`, `ngx.re`, `ngx.balancer`,
+`resty.string`, `resty.sha256`, `resty.aes`, `resty.lrucache`, `ngx.re`, `ngx.balancer`,
 `ngx.ssl`, `resty.core.base`, `resty.websocket.server`,
 `resty.websocket.client`, `resty.lock`, `resty.limit.req`,
 `resty.limit.conn`, `resty.limit.count`, `resty.limit.traffic`,

@@ -285,7 +285,7 @@ pub(crate) fn refusal(name: &str) -> Option<&'static str> {
 }
 
 /// The modules OpenResty scripts commonly load that come with the gateway.
-pub(crate) const BUILT_IN: [&str; 65] = [
+pub(crate) const BUILT_IN: [&str; 66] = [
     "panel.v1",
     "cjson",
     "cjson.safe",
@@ -319,6 +319,7 @@ pub(crate) const BUILT_IN: [&str; 65] = [
     "resty.core.worker",
     "resty.string",
     "resty.random",
+    "resty.aes",
     "resty.md5",
     "resty.sha1",
     "resty.sha224",
@@ -428,6 +429,7 @@ fn built_in(
         }
         "ngx.semaphore" => Value::Table(super::semaphore::module(lua, slot)?),
         "resty.lock" => Value::Table(super::lock::module(lua, ngx, slot)?),
+        "resty.aes" => Value::Table(super::aes::module(lua)?),
         "resty.md5" => hasher::<Md5>(lua)?,
         "resty.sha1" => hasher::<Sha1>(lua)?,
         "resty.sha224" => hasher::<Sha224>(lua)?,

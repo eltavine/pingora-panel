@@ -1,6 +1,7 @@
 //! The globals scripts see: `ngx`, `require`, `print` and the built-in
 //! modules, following lua-nginx-module's documentation.
 
+mod aes;
 mod bit;
 mod codec;
 pub(crate) mod contexts;

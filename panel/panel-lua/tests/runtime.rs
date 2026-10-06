@@ -2995,3 +2995,65 @@ async fn limiters_delay_and_refuse_as_lua_resty_limit_traffic_does() {
     assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
     assert_eq!(scripts.exchange().response.body, b"ok\n");
 }
+
+#[tokio::test]
+async fn aes_encrypts_as_lua_resty_string_does_with_openssl() {
+    let lua = start(
+        1,
+        handlers(&[r#"
+            local aes = require "resty.aes"
+            local str = require "resty.string"
+            local default = assert(aes:new("AKeyForAES"))
+            local encrypted = default:encrypt("Secret message!")
+            assert(str.to_hex(encrypted) == "6d87d6b11c6bf0dcb76d1aa611520b3c", str.to_hex(encrypted))
+            assert(default:decrypt(encrypted) == "Secret message!")
+            local salted = assert(aes:new("AKeyForAES-256-CBC", "MySalt!!", aes.cipher(256, "cbc"), aes.hash.sha512, 1))
+            assert(str.to_hex(salted:encrypt("Really secret message!"))
+                == "27b7c9c43f8ec66418dcf12e8f156e13942c5611c4678e5669057e4949f23aed")
+            local counter = assert(aes:new("pw", nil, aes.cipher(192, "ctr"), aes.hash.sha256))
+            assert(str.to_hex(counter:encrypt("0123456789abcdef0123456789abcdef"))
+                == "5db8ea3768c9fb31896e05e48c3ae07f0cef27a077b4ebf7a9023c5f4b50df29")
+            local rounds = assert(aes:new("AKeyForAES-256-CBC", "MySalt!!", aes.cipher(256, "cbc"), aes.hash.sha512, 5))
+            assert(rounds:decrypt(rounds:encrypt("Really secret message!")) == "Really secret message!")
+
+            local with_iv = assert(aes:new("1234567890123456", nil, aes.cipher(128, "cbc"), { iv = "1234567890123456" }))
+            assert(with_iv:decrypt(with_iv:encrypt("Really secret message!")) == "Really secret message!")
+            local unpadded = assert(aes:new(string.rep("k", 32), nil, aes.cipher(256, "cbc"),
+                { iv = string.rep("i", 16) }, nil, nil, false))
+            local nothing, err = unpadded:encrypt("hello")
+            assert(nothing == nil and err == "EVP_EncryptFinal_ex failed", err)
+            local padded = "hello" .. string.rep(string.char(27), 27)
+            assert(unpadded:decrypt(unpadded:encrypt(padded)) == padded)
+            local keyed = assert(aes:new("short", nil, aes.cipher(128, "ecb"),
+                { iv = "", method = function(key) return string.rep(key, 4):sub(1, 16) end }))
+            assert(keyed:decrypt(keyed:encrypt("data")) == "data")
+
+            local zeros = string.rep("\0", 16)
+            local gcm = assert(aes:new(zeros, nil, aes.cipher(128, "gcm"), { iv = string.rep("\0", 12) }))
+            local sealed = gcm:encrypt(zeros)
+            assert(str.to_hex(sealed[1]) == "0388dace60b6a392f328c2b971b2fe78")
+            assert(str.to_hex(sealed[2]) == "ab6e47d42cec13bdf53a67b21257bddf")
+            assert(gcm:decrypt(sealed[1], sealed[2]) == zeros)
+            assert(select(2, gcm:decrypt(sealed[1], string.rep("x", 16))) == "EVP_DecryptFinal_ex failed")
+            local derived = assert(aes:new("secret", nil, aes.cipher(256, "gcm"), aes.hash.sha256, 1, 12))
+            local box = derived:encrypt("payload", "header")
+            assert(derived:decrypt(box[1], box[2], "header") == "payload")
+            assert(derived:decrypt(box[1], box[2], "other") == nil)
+            local wide = assert(aes:new("secret", nil, aes.cipher(128, "gcm")))
+            local boxed = wide:encrypt("payload")
+            assert(wide:decrypt(boxed[1], boxed[2]) == "payload")
+
+            assert(select(2, aes:new("k", "short")) == "salt must be 8 characters or nil")
+            assert(select(2, aes:new("k", nil, aes.cipher(128, "cbc"), {})) == "iv is needed")
+            assert(select(2, aes:new("short", nil, aes.cipher(128, "cbc"), { iv = "x" })) == "bad key length")
+            assert(select(2, aes:new(zeros, nil, aes.cipher(128, "cbc"), { iv = string.rep("i", 17) })) == "bad iv length")
+            assert(aes.cipher(512, "cbc") == nil and aes.cipher(128, "xts") == nil)
+            assert(aes.cipher().size == 128 and aes.cipher().cipher == "cbc")
+            ngx.say("ok")
+        "#]),
+    );
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = run(&mut scripts, handler(lua.handlers[0], Phase::Content)).await;
+    assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+    assert_eq!(scripts.exchange().response.body, b"ok\n");
+}

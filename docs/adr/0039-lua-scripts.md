@@ -218,7 +218,10 @@ and tables of them to it and its results back; there the function has the
 Modules OpenResty scripts commonly load are built in:
 `cjson` and `cjson.safe`, `bit` with LuaJIT BitOp semantics, `table.new`,
 `table.clear`, `table.nkeys`, `resty.core`, `resty.string`, `resty.md5`,
-`resty.sha1`, `resty.sha256`, `resty.random`, `ngx.re`, `ngx.balancer`,
+`resty.sha1`, `resty.sha256`, `resty.random`, `resty.aes` with OpenSSL's
+AES modes from ECB to GCM, its padding and its `EVP_BytesToKey`
+derivation, on RustCrypto's ciphers since lua-resty-string reaches
+OpenSSL through the FFI, `ngx.re`, `ngx.balancer`,
 `ngx.semaphore`, whose semaphores the threads, timers and requests of
 one VM share, `ngx.resp` and `ngx.req` with `add_header`, `ngx.process`,
 which refuses `enable_privileged_agent` because a privileged agent would
