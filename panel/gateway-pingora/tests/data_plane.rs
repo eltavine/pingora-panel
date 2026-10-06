@@ -3557,17 +3557,31 @@ async fn certificate_scripts_staple_ocsp_responses() {
     snapshot
         .required_capabilities
         .push(CapabilityRequirement::new(LUA_SCRIPTS_CAPABILITY, "1"));
-    snapshot.lua.scripts = vec![lua_script(
-        "staple",
-        "assert(require('ngx.ocsp').set_ocsp_status_resp('a stapled response'))",
-    )];
+    snapshot.lua.scripts = vec![
+        lua_script(
+            "staple",
+            "assert(require('ngx.ocsp').set_ocsp_status_resp('a stapled response'))",
+        ),
+        lua_script(
+            "tls",
+            "ngx.print(ngx.var.ssl_protocol, ' ', ngx.var.ssl_cipher, ' ', ngx.var.ssl_server_name)",
+        ),
+    ];
     let mut shop = site(&["shop.example"]);
     shop.lua.ssl_cert = Some(LuaHandler::new("staple"));
     snapshot.sites.push(shop);
     snapshot.upstream_pools.push(pool("app", &[upstream]));
-    snapshot
-        .routes
-        .push(route("app", 1, prefix("/"), proxy("app")));
+    snapshot.routes.extend([
+        route(
+            "tls",
+            1,
+            prefix("/tls"),
+            RouteAction::Lua {
+                handler: LuaHandler::new("tls"),
+            },
+        ),
+        route("app", 2, prefix("/"), proxy("app")),
+    ]);
     let gateway = Gateway::start(
         AdapterOptions::default().with_secrets(Arc::new(DirectorySecrets::new(secrets.path()))),
         snapshot,
@@ -3605,10 +3619,15 @@ async fn certificate_scripts_staple_ocsp_responses() {
     assert_eq!(seen.lock().unwrap().as_slice(), b"a stapled response");
     let response = exchange(
         &mut stream,
-        "GET / HTTP/1.1\r\nhost: shop.example\r\nconnection: close\r\n\r\n",
+        "GET /tls HTTP/1.1\r\nhost: shop.example\r\nconnection: close\r\n\r\n",
     )
     .await;
     assert_eq!(response.status, 200);
+    let facts = String::from_utf8(response.body).unwrap();
+    assert!(
+        facts.starts_with("TLSv1.3 TLS_") && facts.ends_with(" shop.example"),
+        "{facts}"
+    );
     gateway.stop().await;
 }
 

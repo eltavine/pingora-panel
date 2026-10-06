@@ -512,6 +512,13 @@ impl PanelProxy {
                 .clone_from(&handshake.server_name);
             exchange.handshake.version = handshake.version.map(TlsVersion::number);
         }
+        if let Some(digest) = session
+            .digest()
+            .and_then(|digest| digest.ssl_digest.as_ref())
+            .filter(|digest| !digest.cipher.is_empty())
+        {
+            exchange.handshake.cipher = Some(panel_ir::tls::openssl_name(&digest.cipher));
+        }
         let scripts = match ctx.subrequest.as_ref() {
             Some(subrequest) => {
                 let scripts = match &subrequest.share {

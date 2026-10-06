@@ -156,6 +156,17 @@ pub(crate) fn variable(exchange: &Exchange, name: &str) -> Option<Vec<u8>> {
         "server_name" => text(connection.server_name.clone()),
         "scheme" => text(if connection.tls { "https" } else { "http" }.into()),
         "https" => text(if connection.tls { "on" } else { "" }.into()),
+        "ssl_protocol" => exchange
+            .handshake
+            .version
+            .and_then(crate::ssl::version_name)
+            .map(|name| name.as_bytes().to_vec()),
+        "ssl_cipher" => exchange.handshake.cipher.clone().map(String::into_bytes),
+        "ssl_server_name" => exchange
+            .handshake
+            .server_name
+            .clone()
+            .map(String::into_bytes),
         "request_method" => text(request.method.clone()),
         "request_id" => text(connection.request_id.clone()),
         "request" => text(format!(

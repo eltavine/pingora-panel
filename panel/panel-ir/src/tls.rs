@@ -80,6 +80,18 @@ pub const OPENSSL_SUITES: &[(&str, &str)] = &[
     ),
 ];
 
+/// How OpenSSL names the suite rustls names `suite`: TLS 1.3's by their
+/// IANA names, TLS 1.2's by [`OPENSSL_SUITES`]; others as they are.
+pub fn openssl_name(suite: &str) -> String {
+    if let Some(rest) = suite.strip_prefix("TLS13_") {
+        return format!("TLS_{rest}");
+    }
+    OPENSSL_SUITES
+        .iter()
+        .find(|(_, iana)| *iana == suite)
+        .map_or_else(|| suite.to_owned(), |(openssl, _)| (*openssl).to_owned())
+}
+
 /// The TLS 1.2 suites an OpenSSL cipher list chooses, by IANA name, or
 /// none to keep them all. The list chooses among the suites of
 /// [`OPENSSL_SUITES`] by their names; other names and keywords such as
@@ -136,6 +148,19 @@ pub fn openssl_suites(list: &str) -> Result<Vec<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn suites_have_their_openssl_names() {
+        assert_eq!(
+            openssl_name("TLS13_AES_128_GCM_SHA256"),
+            "TLS_AES_128_GCM_SHA256"
+        );
+        assert_eq!(
+            openssl_name("TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"),
+            "ECDHE-RSA-AES128-GCM-SHA256"
+        );
+        assert_eq!(openssl_name("TLS_UNKNOWN"), "TLS_UNKNOWN");
+    }
 
     #[test]
     fn openssl_lists_choose_among_the_suites_offered() {

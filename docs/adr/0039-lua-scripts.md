@@ -92,7 +92,11 @@ headers, log fields, redirects and answers read the value it has when they
 are filled in, which they name as `${lua:name}`; `$name` is written so
 there, and `${lua:name}` also reads what a script gave any other variable.
 Where a value must be known before requests, a constant stays the text it
-was set to, and a variable only scripts set cannot be used.
+was set to, and a variable only scripts set cannot be used. `ngx.var` also
+reads the variables nginx gives a request — its line, header fields,
+cookies and arguments, its addresses, `$scheme`, `$https`, its times, and
+on TLS connections `$ssl_protocol`, `$ssl_cipher` by OpenSSL's name for
+the suite and `$ssl_server_name`.
 
 **TLS handshakes.** `ssl_client_hello_by_lua*` and
 `ssl_certificate_by_lua*` run before rustls answers the client's hello,

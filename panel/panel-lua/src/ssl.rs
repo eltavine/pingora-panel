@@ -34,6 +34,8 @@ pub struct Handshake {
     /// That session, serialized: what `ssl_session_store_by_lua` reads,
     /// and what `ssl_session_fetch_by_lua` found.
     pub serialized: Option<Bytes>,
+    /// The cipher suite it settled on, by its OpenSSL name (`$ssl_cipher`).
+    pub cipher: Option<String>,
     /// The version the handshake settles on, as far as the gateway knows:
     /// the newest the client offers, until the gateway says otherwise.
     pub version: Option<u16>,
