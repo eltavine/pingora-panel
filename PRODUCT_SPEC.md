@@ -746,7 +746,7 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 
 以下目录完整承接原 580 项，并加入团队治理、可靠事件、插件、升级与供应链能力。每一项均是 1.0 门禁的一部分。
 
-### 15.2 功能矩阵（700 项）
+### 15.2 功能矩阵（701 项）
 
 `Legacy` 列即原 1..580 编号到稳定 Feature ID 的完整映射。新增平台项使用 `-`。本表由需求基线校验生成；Feature ID 发布后只允许增加或 Deprecated，不允许重排复用。
 
@@ -1127,6 +1127,7 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | LUA-060 | - | 内置 `resty.mysql` | 0.7 | A/C/G | Administrator | lua-runtime | 按 lua-resty-mysql 接口连接 MySQL 与 MariaDB，认证（含 `caching_sha2_password` 与 TLS）、结果集、多结果集与错误与该库一致。 | Implemented | No |
 | LUA-061 | - | 上游健康检查与 `ngx.upstream` | 0.7 | A/C/G | Administrator | lua-runtime | `resty.upstream.healthcheck` 主动探测上游节点并经 `ngx.upstream` 标记上下线，网关据此选择节点，状态报告与该库一致。 | Implemented | No |
 | LUA-062 | - | Lua 内置模块目录 | 0.7 | A/C/G | Administrator | lua-runtime | API、CLI 与控制台列出内置模块，并标明脚本引用的每个模块来自内置、配置文件还是被拒绝。 | Implemented | No |
+| LUA-063 | - | 内置 `resty.http` | 0.7 | A/C/G | Administrator | lua-runtime | 按 lua-resty-http 接口发起 HTTP/1.1 请求：连接池、TLS 与客户端证书、HTTP 代理与 CONNECT 隧道、分块与定长响应体、100-continue、trailers、管道与请求代理的结果与该库一致，且不依赖 FFI。 | Planned | No |
 | SEC-001 | 361 | Basic Auth | 0.4 | A/C/G | Operator | policy-engine | 执行“Basic Auth”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | SEC-002 | 362 | 用户名密码文件 | 0.4 | A/C/G | Operator | policy-engine | 执行“用户名密码文件”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | SEC-003 | 363 | IP 白名单 | 0.4 | A/C/G | Operator | policy-engine | 执行“IP 白名单”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
@@ -1458,13 +1459,13 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | 指标 | 值 |
 |---|---:|
 | 原始需求映射 | 580 |
-| 新增团队/平台需求 | 120 |
-| 总 Feature ID | 700 |
+| 新增团队/平台需求 | 121 |
+| 总 Feature ID | 701 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
 | 当前 `Implemented` | 554（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-003`、`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-025`、`HTTP-001`～`HTTP-028`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-006`；身份：`IAM-001`～`IAM-038`；证书：`TLS-001`～`TLS-033`；安全：`SEC-001`～`SEC-035`；可观测：`OBS-001`～`OBS-053`；主机：`HOST-001`～`HOST-018`；容器：`CTR-001`～`CTR-038`；文件与备份：`BACKUP-001`～`BACKUP-012`；Lua：`LUA-001`～`LUA-062`；CLI：`CLI-020`、`CLI-021`） |
-| 1.0 要求 `Verified` | 700 |
+| 1.0 要求 `Verified` | 701 |
 
-分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 62、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。
+分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 63、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。
 
 ---
 
