@@ -1,13 +1,13 @@
 //! The response: `ngx.header`, `ngx.resp`, `ngx.status`, output with
 //! `ngx.say` and `ngx.print`, `ngx.exit`, `ngx.redirect` and `ngx.arg`.
 
-use super::{bytes, cell, codec::encode_args, exchange, require_permission, Api};
+use super::{bytes, cell, codec::encode_args, exchange, require_permission, results, Api};
 use crate::{
     exchange::{Exit, LogLevel, Phase},
     vm::{refused, Slot},
 };
 use http::{header, HeaderMap, HeaderName, HeaderValue};
-use mlua::{Lua, LuaString, Table, Value, Variadic};
+use mlua::{Lua, LuaString, MultiValue, Table, Value, Variadic};
 use std::{future, sync::Arc};
 
 /// Bytes a handler may print; the response is held in memory until sent.
@@ -273,7 +273,16 @@ fn output(value: &Value, into: &mut Vec<u8>, depth: usize) -> mlua::Result<()> {
     Ok(())
 }
 
-fn print(slot: &Slot, args: &[Value], newline: bool) -> mlua::Result<i64> {
+/// `1`, or `nil, "seen eof"` once `ngx.eof` ended the response, as
+/// lua-nginx-module's output functions answer.
+fn written(lua: &Lua, eof: bool) -> mlua::Result<MultiValue> {
+    if eof {
+        return super::failed(lua, 1, "seen eof");
+    }
+    Ok(results([Value::Integer(1)]))
+}
+
+fn print(lua: &Lua, slot: &Slot, args: &[Value], newline: bool) -> mlua::Result<MultiValue> {
     let mut text = Vec::new();
     for arg in args {
         output(arg, &mut text, 0)?;
@@ -281,17 +290,18 @@ fn print(slot: &Slot, args: &[Value], newline: bool) -> mlua::Result<i64> {
     if newline {
         text.push(b'\n');
     }
-    exchange(slot, Api::Output, |exchange| {
-        if exchange.exit.is_some() {
-            return Err(mlua::Error::runtime("seen eof"));
+    let eof = exchange(slot, Api::Output, |exchange| {
+        if exchange.eof {
+            return Ok(true);
         }
         if exchange.response.body.len() + text.len() > MAX_OUTPUT {
             return Err(mlua::Error::runtime("the response printed is too large"));
         }
         start_response(exchange);
         exchange.response.body.extend_from_slice(&text);
-        Ok(1)
-    })
+        Ok(false)
+    })?;
+    written(lua, eof)
 }
 
 fn start_response(exchange: &mut crate::exchange::Exchange) {
@@ -421,21 +431,22 @@ pub(super) fn install(lua: &Lua, ngx: &Table, slot: &Arc<Slot>) -> mlua::Result<
     let say = Arc::clone(slot);
     ngx.raw_set(
         "say",
-        lua.create_function(move |_, args: Variadic<Value>| print(&say, &args, true))?,
+        lua.create_function(move |lua, args: Variadic<Value>| print(lua, &say, &args, true))?,
     )?;
     let printer = Arc::clone(slot);
     ngx.raw_set(
         "print",
-        lua.create_function(move |_, args: Variadic<Value>| print(&printer, &args, false))?,
+        lua.create_function(move |lua, args: Variadic<Value>| print(lua, &printer, &args, false))?,
     )?;
     let flush = Arc::clone(slot);
     ngx.raw_set(
         "flush",
-        lua.create_function(move |_, _: Option<bool>| {
-            exchange(&flush, Api::Flush, |exchange| {
+        lua.create_function(move |lua, _: Option<bool>| {
+            let eof = exchange(&flush, Api::Flush, |exchange| {
                 start_response(exchange);
-                Ok(1)
-            })
+                Ok(exchange.eof)
+            })?;
+            written(lua, eof)
         })?,
     )?;
     let send_headers = Arc::clone(slot);
@@ -451,12 +462,12 @@ pub(super) fn install(lua: &Lua, ngx: &Table, slot: &Arc<Slot>) -> mlua::Result<
     let eof = Arc::clone(slot);
     ngx.raw_set(
         "eof",
-        lua.create_function(move |_, ()| {
-            exchange(&eof, Api::Eof, |exchange| {
+        lua.create_function(move |lua, ()| {
+            let seen = exchange(&eof, Api::Eof, |exchange| {
                 start_response(exchange);
-                exchange.exit.get_or_insert(Exit::Respond);
-                Ok(1)
-            })
+                Ok(std::mem::replace(&mut exchange.eof, true))
+            })?;
+            written(lua, seen)
         })?,
     )?;
     // `ngx.exit` and `ngx.redirect` never return: their phase handler ends.

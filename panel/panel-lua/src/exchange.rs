@@ -317,6 +317,8 @@ pub struct Exchange {
     pub(crate) internal: bool,
     /// The client closed the connection while a handler ran.
     pub(crate) client_closed: bool,
+    /// `ngx.eof` ended the response; the handler goes on without output.
+    pub(crate) eof: bool,
     /// What the last run's handler says of `lua_use_default_type`.
     pub(crate) default_type: bool,
 }
@@ -341,6 +343,7 @@ impl Exchange {
             new_body: None,
             internal: false,
             client_closed: false,
+            eof: false,
             default_type: true,
         }
     }

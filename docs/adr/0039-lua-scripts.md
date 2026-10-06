@@ -199,7 +199,9 @@ contents across activations while its name and size stay.
 
 What a handler changes — the request line and header, the response status
 and header, a response it starts — is held until the handler returns. A
-handler that fails leaves the request as it was before it ran.
+handler that fails leaves the request as it was before it ran. `ngx.eof`
+ends the response but not the handler, which goes on: what it prints after
+returns `nil, "seen eof"`, as lua-nginx-module's output functions do.
 
 **Limits.** Each run of a handler is bounded:
 

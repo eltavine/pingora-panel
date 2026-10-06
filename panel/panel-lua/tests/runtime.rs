@@ -1895,3 +1895,31 @@ async fn clients_that_leave_run_the_abort_callback_or_stop_the_run() {
         b"nil lua_check_client_abort is off\n"
     );
 }
+
+#[tokio::test]
+async fn handlers_go_on_after_eof_without_output() {
+    let lua = start(
+        1,
+        handlers(&[r#"
+            ngx.say("a")
+            assert(ngx.eof() == 1)
+            local said, err = ngx.say("b")
+            local flushed, flush_err = ngx.flush(true)
+            local again, again_err = ngx.eof()
+            ngx.log(ngx.NOTICE, "after eof ", tostring(said), " ", err, " ",
+                tostring(flushed), " ", flush_err, " ", tostring(again), " ", again_err)
+        "#]),
+    );
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = run(&mut scripts, handler(lua.handlers[0], Phase::Content)).await;
+    assert_eq!(outcome, Outcome::Respond);
+    let exchange = scripts.exchange();
+    assert_eq!(exchange.response.body, b"a\n");
+    assert!(
+        exchange.logs.iter().any(|entry| entry
+            .message
+            .ends_with("after eof nil seen eof nil seen eof nil seen eof")),
+        "{:?}",
+        exchange.logs
+    );
+}
