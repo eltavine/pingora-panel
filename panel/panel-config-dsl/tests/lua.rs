@@ -326,9 +326,9 @@ http {
             "'content_by_lua_block' is not allowed in http",
         ),
         (
-            codes::TYPE,
+            codes::NO_EFFECT,
             "main.conf:5",
-            "lua_code_cache off is not available",
+            "'lua_code_cache off' has no effect",
         ),
         (
             codes::INCLUDE,

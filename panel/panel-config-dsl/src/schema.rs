@@ -590,7 +590,7 @@ pub static DIRECTIVES: &[DirectiveSpec] = &[
         "lua_ssl_ciphers <OpenSSL cipher list>;", "The TLS 1.2 suites cosockets offer, by their OpenSSL names; TLS 1.3's are always offered.",
         inherits "Every suite when not written; a route's replaces its server's, and a server's the one in http."),
     spec!("lua_code_cache" in LUA_CONTEXTS, None, 1..Some(1), false,
-        "lua_code_cache on;", "Accepted from OpenResty: scripts are compiled once per activation, so off is refused."),
+        "lua_code_cache on|off;", "Accepted from OpenResty: scripts are compiled once per activation, so off has no effect and a changed script takes effect when its configuration is activated."),
     DirectiveSpec {
         deprecated: Some(Deprecation {
             replacement: "route",

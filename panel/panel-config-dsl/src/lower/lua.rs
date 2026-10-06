@@ -552,13 +552,12 @@ impl<'a> Lowerer<'a> {
             }
             "lua_code_cache" => {
                 if self.bool_arg(file, arg) == Some(false) {
-                    self.error_with_help(
-                        file,
-                        arg.span,
-                        codes::TYPE,
-                        "scripts are compiled once per activation; lua_code_cache off is not available",
-                        "remove it: a changed script takes effect when its configuration is activated",
-                    );
+                    let diagnostic = Diagnostic::warning(
+                        codes::NO_EFFECT,
+                        "'lua_code_cache off' has no effect: scripts are compiled once per activation",
+                    )
+                    .with_help("remove it: a changed script takes effect when its configuration is activated");
+                    self.report(diagnostic, file, arg.span);
                 }
             }
             _ => unreachable!("the schema has no other Lua term"),
