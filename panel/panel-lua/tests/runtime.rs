@@ -1575,3 +1575,47 @@ async fn vms_run_exit_worker_when_their_runtime_is_dropped() {
         "a test runs no exit_worker"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn worker_threads_run_module_functions_on_threads_of_their_own() {
+    let lua = start(1, |builder| {
+        builder.module(
+            "heavy",
+            &Source::new(
+                "lua/heavy.lua",
+                r#"
+                local M = {}
+                function M.digest(text, times)
+                    local out = text
+                    for _ = 1, times do out = ngx.md5(out) end
+                    return out, #text
+                end
+                function M.echo(...) return ... end
+                function M.method() return ngx.req.get_method() end
+                return M
+                "#,
+                1,
+            ),
+        );
+        vec![builder.handler(&source(
+            r#"
+            local ok, digest, length = ngx.run_worker_thread("default", "heavy", "digest", "hello", 3)
+            assert(ok and length == 5 and #digest == 32, tostring(digest))
+            local same, t = ngx.run_worker_thread("default", "heavy", "echo", { a = { 1, 2 }, b = "x" })
+            assert(same and t.a[2] == 2 and t.b == "x")
+            local refused, why = ngx.run_worker_thread("default", "heavy", "method")
+            assert(refused == false and why:find("ngx.run_worker_thread"), why)
+            local missing, err = ngx.run_worker_thread("default", "heavy", "nothing")
+            assert(missing == false and err:find("is not a function"), err)
+            local passed = pcall(ngx.run_worker_thread, "default", "heavy", "echo", function() end)
+            ngx.say(tostring(passed))
+            "#,
+        ))]
+    });
+    let mut worker = handler(lua.handlers[0], Phase::Content);
+    worker.limits.time = Duration::from_secs(5);
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = run(&mut scripts, worker).await;
+    assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+    assert_eq!(scripts.exchange().response.body, b"false\n");
+}

@@ -124,7 +124,6 @@ pub(crate) const INERT: &[(&str, &str)] = &[
     ("lua_malloc_trim", "the gateway's allocator returns freed memory to the system itself"),
     ("lua_sa_restart", "scripts make no system calls a signal could interrupt"),
     ("lua_thread_cache_max_entries", "VMs reuse coroutines without a cache to size"),
-    ("lua_worker_thread_vm_pool_size", "ngx.run_worker_thread is not available"),
     ("lua_capture_error_log", "ngx.errlog is not available, and what scripts log goes to the gateway's error log"),
     ("rewrite_by_lua_no_postpone", "nothing else runs in the rewrite phase for rewrite_by_lua to wait for"),
     ("precontent_by_lua_no_postpone", "nothing else runs in the precontent phase for precontent_by_lua to wait for"),
@@ -158,6 +157,7 @@ pub(super) const HTTP: &[&str] = &[
     "lua_max_running_timers",
     "lua_regex_cache_max_entries",
     "lua_regex_match_limit",
+    "lua_worker_thread_vm_pool_size",
     "init_by_lua_block",
     "init_by_lua_file",
     "init_worker_by_lua_block",
@@ -457,7 +457,8 @@ impl<'a> Lowerer<'a> {
             "lua_max_pending_timers"
             | "lua_max_running_timers"
             | "lua_regex_cache_max_entries"
-            | "lua_regex_match_limit" => {
+            | "lua_regex_match_limit"
+            | "lua_worker_thread_vm_pool_size" => {
                 let arg = &directive.args[0];
                 let Some(value) = self.value(file, arg) else {
                     return;
@@ -467,6 +468,7 @@ impl<'a> Lowerer<'a> {
                     "lua_max_pending_timers" => &mut self.lua.max_pending_timers,
                     "lua_max_running_timers" => &mut self.lua.max_running_timers,
                     "lua_regex_cache_max_entries" => &mut self.lua.regex_cache_max_entries,
+                    "lua_worker_thread_vm_pool_size" => &mut self.lua.worker_thread_vm_pool_size,
                     _ => &mut self.lua.regex_match_limit,
                 };
                 *field = number;

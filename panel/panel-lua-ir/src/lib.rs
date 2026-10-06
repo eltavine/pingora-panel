@@ -317,6 +317,7 @@ impl<'a> Compiler<'a> {
         compiler
             .builder
             .timers(count(lua.max_pending_timers), count(lua.max_running_timers))
+            .worker_threads(count(lua.worker_thread_vm_pool_size))
             .regexes(
                 lua.regex_cache_max_entries.map(count),
                 u32::try_from(lua.regex_match_limit).unwrap_or(u32::MAX),

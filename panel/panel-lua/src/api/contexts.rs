@@ -75,10 +75,11 @@ pub(crate) enum Api {
     ReqGetBodyFile,
     Exec,
     ReqSocket,
+    RunWorkerThread,
 }
 
 impl Api {
-    const ALL: [Api; 44] = [
+    const ALL: [Api; 45] = [
         Api::Arg,
         Api::Ctx,
         Api::Eof,
@@ -123,6 +124,7 @@ impl Api {
         Api::ReqGetBodyFile,
         Api::Exec,
         Api::ReqSocket,
+        Api::RunWorkerThread,
     ];
 
     /// The function a path such as `ngx.var.host` or `ngx.req.get_headers`
@@ -191,6 +193,7 @@ impl Api {
             Api::ReqGetBodyFile => "ngx.req.get_body_file",
             Api::Exec => "ngx.exec",
             Api::ReqSocket => "ngx.req.socket",
+            Api::RunWorkerThread => "ngx.run_worker_thread",
         }
     }
 
@@ -226,7 +229,8 @@ impl Api {
             | Api::ReqFinishBody
             | Api::ReqGetBodyFile
             | Api::Exec
-            | Api::ReqSocket => bits(&[RW, AC, CT]),
+            | Api::ReqSocket
+            | Api::RunWorkerThread => bits(&[RW, AC, CT]),
         }
     }
 
@@ -251,5 +255,6 @@ pub(crate) const fn context(phase: Phase) -> &'static str {
         Phase::Log => "log_by_lua*",
         Phase::Timer => "ngx.timer",
         Phase::ExitWorker => "exit_worker_by_lua*",
+        Phase::WorkerThread => "ngx.run_worker_thread",
     }
 }

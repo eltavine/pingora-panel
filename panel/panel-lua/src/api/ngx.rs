@@ -80,9 +80,8 @@ const STATUSES: [(&str, i64); 37] = [
 
 /// What lua-nginx-module has and this gateway does not: each raises an error
 /// naming itself rather than doing something else.
-pub(crate) const UNAVAILABLE: [&str; 5] = [
+pub(crate) const UNAVAILABLE: [&str; 4] = [
     "ngx.on_abort",
-    "ngx.run_worker_thread",
     "ngx.location.capture",
     "ngx.location.capture_multi",
     "ngx.req.set_body_file",
@@ -144,6 +143,7 @@ pub(super) fn table(lua: &Lua, context: &Context) -> mlua::Result<Table> {
     super::udp::install(lua, &ngx, &context.slot)?;
     super::thread::install(lua, &ngx, &context.slot)?;
     crate::timer::install(lua, &ngx, &context.slot, &context.timers)?;
+    crate::worker::install(lua, &ngx, &context.slot, &context.worker_threads)?;
     for path in UNAVAILABLE {
         set_path(lua, &ngx, path, unavailable(lua, path)?)?;
     }

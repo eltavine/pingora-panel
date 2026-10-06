@@ -118,6 +118,8 @@ pub struct Program {
     pub(crate) regex_cache: Option<usize>,
     /// Zero keeps PCRE2's.
     pub(crate) regex_match_limit: u32,
+    /// The VMs `ngx.run_worker_thread` may run on; zero keeps 10.
+    pub(crate) worker_vms: usize,
 }
 
 impl Program {
@@ -209,6 +211,14 @@ impl ProgramBuilder {
     pub fn regexes(&mut self, cache_entries: Option<usize>, match_limit: u32) -> &mut Self {
         self.program.regex_cache = cache_entries;
         self.program.regex_match_limit = match_limit;
+        self
+    }
+
+    /// The VMs `ngx.run_worker_thread` may run on at once, as
+    /// `lua_worker_thread_vm_pool_size` sets them; zero keeps
+    /// lua-nginx-module's 10.
+    pub fn worker_threads(&mut self, vms: usize) -> &mut Self {
+        self.program.worker_vms = vms;
         self
     }
 

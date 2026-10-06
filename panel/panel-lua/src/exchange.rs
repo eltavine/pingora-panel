@@ -23,10 +23,12 @@ pub enum Phase {
     Timer,
     /// When a VM stops: `exit_worker_by_lua`.
     ExitWorker,
+    /// A module's function in `ngx.run_worker_thread`.
+    WorkerThread,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 13] = [
+    pub const ALL: [Phase; 14] = [
         Phase::Init,
         Phase::InitWorker,
         Phase::ServerRewrite,
@@ -40,6 +42,7 @@ impl Phase {
         Phase::Log,
         Phase::Timer,
         Phase::ExitWorker,
+        Phase::WorkerThread,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -57,6 +60,7 @@ impl Phase {
             Phase::Log => "log",
             Phase::Timer => "timer",
             Phase::ExitWorker => "exit_worker",
+            Phase::WorkerThread => "worker_thread",
         }
     }
 

@@ -44,6 +44,7 @@ pub(crate) struct Context {
     pub worker: usize,
     pub workers: usize,
     pub timers: Arc<crate::timer::Timers>,
+    pub worker_threads: std::sync::Weak<crate::worker::WorkerThreads>,
 }
 
 pub(crate) fn install(lua: &Lua, globals: &Table, context: &Context) -> mlua::Result<()> {

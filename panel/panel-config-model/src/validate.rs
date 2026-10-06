@@ -591,6 +591,18 @@ fn validate_lua(model: &ConfigModel, report: &mut Report) {
         );
     }
     if lua
+        .worker_thread_vm_pool_size
+        .is_some_and(|vms| !(1..=panel_engine::MOST_LUA_WORKER_VMS).contains(&vms))
+    {
+        report.error(
+            "lua",
+            format!(
+                "lua_worker_thread_vm_pool_size is not 1 to {}",
+                panel_engine::MOST_LUA_WORKER_VMS
+            ),
+        );
+    }
+    if lua
         .regex_match_limit
         .is_some_and(|limit| limit > u64::from(u32::MAX))
     {

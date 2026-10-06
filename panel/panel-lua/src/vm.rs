@@ -306,6 +306,8 @@ impl Vm {
         settings: &Settings,
         index: usize,
         timers: Arc<Timers>,
+        worker_threads: std::sync::Weak<crate::worker::WorkerThreads>,
+        worker: bool,
     ) -> mlua::Result<(Self, Vec<crate::exchange::LogEntry>)> {
         let lua = Lua::new_with(StdLib::ALL_SAFE, LuaOptions::new())?;
         lua.set_app_data(api::Regexes::new(
@@ -339,6 +341,7 @@ impl Vm {
                 worker: index,
                 workers: settings.vms,
                 timers,
+                worker_threads,
             },
         )?;
         let load = |index: HandlerId| -> mlua::Result<Function> {
@@ -353,7 +356,12 @@ impl Vm {
         // every request to read, and like the standard library it cannot be
         // changed. State requests change lives in modules and shared
         // dictionaries.
-        let logs = Self::initialize(&lua, &slot, program, &load)?;
+        // A worker thread's VM loads the modules and runs nothing else.
+        let logs = if worker {
+            Vec::new()
+        } else {
+            Self::initialize(&slot, program, &load)?
+        };
         lua.sandbox(true)?;
         let handlers = (0..program.handlers.len())
             .map(|index| load(HandlerId(index as u32)))
@@ -380,7 +388,6 @@ impl Vm {
     }
 
     fn initialize(
-        lua: &Lua,
         slot: &Arc<Slot>,
         program: &Program,
         load: &dyn Fn(HandlerId) -> mlua::Result<Function>,
@@ -404,8 +411,9 @@ impl Vm {
                 run.deadline = slot.after(program.init_limits.time);
             }
             let function = load(handler)?;
-            let key = lua.current_thread().to_pointer() as usize;
-            slot.enter(key, &cell);
+            // Keyed 0, which no thread is, a run on the main thread is never
+            // sliced: it cannot yield.
+            slot.enter(0, &cell);
             let result = function.call::<()>(());
             *slot.current.lock() = None;
             logs.append(&mut cell.exchange.lock().logs);
@@ -432,8 +440,7 @@ impl Vm {
             run.work_left = i64::try_from(limits.work).unwrap_or(i64::MAX);
             run.deadline = self.slot.after(limits.time);
         }
-        let key = self.lua.current_thread().to_pointer() as usize;
-        self.slot.enter(key, &cell);
+        self.slot.enter(0, &cell);
         let result = function.call::<()>(());
         *self.slot.current.lock() = None;
         let exceeded = cell.run.lock().exceeded;

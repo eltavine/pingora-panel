@@ -25,6 +25,8 @@ pub const LEAST_LUA_SOCKET_BUFFER: u64 = 1 << 10;
 pub const MOST_LUA_SOCKET_BUFFER: u64 = 16 << 20;
 /// The most connections `lua_socket_pool_size` may keep for a pool.
 pub const MOST_LUA_SOCKET_POOL: u64 = 1 << 16;
+/// The most VMs `lua_worker_thread_vm_pool_size` may allow.
+pub const MOST_LUA_WORKER_VMS: u64 = 1024;
 /// The most `lua_max_pending_timers`, `lua_max_running_timers` and
 /// `lua_regex_cache_max_entries` may set.
 pub const MOST_LUA_TIMERS: u64 = 1 << 20;
@@ -239,6 +241,12 @@ pub fn problems(snapshot: &RuntimeSnapshot) -> Vec<(String, String)> {
         found.push((
             "lua".into(),
             format!("lua_regex_cache_max_entries is over {MOST_LUA_REGEX_CACHE}"),
+        ));
+    }
+    if program.worker_thread_vm_pool_size > MOST_LUA_WORKER_VMS {
+        found.push((
+            "lua".into(),
+            format!("lua_worker_thread_vm_pool_size is over {MOST_LUA_WORKER_VMS}"),
         ));
     }
     if program.regex_match_limit > u64::from(u32::MAX) {

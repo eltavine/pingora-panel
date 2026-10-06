@@ -297,6 +297,10 @@ pub struct LuaProgram {
     /// `access_by_lua_no_postpone on` has them.
     #[serde(default, skip_serializing_if = "is_false")]
     pub access_first: bool,
+    /// The VMs `ngx.run_worker_thread` may run on at once, as
+    /// `lua_worker_thread_vm_pool_size` sets them; zero for 10.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub worker_thread_vm_pool_size: u64,
 }
 
 impl LuaProgram {

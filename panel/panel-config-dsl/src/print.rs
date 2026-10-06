@@ -124,6 +124,10 @@ pub(crate) fn lua_http(lua: &LuaConfig) -> Vec<Directive> {
         ("lua_max_running_timers", lua.max_running_timers),
         ("lua_regex_cache_max_entries", lua.regex_cache_max_entries),
         ("lua_regex_match_limit", lua.regex_match_limit),
+        (
+            "lua_worker_thread_vm_pool_size",
+            lua.worker_thread_vm_pool_size,
+        ),
     ] {
         if let Some(value) = value {
             body.push(Directive::simple(name, [value.to_string()]));

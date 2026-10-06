@@ -717,6 +717,9 @@ message LuaProgram {
   bool access_first = 11;
   // Runs in each VM when it stops (exit_worker_by_lua).
   LuaHandler exit_worker = 12;
+  // The VMs ngx.run_worker_thread may run on at once
+  // (lua_worker_thread_vm_pool_size); zero keeps 10.
+  uint64 worker_thread_vm_pool_size = 13;
 }
 
 message ValidateRequest {

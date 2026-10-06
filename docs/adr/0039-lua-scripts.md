@@ -96,7 +96,12 @@ too. `ngx.exec` redirects internally: the request is handled
 again from `server_rewrite` with its new URI and arguments, and as in
 nginx a request that changes its URI more than ten times, by jumps and
 redirects together, is answered 500; `$request_uri` keeps the client's
-through both. Modules OpenResty scripts commonly load are built in:
+through both. `ngx.run_worker_thread` runs a module's function on a VM of
+its own on a thread of its own, at most `lua_worker_thread_vm_pool_size`
+of them at once (10 by default), and copies nil, booleans, numbers, strings
+and tables of them to it and its results back; there the function has the
+`ngx` functions lua-nginx-module allows in that context and no request.
+Modules OpenResty scripts commonly load are built in:
 `cjson` and `cjson.safe`, `bit` with LuaJIT BitOp semantics, `table.new`,
 `table.clear`, `table.nkeys`, `resty.core`, `resty.string`, `resty.md5`,
 `resty.sha1`, `resty.sha256`, `resty.random`, `ngx.re`, `ngx.balancer`
@@ -114,8 +119,8 @@ honour for TCP, are refused.
 `lua_transform_underscores_in_response_headers`, `lua_use_default_type` and
 `lua_need_request_body` apply as in lua-nginx-module. Directives with nothing to tune here —
 `lua_load_resty_core`, `lua_malloc_trim`, `lua_sa_restart`,
-`lua_thread_cache_max_entries`, `lua_worker_thread_vm_pool_size`,
-`lua_capture_error_log`, `lua_check_client_abort`, `lua_http10_buffering`,
+`lua_thread_cache_max_entries`, `lua_capture_error_log`,
+`lua_check_client_abort`, `lua_http10_buffering`,
 `rewrite_by_lua_no_postpone`, `precontent_by_lua_no_postpone`,
 `lua_upstream_skip_openssl_default_verify` and `balancer_keepalive` — are
 read with a warning saying why, so configurations written for OpenResty
@@ -123,8 +128,8 @@ still read. `sslhandshake` verifies the server's
 certificate with the system's trusted roots unless the script passes
 `ssl_verify` false, where lua-nginx-module verifies nothing by default.
 Subrequests (`ngx.location.capture`), named locations, the raw request
-socket of `ngx.req.socket(true)`, `ngx.on_abort`, worker threads and body
-files are not available.
+socket of `ngx.req.socket(true)`, `ngx.on_abort` and body files are not
+available.
 
 **Native API.** Next to `ngx`, `require("panel.v1")` returns the
 capabilities the specification names — `req`, `resp`, `ctx`, `upstream`,

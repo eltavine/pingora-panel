@@ -118,6 +118,9 @@ struct Inner {
     next: AtomicUsize,
     timers: Vec<Arc<Timers>>,
     reports: Arc<TimerReports>,
+    /// The VMs of `ngx.run_worker_thread`, which hold the runtime's VMs
+    /// only weakly.
+    _workers: Arc<crate::worker::WorkerThreads>,
     /// Dropped with the runtime, which runs the pending timers at once.
     _closing: tokio::sync::watch::Sender<()>,
 }
@@ -149,6 +152,21 @@ impl Runtime {
         let (closing, closed) = tokio::sync::watch::channel(());
         let reports = Arc::new(TimerReports::default());
         let handle = tokio::runtime::Handle::try_current().ok();
+        // Worker threads create no timers that would run.
+        let idle_timers = Arc::new(Timers::new(
+            0,
+            (0, 0),
+            closed.clone(),
+            Arc::clone(&reports),
+            None,
+        ));
+        idle_timers.discard();
+        let workers = Arc::new(crate::worker::WorkerThreads::new(
+            program,
+            dicts.clone(),
+            settings,
+            idle_timers,
+        ));
         let mut vms = Vec::with_capacity(settings.vms.max(1));
         let mut timers = Vec::with_capacity(settings.vms.max(1));
         let mut logs = Vec::new();
@@ -170,7 +188,15 @@ impl Runtime {
                 handle.clone(),
             ));
             timers.push(Arc::clone(&vm_timers));
-            let started = Vm::new(program, &dicts, settings, index, vm_timers);
+            let started = Vm::new(
+                program,
+                &dicts,
+                settings,
+                index,
+                vm_timers,
+                Arc::downgrade(&workers),
+                false,
+            );
             let (vm, mut logged) = match started {
                 Ok(started) => started,
                 Err(error) => {
@@ -191,6 +217,7 @@ impl Runtime {
                     next: AtomicUsize::new(0),
                     timers,
                     reports,
+                    _workers: workers,
                     _closing: closing,
                 }),
             },

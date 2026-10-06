@@ -272,6 +272,10 @@ pub struct LuaConfig {
     /// keeps PCRE2's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub regex_match_limit: Option<u64>,
+    /// The VMs `ngx.run_worker_thread` may run on at once
+    /// (`lua_worker_thread_vm_pool_size`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_thread_vm_pool_size: Option<u64>,
     /// `access_by_lua_no_postpone`: access handlers run before the
     /// security policies.
     #[serde(default, skip_serializing_if = "Option::is_none")]

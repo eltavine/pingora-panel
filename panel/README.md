@@ -1414,6 +1414,7 @@ that mean one thing in every phase.
 | `lua_max_running_timers` | `256` | timers each VM runs at once (`http` only) |
 | `lua_regex_cache_max_entries` | `1024` | compiled `ngx.re` expressions each VM keeps, none at `0` (`http` only) |
 | `lua_regex_match_limit` | PCRE2's | backtracking a match may do before it fails (`http` only) |
+| `lua_worker_thread_vm_pool_size` | `10` | VMs `ngx.run_worker_thread` runs module functions on at once (`http` only) |
 | `lua_allow` | `none` | `body`, `upstream` (balancers), `network` (cosockets) |
 | `lua_on_error` | `fail` | what a failed run does |
 | `lua_log_level` | `notice` | the least severe `ngx.log` messages kept |
@@ -1441,7 +1442,9 @@ when a new configuration takes over, pending ones run at once with
 permission, and `ngx.semaphore` coordinates the threads, timers and
 requests of a VM. `ngx.req.socket()` streams the request body to a script,
 chunked bodies included. `ngx.exec` handles the request again with a new URI, up
-to ten URI changes as in nginx. Subrequests are not available.
+to ten URI changes as in nginx. `ngx.run_worker_thread` runs a module's
+function on a thread and VM of its own, copying its arguments and results.
+Subrequests are not available.
 
 Reading the configuration compiles every script with the gateway's
 compiler and reports, at their lines, scripts that do not compile, modules

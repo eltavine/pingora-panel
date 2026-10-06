@@ -17,6 +17,7 @@ mod runtime;
 mod shared;
 mod timer;
 mod vm;
+mod worker;
 
 pub use exchange::{
     Balancer, Changes, Chunk, Connection, Exchange, Failure, FailureKind, Limits, LogEntry,
