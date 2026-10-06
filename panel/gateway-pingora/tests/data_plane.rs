@@ -2479,6 +2479,8 @@ async fn lua_handlers_rewrite_answer_filter_and_choose_peers() {
         lua_script("cycle", "return ngx.exec('/cycle')"),
         lua_script("gate", "return ngx.exec('/target')"),
         lua_script("untyped", "ngx.say('plain')"),
+        lua_script("precontent", "ngx.req.set_header('X-Pre', 'yes')"),
+        lua_script("preanswer", "ngx.say('before the action')"),
         lua_script(
             "streamed",
             "local sock = assert(ngx.req.socket()) local first = assert(sock:receiveuntil('|')()) local rest = assert(sock:receive('*a')) ngx.say(first, ' then ', rest)",
@@ -2514,6 +2516,15 @@ async fn lua_handlers_rewrite_answer_filter_and_choose_peers() {
     untyped.no_default_type = true;
     let mut streamed = LuaHandler::new("streamed");
     streamed.allow.body = true;
+    let mut pre = route("pre", 14, prefix("/pre/proxied"), proxy("app"));
+    pre.lua.precontent = Some(LuaHandler::new("precontent"));
+    let mut preanswer = route(
+        "preanswer",
+        15,
+        prefix("/pre/answered"),
+        RouteAction::respond(200, Some("the action".into())),
+    );
+    preanswer.lua.precontent = Some(LuaHandler::new("preanswer"));
     snapshot.routes = vec![
         generated,
         route(
@@ -2583,6 +2594,8 @@ async fn lua_handlers_rewrite_answer_filter_and_choose_peers() {
             prefix("/streamed"),
             RouteAction::Lua { handler: streamed },
         ),
+        pre,
+        preanswer,
     ];
     snapshot.upstream_pools.push(pool("app", &[upstream]));
     let mut lb = pool("lb", &[unreachable]);
@@ -2668,6 +2681,12 @@ async fn lua_handlers_rewrite_answer_filter_and_choose_peers() {
         body(&chunked),
         "first then sec\nond\n",
         "ngx.req.socket reads a chunked body without its chunking"
+    );
+    let proxied = body(&get(listen, Some("shop.test"), "/pre/proxied", "").await);
+    assert!(proxied.contains("x-pre: yes"), "{proxied}");
+    assert_eq!(
+        body(&get(listen, Some("shop.test"), "/pre/answered", "").await),
+        "before the action\n"
     );
     assert!(body(&cycling).contains("internal redirection cycle"));
     gateway.stop().await;

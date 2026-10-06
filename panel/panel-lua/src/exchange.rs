@@ -13,6 +13,8 @@ pub enum Phase {
     ServerRewrite,
     Rewrite,
     Access,
+    /// After access and before content: `precontent_by_lua`.
+    Precontent,
     Content,
     Balancer,
     HeaderFilter,
@@ -22,12 +24,13 @@ pub enum Phase {
 }
 
 impl Phase {
-    pub const ALL: [Phase; 11] = [
+    pub const ALL: [Phase; 12] = [
         Phase::Init,
         Phase::InitWorker,
         Phase::ServerRewrite,
         Phase::Rewrite,
         Phase::Access,
+        Phase::Precontent,
         Phase::Content,
         Phase::Balancer,
         Phase::HeaderFilter,
@@ -43,6 +46,7 @@ impl Phase {
             Phase::ServerRewrite => "server_rewrite",
             Phase::Rewrite => "rewrite",
             Phase::Access => "access",
+            Phase::Precontent => "precontent",
             Phase::Content => "content",
             Phase::Balancer => "balancer",
             Phase::HeaderFilter => "header_filter",
@@ -60,7 +64,11 @@ impl Phase {
     pub(crate) const fn answers(self) -> bool {
         matches!(
             self,
-            Phase::ServerRewrite | Phase::Rewrite | Phase::Access | Phase::Content
+            Phase::ServerRewrite
+                | Phase::Rewrite
+                | Phase::Access
+                | Phase::Precontent
+                | Phase::Content
         )
     }
 }

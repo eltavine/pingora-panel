@@ -213,6 +213,9 @@ pub struct LuaHandlers {
     /// After security policies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub access: Option<LuaHandler>,
+    /// After access and the HTTP policies, before the route's action.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub precontent: Option<LuaHandler>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub header_filter: Option<LuaHandler>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -232,6 +235,7 @@ impl LuaHandlers {
             ("server_rewrite", &self.server_rewrite),
             ("rewrite", &self.rewrite),
             ("access", &self.access),
+            ("precontent", &self.precontent),
             ("header_filter", &self.header_filter),
             ("body_filter", &self.body_filter),
             ("log", &self.log),

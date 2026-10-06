@@ -1384,8 +1384,8 @@ http {
 }
 ```
 
-Handlers run in `server_rewrite`, `rewrite`, `access`, `content` (the
-action of a server or route), `balancer`, `header_filter`, `body_filter`
+Handlers run in `server_rewrite`, `rewrite`, `access`, `precontent`,
+`content` (the action of a server or route), `balancer`, `header_filter`, `body_filter`
 and `log`; a route's handler replaces its server's and a server's the one
 in `http`, as NGINX inherits them. `init_by_lua*` and `init_worker_by_lua*`
 run once in each VM. The code of a `*_by_lua_block` is read with Lua's

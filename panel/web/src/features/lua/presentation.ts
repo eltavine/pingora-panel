@@ -6,6 +6,7 @@ export const PHASES = [
   'server_rewrite',
   'rewrite',
   'access',
+  'precontent',
   'content',
   'balancer',
   'header_filter',

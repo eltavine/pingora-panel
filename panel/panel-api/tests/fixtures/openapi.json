@@ -83460,6 +83460,17 @@
               }
             ]
           },
+          "precontent": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LuaCode",
+                "description": "After access, before the action."
+              }
+            ]
+          },
           "rewrite": {
             "oneOf": [
               {

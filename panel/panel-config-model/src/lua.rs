@@ -74,6 +74,9 @@ pub struct LuaScope {
     /// After security policies.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub access: Option<LuaCode>,
+    /// After access, before the action.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub precontent: Option<LuaCode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub header_filter: Option<LuaCode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -145,6 +148,7 @@ impl LuaScope {
             server_rewrite: pick(&self.server_rewrite, &outer.server_rewrite),
             rewrite: pick(&self.rewrite, &outer.rewrite),
             access: pick(&self.access, &outer.access),
+            precontent: pick(&self.precontent, &outer.precontent),
             header_filter: pick(&self.header_filter, &outer.header_filter),
             body_filter: pick(&self.body_filter, &outer.body_filter),
             log: pick(&self.log, &outer.log),
@@ -186,6 +190,7 @@ impl LuaScope {
             ("server_rewrite", &self.server_rewrite),
             ("rewrite", &self.rewrite),
             ("access", &self.access),
+            ("precontent", &self.precontent),
             ("header_filter", &self.header_filter),
             ("body_filter", &self.body_filter),
             ("log", &self.log),
@@ -199,6 +204,7 @@ impl LuaScope {
             &mut self.server_rewrite,
             &mut self.rewrite,
             &mut self.access,
+            &mut self.precontent,
             &mut self.header_filter,
             &mut self.body_filter,
             &mut self.log,
@@ -584,6 +590,7 @@ pub(crate) fn handlers(
         },
         rewrite: compile(&scope.rewrite),
         access: compile(&scope.access),
+        precontent: compile(&scope.precontent),
         header_filter: compile(&scope.header_filter),
         body_filter: compile(&scope.body_filter),
         log: compile(&scope.log),

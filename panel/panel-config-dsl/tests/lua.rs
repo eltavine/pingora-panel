@@ -687,3 +687,35 @@ http {
         );
     }
 }
+
+#[test]
+fn precontent_handlers_read_compile_and_print() {
+    let sources = Sources::single(
+        r#"language_version 1;
+http {
+    server s {
+        server_name s.example;
+        respond 404;
+        route r {
+            match prefix /;
+            precontent_by_lua_block {
+                ngx.req.set_header("X-Pre", "1")
+            }
+            respond 200;
+        }
+    }
+}
+"#,
+    );
+    let lowered = read(&sources);
+    assert!(lowered.is_valid(), "{:#?}", lowered.diagnostics);
+    let route = &lowered.model.sites[0].routes[0];
+    assert!(route.lua.precontent.is_some());
+    let snapshot = compile(&lowered.model, RevisionId::new(1)).unwrap();
+    assert!(snapshot.routes[0].lua.precontent.is_some());
+    let printed = print_sources(&lowered.model);
+    assert!(printed
+        .get("main.conf")
+        .unwrap()
+        .contains("            precontent_by_lua_block {\n"));
+}

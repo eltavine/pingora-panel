@@ -256,7 +256,11 @@ impl Scripts {
         if handler.read_body_first
             && matches!(
                 handler.phase,
-                Phase::ServerRewrite | Phase::Rewrite | Phase::Access | Phase::Content
+                Phase::ServerRewrite
+                    | Phase::Rewrite
+                    | Phase::Access
+                    | Phase::Precontent
+                    | Phase::Content
             )
             && self.exchange.lock().request.body.is_none()
         {

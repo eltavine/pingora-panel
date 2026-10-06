@@ -586,6 +586,22 @@ impl ProxyHttp for PanelProxy {
                     compression.prepare(session);
                 }
             }
+            if let Some(hook) = route.lua.precontent.clone() {
+                let proxied = matches!(route.target, RouteTarget::Proxy(_));
+                match self
+                    .lua_request(session, ctx, &hook, &path, host_name, proxied)
+                    .await?
+                {
+                    LuaStep::Done => return Ok(true),
+                    LuaStep::Redirect => {
+                        if !Self::restart(session, ctx, &mut changes_left).await? {
+                            return Ok(true);
+                        }
+                        continue 'request;
+                    }
+                    LuaStep::Go { .. } => {}
+                }
+            }
             return match &route.target {
                 RouteTarget::Proxy(index) => {
                     let pool = &snapshot.pools[*index];

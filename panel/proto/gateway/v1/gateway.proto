@@ -683,6 +683,8 @@ message LuaHandlers {
   LuaHandler header_filter = 4;
   LuaHandler body_filter = 5;
   LuaHandler log = 6;
+  // After access and the HTTP policies, before the route's action.
+  LuaHandler precontent = 7;
 }
 
 message LuaSharedDict {

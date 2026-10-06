@@ -540,6 +540,27 @@ async fn pipeline(
                 }
             }
         }
+        if let Some(hook) = hooks.and_then(|hooks| hooks.precontent.as_ref()) {
+            match runner.run(hook).await {
+                Next::Go => {}
+                Next::Redirect => {
+                    if runner.restart(&mut changes_left, hooks).await {
+                        continue 'request;
+                    }
+                    return Ok(());
+                }
+                Next::Answer => {
+                    runner.respond(hooks).await;
+                    runner.log(hooks).await;
+                    return Ok(());
+                }
+                Next::Close => {
+                    runner.trial.aborted = true;
+                    runner.log(hooks).await;
+                    return Ok(());
+                }
+            }
+        }
         match &snapshot.routes[route.spec].action {
             RouteAction::Lua { .. } => {
                 if let Some(hook) = index.contents.get(route.id.as_str()) {
@@ -778,6 +799,33 @@ mod tests {
         .unwrap();
         assert_eq!(cycling.runs.len(), 11, "the first run and ten redirects");
         assert_eq!(cycling.response.unwrap().0, 500);
+    }
+
+    #[tokio::test]
+    async fn precontent_handlers_run_between_access_and_the_action() {
+        let mut snapshot = snapshot();
+        snapshot
+            .lua
+            .scripts
+            .push(script("pre", "ngx.req.set_header('X-Pre', '1')"));
+        snapshot.routes[0].lua.precontent = Some(LuaHandler::new("pre"));
+        let trial = try_request(
+            &snapshot,
+            TrialScript::Configured,
+            request("/", &[("x-key", "k")]),
+            TrialResponse::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            phases(&trial)[..3],
+            [
+                (Phase::Access, RunOutcome::Continue),
+                (Phase::Precontent, RunOutcome::Continue),
+                (Phase::Content, RunOutcome::Respond),
+            ]
+        );
+        assert_eq!(trial.request.unwrap().headers["x-pre"], "1");
     }
 
     #[tokio::test]

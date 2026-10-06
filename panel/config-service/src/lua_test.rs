@@ -22,6 +22,7 @@ fn phase(name: &str) -> Result<Phase> {
         "server_rewrite" => Phase::ServerRewrite,
         "rewrite" => Phase::Rewrite,
         "access" => Phase::Access,
+        "precontent" => Phase::Precontent,
         "content" => Phase::Content,
         "balancer" => Phase::Balancer,
         "header_filter" => Phase::HeaderFilter,

@@ -12,6 +12,11 @@ const fn bits(phases: &[Phase]) -> u16 {
         if matches!(phases[index], Phase::Rewrite) {
             bits |= Phase::ServerRewrite.bit();
         }
+        // lua-nginx-module allows in precontent_by_lua what it allows in
+        // access_by_lua.
+        if matches!(phases[index], Phase::Access) {
+            bits |= Phase::Precontent.bit();
+        }
         index += 1;
     }
     bits
@@ -238,6 +243,7 @@ pub(crate) const fn context(phase: Phase) -> &'static str {
         Phase::ServerRewrite => "server_rewrite_by_lua*",
         Phase::Rewrite => "rewrite_by_lua*",
         Phase::Access => "access_by_lua*",
+        Phase::Precontent => "precontent_by_lua*",
         Phase::Content => "content_by_lua*",
         Phase::Balancer => "balancer_by_lua*",
         Phase::HeaderFilter => "header_filter_by_lua*",
