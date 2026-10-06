@@ -1509,6 +1509,7 @@ says why.
 ```sh
 ppanel lua check conf/                      # the Lua diagnostics of local files
 ppanel lua scripts --revision 12            # every script, where it runs and its version
+ppanel lua modules                          # built-in modules, their libraries and the scripts that load them
 ppanel lua test --host shop.example --target '/hello?who=lua' -H 'X-Key: k'
 ppanel lua test --host shop.example --script lua/auth.lua --phase access --allow body
 ```

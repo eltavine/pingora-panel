@@ -2,12 +2,14 @@
 import { computed, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import {
+  Ban,
   Box,
   Braces,
   Database,
   FileCode2,
   GitBranch,
   History,
+  Library,
   Package,
   PowerOff,
   RefreshCw,
@@ -18,7 +20,11 @@ import {
 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { listRevisionsOptions, luaLibraryOptions } from '@/api/generated/@tanstack/vue-query.gen'
+import {
+  listRevisionsOptions,
+  luaLibraryOptions,
+  luaModulesOptions,
+} from '@/api/generated/@tanstack/vue-query.gen'
 import ApiFailureAlert from '@/components/ApiFailureAlert.vue'
 import CodeEditor from '@/components/code/CodeEditor.vue'
 import CopyValue from '@/components/CopyValue.vue'
@@ -51,7 +57,17 @@ import { toApiFailure } from '@/lib/api'
 import { changeHeaders, notifyFailure, useRefreshConfiguration } from '@/lib/configuration'
 import { useSession } from '@/lib/session'
 import LuaTestPanel from './LuaTestPanel.vue'
-import { handlerCount, isFile, PHASES, shortVersion, type Phase } from './presentation'
+import {
+  handlerCount,
+  isFile,
+  libraryIcon,
+  moduleGroups,
+  moduleOrigin,
+  ORIGIN_ICONS,
+  PHASES,
+  shortVersion,
+  type Phase,
+} from './presentation'
 
 const DRAFT = 'draft'
 
@@ -68,8 +84,16 @@ const library = useQuery(
   ),
 )
 const revisions = useQuery(listRevisionsOptions({ query: { limit: 20 } }))
+const modules = useQuery(luaModulesOptions())
 
 const scripts = computed(() => library.data.value?.scripts ?? [])
+const loadedModules = computed(() => new Set(scripts.value.flatMap((item) => item.requires)))
+const groups = computed(() => moduleGroups(modules.data.value?.built_in ?? [], scripts.value))
+const refused = computed(() => modules.data.value?.refused ?? [])
+
+function originOf(name: string) {
+  return moduleOrigin(name, modules.data.value, scripts.value)
+}
 const selected = ref<string>()
 watch(
   scripts,
@@ -322,8 +346,17 @@ function revert() {
                   :key="name"
                   variant="outline"
                   class="font-mono text-[10px]"
+                  :title="originOf(name) ? t(`lua.origin.${originOf(name)}`) : undefined"
                 >
+                  <component
+                    :is="ORIGIN_ICONS[originOf(name)!]"
+                    v-if="originOf(name)"
+                    aria-hidden="true"
+                  />
                   {{ name }}
+                  <span v-if="originOf(name)" class="sr-only">
+                    {{ t(`lua.origin.${originOf(name)}`) }}
+                  </span>
                 </Badge>
               </p>
               <div class="h-80 overflow-hidden rounded-md border">
@@ -359,6 +392,63 @@ function revert() {
           <LuaTestPanel v-if="can('config.lua') && viewingDraft" :code="code" :phase="phase" />
         </div>
       </div>
+
+      <Card v-if="modules.data.value">
+        <CardHeader>
+          <CardTitle class="flex items-center gap-2 text-sm">
+            <Library class="size-4" aria-hidden="true" />
+            {{ t('lua.modules.title') }}
+            <Badge variant="secondary">{{ modules.data.value.built_in.length }}</Badge>
+          </CardTitle>
+          <CardDescription>{{ t('lua.modules.description') }}</CardDescription>
+        </CardHeader>
+        <CardContent class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <section
+            v-for="group in groups"
+            :key="group.library"
+            class="flex flex-col gap-2 rounded-md border p-3"
+            :aria-label="group.library"
+          >
+            <div class="flex items-center gap-2">
+              <component
+                :is="libraryIcon(group.library)"
+                class="size-4 shrink-0"
+                aria-hidden="true"
+              />
+              <span class="truncate font-mono text-xs font-medium">{{ group.library }}</span>
+              <span class="text-muted-foreground ml-auto shrink-0 text-xs">
+                {{ t('lua.modules.loaded', { loaded: group.loaded, total: group.modules.length }) }}
+              </span>
+            </div>
+            <div class="flex flex-wrap gap-1">
+              <Badge
+                v-for="name in group.modules"
+                :key="name"
+                :variant="loadedModules.has(name) ? 'default' : 'outline'"
+                class="font-mono text-[10px]"
+              >
+                {{ name }}
+              </Badge>
+            </div>
+          </section>
+          <section
+            v-if="refused.length"
+            class="flex flex-col gap-2 rounded-md border border-dashed p-3"
+            :aria-label="t('lua.modules.refused')"
+          >
+            <div class="flex items-center gap-2">
+              <Ban class="size-4 shrink-0" aria-hidden="true" />
+              <span class="text-xs font-medium">{{ t('lua.modules.refused') }}</span>
+            </div>
+            <ul class="flex flex-col gap-1 text-xs">
+              <li v-for="module in refused" :key="module.name" class="flex flex-col">
+                <span class="font-mono">{{ module.name }}</span>
+                <span class="text-muted-foreground">{{ module.reason }}</span>
+              </li>
+            </ul>
+          </section>
+        </CardContent>
+      </Card>
     </template>
   </div>
 </template>

@@ -2342,6 +2342,19 @@ const zhCN = {
     writtenAt: '写在 {file} 第 {line} 行',
     notRun: '没有处理器运行它；它可以被 require 加载。',
     requires: '加载的模块',
+    origin: {
+      built_in: '内置',
+      file: 'lua/ 下的文件',
+      refused: '被拒绝',
+      missing: '未找到',
+    },
+    modules: {
+      title: '内置模块',
+      description:
+        'require 无需配置文件即可加载的模块，按各自对应的 OpenResty 库分组；脚本已加载的模块以实心标出。',
+      loaded: '已加载 {loaded}/{total}',
+      refused: '拒绝加载',
+    },
     editor: 'Lua 代码：{script}',
     revert: '还原',
     stale: '草稿已在别处更改，保存前请刷新。',

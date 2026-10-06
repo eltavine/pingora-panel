@@ -2441,6 +2441,19 @@ const en: Messages = {
     writtenAt: 'Written at {file} line {line}',
     notRun: 'No handler runs it; require can load it.',
     requires: 'Loads',
+    origin: {
+      built_in: 'Built in',
+      file: 'A file under lua/',
+      refused: 'Refused',
+      missing: 'Not found',
+    },
+    modules: {
+      title: 'Built-in modules',
+      description:
+        'What require loads without a file of the configuration, by the OpenResty library each module stands in for. Modules the scripts load are filled in.',
+      loaded: '{loaded} of {total} loaded',
+      refused: 'Refused',
+    },
     editor: 'Lua code: {script}',
     revert: 'Revert',
     stale: 'The draft changed elsewhere; refresh before saving.',

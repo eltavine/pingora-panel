@@ -449,6 +449,11 @@ call, in the control plane with the gateway's runtime and limits, and
 reports what it did: the changes to the request and response, the response
 it sent, its logs, duration and errors. A test reaches nothing outside: it
 opens no connections, and the timers it creates do not run.
+`GET /api/v1/config/lua/modules`, `ppanel lua modules` and the console list
+the built-in modules by the library each stands in for, with the draft's
+scripts that load them, and the refused modules with why; the console marks
+each module a script loads as built in, a file under `lua/`, refused or not
+found.
 
 **Switch.** `lua off;` in `http` keeps the scripts in the configuration but
 runs none of them.
