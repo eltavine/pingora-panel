@@ -256,7 +256,13 @@ an answer is truncated, and whose `compress_ipv6_addr` follows RFC 5952,
 RFC 7578) over the request socket, whose `preserve_body` gives the
 request back the body as it arrived, `resty.memcached`,
 lua-resty-memcached's client of the memcached text protocol with its key
-escaping and pipelines, and
+escaping and pipelines, `resty.mysql`, lua-resty-mysql's client of the
+MySQL and MariaDB text protocol with TLS, result sets and multiple
+results, authenticating with `mysql_native_password`, and with
+`caching_sha2_password` and `sha256_password` by their scramble or, over
+TLS, the password itself (encrypting it with the server's RSA key, MariaDB's
+`client_ed25519` and the pre-4.1 `mysql_old_password` are refused saying
+so), and
 `ngx.ssl` with `ngx.ssl.clienthello`, `ngx.ssl.session`,
 `ngx.ssl.proxysslcert` and `ngx.ssl.proxysslverify`, `ngx.proxyssl` and
 `ngx.ocsp`. `resty.core.base` gives libraries
