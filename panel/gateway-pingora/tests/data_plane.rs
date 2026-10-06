@@ -3918,3 +3918,126 @@ async fn certificate_scripts_verify_clients_and_requests_read_how() {
     assert!(said.starts_with("FAILED:"), "{said}");
     gateway.stop().await;
 }
+
+/// An HTTPS upstream presenting `chain`, answering every request `secure`.
+async fn tls_upstream(
+    chain: Vec<rustls_pki_types::CertificateDer<'static>>,
+    key: rustls_pki_types::PrivateKeyDer<'static>,
+) -> SocketAddr {
+    let config = rustls::ServerConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .unwrap()
+    .with_no_client_auth()
+    .with_single_cert(chain, key)
+    .unwrap();
+    let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let Ok((stream, _)) = listener.accept().await else {
+                return;
+            };
+            let acceptor = acceptor.clone();
+            tokio::spawn(async move {
+                let Ok(mut stream) = acceptor.accept(stream).await else {
+                    return;
+                };
+                let mut seen = Vec::new();
+                let mut buffer = [0u8; 4096];
+                while !seen.windows(4).any(|window| window == b"\r\n\r\n") {
+                    match stream.read(&mut buffer).await {
+                        Ok(0) | Err(_) => return,
+                        Ok(read) => seen.extend_from_slice(&buffer[..read]),
+                    }
+                }
+                let _ = stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\ncontent-length: 6\r\nconnection: close\r\n\r\nsecure",
+                    )
+                    .await;
+                let _ = stream.shutdown().await;
+            });
+        }
+    });
+    address
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn proxy_verify_scripts_judge_upstream_certificates() {
+    use panel_ir::{LuaHandler, LUA_SCRIPTS_CAPABILITY};
+
+    // Against an unpatched Pingora the upstream's chain is not kept, so the
+    // pinning script cannot find what it pins.
+    let kept = std::env::var_os("PANEL_PINGORA_CANARY").is_none();
+    let served = rcgen::generate_simple_self_signed(vec!["upstream.example".into()]).unwrap();
+    let upstream = tls_upstream(
+        vec![served.cert.der().clone()],
+        rustls_pki_types::PrivatePkcs8KeyDer::from(served.signing_key.serialize_der()).into(),
+    )
+    .await;
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    snapshot
+        .required_capabilities
+        .push(CapabilityRequirement::new(LUA_SCRIPTS_CAPABILITY, "1"));
+    let hex: String = served
+        .cert
+        .der()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    snapshot.lua.scripts = vec![
+        lua_script(
+            "pin",
+            &format!(
+                "local verify = require 'ngx.ssl.proxysslverify' \
+                 local pinned = ('{hex}'):gsub('%x%x', function(pair) return string.char(tonumber(pair, 16)) end) \
+                 assert(verify.get_verify_result() == 18, verify.get_verify_result()) \
+                 assert(require('ngx.proxyssl').get_tls1_version_str() == 'TLSv1.3') \
+                 verify.set_verify_result(verify.get_verify_cert() == pinned and 0 or 50)"
+            ),
+        ),
+        lua_script(
+            "refuse",
+            "require('ngx.ssl.proxysslverify').set_verify_result(50)",
+        ),
+    ];
+    snapshot.sites.push(site(&["shop.test"]));
+    for (id, sni) in [("pinned", "upstream.example"), ("refused", "other.example")] {
+        let mut secure = pool(id, &[upstream]);
+        secure.endpoints[0].address =
+            EndpointAddress::new(upstream.ip().to_string(), upstream.port(), true).unwrap();
+        secure.tls.verify_certificate = false;
+        secure.tls.sni = Some(sni.into());
+        snapshot.upstream_pools.push(secure);
+    }
+    let mut pinned = route("pinned", 1, prefix("/pinned"), proxy("pinned"));
+    pinned.lua.proxy_ssl_verify = Some(LuaHandler::new("pin"));
+    let mut refused = route("refused", 2, prefix("/"), proxy("refused"));
+    refused.lua.proxy_ssl_verify = Some(LuaHandler::new("refuse"));
+    snapshot.routes.extend([pinned, refused]);
+    let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
+    wait_for(listen).await;
+
+    let trusted = get(listen, Some("shop.test"), "/pinned", "").await;
+    if kept {
+        assert_eq!(
+            trusted.status,
+            200,
+            "{}",
+            String::from_utf8_lossy(&trusted.body)
+        );
+        assert_eq!(trusted.body, b"secure");
+    } else {
+        assert_eq!(trusted.status, 502);
+    }
+    let refused = get(listen, Some("shop.test"), "/refused", "").await;
+    assert_eq!(refused.status, 502);
+    gateway.stop().await;
+}

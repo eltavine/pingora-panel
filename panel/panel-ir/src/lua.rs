@@ -301,6 +301,10 @@ pub struct LuaHandlers {
     /// certificate it presents when asked for one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy_ssl_cert: Option<LuaHandler>,
+    /// As a request's new TLS connection to its upstream is judged by the
+    /// certificate the upstream presented.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_ssl_verify: Option<LuaHandler>,
     /// Set in order as the site's server rewrite phase or the route's
     /// rewrite phase begins, before its handler.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -326,6 +330,7 @@ impl LuaHandlers {
             ("ssl_client_hello", &self.ssl_client_hello),
             ("ssl_cert", &self.ssl_cert),
             ("proxy_ssl_cert", &self.proxy_ssl_cert),
+            ("proxy_ssl_verify", &self.proxy_ssl_verify),
         ]
         .into_iter()
         .filter_map(|(phase, handler)| handler.as_ref().map(|handler| (phase, handler)))

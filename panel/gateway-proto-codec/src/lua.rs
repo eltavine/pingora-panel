@@ -271,6 +271,7 @@ pub(super) fn decode_handlers(value: Option<wire::LuaHandlers>) -> Result<LuaHan
         ssl_client_hello: handler(value.ssl_client_hello)?,
         ssl_cert: handler(value.ssl_cert)?,
         proxy_ssl_cert: handler(value.proxy_ssl_cert)?,
+        proxy_ssl_verify: handler(value.proxy_ssl_verify)?,
         variables: value
             .variables
             .into_iter()
@@ -302,6 +303,7 @@ pub(super) fn encode_handlers(value: &LuaHandlers) -> Option<wire::LuaHandlers> 
         ssl_client_hello: handler(&value.ssl_client_hello),
         ssl_cert: handler(&value.ssl_cert),
         proxy_ssl_cert: handler(&value.proxy_ssl_cert),
+        proxy_ssl_verify: handler(&value.proxy_ssl_verify),
         variables: value
             .variables
             .iter()

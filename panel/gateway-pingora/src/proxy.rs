@@ -1027,14 +1027,19 @@ impl ProxyHttp for PanelProxy {
 
     async fn connected_to_upstream(
         &self,
-        _session: &mut Session,
+        session: &mut Session,
         reused: bool,
-        _peer: &HttpPeer,
+        peer: &HttpPeer,
         #[cfg(unix)] _fd: std::os::unix::io::RawFd,
         #[cfg(windows)] _sock: std::os::windows::io::RawSocket,
-        _digest: Option<&pingora_core::protocols::Digest>,
+        digest: Option<&pingora_core::protocols::Digest>,
         ctx: &mut RequestContext,
     ) -> pingora_core::Result<()> {
+        // A connection is judged once, as its handshake is, not each time
+        // it is reused.
+        if !reused && peer.is_tls() {
+            self.lua_upstream_verify(session, ctx, peer, digest).await?;
+        }
         let upstream = ctx
             .snapshot
             .as_ref()

@@ -204,6 +204,7 @@ fn phase(name: &str) -> Phase {
         "ssl_session_fetch" => Phase::SslSessionFetch,
         "ssl_session_store" => Phase::SslSessionStore,
         "proxy_ssl_cert" => Phase::ProxySslCertificate,
+        "proxy_ssl_verify" => Phase::ProxySslVerify,
         _ => Phase::Log,
     }
 }

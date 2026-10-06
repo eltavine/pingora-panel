@@ -52,6 +52,9 @@ manifest.write_text(text)
 PY
 
 printf 'Testing Panel adapter against Cloudflare Pingora main at %s\n' "$upstream_sha"
+# Upstream Pingora keeps no TLS server certificate in its connection digests,
+# so the adapter's tests expect scripts to find none.
+export PANEL_PINGORA_CANARY=1
 cargo check \
   --manifest-path "$workspace_root/panel/Cargo.toml" \
   --package gateway-pingora \

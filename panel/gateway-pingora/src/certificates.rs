@@ -380,7 +380,7 @@ impl fmt::Debug for ChosenCertificates {
 }
 
 /// Whether `certificate` names itself as its issuer.
-fn self_issued(certificate: &[u8]) -> bool {
+pub(crate) fn self_issued(certificate: &[u8]) -> bool {
     x509_parser::parse_x509_certificate(certificate)
         .is_ok_and(|(_, certificate)| certificate.issuer() == certificate.subject())
 }

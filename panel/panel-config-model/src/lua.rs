@@ -140,6 +140,10 @@ pub struct LuaScope {
     /// certificate it presents when asked for one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy_ssl_cert: Option<LuaCode>,
+    /// As a request's new TLS connection to its upstream is judged by the
+    /// certificate the upstream presented.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_ssl_verify: Option<LuaCode>,
     /// Wall-clock milliseconds a run may take, waits included.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub time_limit_ms: Option<u64>,
@@ -242,6 +246,7 @@ impl LuaScope {
             ssl_client_hello: pick(&self.ssl_client_hello, &outer.ssl_client_hello),
             ssl_cert: pick(&self.ssl_cert, &outer.ssl_cert),
             proxy_ssl_cert: pick(&self.proxy_ssl_cert, &outer.proxy_ssl_cert),
+            proxy_ssl_verify: pick(&self.proxy_ssl_verify, &outer.proxy_ssl_verify),
             time_limit_ms: pick(&self.time_limit_ms, &outer.time_limit_ms),
             work_limit: pick(&self.work_limit, &outer.work_limit),
             allow: pick(&self.allow, &outer.allow),
@@ -300,6 +305,7 @@ impl LuaScope {
             ("ssl_client_hello", &self.ssl_client_hello),
             ("ssl_cert", &self.ssl_cert),
             ("proxy_ssl_cert", &self.proxy_ssl_cert),
+            ("proxy_ssl_verify", &self.proxy_ssl_verify),
         ]
         .into_iter()
         .filter_map(|(phase, code)| code.as_ref().map(|code| (phase, code)))
@@ -322,6 +328,7 @@ impl LuaScope {
             &mut self.ssl_client_hello,
             &mut self.ssl_cert,
             &mut self.proxy_ssl_cert,
+            &mut self.proxy_ssl_verify,
         ]
         .into_iter()
         .flatten()
@@ -796,6 +803,7 @@ pub(crate) fn handlers(
             compile(&scope.ssl_cert)
         },
         proxy_ssl_cert: compile(&scope.proxy_ssl_cert),
+        proxy_ssl_verify: compile(&scope.proxy_ssl_verify),
         variables: Vec::new(),
     }
 }

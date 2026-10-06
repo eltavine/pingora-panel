@@ -1404,7 +1404,8 @@ ends the handshake. `ssl_session_fetch_by_lua*` and `ssl_session_store_by_lua*` 
 `http` keep TLS sessions where scripts choose, with `ngx.ssl.session`, so
 any listener, or another gateway, resumes them, and
 `proxy_ssl_certificate_by_lua*` chooses the certificate a route's TLS
-connections to its upstream present. The code of a
+connections to its upstream present, and `proxy_ssl_verify_by_lua*`
+accepts or refuses each new one by the certificate the upstream presented. The code of a
 `*_by_lua_block` is read with Lua's lexical rules and kept as it is
 written; `access_by_lua '...'` and the other forms that take code as a
 string read as their blocks, with a warning. `lua off;` keeps every

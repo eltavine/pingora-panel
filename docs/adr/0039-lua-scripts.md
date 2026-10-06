@@ -65,6 +65,7 @@ inheritance, where a directive in an inner block replaces the outer one:
 | `ssl_session_fetch_by_lua_block`, `_file` | as a TLS handshake offers to resume a session the listener does not hold | `http` |
 | `ssl_session_store_by_lua_block`, `_file` | as a TLS handshake makes a session | `http` |
 | `proxy_ssl_certificate_by_lua_block`, `_file` | as a request's TLS connection to its upstream chooses the certificate it presents when asked for one | `http`, `server`, `route` |
+| `proxy_ssl_verify_by_lua_block`, `_file` | as a request's new TLS connection to its upstream is judged by the certificate the upstream presented | `http`, `server`, `route` |
 | `lua_shared_dict <name> <size>` | declares a dictionary every VM shares | `http` |
 
 The body of a `*_by_lua_block` directive is read with Lua's lexical rules,
@@ -164,9 +165,18 @@ runs it in the handshake, only when asked; here it may run for a request
 that reuses a connection, which Pingora keeps apart by the certificate it
 presented. It may be written in `http` and servers as well as routes,
 inherited as the other handlers are, and a failure answers 502 unless
-`lua_on_error` says otherwise. `proxy_ssl_verify_by_lua*` is refused:
-Pingora's TLS connections to upstreams keep no server certificate for a
-script to read, so a route's upstream TLS terms verify it.
+`lua_on_error` says otherwise. `proxy_ssl_verify_by_lua*` judges each new
+TLS connection to an upstream, once its handshake is done and before the
+request goes on it: `ngx.ssl.proxysslverify.get_verify_cert` gives the
+chain the upstream presented in DER, as `ngx.ocsp` takes it, since scripts
+have no FFI for OpenSSL's certificate objects; `get_verify_result` gives 0
+when the route's upstream TLS terms verified it, and otherwise OpenSSL's
+code for how it verifies on the pool's trust anchors or the system's; and
+`set_verify_result` with anything but 0 refuses the connection, which
+answers 502 and is not kept. A certificate the route's terms refuse ends
+the handshake before the script runs, so a script that accepts what they
+would not, such as a pinned self-signed certificate, runs on a route that
+does not verify. `ngx.proxyssl` gives the connection's version.
 
 `ngx` is lua-nginx-module's API with its documented semantics, in the phases
 where lua-nginx-module allows each function: `ngx.var`, `ngx.ctx`,
@@ -215,16 +225,15 @@ run scripts with the gateway's own privileges outside the sandbox and
 `signal_graceful_exit` because scripts do not stop workers, and
 `resty.lrucache` (with `resty.lrucache.pureffi`), each VM holding its own
 caches, so the library scripts vendor for its FFI needs no FFI, and
-`ngx.ssl` with `ngx.ssl.clienthello`, `ngx.ssl.session` and
-`ngx.ssl.proxysslcert`, and `ngx.ocsp`. `resty.core.base` gives libraries
+`ngx.ssl` with `ngx.ssl.clienthello`, `ngx.ssl.session`,
+`ngx.ssl.proxysslcert` and `ngx.ssl.proxysslverify`, `ngx.proxyssl` and
+`ngx.ocsp`. `resty.core.base` gives libraries
 its table helpers, status codes, subsystem check and table references, and
 the other `resty.core` modules load and do nothing, since the `ngx` they
 would replace with FFI functions is native here. `require` refuses
 `ngx.pipe`, which would start processes on the gateway's host, LuaJIT's
-`ffi`, whose native calls would leave the sandbox, and
-`ngx.ssl.proxysslverify` and `ngx.proxyssl`, which read upstream TLS
-connections Pingora keeps no handshake of, saying so; the configuration
-check reports them where they are required.
+`ffi`, whose native calls would leave the sandbox, saying so; the
+configuration check reports them where they are required.
 `lua_capture_error_log` keeps, for each VM, what its scripts log up to the
 size given, oldest messages dropped first, for `ngx.errlog.get_logs`;
 `ngx.errlog` also has `raw_log`, `set_filter_level` in `init_by_lua` and

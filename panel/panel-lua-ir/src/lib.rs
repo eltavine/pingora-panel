@@ -76,6 +76,8 @@ pub struct Hooks {
     /// As a request's TLS connection to its upstream chooses its
     /// certificate.
     pub proxy_ssl_cert: Option<Hook>,
+    /// As a request's new TLS connection to its upstream is judged.
+    pub proxy_ssl_verify: Option<Hook>,
     /// Set in order before the site's server rewrite or the route's rewrite
     /// hook.
     pub variables: Vec<Variable>,
@@ -95,6 +97,7 @@ impl Hooks {
             Phase::SslClientHello => self.ssl_client_hello.as_ref(),
             Phase::SslCertificate => self.ssl_cert.as_ref(),
             Phase::ProxySslCertificate => self.proxy_ssl_cert.as_ref(),
+            Phase::ProxySslVerify => self.proxy_ssl_verify.as_ref(),
             _ => None,
         }
     }
@@ -299,6 +302,7 @@ impl Compiler<'_> {
             ssl_client_hello: hook(&handlers.ssl_client_hello, Phase::SslClientHello)?,
             ssl_cert: hook(&handlers.ssl_cert, Phase::SslCertificate)?,
             proxy_ssl_cert: hook(&handlers.proxy_ssl_cert, Phase::ProxySslCertificate)?,
+            proxy_ssl_verify: hook(&handlers.proxy_ssl_verify, Phase::ProxySslVerify)?,
             variables: handlers
                 .variables
                 .iter()

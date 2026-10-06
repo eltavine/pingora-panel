@@ -26,7 +26,7 @@ use panel_lua::{
 };
 use pingora_core::{
     modules::http::{HttpModule, HttpModuleBuilder, Module},
-    upstreams::peer::HttpPeer,
+    upstreams::peer::{HttpPeer, Peer},
     utils::tls::CertKey,
     Error, ErrorType,
 };
@@ -231,6 +231,82 @@ impl Report {
                 ),
             );
         }
+    }
+}
+
+/// How `chain` verifies for `peer` as OpenSSL's verify codes say it: 0 when
+/// it does, with the pool's trust anchors or else the system's.
+fn upstream_verification(
+    peer: &HttpPeer,
+    chain: &[rustls_pki_types::CertificateDer<'static>],
+) -> i64 {
+    use rustls::{client::danger::ServerCertVerifier, CertificateError};
+    /// X509_V_ERR_UNSPECIFIED.
+    const UNSPECIFIED: i64 = 1;
+    let Some((leaf, intermediates)) = chain.split_first() else {
+        return UNSPECIFIED;
+    };
+    if intermediates.is_empty() && crate::certificates::self_issued(leaf) {
+        // X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT.
+        return 18;
+    }
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let verifier: Arc<dyn ServerCertVerifier> = match peer.options.ca.as_deref() {
+        Some(anchors) => {
+            let mut roots = rustls::RootCertStore::empty();
+            for anchor in anchors {
+                let _ = roots.add(rustls_pki_types::CertificateDer::from(
+                    anchor.borrow_raw_cert().clone(),
+                ));
+            }
+            match rustls::client::WebPkiServerVerifier::builder_with_provider(
+                Arc::new(roots),
+                provider,
+            )
+            .build()
+            {
+                Ok(verifier) => verifier,
+                Err(_) => return UNSPECIFIED,
+            }
+        }
+        None => match rustls_platform_verifier::Verifier::new(provider) {
+            Ok(verifier) => Arc::new(verifier),
+            Err(_) => return UNSPECIFIED,
+        },
+    };
+    let name = if peer.sni().is_empty() {
+        match peer.address().as_inet() {
+            Some(address) => rustls_pki_types::ServerName::IpAddress(address.ip().into()),
+            None => return UNSPECIFIED,
+        }
+    } else {
+        match rustls_pki_types::ServerName::try_from(peer.sni().to_owned()) {
+            Ok(name) => name,
+            Err(_) => return UNSPECIFIED,
+        }
+    };
+    let verified = verifier.verify_server_cert(
+        leaf,
+        intermediates,
+        &name,
+        &[],
+        rustls_pki_types::UnixTime::now(),
+    );
+    match verified {
+        Ok(_) => 0,
+        Err(rustls::Error::InvalidCertificate(error)) => match error {
+            CertificateError::NotValidYet | CertificateError::NotValidYetContext { .. } => 9,
+            CertificateError::Expired | CertificateError::ExpiredContext { .. } => 10,
+            CertificateError::BadSignature => 7,
+            CertificateError::UnknownIssuer => 20,
+            CertificateError::Revoked => 23,
+            CertificateError::InvalidPurpose | CertificateError::InvalidPurposeContext { .. } => 26,
+            CertificateError::NotValidForName | CertificateError::NotValidForNameContext { .. } => {
+                62
+            }
+            _ => UNSPECIFIED,
+        },
+        Err(_) => UNSPECIFIED,
     }
 }
 
@@ -881,6 +957,87 @@ impl PanelProxy {
         };
         report.write(&hook, &request_id, "error", &problem);
         Err(refused())
+    }
+
+    /// `proxy_ssl_verify_by_lua`: whether the request's new TLS connection
+    /// to `peer` may carry it, by what the upstream presented. A script
+    /// that sets a verify result other than 0 refuses the connection.
+    pub(super) async fn lua_upstream_verify(
+        &self,
+        session: &mut Session,
+        ctx: &mut RequestContext,
+        peer: &HttpPeer,
+        digest: Option<&pingora_core::protocols::Digest>,
+    ) -> pingora_core::Result<()> {
+        let Some(hook) = Self::lua_hook(ctx, |hooks| &hooks.proxy_ssl_verify) else {
+            return Ok(());
+        };
+        let (Some(plan), Some(report)) = (Self::lua_plan(ctx), self.report(ctx)) else {
+            return Ok(());
+        };
+        let tls = digest.and_then(|digest| digest.ssl_digest.as_ref());
+        let chain: Vec<rustls_pki_types::CertificateDer<'static>> = tls
+            .and_then(|tls| {
+                tls.extension
+                    .get::<Vec<rustls_pki_types::CertificateDer<'static>>>()
+            })
+            .cloned()
+            .unwrap_or_default();
+        let version = tls
+            .and_then(|tls| TlsVersion::parse(&tls.version))
+            .map(TlsVersion::number);
+        let verify_result = if peer.verify_cert() {
+            0
+        } else {
+            upstream_verification(peer, &chain)
+        };
+        let path = normalized(session);
+        let mut scripts = self.lua_scripts(session, ctx, &plan, &path, "");
+        {
+            let mut exchange = scripts.exchange();
+            let upstream = &mut exchange.upstream_tls;
+            upstream.chain = chain
+                .iter()
+                .map(|certificate| certificate.to_vec())
+                .collect();
+            upstream.version = version;
+            upstream.verify_result = verify_result;
+            upstream.verdict = None;
+        }
+        let started = Instant::now();
+        let outcome = scripts.run(hook.handler, &mut NoHost).await;
+        report.finished(&hook, &scripts, &outcome, started.elapsed());
+        let (verdict, request_id) = {
+            let mut exchange = scripts.exchange();
+            let verdict = exchange.upstream_tls.verdict.take();
+            exchange.upstream_tls = panel_lua::UpstreamTls::default();
+            (verdict, exchange.connection.request_id.clone())
+        };
+        put_scripts(session, scripts);
+        match outcome {
+            Outcome::Abort => return Err(failed(502, "proxy SSL verify")),
+            Outcome::Failed(_) => {
+                return match fallback_status(&hook, 502) {
+                    None => Ok(()),
+                    Some(status) => Err(failed(status, "proxy SSL verify")),
+                }
+            }
+            Outcome::Continue | Outcome::Respond => {}
+        }
+        match verdict {
+            Some(code) if code != 0 => {
+                report.write(
+                    &hook,
+                    &request_id,
+                    "error",
+                    &format!(
+                        "the script refused the upstream's certificate (verify result {code})"
+                    ),
+                );
+                Err(failed(502, "proxy SSL verify"))
+            }
+            _ => Ok(()),
+        }
     }
 
     /// Runs the body filter on a piece of the response body. A filter that

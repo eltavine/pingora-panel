@@ -71,6 +71,12 @@ handover can exit the process.
 - **Runtime control.** `gatewayd` exposes data plane state, reload, worker
   count, shutdown, upstream health and drain over
   `pingora.panel.gateway.v1.GatewayRuntime`, admitting only `panel-api`.
+- **One change to Pingora.** Its rustls client keeps the server's
+  certificate chain in the connection digest's extension, a slot upstream
+  Pingora already has, so `proxy_ssl_verify_by_lua` (ADR 0039) can read
+  what an upstream presented. The adapter reads it through upstream's API
+  and builds against an unchanged Pingora, where scripts find no chain;
+  the weekly canary against Pingora's main tests it that way.
 
 ## Consequences
 

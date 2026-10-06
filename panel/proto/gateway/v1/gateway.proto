@@ -720,6 +720,9 @@ message LuaHandlers {
   // As a request's TLS connection to its upstream chooses the certificate
   // it presents when asked for one.
   LuaHandler proxy_ssl_cert = 11;
+  // As a request's new TLS connection to its upstream is judged by the
+  // certificate the upstream presented.
+  LuaHandler proxy_ssl_verify = 12;
 }
 
 // A variable of the request templates name as ${lua:NAME}.

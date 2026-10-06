@@ -1284,13 +1284,15 @@ http {
     );
 
     let verify = read(&Sources::single(
-        "language_version 1;\nhttp {\n    proxy_ssl_verify_by_lua_block { }\n}\n",
+        "language_version 1;\nhttp {\n    proxy_ssl_verify_by_lua_block { }\n    server s {\n        server_name s.example;\n        respond 200;\n    }\n}\n",
     ));
-    assert!(verify.diagnostics.iter().any(|diagnostic| {
-        diagnostic.message.contains("proxy_ssl_verify_by_lua_block")
-            && diagnostic
-                .help
-                .as_deref()
-                .is_some_and(|help| help.contains("upstream TLS terms"))
-    }));
+    assert!(verify.is_valid(), "{:#?}", verify.diagnostics);
+    assert!(verify.model.lua.http.proxy_ssl_verify.is_some());
+    let snapshot = compile(&verify.model, RevisionId::new(1)).unwrap();
+    assert!(snapshot.sites[0].lua.proxy_ssl_verify.is_some());
+    let printed = print_sources(&verify.model);
+    assert!(printed
+        .get("main.conf")
+        .unwrap()
+        .contains("    proxy_ssl_verify_by_lua_block {"));
 }

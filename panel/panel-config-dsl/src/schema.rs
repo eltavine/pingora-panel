@@ -438,6 +438,12 @@ pub static DIRECTIVES: &[DirectiveSpec] = &[
     spec!("proxy_ssl_certificate_by_lua_file" in LUA_CONTEXTS, None, 1..Some(1), false,
         "proxy_ssl_certificate_by_lua_file lua/<file>.lua;", "Chooses with a file's script the certificate a TLS connection to the upstream presents.",
         inherits "A route's replaces its server's, and a server's the one in http."),
+    spec!("proxy_ssl_verify_by_lua_block" in LUA_CONTEXTS, None, 0..Some(0), false,
+        "proxy_ssl_verify_by_lua_block { ... }", "Judges a request's new TLS connection to its upstream by the certificate the upstream presented, with ngx.ssl.proxysslverify; set_verify_result with an error refuses it.",
+        inherits "A route's replaces its server's, and a server's the one in http."),
+    spec!("proxy_ssl_verify_by_lua_file" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "proxy_ssl_verify_by_lua_file lua/<file>.lua;", "Judges with a file's script a request's new TLS connection to its upstream.",
+        inherits "A route's replaces its server's, and a server's the one in http."),
     spec!("rewrite_by_lua_block" in LUA_CONTEXTS, None, 0..Some(0), false,
         "rewrite_by_lua_block { ... }", "Runs after the route is chosen, before security policies; ngx.req.set_uri(uri, true) chooses the route again.",
         inherits "A route's replaces its server's, and a server's the one in http."),
@@ -623,9 +629,6 @@ pub fn refusal(name: &str) -> Option<String> {
     let reason = match name {
         "lua_package_path" | "lua_package_cpath" => {
             "require loads the built-in modules and the files under lua/, and nothing else"
-        }
-        "proxy_ssl_verify_by_lua_block" | "proxy_ssl_verify_by_lua_file" => {
-            "Pingora's TLS connections to upstreams keep no server certificate for a script to verify; the route's upstream TLS terms verify it"
         }
         "lua_ssl_key_log" => {
             "TLS session keys are never written out, so no capture can be decrypted with them"

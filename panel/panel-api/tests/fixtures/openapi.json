@@ -83489,6 +83489,17 @@
               }
             ]
           },
+          "proxy_ssl_verify": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LuaCode",
+                "description": "As a request's new TLS connection to its upstream is judged by the\ncertificate the upstream presented."
+              }
+            ]
+          },
           "rewrite": {
             "oneOf": [
               {
@@ -84163,7 +84174,7 @@
           },
           "phase": {
             "type": "string",
-            "description": "`set`, `server_rewrite`, `rewrite`, `access`, `precontent`,\n`content`, `balancer`, `header_filter`, `body_filter`, `log`,\n`ssl_client_hello`, `ssl_cert`, `ssl_session_fetch`,\n`ssl_session_store` or `proxy_ssl_cert`."
+            "description": "`set`, `server_rewrite`, `rewrite`, `access`, `precontent`,\n`content`, `balancer`, `header_filter`, `body_filter`, `log`,\n`ssl_client_hello`, `ssl_cert`, `ssl_session_fetch`,\n`ssl_session_store`, `proxy_ssl_cert` or `proxy_ssl_verify`."
           },
           "time_limit_ms": {
             "type": [

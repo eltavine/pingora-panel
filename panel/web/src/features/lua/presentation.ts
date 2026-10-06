@@ -15,6 +15,7 @@ export const PHASES = [
   'content',
   'balancer',
   'proxy_ssl_cert',
+  'proxy_ssl_verify',
   'header_filter',
   'body_filter',
   'log',
