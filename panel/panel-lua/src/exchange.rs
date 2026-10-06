@@ -33,10 +33,15 @@ pub enum Phase {
     /// `ssl_client_hello_by_lua`: a TLS handshake as the client's hello
     /// arrives.
     SslClientHello,
+    /// `ssl_session_fetch_by_lua`: the session a handshake offers to
+    /// resume, which the gateway does not hold.
+    SslSessionFetch,
+    /// `ssl_session_store_by_lua`: a session a handshake made.
+    SslSessionStore,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 17] = [
+    pub const ALL: [Phase; 19] = [
         Phase::Init,
         Phase::InitWorker,
         Phase::ServerRewrite,
@@ -54,6 +59,8 @@ impl Phase {
         Phase::Set,
         Phase::SslCertificate,
         Phase::SslClientHello,
+        Phase::SslSessionFetch,
+        Phase::SslSessionStore,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -75,6 +82,8 @@ impl Phase {
             Phase::Set => "set",
             Phase::SslCertificate => "ssl_cert",
             Phase::SslClientHello => "ssl_client_hello",
+            Phase::SslSessionFetch => "ssl_session_fetch",
+            Phase::SslSessionStore => "ssl_session_store",
         }
     }
 

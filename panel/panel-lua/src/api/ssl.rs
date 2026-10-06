@@ -9,7 +9,10 @@ use crate::{
     tls::der,
     vm::Slot,
 };
-use mlua::{FromLuaMulti, Lua, MultiValue, Table, UserData, UserDataRef, Value, Variadic};
+use bytes::Bytes;
+use mlua::{
+    FromLuaMulti, Lua, LuaString, MultiValue, Table, UserData, UserDataRef, Value, Variadic,
+};
 use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
 use std::{net::SocketAddr, sync::Arc};
 
@@ -353,6 +356,56 @@ pub(super) fn module(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
             move |lua, _, _: Variadic<Value>| failed(lua, 1, reason),
         )?;
     }
+    Ok(module)
+}
+
+/// The `ngx.ssl.session` module.
+pub(super) fn session(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
+    let module = lua.create_table()?;
+    define(lua, &module, slot, "get_session_id", |lua, slot, ()| {
+        let id = with(slot, None, |exchange| {
+            matches!(
+                exchange.phase,
+                Phase::SslSessionFetch | Phase::SslSessionStore
+            )
+            .then(|| exchange.handshake.session.clone())
+        })?;
+        match id {
+            None => Err(mlua::Error::runtime("API disabled in the current context")),
+            Some(None) => failed(lua, 1, "no session ID"),
+            Some(Some(id)) => {
+                let hex: String = id.iter().map(|byte| format!("{byte:02x}")).collect();
+                Ok(results([text(lua, hex)?]))
+            }
+        }
+    })?;
+    define(
+        lua,
+        &module,
+        slot,
+        "get_serialized_session",
+        |lua, slot, ()| match with(slot, Some(Phase::SslSessionStore), |exchange| {
+            exchange.handshake.serialized.clone()
+        })? {
+            Some(session) => Ok(results([text(lua, session)?])),
+            None => failed(lua, 1, "no session"),
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "set_serialized_session",
+        |lua, slot, session: LuaString| {
+            if session.as_bytes().is_empty() {
+                return failed(lua, 1, "the serialized session is empty");
+            }
+            with(slot, Some(Phase::SslSessionFetch), |exchange| {
+                exchange.handshake.serialized = Some(Bytes::copy_from_slice(&session.as_bytes()));
+            })?;
+            Ok(done())
+        },
+    )?;
     Ok(module)
 }
 

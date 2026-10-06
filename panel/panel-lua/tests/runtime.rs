@@ -2375,3 +2375,47 @@ async fn raw_request_sockets_wait_for_a_client_and_a_sent_header() {
         "{printed}"
     );
 }
+
+#[tokio::test]
+async fn session_handlers_read_and_give_sessions() {
+    let lua = start(
+        1,
+        handlers(&[
+            r#"
+            local session = require "ngx.ssl.session"
+            assert(ngx.get_phase() == "ssl_session_fetch")
+            assert(session.get_session_id() == "0a0b0c")
+            assert(not pcall(session.get_serialized_session))
+            assert(session.set_serialized_session("kept elsewhere"))
+            "#,
+            r#"
+            local session = require "ngx.ssl.session"
+            assert(session.get_session_id() == "0a0b0c")
+            assert(session.get_serialized_session() == "fresh")
+            assert(not pcall(session.set_serialized_session, "x"))
+            assert(not pcall(ngx.sleep, 0))
+            assert(ngx.timer.at(0, function() end))
+            "#,
+        ]),
+    );
+    let mut exchange = request("GET", "/", &[]);
+    exchange.handshake.session = Some(Bytes::from_static(&[10, 11, 12]));
+    let mut scripts = lua.runtime.scripts(exchange);
+    let outcome = run(
+        &mut scripts,
+        handler(lua.handlers[0], Phase::SslSessionFetch),
+    )
+    .await;
+    assert_eq!(outcome, Outcome::Continue, "{:?}", scripts.exchange().logs);
+    assert_eq!(
+        scripts.exchange().handshake.serialized.as_deref(),
+        Some(&b"kept elsewhere"[..])
+    );
+    scripts.exchange().handshake.serialized = Some(Bytes::from_static(b"fresh"));
+    let outcome = run(
+        &mut scripts,
+        handler(lua.handlers[1], Phase::SslSessionStore),
+    )
+    .await;
+    assert_eq!(outcome, Outcome::Continue, "{:?}", scripts.exchange().logs);
+}

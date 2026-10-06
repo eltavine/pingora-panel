@@ -8,6 +8,8 @@ use bytes::Bytes;
 const SERVER_NAME: u16 = 0;
 /// `supported_versions` (RFC 8446 §4.2.1).
 pub(crate) const SUPPORTED_VERSIONS: u16 = 43;
+/// `pre_shared_key` (RFC 8446 §4.2.11).
+const PRE_SHARED_KEY: u16 = 41;
 
 /// A handshake as scripts see and change it.
 #[derive(Clone, Debug, Default)]
@@ -23,6 +25,15 @@ pub struct Handshake {
     /// Its extensions, by type, in its order.
     pub extensions: Vec<(u16, Bytes)>,
     pub random: Bytes,
+    /// The session ID the hello offers to resume (`legacy_session_id`).
+    pub session_id: Bytes,
+    /// The identities of the tickets it offers to resume with.
+    pub tickets: Vec<Bytes>,
+    /// The session `ssl_session_*_by_lua` handlers run for, by its ID.
+    pub session: Option<Bytes>,
+    /// That session, serialized: what `ssl_session_store_by_lua` reads,
+    /// and what `ssl_session_fetch_by_lua` found.
+    pub serialized: Option<Bytes>,
     /// The version the handshake settles on, as far as the gateway knows:
     /// the newest the client offers, until the gateway says otherwise.
     pub version: Option<u16>,
@@ -78,7 +89,7 @@ impl Handshake {
         let mut body = outer.vector(3)?;
         let legacy = body.number(2)? as u16;
         let random = Bytes::copy_from_slice(body.take(32)?);
-        body.vector(1)?;
+        let session_id = Bytes::copy_from_slice(body.vector(1)?.0);
         let ciphers = body.vector(2)?.u16s();
         body.vector(1)?;
         let mut extensions = Vec::new();
@@ -91,6 +102,7 @@ impl Handshake {
         }
         let mut server_name = None;
         let mut versions = vec![legacy];
+        let mut tickets = Vec::new();
         for (kind, data) in &extensions {
             let mut reader = Reader(data);
             match *kind {
@@ -108,6 +120,13 @@ impl Handshake {
                     }
                 }
                 SUPPORTED_VERSIONS => versions = reader.vector(1)?.u16s(),
+                PRE_SHARED_KEY => {
+                    let mut identities = reader.vector(2)?;
+                    while !identities.0.is_empty() {
+                        tickets.push(Bytes::copy_from_slice(identities.vector(2)?.0));
+                        identities.take(4)?;
+                    }
+                }
                 _ => {}
             }
         }
@@ -123,6 +142,8 @@ impl Handshake {
             ciphers,
             extensions,
             random,
+            session_id,
+            tickets,
             version,
             ..Self::default()
         })
@@ -188,5 +209,35 @@ mod tests {
         assert!(Handshake::parse(&hello()[..20]).is_none());
         assert_eq!(version_name(0x0304), Some("TLSv1.3"));
         assert!(grease(0x1a1a) && grease(0xfafa) && !grease(0x0a1a) && !grease(0x0304));
+        assert!(handshake.session_id.is_empty() && handshake.tickets.is_empty());
+    }
+
+    #[test]
+    fn hellos_give_the_sessions_they_offer_to_resume() {
+        let identity = b"ticket-1";
+        let mut psk = vec![0, 41];
+        let identities_len = 2 + identity.len() + 4;
+        let binders = [0u8, 33, 32];
+        let ext_len = 2 + identities_len + binders.len() + 32;
+        psk.extend((ext_len as u16).to_be_bytes());
+        psk.extend((identities_len as u16).to_be_bytes());
+        psk.extend((identity.len() as u16).to_be_bytes());
+        psk.extend(identity);
+        psk.extend([0, 0, 0, 1]);
+        psk.extend(binders);
+        psk.extend([9u8; 32]);
+        let mut body = vec![0x03, 0x03];
+        body.extend([7u8; 32]);
+        body.push(32);
+        body.extend([5u8; 32]);
+        body.extend([0, 2, 0x13, 0x01, 1, 0]);
+        body.extend((psk.len() as u16).to_be_bytes());
+        body.extend(psk);
+        let mut message = vec![1];
+        message.extend(&(body.len() as u32).to_be_bytes()[1..]);
+        message.extend(body);
+        let handshake = Handshake::parse(&message).unwrap();
+        assert_eq!(&handshake.session_id[..], &[5u8; 32]);
+        assert_eq!(handshake.tickets, [Bytes::from_static(b"ticket-1")]);
     }
 }
