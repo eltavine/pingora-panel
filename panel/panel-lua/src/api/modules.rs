@@ -12,7 +12,9 @@ use crate::{
     vm::{refused, Slot},
 };
 use md5::{Digest, Md5};
-use mlua::{chunk::ChunkMode, Function, Lua, LuaString, Table, UserData, UserDataMethods, Value};
+use mlua::{
+    chunk::ChunkMode, Function, Lua, LuaString, MultiValue, Table, UserData, UserDataMethods, Value,
+};
 use parking_lot::Mutex;
 use sha1::Sha1;
 use sha2::{Sha224, Sha256, Sha384, Sha512};
@@ -70,6 +72,17 @@ fn load(
 ) -> mlua::Result<Value> {
     if name == "panel.v1" {
         return panel_v1(lua, module_meta);
+    }
+    if name == "resty.lrucache" || name == "resty.lrucache.pureffi" {
+        let env = lua.create_table()?;
+        env.set_metatable(Some(module_meta.clone()))?;
+        env.set_safeenv(true);
+        return lua
+            .load(include_str!("lrucache.lua"))
+            .set_name("=resty.lrucache")
+            .set_environment(env)
+            .into_function()?
+            .call::<Value>(());
     }
     if let Some(module) = built_in(lua, name, ngx, globals, slot)? {
         return Ok(module);
@@ -198,7 +211,7 @@ fn panel_v1(lua: &Lua, module_meta: &Table) -> mlua::Result<Value> {
 }
 
 /// The modules OpenResty scripts commonly load that come with the gateway.
-pub(crate) const BUILT_IN: [&str; 23] = [
+pub(crate) const BUILT_IN: [&str; 28] = [
     "panel.v1",
     "cjson",
     "cjson.safe",
@@ -222,6 +235,11 @@ pub(crate) const BUILT_IN: [&str; 23] = [
     "ngx.base64",
     "ngx.balancer",
     "ngx.semaphore",
+    "ngx.resp",
+    "ngx.req",
+    "ngx.process",
+    "resty.lrucache",
+    "resty.lrucache.pureffi",
 ];
 
 fn built_in(
@@ -301,6 +319,37 @@ fn built_in(
         "resty.sha384" => hasher::<Sha384>(lua)?,
         "resty.sha512" => hasher::<Sha512>(lua)?,
         "ngx.re" => ngx.raw_get("re")?,
+        "ngx.resp" | "ngx.req" => {
+            let module = lua.create_table()?;
+            let table: Table = ngx.raw_get(&name[4..])?;
+            module.raw_set("add_header", table.raw_get::<Value>("add_header")?)?;
+            Value::Table(module)
+        }
+        "ngx.process" => {
+            let module = lua.create_table()?;
+            module.raw_set("type", lua.create_function(|_, ()| Ok("worker"))?)?;
+            module.raw_set(
+                "get_master_pid",
+                lua.create_function(|_, ()| Ok(std::process::id()))?,
+            )?;
+            module.raw_set(
+                "enable_privileged_agent",
+                lua.create_function(|lua, _: MultiValue| {
+                    failed(
+                        lua,
+                        1,
+                        "privileged agent processes are not available: they would run scripts with the gateway's own privileges, outside the sandbox",
+                    )
+                })?,
+            )?;
+            module.raw_set(
+                "signal_graceful_exit",
+                lua.create_function(|lua, ()| {
+                    failed(lua, 1, "scripts cannot stop the gateway's workers")
+                })?,
+            )?;
+            Value::Table(module)
+        }
         "ngx.base64" => {
             let module = lua.create_table()?;
             module.raw_set(

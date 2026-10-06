@@ -123,9 +123,14 @@ and tables of them to it and its results back; there the function has the
 Modules OpenResty scripts commonly load are built in:
 `cjson` and `cjson.safe`, `bit` with LuaJIT BitOp semantics, `table.new`,
 `table.clear`, `table.nkeys`, `resty.core`, `resty.string`, `resty.md5`,
-`resty.sha1`, `resty.sha256`, `resty.random`, `ngx.re`, `ngx.balancer`
-and `ngx.semaphore`, whose semaphores the threads, timers and requests of
-one VM share. Errors the runtime's functions raise reach `pcall` as
+`resty.sha1`, `resty.sha256`, `resty.random`, `ngx.re`, `ngx.balancer`,
+`ngx.semaphore`, whose semaphores the threads, timers and requests of
+one VM share, `ngx.resp` and `ngx.req` with `add_header`, `ngx.process`,
+which refuses `enable_privileged_agent` because a privileged agent would
+run scripts with the gateway's own privileges outside the sandbox and
+`signal_graceful_exit` because scripts do not stop workers, and
+`resty.lrucache` (with `resty.lrucache.pureffi`), each VM holding its own
+caches, so the library scripts vendor for its FFI needs no FFI. Errors the runtime's functions raise reach `pcall` as
 strings, as a C function's do. Every `ngx` function either follows its documentation or
 raises an error naming it, and checking the configuration lists each place a
 script uses a function this gateway does not provide.

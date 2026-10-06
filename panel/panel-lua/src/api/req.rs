@@ -130,6 +130,21 @@ pub(super) fn table(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
     )?;
     let s = Arc::clone(slot);
     req.raw_set(
+        "add_header",
+        lua.create_function(move |_, (name, value): (LuaString, Value)| {
+            let name = header_name(&name.as_bytes(), false)?;
+            let values = header_values(&value)?;
+            exchange(&s, Api::ReqSetHeader, |exchange| {
+                for value in values {
+                    exchange.request.headers.append(name.clone(), value);
+                }
+                exchange.changes.headers = true;
+                Ok(())
+            })
+        })?,
+    )?;
+    let s = Arc::clone(slot);
+    req.raw_set(
         "clear_header",
         lua.create_function(move |_, name: LuaString| {
             let name = header_name(&name.as_bytes(), false)?;

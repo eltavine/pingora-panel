@@ -195,6 +195,31 @@ pub(super) fn header_proxy(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
 pub(super) fn resp_table(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
     let resp = lua.create_table()?;
     let meta = headers_meta(lua)?;
+    let adder = Arc::clone(slot);
+    resp.raw_set(
+        "add_header",
+        lua.create_function(move |_, (key, value): (LuaString, Value)| {
+            let name = header_name(&key.as_bytes(), transforms_underscores(&adder))?;
+            let values = header_values(&value)?;
+            exchange(&adder, Api::Header, |exchange| {
+                if exchange.headers_sent && exchange.phase != Phase::HeaderFilter {
+                    exchange.log(
+                        LogLevel::Err,
+                        format!(
+                            "attempt to set ngx.header.{} after sending out response headers",
+                            name.as_str()
+                        ),
+                    );
+                    return Ok(());
+                }
+                for value in values {
+                    exchange.response.headers.append(name.clone(), value);
+                }
+                exchange.changes.response_headers = true;
+                Ok(())
+            })
+        })?,
+    )?;
     let slot = Arc::clone(slot);
     resp.raw_set(
         "get_headers",

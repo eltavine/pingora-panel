@@ -2024,3 +2024,53 @@ async fn subrequests_carry_their_options_and_come_back_as_tables() {
     assert!(host.asked[1].body.is_none() && host.asked[1].variables.is_empty());
     assert!(host.asked[2].share_variables);
 }
+
+#[tokio::test]
+async fn resty_core_modules_and_lrucache_work_as_in_openresty() {
+    let lua = start(
+        1,
+        handlers(&[r#"
+            local lrucache = require "resty.lrucache"
+            local c = assert(lrucache.new(2))
+            c:set("a", 1)
+            c:set("b", 2, 0, 7)
+            assert(c:get("a") == 1)
+            c:set("c", 3)
+            assert(c:get("b") == nil, "b was used least recently")
+            assert(c:get("a") == 1)
+            assert(c:count() == 2 and c:capacity() == 2)
+            local keys = c:get_keys()
+            assert(keys[1] == "a" and keys[2] == "c" and keys[3] == nil)
+            c:set("t", "x", 0.001, 5)
+            ngx.sleep(0.01)
+            local fresh, stale, flags = c:get("t")
+            assert(fresh == nil and stale == "x" and flags == 5)
+            assert(c:delete("t") and not c:delete("t"))
+            c:flush_all()
+            assert(c:count() == 0 and c:get("a") == nil)
+            assert(require("resty.lrucache.pureffi").new(1))
+            assert(lrucache.new(0) == nil)
+
+            local resp = require "ngx.resp"
+            resp.add_header("X-Multi", "1")
+            resp.add_header("X-Multi", "2")
+            local req = require "ngx.req"
+            req.add_header("X-Added", "a")
+            req.add_header("X-Added", { "b", "c" })
+            local process = require "ngx.process"
+            assert(process.type() == "worker" and process.get_master_pid() > 0)
+            local ok, err = process.enable_privileged_agent()
+            assert(ok == nil and err:find("privileged"), err)
+            ngx.say(#ngx.req.get_headers()["X-Added"])
+        "#]),
+    );
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = run(&mut scripts, handler(lua.handlers[0], Phase::Content)).await;
+    assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+    let exchange = scripts.exchange();
+    assert_eq!(exchange.response.body, b"3\n");
+    assert_eq!(
+        exchange.response.headers.get_all("x-multi").iter().count(),
+        2
+    );
+}
