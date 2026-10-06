@@ -108,7 +108,8 @@ fn detail(inspected: ImageInspect, containers: u32) -> wire::ImageDetail {
     }
 }
 
-/// Whether an image answers a search of its tags and ID.
+/// Whether an image answers a search of its tags, digests and ID; an image
+/// pulled by digest may have no tag at all.
 fn matches(image: &wire::Image, search: &str) -> bool {
     let search = search.trim().to_lowercase();
     search.is_empty()
@@ -116,7 +117,8 @@ fn matches(image: &wire::Image, search: &str) -> bool {
         || image
             .tags
             .iter()
-            .any(|tag| tag.to_lowercase().contains(&search))
+            .chain(&image.digests)
+            .any(|name| name.to_lowercase().contains(&search))
 }
 
 /// How many containers, running or not, each image has, and the images
@@ -444,6 +446,12 @@ mod tests {
 
         let found = listed(&service, "REDIS").await;
         assert_eq!(found.images.len(), 1);
+        let by_digest = listed(&service, "nginx@sha256:d1").await;
+        assert_eq!(
+            by_digest.images.len(),
+            1,
+            "images pulled by digest are found by it"
+        );
     }
 
     #[tokio::test]

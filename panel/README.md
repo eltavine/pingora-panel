@@ -640,7 +640,7 @@ processes, each with the time the engine read them. The agent reads at
 most 16 containers at once, and leaves out one that stops meanwhile.
 `GET /api/v1/container-engines/{engine}/images` lists an engine's images
 with their tags, digests, size and the containers made from each,
-searched by tag or ID, and `.../images/{image}` shows one's platform,
+searched by tag, digest or ID, and `.../images/{image}` shows one's platform,
 author, user, working directory, exposed ports, volumes, stop signal,
 layers and labels, never its environment or command line; both need
 `containers.read`. `DELETE .../images/{image}` needs `containers.manage`
