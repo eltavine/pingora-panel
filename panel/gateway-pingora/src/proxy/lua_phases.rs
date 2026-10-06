@@ -43,6 +43,8 @@ pub(super) enum LuaStep {
     Go { jump: bool },
     /// The request was answered.
     Done,
+    /// `ngx.exec`: the request starts over with its new URI.
+    Redirect,
 }
 
 /// Closes the connection without an answer, as nginx's 444 does.
@@ -369,7 +371,7 @@ impl PanelProxy {
         report.finished(hook, &scripts, &outcome, started.elapsed());
         match outcome {
             Outcome::Continue | Outcome::Respond => {
-                let (jump, body) = {
+                let (jump, redirected, body) = {
                     let mut exchange = scripts.exchange();
                     let changes = exchange.changes();
                     let body = changes
@@ -378,12 +380,15 @@ impl PanelProxy {
                         .flatten();
                     lua::apply_request(session.req_header_mut(), &mut exchange)
                         .map_err(internal)?;
-                    (changes.jump, body)
+                    (changes.jump, exchange.redirected(), body)
                 };
                 if body.is_some() {
                     ctx.lua_body = body;
                 }
                 put_scripts(session, scripts);
+                if redirected {
+                    return Ok(LuaStep::Redirect);
+                }
                 if outcome == Outcome::Respond {
                     self.lua_answer(session, ctx).await?;
                     return Ok(LuaStep::Done);

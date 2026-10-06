@@ -242,6 +242,7 @@ impl Scripts {
             Ok(()) => {
                 let exchange = self.exchange.lock();
                 match exchange.exit {
+                    Some(Exit::Exec) => Outcome::Continue,
                     Some(Exit::Abort) => Outcome::Abort,
                     Some(Exit::Respond) => Outcome::Respond,
                     Some(Exit::Phase) if handler.phase == Phase::Content => Outcome::Respond,

@@ -1295,3 +1295,61 @@ async fn errors_of_host_functions_reach_pcall_as_strings() {
     let body = String::from_utf8(scripts.exchange().response.body.clone()).unwrap();
     assert!(body.ends_with("|plain\n"), "{body}");
 }
+
+#[tokio::test]
+async fn exec_redirects_internally_and_ends_the_handler() {
+    let lua = start(
+        1,
+        handlers(&[
+            r#"ngx.exec("/next?a=1", { b = "x y" }) ngx.say("not reached")"#,
+            "ngx.say(tostring(ngx.req.is_internal()))",
+            "ngx.say('sent') ngx.exec('/next')",
+            "ngx.exec('@named')",
+            "ngx.exec('/../etc')",
+        ]),
+    );
+    let mut scripts = lua.runtime.scripts(request("GET", "/first?z=9", &[]));
+    assert_eq!(
+        run(&mut scripts, handler(lua.handlers[0], Phase::Content)).await,
+        Outcome::Continue
+    );
+    {
+        let exchange = scripts.exchange();
+        assert!(exchange.redirected());
+        assert_eq!(exchange.request.uri, "/next");
+        assert_eq!(exchange.request.args.as_deref(), Some("a=1&b=x%20y"));
+        assert_eq!(exchange.request.request_uri, "/first?z=9");
+        assert!(exchange.response.body.is_empty());
+    }
+    assert_eq!(
+        run(&mut scripts, handler(lua.handlers[1], Phase::Content)).await,
+        Outcome::Respond
+    );
+    assert_eq!(scripts.exchange().response.body, b"true\n");
+    assert!(!scripts.exchange().redirected());
+
+    for (index, wanted) in [
+        (2, "after sending out response headers"),
+        (3, "no named locations"),
+        (4, "unsafe uri"),
+    ] {
+        let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+        let Outcome::Failed(failure) =
+            run(&mut scripts, handler(lua.handlers[index], Phase::Content)).await
+        else {
+            panic!("{wanted}");
+        };
+        assert!(failure.message.contains(wanted), "{}", failure.message);
+    }
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let Outcome::Failed(failure) =
+        run(&mut scripts, handler(lua.handlers[0], Phase::HeaderFilter)).await
+    else {
+        panic!("ngx.exec is not for header filters");
+    };
+    assert!(
+        failure.message.contains("header_filter_by_lua"),
+        "{}",
+        failure.message
+    );
+}

@@ -2471,6 +2471,13 @@ async fn lua_handlers_rewrite_answer_filter_and_choose_peers() {
             "count",
             "local hits = ngx.shared.hits hits:safe_add('n', 0) ngx.say(hits:incr('n', 1))",
         ),
+        lua_script("exec", "return ngx.exec('/target', { x = '1 2' })"),
+        lua_script(
+            "target",
+            "ngx.say(ngx.var.uri, ' ', ngx.var.args, ' ', tostring(ngx.req.is_internal()), ' ', ngx.var.request_uri)",
+        ),
+        lua_script("cycle", "return ngx.exec('/cycle')"),
+        lua_script("gate", "return ngx.exec('/target')"),
     ];
     snapshot.lua.shared_dicts.push(LuaSharedDict {
         name: "hits".into(),
@@ -2496,6 +2503,8 @@ async fn lua_handlers_rewrite_answer_filter_and_choose_peers() {
         RouteAction::respond(200, Some("new".into())),
     );
     generated.lua.header_filter = Some(LuaHandler::new("seen"));
+    let mut gate = route("gate", 11, prefix("/gate"), proxy("app"));
+    gate.lua.access = Some(LuaHandler::new("gate"));
     snapshot.routes = vec![
         generated,
         route(
@@ -2528,6 +2537,31 @@ async fn lua_handlers_rewrite_answer_filter_and_choose_peers() {
                 handler: LuaHandler::new("count"),
             },
         ),
+        route(
+            "exec",
+            8,
+            prefix("/exec"),
+            RouteAction::Lua {
+                handler: LuaHandler::new("exec"),
+            },
+        ),
+        route(
+            "target",
+            9,
+            prefix("/target"),
+            RouteAction::Lua {
+                handler: LuaHandler::new("target"),
+            },
+        ),
+        route(
+            "cycle",
+            10,
+            prefix("/cycle"),
+            RouteAction::Lua {
+                handler: LuaHandler::new("cycle"),
+            },
+        ),
+        gate,
     ];
     snapshot.upstream_pools.push(pool("app", &[upstream]));
     let mut lb = pool("lb", &[unreachable]);
@@ -2582,6 +2616,19 @@ async fn lua_handlers_rewrite_answer_filter_and_choose_peers() {
             expected
         );
     }
+
+    let redirected = get(listen, Some("shop.test"), "/exec?y=0", "").await;
+    assert_eq!(redirected.status, 200, "{}", body(&redirected));
+    assert_eq!(
+        body(&redirected),
+        "/target x=1%202 true /exec?y=0\n",
+        "ngx.exec handles the request again with its new URI and arguments"
+    );
+    let gated = get(listen, Some("shop.test"), "/gate", "").await;
+    assert_eq!(body(&gated), "/target nil true /gate\n");
+    let cycling = get(listen, Some("shop.test"), "/cycle", "").await;
+    assert_eq!(cycling.status, 500);
+    assert!(body(&cycling).contains("internal redirection cycle"));
     gateway.stop().await;
 }
 

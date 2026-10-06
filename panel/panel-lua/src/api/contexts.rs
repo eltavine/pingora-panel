@@ -68,10 +68,11 @@ pub(crate) enum Api {
     ReqAppendBody,
     ReqFinishBody,
     ReqGetBodyFile,
+    Exec,
 }
 
 impl Api {
-    const ALL: [Api; 42] = [
+    const ALL: [Api; 43] = [
         Api::Arg,
         Api::Ctx,
         Api::Eof,
@@ -114,6 +115,7 @@ impl Api {
         Api::ReqAppendBody,
         Api::ReqFinishBody,
         Api::ReqGetBodyFile,
+        Api::Exec,
     ];
 
     /// The function a path such as `ngx.var.host` or `ngx.req.get_headers`
@@ -180,6 +182,7 @@ impl Api {
             Api::ReqAppendBody => "ngx.req.append_body",
             Api::ReqFinishBody => "ngx.req.finish_body",
             Api::ReqGetBodyFile => "ngx.req.get_body_file",
+            Api::Exec => "ngx.exec",
         }
     }
 
@@ -210,9 +213,11 @@ impl Api {
             Api::RespGetHeaders => REQUEST,
             Api::Balancer => bits(&[BL]),
             Api::Socket | Api::Thread | Api::Udp | Api::SemaphoreWait => bits(&[RW, AC, CT, TM]),
-            Api::ReqInitBody | Api::ReqAppendBody | Api::ReqFinishBody | Api::ReqGetBodyFile => {
-                bits(&[RW, AC, CT])
-            }
+            Api::ReqInitBody
+            | Api::ReqAppendBody
+            | Api::ReqFinishBody
+            | Api::ReqGetBodyFile
+            | Api::Exec => bits(&[RW, AC, CT]),
         }
     }
 

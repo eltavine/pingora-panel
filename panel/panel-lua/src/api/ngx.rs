@@ -80,8 +80,7 @@ const STATUSES: [(&str, i64); 37] = [
 
 /// What lua-nginx-module has and this gateway does not: each raises an error
 /// naming itself rather than doing something else.
-pub(crate) const UNAVAILABLE: [&str; 7] = [
-    "ngx.exec",
+pub(crate) const UNAVAILABLE: [&str; 6] = [
     "ngx.on_abort",
     "ngx.run_worker_thread",
     "ngx.location.capture",

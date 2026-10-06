@@ -260,6 +260,8 @@ pub(crate) enum Exit {
     Respond,
     /// `ngx.exit(ngx.ERROR)` or 444: the connection closes without an answer.
     Abort,
+    /// `ngx.exec`: the request is handled again with its new URI.
+    Exec,
 }
 
 /// Everything a handler run reads and changes.
@@ -286,6 +288,8 @@ pub struct Exchange {
     /// The body `ngx.req.init_body` started and `ngx.req.finish_body`
     /// will make the request's.
     pub(crate) new_body: Option<Vec<u8>>,
+    /// `ngx.exec` redirected the request internally.
+    pub(crate) internal: bool,
 }
 
 impl Exchange {
@@ -304,12 +308,19 @@ impl Exchange {
             exit: None,
             headers_sent: false,
             new_body: None,
+            internal: false,
         }
     }
 
     /// What the last run changed.
     pub fn changes(&self) -> Changes {
         self.changes
+    }
+
+    /// The last run called `ngx.exec`: the request is to be handled again,
+    /// from `server_rewrite`, with the URI and arguments it now has.
+    pub fn redirected(&self) -> bool {
+        matches!(self.exit, Some(Exit::Exec))
     }
 
     /// Whether a handler has started sending the response.

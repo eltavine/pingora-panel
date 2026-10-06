@@ -21,7 +21,9 @@ use std::{
 };
 
 /// Rewrites that choose the route again before the gateway stops, as it does.
-const MOST_REWRITES: usize = 10;
+/// URI changes a request may make, by jumps and internal redirects together,
+/// as nginx allows.
+const MOST_URI_CHANGES: usize = 10;
 
 /// A request to try.
 #[derive(Clone, Debug)]
@@ -168,6 +170,8 @@ enum Next {
     Go,
     Answer,
     Close,
+    /// `ngx.exec`: the request starts over with its new URI.
+    Redirect,
 }
 
 struct Runner<'a> {
@@ -183,6 +187,9 @@ impl Runner<'_> {
         let duration = started.elapsed();
         let logs = std::mem::take(&mut self.scripts.exchange().logs);
         let (outcome, next) = match outcome {
+            Outcome::Continue if self.scripts.exchange().redirected() => {
+                (RunOutcome::Continue, Next::Redirect)
+            }
             Outcome::Continue => (RunOutcome::Continue, Next::Go),
             Outcome::Respond => (RunOutcome::Respond, Next::Answer),
             Outcome::Abort => (RunOutcome::Abort, Next::Close),
@@ -227,6 +234,26 @@ impl Runner<'_> {
         exchange.response.status = status;
         exchange.response.headers.clear();
         exchange.response.body.clear();
+    }
+
+    /// Answers 500, as the gateway does once a request has changed its URI
+    /// more often than it may.
+    async fn cycle(&mut self, hooks: Option<&Hooks>) {
+        self.answer(500);
+        self.scripts.exchange().response.body = b"rewrite or internal redirection cycle".to_vec();
+        self.respond(hooks).await;
+        self.log(hooks).await;
+    }
+
+    /// Lets the request start over after `ngx.exec`, or answers 500 once it
+    /// has changed its URI too often. Returns whether it starts over.
+    async fn restart(&mut self, changes_left: &mut usize, hooks: Option<&Hooks>) -> bool {
+        if *changes_left == 0 {
+            self.cycle(hooks).await;
+            return false;
+        }
+        *changes_left -= 1;
+        true
     }
 
     /// Sets the upstream's response as the one the filters see.
@@ -385,7 +412,7 @@ pub async fn try_request(
             _ => match runner.run(&hook).await {
                 Next::Answer => runner.respond(None).await,
                 Next::Close => runner.trial.aborted = true,
-                Next::Go => {}
+                Next::Go | Next::Redirect => {}
             },
         }
         runner.log(Some(&hooks)).await;
@@ -419,102 +446,139 @@ async fn pipeline(
     };
     runner.trial.site = Some(site.id.as_str().to_owned());
     let site_hooks = index.sites.get(site.id.as_str());
-    if let Some(hook) = site_hooks.and_then(|hooks| hooks.server_rewrite.as_ref()) {
-        match runner.run(hook).await {
-            Next::Go => {}
-            Next::Answer => {
-                runner.respond(site_hooks).await;
-                runner.log(site_hooks).await;
-                return Ok(());
-            }
-            Next::Close => {
-                runner.trial.aborted = true;
-                runner.log(site_hooks).await;
-                return Ok(());
-            }
-        }
-    }
-    let mut route = None;
-    for _ in 0..=MOST_REWRITES {
-        let simulated = routing_request(&runner.scripts.exchange(), &host).ok_or_else(|| {
-            PanelError::invalid_argument("a script set a path that is not absolute")
-        })?;
-        route = site.select(&simulated).map(|position| site.route(position));
-        runner.trial.route = route.map(|route| route.id.as_str().to_owned());
-        let hooks = route.and_then(|route| index.routes.get(route.id.as_str()));
-        let Some(hook) = hooks.and_then(|hooks| hooks.rewrite.as_ref()) else {
-            break;
-        };
-        runner.scripts.exchange().clear_changes();
-        match runner.run(hook).await {
-            Next::Go if runner.scripts.exchange().changes().jump => continue,
-            Next::Go => break,
-            Next::Answer => {
-                runner.respond(hooks).await;
-                runner.log(hooks).await;
-                return Ok(());
-            }
-            Next::Close => {
-                runner.trial.aborted = true;
-                runner.log(hooks).await;
-                return Ok(());
+    let mut changes_left = MOST_URI_CHANGES;
+    'request: loop {
+        if let Some(hook) = site_hooks.and_then(|hooks| hooks.server_rewrite.as_ref()) {
+            match runner.run(hook).await {
+                Next::Go => {}
+                Next::Redirect => {
+                    if runner.restart(&mut changes_left, site_hooks).await {
+                        continue 'request;
+                    }
+                    return Ok(());
+                }
+                Next::Answer => {
+                    runner.respond(site_hooks).await;
+                    runner.log(site_hooks).await;
+                    return Ok(());
+                }
+                Next::Close => {
+                    runner.trial.aborted = true;
+                    runner.log(site_hooks).await;
+                    return Ok(());
+                }
             }
         }
-    }
-    let Some(route) = route else {
-        runner.log(site_hooks).await;
-        return Ok(());
-    };
-    let hooks = index.routes.get(route.id.as_str());
-    if let Some(hook) = hooks.and_then(|hooks| hooks.access.as_ref()) {
-        match runner.run(hook).await {
-            Next::Go => {}
-            Next::Answer => {
-                runner.respond(hooks).await;
-                runner.log(hooks).await;
-                return Ok(());
-            }
-            Next::Close => {
-                runner.trial.aborted = true;
-                runner.log(hooks).await;
-                return Ok(());
-            }
-        }
-    }
-    match &snapshot.routes[route.spec].action {
-        RouteAction::Lua { .. } => {
-            if let Some(hook) = index.contents.get(route.id.as_str()) {
-                if let Next::Close = runner.run(hook).await {
+        let mut route;
+        loop {
+            let simulated =
+                routing_request(&runner.scripts.exchange(), &host).ok_or_else(|| {
+                    PanelError::invalid_argument("a script set a path that is not absolute")
+                })?;
+            route = site.select(&simulated).map(|position| site.route(position));
+            runner.trial.route = route.map(|route| route.id.as_str().to_owned());
+            let hooks = route.and_then(|route| index.routes.get(route.id.as_str()));
+            let Some(hook) = hooks.and_then(|hooks| hooks.rewrite.as_ref()) else {
+                break;
+            };
+            runner.scripts.exchange().clear_changes();
+            match runner.run(hook).await {
+                Next::Go if runner.scripts.exchange().changes().jump => {
+                    if changes_left == 0 {
+                        runner.cycle(hooks).await;
+                        return Ok(());
+                    }
+                    changes_left -= 1;
+                }
+                Next::Go => break,
+                Next::Redirect => {
+                    if runner.restart(&mut changes_left, hooks).await {
+                        continue 'request;
+                    }
+                    return Ok(());
+                }
+                Next::Answer => {
+                    runner.respond(hooks).await;
+                    runner.log(hooks).await;
+                    return Ok(());
+                }
+                Next::Close => {
                     runner.trial.aborted = true;
                     runner.log(hooks).await;
                     return Ok(());
                 }
             }
         }
-        RouteAction::Proxy { upstream_pool_id } => {
-            if let Some(hook) = index.balancers.get(upstream_pool_id.as_str()) {
-                {
-                    let mut exchange = runner.scripts.exchange();
-                    exchange.balancer.upstream = upstream_pool_id.as_str().to_owned();
-                }
-                match runner.run(hook).await {
-                    Next::Go => runner.upstream(upstream)?,
-                    Next::Answer => {}
-                    Next::Close => {
-                        runner.trial.aborted = true;
-                        runner.log(hooks).await;
-                        return Ok(());
+        let Some(route) = route else {
+            runner.log(site_hooks).await;
+            return Ok(());
+        };
+        let hooks = index.routes.get(route.id.as_str());
+        if let Some(hook) = hooks.and_then(|hooks| hooks.access.as_ref()) {
+            match runner.run(hook).await {
+                Next::Go => {}
+                Next::Redirect => {
+                    if runner.restart(&mut changes_left, hooks).await {
+                        continue 'request;
                     }
+                    return Ok(());
                 }
-            } else {
-                runner.upstream(upstream)?;
+                Next::Answer => {
+                    runner.respond(hooks).await;
+                    runner.log(hooks).await;
+                    return Ok(());
+                }
+                Next::Close => {
+                    runner.trial.aborted = true;
+                    runner.log(hooks).await;
+                    return Ok(());
+                }
             }
         }
-        _ => runner.upstream(upstream)?,
+        match &snapshot.routes[route.spec].action {
+            RouteAction::Lua { .. } => {
+                if let Some(hook) = index.contents.get(route.id.as_str()) {
+                    match runner.run(hook).await {
+                        Next::Close => {
+                            runner.trial.aborted = true;
+                            runner.log(hooks).await;
+                            return Ok(());
+                        }
+                        Next::Redirect => {
+                            if runner.restart(&mut changes_left, hooks).await {
+                                continue 'request;
+                            }
+                            return Ok(());
+                        }
+                        Next::Go | Next::Answer => {}
+                    }
+                }
+            }
+            RouteAction::Proxy { upstream_pool_id } => {
+                if let Some(hook) = index.balancers.get(upstream_pool_id.as_str()) {
+                    {
+                        let mut exchange = runner.scripts.exchange();
+                        exchange.balancer.upstream = upstream_pool_id.as_str().to_owned();
+                    }
+                    match runner.run(hook).await {
+                        Next::Go | Next::Redirect => runner.upstream(upstream)?,
+                        Next::Answer => {}
+                        Next::Close => {
+                            runner.trial.aborted = true;
+                            runner.log(hooks).await;
+                            return Ok(());
+                        }
+                    }
+                } else {
+                    runner.upstream(upstream)?;
+                }
+            }
+            _ => runner.upstream(upstream)?,
+        }
+        runner.respond(hooks).await;
+        runner.log(hooks).await;
+        return Ok(());
     }
-    runner.respond(hooks).await;
-    runner.log(hooks).await;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -657,6 +721,58 @@ mod tests {
             4,
             "access, then both filters and the log"
         );
+    }
+
+    #[tokio::test]
+    async fn internal_redirects_start_the_request_over_as_the_gateway_does() {
+        let mut snapshot = snapshot();
+        snapshot.lua.scripts.extend([
+            script("exec", "return ngx.exec('/', { name = 'again' })"),
+            script("loop", "return ngx.exec('/loop')"),
+        ]);
+        for (id, path, handler) in [("exec", "/exec", "exec"), ("loop", "/loop", "loop")] {
+            snapshot.routes.push(RouteSpec::new(
+                RouteId::new(id).unwrap(),
+                SiteId::new("shop").unwrap(),
+                5,
+                RouteMatcher::PathPrefix {
+                    path: PathPrefix::new(path).unwrap(),
+                },
+                RouteAction::Lua {
+                    handler: LuaHandler::new(handler),
+                },
+            ));
+        }
+        let trial = try_request(
+            &snapshot,
+            TrialScript::Configured,
+            request("/exec", &[("x-key", "k")]),
+            TrialResponse::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(trial.route.as_deref(), Some("hello"));
+        assert_eq!(
+            phases(&trial)[..3],
+            [
+                (Phase::Content, RunOutcome::Continue),
+                (Phase::Access, RunOutcome::Continue),
+                (Phase::Content, RunOutcome::Respond),
+            ]
+        );
+        let (status, _, body) = trial.response.unwrap();
+        assert_eq!((status, &body[..]), (200, &b"HELLO AGAIN\n"[..]));
+
+        let cycling = try_request(
+            &snapshot,
+            TrialScript::Configured,
+            request("/loop", &[]),
+            TrialResponse::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(cycling.runs.len(), 11, "the first run and ten redirects");
+        assert_eq!(cycling.response.unwrap().0, 500);
     }
 
     #[tokio::test]

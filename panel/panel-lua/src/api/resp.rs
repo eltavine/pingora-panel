@@ -1,7 +1,7 @@
 //! The response: `ngx.header`, `ngx.resp`, `ngx.status`, output with
 //! `ngx.say` and `ngx.print`, `ngx.exit`, `ngx.redirect` and `ngx.arg`.
 
-use super::{bytes, cell, exchange, require_permission, Api};
+use super::{bytes, cell, codec::encode_args, exchange, require_permission, Api};
 use crate::{
     exchange::{Exit, LogLevel, Phase},
     vm::{refused, Slot},
@@ -328,6 +328,63 @@ fn exit(slot: &Slot, status: i64) -> mlua::Result<()> {
     })
 }
 
+/// `ngx.exec`: an internal redirect to `uri`, whose query arguments come
+/// before `args`. `$request_uri` keeps the request's own.
+fn exec(slot: &Slot, uri: &[u8], args: Value) -> mlua::Result<()> {
+    let uri = std::str::from_utf8(uri)
+        .map_err(|_| mlua::Error::runtime("bad argument #1 to 'exec' (the URI must be UTF-8)"))?;
+    if uri.is_empty() {
+        return Err(mlua::Error::runtime(
+            "bad argument #1 to 'exec' (uri should not be empty)",
+        ));
+    }
+    if uri.starts_with('@') {
+        return Err(refused(
+            "ngx.exec takes a path: there are no named locations in Pingora Panel",
+        ));
+    }
+    if uri.bytes().any(|byte| byte.is_ascii_control()) {
+        return Err(refused("the URI cannot hold control characters"));
+    }
+    let (path, query) = match uri.split_once('?') {
+        Some((path, query)) => (path, Some(query.to_owned())),
+        None => (uri, None),
+    };
+    if !path.starts_with('/') || path.split('/').any(|segment| segment == "..") {
+        return Err(mlua::Error::runtime(format!("unsafe uri \"{uri}\"")));
+    }
+    let extra = match args {
+        Value::Nil => None,
+        Value::String(text) => Some(String::from_utf8_lossy(&text.as_bytes()).into_owned()),
+        Value::Table(table) => Some(String::from_utf8_lossy(&encode_args(&table)?).into_owned()),
+        other => {
+            return Err(mlua::Error::runtime(format!(
+                "bad argument #2 to 'exec' (string, table, or nil expected, got {})",
+                other.type_name()
+            )))
+        }
+    };
+    let query = match (query, extra.filter(|extra| !extra.is_empty())) {
+        (Some(query), Some(extra)) if !query.is_empty() => Some(format!("{query}&{extra}")),
+        (_, Some(extra)) => Some(extra),
+        (query, None) => query,
+    };
+    exchange(slot, Api::Exec, |exchange| {
+        if exchange.headers_sent {
+            return Err(mlua::Error::runtime(
+                "attempt to call ngx.exec after sending out response headers",
+            ));
+        }
+        exchange.request.uri = path.to_owned();
+        exchange.request.args = query;
+        exchange.changes.uri = true;
+        exchange.changes.args = true;
+        exchange.internal = true;
+        exchange.exit = Some(Exit::Exec);
+        Ok(())
+    })
+}
+
 fn redirect(slot: &Slot, location: &[u8], status: Option<i64>) -> mlua::Result<()> {
     let status = status.unwrap_or(302);
     if ![301, 302, 303, 307, 308].contains(&status) {
@@ -401,6 +458,17 @@ pub(super) fn install(lua: &Lua, ngx: &Table, slot: &Arc<Slot>) -> mlua::Result<
         "exit",
         lua.create_async_function(move |_, status: i64| {
             let ended = exit(&exiter, status);
+            async move {
+                ended?;
+                future::pending::<mlua::Result<()>>().await
+            }
+        })?,
+    )?;
+    let executor = Arc::clone(slot);
+    ngx.raw_set(
+        "exec",
+        lua.create_async_function(move |_, (uri, args): (LuaString, Value)| {
+            let ended = exec(&executor, &uri.as_bytes(), args);
             async move {
                 ended?;
                 future::pending::<mlua::Result<()>>().await

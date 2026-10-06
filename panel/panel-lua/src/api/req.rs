@@ -330,8 +330,7 @@ pub(super) fn table(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
     req.raw_set(
         "is_internal",
         lua.create_function(move |_, ()| {
-            cell(&s, Api::ReqIsInternal)?;
-            Ok(false)
+            exchange(&s, Api::ReqIsInternal, |exchange| Ok(exchange.internal))
         })?,
     )?;
     let s = Arc::clone(slot);

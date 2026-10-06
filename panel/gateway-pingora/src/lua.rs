@@ -106,11 +106,6 @@ pub(crate) fn sync_request(exchange: &mut Exchange, header: &RequestHeader, path
     let request = &mut exchange.request;
     request.method = header.method.as_str().to_owned();
     request.uri = decoded_path(path);
-    request.request_uri = header
-        .uri
-        .path_and_query()
-        .map_or("/", |value| value.as_str())
-        .to_owned();
     request.args = header.uri.query().map(str::to_owned);
     request.version = header.version;
     request.headers.clone_from(&header.headers);
@@ -141,6 +136,12 @@ pub(crate) fn exchange(
                 .unwrap_or_else(SystemTime::now),
         },
     );
+    // `$request_uri` stays the client's through rewrites and redirects.
+    exchange.request.request_uri = header
+        .uri
+        .path_and_query()
+        .map_or("/", |value| value.as_str())
+        .to_owned();
     sync_request(&mut exchange, header, path);
     exchange
 }

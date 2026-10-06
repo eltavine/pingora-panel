@@ -51,11 +51,19 @@ use lua_phases::LuaStep;
 const REDIRECT_STATUS: u16 = 308;
 /// Times the rewrite phase may send a request to another route, as nginx
 /// allows ten internal redirects.
-const MOST_REWRITES: usize = 10;
+/// URI changes a request may make, by jumps and internal redirects together,
+/// as nginx allows.
+const MOST_URI_CHANGES: usize = 10;
 /// Forwarding headers dropped from peers that are not trusted proxies, so
 /// upstreams are not told a forged client.
 const UNTRUSTED_FORWARDING: [&str; 3] = ["x-forwarded-for", "x-real-ip", "forwarded"];
 static X_REAL_IP: header::HeaderName = header::HeaderName::from_static("x-real-ip");
+
+/// Answers a request that changed its URI more often than it may, as
+/// nginx does.
+async fn cycle(session: &mut Session) -> pingora_core::Result<()> {
+    responses::plain(session, 500, "rewrite or internal redirection cycle", &[]).await
+}
 
 /// Answers a request a security policy refused.
 async fn refuse(session: &mut Session, refusal: Refusal) -> pingora_core::Result<()> {
@@ -406,260 +414,295 @@ impl ProxyHttp for PanelProxy {
             responses::redirect(session, REDIRECT_STATUS, &location).await?;
             return Ok(true);
         }
-        let site_path = panel_routing::path::normalize(session.req_header().uri.path())
-            .map_or_else(
-                || session.req_header().uri.path().to_owned(),
-                |path| path.into_owned(),
-            );
-        self.lua_prepare_header_filter(session, ctx, &site_path, host_name);
-        if let Some(hook) = site.lua.server_rewrite.clone() {
-            let path = site_path;
-            if let LuaStep::Done = self
-                .lua_request(session, ctx, &hook, &path, host_name, true)
-                .await?
-            {
-                return Ok(true);
-            }
-        }
-
-        let Some(mut path) = panel_routing::path::normalize(session.req_header().uri.path())
-            .map(|path| path.into_owned())
-        else {
-            responses::plain(
-                session,
-                400,
-                "the request target is not an absolute path",
-                &[],
-            )
-            .await?;
-            return Ok(true);
-        };
-        let request = Routed {
-            header: session.req_header(),
-            host: host_name,
-            path: &path,
-            client: ctx.client,
-        };
-        let Some(mut route_index) = routing.select(site_index, &request) else {
-            responses::plain(session, 404, "not found", &[]).await?;
-            return Ok(true);
-        };
-        ctx.route = Some(route_index);
-        for _ in 0..MOST_REWRITES {
-            let Some(hook) = site.route(route_index).lua.rewrite.clone() else {
-                break;
-            };
-            let proxied = matches!(site.route(route_index).target, RouteTarget::Proxy(_));
-            match self
-                .lua_request(session, ctx, &hook, &path, host_name, proxied)
-                .await?
-            {
-                LuaStep::Done => return Ok(true),
-                LuaStep::Go { jump: false } => break,
-                LuaStep::Go { jump: true } => {
-                    let Some(rewritten) =
-                        panel_routing::path::normalize(session.req_header().uri.path())
-                            .map(|path| path.into_owned())
-                    else {
-                        responses::plain(
-                            session,
-                            400,
-                            "the rewritten target is not an absolute path",
-                            &[],
-                        )
-                        .await?;
-                        return Ok(true);
-                    };
-                    path = rewritten;
-                    let request = Routed {
-                        header: session.req_header(),
-                        host: host_name,
-                        path: &path,
-                        client: ctx.client,
-                    };
-                    let Some(next) = routing.select(site_index, &request) else {
-                        responses::plain(session, 404, "not found", &[]).await?;
-                        return Ok(true);
-                    };
-                    route_index = next;
-                    ctx.route = Some(route_index);
-                }
-            }
-        }
-        let route = site.route(route_index);
-        self.lua_prepare_header_filter(session, ctx, &path, host_name);
-        let gates: Vec<usize> = site.security.into_iter().chain(route.security).collect();
-        if !gates.is_empty() {
-            let mut admission = Admission::default();
-            let candidate = Candidate {
-                client: ctx.client.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
-                header: session.req_header(),
-                path: &path,
-                host: host_name,
-                route: route.id.as_str(),
-            };
-            let mut refused = None;
-            for index in gates {
-                if let Err(refusal) = snapshot.policies[index]
-                    .check(&candidate, &mut admission)
-                    .await
+        let mut changes_left = MOST_URI_CHANGES;
+        'request: loop {
+            let site_path = panel_routing::path::normalize(session.req_header().uri.path())
+                .map_or_else(
+                    || session.req_header().uri.path().to_owned(),
+                    |path| path.into_owned(),
+                );
+            self.lua_prepare_header_filter(session, ctx, &site_path, host_name);
+            if let Some(hook) = site.lua.server_rewrite.clone() {
+                match self
+                    .lua_request(session, ctx, &hook, &site_path, host_name, true)
+                    .await?
                 {
-                    refused = Some(refusal);
-                    break;
+                    LuaStep::Done => return Ok(true),
+                    LuaStep::Redirect => {
+                        if !Self::restart(session, ctx, &mut changes_left).await? {
+                            return Ok(true);
+                        }
+                        continue 'request;
+                    }
+                    LuaStep::Go { .. } => {}
                 }
             }
-            if let Some(refusal) = refused {
-                refuse(session, refusal).await?;
+
+            let Some(mut path) = panel_routing::path::normalize(session.req_header().uri.path())
+                .map(|path| path.into_owned())
+            else {
+                responses::plain(
+                    session,
+                    400,
+                    "the request target is not an absolute path",
+                    &[],
+                )
+                .await?;
                 return Ok(true);
-            }
-            if let Some(timeout) = admission.body_timeout {
-                session.set_read_timeout(Some(timeout));
-            }
-            ctx.admission = admission;
-        }
-        if let Some(hook) = route.lua.access.clone() {
-            let proxied = matches!(route.target, RouteTarget::Proxy(_));
-            if let LuaStep::Done = self
-                .lua_request(session, ctx, &hook, &path, host_name, proxied)
-                .await?
-            {
+            };
+            let request = Routed {
+                header: session.req_header(),
+                host: host_name,
+                path: &path,
+                client: ctx.client,
+            };
+            let Some(mut route_index) = routing.select(site_index, &request) else {
+                responses::plain(session, 404, "not found", &[]).await?;
                 return Ok(true);
+            };
+            ctx.route = Some(route_index);
+            while let Some(hook) = site.route(route_index).lua.rewrite.clone() {
+                let proxied = matches!(site.route(route_index).target, RouteTarget::Proxy(_));
+                match self
+                    .lua_request(session, ctx, &hook, &path, host_name, proxied)
+                    .await?
+                {
+                    LuaStep::Done => return Ok(true),
+                    LuaStep::Go { jump: false } => break,
+                    LuaStep::Redirect => {
+                        if !Self::restart(session, ctx, &mut changes_left).await? {
+                            return Ok(true);
+                        }
+                        continue 'request;
+                    }
+                    LuaStep::Go { jump: true } => {
+                        if changes_left == 0 {
+                            cycle(session).await?;
+                            return Ok(true);
+                        }
+                        changes_left -= 1;
+                        let Some(rewritten) =
+                            panel_routing::path::normalize(session.req_header().uri.path())
+                                .map(|path| path.into_owned())
+                        else {
+                            responses::plain(
+                                session,
+                                400,
+                                "the rewritten target is not an absolute path",
+                                &[],
+                            )
+                            .await?;
+                            return Ok(true);
+                        };
+                        path = rewritten;
+                        let request = Routed {
+                            header: session.req_header(),
+                            host: host_name,
+                            path: &path,
+                            client: ctx.client,
+                        };
+                        let Some(next) = routing.select(site_index, &request) else {
+                            responses::plain(session, 404, "not found", &[]).await?;
+                            return Ok(true);
+                        };
+                        route_index = next;
+                        ctx.route = Some(route_index);
+                    }
+                }
             }
-        }
-        let http: Vec<&HttpPolicy> = site
-            .http
-            .into_iter()
-            .chain(route.http)
-            .map(|index| &snapshot.http[index])
-            .collect();
-        if !http.is_empty() {
-            if let Some(answer) = http
-                .iter()
-                .rev()
-                .find_map(|policy| policy.cors.as_ref())
-                .and_then(|cors| cors.preflight(session.req_header()))
-            {
-                let headers: Vec<(header::HeaderName, &str)> = answer
-                    .iter()
-                    .filter_map(|(name, value)| Some((name.clone(), value.to_str().ok()?)))
-                    .collect();
-                responses::send(session, 204, &headers, bytes::Bytes::new()).await?;
-                return Ok(true);
+            let route = site.route(route_index);
+            self.lua_prepare_header_filter(session, ctx, &path, host_name);
+            let gates: Vec<usize> = site.security.into_iter().chain(route.security).collect();
+            if !gates.is_empty() {
+                let mut admission = Admission::default();
+                let candidate = Candidate {
+                    client: ctx.client.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+                    header: session.req_header(),
+                    path: &path,
+                    host: host_name,
+                    route: route.id.as_str(),
+                };
+                let mut refused = None;
+                for index in gates {
+                    if let Err(refusal) = snapshot.policies[index]
+                        .check(&candidate, &mut admission)
+                        .await
+                    {
+                        refused = Some(refusal);
+                        break;
+                    }
+                }
+                if let Some(refusal) = refused {
+                    refuse(session, refusal).await?;
+                    return Ok(true);
+                }
+                if let Some(timeout) = admission.body_timeout {
+                    session.set_read_timeout(Some(timeout));
+                }
+                ctx.admission = admission;
             }
-            let facts = facts(session, host_name, &path, self.listener.tls);
-            for policy in &http {
-                policy.request_changes(&facts, &mut ctx.http_request);
+            if let Some(hook) = route.lua.access.clone() {
+                let proxied = matches!(route.target, RouteTarget::Proxy(_));
+                match self
+                    .lua_request(session, ctx, &hook, &path, host_name, proxied)
+                    .await?
+                {
+                    LuaStep::Done => return Ok(true),
+                    LuaStep::Redirect => {
+                        if !Self::restart(session, ctx, &mut changes_left).await? {
+                            return Ok(true);
+                        }
+                        continue 'request;
+                    }
+                    LuaStep::Go { .. } => {}
+                }
             }
-            let mut module = HttpPolicyModule::default();
-            module.prepare(&http, &facts, session.req_header());
-            if let Some(slot) = session.downstream_modules_ctx.get_mut::<HttpPolicyModule>() {
-                *slot = module;
-            }
-            ctx.compression = site
+            let http: Vec<&HttpPolicy> = site
                 .http
                 .into_iter()
                 .chain(route.http)
-                .rev()
-                .find(|index| snapshot.http[*index].compression.is_some())
-                .filter(|_| matches!(route.target, RouteTarget::Proxy(_) | RouteTarget::Static(_)));
-            if let Some(compression) = ctx
-                .compression
-                .and_then(|index| snapshot.http[index].compression.as_ref())
-            {
-                compression.prepare(session);
-            }
-        }
-        match &route.target {
-            RouteTarget::Proxy(index) => {
-                let pool = &snapshot.pools[*index];
-                match pool.admit() {
-                    Ok(trial) => ctx.trial = trial,
-                    Err(seconds) => {
-                        let wait = seconds.to_string();
-                        responses::plain(
-                            session,
-                            503,
-                            "the upstream is failing; try again later",
-                            &[(header::RETRY_AFTER, wait.as_str())],
-                        )
-                        .await?;
-                        return Ok(true);
-                    }
+                .map(|index| &snapshot.http[index])
+                .collect();
+            if !http.is_empty() {
+                if let Some(answer) = http
+                    .iter()
+                    .rev()
+                    .find_map(|policy| policy.cors.as_ref())
+                    .and_then(|cors| cors.preflight(session.req_header()))
+                {
+                    let headers: Vec<(header::HeaderName, &str)> = answer
+                        .iter()
+                        .filter_map(|(name, value)| Some((name.clone(), value.to_str().ok()?)))
+                        .collect();
+                    responses::send(session, 204, &headers, bytes::Bytes::new()).await?;
+                    return Ok(true);
                 }
-                match pool.place().await {
-                    Ok(place) => ctx.place = place,
-                    Err(busy) => {
-                        if std::mem::take(&mut ctx.trial) {
-                            pool.cancel_trial();
-                        }
-                        let message = match busy {
-                            Busy::Full => "the upstream is handling all the requests it takes",
-                            Busy::Waited => "the upstream did not take the request in time",
-                        };
-                        responses::plain(session, 503, message, &[(header::RETRY_AFTER, "1")])
-                            .await?;
-                        return Ok(true);
-                    }
+                let facts = facts(session, host_name, &path, self.listener.tls);
+                for policy in &http {
+                    policy.request_changes(&facts, &mut ctx.http_request);
                 }
-                pool.count_request();
-                ctx.pool = Some(*index);
-                Ok(false)
-            }
-            RouteTarget::Static(content) => {
-                let compression = ctx
+                let mut module = HttpPolicyModule::default();
+                module.prepare(&http, &facts, session.req_header());
+                if let Some(slot) = session.downstream_modules_ctx.get_mut::<HttpPolicyModule>() {
+                    *slot = module;
+                }
+                ctx.compression = site
+                    .http
+                    .into_iter()
+                    .chain(route.http)
+                    .rev()
+                    .find(|index| snapshot.http[*index].compression.is_some())
+                    .filter(|_| {
+                        matches!(route.target, RouteTarget::Proxy(_) | RouteTarget::Static(_))
+                    });
+                if let Some(compression) = ctx
                     .compression
-                    .and_then(|index| snapshot.http[index].compression.as_ref());
-                static_files::serve(session, &snapshot.statics[*content], &path, compression)
-                    .await?;
-                Ok(true)
-            }
-            RouteTarget::Redirect {
-                location,
-                status,
-                preserve_path,
-            } => {
-                let rendered =
-                    location.render(&facts(session, host_name, &path, self.listener.tls));
-                let location = String::from_utf8_lossy(&rendered).into_owned();
-                let location = if *preserve_path {
-                    let target = session
-                        .req_header()
-                        .uri
-                        .path_and_query()
-                        .map_or("/", |value| value.as_str());
-                    format!("{}{target}", location.trim_end_matches('/'))
-                } else {
-                    location
-                };
-                responses::redirect(session, *status, &location).await?;
-                Ok(true)
-            }
-            RouteTarget::Respond {
-                status,
-                body,
-                content_type,
-                retry_after,
-            } => {
-                let body = body.render(&facts(session, host_name, &path, self.listener.tls));
-                let retry_after = retry_after.map(|seconds| seconds.to_string());
-                let mut headers = Vec::with_capacity(2);
-                if let Some(content_type) = content_type {
-                    headers.push((header::CONTENT_TYPE, content_type.as_str()));
-                } else if !body.is_empty() {
-                    headers.push((header::CONTENT_TYPE, "text/plain; charset=utf-8"));
+                    .and_then(|index| snapshot.http[index].compression.as_ref())
+                {
+                    compression.prepare(session);
                 }
-                if let Some(retry_after) = &retry_after {
-                    headers.push((header::RETRY_AFTER, retry_after.as_str()));
+            }
+            return match &route.target {
+                RouteTarget::Proxy(index) => {
+                    let pool = &snapshot.pools[*index];
+                    match pool.admit() {
+                        Ok(trial) => ctx.trial = trial,
+                        Err(seconds) => {
+                            let wait = seconds.to_string();
+                            responses::plain(
+                                session,
+                                503,
+                                "the upstream is failing; try again later",
+                                &[(header::RETRY_AFTER, wait.as_str())],
+                            )
+                            .await?;
+                            return Ok(true);
+                        }
+                    }
+                    match pool.place().await {
+                        Ok(place) => ctx.place = place,
+                        Err(busy) => {
+                            if std::mem::take(&mut ctx.trial) {
+                                pool.cancel_trial();
+                            }
+                            let message = match busy {
+                                Busy::Full => "the upstream is handling all the requests it takes",
+                                Busy::Waited => "the upstream did not take the request in time",
+                            };
+                            responses::plain(session, 503, message, &[(header::RETRY_AFTER, "1")])
+                                .await?;
+                            return Ok(true);
+                        }
+                    }
+                    pool.count_request();
+                    ctx.pool = Some(*index);
+                    Ok(false)
                 }
-                responses::send(session, *status, &headers, body).await?;
-                Ok(true)
-            }
-            RouteTarget::Lua(hook) => {
-                let hook = hook.clone();
-                self.lua_request(session, ctx, &hook, &path, host_name, false)
-                    .await?;
-                Ok(true)
-            }
+                RouteTarget::Static(content) => {
+                    let compression = ctx
+                        .compression
+                        .and_then(|index| snapshot.http[index].compression.as_ref());
+                    static_files::serve(session, &snapshot.statics[*content], &path, compression)
+                        .await?;
+                    Ok(true)
+                }
+                RouteTarget::Redirect {
+                    location,
+                    status,
+                    preserve_path,
+                } => {
+                    let rendered =
+                        location.render(&facts(session, host_name, &path, self.listener.tls));
+                    let location = String::from_utf8_lossy(&rendered).into_owned();
+                    let location = if *preserve_path {
+                        let target = session
+                            .req_header()
+                            .uri
+                            .path_and_query()
+                            .map_or("/", |value| value.as_str());
+                        format!("{}{target}", location.trim_end_matches('/'))
+                    } else {
+                        location
+                    };
+                    responses::redirect(session, *status, &location).await?;
+                    Ok(true)
+                }
+                RouteTarget::Respond {
+                    status,
+                    body,
+                    content_type,
+                    retry_after,
+                } => {
+                    let body = body.render(&facts(session, host_name, &path, self.listener.tls));
+                    let retry_after = retry_after.map(|seconds| seconds.to_string());
+                    let mut headers = Vec::with_capacity(2);
+                    if let Some(content_type) = content_type {
+                        headers.push((header::CONTENT_TYPE, content_type.as_str()));
+                    } else if !body.is_empty() {
+                        headers.push((header::CONTENT_TYPE, "text/plain; charset=utf-8"));
+                    }
+                    if let Some(retry_after) = &retry_after {
+                        headers.push((header::RETRY_AFTER, retry_after.as_str()));
+                    }
+                    responses::send(session, *status, &headers, body).await?;
+                    Ok(true)
+                }
+                RouteTarget::Lua(hook) => {
+                    let hook = hook.clone();
+                    match self
+                        .lua_request(session, ctx, &hook, &path, host_name, false)
+                        .await?
+                    {
+                        LuaStep::Redirect => {
+                            if !Self::restart(session, ctx, &mut changes_left).await? {
+                                return Ok(true);
+                            }
+                            continue 'request;
+                        }
+                        _ => Ok(true),
+                    }
+                }
+            };
         }
     }
 
@@ -1065,6 +1108,31 @@ impl ProxyHttp for PanelProxy {
 }
 
 impl PanelProxy {
+    /// Forgets what the route a request took prepared, before the request
+    /// starts over after `ngx.exec`; answers 500 instead once the request
+    /// has changed its URI too often. Returns whether it starts over.
+    async fn restart(
+        session: &mut Session,
+        ctx: &mut RequestContext,
+        changes_left: &mut usize,
+    ) -> pingora_core::Result<bool> {
+        if *changes_left == 0 {
+            cycle(session).await?;
+            return Ok(false);
+        }
+        *changes_left -= 1;
+        ctx.route = None;
+        ctx.admission = Admission::default();
+        ctx.http_request.clear();
+        if ctx.compression.take().is_some() {
+            http_policy::disable_compression(session);
+        }
+        if let Some(module) = session.downstream_modules_ctx.get_mut::<HttpPolicyModule>() {
+            *module = HttpPolicyModule::default();
+        }
+        Ok(true)
+    }
+
     fn scheme(&self) -> &'static str {
         if self.listener.tls {
             "https"

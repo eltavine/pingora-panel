@@ -87,7 +87,11 @@ once with `premature` true, as on a worker's exit. `ngx.socket.udp`
 sends and receives datagrams of at most 8192 bytes under the same network
 permission, `ngx.socket.stream` is the TCP cosocket, and
 `ngx.req.init_body`, `append_body` and `finish_body` build a new request
-body in memory. Modules OpenResty scripts commonly load are built in:
+body in memory. `ngx.exec` redirects internally: the request is handled
+again from `server_rewrite` with its new URI and arguments, and as in
+nginx a request that changes its URI more than ten times, by jumps and
+redirects together, is answered 500; `$request_uri` keeps the client's
+through both. Modules OpenResty scripts commonly load are built in:
 `cjson` and `cjson.safe`, `bit` with LuaJIT BitOp semantics, `table.new`,
 `table.clear`, `table.nkeys`, `resty.core`, `resty.string`, `resty.md5`,
 `resty.sha1`, `resty.sha256`, `resty.random`, `ngx.re`, `ngx.balancer`
@@ -103,8 +107,8 @@ are not available; `lua_package_path`, `lua_package_cpath` and
 `lua_code_cache off` are refused. `sslhandshake` verifies the server's
 certificate with the system's trusted roots unless the script passes
 `ssl_verify` false, where lua-nginx-module verifies nothing by default.
-Subrequests (`ngx.location.capture`), internal redirects (`ngx.exec`),
-the request's own socket and body files are not available.
+Subrequests (`ngx.location.capture`), named locations, the request's own
+socket, `ngx.on_abort`, worker threads and body files are not available.
 
 **Native API.** Next to `ngx`, `require("panel.v1")` returns the
 capabilities the specification names — `req`, `resp`, `ctx`, `upstream`,
