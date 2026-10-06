@@ -1441,6 +1441,9 @@ Reading the configuration compiles every script with the gateway's
 compiler and reports, at their lines, scripts that do not compile, modules
 `require` cannot load, `ngx` functions the gateway does not provide or the
 phase does not allow, globals scripts write and Lua files nothing uses.
+OpenResty directives that have nothing to tune here, such as
+`lua_load_resty_core` or `lua_malloc_trim`, are read with a warning that
+says why.
 
 ```sh
 ppanel lua check conf/                      # the Lua diagnostics of local files

@@ -180,6 +180,9 @@ impl<'a> Lowerer<'a> {
                                 &mut draft.route.lua,
                                 "the route",
                             ),
+                            name if super::lua::inert(name).is_some() => {
+                                lowerer.lua_inert(file, directive)
+                            }
                             "log_field" => {
                                 lowerer.log_field(file, directive, &mut draft.route.access_log)
                             }

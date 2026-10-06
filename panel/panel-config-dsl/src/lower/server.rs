@@ -265,6 +265,7 @@ impl<'a> Lowerer<'a> {
             name if super::lua::SCOPE.contains(&name) => {
                 self.lua_scope(file, directive, &mut draft.site.lua, "the server");
             }
+            name if super::lua::inert(name).is_some() => self.lua_inert(file, directive),
             action => {
                 let Some(found) = self.action(file, directive, action) else {
                     return;

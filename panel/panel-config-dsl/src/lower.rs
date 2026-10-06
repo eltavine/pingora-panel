@@ -791,6 +791,7 @@ impl<'a> Lowerer<'a> {
                     "access_log" | "log_field" | "log_redact_query" | "log_redact_headers"
                     | "log_files" => lowerer.logging(file, directive),
                     name if lua::HTTP.contains(&name) => lowerer.lua_http(file, directive, depth),
+                    name if lua::inert(name).is_some() => lowerer.lua_inert(file, directive),
                     name if lua::SCOPE.contains(&name) => {
                         lowerer
                             .origins

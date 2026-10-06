@@ -632,3 +632,54 @@ fn the_library_lists_each_script_where_it_runs() {
     assert_eq!(library.shared_dicts.len(), 1);
     assert!(library.diagnostics.is_empty(), "{:#?}", library.diagnostics);
 }
+
+#[test]
+fn openresty_directives_with_nothing_to_tune_read_with_a_warning() {
+    let lowered = read(&Sources::single(
+        r#"language_version 1;
+http {
+    lua_load_resty_core on;
+    lua_malloc_trim 1000;
+    lua_capture_error_log 32k;
+    lua_check_client_abort on;
+    upstream app {
+        server 10.0.0.1:80;
+        balancer_keepalive 32;
+    }
+    server s {
+        server_name s.example;
+        lua_http10_buffering off;
+        proxy app;
+        route r {
+            match prefix /;
+            lua_upstream_skip_openssl_default_verify on;
+            respond 200;
+        }
+    }
+}
+"#,
+    ));
+    assert!(lowered.is_valid(), "{:#?}", lowered.diagnostics);
+    let warned: Vec<&str> = lowered
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code.as_str() == codes::NO_EFFECT)
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect();
+    for name in [
+        "lua_load_resty_core",
+        "lua_malloc_trim",
+        "lua_capture_error_log",
+        "lua_check_client_abort",
+        "balancer_keepalive",
+        "lua_http10_buffering",
+        "lua_upstream_skip_openssl_default_verify",
+    ] {
+        assert!(
+            warned
+                .iter()
+                .any(|message| message.starts_with(&format!("'{name}' has no effect: "))),
+            "{name}: {warned:?}"
+        );
+    }
+}

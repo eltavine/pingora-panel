@@ -91,6 +91,7 @@ impl<'a> Lowerer<'a> {
         };
         match spec.name {
             "id" => {}
+            "balancer_keepalive" => self.lua_inert(file, directive),
             "balancer_by_lua_block" | "balancer_by_lua_file" => {
                 if upstream.balancer.is_some() {
                     self.error(

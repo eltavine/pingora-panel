@@ -8,6 +8,7 @@ use panel_config_model::{
     LUA_DIRECTORY,
 };
 use panel_dsl::Directive;
+use panel_errors::Diagnostic;
 
 /// Directives that set a handler or a term of `http`, a server or a route.
 pub(super) const SCOPE: &[&str] = &[
@@ -108,6 +109,31 @@ pub(crate) const TERMS: &[&str] = &[
     "lua_transform_underscores_in_response_headers",
     "lua_use_default_type",
 ];
+
+/// OpenResty directives with nothing to tune here, and why. They are read
+/// with a warning, so configurations written for OpenResty still read.
+pub(crate) const INERT: &[(&str, &str)] = &[
+    ("lua_load_resty_core", "lua-resty-core is always loaded, as in OpenResty since 0.10.16"),
+    ("lua_malloc_trim", "the gateway's allocator returns freed memory to the system itself"),
+    ("lua_sa_restart", "scripts make no system calls a signal could interrupt"),
+    ("lua_thread_cache_max_entries", "VMs reuse coroutines without a cache to size"),
+    ("lua_worker_thread_vm_pool_size", "ngx.run_worker_thread is not available"),
+    ("lua_capture_error_log", "ngx.errlog is not available, and what scripts log goes to the gateway's error log"),
+    ("rewrite_by_lua_no_postpone", "nothing else runs in the rewrite phase for rewrite_by_lua to wait for"),
+    ("precontent_by_lua_no_postpone", "precontent_by_lua is not available"),
+    ("lua_check_client_abort", "ngx.on_abort is not available, so scripts are not told of clients that leave"),
+    ("lua_http10_buffering", "the answers of scripts are always buffered and sent with a Content-Length"),
+    ("lua_upstream_skip_openssl_default_verify", "cosockets verify certificates with the system's trusted roots, not OpenSSL's defaults"),
+    ("balancer_keepalive", "the gateway pools connections to upstream nodes itself, and keepalive on|off turns reuse on or off"),
+];
+
+/// Why an OpenResty directive has no effect here, if it is one of those.
+pub(crate) fn inert(name: &str) -> Option<&'static str> {
+    INERT
+        .iter()
+        .find(|(inert, _)| *inert == name)
+        .map(|(_, why)| *why)
+}
 
 /// Whether a Lua handler runs for the requests of a block with `scope`
 /// and `action`.
@@ -240,6 +266,18 @@ impl<'a> Lowerer<'a> {
             return;
         }
         *slot = self.lua_code(file, directive);
+    }
+
+    /// An OpenResty directive with nothing to tune here.
+    pub(super) fn lua_inert(&mut self, file: &str, directive: &Directive) {
+        let name = directive.name.value.as_str();
+        let Some(why) = inert(name) else {
+            return;
+        };
+        let diagnostic =
+            Diagnostic::warning(codes::NO_EFFECT, format!("'{name}' has no effect: {why}"))
+                .with_help("remove it");
+        self.report(diagnostic, file, directive.name.span);
     }
 
     /// A handler or term of `http`, a server or a route.
