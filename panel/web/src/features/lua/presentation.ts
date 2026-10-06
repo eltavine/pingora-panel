@@ -21,6 +21,7 @@ import {
   Package,
   PackageCheck,
   Recycle,
+  Send,
   Upload,
   Zap,
 } from '@lucide/vue'
@@ -50,6 +51,7 @@ const LIBRARY_ICONS: Record<string, Component> = {
   'lua-resty-mysql': HardDrive,
   'lua-resty-memcached': MemoryStick,
   'lua-resty-dns': Globe,
+  'lua-resty-http': Send,
   'lua-resty-upload': Upload,
   'lua-upstream-nginx-module': Network,
   'lua-resty-upstream-healthcheck': HeartPulse,

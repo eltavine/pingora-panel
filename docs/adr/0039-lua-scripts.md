@@ -268,7 +268,14 @@ permission, takes a peer out of rotation for every request of the
 configuration until a script puts it back, next to the gateway's own
 health checks, drains and passive ejection, `resty.upstream.healthcheck`,
 lua-resty-upstream-healthcheck's active checks over it, one VM checking
-each round, with its status pages in text and for Prometheus, and
+each round, with its status pages in text and for Prometheus,
+`resty.http` with `resty.http_headers`, lua-resty-http's HTTP/1.1 client,
+which loads no FFI module when it connects as the library does, with its
+pools, TLS and client certificates, HTTP proxies and CONNECT tunnels,
+chunked, sized and closing bodies, `100-continue`, trailers and request
+and response proxying (`request_pipeline` reads each response's body as it
+returns, since Luau cannot wait inside the metamethod the library reads
+them in), and
 `ngx.ssl` with `ngx.ssl.clienthello`, `ngx.ssl.session`,
 `ngx.ssl.proxysslcert` and `ngx.ssl.proxysslverify`, `ngx.proxyssl` and
 `ngx.ocsp`. `resty.core.base` gives libraries
