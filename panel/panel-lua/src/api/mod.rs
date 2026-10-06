@@ -7,6 +7,7 @@ pub(crate) mod contexts;
 mod errlog;
 mod json;
 mod location;
+mod lock;
 mod modules;
 mod ngx;
 mod re;

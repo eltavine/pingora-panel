@@ -2846,3 +2846,63 @@ async fn cosockets_present_the_client_certificate_set_for_them() {
     assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
     assert_eq!(scripts.exchange().response.body, b"1 0\n");
 }
+
+#[tokio::test]
+async fn locks_wait_for_each_other_and_release_only_their_own() {
+    let (program, ids) = program(|builder| {
+        builder.shared_dict("locks", 1 << 20);
+        vec![builder.handler(&source(
+            r#"
+            local lock = require "resty.lock"
+            local locks = ngx.shared.locks
+            local nothing, err = lock:new("missing")
+            assert(nothing == nil and err == "dictionary not found", err)
+            local first = assert(lock:new("locks", { exptime = 0.2, timeout = 0 }))
+            local second = assert(lock:new("locks", { timeout = 1, step = 0.01 }))
+            assert(first:lock("k") == 0)
+            assert(select(2, first:lock("k")) == "locked")
+            assert(select(2, assert(lock:new("locks", { timeout = 0 })):lock("k")) == "timeout")
+            local elapsed = assert(second:lock("k"))
+            assert(elapsed > 0.1 and elapsed < 1, elapsed)
+            assert(select(2, first:unlock()) == "unlocked")
+            assert(select(2, first:expire()) == "unlocked")
+            assert(locks:get("k"), "the second still holds it")
+            assert(second:expire(10) == 1 and locks:ttl("k") > 9)
+            assert(second:unlock() == 1)
+            assert(select(2, second:unlock()) == "unlocked")
+            assert(locks:get("k") == nil)
+            assert(second:lock("k") == 0 and second:unlock())
+            ;(function()
+                local forgotten = assert(lock:new("locks"))
+                assert(forgotten:lock("g") == 0)
+            end)()
+            assert(locks:get("g"))
+            for _ = 1, 200 do
+                if locks:get("g") == nil then
+                    break
+                end
+                local garbage = {}
+                for index = 1, 10000 do
+                    garbage[index] = { index }
+                end
+            end
+            ngx.say(tostring(locks:get("g")))
+            "#,
+        ))]
+    });
+    let (runtime, _) = Runtime::start(
+        &program,
+        &Settings {
+            vms: 1,
+            memory: 16 << 20,
+        },
+        &SharedStore::default(),
+    )
+    .unwrap();
+    let mut waiting = handler(ids[0], Phase::Content);
+    waiting.limits.time = Duration::from_secs(5);
+    let mut scripts = runtime.scripts(request("GET", "/", &[]));
+    let outcome = run(&mut scripts, waiting).await;
+    assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+    assert_eq!(scripts.exchange().response.body, b"nil\n");
+}

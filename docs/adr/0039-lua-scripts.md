@@ -232,7 +232,10 @@ socket and cosockets, written in Luau since its own needs the FFI, where
 the server answers with one of the subprotocols the client offers (the
 first its `protocols` option names, when given) and the client checks the
 server's `Sec-WebSocket-Accept`, as RFC 6455 requires and the library does
-not, and
+not, `resty.lock`, whose locks keep a token of their own in their key, so
+that releasing or extending a lock that expired leaves alone the lock
+another took since, and which are released when their object is
+collected, as lua-resty-lock's are, and
 `ngx.ssl` with `ngx.ssl.clienthello`, `ngx.ssl.session`,
 `ngx.ssl.proxysslcert` and `ngx.ssl.proxysslverify`, `ngx.proxyssl` and
 `ngx.ocsp`. `resty.core.base` gives libraries

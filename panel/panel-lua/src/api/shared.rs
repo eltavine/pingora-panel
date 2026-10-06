@@ -6,7 +6,7 @@ use crate::shared::{Dict, Scalar, SetMode};
 use mlua::{Lua, Table, UserData, UserDataMethods, Value};
 use std::{sync::Arc, time::Duration};
 
-struct Handle(Arc<Dict>);
+pub(super) struct Handle(pub(super) Arc<Dict>);
 
 fn key(key: &Value) -> mlua::Result<Vec<u8>> {
     let key = match key {

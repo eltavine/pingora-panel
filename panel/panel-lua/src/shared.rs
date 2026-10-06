@@ -55,6 +55,10 @@ impl Entry {
     fn expired(&self, now: Instant) -> bool {
         self.expires.is_some_and(|expires| expires <= now)
     }
+
+    fn holds(&self, wanted: &Scalar, now: Instant) -> bool {
+        !self.expired(now) && matches!(&self.item, Item::Scalar { value, .. } if value == wanted)
+    }
 }
 
 /// Bytes an entry costs besides its key and value, as lua-nginx-module's
@@ -358,6 +362,35 @@ impl Dict {
                 Ok(())
             }
             _ => Err(Refusal::NotFound),
+        }
+    }
+
+    /// Deletes `key` if it holds `value` and has not expired. Returns
+    /// whether it did.
+    pub fn delete_if(&self, key: &[u8], value: &Scalar) -> bool {
+        let now = Instant::now();
+        let mut inner = self.inner.lock();
+        let holds = inner
+            .entries
+            .peek(key)
+            .is_some_and(|entry| entry.holds(value, now));
+        if holds {
+            inner.remove(key);
+        }
+        holds
+    }
+
+    /// Gives `key` a new time to live if it holds `value` and has not
+    /// expired. Returns whether it did.
+    pub fn expire_if(&self, key: &[u8], value: &Scalar, ttl: Option<Duration>) -> bool {
+        let now = Instant::now();
+        let mut inner = self.inner.lock();
+        match inner.entries.peek_mut(key) {
+            Some(entry) if entry.holds(value, now) => {
+                entry.expires = ttl.map(|ttl| now + ttl);
+                true
+            }
+            _ => false,
         }
     }
 
