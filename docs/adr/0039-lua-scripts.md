@@ -206,7 +206,9 @@ permission, `ngx.socket.stream` is the TCP cosocket, and
 `ngx.req.init_body`, `append_body` and `finish_body` build a new request
 body in memory, and `ngx.req.socket()` reads the request body as it
 arrives with `receive`, `receiveany` and `receiveuntil`, chunked bodies
-too. `ngx.exec` redirects internally: the request is handled
+too, after which the body counts as read, as in lua-nginx-module: a
+second request socket is refused and `ngx.req.set_body_data` or
+`ngx.req.init_body` give the request a new body. `ngx.exec` redirects internally: the request is handled
 again from `server_rewrite` with its new URI and arguments, and as in
 nginx a request that changes its URI more than ten times, by jumps and
 redirects together, is answered 500; `$request_uri` keeps the client's

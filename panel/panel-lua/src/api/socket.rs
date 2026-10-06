@@ -913,9 +913,11 @@ pub(super) fn install(
                 let socket = TcpSocket::raw(Arc::clone(&request_slot), Arc::clone(&request_pool));
                 return Ok(results([Value::UserData(lua.create_userdata(socket)?)]));
             }
-            if cell.exchange.lock().request.body.is_some() {
+            if cell.body_read() {
                 return failed(lua, "request body already exists");
             }
+            cell.body_socket
+                .store(true, std::sync::atomic::Ordering::Relaxed);
             let socket = TcpSocket::request(Arc::clone(&request_slot), Arc::clone(&request_pool));
             Ok(results([Value::UserData(lua.create_userdata(socket)?)]))
         })?,

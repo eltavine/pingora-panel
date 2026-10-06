@@ -130,6 +130,9 @@ pub(crate) struct Cell {
     pub ctx: Mutex<Option<Table>>,
     pub run: Mutex<Run>,
     pub threads: Mutex<Threads>,
+    /// `ngx.req.socket()` took the request body, which then counts as
+    /// read, as lua-nginx-module has it.
+    pub body_socket: std::sync::atomic::AtomicBool,
 }
 
 impl Cell {
@@ -140,7 +143,15 @@ impl Cell {
             ctx: Mutex::new(None),
             run: Mutex::new(Run::default()),
             threads: Mutex::new(Threads::default()),
+            body_socket: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Whether the request body was read, into memory or by the request
+    /// socket.
+    pub fn body_read(&self) -> bool {
+        self.exchange.lock().request.body.is_some()
+            || self.body_socket.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 

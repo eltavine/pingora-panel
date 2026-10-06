@@ -1499,6 +1499,9 @@ async fn request_sockets_stream_the_body_across_its_pieces() {
             local rest = assert(sock:receive("*a"))
             local sent, err = sock:send("x")
             ngx.say(before, "|", line, "|", rest, "|", tostring(sent), " ", err)
+            local again, taken = ngx.req.socket()
+            assert(again == nil and taken == "request body already exists", taken)
+            ngx.req.set_body_data("replaced")
             "#,
             "local sock, err = ngx.req.socket(true) ngx.say(tostring(sock), ' ', err)",
         ]),
@@ -1512,6 +1515,10 @@ async fn request_sockets_stream_the_body_across_its_pieces() {
     assert_eq!(
         scripts.exchange().response.body,
         b"first part||header line\r\ntail|nil not supported on the request socket\n"
+    );
+    assert_eq!(
+        scripts.exchange().request.body.as_deref(),
+        Some(&b"replaced"[..])
     );
 
     let mut scripts = lua.runtime.scripts(request("POST", "/", &[]));

@@ -214,12 +214,12 @@ pub(super) fn table(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
         lua.create_function(move |_, data: LuaString| {
             let cell = cell(&s, Api::ReqSetBodyData)?;
             require_permission(&cell, Api::ReqSetBodyData, |granted| granted.body, "body")?;
-            let mut exchange = cell.exchange.lock();
-            if exchange.request.body.is_none() {
+            if !cell.body_read() {
                 return Err(mlua::Error::runtime(
                     "request body not read yet: call ngx.req.read_body first",
                 ));
             }
+            let mut exchange = cell.exchange.lock();
             exchange.request.body = Some(::bytes::Bytes::copy_from_slice(&data.as_bytes()));
             exchange.changes.body = true;
             Ok(())
@@ -231,12 +231,12 @@ pub(super) fn table(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
         lua.create_function(move |_, size: Option<usize>| {
             let cell = cell(&s, Api::ReqInitBody)?;
             require_permission(&cell, Api::ReqInitBody, |granted| granted.body, "body")?;
-            let mut exchange = cell.exchange.lock();
-            if exchange.request.body.is_none() {
+            if !cell.body_read() {
                 return Err(mlua::Error::runtime(
                     "request body not read yet: call ngx.req.read_body first",
                 ));
             }
+            let mut exchange = cell.exchange.lock();
             exchange.new_body = Some(Vec::with_capacity(size.unwrap_or(0).min(MAX_BODY)));
             Ok(())
         })?,
