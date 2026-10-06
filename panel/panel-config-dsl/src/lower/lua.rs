@@ -203,6 +203,10 @@ pub(super) const HTTP: &[&str] = &[
     "init_worker_by_lua_file",
     "exit_worker_by_lua_block",
     "exit_worker_by_lua_file",
+    "ssl_session_fetch_by_lua_block",
+    "ssl_session_fetch_by_lua_file",
+    "ssl_session_store_by_lua_block",
+    "ssl_session_store_by_lua_file",
 ];
 
 /// The phase a handler directive runs in.
@@ -227,6 +231,8 @@ fn phase(name: &str) -> Option<&'static str> {
         "init",
         "init_worker",
         "exit_worker",
+        "ssl_session_fetch",
+        "ssl_session_store",
     ]
     .into_iter()
     .find(|phase| *phase == stem)
@@ -647,6 +653,8 @@ impl<'a> Lowerer<'a> {
                 let slot = match phase(name) {
                     Some("init") => &mut config.init,
                     Some("exit_worker") => &mut config.exit_worker,
+                    Some("ssl_session_fetch") => &mut config.ssl_session_fetch,
+                    Some("ssl_session_store") => &mut config.ssl_session_store,
                     _ => &mut config.init_worker,
                 };
                 self.lua_handler(file, directive, slot, "http");

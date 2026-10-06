@@ -48,7 +48,7 @@ use std::{
 mod handshake;
 mod lua_phases;
 
-pub(crate) use handshake::HandshakeScripts;
+pub(crate) use handshake::{HandshakeScripts, Sessions};
 use lua_phases::LuaStep;
 
 const REDIRECT_STATUS: u16 = 308;
@@ -130,13 +130,28 @@ impl PanelProxy {
         }
     }
 
+    /// The sessions the listener resumes, which its session scripts fetch
+    /// and store.
+    pub(crate) fn sessions(&self) -> Arc<Sessions> {
+        Arc::new(Sessions::new(
+            Arc::clone(&self.listener),
+            Arc::clone(&self.active),
+        ))
+    }
+
     /// What runs the handshake scripts of the listener's sites, presenting
-    /// the certificates they choose through `chosen`.
-    pub(crate) fn handshake_scripts(&self, chosen: Arc<ChosenCertificates>) -> HandshakeScripts {
+    /// the certificates they choose through `chosen` and resuming the
+    /// sessions they find from `sessions`.
+    pub(crate) fn handshake_scripts(
+        &self,
+        chosen: Arc<ChosenCertificates>,
+        sessions: Arc<Sessions>,
+    ) -> HandshakeScripts {
         HandshakeScripts {
             listener: Arc::clone(&self.listener),
             active: Arc::clone(&self.active),
             chosen,
+            sessions,
         }
     }
 }

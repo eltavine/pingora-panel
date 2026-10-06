@@ -358,6 +358,13 @@ pub struct LuaProgram {
     /// Runs in each VM when it stops.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_worker: Option<LuaHandler>,
+    /// As a TLS handshake offers to resume a session the gateway does not
+    /// hold.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssl_session_fetch: Option<LuaHandler>,
+    /// As a TLS handshake makes a session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssl_session_store: Option<LuaHandler>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shared_dicts: Vec<LuaSharedDict>,
     /// Bytes each VM may allocate; zero for the gateway's default.

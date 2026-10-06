@@ -414,6 +414,14 @@ impl Compiler<'_> {
                 .exit_worker
                 .as_ref()
                 .map(|code| lua::handler(self.scripts.add(code, &config.files), &config.http)),
+            ssl_session_fetch: config
+                .ssl_session_fetch
+                .as_ref()
+                .map(|code| lua::handler(self.scripts.add(code, &config.files), &config.http)),
+            ssl_session_store: config
+                .ssl_session_store
+                .as_ref()
+                .map(|code| lua::handler(self.scripts.add(code, &config.files), &config.http)),
             ..LuaProgram::default()
         };
         if self.scripts.is_empty() {

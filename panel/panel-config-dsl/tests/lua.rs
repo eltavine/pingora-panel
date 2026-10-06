@@ -824,13 +824,13 @@ http {
 http {
     server s {
         server_name s.example;
+        ssl_session_store_by_lua_block { }
         route r {
             match prefix /;
             ssl_certificate_by_lua_block { }
             respond 200;
         }
     }
-    ssl_session_fetch_by_lua_block { }
 }
 "#,
     ));
@@ -839,22 +839,57 @@ http {
         has(
             &found,
             codes::CONTEXT,
-            "main.conf:7",
+            "main.conf:8",
             "'ssl_certificate_by_lua_block' is not allowed in route"
         ),
         "{found:#?}"
     );
     assert!(
-        misplaced.diagnostics.iter().any(|diagnostic| {
-            diagnostic
-                .message
-                .contains("ssl_session_fetch_by_lua_block")
-                && diagnostic
-                    .help
-                    .as_deref()
-                    .is_some_and(|help| help.contains("cache"))
-        }),
+        has(
+            &found,
+            codes::CONTEXT,
+            "main.conf:5",
+            "'ssl_session_store_by_lua_block' is not allowed in server"
+        ),
         "{found:#?}"
+    );
+}
+
+#[test]
+fn session_handlers_read_compile_and_print_in_http() {
+    let sources = Sources::single(
+        r#"language_version 1;
+http {
+    lua_shared_dict sessions 1m;
+    ssl_session_fetch_by_lua_block {
+        local session = require "ngx.ssl.session"
+    }
+    ssl_session_store_by_lua_block {
+        local id = require("ngx.ssl.session").get_session_id()
+    }
+    server s {
+        server_name s.example;
+        respond 200;
+    }
+}
+"#,
+    );
+    let lowered = read(&sources);
+    assert!(lowered.is_valid(), "{:#?}", lowered.diagnostics);
+    assert!(lowered.model.lua.ssl_session_fetch.is_some());
+    assert!(lowered.model.lua.ssl_session_store.is_some());
+    let snapshot = compile(&lowered.model, RevisionId::new(1)).unwrap();
+    assert!(snapshot.lua.ssl_session_fetch.is_some());
+    assert!(snapshot.lua.ssl_session_store.is_some());
+    let printed = print_sources(&lowered.model);
+    let main = printed.get("main.conf").unwrap();
+    assert!(
+        main.contains("    ssl_session_fetch_by_lua_block {\n"),
+        "{main}"
+    );
+    assert!(
+        main.contains("    ssl_session_store_by_lua_block {\n"),
+        "{main}"
     );
 }
 

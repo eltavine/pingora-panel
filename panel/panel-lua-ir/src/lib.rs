@@ -98,6 +98,7 @@ impl Hooks {
 
 /// Hooks by the IR identifier of what runs them.
 #[derive(Debug, Default)]
+#[non_exhaustive]
 pub struct HookIndex {
     pub sites: HashMap<String, Hooks>,
     pub routes: HashMap<String, Hooks>,
@@ -105,6 +106,11 @@ pub struct HookIndex {
     pub contents: HashMap<String, Hook>,
     /// Upstream pools that choose their endpoints with a script.
     pub balancers: HashMap<String, Hook>,
+    /// As a TLS handshake offers to resume a session the gateway does not
+    /// hold.
+    pub ssl_session_fetch: Option<Hook>,
+    /// As a TLS handshake makes a session.
+    pub ssl_session_store: Option<Hook>,
 }
 
 /// A snapshot's scripts, compiled, with what starting their VMs takes.
@@ -347,6 +353,12 @@ pub fn compile_with_secrets(
             let hook = compiler.hook(handler, Phase::Balancer)?;
             index.balancers.insert(pool.id.as_str().into(), hook);
         }
+    }
+    if let Some(handler) = &snapshot.lua.ssl_session_fetch {
+        index.ssl_session_fetch = Some(compiler.hook(handler, Phase::SslSessionFetch)?);
+    }
+    if let Some(handler) = &snapshot.lua.ssl_session_store {
+        index.ssl_session_store = Some(compiler.hook(handler, Phase::SslSessionStore)?);
     }
     compiler.finish(index, vms).map(Some)
 }

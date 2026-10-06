@@ -406,6 +406,14 @@ pub static DIRECTIVES: &[DirectiveSpec] = &[
         "exit_worker_by_lua_block { ... }", "Runs once in each VM when it stops, as a new configuration replaces it; nothing it starts may wait."),
     spec!("exit_worker_by_lua_file" in &[Http], None, 1..Some(1), false,
         "exit_worker_by_lua_file lua/<file>.lua;", "Runs a file once in each VM when it stops."),
+    spec!("ssl_session_fetch_by_lua_block" in &[Http], None, 0..Some(0), false,
+        "ssl_session_fetch_by_lua_block { ... }", "Runs as a TLS handshake offers to resume a session the gateway does not hold; ngx.ssl.session gives its ID and takes the session found."),
+    spec!("ssl_session_fetch_by_lua_file" in &[Http], None, 1..Some(1), false,
+        "ssl_session_fetch_by_lua_file lua/<file>.lua;", "Runs a file as a TLS handshake offers to resume a session the gateway does not hold."),
+    spec!("ssl_session_store_by_lua_block" in &[Http], None, 0..Some(0), false,
+        "ssl_session_store_by_lua_block { ... }", "Runs as a TLS handshake makes a session; ngx.ssl.session gives its ID and its serialized form to keep elsewhere."),
+    spec!("ssl_session_store_by_lua_file" in &[Http], None, 1..Some(1), false,
+        "ssl_session_store_by_lua_file lua/<file>.lua;", "Runs a file as a TLS handshake makes a session."),
     spec!("server_rewrite_by_lua_block" in &[Http, Server], None, 0..Some(0), false,
         "server_rewrite_by_lua_block { ... }", "Runs before the route is chosen, and may change the URI and arguments it is chosen by.",
         inherits "A server's replaces the one in http."),
@@ -608,9 +616,6 @@ pub fn refusal(name: &str) -> Option<String> {
         "lua_package_path" | "lua_package_cpath" => {
             "require loads the built-in modules and the files under lua/, and nothing else"
         }
-        _ if name.starts_with("ssl_session_") && name.contains("_by_lua") => {
-            "TLS sessions are resumed from the gateway's own cache, which scripts do not fill"
-        }
         "lua_socket_send_lowat" => {
             "Linux, which the gateway runs on, sets no send low-water mark for TCP sockets"
         }
@@ -690,7 +695,7 @@ mod tests {
             Some("write the code in braces, as access_by_lua_block { ... }")
         );
         assert!(refusal("lua_package_path").unwrap().contains("lua/"));
-        assert!(refusal("ssl_session_fetch_by_lua_block").is_some());
+        assert!(lookup("ssl_session_fetch_by_lua_block", Http).is_some());
         assert!(lookup("ssl_certificate_by_lua_block", Server).is_some());
         assert!(lookup("ssl_client_hello_by_lua_file", Http).is_some());
         assert!(refusal("lua_socket_send_lowat").unwrap().contains("Linux"));

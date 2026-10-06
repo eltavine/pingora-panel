@@ -297,6 +297,14 @@ pub fn problems(snapshot: &RuntimeSnapshot) -> Vec<(String, String)> {
     if let Some(exit) = &program.exit_worker {
         check_handler(&mut found, &ids, "lua".into(), "exit_worker", exit);
     }
+    for (phase, handler) in [
+        ("ssl_session_fetch", &program.ssl_session_fetch),
+        ("ssl_session_store", &program.ssl_session_store),
+    ] {
+        if let Some(handler) = handler {
+            check_handler(&mut found, &ids, "lua".into(), phase, handler);
+        }
+    }
     if let Some(init) = &program.init_worker {
         check_handler(&mut found, &ids, "lua".into(), "init_worker", init);
     }

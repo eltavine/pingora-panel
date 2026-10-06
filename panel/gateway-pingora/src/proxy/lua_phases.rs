@@ -115,6 +115,19 @@ impl Report {
         }
     }
 
+    /// Where the runs of the scripts of `http` that run for no request go.
+    pub(super) fn program(
+        listener: Arc<ListenerContext>,
+        snapshot: Arc<PreparedPingoraSnapshot>,
+    ) -> Self {
+        Self {
+            listener,
+            snapshot,
+            site: None,
+            route: None,
+        }
+    }
+
     /// Writes `message` of `hook`'s script, which ran for `request_id`.
     pub(super) fn write(&self, hook: &Hook, request_id: &str, level: &str, message: &str) {
         let phase = hook.phase().name();

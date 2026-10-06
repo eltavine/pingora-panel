@@ -192,6 +192,12 @@ pub(crate) fn lua_http(lua: &LuaConfig) -> Vec<Directive> {
     if let Some(code) = &lua.exit_worker {
         body.push(lua_handler("exit_worker", code));
     }
+    if let Some(code) = &lua.ssl_session_fetch {
+        body.push(lua_handler("ssl_session_fetch", code));
+    }
+    if let Some(code) = &lua.ssl_session_store {
+        body.push(lua_handler("ssl_session_store", code));
+    }
     body.extend(handlers);
     body
 }

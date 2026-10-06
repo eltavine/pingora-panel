@@ -201,6 +201,8 @@ fn phase(name: &str) -> Phase {
         "body_filter" => Phase::BodyFilter,
         "ssl_client_hello" => Phase::SslClientHello,
         "ssl_cert" => Phase::SslCertificate,
+        "ssl_session_fetch" => Phase::SslSessionFetch,
+        "ssl_session_store" => Phase::SslSessionStore,
         _ => Phase::Log,
     }
 }

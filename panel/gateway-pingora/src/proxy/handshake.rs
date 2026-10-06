@@ -1,21 +1,30 @@
-//! `ssl_client_hello_by_lua` and `ssl_certificate_by_lua` (ADR 0039): the
-//! scripts of the site a TLS handshake's server name selects run on the
-//! client's hello before rustls answers it, and may end the handshake or
-//! choose the certificate it presents.
+//! The TLS handshake's scripts (ADR 0039), which run on the client's hello
+//! before rustls answers it: `ssl_client_hello_by_lua` and
+//! `ssl_certificate_by_lua` of the site the hello's server name selects,
+//! which may end the handshake or choose the certificate it presents, and
+//! `ssl_session_fetch_by_lua`, which may find the session it offers to
+//! resume. `ssl_session_store_by_lua` runs as rustls keeps a new session.
 
 use super::{lua_phases::Report, ListenerContext};
-use crate::{adapter::ActiveSnapshot, certificates::ChosenCertificates};
+use crate::{
+    adapter::ActiveSnapshot, certificates::ChosenCertificates, listeners::SESSION_CACHE, lua::Hook,
+};
 use async_trait::async_trait;
+use bytes::Bytes;
 use panel_ir::LuaFallback;
-use panel_lua::{Connection, Exchange, Handshake, NoHost, Outcome, Request};
+use panel_lua::{Connection, Exchange, Handshake, NoHost, Outcome, Request, Scripts};
 use pingora_core::{
     listeners::PreTlsProcess,
     protocols::{l4::stream::Stream as L4Stream, GetSocketDigest},
     Error, ErrorType, Result,
 };
-use rustls::sign::CertifiedKey;
+use rustls::{
+    server::{ServerSessionMemoryCache, StoresServerSessions},
+    sign::CertifiedKey,
+};
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use std::{
+    fmt,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -35,6 +44,110 @@ pub(crate) struct HandshakeScripts {
     pub(super) listener: Arc<ListenerContext>,
     pub(super) active: ActiveSnapshot,
     pub(super) chosen: Arc<ChosenCertificates>,
+    pub(super) sessions: Arc<Sessions>,
+}
+
+/// The sessions a listener resumes: rustls' own cache, which
+/// `ssl_session_fetch_by_lua` adds the sessions it finds to, and whose new
+/// sessions go to `ssl_session_store_by_lua`.
+pub(crate) struct Sessions {
+    cache: Arc<ServerSessionMemoryCache>,
+    listener: Arc<ListenerContext>,
+    active: ActiveSnapshot,
+}
+
+impl Sessions {
+    pub(super) fn new(listener: Arc<ListenerContext>, active: ActiveSnapshot) -> Self {
+        Self {
+            cache: ServerSessionMemoryCache::new(SESSION_CACHE),
+            listener,
+            active,
+        }
+    }
+
+    /// The session the hello offers to resume that is not held here: its
+    /// first ticket when it offers TLS 1.3, its session ID otherwise.
+    fn missing(&self, handshake: &Handshake) -> Option<Bytes> {
+        let candidate = if handshake.versions.contains(&0x0304) {
+            handshake.tickets.first()
+        } else {
+            Some(&handshake.session_id).filter(|id| !id.is_empty())
+        }?;
+        self.cache
+            .get(candidate)
+            .is_none()
+            .then(|| candidate.clone())
+    }
+
+    /// Runs `ssl_session_store_by_lua` on a session rustls keeps.
+    fn stored(&self, id: &[u8], session: &[u8]) {
+        let Some(snapshot) = self.active.load_full() else {
+            return;
+        };
+        let Some(plan) = snapshot.lua.clone().filter(|plan| !plan.disabled) else {
+            return;
+        };
+        let (Some(hook), Ok(runtime)) = (
+            plan.session_store.clone(),
+            tokio::runtime::Handle::try_current(),
+        ) else {
+            return;
+        };
+        let report = Report::program(Arc::clone(&self.listener), Arc::clone(&snapshot));
+        let mut exchange = Exchange::new(
+            Request::default(),
+            Connection {
+                tls: true,
+                ..Connection::default()
+            },
+        );
+        exchange.handshake.session = Some(Bytes::copy_from_slice(id));
+        exchange.handshake.serialized = Some(Bytes::copy_from_slice(session));
+        runtime.spawn(async move {
+            let mut scripts = plan.runtime.scripts(exchange);
+            run(&mut scripts, &hook, &report).await;
+        });
+    }
+}
+
+impl fmt::Debug for Sessions {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Sessions")
+            .field("listener", &self.listener.id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl StoresServerSessions for Sessions {
+    fn put(&self, key: Vec<u8>, value: Vec<u8>) -> bool {
+        self.stored(&key, &value);
+        self.cache.put(key, value)
+    }
+
+    fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
+        self.cache.get(key)
+    }
+
+    fn take(&self, key: &[u8]) -> Option<Vec<u8>> {
+        self.cache.take(key)
+    }
+
+    fn can_cache(&self) -> bool {
+        self.cache.can_cache()
+    }
+}
+
+/// Runs `hook` and reports the run; whether the handshake goes on.
+async fn run(scripts: &mut Scripts, hook: &Hook, report: &Report) -> bool {
+    let started = Instant::now();
+    let outcome = scripts.run(hook.handler, &mut NoHost).await;
+    report.finished(hook, scripts, &outcome, started.elapsed());
+    match outcome {
+        Outcome::Continue => true,
+        Outcome::Failed(_) => matches!(hook.fallback, LuaFallback::Continue),
+        Outcome::Respond | Outcome::Abort => false,
+    }
 }
 
 /// Reads the records that hold the client's hello into `read`, and the
@@ -140,23 +253,26 @@ impl PreTlsProcess for HandshakeScripts {
                 ))
             }
         };
-        let Some(handshake) = Handshake::parse(&hello) else {
+        let Some(mut handshake) = Handshake::parse(&hello) else {
             return Ok(());
         };
         let routing = &snapshot.routing;
         let listener = self.listener.id.as_str();
-        let Some(site) = handshake
+        let site = handshake
             .server_name
             .as_deref()
             .and_then(|name| routing.lookup(name))
             .filter(|entry| routing.serves(entry.site, listener))
             .map(|entry| entry.site)
-            .or_else(|| routing.default_site(listener))
-        else {
-            return Ok(());
-        };
-        let hooks = &routing.site(site).lua;
-        if hooks.ssl_client_hello.is_none() && hooks.ssl_cert.is_none() {
+            .or_else(|| routing.default_site(listener));
+        let hooks = site.map(|site| &routing.site(site).lua);
+        let hello_hook = hooks.and_then(|hooks| hooks.ssl_client_hello.as_ref());
+        let cert_hook = hooks.and_then(|hooks| hooks.ssl_cert.as_ref());
+        let fetch = plan
+            .session_fetch
+            .as_ref()
+            .zip(self.sessions.missing(&handshake));
+        if hello_hook.is_none() && cert_hook.is_none() && fetch.is_none() {
             return Ok(());
         }
         let digest = stream.get_socket_digest();
@@ -169,45 +285,51 @@ impl PreTlsProcess for HandshakeScripts {
             };
             address?.as_inet().copied()
         };
+        let server_name = handshake.server_name.clone().unwrap_or_default();
+        handshake.session = fetch.as_ref().map(|(_, id)| id.clone());
         let mut exchange = Exchange::new(
             Request::default(),
             Connection {
                 client: address(false),
                 server: address(true),
                 tls: true,
-                server_name: handshake.server_name.clone().unwrap_or_default(),
+                server_name,
                 ..Connection::default()
             },
         );
         exchange.handshake = handshake;
         let mut scripts = plan.runtime.scripts(exchange);
-        let report = Report::site(Arc::clone(&self.listener), Arc::clone(&snapshot), site);
-        let mut last = None;
-        for hook in [&hooks.ssl_client_hello, &hooks.ssl_cert]
-            .into_iter()
-            .flatten()
-        {
-            let started = Instant::now();
-            let outcome = scripts.run(hook.handler, &mut NoHost).await;
-            report.finished(hook, &scripts, &outcome, started.elapsed());
-            let go_on = match outcome {
-                Outcome::Continue => true,
-                Outcome::Failed(_) => matches!(hook.fallback, LuaFallback::Continue),
-                Outcome::Respond | Outcome::Abort => false,
-            };
-            if !go_on {
+        let site_report =
+            site.map(|site| Report::site(Arc::clone(&self.listener), Arc::clone(&snapshot), site));
+        if let (Some(hook), Some(report)) = (hello_hook, &site_report) {
+            if !run(&mut scripts, hook, report).await {
                 return Err(ended());
             }
-            last = Some(hook);
+        }
+        if let Some((hook, id)) = fetch {
+            let report = Report::program(Arc::clone(&self.listener), Arc::clone(&snapshot));
+            if !run(&mut scripts, hook, &report).await {
+                return Err(ended());
+            }
+            let found = scripts.exchange().handshake.serialized.take();
+            if let Some(session) = found {
+                // A resumed session presents no certificate.
+                self.sessions.cache.put(id.to_vec(), session.to_vec());
+                return Ok(());
+            }
+        }
+        let (Some(hook), Some(report)) = (cert_hook, &site_report) else {
+            return Ok(());
+        };
+        if !run(&mut scripts, hook, report).await {
+            return Err(ended());
         }
         let handshake = std::mem::take(&mut scripts.exchange().handshake);
         match certified(&handshake) {
             Ok(Some(key)) => self.chosen.choose(key),
             Ok(None) => {}
             Err(message) => {
-                if let Some(hook) = last {
-                    report.write(hook, "", "error", &message);
-                }
+                report.write(hook, "", "error", &message);
                 return Err(ended());
             }
         }

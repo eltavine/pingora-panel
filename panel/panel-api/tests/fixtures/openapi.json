@@ -84152,7 +84152,7 @@
           },
           "phase": {
             "type": "string",
-            "description": "`set`, `server_rewrite`, `rewrite`, `access`, `precontent`,\n`content`, `balancer`, `header_filter`, `body_filter`, `log`,\n`ssl_client_hello` or `ssl_cert`."
+            "description": "`set`, `server_rewrite`, `rewrite`, `access`, `precontent`,\n`content`, `balancer`, `header_filter`, `body_filter`, `log`,\n`ssl_client_hello`, `ssl_cert`, `ssl_session_fetch` or\n`ssl_session_store`."
           },
           "time_limit_ms": {
             "type": [

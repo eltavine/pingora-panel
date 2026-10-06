@@ -50,6 +50,10 @@ pub(crate) struct LuaPlan {
     /// `access_by_lua_no_postpone on`: access handlers run before the
     /// security policies.
     pub access_first: bool,
+    /// `ssl_session_fetch_by_lua`.
+    pub session_fetch: Option<Hook>,
+    /// `ssl_session_store_by_lua`.
+    pub session_store: Option<Hook>,
 }
 
 impl std::fmt::Debug for LuaPlan {
@@ -98,6 +102,8 @@ pub(crate) fn compile(
             runtime,
             disabled: compiled.disabled,
             access_first: snapshot.lua.access_first,
+            session_fetch: compiled.index.ssl_session_fetch.clone(),
+            session_store: compiled.index.ssl_session_store.clone(),
         })),
         compiled.index,
     ))

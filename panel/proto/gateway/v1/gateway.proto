@@ -766,6 +766,11 @@ message LuaProgram {
   // Bytes of what each VM's scripts log that ngx.errlog reads back
   // (lua_capture_error_log); none kept at zero.
   uint64 capture_error_log_bytes = 14;
+  // As a TLS handshake offers to resume a session the gateway does not
+  // hold (ssl_session_fetch_by_lua).
+  LuaHandler ssl_session_fetch = 15;
+  // As a TLS handshake makes a session (ssl_session_store_by_lua).
+  LuaHandler ssl_session_store = 16;
 }
 
 message ValidateRequest {

@@ -439,7 +439,8 @@ impl Generation {
                 Arc::clone(&active),
                 Arc::clone(&in_flight),
             );
-            let scripts = proxy.handshake_scripts(Arc::clone(&chosen));
+            let sessions = proxy.sessions();
+            let scripts = proxy.handshake_scripts(Arc::clone(&chosen), Arc::clone(&sessions));
             let mut server_options = HttpServerOptions::default();
             server_options.h2c = plan.http2 && !plan.tls;
             let mut proxy = HttpProxy::new(proxy, Arc::clone(&conf));
@@ -449,11 +450,14 @@ impl Generation {
             let app = HeadDeadline::new(proxy, plan.head_timeout, connections, serve.clone());
             let address = plan.socket.address.to_string();
             let mut service = if plan.tls {
-                let config = plan.server_config(Arc::new(ListenerCertificates::new(
-                    Arc::clone(&active),
-                    plan.id.clone(),
-                    chosen,
-                )))?;
+                let config = plan.server_config_with(
+                    Arc::new(ListenerCertificates::new(
+                        Arc::clone(&active),
+                        plan.id.clone(),
+                        chosen,
+                    )),
+                    sessions,
+                )?;
                 let settings = TlsSettings::from_server_config(config, Some(Box::new(handshakes)));
                 let mut endpoints = Listeners::new();
                 endpoints.set_pre_tls_callback(Arc::new(scripts));

@@ -29,6 +29,8 @@ pub(super) fn decode_program(value: Option<wire::LuaProgram>) -> Result<LuaProgr
         init: value.init.map(decode_handler).transpose()?,
         init_worker: value.init_worker.map(decode_handler).transpose()?,
         exit_worker: value.exit_worker.map(decode_handler).transpose()?,
+        ssl_session_fetch: value.ssl_session_fetch.map(decode_handler).transpose()?,
+        ssl_session_store: value.ssl_session_store.map(decode_handler).transpose()?,
         shared_dicts: value
             .shared_dicts
             .into_iter()
@@ -69,6 +71,8 @@ pub(super) fn encode_program(value: &LuaProgram) -> Option<wire::LuaProgram> {
         init: value.init.as_ref().map(encode_handler),
         init_worker: value.init_worker.as_ref().map(encode_handler),
         exit_worker: value.exit_worker.as_ref().map(encode_handler),
+        ssl_session_fetch: value.ssl_session_fetch.as_ref().map(encode_handler),
+        ssl_session_store: value.ssl_session_store.as_ref().map(encode_handler),
         shared_dicts: value
             .shared_dicts
             .iter()

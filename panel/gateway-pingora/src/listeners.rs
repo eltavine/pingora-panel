@@ -9,7 +9,7 @@ use panel_errors::{PanelError, Result};
 use panel_ir::{ListenerRef, TlsProfile};
 use rustls::{
     crypto::CryptoProvider,
-    server::{NoServerSessionStorage, ResolvesServerCert, ServerSessionMemoryCache},
+    server::{NoServerSessionStorage, ResolvesServerCert},
     ServerConfig, SupportedProtocolVersion,
 };
 use socket2::{Domain, Protocol, Socket, Type};
@@ -22,7 +22,7 @@ use std::{
 
 const BACKLOG: i32 = 65_535;
 /// Sessions each listener remembers for resumption.
-const SESSION_CACHE: usize = 4_096;
+pub(crate) const SESSION_CACHE: usize = 4_096;
 
 /// Socket options fixed at bind time; changing any of them needs a new socket.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -151,9 +151,23 @@ impl ListenerPlan {
 
     /// The server side of the listener's handshakes, with certificates from
     /// `resolver`.
+    #[cfg(test)]
     pub(crate) fn server_config(
         &self,
         resolver: Arc<dyn ResolvesServerCert>,
+    ) -> Result<Arc<ServerConfig>> {
+        self.server_config_with(
+            resolver,
+            rustls::server::ServerSessionMemoryCache::new(SESSION_CACHE),
+        )
+    }
+
+    /// [`Self::server_config`], resuming sessions from `sessions` when the
+    /// listener resumes them.
+    pub(crate) fn server_config_with(
+        &self,
+        resolver: Arc<dyn ResolvesServerCert>,
+        sessions: Arc<dyn rustls::server::StoresServerSessions>,
     ) -> Result<Arc<ServerConfig>> {
         let invalid = |detail: String| {
             PanelError::validation_failed(format!("listener {}: {detail}", self.id))
@@ -206,7 +220,7 @@ impl ListenerPlan {
             (true, false) => vec![b"http/1.1".to_vec()],
         };
         if self.handshake.session_resumption {
-            config.session_storage = ServerSessionMemoryCache::new(SESSION_CACHE);
+            config.session_storage = sessions;
         } else {
             config.session_storage = Arc::new(NoServerSessionStorage {});
             config.send_tls13_tickets = 0;

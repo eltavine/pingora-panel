@@ -31,9 +31,11 @@ fn phase(name: &str) -> Result<Phase> {
         "log" => Phase::Log,
         "ssl_client_hello" => Phase::SslClientHello,
         "ssl_cert" => Phase::SslCertificate,
+        "ssl_session_fetch" => Phase::SslSessionFetch,
+        "ssl_session_store" => Phase::SslSessionStore,
         other => {
             return Err(PanelError::invalid_argument(format!(
-                "{other:?} is not a phase a script runs in: use set, server_rewrite, rewrite, access, precontent, content, balancer, header_filter, body_filter, log, ssl_client_hello or ssl_cert"
+                "{other:?} is not a phase a script runs in: use set, server_rewrite, rewrite, access, precontent, content, balancer, header_filter, body_filter, log, ssl_client_hello, ssl_cert, ssl_session_fetch or ssl_session_store"
             )))
         }
     })

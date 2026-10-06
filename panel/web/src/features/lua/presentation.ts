@@ -4,7 +4,9 @@ import type { StatusTone } from '@/components/StatusIndicator.vue'
 /** The phases a script can be tested in, in the order a connection and its requests run them. */
 export const PHASES = [
   'ssl_client_hello',
+  'ssl_session_fetch',
   'ssl_cert',
+  'ssl_session_store',
   'set',
   'server_rewrite',
   'rewrite',

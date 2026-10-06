@@ -373,6 +373,13 @@ pub struct LuaConfig {
     /// Runs once in each VM when it stops.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_worker: Option<LuaCode>,
+    /// As a TLS handshake offers to resume a session the gateway does not
+    /// hold (`ssl_session_fetch_by_lua`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssl_session_fetch: Option<LuaCode>,
+    /// As a TLS handshake makes a session (`ssl_session_store_by_lua`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssl_session_store: Option<LuaCode>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shared_dicts: Vec<LuaSharedDict>,
     /// Bytes each VM may allocate.
@@ -429,6 +436,8 @@ pub fn lua_handlers(model: &ConfigModel) -> Vec<(String, &'static str, &LuaCode)
         ("init", &lua.init),
         ("init_worker", &lua.init_worker),
         ("exit_worker", &lua.exit_worker),
+        ("ssl_session_fetch", &lua.ssl_session_fetch),
+        ("ssl_session_store", &lua.ssl_session_store),
     ] {
         if let Some(code) = code {
             found.push(("lua".into(), phase, code));
@@ -478,6 +487,8 @@ pub fn lua_codes_mut(model: &mut ConfigModel) -> Vec<&mut LuaCode> {
         .iter_mut()
         .chain(lua.init_worker.iter_mut())
         .chain(lua.exit_worker.iter_mut())
+        .chain(lua.ssl_session_fetch.iter_mut())
+        .chain(lua.ssl_session_store.iter_mut())
         .collect();
     found.extend(lua.http.handlers_mut());
     found.extend(

@@ -62,6 +62,8 @@ inheritance, where a directive in an inner block replaces the outer one:
 | `log_by_lua_block`, `_file` | after the response is sent | `http`, `server`, `route` |
 | `ssl_client_hello_by_lua_block`, `_file` | as a TLS handshake's hello arrives, for the server its server name selects | `http`, `server` |
 | `ssl_certificate_by_lua_block`, `_file` | as a TLS handshake chooses the certificate it presents | `http`, `server` |
+| `ssl_session_fetch_by_lua_block`, `_file` | as a TLS handshake offers to resume a session the listener does not hold | `http` |
+| `ssl_session_store_by_lua_block`, `_file` | as a TLS handshake makes a session | `http` |
 | `lua_shared_dict <name> <size>` | declares a dictionary every VM shares | `http` |
 
 The body of a `*_by_lua_block` directive is read with Lua's lexical rules,
@@ -115,8 +117,20 @@ listener for a client certificate or none and offers them all the same
 versions; `get_session_master_key`, which would give scripts what decrypts
 the connection; and `get_req_ssl_pointer` and its kin, which hand out
 OpenSSL handles for the FFI scripts do not have.
-`ssl_session_fetch_by_lua*` and `ssl_session_store_by_lua*` are refused:
-sessions resume from the gateway's own cache.
+`ssl_session_fetch_by_lua*` and `ssl_session_store_by_lua*` share
+sessions beyond one listener. rustls keeps each listener's sessions; a
+hello that offers to resume one the listener does not hold — by its first
+TLS 1.3 ticket, which the gateway issues as the session's ID, or by its
+TLS 1.2 session ID — runs the fetch handler after
+`ssl_client_hello_by_lua*`, and a session it gives with
+`ngx.ssl.session.set_serialized_session` is resumed without
+`ssl_certificate_by_lua*`, as in nginx. Each session a handshake makes runs
+the store handler, where `get_session_id` and `get_serialized_session`
+give it to keep in `ngx.shared` or, through a timer, elsewhere; as in
+nginx it may not wait, and it runs apart from the handshake. The
+serialized form is rustls', so gateways that share sessions run the same
+version, and sessions resume only on listeners whose TLS profile resumes
+them.
 
 `ngx` is lua-nginx-module's API with its documented semantics, in the phases
 where lua-nginx-module allows each function: `ngx.var`, `ngx.ctx`,
@@ -164,7 +178,7 @@ run scripts with the gateway's own privileges outside the sandbox and
 `signal_graceful_exit` because scripts do not stop workers, and
 `resty.lrucache` (with `resty.lrucache.pureffi`), each VM holding its own
 caches, so the library scripts vendor for its FFI needs no FFI, and
-`ngx.ssl` with `ngx.ssl.clienthello`. `require` refuses `ngx.pipe`,
+`ngx.ssl` with `ngx.ssl.clienthello` and `ngx.ssl.session`. `require` refuses `ngx.pipe`,
 which would start processes on the gateway's host, and LuaJIT's `ffi`,
 whose native calls would leave the sandbox, saying so; the configuration
 check reports them where they are required.

@@ -70,7 +70,8 @@ pub struct LuaTestScript {
     pub code: String,
     /// `set`, `server_rewrite`, `rewrite`, `access`, `precontent`,
     /// `content`, `balancer`, `header_filter`, `body_filter`, `log`,
-    /// `ssl_client_hello` or `ssl_cert`.
+    /// `ssl_client_hello`, `ssl_cert`, `ssl_session_fetch` or
+    /// `ssl_session_store`.
     pub phase: String,
     #[serde(default)]
     pub allow: LuaPermissions,

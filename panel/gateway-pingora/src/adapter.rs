@@ -464,14 +464,16 @@ impl PingoraGatewayAdapter {
         )?;
         let labels = SnapshotLabels::new(&routing, &pools);
         let logging = LoggingPlan::new(&snapshot.logging, Some(snapshot.revision_id.get()));
+        let fetches = lua.as_ref().is_some_and(|lua| lua.session_fetch.is_some());
         let scripted_handshakes = listeners
             .iter()
             .filter(|plan| plan.tls)
             .filter(|plan| {
-                routing.sites().iter().enumerate().any(|(index, site)| {
-                    routing.serves(index, &plan.id)
-                        && (site.lua.ssl_client_hello.is_some() || site.lua.ssl_cert.is_some())
-                })
+                (fetches && plan.handshake.session_resumption)
+                    || routing.sites().iter().enumerate().any(|(index, site)| {
+                        routing.serves(index, &plan.id)
+                            && (site.lua.ssl_client_hello.is_some() || site.lua.ssl_cert.is_some())
+                    })
             })
             .map(|plan| plan.id.clone())
             .collect();

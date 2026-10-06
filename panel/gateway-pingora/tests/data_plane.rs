@@ -3324,3 +3324,141 @@ async fn raw_request_sockets_carry_upgraded_connections() {
     .unwrap();
     gateway.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn session_scripts_resume_sessions_another_listener_made() {
+    use panel_ir::{LuaHandler, LuaSharedDict, LUA_SCRIPTS_CAPABILITY};
+
+    let upstream = echo_upstream().await;
+    let secrets = tempfile::tempdir().unwrap();
+    let certified = rcgen::generate_simple_self_signed(vec!["shop.example".into()]).unwrap();
+    std::fs::write(
+        secrets.path().join("edge.crt"),
+        pem("CERTIFICATE", certified.cert.der()),
+    )
+    .unwrap();
+    std::fs::write(
+        secrets.path().join("edge.key"),
+        pem("PRIVATE KEY", &certified.signing_key.serialize_der()),
+    )
+    .unwrap();
+    let (first, second) = (free_address(), free_address());
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot.tls_profiles.push(TlsProfile {
+        id: "edge".into(),
+        certificate_secret_id: "edge.crt".into(),
+        private_key_secret_id: "edge.key".into(),
+        min_protocol: "TLSv1.2".into(),
+        max_protocol: None,
+        cipher_suites: Vec::new(),
+        session_resumption: true,
+        alpn: BTreeSet::new(),
+    });
+    for (id, address) in [("first", first), ("second", second)] {
+        let mut listener = ListenerRef::new(id, address.to_string());
+        listener.tls_profile_id = Some("edge".into());
+        snapshot.listeners.push(listener);
+    }
+    snapshot
+        .required_capabilities
+        .push(CapabilityRequirement::new(LUA_SCRIPTS_CAPABILITY, "1"));
+    snapshot.lua.scripts = vec![
+        lua_script(
+            "store",
+            "local session = require 'ngx.ssl.session' \
+             ngx.shared.sessions:set(session.get_session_id(), session.get_serialized_session())",
+        ),
+        lua_script(
+            "fetch",
+            "local session = require 'ngx.ssl.session' \
+             local found = ngx.shared.sessions:get(session.get_session_id()) \
+             if found then assert(session.set_serialized_session(found)) end",
+        ),
+        lua_script("count", "ngx.print(#ngx.shared.sessions:get_keys())"),
+    ];
+    snapshot.lua.shared_dicts = vec![LuaSharedDict {
+        name: "sessions".into(),
+        capacity_bytes: 1 << 20,
+    }];
+    snapshot.lua.ssl_session_store = Some(LuaHandler::new("store"));
+    snapshot.lua.ssl_session_fetch = Some(LuaHandler::new("fetch"));
+    snapshot.sites.push(site(&["shop.example"]));
+    snapshot.upstream_pools.push(pool("app", &[upstream]));
+    snapshot.routes.extend([
+        route(
+            "count",
+            1,
+            prefix("/count"),
+            RouteAction::Lua {
+                handler: LuaHandler::new("count"),
+            },
+        ),
+        route("app", 2, prefix("/"), proxy("app")),
+    ]);
+    let gateway = Gateway::start(
+        AdapterOptions::default().with_secrets(Arc::new(DirectorySecrets::new(secrets.path()))),
+        snapshot,
+    )
+    .await;
+    wait_for(first).await;
+    wait_for(second).await;
+
+    let mut roots = rustls::RootCertStore::empty();
+    roots.add(certified.cert.der().clone()).unwrap();
+    let config = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .unwrap()
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
+    let request = |address: SocketAddr,
+                   connector: tokio_rustls::TlsConnector,
+                   path: &'static str| async move {
+        let stream = TcpStream::connect(address).await.unwrap();
+        let mut stream = connector
+            .connect(
+                rustls_pki_types::ServerName::try_from("shop.example").unwrap(),
+                stream,
+            )
+            .await
+            .unwrap();
+        let kind = stream.get_ref().1.handshake_kind();
+        let response = exchange(
+            &mut stream,
+            &format!("GET {path} HTTP/1.1\r\nhost: shop.example\r\nconnection: close\r\n\r\n"),
+        )
+        .await;
+        (kind, response)
+    };
+    let (kind, response) = request(first, connector.clone(), "/").await;
+    assert_eq!(
+        (kind, response.status),
+        (Some(rustls::HandshakeKind::Full), 200)
+    );
+    // The sessions the first listener made reach the dictionary as they
+    // are stored, from another connection whose own sessions are not used.
+    let mut uncached = rustls::ClientConfig::clone(connector.config());
+    uncached.resumption = rustls::client::Resumption::disabled();
+    let counter = tokio_rustls::TlsConnector::from(Arc::new(uncached));
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let (_, response) = request(first, counter.clone(), "/count").await;
+        if String::from_utf8_lossy(&response.body) != "0" {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no session was stored"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    // The second listener holds none of them itself, and resumes one.
+    let (kind, response) = request(second, connector, "/").await;
+    assert_eq!(
+        (kind, response.status),
+        (Some(rustls::HandshakeKind::Resumed), 200)
+    );
+    gateway.stop().await;
+}
