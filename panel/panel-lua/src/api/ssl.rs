@@ -33,12 +33,12 @@ const NO_HANDLES: &str =
 const NOT_KEPT: &str = "the gateway's TLS does not keep this for scripts";
 
 /// A certificate chain `parse_pem_cert` or `parse_der_cert` read.
-struct Chain(Vec<Vec<u8>>);
+pub(super) struct Chain(pub(super) Vec<Vec<u8>>);
 
 impl UserData for Chain {}
 
 /// A private key `parse_pem_priv_key` or `parse_der_priv_key` read.
-struct Key(Vec<u8>);
+pub(super) struct Key(pub(super) Vec<u8>);
 
 impl UserData for Key {}
 

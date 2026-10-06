@@ -2605,3 +2605,98 @@ async fn proxy_verify_handlers_judge_the_upstream_certificate() {
     assert_eq!(outcome, Outcome::Continue, "{:?}", scripts.exchange().logs);
     assert_eq!(scripts.exchange().upstream_tls.verdict, Some(0));
 }
+
+#[tokio::test]
+async fn cosockets_present_the_client_certificate_set_for_them() {
+    use rustls::pki_types::PrivatePkcs8KeyDer;
+    use std::sync::Arc;
+    use tokio::io::AsyncWriteExt;
+    let mut authority = rcgen::CertificateParams::new(Vec::<String>::new()).unwrap();
+    authority.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+    let authority =
+        rcgen::CertifiedIssuer::self_signed(authority, rcgen::KeyPair::generate().unwrap())
+            .unwrap();
+    let client_key = rcgen::KeyPair::generate().unwrap();
+    let client = rcgen::CertificateParams::new(vec!["client.test".into()])
+        .unwrap()
+        .signed_by(&client_key, &authority)
+        .unwrap();
+    let mut roots = rustls::RootCertStore::empty();
+    roots.add(authority.der().clone()).unwrap();
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let verifier = rustls::server::WebPkiClientVerifier::builder_with_provider(
+        Arc::new(roots),
+        Arc::clone(&provider),
+    )
+    .allow_unauthenticated()
+    .build()
+    .unwrap();
+    let server = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    let config = rustls::ServerConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_client_cert_verifier(verifier)
+        .with_single_cert(
+            vec![server.cert.der().clone()],
+            PrivatePkcs8KeyDer::from(server.signing_key.serialize_der()).into(),
+        )
+        .unwrap();
+    let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        loop {
+            let (stream, _) = listener.accept().await.unwrap();
+            let acceptor = acceptor.clone();
+            tokio::spawn(async move {
+                if let Ok(mut tls) = acceptor.accept(stream).await {
+                    let presented = tls.get_ref().1.peer_certificates().map_or(0, <[_]>::len);
+                    let _ = tls.write_all(format!("{presented}\r\n").as_bytes()).await;
+                    let _ = tls.flush().await;
+                }
+            });
+        }
+    });
+    let hex = |der: &[u8]| {
+        der.iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    };
+    let script = format!(
+        r#"
+        local ssl = require "ngx.ssl"
+        local function bytes(hex)
+            return (hex:gsub("%x%x", function(pair) return string.char(tonumber(pair, 16)) end))
+        end
+        local chain = assert(ssl.parse_der_cert(bytes("{chain}")))
+        local key = assert(ssl.parse_der_priv_key(bytes("{key}")))
+        local other = assert(ssl.parse_der_priv_key(bytes("{other}")))
+        local function presented(certificate, private)
+            local sock = ngx.socket.tcp()
+            assert(sock:connect("127.0.0.1", {port}))
+            assert(sock:setclientcert(chain, key))
+            assert(sock:setclientcert(certificate, private))
+            assert(sock:sslhandshake(nil, "localhost", false))
+            local count = assert(sock:receive())
+            sock:close()
+            return count
+        end
+        local sock = ngx.socket.tcp()
+        local ok, err = sock:setclientcert(chain)
+        assert(ok == nil and err == "client certificate must be supplied with corresponding private key", err)
+        ok, err = sock:setclientcert(chain, other)
+        assert(ok == nil and err:find("cannot be used", 1, true), err)
+        ngx.say(presented(chain, key), " ", presented(nil, nil))
+        "#,
+        chain = hex(client.der()),
+        key = hex(&client_key.serialize_der()),
+        other = hex(&rcgen::KeyPair::generate().unwrap().serialize_der()),
+    );
+    let lua = start(1, handlers(&[&script]));
+    let mut granted = handler(lua.handlers[0], Phase::Content);
+    granted.permissions.network = true;
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = run(&mut scripts, granted).await;
+    assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+    assert_eq!(scripts.exchange().response.body, b"1 0\n");
+}

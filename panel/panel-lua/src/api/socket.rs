@@ -4,18 +4,26 @@
 //! kept with `setkeepalive` are reused by later requests of the same VM.
 //! TLS verifies the certificate unless the script says `ssl_verify` false.
 
-use super::{cell, require_permission, results, Api};
+use super::{
+    cell, require_permission, results,
+    ssl::{Chain, Key},
+    Api,
+};
 use crate::{
     exchange::{LogLevel, Sockets},
     vm::{refused, HostCall, HostReply, Slot},
 };
 use bytes::{Bytes, BytesMut};
 use mlua::{
-    AnyUserData, Lua, LuaString, MultiValue, Table, UserData, UserDataMethods, UserDataRefMut,
-    Value,
+    AnyUserData, Lua, LuaString, MultiValue, Table, UserData, UserDataMethods, UserDataRef,
+    UserDataRefMut, Value,
 };
 use parking_lot::Mutex;
-use rustls::pki_types::ServerName;
+use rustls::{
+    client::Resumption,
+    pki_types::{CertificateDer, PrivateKeyDer, ServerName},
+    sign::{CertifiedKey, SingleCertAndKey},
+};
 use std::{
     collections::HashMap,
     future::Future,
@@ -230,6 +238,8 @@ pub(crate) struct TcpSocket {
     /// The local address `bind` gave connections.
     local: Option<IpAddr>,
     tls: Option<crate::tls::TlsId>,
+    /// The certificate `setclientcert` gave handshakes to present.
+    client: Option<Arc<CertifiedKey>>,
 }
 
 impl TcpSocket {
@@ -251,6 +261,7 @@ impl TcpSocket {
             raw: false,
             local: None,
             tls: sockets.tls,
+            client: None,
         }
     }
 
@@ -391,6 +402,18 @@ impl TcpSocket {
         let config = match config {
             Ok(config) => config,
             Err(error) => return failed(lua, &error),
+        };
+        let config = match &self.client {
+            Some(certified) => {
+                let mut presenting = (*config).clone();
+                presenting.client_auth_cert_resolver =
+                    Arc::new(SingleCertAndKey::from(Arc::clone(certified)));
+                // A session resumed from the shared cache would carry the
+                // identity another handshake presented.
+                presenting.resumption = Resumption::disabled();
+                Arc::new(presenting)
+            }
+            None => config,
         };
         let name = server_name.unwrap_or_else(|| self.host.clone());
         let Ok(name) = ServerName::try_from(name) else {
@@ -645,6 +668,27 @@ impl UserData for TcpSocket {
                     .await
             },
         );
+        methods.add_method_mut(
+            "setclientcert",
+            |lua, this, (chain, key): (Option<UserDataRef<Chain>>, Option<UserDataRef<Key>>)| {
+                if let Some(refused) = this.own_connection(lua) {
+                    return refused;
+                }
+                this.client =
+                    match (chain, key) {
+                        (None, None) => None,
+                        (Some(chain), Some(key)) => match certified(&chain.0, &key.0) {
+                            Ok(certified) => Some(Arc::new(certified)),
+                            Err(error) => return failed(lua, &error),
+                        },
+                        _ => return failed(
+                            lua,
+                            "client certificate must be supplied with corresponding private key",
+                        ),
+                    };
+                Ok(results([Value::Boolean(true)]))
+            },
+        );
         methods.add_async_method_mut("send", |lua, mut this, data: Value| async move {
             if let Some(refused) = this.writable(&lua) {
                 return refused;
@@ -771,6 +815,20 @@ impl UserData for TcpSocket {
         });
         methods.add_method("setoption", |_, _, _: MultiValue| Ok(1));
     }
+}
+
+/// The certificate chain and key `setclientcert` was given, as handshakes
+/// present them.
+fn certified(chain: &[Vec<u8>], key: &[u8]) -> Result<CertifiedKey, String> {
+    let key = PrivateKeyDer::try_from(key)
+        .map_err(|error| format!("the private key cannot be read: {error}"))?
+        .clone_key();
+    let chain = chain
+        .iter()
+        .map(|der| CertificateDer::from(der.clone()))
+        .collect();
+    CertifiedKey::from_der(chain, key, &rustls::crypto::ring::default_provider())
+        .map_err(|error| format!("the client certificate and its key cannot be used: {error}"))
 }
 
 /// The number of the descriptor `stream` holds, where descriptors are

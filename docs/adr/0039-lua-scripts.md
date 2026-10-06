@@ -186,11 +186,12 @@ log level constants, `ngx.re` on PCRE2 (the engine NGINX uses),
 `ngx.shared`, the time, escaping, argument, base64, digest and quoting
 functions, `ngx.sleep`, `ngx.get_phase`, `ngx.worker`, `ngx.config`,
 `ngx.balancer` and the TCP cosockets of `ngx.socket.tcp` and
-`ngx.socket.connect` (`bind`, `connect`, `sslhandshake`, `send`,
-`receive`, `receiveany`, `receiveuntil`, `settimeout`, `settimeouts`,
-`setkeepalive`, `getreusedtimes`, `getfd` and `close`), whose idle
+`ngx.socket.connect` (`bind`, `connect`, `setclientcert`, `sslhandshake`,
+`send`, `receive`, `receiveany`, `receiveuntil`, `settimeout`,
+`settimeouts`, `setkeepalive`, `getreusedtimes`, `getfd` and `close`), whose idle
 connections each VM keeps for
-its later requests and whose defaults the `lua_socket_*` directives set
+its later requests, whose handshakes with a certificate of
+`setclientcert` resume no session another identity made, and whose defaults the `lua_socket_*` directives set
 for `http`, a server or a route, and the light threads of `ngx.thread.spawn`, `wait`
 and `kill`, which run on the budget of the run that spawned them; a run
 ends once its entry thread and its light threads have ended, or as soon as
