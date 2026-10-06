@@ -554,7 +554,7 @@ http {
     );
     sources.insert(
         "lua/gate.lua",
-        "local redis = require \"resty.redis\"\nlocal res = ngx.location.capture(\"/auth\")\nseen = true\n",
+        "local redis = require \"resty.redis\"\nlocal res = ngx.req.set_body_file(\"/auth\")\nseen = true\n",
     );
     sources.insert("lua/lib/util.lua", "counter = 0\nreturn {}\n");
     sources.insert("lua/bad.lua", "return function(\n");
@@ -574,7 +574,7 @@ http {
         (
             codes::LUA,
             "lua/gate.lua:2",
-            "ngx.location.capture is not available in Pingora Panel",
+            "ngx.req.set_body_file is not available in Pingora Panel",
         ),
         (
             codes::LUA,

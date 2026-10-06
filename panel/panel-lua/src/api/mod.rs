@@ -5,6 +5,7 @@ mod bit;
 mod codec;
 pub(crate) mod contexts;
 mod json;
+mod location;
 mod modules;
 mod ngx;
 mod re;

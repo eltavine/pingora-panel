@@ -319,6 +319,8 @@ pub struct Exchange {
     pub(crate) client_closed: bool,
     /// `ngx.eof` ended the response; the handler goes on without output.
     pub(crate) eof: bool,
+    /// A script's subrequest (`ngx.location.capture`) runs the handlers.
+    pub(crate) subrequest: bool,
     /// What the last run's handler says of `lua_use_default_type`.
     pub(crate) default_type: bool,
 }
@@ -344,8 +346,15 @@ impl Exchange {
             internal: false,
             client_closed: false,
             eof: false,
+            subrequest: false,
             default_type: true,
         }
+    }
+
+    /// Marks the exchange as a script's subrequest's: `ngx.is_subrequest`
+    /// and `ngx.req.is_internal` are true.
+    pub fn set_subrequest(&mut self) {
+        self.subrequest = true;
     }
 
     /// Whether the client closed the connection while a handler watched

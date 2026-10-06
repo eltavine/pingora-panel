@@ -396,7 +396,7 @@ async fn phases_and_permissions_refuse_what_they_do_not_allow() {
             "ngx.say('late')",
             "ngx.req.read_body()",
             "require('ngx.balancer').set_current_peer('10.0.0.5', 8080)",
-            "ngx.location.capture('/sub')",
+            "ngx.req.set_body_file('/tmp/body')",
         ]),
     );
     let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
@@ -427,7 +427,7 @@ async fn phases_and_permissions_refuse_what_they_do_not_allow() {
     assert!(
         failure
             .message
-            .contains("ngx.location.capture is not available"),
+            .contains("ngx.req.set_body_file is not available"),
         "{}",
         failure.message
     );
@@ -1922,4 +1922,91 @@ async fn handlers_go_on_after_eof_without_output() {
         "{:?}",
         exchange.logs
     );
+}
+
+/// Answers subrequests with their method, path and arguments, and keeps what
+/// it was asked.
+struct Subrequests {
+    asked: Vec<panel_lua::Capture>,
+}
+
+#[async_trait]
+impl Host for Subrequests {
+    async fn read_body(&mut self, _limit: usize) -> Result<Bytes, String> {
+        Ok(Bytes::from_static(b"parent body"))
+    }
+
+    async fn capture(
+        &mut self,
+        requests: Vec<panel_lua::Capture>,
+    ) -> Result<Vec<panel_lua::Captured>, String> {
+        let answers = requests
+            .iter()
+            .map(|request| {
+                let mut headers = HeaderMap::new();
+                headers.append("content-type", HeaderValue::from_static("text/plain"));
+                headers.append("set-cookie", HeaderValue::from_static("a=1"));
+                headers.append("set-cookie", HeaderValue::from_static("b=2"));
+                let body = format!(
+                    "{} {}?{}",
+                    request.method,
+                    request.path,
+                    request.args.clone().unwrap_or_default()
+                );
+                let mut captured = panel_lua::Captured::new(201, headers, Bytes::from(body));
+                if request.share_variables {
+                    captured.variables = Some(std::collections::HashMap::from([(
+                        "from_sub".to_owned(),
+                        "yes".to_owned(),
+                    )]));
+                }
+                captured
+            })
+            .collect();
+        self.asked.extend(requests);
+        Ok(answers)
+    }
+}
+
+#[tokio::test]
+async fn subrequests_carry_their_options_and_come_back_as_tables() {
+    let lua = start(
+        1,
+        handlers(&[r#"
+            ngx.req.read_body()
+            ngx.var.parent = "p"
+            local res = ngx.location.capture("/sub?x=1", {
+                args = { y = 2 }, method = ngx.HTTP_POST, vars = { v = "1" },
+                copy_all_vars = true, ctx = ngx.ctx,
+            })
+            assert(res.status == 201, res.status)
+            assert(res.header["Content-Type"] == "text/plain")
+            assert(res.header.content_type == "text/plain")
+            assert(#res.header["Set-Cookie"] == 2)
+            assert(res.body == "POST /sub?x=1&y=2", res.body)
+            assert(res.truncated == false)
+            local a, b = ngx.location.capture_multi({ { "/a" }, { "/b", { share_all_vars = true } } })
+            assert(a.body == "GET /a?" and b.body == "GET /b?", a.body .. b.body)
+            ngx.say(ngx.var.from_sub)
+        "#]),
+    );
+    let mut granted = handler(lua.handlers[0], Phase::Content);
+    granted.permissions.body = true;
+    let mut host = Subrequests { asked: Vec::new() };
+    let mut scripts = lua.runtime.scripts(request("POST", "/", &[]));
+    let outcome = scripts.run(granted, &mut host).await;
+    assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+    assert_eq!(scripts.exchange().response.body, b"yes\n");
+    let first = &host.asked[0];
+    assert_eq!(first.method, http::Method::POST);
+    assert_eq!(
+        (first.path.as_str(), first.args.as_deref()),
+        ("/sub", Some("x=1&y=2"))
+    );
+    assert_eq!(first.body.as_deref(), Some(&b"parent body"[..]));
+    assert_eq!(first.variables["parent"], "p");
+    assert_eq!(first.variables["v"], "1");
+    assert!(first.share.is_some());
+    assert!(host.asked[1].body.is_none() && host.asked[1].variables.is_empty());
+    assert!(host.asked[2].share_variables);
 }

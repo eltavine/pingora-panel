@@ -75,10 +75,12 @@ pub(crate) enum Api {
     ReqSocket,
     RunWorkerThread,
     OnAbort,
+    LocationCapture,
+    LocationCaptureMulti,
 }
 
 impl Api {
-    const ALL: [Api; 46] = [
+    const ALL: [Api; 48] = [
         Api::Arg,
         Api::Ctx,
         Api::Eof,
@@ -125,6 +127,8 @@ impl Api {
         Api::ReqSocket,
         Api::RunWorkerThread,
         Api::OnAbort,
+        Api::LocationCapture,
+        Api::LocationCaptureMulti,
     ];
 
     /// The function a path such as `ngx.var.host` or `ngx.req.get_headers`
@@ -195,6 +199,8 @@ impl Api {
             Api::ReqSocket => "ngx.req.socket",
             Api::RunWorkerThread => "ngx.run_worker_thread",
             Api::OnAbort => "ngx.on_abort",
+            Api::LocationCapture => "ngx.location.capture",
+            Api::LocationCaptureMulti => "ngx.location.capture_multi",
         }
     }
 
@@ -232,7 +238,9 @@ impl Api {
             | Api::Exec
             | Api::ReqSocket
             | Api::RunWorkerThread
-            | Api::OnAbort => bits(&[RW, AC, CT]),
+            | Api::OnAbort
+            | Api::LocationCapture
+            | Api::LocationCaptureMulti => bits(&[RW, AC, CT]),
         }
     }
 

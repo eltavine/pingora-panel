@@ -165,8 +165,16 @@ it, the function `ngx.on_abort` registered runs as a light thread of the
 run and may end the request with `ngx.exit`, and without one the run stops
 and the request is logged as nginx's 499; `ngx.on_abort` returns `nil,
 "lua_check_client_abort is off"` otherwise, as lua-nginx-module's does.
-Subrequests (`ngx.location.capture`), named locations, the raw request
-socket of `ngx.req.socket(true)` and body files are not available.
+`ngx.location.capture` and `capture_multi` make subrequests with
+Pingora's own: each goes through the gateway as a request to the same site
+does, with the `method`, `args`, `body`, `vars`, `copy_all_vars`,
+`share_all_vars` and `always_forward_body` options lua-nginx-module takes,
+and with `ctx` its scripts run on the VM of the script that made it with
+that table as their `ngx.ctx`. As in nginx, subrequests skip the access
+phase, are not logged, see `ngx.is_subrequest` true and may nest fifty
+deep; `capture_multi` runs its subrequests at once. Named locations, the
+raw request socket of `ngx.req.socket(true)` and body files are not
+available.
 
 **Native API.** Next to `ngx`, `require("panel.v1")` returns the
 capabilities the specification names — `req`, `resp`, `ctx`, `upstream`,

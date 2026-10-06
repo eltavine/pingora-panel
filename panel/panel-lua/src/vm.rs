@@ -75,12 +75,15 @@ pub(crate) enum HostCall {
     },
     /// The next piece of the request body, for `ngx.req.socket`.
     ReadBodyChunk,
+    /// The subrequests of `ngx.location.capture`.
+    Capture(Vec<crate::capture::Capture>),
 }
 
 #[derive(Debug)]
 pub(crate) enum HostReply {
     Body(Result<Bytes, String>),
     Chunk(Result<Option<Bytes>, String>),
+    Captured(Result<Vec<crate::capture::Captured>, String>),
 }
 
 /// The run under way for a request.
@@ -181,11 +184,14 @@ pub(crate) struct Slot {
     pub entries: Mutex<HashMap<usize, Arc<Cell>>>,
     /// Runs reach nothing outside, as in a test.
     pub isolated: AtomicBool,
+    /// The VM's place in its runtime.
+    pub index: usize,
 }
 
 impl Slot {
-    fn new() -> Self {
+    fn new(index: usize) -> Self {
         Self {
+            index,
             epoch: Instant::now(),
             entry: AtomicUsize::new(0),
             work_left: AtomicI64::new(i64::MAX),
@@ -321,7 +327,7 @@ impl Vm {
             program.regex_match_limit,
         ));
         lua.set_app_data(crate::tls::TlsTable(program.tls.clone().into()));
-        let slot = Arc::new(Slot::new());
+        let slot = Arc::new(Slot::new(index));
         {
             let slot = Arc::clone(&slot);
             lua.set_interrupt(move |lua| slot.interrupt(lua));

@@ -338,7 +338,7 @@ impl PanelProxy {
             .server_addr()
             .and_then(|address| address.as_inet())
             .copied();
-        let scripts = plan.runtime.scripts(lua::exchange(
+        let exchange = lua::exchange(
             session.req_header(),
             path,
             client,
@@ -346,7 +346,18 @@ impl PanelProxy {
             self.listener.tls,
             host,
             ctx.started,
-        ));
+        );
+        let scripts = match ctx.subrequest.as_ref() {
+            Some(subrequest) => {
+                let scripts = match &subrequest.share {
+                    Some(share) => plan.runtime.scripts_sharing(exchange, share),
+                    None => plan.runtime.scripts(exchange),
+                };
+                scripts.exchange().set_subrequest();
+                scripts
+            }
+            None => plan.runtime.scripts(exchange),
+        };
         scripts.exchange().variables = variables;
         scripts
     }
@@ -473,6 +484,10 @@ impl PanelProxy {
                     session,
                     limit,
                     streamed: 0,
+                    depth: ctx
+                        .subrequest
+                        .as_ref()
+                        .map_or(0, |subrequest| subrequest.depth),
                 },
             )
             .await;

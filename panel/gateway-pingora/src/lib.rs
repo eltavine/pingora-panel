@@ -27,6 +27,7 @@ mod routing;
 mod secrets;
 mod security;
 mod static_files;
+mod subrequests;
 mod telemetry;
 mod template;
 mod upstream;

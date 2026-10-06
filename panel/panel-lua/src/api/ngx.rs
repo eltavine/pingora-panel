@@ -80,11 +80,7 @@ const STATUSES: [(&str, i64); 37] = [
 
 /// What lua-nginx-module has and this gateway does not: each raises an error
 /// naming itself rather than doing something else.
-pub(crate) const UNAVAILABLE: [&str; 3] = [
-    "ngx.location.capture",
-    "ngx.location.capture_multi",
-    "ngx.req.set_body_file",
-];
+pub(crate) const UNAVAILABLE: [&str; 1] = ["ngx.req.set_body_file"];
 
 /// Identifies the lua-nginx-module release this API follows.
 const NGX_LUA_VERSION: i64 = 10028;
@@ -141,6 +137,7 @@ pub(super) fn table(lua: &Lua, context: &Context) -> mlua::Result<Table> {
     )?;
     super::udp::install(lua, &ngx, &context.slot)?;
     super::thread::install(lua, &ngx, &context.slot)?;
+    super::location::install(lua, &ngx, &context.slot)?;
     crate::timer::install(lua, &ngx, &context.slot, &context.timers)?;
     crate::worker::install(lua, &ngx, &context.slot, &context.worker_threads)?;
     for path in UNAVAILABLE {
@@ -205,10 +202,9 @@ fn dynamic_fields(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
                 b"headers_sent" => exchange(&reader, Api::HeadersSent, |exchange| {
                     Ok(Value::Boolean(exchange.headers_sent))
                 }),
-                b"is_subrequest" => {
-                    cell(&reader, Api::IsSubrequest)?;
-                    Ok(Value::Boolean(false))
-                }
+                b"is_subrequest" => exchange(&reader, Api::IsSubrequest, |exchange| {
+                    Ok(Value::Boolean(exchange.subrequest))
+                }),
                 _ => Ok(Value::Nil),
             }
         })?,

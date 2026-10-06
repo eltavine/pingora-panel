@@ -2883,3 +2883,88 @@ async fn scripts_watching_for_it_learn_that_the_client_left() {
     }
     gateway.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn scripts_capture_subrequests_through_the_gateway() {
+    use panel_ir::{LuaHandler, LuaPermissions, LUA_SCRIPTS_CAPABILITY};
+
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    snapshot.required_capabilities.extend([
+        CapabilityRequirement::new(LUA_SCRIPTS_CAPABILITY, "1"),
+        CapabilityRequirement::new(REQUEST_SECURITY_CAPABILITY, "1"),
+    ]);
+    snapshot.lua.scripts = vec![
+        lua_script(
+            "parent",
+            r#"
+            local res = ngx.location.capture("/child?x=1", {
+                method = ngx.HTTP_POST, body = "hello", vars = { tag = "t" }, ctx = ngx.ctx,
+            })
+            local a, b = ngx.location.capture_multi({ { "/static" }, { "/child" } })
+            ngx.say(res.status, "|", res.body, "|", res.header["X-Child"], "|",
+                tostring(ngx.ctx.from_child), "|", a.status, "|", a.body, "|", b.status, "|", b.body)
+            "#,
+        ),
+        lua_script(
+            "child",
+            r#"
+            ngx.ctx.from_child = "c"
+            ngx.req.read_body()
+            ngx.header["X-Child"] = "yes"
+            ngx.status = 201
+            ngx.say(ngx.req.get_method(), " ", ngx.var.arg_x or "-", " ",
+                ngx.req.get_body_data() or "-", " ", ngx.var.tag or "-", " ", tostring(ngx.is_subrequest))
+            "#,
+        ),
+    ];
+    snapshot.sites.push(site(&["shop.test"]));
+    snapshot.routes.push(route(
+        "parent",
+        1,
+        prefix("/parent"),
+        RouteAction::Lua {
+            handler: LuaHandler::new("parent"),
+        },
+    ));
+    let mut child = LuaHandler::new("child");
+    child.allow = LuaPermissions {
+        body: true,
+        ..LuaPermissions::default()
+    };
+    let mut guarded = route(
+        "child",
+        2,
+        prefix("/child"),
+        RouteAction::Lua { handler: child },
+    );
+    guarded.security_policy_id = Some("closed".into());
+    snapshot.routes.push(guarded);
+    snapshot.routes.push(route(
+        "static",
+        3,
+        prefix("/static"),
+        RouteAction::respond(200, Some("plain".into())),
+    ));
+    snapshot.security_policies.push(SecurityPolicy {
+        id: "closed".into(),
+        denied_path_prefixes: vec!["/".into()],
+        ..SecurityPolicy::default()
+    });
+    let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
+    wait_for(listen).await;
+    assert_eq!(
+        get(listen, Some("shop.test"), "/child", "").await.status,
+        403
+    );
+    let response = get(listen, Some("shop.test"), "/parent", "").await;
+    assert_eq!(response.status, 200);
+    assert_eq!(
+        String::from_utf8_lossy(&response.body),
+        "201|POST 1 hello t true\n|yes|c|200|plain|201|GET - - - true\n\n"
+    );
+    gateway.stop().await;
+}

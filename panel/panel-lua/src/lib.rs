@@ -10,6 +10,7 @@
 //! [`compile`] and [`lint`] and tries them with the same runtime.
 
 mod api;
+mod capture;
 mod exchange;
 mod lint;
 mod program;
@@ -20,6 +21,7 @@ mod tls;
 mod vm;
 mod worker;
 
+pub use capture::{Capture, Captured, Share, MOST_CAPTURES, MOST_DEPTH};
 pub use exchange::{
     Balancer, Changes, Chunk, Connection, Exchange, Failure, FailureKind, Limits, LogEntry,
     LogLevel, Outcome, Peer, PeerTimeouts, Permissions, Phase, Request, Response, Sockets,

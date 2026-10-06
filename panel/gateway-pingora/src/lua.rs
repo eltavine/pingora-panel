@@ -278,6 +278,8 @@ pub(crate) struct SessionHost<'a> {
     pub limit: usize,
     /// What `ngx.req.socket` has read so far.
     pub streamed: usize,
+    /// How deep the request is in subrequests: none for a client's.
+    pub depth: usize,
 }
 
 #[async_trait]
@@ -333,6 +335,13 @@ impl Host for SessionHost<'_> {
             }
         }
         Ok(chunk)
+    }
+
+    async fn capture(
+        &mut self,
+        requests: Vec<panel_lua::Capture>,
+    ) -> std::result::Result<Vec<panel_lua::Captured>, String> {
+        crate::subrequests::capture(self.session, requests, self.depth).await
     }
 
     /// Watches the connection once the request body is in: the client

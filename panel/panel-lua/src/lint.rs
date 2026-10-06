@@ -765,7 +765,7 @@ local s = "quoted = 1" .. [[long = 2]]
 
     #[test]
     fn ngx_functions_are_checked_against_the_gateway_and_the_phase() {
-        let text = "ngx.say(ngx.var.host)\nlocal r = ngx.location.capture('/x')\nngx.header['X'] = '1'\nlocal ok = ngx.req.get_headers()\n-- ngx.say in a comment\nlocal s = 'ngx.exit(1)'\n";
+        let text = "ngx.say(ngx.var.host)\nlocal r = ngx.req.set_body_file('/x')\nngx.header['X'] = '1'\nlocal ok = ngx.req.get_headers()\n-- ngx.say in a comment\nlocal s = 'ngx.exit(1)'\n";
         let in_header_filter = found(text, Role::Handler(Phase::HeaderFilter));
         assert_eq!(
             in_header_filter,
@@ -778,7 +778,7 @@ local s = "quoted = 1" .. [[long = 2]]
                 (
                     FindingKind::Unavailable,
                     2,
-                    "ngx.location.capture is not available in Pingora Panel".to_owned()
+                    "ngx.req.set_body_file is not available in Pingora Panel".to_owned()
                 ),
             ]
         );

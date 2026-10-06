@@ -59,6 +59,15 @@ pub trait Host: Send {
     async fn closed(&mut self) {
         std::future::pending::<()>().await;
     }
+
+    /// Makes the subrequests of `ngx.location.capture`, all at once, and
+    /// gives their responses in order.
+    async fn capture(
+        &mut self,
+        _requests: Vec<crate::capture::Capture>,
+    ) -> Result<Vec<crate::capture::Captured>, String> {
+        Err("subrequests cannot be made here".into())
+    }
 }
 
 /// A host for runs that have no request to read from.
@@ -249,6 +258,19 @@ impl Runtime {
             vm.slot.isolated.store(true, Ordering::Relaxed);
         }
         self.inner.timers.iter().for_each(|timers| timers.discard());
+    }
+
+    /// Scripts for a subrequest that `share` ties to the VM and `ngx.ctx` of
+    /// the script that made it.
+    pub fn scripts_sharing(&self, exchange: Exchange, share: &crate::capture::Share) -> Scripts {
+        let exchange = Arc::new(Mutex::new(exchange));
+        let cell = Arc::new(Cell::new(Arc::clone(&exchange)));
+        *cell.ctx.lock() = Some(share.ctx.clone());
+        Scripts {
+            runtime: Arc::clone(&self.inner),
+            exchange,
+            bound: Some((share.vm.min(self.inner.vms.len() - 1), cell)),
+        }
     }
 
     /// Scripts for one request, starting from `exchange`.
@@ -498,6 +520,9 @@ pub(crate) async fn drive(
                 let answer = match call {
                     HostCall::ReadBody { limit } => HostReply::Body(host.read_body(limit).await),
                     HostCall::ReadBodyChunk => HostReply::Chunk(host.read_body_chunk().await),
+                    HostCall::Capture(requests) => {
+                        HostReply::Captured(host.capture(requests).await)
+                    }
                 };
                 let _ = reply.send(answer);
             }

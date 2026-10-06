@@ -1460,7 +1460,9 @@ requests of a VM. `ngx.req.socket()` streams the request body to a script,
 chunked bodies included. `ngx.exec` handles the request again with a new URI, up
 to ten URI changes as in nginx. `ngx.run_worker_thread` runs a module's
 function on a thread and VM of its own, copying its arguments and results.
-Subrequests are not available.
+`ngx.location.capture` and `capture_multi` send subrequests through the
+gateway to routes of the same site, skipping the access phase as nginx
+does, and give their status, header and body back.
 
 Reading the configuration compiles every script with the gateway's
 compiler and reports, at their lines, scripts that do not compile, modules

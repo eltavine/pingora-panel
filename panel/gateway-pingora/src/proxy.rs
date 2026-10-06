@@ -191,6 +191,8 @@ pub(crate) struct RequestContext {
     /// The variables `set` gave the request before it had scripts; the
     /// scripts hold them once they do.
     variables: HashMap<String, String>,
+    /// What a script's subrequest keeps of the script that made it.
+    subrequest: Option<crate::subrequests::Subrequest>,
 }
 
 impl RequestContext {
@@ -306,7 +308,14 @@ impl ProxyHttp for PanelProxy {
             lua_last_failure: None,
             lua_peer: None,
             variables: HashMap::new(),
+            subrequest: None,
         }
+    }
+
+    /// Scripts make subrequests with Pingora's, which take the request's
+    /// session.
+    fn allow_spawning_subrequest(&self, _session: &Session, _ctx: &RequestContext) -> bool {
+        true
     }
 
     async fn early_request_filter(
@@ -315,6 +324,10 @@ impl ProxyHttp for PanelProxy {
         ctx: &mut RequestContext,
     ) -> pingora_core::Result<()> {
         ctx.accept_encoding = http_policy::rank_codings(session.req_header_mut());
+        if let Some((subrequest, variables)) = crate::subrequests::begin(session) {
+            ctx.subrequest = Some(subrequest);
+            ctx.variables = variables;
+        }
         Ok(())
     }
 
@@ -328,7 +341,12 @@ impl ProxyHttp for PanelProxy {
         }
         http_policy::disable_compression(session);
         request_identity::ensure_request_id(session.req_header_mut());
-        if let Some(metrics) = &self.listener.metrics {
+        if let Some(metrics) = self
+            .listener
+            .metrics
+            .as_ref()
+            .filter(|_| ctx.subrequest.is_none())
+        {
             ctx.active = Some(
                 metrics
                     .server
@@ -541,12 +559,15 @@ impl ProxyHttp for PanelProxy {
             // access_by_lua_no_postpone: the access handler goes before the
             // security policies instead of after them.
             let access_first = Self::lua_plan(ctx).is_some_and(|plan| plan.access_first);
+            // Subrequests skip the access phase, as nginx's do.
+            let subrequest = ctx.subrequest.is_some();
             if !access_first
+                && !subrequest
                 && Self::admit(session, ctx, &snapshot, site, route, &path, host_name).await?
             {
                 return Ok(true);
             }
-            if let Some(hook) = route.lua.access.clone() {
+            if let Some(hook) = route.lua.access.clone().filter(|_| !subrequest) {
                 let proxied = matches!(route.target, RouteTarget::Proxy(_));
                 match self
                     .lua_request(session, ctx, &hook, &path, host_name, proxied)
@@ -563,6 +584,7 @@ impl ProxyHttp for PanelProxy {
                 }
             }
             if access_first
+                && !subrequest
                 && Self::admit(session, ctx, &snapshot, site, route, &path, host_name).await?
             {
                 return Ok(true);
@@ -1123,6 +1145,12 @@ impl ProxyHttp for PanelProxy {
             }
         }
         ctx.lease = None;
+        // A subrequest is not logged; it gives its variables back.
+        if let Some(mut subrequest) = ctx.subrequest.take() {
+            let variables = lua_phases::with_variables(session, &ctx.variables, Clone::clone);
+            subrequest.finish(variables);
+            return;
+        }
         if let Some(hook) = Self::lua_hook(ctx, |hooks| &hooks.log) {
             self.lua_log_phase(session, ctx, &hook, status).await;
         }
