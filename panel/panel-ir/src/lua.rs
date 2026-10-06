@@ -218,6 +218,23 @@ pub struct LuaProgram {
     /// Bytes each VM may allocate; zero for the gateway's default.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub memory_limit_bytes: u64,
+    /// Timers each VM may hold waiting, as `lua_max_pending_timers` sets
+    /// them; zero for lua-nginx-module's 1024.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub max_pending_timers: u64,
+    /// Timers each VM may run at once, as `lua_max_running_timers` sets
+    /// them; zero for lua-nginx-module's 256.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub max_running_timers: u64,
+    /// Compiled regular expressions each VM keeps, as
+    /// `lua_regex_cache_max_entries` sets them: 1024 when unset, none at
+    /// zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regex_cache_max_entries: Option<u64>,
+    /// PCRE2's match limit for `ngx.re`, as `lua_regex_match_limit` sets it;
+    /// zero for PCRE2's own.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub regex_match_limit: u64,
 }
 
 impl LuaProgram {

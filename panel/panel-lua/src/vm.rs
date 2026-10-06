@@ -298,6 +298,10 @@ impl Vm {
         timers: Arc<Timers>,
     ) -> mlua::Result<(Self, Vec<crate::exchange::LogEntry>)> {
         let lua = Lua::new_with(StdLib::ALL_SAFE, LuaOptions::new())?;
+        lua.set_app_data(api::Regexes::new(
+            program.regex_cache.unwrap_or(api::REGEX_CACHE_ENTRIES),
+            program.regex_match_limit,
+        ));
         let slot = Arc::new(Slot::new());
         {
             let slot = Arc::clone(&slot);

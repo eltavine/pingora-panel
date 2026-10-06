@@ -1353,3 +1353,29 @@ async fn exec_redirects_internally_and_ends_the_handler() {
         failure.message
     );
 }
+
+#[tokio::test]
+async fn programs_set_the_regex_cache_match_limit_and_timer_caps() {
+    let lua = start(1, |builder| {
+        builder.timers(1, 0).regexes(Some(0), 100);
+        vec![builder.handler(&source(
+            r#"
+            local m, err = ngx.re.match(string.rep("a", 24) .. "b", "^(a+)+$")
+            assert(m == nil and err:find("limit"), err)
+            assert(ngx.re.match("abc", "b")[0] == "b")
+            assert(ngx.timer.at(60, function() end))
+            local ok, too_many = ngx.timer.at(60, function() end)
+            ngx.say(tostring(ok), " ", too_many)
+            "#,
+        ))]
+    });
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = run(&mut scripts, handler(lua.handlers[0], Phase::Content)).await;
+    assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+    assert_eq!(
+        scripts.exchange().response.body,
+        b"nil too many pending timers\n"
+    );
+    drop(scripts);
+    lua.runtime.isolate();
+}

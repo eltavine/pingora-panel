@@ -289,6 +289,15 @@ impl<'a> Compiler<'a> {
                 usize::try_from(dict.capacity_bytes).unwrap_or(usize::MAX),
             );
         }
+        let count = |value: u64| usize::try_from(value).unwrap_or(usize::MAX);
+        let lua = &snapshot.lua;
+        compiler
+            .builder
+            .timers(count(lua.max_pending_timers), count(lua.max_running_timers))
+            .regexes(
+                lua.regex_cache_max_entries.map(count),
+                u32::try_from(lua.regex_match_limit).unwrap_or(u32::MAX),
+            );
         Ok(())
     }
 

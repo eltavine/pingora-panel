@@ -187,6 +187,20 @@ pub struct LuaConfig {
     /// Bytes each VM may allocate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_limit_bytes: Option<u64>,
+    /// Timers each VM may hold waiting (`lua_max_pending_timers`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_pending_timers: Option<u64>,
+    /// Timers each VM may run at once (`lua_max_running_timers`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_running_timers: Option<u64>,
+    /// Compiled regular expressions each VM keeps
+    /// (`lua_regex_cache_max_entries`); zero keeps none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regex_cache_max_entries: Option<u64>,
+    /// PCRE2's match limit for `ngx.re` (`lua_regex_match_limit`); zero
+    /// keeps PCRE2's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regex_match_limit: Option<u64>,
     /// What every site runs, and the terms of every handler; balancers and
     /// `init` run on these terms.
     #[serde(default, skip_serializing_if = "LuaScope::is_empty")]

@@ -152,6 +152,11 @@ handler that fails leaves the request as it was before it ran.
 - in memory, by `lua_memory_limit` per VM (64 MiB by default); an
   allocation over the limit fails the run that made it.
 
+`lua_max_pending_timers` and `lua_max_running_timers` cap each VM's
+timers, `lua_regex_cache_max_entries` the compiled expressions it keeps
+(none at 0) and `lua_regex_match_limit` PCRE2's match limit, with
+lua-nginx-module's defaults.
+
 A run that keeps the CPU for more than a millisecond is suspended at its
 next interrupt and resumed after other tasks have run, so a busy script
 slows its own request and not the others on its thread. The host functions

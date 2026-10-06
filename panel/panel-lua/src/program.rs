@@ -110,6 +110,13 @@ pub struct Program {
     pub(crate) init_limits: Limits,
     pub(crate) init_permissions: Permissions,
     pub(crate) dicts: Vec<SharedDict>,
+    /// Zero keeps lua-nginx-module's defaults.
+    pub(crate) pending_timers: usize,
+    pub(crate) running_timers: usize,
+    /// `None` keeps the default; zero caches nothing.
+    pub(crate) regex_cache: Option<usize>,
+    /// Zero keeps PCRE2's.
+    pub(crate) regex_match_limit: u32,
 }
 
 impl Program {
@@ -176,6 +183,25 @@ impl ProgramBuilder {
     /// What the timers `init_by_lua` and `init_worker_by_lua` create may do.
     pub fn init_permissions(&mut self, permissions: Permissions) -> &mut Self {
         self.program.init_permissions = permissions;
+        self
+    }
+
+    /// The timers each VM may hold waiting and running at once, as
+    /// `lua_max_pending_timers` and `lua_max_running_timers` set them; zero
+    /// keeps lua-nginx-module's 1024 and 256.
+    pub fn timers(&mut self, pending: usize, running: usize) -> &mut Self {
+        self.program.pending_timers = pending;
+        self.program.running_timers = running;
+        self
+    }
+
+    /// The compiled expressions each VM keeps, as
+    /// `lua_regex_cache_max_entries` sets them (1024 unless given; none at
+    /// zero), and PCRE2's match limit, as `lua_regex_match_limit` sets it
+    /// (PCRE2's own at zero).
+    pub fn regexes(&mut self, cache_entries: Option<usize>, match_limit: u32) -> &mut Self {
+        self.program.regex_cache = cache_entries;
+        self.program.regex_match_limit = match_limit;
         self
     }
 

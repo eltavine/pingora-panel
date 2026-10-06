@@ -113,6 +113,16 @@ pub(crate) fn lua_http(lua: &LuaConfig) -> Vec<Directive> {
     if let Some(bytes) = lua.memory_limit_bytes {
         body.push(Directive::simple("lua_memory_limit", [print_size(bytes)]));
     }
+    for (name, value) in [
+        ("lua_max_pending_timers", lua.max_pending_timers),
+        ("lua_max_running_timers", lua.max_running_timers),
+        ("lua_regex_cache_max_entries", lua.regex_cache_max_entries),
+        ("lua_regex_match_limit", lua.regex_match_limit),
+    ] {
+        if let Some(value) = value {
+            body.push(Directive::simple(name, [value.to_string()]));
+        }
+    }
     for dict in &lua.shared_dicts {
         body.push(Directive::simple(
             "lua_shared_dict",

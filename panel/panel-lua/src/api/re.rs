@@ -1,17 +1,16 @@
 //! `ngx.re` on PCRE2, the engine NGINX uses, with compiled expressions
-//! cached as `lua_regex_cache_max_entries` does by default.
+//! cached per VM as `lua_regex_cache_max_entries` asks and matches bounded
+//! by `lua_regex_match_limit`.
 
 use super::{failed, results};
 use lru::LruCache;
 use mlua::{Function, Lua, LuaString, MultiValue, Table, Value};
 use parking_lot::Mutex;
 use pcre2::bytes::{CaptureLocations, Regex, RegexBuilder};
-use std::{
-    num::NonZeroUsize,
-    sync::{Arc, LazyLock},
-};
+use std::{num::NonZeroUsize, sync::Arc};
 
-const CACHE_ENTRIES: usize = 1024;
+/// lua-nginx-module's default for `lua_regex_cache_max_entries`.
+pub(crate) const CACHE_ENTRIES: usize = 1024;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 struct Flags {
@@ -53,17 +52,45 @@ fn flags(options: Option<&str>) -> mlua::Result<Flags> {
 
 type Cache = Mutex<LruCache<(String, Flags), Arc<Regex>>>;
 
-static CACHE: LazyLock<Cache> =
-    LazyLock::new(|| Mutex::new(LruCache::new(NonZeroUsize::new(CACHE_ENTRIES).unwrap())));
+/// The compiled expressions of a VM, and the match limit they run with.
+pub(crate) struct Regexes {
+    cache: Option<Cache>,
+    match_limit: u32,
+}
 
-fn compile(pattern: &[u8], flags: Flags) -> Result<Arc<Regex>, String> {
+impl Regexes {
+    pub fn new(entries: usize, match_limit: u32) -> Self {
+        Self {
+            cache: NonZeroUsize::new(entries).map(|entries| Mutex::new(LruCache::new(entries))),
+            match_limit,
+        }
+    }
+}
+
+fn compile(lua: &Lua, pattern: &[u8], flags: Flags) -> Result<Arc<Regex>, String> {
+    let regexes = lua.app_data_ref::<Regexes>();
+    let defaults = Regexes::new(0, 0);
+    let regexes = regexes.as_deref().unwrap_or(&defaults);
     let pattern = std::str::from_utf8(pattern)
         .map_err(|_| "the regular expression is not valid UTF-8".to_owned())?;
     let key = (pattern.to_owned(), flags);
-    if let Some(regex) = CACHE.lock().get(&key) {
-        return Ok(Arc::clone(regex));
+    if let Some(cache) = &regexes.cache {
+        if let Some(regex) = cache.lock().get(&key) {
+            return Ok(Arc::clone(regex));
+        }
     }
-    let mut text = String::with_capacity(pattern.len() + 10);
+    let regex = Arc::new(build(pattern, flags, regexes.match_limit)?);
+    if let Some(cache) = &regexes.cache {
+        cache.lock().put(key, Arc::clone(&regex));
+    }
+    Ok(regex)
+}
+
+fn build(pattern: &str, flags: Flags, match_limit: u32) -> Result<Regex, String> {
+    let mut text = String::with_capacity(pattern.len() + 32);
+    if match_limit > 0 {
+        text.push_str(&format!("(*LIMIT_MATCH={match_limit})"));
+    }
     if flags.duplicate_names {
         text.push_str("(?J)");
     }
@@ -82,9 +109,7 @@ fn compile(pattern: &[u8], flags: Flags) -> Result<Arc<Regex>, String> {
         .extended(flags.extended)
         .utf(flags.utf)
         .jit_if_available(true);
-    let regex = Arc::new(builder.build(&text).map_err(|error| error.to_string())?);
-    CACHE.lock().put(key, Arc::clone(&regex));
-    Ok(regex)
+    builder.build(&text).map_err(|error| error.to_string())
 }
 
 fn options_text(options: &Option<LuaString>) -> mlua::Result<Option<String>> {
@@ -247,7 +272,7 @@ fn substitute(
     global: bool,
 ) -> mlua::Result<MultiValue> {
     let flags = flags(options.as_deref())?;
-    let regex = match compile(pattern, flags) {
+    let regex = match compile(lua, pattern, flags) {
         Ok(regex) => regex,
         Err(error) => return failed(lua, 2, &error),
     };
@@ -316,7 +341,7 @@ pub(super) fn table(lua: &Lua) -> mlua::Result<Table> {
                 Option<Table>,
             )| {
                 let flags = flags(options_text(&options)?.as_deref())?;
-                let regex = match compile(&pattern.as_bytes(), flags) {
+                let regex = match compile(lua, &pattern.as_bytes(), flags) {
                     Ok(regex) => regex,
                     Err(error) => return failed(lua, 1, &error),
                 };
@@ -349,7 +374,7 @@ pub(super) fn table(lua: &Lua) -> mlua::Result<Table> {
                 Option<usize>,
             )| {
                 let flags = flags(options_text(&options)?.as_deref())?;
-                let regex = match compile(&pattern.as_bytes(), flags) {
+                let regex = match compile(lua, &pattern.as_bytes(), flags) {
                     Ok(regex) => regex,
                     Err(error) => return failed(lua, 2, &error),
                 };
@@ -379,7 +404,7 @@ pub(super) fn table(lua: &Lua) -> mlua::Result<Table> {
         lua.create_function(
             |lua, (subject, pattern, options): (LuaString, LuaString, Option<LuaString>)| {
                 let flags = flags(options_text(&options)?.as_deref())?;
-                let regex = match compile(&pattern.as_bytes(), flags) {
+                let regex = match compile(lua, &pattern.as_bytes(), flags) {
                     Ok(regex) => regex,
                     Err(error) => return failed(lua, 1, &error),
                 };
@@ -510,7 +535,7 @@ fn split(
             at = next;
         }
     } else {
-        let regex = match compile(pattern, flags) {
+        let regex = match compile(lua, pattern, flags) {
             Ok(regex) => regex,
             Err(error) => return failed(lua, 1, &error),
         };
@@ -558,7 +583,7 @@ mod tests {
 
     #[test]
     fn templates_expand_groups_braces_and_dollars() {
-        let regex = compile(b"([0-9])[0-9]", Flags::default()).unwrap();
+        let regex = build("([0-9])[0-9]", Flags::default(), 0).unwrap();
         let mut locations = regex.capture_locations();
         find_at(&regex, &mut locations, b"hello, 1234", 0).unwrap();
         let mut output = Vec::new();

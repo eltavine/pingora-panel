@@ -21,6 +21,7 @@ mod var;
 pub(crate) use contexts::Api;
 pub(crate) use modules::BUILT_IN as BUILT_IN_MODULES;
 pub(crate) use ngx::UNAVAILABLE;
+pub(crate) use re::{Regexes, CACHE_ENTRIES as REGEX_CACHE_ENTRIES};
 
 use crate::{
     exchange::{Exchange, LogLevel, Permissions},

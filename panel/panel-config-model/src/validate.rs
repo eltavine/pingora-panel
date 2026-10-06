@@ -567,6 +567,35 @@ fn validate_lua(model: &ConfigModel, report: &mut Report) {
             );
         }
     }
+    for (name, value) in [
+        ("lua_max_pending_timers", lua.max_pending_timers),
+        ("lua_max_running_timers", lua.max_running_timers),
+    ] {
+        if value.is_some_and(|value| !(1..=panel_engine::MOST_LUA_TIMERS).contains(&value)) {
+            report.error(
+                "lua",
+                format!("{name} is not 1 to {}", panel_engine::MOST_LUA_TIMERS),
+            );
+        }
+    }
+    if lua
+        .regex_cache_max_entries
+        .is_some_and(|entries| entries > panel_engine::MOST_LUA_REGEX_CACHE)
+    {
+        report.error(
+            "lua",
+            format!(
+                "lua_regex_cache_max_entries is over {}",
+                panel_engine::MOST_LUA_REGEX_CACHE
+            ),
+        );
+    }
+    if lua
+        .regex_match_limit
+        .is_some_and(|limit| limit > u64::from(u32::MAX))
+    {
+        report.error("lua", format!("lua_regex_match_limit is over {}", u32::MAX));
+    }
     let mut dicts = BTreeSet::new();
     for dict in &lua.shared_dicts {
         let valid = !dict.name.is_empty()
@@ -962,8 +991,14 @@ mod tests {
             },
         ];
         model.lua.memory_limit_bytes = Some(1);
+        model.lua.max_running_timers = Some(0);
+        model.lua.regex_cache_max_entries = Some(u64::MAX);
+        model.lua.regex_match_limit = Some(u64::MAX);
         let found = messages(&model);
         for expected in [
+            "lua_max_running_timers is not 1 to",
+            "lua_regex_cache_max_entries is over",
+            "lua_regex_match_limit is over",
             "lua/a.lua and lua/a/init.lua are both module a",
             "\"lua/bad name.lua\" is not a Lua file name",
             "runs lua/missing.lua, which is not a Lua file of the configuration",

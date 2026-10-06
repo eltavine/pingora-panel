@@ -400,6 +400,10 @@ impl Compiler<'_> {
         program.scripts = std::mem::take(&mut self.scripts).into_scripts();
         program.shared_dicts.clone_from(&config.shared_dicts);
         program.memory_limit_bytes = config.memory_limit_bytes.unwrap_or(0);
+        program.max_pending_timers = config.max_pending_timers.unwrap_or(0);
+        program.max_running_timers = config.max_running_timers.unwrap_or(0);
+        program.regex_cache_max_entries = config.regex_cache_max_entries;
+        program.regex_match_limit = config.regex_match_limit.unwrap_or(0);
         self.snapshot.lua = program;
         self.capabilities.insert(LUA_SCRIPTS_CAPABILITY);
     }

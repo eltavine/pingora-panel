@@ -37,6 +37,10 @@ pub(super) fn decode_program(value: Option<wire::LuaProgram>) -> Result<LuaProgr
             })
             .collect(),
         memory_limit_bytes: value.memory_limit_bytes,
+        max_pending_timers: value.max_pending_timers,
+        max_running_timers: value.max_running_timers,
+        regex_cache_max_entries: value.regex_cache_max_entries,
+        regex_match_limit: value.regex_match_limit,
     })
 }
 
@@ -69,6 +73,10 @@ pub(super) fn encode_program(value: &LuaProgram) -> Option<wire::LuaProgram> {
             })
             .collect(),
         memory_limit_bytes: value.memory_limit_bytes,
+        max_pending_timers: value.max_pending_timers,
+        max_running_timers: value.max_running_timers,
+        regex_cache_max_entries: value.regex_cache_max_entries,
+        regex_match_limit: value.regex_match_limit,
     })
 }
 

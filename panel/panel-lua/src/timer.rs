@@ -25,8 +25,8 @@ use tokio::{runtime::Handle, sync::watch};
 
 /// lua-nginx-module's defaults for `lua_max_pending_timers` and
 /// `lua_max_running_timers`.
-const MOST_PENDING: usize = 1024;
-const MOST_RUNNING: usize = 256;
+pub(crate) const MOST_PENDING: usize = 1024;
+pub(crate) const MOST_RUNNING: usize = 256;
 /// Reports kept until the embedding takes them.
 const KEPT_REPORTS: usize = 64;
 
@@ -102,6 +102,8 @@ impl TimerReports {
 #[derive(Debug)]
 pub(crate) struct Timers {
     vm: usize,
+    most_pending: usize,
+    most_running: usize,
     pending: AtomicUsize,
     running: AtomicUsize,
     discarded: AtomicBool,
@@ -116,12 +118,15 @@ pub(crate) struct Timers {
 impl Timers {
     pub fn new(
         vm: usize,
+        (most_pending, most_running): (usize, usize),
         closing: watch::Receiver<()>,
         reports: Arc<TimerReports>,
         handle: Option<Handle>,
     ) -> Self {
         Self {
             vm,
+            most_pending,
+            most_running,
             pending: AtomicUsize::new(0),
             running: AtomicUsize::new(0),
             discarded: AtomicBool::new(false),
@@ -206,7 +211,7 @@ fn create(
             let Some(handle) = Handle::try_current().ok().or_else(|| timers.handle.clone()) else {
                 return failed(lua, 1, "no event loop to run timers on");
             };
-            if timers.pending.fetch_add(1, Relaxed) >= MOST_PENDING {
+            if timers.pending.fetch_add(1, Relaxed) >= timers.most_pending {
                 timers.pending.fetch_sub(1, Relaxed);
                 return failed(lua, 1, "too many pending timers");
             }
@@ -256,7 +261,7 @@ async fn fire(timer: Timer) {
         if timers.discarded.load(Relaxed) {
             return;
         }
-        let ran = if timers.running.fetch_add(1, Relaxed) >= MOST_RUNNING {
+        let ran = if timers.running.fetch_add(1, Relaxed) >= timers.most_running {
             TimerRun {
                 vm: timers.vm,
                 premature,

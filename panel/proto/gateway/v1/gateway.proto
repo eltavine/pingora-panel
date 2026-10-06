@@ -674,6 +674,17 @@ message LuaProgram {
   repeated LuaSharedDict shared_dicts = 5;
   // Bytes each VM may allocate; zero keeps the gateway's default.
   uint64 memory_limit_bytes = 6;
+  // Timers each VM may hold waiting (lua_max_pending_timers); zero keeps
+  // 1024.
+  uint64 max_pending_timers = 7;
+  // Timers each VM may run at once (lua_max_running_timers); zero keeps 256.
+  uint64 max_running_timers = 8;
+  // Compiled regular expressions each VM keeps
+  // (lua_regex_cache_max_entries): 1024 when unset, none at zero.
+  optional uint64 regex_cache_max_entries = 9;
+  // PCRE2's match limit for ngx.re (lua_regex_match_limit); zero keeps
+  // PCRE2's own.
+  uint64 regex_match_limit = 10;
 }
 
 message ValidateRequest {

@@ -105,6 +105,16 @@ impl Runtime {
         for index in 0..settings.vms.max(1) {
             let vm_timers = Arc::new(Timers::new(
                 index,
+                (
+                    match program.pending_timers {
+                        0 => crate::timer::MOST_PENDING,
+                        most => most,
+                    },
+                    match program.running_timers {
+                        0 => crate::timer::MOST_RUNNING,
+                        most => most,
+                    },
+                ),
                 closed.clone(),
                 Arc::clone(&reports),
                 handle.clone(),

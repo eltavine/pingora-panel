@@ -84,6 +84,10 @@ pub(super) const HTTP: &[&str] = &[
     "lua",
     "lua_shared_dict",
     "lua_memory_limit",
+    "lua_max_pending_timers",
+    "lua_max_running_timers",
+    "lua_regex_cache_max_entries",
+    "lua_regex_match_limit",
     "init_by_lua_block",
     "init_by_lua_file",
     "init_worker_by_lua_block",
@@ -342,6 +346,23 @@ impl<'a> Lowerer<'a> {
             }
             "lua_memory_limit" => {
                 self.lua.memory_limit_bytes = self.size(file, &directive.args[0]);
+            }
+            "lua_max_pending_timers"
+            | "lua_max_running_timers"
+            | "lua_regex_cache_max_entries"
+            | "lua_regex_match_limit" => {
+                let arg = &directive.args[0];
+                let Some(value) = self.value(file, arg) else {
+                    return;
+                };
+                let number = self.number(file, arg, &value, "a whole number");
+                let field = match name {
+                    "lua_max_pending_timers" => &mut self.lua.max_pending_timers,
+                    "lua_max_running_timers" => &mut self.lua.max_running_timers,
+                    "lua_regex_cache_max_entries" => &mut self.lua.regex_cache_max_entries,
+                    _ => &mut self.lua.regex_match_limit,
+                };
+                *field = number;
             }
             "lua_shared_dict" => {
                 let name_arg = &directive.args[0];

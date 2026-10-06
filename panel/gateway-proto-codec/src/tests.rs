@@ -544,6 +544,10 @@ fn lua_programs_and_handlers_round_trip_and_unknown_kinds_are_refused() {
             capacity_bytes: 1 << 20,
         }],
         memory_limit_bytes: 32 << 20,
+        max_pending_timers: 64,
+        max_running_timers: 8,
+        regex_cache_max_entries: Some(0),
+        regex_match_limit: 100_000,
     };
     let site_id = SiteId::new("site").unwrap();
     let mut site = SiteSpec::new(

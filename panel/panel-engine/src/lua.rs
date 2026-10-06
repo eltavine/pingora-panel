@@ -18,6 +18,10 @@ pub const MOST_LUA_SCRIPT_BYTES: usize = 1 << 20;
 pub const LEAST_LUA_MEMORY_BYTES: u64 = 1 << 20;
 pub const MOST_LUA_MEMORY_BYTES: u64 = 4 << 30;
 /// The smallest and largest shared dictionary.
+/// The most `lua_max_pending_timers`, `lua_max_running_timers` and
+/// `lua_regex_cache_max_entries` may set.
+pub const MOST_LUA_TIMERS: u64 = 1 << 20;
+pub const MOST_LUA_REGEX_CACHE: u64 = 1 << 20;
 pub const LEAST_LUA_DICT_BYTES: u64 = 8 << 10;
 pub const MOST_LUA_DICT_BYTES: u64 = 4 << 30;
 
@@ -175,6 +179,32 @@ pub fn problems(snapshot: &RuntimeSnapshot) -> Vec<(String, String)> {
                 "VMs get {} bytes, not {LEAST_LUA_MEMORY_BYTES} to {MOST_LUA_MEMORY_BYTES}",
                 program.memory_limit_bytes
             ),
+        ));
+    }
+    for (name, value) in [
+        ("lua_max_pending_timers", program.max_pending_timers),
+        ("lua_max_running_timers", program.max_running_timers),
+    ] {
+        if value > MOST_LUA_TIMERS {
+            found.push((
+                "lua".into(),
+                format!("{name} {value} is over {MOST_LUA_TIMERS}"),
+            ));
+        }
+    }
+    if program
+        .regex_cache_max_entries
+        .is_some_and(|entries| entries > MOST_LUA_REGEX_CACHE)
+    {
+        found.push((
+            "lua".into(),
+            format!("lua_regex_cache_max_entries is over {MOST_LUA_REGEX_CACHE}"),
+        ));
+    }
+    if program.regex_match_limit > u64::from(u32::MAX) {
+        found.push((
+            "lua".into(),
+            format!("lua_regex_match_limit is over {}", u32::MAX),
         ));
     }
     let mut dicts = BTreeSet::new();
