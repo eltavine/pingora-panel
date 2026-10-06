@@ -5,7 +5,7 @@ use panel_contracts::gateway::v1 as wire;
 use panel_errors::{PanelError, Result};
 use panel_ir::{
     LuaFallback, LuaHandler, LuaHandlers, LuaLogLevel, LuaPermissions, LuaProgram, LuaScript,
-    LuaSharedDict,
+    LuaSharedDict, LuaSockets,
 };
 
 pub(super) fn decode_program(value: Option<wire::LuaProgram>) -> Result<LuaProgram> {
@@ -167,6 +167,20 @@ pub(super) fn decode_handler(value: wire::LuaHandler) -> Result<LuaHandler> {
         log_level: decode_level(value.log_level)?,
         slow_threshold_ms: value.slow_threshold_ms,
         debug: value.debug,
+        sockets: value
+            .sockets
+            .map(|sockets| LuaSockets {
+                connect_timeout_ms: sockets.connect_timeout_ms,
+                send_timeout_ms: sockets.send_timeout_ms,
+                read_timeout_ms: sockets.read_timeout_ms,
+                buffer_bytes: sockets.buffer_bytes,
+                pool_size: sockets.pool_size,
+                keepalive_timeout_ms: sockets.keepalive_timeout_ms,
+                quiet: sockets.quiet,
+            })
+            .unwrap_or_default(),
+        keep_underscores: value.keep_underscores,
+        no_default_type: value.no_default_type,
     })
 }
 
@@ -184,6 +198,17 @@ pub(super) fn encode_handler(value: &LuaHandler) -> wire::LuaHandler {
         log_level: encode_level(value.log_level),
         slow_threshold_ms: value.slow_threshold_ms,
         debug: value.debug,
+        sockets: (!value.sockets.is_default()).then_some(wire::LuaSockets {
+            connect_timeout_ms: value.sockets.connect_timeout_ms,
+            send_timeout_ms: value.sockets.send_timeout_ms,
+            read_timeout_ms: value.sockets.read_timeout_ms,
+            buffer_bytes: value.sockets.buffer_bytes,
+            pool_size: value.sockets.pool_size,
+            keepalive_timeout_ms: value.sockets.keepalive_timeout_ms,
+            quiet: value.sockets.quiet,
+        }),
+        keep_underscores: value.keep_underscores,
+        no_default_type: value.no_default_type,
     }
 }
 

@@ -242,7 +242,7 @@ pub(crate) fn response_header(exchange: &Exchange, body: usize) -> Result<Respon
             .map_err(header_error)?;
     }
     if !matches!(status, 100..=199 | 204 | 304) {
-        if !response.headers.contains_key(header::CONTENT_TYPE) {
+        if exchange.default_type() && !response.headers.contains_key(header::CONTENT_TYPE) {
             response
                 .insert_header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
                 .map_err(header_error)?;

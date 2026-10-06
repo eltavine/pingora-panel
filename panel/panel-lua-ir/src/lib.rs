@@ -107,26 +107,43 @@ pub fn level(level: LuaLogLevel) -> LogLevel {
 
 /// The runtime's terms for `handler` in `phase`, with the defaults filled in.
 pub fn handler(id: HandlerId, handler: &LuaHandler, phase: Phase) -> Handler {
-    Handler {
-        id,
-        phase,
-        limits: Limits {
-            time: match handler.time_limit_ms {
-                0 => DEFAULT_TIME,
-                millis => Duration::from_millis(millis),
-            },
-            work: match handler.work_limit {
-                0 => DEFAULT_WORK,
-                work => work,
-            },
+    let mut terms = Handler::new(id, phase);
+    terms.limits = Limits {
+        time: match handler.time_limit_ms {
+            0 => DEFAULT_TIME,
+            millis => Duration::from_millis(millis),
         },
-        permissions: Permissions {
-            body: handler.allow.body,
-            upstream: handler.allow.upstream,
-            network: handler.allow.network,
+        work: match handler.work_limit {
+            0 => DEFAULT_WORK,
+            work => work,
         },
-        log_level: level(handler.log_level),
-    }
+    };
+    terms.permissions = Permissions {
+        body: handler.allow.body,
+        upstream: handler.allow.upstream,
+        network: handler.allow.network,
+    };
+    terms.log_level = level(handler.log_level);
+    let given = &handler.sockets;
+    let sockets = &mut terms.sockets;
+    let time = |millis: u64, default: Duration| match millis {
+        0 => default,
+        millis => Duration::from_millis(millis),
+    };
+    let size = |value: u64, default: usize| match value {
+        0 => default,
+        value => usize::try_from(value).unwrap_or(usize::MAX),
+    };
+    sockets.connect_timeout = time(given.connect_timeout_ms, sockets.connect_timeout);
+    sockets.send_timeout = time(given.send_timeout_ms, sockets.send_timeout);
+    sockets.read_timeout = time(given.read_timeout_ms, sockets.read_timeout);
+    sockets.keepalive_timeout = time(given.keepalive_timeout_ms, sockets.keepalive_timeout);
+    sockets.buffer_size = size(given.buffer_bytes, sockets.buffer_size);
+    sockets.pool_size = size(given.pool_size, sockets.pool_size);
+    sockets.log_errors = !given.quiet;
+    terms.transform_underscores = !handler.keep_underscores;
+    terms.default_type = !handler.no_default_type;
+    terms
 }
 
 struct Compiler<'a> {

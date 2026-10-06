@@ -6,7 +6,9 @@
 
 use crate::{
     api::{cell, failed, results, Api},
-    exchange::{Exchange, Failure, FailureKind, Limits, LogEntry, LogLevel, Permissions, Phase},
+    exchange::{
+        Exchange, Failure, FailureKind, Limits, LogEntry, LogLevel, Permissions, Phase, Sockets,
+    },
     runtime::{drive, failure, settle, NoHost},
     vm::{Cell, Run, Slot},
 };
@@ -150,6 +152,8 @@ impl Timers {
 #[derive(Clone, Copy)]
 struct Terms {
     limits: Limits,
+    sockets: Sockets,
+    keep_underscores: bool,
     permissions: Permissions,
     log_level: Option<LogLevel>,
 }
@@ -219,6 +223,8 @@ fn create(
                 let run = cell.run.lock();
                 Terms {
                     limits: run.limits,
+                    sockets: run.sockets,
+                    keep_underscores: run.keep_underscores,
                     permissions: run.permissions,
                     log_level: run.log_level,
                 }
@@ -293,6 +299,8 @@ impl Timer {
         let limits = self.terms.limits;
         *cell.run.lock() = Run {
             limits,
+            sockets: self.terms.sockets,
+            keep_underscores: self.terms.keep_underscores,
             permissions: self.terms.permissions,
             log_level: self.terms.log_level,
             work_left: i64::try_from(limits.work).unwrap_or(i64::MAX),

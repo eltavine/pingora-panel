@@ -75,7 +75,8 @@ functions, `ngx.sleep`, `ngx.get_phase`, `ngx.worker`, `ngx.config`,
 `ngx.socket.connect` (`connect`, `sslhandshake`, `send`, `receive`,
 `receiveany`, `receiveuntil`, `settimeout`, `settimeouts`, `setkeepalive`,
 `getreusedtimes` and `close`), whose idle connections each VM keeps for
-its later requests, and the light threads of `ngx.thread.spawn`, `wait`
+its later requests and whose defaults the `lua_socket_*` directives set
+for `http`, a server or a route, and the light threads of `ngx.thread.spawn`, `wait`
 and `kill`, which run on the budget of the run that spawned them; a run
 ends once its entry thread and its light threads have ended, or as soon as
 one of them exits. `ngx.timer.at` and `ngx.timer.every` run a callback
@@ -103,8 +104,11 @@ script uses a function this gateway does not provide.
 
 What runs differently: LuaJIT's `ffi` and `jit` modules, `goto` (Luau has
 `continue`), `string.dump` and bytecode, `setfenv`, `getfenv` and `module`
-are not available; `lua_package_path`, `lua_package_cpath` and
-`lua_code_cache off` are refused. `sslhandshake` verifies the server's
+are not available; `lua_package_path`, `lua_package_cpath`,
+`lua_code_cache off` and `lua_socket_send_lowat`, which Linux does not
+honour for TCP, are refused.
+`lua_transform_underscores_in_response_headers` and `lua_use_default_type`
+apply as in lua-nginx-module. `sslhandshake` verifies the server's
 certificate with the system's trusted roots unless the script passes
 `ssl_verify` false, where lua-nginx-module verifies nothing by default.
 Subrequests (`ngx.location.capture`), named locations, the request's own

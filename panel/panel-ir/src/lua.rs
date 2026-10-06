@@ -104,6 +104,39 @@ impl LuaLogLevel {
     }
 }
 
+/// The defaults of the cosockets a handler's scripts open, as the
+/// `lua_socket_*` directives set them; zero keeps the gateway's.
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LuaSockets {
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub connect_timeout_ms: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub send_timeout_ms: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub read_timeout_ms: u64,
+    /// Bytes a read takes from a connection at a time.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub buffer_bytes: u64,
+    /// Idle connections `setkeepalive` keeps for a pool.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub pool_size: u64,
+    /// How long `setkeepalive` keeps an idle connection.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub keepalive_timeout_ms: u64,
+    /// Failures are not written to the error log
+    /// (`lua_socket_log_errors off`).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub quiet: bool,
+}
+
+impl LuaSockets {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// A script run in a phase, and the terms it runs on.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -131,6 +164,16 @@ pub struct LuaHandler {
     /// Logs the start, end, duration and outcome of every run.
     #[serde(default, skip_serializing_if = "is_false")]
     pub debug: bool,
+    #[serde(default, skip_serializing_if = "LuaSockets::is_default")]
+    pub sockets: LuaSockets,
+    /// `ngx.header` keeps underscores in names
+    /// (`lua_transform_underscores_in_response_headers off`).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub keep_underscores: bool,
+    /// An answer without a `Content-Type` gets none
+    /// (`lua_use_default_type off`).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub no_default_type: bool,
 }
 
 impl LuaHandler {
@@ -144,6 +187,9 @@ impl LuaHandler {
             log_level: LuaLogLevel::Notice,
             slow_threshold_ms: 0,
             debug: false,
+            sockets: LuaSockets::default(),
+            keep_underscores: false,
+            no_default_type: false,
         }
     }
 }

@@ -562,6 +562,11 @@ fn lua_programs_and_handlers_round_trip_and_unknown_kinds_are_refused() {
     let mut access = LuaHandler::new("main.conf:3");
     access.time_limit_ms = 25;
     access.work_limit = 1_000;
+    access.sockets.read_timeout_ms = 5_000;
+    access.sockets.pool_size = 10;
+    access.sockets.quiet = true;
+    access.keep_underscores = true;
+    access.no_default_type = true;
     access.allow = LuaPermissions {
         body: true,
         upstream: false,

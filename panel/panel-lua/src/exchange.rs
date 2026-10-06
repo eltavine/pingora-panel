@@ -290,6 +290,8 @@ pub struct Exchange {
     pub(crate) new_body: Option<Vec<u8>>,
     /// `ngx.exec` redirected the request internally.
     pub(crate) internal: bool,
+    /// What the last run's handler says of `lua_use_default_type`.
+    pub(crate) default_type: bool,
 }
 
 impl Exchange {
@@ -309,12 +311,19 @@ impl Exchange {
             headers_sent: false,
             new_body: None,
             internal: false,
+            default_type: true,
         }
     }
 
     /// What the last run changed.
     pub fn changes(&self) -> Changes {
         self.changes
+    }
+
+    /// Whether an answer without a `Content-Type` gets the default one, as
+    /// `lua_use_default_type on` has it.
+    pub fn default_type(&self) -> bool {
+        self.default_type
     }
 
     /// The last run called `ngx.exec`: the request is to be handled again,
@@ -402,6 +411,40 @@ impl FailureKind {
             FailureKind::Work => "work",
             FailureKind::Memory => "memory",
             FailureKind::Refused => "refused",
+        }
+    }
+}
+
+/// The defaults of the cosockets a run opens, as the `lua_socket_*`
+/// directives set them; a script's own `settimeout` and `setkeepalive`
+/// arguments come first.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct Sockets {
+    pub connect_timeout: Duration,
+    pub send_timeout: Duration,
+    pub read_timeout: Duration,
+    /// Bytes a read takes from a connection at a time.
+    pub buffer_size: usize,
+    /// Idle connections `setkeepalive` keeps for a pool.
+    pub pool_size: usize,
+    /// How long `setkeepalive` keeps an idle connection.
+    pub keepalive_timeout: Duration,
+    /// Failures are written to the error log.
+    pub log_errors: bool,
+}
+
+impl Default for Sockets {
+    /// lua-nginx-module's defaults, but for reads of 16 KiB at a time.
+    fn default() -> Self {
+        Self {
+            connect_timeout: Duration::from_secs(60),
+            send_timeout: Duration::from_secs(60),
+            read_timeout: Duration::from_secs(60),
+            buffer_size: 16 << 10,
+            pool_size: 30,
+            keepalive_timeout: Duration::from_secs(60),
+            log_errors: true,
         }
     }
 }

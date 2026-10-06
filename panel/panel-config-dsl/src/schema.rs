@@ -464,6 +464,33 @@ pub static DIRECTIVES: &[DirectiveSpec] = &[
     spec!("lua_debug" in LUA_CONTEXTS, None, 1..Some(1), false,
         "lua_debug on|off;", "Logs the start, end, duration and outcome of every run.",
         inherits "off when not written; a route's replaces its server's, and a server's the one in http."),
+    spec!("lua_socket_connect_timeout" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "lua_socket_connect_timeout <duration>;", "How long a cosocket waits to connect, or for a TLS handshake, unless the script sets its own with settimeout(s).",
+        inherits "60s when not written; a route's replaces its server's, and a server's the one in http."),
+    spec!("lua_socket_send_timeout" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "lua_socket_send_timeout <duration>;", "How long a cosocket waits to send, unless the script sets its own.",
+        inherits "60s when not written; a route's replaces its server's, and a server's the one in http."),
+    spec!("lua_socket_read_timeout" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "lua_socket_read_timeout <duration>;", "How long a cosocket waits to receive, unless the script sets its own.",
+        inherits "60s when not written; a route's replaces its server's, and a server's the one in http."),
+    spec!("lua_socket_buffer_size" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "lua_socket_buffer_size <size>;", "How much a cosocket reads from its connection at a time.",
+        inherits "16k when not written; a route's replaces its server's, and a server's the one in http."),
+    spec!("lua_socket_pool_size" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "lua_socket_pool_size <count>;", "The idle connections setkeepalive keeps for each pool when the script does not say.",
+        inherits "30 when not written; a route's replaces its server's, and a server's the one in http."),
+    spec!("lua_socket_keepalive_timeout" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "lua_socket_keepalive_timeout <duration>;", "How long setkeepalive keeps an idle connection when the script does not say.",
+        inherits "60s when not written; a route's replaces its server's, and a server's the one in http."),
+    spec!("lua_socket_log_errors" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "lua_socket_log_errors on|off;", "Whether cosocket failures are written to the error log.",
+        inherits "on when not written; a route's replaces its server's, and a server's the one in http."),
+    spec!("lua_transform_underscores_in_response_headers" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "lua_transform_underscores_in_response_headers on|off;", "Whether ngx.header turns underscores in field names into hyphens.",
+        inherits "on when not written; a route's replaces its server's, and a server's the one in http."),
+    spec!("lua_use_default_type" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "lua_use_default_type on|off;", "Whether a script's answer without a Content-Type gets text/plain; charset=utf-8.",
+        inherits "on when not written; a route's replaces its server's, and a server's the one in http."),
     spec!("lua_code_cache" in LUA_CONTEXTS, None, 1..Some(1), false,
         "lua_code_cache on;", "Accepted from OpenResty: scripts are compiled once per activation, so off is refused."),
     DirectiveSpec {
@@ -509,8 +536,8 @@ pub fn refusal(name: &str) -> Option<String> {
         _ if name.starts_with("ssl_") && name.contains("_by_lua") => {
             "TLS handshakes run no script; certificates come from TLS profiles"
         }
-        _ if name.starts_with("lua_socket_") => {
-            "set a connection's timeouts in the script with sock:settimeouts"
+        "lua_socket_send_lowat" => {
+            "Linux, which the gateway runs on, sets no send low-water mark for TCP sockets"
         }
         _ if name.starts_with("lua_ssl_") => {
             "sock:sslhandshake verifies certificates with the system's trusted roots"
@@ -586,7 +613,9 @@ mod tests {
         );
         assert!(refusal("lua_package_path").unwrap().contains("lua/"));
         assert!(refusal("ssl_certificate_by_lua_block").is_some());
-        assert!(refusal("lua_socket_connect_timeout").is_some());
+        assert!(refusal("lua_socket_send_lowat").unwrap().contains("Linux"));
+        assert!(refusal("lua_socket_connect_timeout").is_none());
+        assert!(lookup("lua_socket_connect_timeout", Route).is_some());
         assert!(refusal("access_by_lua_block").is_none());
         assert!(refusal("proxy_buffering").is_none());
     }

@@ -30,6 +30,15 @@ pub(super) const SCOPE: &[&str] = &[
     "lua_log_level",
     "lua_slow_threshold",
     "lua_debug",
+    "lua_socket_connect_timeout",
+    "lua_socket_send_timeout",
+    "lua_socket_read_timeout",
+    "lua_socket_buffer_size",
+    "lua_socket_pool_size",
+    "lua_socket_keepalive_timeout",
+    "lua_socket_log_errors",
+    "lua_transform_underscores_in_response_headers",
+    "lua_use_default_type",
     "lua_code_cache",
 ];
 
@@ -49,6 +58,15 @@ pub(crate) const GROUPS: &[&[&str]] = &[
     &["lua_log_level"],
     &["lua_slow_threshold"],
     &["lua_debug"],
+    &["lua_socket_connect_timeout"],
+    &["lua_socket_send_timeout"],
+    &["lua_socket_read_timeout"],
+    &["lua_socket_buffer_size"],
+    &["lua_socket_pool_size"],
+    &["lua_socket_keepalive_timeout"],
+    &["lua_socket_log_errors"],
+    &["lua_transform_underscores_in_response_headers"],
+    &["lua_use_default_type"],
 ];
 
 /// What each term is when no block around a handler writes it.
@@ -60,6 +78,15 @@ pub(crate) const DEFAULTS: &[(&str, &str)] = &[
     ("lua_log_level", "notice"),
     ("lua_slow_threshold", "10ms"),
     ("lua_debug", "off"),
+    ("lua_socket_connect_timeout", "60s"),
+    ("lua_socket_send_timeout", "60s"),
+    ("lua_socket_read_timeout", "60s"),
+    ("lua_socket_buffer_size", "16k"),
+    ("lua_socket_pool_size", "30"),
+    ("lua_socket_keepalive_timeout", "60s"),
+    ("lua_socket_log_errors", "on"),
+    ("lua_transform_underscores_in_response_headers", "on"),
+    ("lua_use_default_type", "on"),
 ];
 
 /// The directives that set the terms handlers run on.
@@ -71,6 +98,15 @@ pub(crate) const TERMS: &[&str] = &[
     "lua_log_level",
     "lua_slow_threshold",
     "lua_debug",
+    "lua_socket_connect_timeout",
+    "lua_socket_send_timeout",
+    "lua_socket_read_timeout",
+    "lua_socket_buffer_size",
+    "lua_socket_pool_size",
+    "lua_socket_keepalive_timeout",
+    "lua_socket_log_errors",
+    "lua_transform_underscores_in_response_headers",
+    "lua_use_default_type",
 ];
 
 /// Whether a Lua handler runs for the requests of a block with `scope`
@@ -261,6 +297,21 @@ impl<'a> Lowerer<'a> {
                 }
             }
             "lua_debug" => scope.debug = self.bool_arg(file, arg),
+            "lua_socket_connect_timeout" => scope.socket_connect_timeout_ms = duration(self),
+            "lua_socket_send_timeout" => scope.socket_send_timeout_ms = duration(self),
+            "lua_socket_read_timeout" => scope.socket_read_timeout_ms = duration(self),
+            "lua_socket_keepalive_timeout" => scope.socket_keepalive_timeout_ms = duration(self),
+            "lua_socket_buffer_size" => scope.socket_buffer_bytes = self.size(file, arg),
+            "lua_socket_pool_size" => {
+                if let Some(value) = self.value(file, arg) {
+                    scope.socket_pool_size = self.number(file, arg, &value, "a whole number");
+                }
+            }
+            "lua_socket_log_errors" => scope.socket_log_errors = self.bool_arg(file, arg),
+            "lua_transform_underscores_in_response_headers" => {
+                scope.transform_underscores = self.bool_arg(file, arg);
+            }
+            "lua_use_default_type" => scope.use_default_type = self.bool_arg(file, arg),
             "lua_allow" => scope.allow = self.lua_allow(file, directive),
             "lua_on_error" => {
                 let Some(value) = self.value(file, arg) else {
@@ -463,6 +514,42 @@ pub(crate) fn print_terms(scope: &LuaScope) -> Vec<(&'static str, Vec<String>)> 
     }
     if let Some(debug) = scope.debug {
         terms.push(("lua_debug", vec![values::print_bool(debug).to_owned()]));
+    }
+    for (name, ms) in [
+        (
+            "lua_socket_connect_timeout",
+            scope.socket_connect_timeout_ms,
+        ),
+        ("lua_socket_send_timeout", scope.socket_send_timeout_ms),
+        ("lua_socket_read_timeout", scope.socket_read_timeout_ms),
+    ] {
+        if let Some(ms) = ms {
+            terms.push((name, vec![values::print_duration_ms(ms)]));
+        }
+    }
+    if let Some(bytes) = scope.socket_buffer_bytes {
+        terms.push(("lua_socket_buffer_size", vec![values::print_size(bytes)]));
+    }
+    if let Some(size) = scope.socket_pool_size {
+        terms.push(("lua_socket_pool_size", vec![size.to_string()]));
+    }
+    if let Some(ms) = scope.socket_keepalive_timeout_ms {
+        terms.push((
+            "lua_socket_keepalive_timeout",
+            vec![values::print_duration_ms(ms)],
+        ));
+    }
+    for (name, on) in [
+        ("lua_socket_log_errors", scope.socket_log_errors),
+        (
+            "lua_transform_underscores_in_response_headers",
+            scope.transform_underscores,
+        ),
+        ("lua_use_default_type", scope.use_default_type),
+    ] {
+        if let Some(on) = on {
+            terms.push((name, vec![values::print_bool(on).to_owned()]));
+        }
     }
     terms
 }

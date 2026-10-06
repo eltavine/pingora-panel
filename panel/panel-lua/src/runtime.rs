@@ -3,7 +3,7 @@
 use crate::{
     exchange::{
         Exchange, Exit, Failure, FailureKind, Limits, LogEntry, LogLevel, Outcome, Permissions,
-        Phase,
+        Phase, Sockets,
     },
     program::{HandlerId, Program},
     shared::SharedStore,
@@ -62,6 +62,7 @@ impl Host for NoHost {
 
 /// A handler and the terms it runs on.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct Handler {
     pub id: HandlerId,
     pub phase: Phase,
@@ -69,6 +70,30 @@ pub struct Handler {
     pub permissions: Permissions,
     /// Messages less severe than this are dropped.
     pub log_level: LogLevel,
+    pub sockets: Sockets,
+    /// `ngx.header` turns underscores into hyphens, as
+    /// `lua_transform_underscores_in_response_headers on` does.
+    pub transform_underscores: bool,
+    /// An answer without a `Content-Type` gets the default one, as
+    /// `lua_use_default_type on` does.
+    pub default_type: bool,
+}
+
+impl Handler {
+    /// `id` in `phase` on the default terms: no permissions beyond the
+    /// default ones and messages from `notice` on.
+    pub fn new(id: HandlerId, phase: Phase) -> Self {
+        Self {
+            id,
+            phase,
+            limits: Limits::default(),
+            permissions: Permissions::default(),
+            log_level: LogLevel::Notice,
+            sockets: Sockets::default(),
+            transform_underscores: true,
+            default_type: true,
+        }
+    }
 }
 
 /// The VMs of a configuration's scripts.
@@ -224,12 +249,15 @@ impl Scripts {
         let before = {
             let mut exchange = self.exchange.lock();
             exchange.begin(handler.phase);
+            exchange.default_type = handler.default_type;
             exchange.clone()
         };
         {
             let mut run = cell.run.lock();
             *run = crate::vm::Run {
                 limits: handler.limits,
+                sockets: handler.sockets,
+                keep_underscores: !handler.transform_underscores,
                 permissions: handler.permissions,
                 log_level: Some(handler.log_level),
                 work_left: i64::try_from(handler.limits.work).unwrap_or(i64::MAX),

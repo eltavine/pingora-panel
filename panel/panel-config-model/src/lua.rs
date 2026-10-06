@@ -6,7 +6,7 @@
 use crate::model::{Action, ConfigModel};
 use panel_domain::ContentHash;
 pub use panel_ir::{LuaFallback, LuaLogLevel, LuaPermissions, LuaSharedDict};
-use panel_ir::{LuaHandler, LuaHandlers, LuaScript};
+use panel_ir::{LuaHandler, LuaHandlers, LuaScript, LuaSockets};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
@@ -99,6 +99,33 @@ pub struct LuaScope {
     /// Logs the start, end, duration and outcome of every run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug: Option<bool>,
+    /// `lua_socket_connect_timeout`, in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub socket_connect_timeout_ms: Option<u64>,
+    /// `lua_socket_send_timeout`, in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub socket_send_timeout_ms: Option<u64>,
+    /// `lua_socket_read_timeout`, in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub socket_read_timeout_ms: Option<u64>,
+    /// `lua_socket_buffer_size`, in bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub socket_buffer_bytes: Option<u64>,
+    /// `lua_socket_pool_size`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub socket_pool_size: Option<u64>,
+    /// `lua_socket_keepalive_timeout`, in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub socket_keepalive_timeout_ms: Option<u64>,
+    /// `lua_socket_log_errors`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub socket_log_errors: Option<bool>,
+    /// `lua_transform_underscores_in_response_headers`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transform_underscores: Option<bool>,
+    /// `lua_use_default_type`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_default_type: Option<bool>,
 }
 
 impl LuaScope {
@@ -125,6 +152,27 @@ impl LuaScope {
             log_level: pick(&self.log_level, &outer.log_level),
             slow_threshold_ms: pick(&self.slow_threshold_ms, &outer.slow_threshold_ms),
             debug: pick(&self.debug, &outer.debug),
+            socket_connect_timeout_ms: pick(
+                &self.socket_connect_timeout_ms,
+                &outer.socket_connect_timeout_ms,
+            ),
+            socket_send_timeout_ms: pick(
+                &self.socket_send_timeout_ms,
+                &outer.socket_send_timeout_ms,
+            ),
+            socket_read_timeout_ms: pick(
+                &self.socket_read_timeout_ms,
+                &outer.socket_read_timeout_ms,
+            ),
+            socket_buffer_bytes: pick(&self.socket_buffer_bytes, &outer.socket_buffer_bytes),
+            socket_pool_size: pick(&self.socket_pool_size, &outer.socket_pool_size),
+            socket_keepalive_timeout_ms: pick(
+                &self.socket_keepalive_timeout_ms,
+                &outer.socket_keepalive_timeout_ms,
+            ),
+            socket_log_errors: pick(&self.socket_log_errors, &outer.socket_log_errors),
+            transform_underscores: pick(&self.transform_underscores, &outer.transform_underscores),
+            use_default_type: pick(&self.use_default_type, &outer.use_default_type),
         }
     }
 
@@ -164,6 +212,15 @@ impl LuaScope {
             || self.log_level.is_some()
             || self.slow_threshold_ms.is_some()
             || self.debug.is_some()
+            || self.socket_connect_timeout_ms.is_some()
+            || self.socket_send_timeout_ms.is_some()
+            || self.socket_read_timeout_ms.is_some()
+            || self.socket_buffer_bytes.is_some()
+            || self.socket_pool_size.is_some()
+            || self.socket_keepalive_timeout_ms.is_some()
+            || self.socket_log_errors.is_some()
+            || self.transform_underscores.is_some()
+            || self.use_default_type.is_some()
     }
 }
 
@@ -484,6 +541,17 @@ pub(crate) fn handler(id: String, scope: &LuaScope) -> LuaHandler {
     handler.log_level = scope.log_level.unwrap_or_default();
     handler.slow_threshold_ms = scope.slow_threshold_ms.unwrap_or(0);
     handler.debug = scope.debug.unwrap_or(false);
+    handler.sockets = LuaSockets {
+        connect_timeout_ms: scope.socket_connect_timeout_ms.unwrap_or(0),
+        send_timeout_ms: scope.socket_send_timeout_ms.unwrap_or(0),
+        read_timeout_ms: scope.socket_read_timeout_ms.unwrap_or(0),
+        buffer_bytes: scope.socket_buffer_bytes.unwrap_or(0),
+        pool_size: scope.socket_pool_size.unwrap_or(0),
+        keepalive_timeout_ms: scope.socket_keepalive_timeout_ms.unwrap_or(0),
+        quiet: scope.socket_log_errors == Some(false),
+    };
+    handler.keep_underscores = scope.transform_underscores == Some(false);
+    handler.no_default_type = scope.use_default_type == Some(false);
     handler
 }
 

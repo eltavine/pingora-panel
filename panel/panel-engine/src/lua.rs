@@ -18,6 +18,13 @@ pub const MOST_LUA_SCRIPT_BYTES: usize = 1 << 20;
 pub const LEAST_LUA_MEMORY_BYTES: u64 = 1 << 20;
 pub const MOST_LUA_MEMORY_BYTES: u64 = 4 << 30;
 /// The smallest and largest shared dictionary.
+/// The longest a `lua_socket_*` timeout may be: a day.
+pub const MOST_LUA_SOCKET_MS: u64 = 86_400_000;
+/// What `lua_socket_buffer_size` may be.
+pub const LEAST_LUA_SOCKET_BUFFER: u64 = 1 << 10;
+pub const MOST_LUA_SOCKET_BUFFER: u64 = 16 << 20;
+/// The most connections `lua_socket_pool_size` may keep for a pool.
+pub const MOST_LUA_SOCKET_POOL: u64 = 1 << 16;
 /// The most `lua_max_pending_timers`, `lua_max_running_timers` and
 /// `lua_regex_cache_max_entries` may set.
 pub const MOST_LUA_TIMERS: u64 = 1 << 20;
@@ -86,6 +93,36 @@ fn check_handler(
         found.push((
             resource.clone(),
             format!("{phase} handler's work limit is above {MOST_LUA_WORK}"),
+        ));
+    }
+    let sockets = &handler.sockets;
+    for (name, ms) in [
+        ("lua_socket_connect_timeout", sockets.connect_timeout_ms),
+        ("lua_socket_send_timeout", sockets.send_timeout_ms),
+        ("lua_socket_read_timeout", sockets.read_timeout_ms),
+        ("lua_socket_keepalive_timeout", sockets.keepalive_timeout_ms),
+    ] {
+        if ms > MOST_LUA_SOCKET_MS {
+            found.push((
+                resource.clone(),
+                format!("{phase} handler's {name} is over {MOST_LUA_SOCKET_MS} ms"),
+            ));
+        }
+    }
+    if sockets.buffer_bytes != 0
+        && !(LEAST_LUA_SOCKET_BUFFER..=MOST_LUA_SOCKET_BUFFER).contains(&sockets.buffer_bytes)
+    {
+        found.push((
+            resource.clone(),
+            format!(
+                "{phase} handler's lua_socket_buffer_size is not {LEAST_LUA_SOCKET_BUFFER} to {MOST_LUA_SOCKET_BUFFER} bytes"
+            ),
+        ));
+    }
+    if sockets.pool_size > MOST_LUA_SOCKET_POOL {
+        found.push((
+            resource.clone(),
+            format!("{phase} handler's lua_socket_pool_size is over {MOST_LUA_SOCKET_POOL}"),
         ));
     }
     if let LuaFallback::Status { status } = handler.on_error {

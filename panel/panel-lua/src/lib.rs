@@ -20,7 +20,7 @@ mod vm;
 
 pub use exchange::{
     Balancer, Changes, Chunk, Connection, Exchange, Failure, FailureKind, Limits, LogEntry,
-    LogLevel, Outcome, Peer, PeerTimeouts, Permissions, Phase, Request, Response,
+    LogLevel, Outcome, Peer, PeerTimeouts, Permissions, Phase, Request, Response, Sockets,
 };
 pub use lint::{lint, Finding, FindingKind, Lint, Role};
 pub use program::{compile, Diagnostic, HandlerId, Program, ProgramBuilder, SharedDict, Source};

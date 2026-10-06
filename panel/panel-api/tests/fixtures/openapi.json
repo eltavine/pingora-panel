@@ -83484,6 +83484,67 @@
             "description": "Runs longer than this many milliseconds are logged and counted as\nslow.",
             "minimum": 0
           },
+          "socket_buffer_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "`lua_socket_buffer_size`, in bytes.",
+            "minimum": 0
+          },
+          "socket_connect_timeout_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "`lua_socket_connect_timeout`, in milliseconds.",
+            "minimum": 0
+          },
+          "socket_keepalive_timeout_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "`lua_socket_keepalive_timeout`, in milliseconds.",
+            "minimum": 0
+          },
+          "socket_log_errors": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "`lua_socket_log_errors`."
+          },
+          "socket_pool_size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "`lua_socket_pool_size`.",
+            "minimum": 0
+          },
+          "socket_read_timeout_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "`lua_socket_read_timeout`, in milliseconds.",
+            "minimum": 0
+          },
+          "socket_send_timeout_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "`lua_socket_send_timeout`, in milliseconds.",
+            "minimum": 0
+          },
           "time_limit_ms": {
             "type": [
               "integer",
@@ -83492,6 +83553,20 @@
             "format": "int64",
             "description": "Wall-clock milliseconds a run may take, waits included.",
             "minimum": 0
+          },
+          "transform_underscores": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "`lua_transform_underscores_in_response_headers`."
+          },
+          "use_default_type": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "`lua_use_default_type`."
           },
           "work_limit": {
             "type": [

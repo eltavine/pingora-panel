@@ -637,6 +637,22 @@ enum LuaLogLevel {
   LUA_LOG_LEVEL_DEBUG = 9;
 }
 
+// The defaults of the cosockets a handler's scripts open, as the
+// lua_socket_* directives set them; zero keeps the gateway's.
+message LuaSockets {
+  uint64 connect_timeout_ms = 1;
+  uint64 send_timeout_ms = 2;
+  uint64 read_timeout_ms = 3;
+  // Bytes a read takes from a connection at a time.
+  uint64 buffer_bytes = 4;
+  // Idle connections setkeepalive keeps for a pool.
+  uint64 pool_size = 5;
+  // How long setkeepalive keeps an idle connection.
+  uint64 keepalive_timeout_ms = 6;
+  // Failures are not written to the error log (lua_socket_log_errors off).
+  bool quiet = 7;
+}
+
 // A script run in a phase, and the terms it runs on. Zero limits keep the
 // gateway's defaults.
 message LuaHandler {
@@ -648,6 +664,12 @@ message LuaHandler {
   LuaLogLevel log_level = 6;
   uint64 slow_threshold_ms = 7;
   bool debug = 8;
+  LuaSockets sockets = 9;
+  // ngx.header keeps underscores in names
+  // (lua_transform_underscores_in_response_headers off).
+  bool keep_underscores = 10;
+  // An answer without a Content-Type gets none (lua_use_default_type off).
+  bool no_default_type = 11;
 }
 
 // The handlers a site or route runs, by phase.

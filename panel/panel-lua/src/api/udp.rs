@@ -4,7 +4,7 @@
 
 use super::{
     results,
-    socket::{allowed, failed, milliseconds, payload, reason, within, DEFAULT_TIMEOUT},
+    socket::{allowed, defaults, failed, log_failure, milliseconds, payload, reason, within},
     Api,
 };
 use crate::vm::Slot;
@@ -83,7 +83,10 @@ impl UserData for UdpSocket {
             };
             match within(this.timeout, socket.send(&data)).await {
                 Ok(_) => Ok(one()),
-                Err(error) => failed(&lua, &error),
+                Err(error) => {
+                    log_failure(&this.slot, "udp", "send", &error);
+                    failed(&lua, &error)
+                }
             }
         });
         methods.add_async_method_mut("receive", |lua, this, size: Option<usize>| async move {
@@ -99,7 +102,10 @@ impl UserData for UdpSocket {
                 Ok(read) => Ok(results([Value::String(
                     lua.create_string(&buffer[..read])?,
                 )])),
-                Err(error) => failed(&lua, &error),
+                Err(error) => {
+                    log_failure(&this.slot, "udp", "receive", &error);
+                    failed(&lua, &error)
+                }
             }
         });
         methods.add_method_mut("settimeout", |_, this, ms: Option<f64>| {
@@ -125,7 +131,7 @@ pub(super) fn install(lua: &Lua, ngx: &Table, slot: &Arc<Slot>) -> mlua::Result<
                 slot: Arc::clone(&slot),
                 socket: None,
                 local: None,
-                timeout: DEFAULT_TIMEOUT,
+                timeout: defaults(&slot).read_timeout,
             })
         })?,
     )?;

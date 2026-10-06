@@ -2,7 +2,7 @@
 
 use crate::{
     api,
-    exchange::{Exchange, Limits, LogLevel, Permissions, Phase},
+    exchange::{Exchange, Limits, LogLevel, Permissions, Phase, Sockets},
     program::{HandlerId, Program},
     runtime::Settings,
     shared::Dict,
@@ -83,6 +83,9 @@ pub(crate) enum HostReply {
 pub(crate) struct Run {
     /// The limits the run was given, which the timers it creates run on.
     pub limits: Limits,
+    pub sockets: Sockets,
+    /// `ngx.header` keeps underscores in names.
+    pub keep_underscores: bool,
     pub permissions: Permissions,
     pub log_level: Option<LogLevel>,
     pub work_left: i64,

@@ -3226,7 +3226,7 @@ dependencies = [
 
 [[package]]
 name = "panel-config-model"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -3486,7 +3486,7 @@ dependencies = [
 
 [[package]]
 name = "panel-ir"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "panel-domain",
  "serde",
@@ -3540,7 +3540,7 @@ dependencies = [
 
 [[package]]
 name = "panel-lua"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",

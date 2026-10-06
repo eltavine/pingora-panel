@@ -20,7 +20,7 @@ pub use http::{
 pub use logging::{AccessLog, AccessLogFormat, LogFiles, LoggingPolicy};
 pub use lua::{
     LuaFallback, LuaHandler, LuaHandlers, LuaLogLevel, LuaPermissions, LuaProgram, LuaScript,
-    LuaSharedDict, LUA_SCRIPTS_CAPABILITY,
+    LuaSharedDict, LuaSockets, LUA_SCRIPTS_CAPABILITY,
 };
 pub use resilience::{
     CircuitBreaker, RetryBudget, RetryCondition, UpstreamQueue, UPSTREAM_RESILIENCE_CAPABILITY,

@@ -2478,6 +2478,7 @@ async fn lua_handlers_rewrite_answer_filter_and_choose_peers() {
         ),
         lua_script("cycle", "return ngx.exec('/cycle')"),
         lua_script("gate", "return ngx.exec('/target')"),
+        lua_script("untyped", "ngx.say('plain')"),
     ];
     snapshot.lua.shared_dicts.push(LuaSharedDict {
         name: "hits".into(),
@@ -2505,6 +2506,8 @@ async fn lua_handlers_rewrite_answer_filter_and_choose_peers() {
     generated.lua.header_filter = Some(LuaHandler::new("seen"));
     let mut gate = route("gate", 11, prefix("/gate"), proxy("app"));
     gate.lua.access = Some(LuaHandler::new("gate"));
+    let mut untyped = LuaHandler::new("untyped");
+    untyped.no_default_type = true;
     snapshot.routes = vec![
         generated,
         route(
@@ -2562,6 +2565,12 @@ async fn lua_handlers_rewrite_answer_filter_and_choose_peers() {
             },
         ),
         gate,
+        route(
+            "untyped",
+            12,
+            prefix("/untyped"),
+            RouteAction::Lua { handler: untyped },
+        ),
     ];
     snapshot.upstream_pools.push(pool("app", &[upstream]));
     let mut lb = pool("lb", &[unreachable]);
@@ -2628,6 +2637,16 @@ async fn lua_handlers_rewrite_answer_filter_and_choose_peers() {
     assert_eq!(body(&gated), "/target nil true /gate\n");
     let cycling = get(listen, Some("shop.test"), "/cycle", "").await;
     assert_eq!(cycling.status, 500);
+    assert_eq!(
+        answered.headers["content-type"],
+        "text/plain; charset=utf-8"
+    );
+    let untyped = get(listen, Some("shop.test"), "/untyped", "").await;
+    assert_eq!(body(&untyped), "plain\n");
+    assert!(
+        !untyped.headers.contains_key("content-type"),
+        "lua_use_default_type off sends no Content-Type"
+    );
     assert!(body(&cycling).contains("internal redirection cycle"));
     gateway.stop().await;
 }

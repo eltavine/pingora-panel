@@ -145,6 +145,13 @@ pub(crate) fn headers_table(
     Ok((table, truncated))
 }
 
+/// Whether the run under way turns underscores of `ngx.header` names into
+/// hyphens.
+fn transforms_underscores(slot: &Slot) -> bool {
+    slot.cell()
+        .is_none_or(|cell| !cell.run.lock().keep_underscores)
+}
+
 pub(super) fn header_proxy(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
     let proxy = lua.create_table()?;
     let meta = lua.create_table()?;
@@ -152,7 +159,7 @@ pub(super) fn header_proxy(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
     meta.raw_set(
         "__index",
         lua.create_function(move |lua, (_, key): (Table, LuaString)| {
-            let name = header_name(&key.as_bytes(), true)?;
+            let name = header_name(&key.as_bytes(), transforms_underscores(&reader))?;
             exchange(&reader, Api::Header, |exchange| {
                 header_lua(lua, &exchange.response.headers, &name)
             })
@@ -162,7 +169,7 @@ pub(super) fn header_proxy(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
     meta.raw_set(
         "__newindex",
         lua.create_function(move |_, (_, key, value): (Table, LuaString, Value)| {
-            let name = header_name(&key.as_bytes(), true)?;
+            let name = header_name(&key.as_bytes(), transforms_underscores(&writer))?;
             let values = header_values(&value)?;
             exchange(&writer, Api::Header, |exchange| {
                 if exchange.headers_sent && exchange.phase != Phase::HeaderFilter {

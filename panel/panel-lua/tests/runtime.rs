@@ -8,8 +8,7 @@ use bytes::Bytes;
 use http::{HeaderMap, HeaderValue};
 use panel_lua::{
     Connection, Exchange, FailureKind, Handler, HandlerId, Host, Limits, LogLevel, NoHost, Outcome,
-    Permissions, Phase, Program, ProgramBuilder, Request, Runtime, Scripts, Settings, SharedStore,
-    Source,
+    Phase, Program, ProgramBuilder, Request, Runtime, Scripts, Settings, SharedStore, Source,
 };
 use std::time::{Duration, Instant};
 
@@ -82,13 +81,9 @@ fn request(method: &str, uri: &str, headers: &[(&str, &str)]) -> Exchange {
 }
 
 fn handler(id: HandlerId, phase: Phase) -> Handler {
-    Handler {
-        id,
-        phase,
-        limits: Limits::default(),
-        permissions: Permissions::default(),
-        log_level: LogLevel::Debug,
-    }
+    let mut handler = Handler::new(id, phase);
+    handler.log_level = LogLevel::Debug;
+    handler
 }
 
 async fn run(scripts: &mut Scripts, handler: Handler) -> Outcome {
@@ -1378,4 +1373,85 @@ async fn programs_set_the_regex_cache_match_limit_and_timer_caps() {
     );
     drop(scripts);
     lua.runtime.isolate();
+}
+
+#[tokio::test]
+async fn handlers_set_the_defaults_of_their_cosockets_and_headers() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let mut held = Vec::new();
+        while let Ok((stream, _)) = listener.accept().await {
+            held.push(stream);
+        }
+    });
+    let silent = format!(
+        r#"
+        local sock = ngx.socket.tcp()
+        assert(sock:connect("127.0.0.1", {port}))
+        local reused = sock:getreusedtimes()
+        local data, err = sock:receive()
+        sock:close()
+        local again = ngx.socket.tcp()
+        assert(again:connect("127.0.0.1", {port}))
+        assert(again:setkeepalive())
+        ngx.sleep(0.03)
+        local third = ngx.socket.tcp()
+        assert(third:connect("127.0.0.1", {port}))
+        ngx.say(tostring(data), " ", err, " ", reused, " ", third:getreusedtimes())
+        "#
+    );
+    let lua = start(
+        1,
+        handlers(&[&silent, "ngx.header.x_custom_name = '1' ngx.say('ok')"]),
+    );
+    let mut quick = handler(lua.handlers[0], Phase::Content);
+    quick.permissions.network = true;
+    quick.limits.time = Duration::from_secs(2);
+    quick.sockets.read_timeout = Duration::from_millis(50);
+    quick.sockets.keepalive_timeout = Duration::from_millis(10);
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let started = Instant::now();
+    let outcome = run(&mut scripts, quick).await;
+    assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+    assert!(started.elapsed() < Duration::from_secs(1));
+    {
+        let exchange = scripts.exchange();
+        assert_eq!(exchange.response.body, b"nil timeout 0 0\n");
+        assert!(
+            exchange
+                .logs
+                .iter()
+                .any(|log| log.message == "lua tcp socket receive failed: timeout"),
+            "{:?}",
+            exchange.logs
+        );
+    }
+    quick.sockets.log_errors = false;
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    assert_eq!(run(&mut scripts, quick).await, Outcome::Respond);
+    assert!(!scripts
+        .exchange()
+        .logs
+        .iter()
+        .any(|log| log.message.contains("socket")));
+
+    let mut kept = handler(lua.handlers[1], Phase::Content);
+    kept.transform_underscores = false;
+    kept.default_type = false;
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    assert_eq!(run(&mut scripts, kept).await, Outcome::Respond);
+    {
+        let exchange = scripts.exchange();
+        assert!(exchange.response.headers.contains_key("x_custom_name"));
+        assert!(!exchange.default_type());
+    }
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    assert_eq!(
+        run(&mut scripts, handler(lua.handlers[1], Phase::Content)).await,
+        Outcome::Respond
+    );
+    let exchange = scripts.exchange();
+    assert!(exchange.response.headers.contains_key("x-custom-name"));
+    assert!(exchange.default_type());
 }

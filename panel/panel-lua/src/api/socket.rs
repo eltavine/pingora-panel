@@ -5,7 +5,10 @@
 //! TLS verifies the certificate unless the script says `ssl_verify` false.
 
 use super::{cell, require_permission, results, Api};
-use crate::vm::{refused, Slot};
+use crate::{
+    exchange::{LogLevel, Sockets},
+    vm::{refused, Slot},
+};
 use bytes::BytesMut;
 use mlua::{
     AnyUserData, Lua, LuaString, MultiValue, Table, UserData, UserDataMethods, UserDataRefMut,
@@ -31,12 +34,29 @@ use tokio::{
 use tokio_rustls::{client::TlsStream, TlsConnector};
 
 /// lua-nginx-module's default for connecting, sending and reading.
-pub(super) const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
-const DEFAULT_IDLE: Duration = Duration::from_secs(60);
-const DEFAULT_POOL_SIZE: usize = 30;
 /// The most a single receive holds, as the VM's memory limit does not see it.
 const MOST_RECEIVED: usize = 16 << 20;
-const READ_SIZE: usize = 16 << 10;
+
+/// The cosocket defaults of the run under way.
+pub(super) fn defaults(slot: &Slot) -> Sockets {
+    slot.cell()
+        .map(|cell| cell.run.lock().sockets)
+        .unwrap_or_default()
+}
+
+/// Writes a cosocket's failure to the error log, as
+/// `lua_socket_log_errors on` does.
+pub(super) fn log_failure(slot: &Slot, kind: &str, action: &str, error: &str) {
+    let Some(cell) = slot.cell() else {
+        return;
+    };
+    if cell.run.lock().sockets.log_errors {
+        cell.exchange.lock().log(
+            LogLevel::Err,
+            format!("lua {kind} socket {action} failed: {error}"),
+        );
+    }
+}
 
 enum Stream {
     Plain(TcpStream),
@@ -54,8 +74,8 @@ impl Stream {
         }
     }
 
-    async fn read_into(&mut self, buffer: &mut BytesMut) -> std::io::Result<usize> {
-        buffer.reserve(READ_SIZE);
+    async fn read_into(&mut self, buffer: &mut BytesMut, size: usize) -> std::io::Result<usize> {
+        buffer.reserve(size);
         match self {
             Self::Plain(stream) => stream.read_buf(buffer).await,
             Self::Tls(stream) => stream.read_buf(buffer).await,
@@ -230,11 +250,13 @@ pub(crate) struct TcpSocket {
     connect_timeout: Duration,
     send_timeout: Duration,
     read_timeout: Duration,
+    read_size: usize,
     reused: u32,
 }
 
 impl TcpSocket {
     pub(crate) fn new(slot: Arc<Slot>, pool: Arc<Pool>) -> Self {
+        let sockets = defaults(&slot);
         Self {
             slot,
             pool,
@@ -242,11 +264,17 @@ impl TcpSocket {
             key: String::new(),
             host: String::new(),
             buffer: BytesMut::new(),
-            connect_timeout: DEFAULT_TIMEOUT,
-            send_timeout: DEFAULT_TIMEOUT,
-            read_timeout: DEFAULT_TIMEOUT,
+            connect_timeout: sockets.connect_timeout,
+            send_timeout: sockets.send_timeout,
+            read_timeout: sockets.read_timeout,
+            read_size: sockets.buffer_size.max(1024),
             reused: 0,
         }
+    }
+
+    fn failed(&self, lua: &Lua, action: &str, error: &str) -> mlua::Result<MultiValue> {
+        log_failure(&self.slot, "tcp", action, error);
+        failed(lua, error)
     }
 
     fn allowed(&self) -> mlua::Result<()> {
@@ -261,7 +289,11 @@ impl TcpSocket {
         if self.buffer.len() >= MOST_RECEIVED {
             return Err(format!("more than {MOST_RECEIVED} bytes arrived at once"));
         }
-        let read = within(self.read_timeout, stream.read_into(&mut self.buffer)).await?;
+        let read = within(
+            self.read_timeout,
+            stream.read_into(&mut self.buffer, self.read_size),
+        )
+        .await?;
         Ok(read > 0)
     }
 
@@ -294,7 +326,7 @@ impl TcpSocket {
                 self.reused = 0;
                 Ok(results([Value::Integer(1)]))
             }
-            Err(error) => failed(lua, &error),
+            Err(error) => self.failed(lua, "connect", &error),
         }
     }
 
@@ -327,7 +359,7 @@ impl TcpSocket {
                 self.stream = Some(Stream::Tls(Box::new(stream)));
                 Ok(results([Value::Boolean(true)]))
             }
-            Err(error) => failed(lua, &format!("handshake failed: {error}")),
+            Err(error) => self.failed(lua, "handshake", &format!("handshake failed: {error}")),
         }
     }
 
@@ -342,7 +374,7 @@ impl TcpSocket {
             )])),
             Err(error) => {
                 self.stream = None;
-                failed(lua, &error)
+                self.failed(lua, "send", &error)
             }
         }
     }
@@ -367,6 +399,7 @@ impl TcpSocket {
                         }
                         Err(error) => {
                             let data = self.buffer.split();
+                            log_failure(&self.slot, "tcp", "receive", &error);
                             return partial(lua, &error, &data);
                         }
                     }
@@ -383,6 +416,7 @@ impl TcpSocket {
                     }
                     Err(error) => {
                         let data = self.buffer.split();
+                        log_failure(&self.slot, "tcp", "receive", &error);
                         return partial(lua, &error, &data);
                     }
                 }
@@ -415,6 +449,7 @@ impl TcpSocket {
                 }
                 Err(error) => {
                     let data = self.buffer.split();
+                    log_failure(&self.slot, "tcp", "receive", &error);
                     return partial(lua, &error, &data);
                 }
             }
@@ -484,6 +519,7 @@ impl TcpSocket {
                 }
                 Err(error) => {
                     let data = self.buffer.split();
+                    log_failure(&self.slot, "tcp", "receive", &error);
                     return partial(lua, &error, &data);
                 }
             }
@@ -636,8 +672,9 @@ impl UserData for TcpSocket {
                     this.buffer.clear();
                     return failed(lua, "unread data in buffer");
                 }
-                let idle = milliseconds(idle).unwrap_or(DEFAULT_IDLE);
-                let size = size.filter(|size| *size > 0).unwrap_or(DEFAULT_POOL_SIZE);
+                let sockets = defaults(&this.slot);
+                let idle = milliseconds(idle).unwrap_or(sockets.keepalive_timeout);
+                let size = size.filter(|size| *size > 0).unwrap_or(sockets.pool_size);
                 this.pool
                     .put(this.key.clone(), stream, idle, size, this.reused);
                 Ok(results([Value::Integer(1)]))

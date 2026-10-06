@@ -670,6 +670,47 @@ fn check_lua_scope(scope: &LuaScope, resource: &str, route: bool, report: &mut R
             );
         }
     }
+    for (directive, value) in [
+        (
+            "lua_socket_connect_timeout",
+            scope.socket_connect_timeout_ms,
+        ),
+        ("lua_socket_send_timeout", scope.socket_send_timeout_ms),
+        ("lua_socket_read_timeout", scope.socket_read_timeout_ms),
+        (
+            "lua_socket_keepalive_timeout",
+            scope.socket_keepalive_timeout_ms,
+        ),
+    ] {
+        if value.is_some_and(|ms| ms == 0 || ms > panel_engine::MOST_LUA_SOCKET_MS) {
+            report.error(
+                resource,
+                format!(
+                    "{directive} must be 1 ms to {} ms",
+                    panel_engine::MOST_LUA_SOCKET_MS
+                ),
+            );
+        }
+    }
+    let buffers = panel_engine::LEAST_LUA_SOCKET_BUFFER..=panel_engine::MOST_LUA_SOCKET_BUFFER;
+    if scope
+        .socket_buffer_bytes
+        .is_some_and(|bytes| !buffers.contains(&bytes))
+    {
+        report.error(resource, "lua_socket_buffer_size must be 1k to 16m");
+    }
+    if scope
+        .socket_pool_size
+        .is_some_and(|size| size == 0 || size > panel_engine::MOST_LUA_SOCKET_POOL)
+    {
+        report.error(
+            resource,
+            format!(
+                "lua_socket_pool_size must be 1 to {}",
+                panel_engine::MOST_LUA_SOCKET_POOL
+            ),
+        );
+    }
     if scope
         .work_limit
         .is_some_and(|work| work == 0 || work > panel_engine::MOST_LUA_WORK)

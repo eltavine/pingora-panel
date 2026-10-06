@@ -1415,6 +1415,12 @@ that mean one thing in every phase.
 | `lua_log_level` | `notice` | the least severe `ngx.log` messages kept |
 | `lua_slow_threshold` | `10ms` | runs longer than this are logged and counted as slow |
 | `lua_debug` | `off` | logs every run's start, end, duration and outcome |
+| `lua_socket_connect_timeout`, `lua_socket_send_timeout`, `lua_socket_read_timeout` | `60s` | how long cosockets wait, unless a script sets its own |
+| `lua_socket_buffer_size` | `16k` | how much a cosocket reads at a time |
+| `lua_socket_pool_size`, `lua_socket_keepalive_timeout` | `30`, `60s` | the idle connections `setkeepalive` keeps, and for how long |
+| `lua_socket_log_errors` | `on` | cosocket failures in the error log |
+| `lua_transform_underscores_in_response_headers` | `on` | `ngx.header.x_trace_id` sets `X-Trace-Id` |
+| `lua_use_default_type` | `on` | answers without a `Content-Type` get `text/plain; charset=utf-8` |
 
 The sandbox has no `io`, `os.execute`, native libraries, FFI or bytecode
 loading; globals are read-only and a request's writes stay with it. A run
