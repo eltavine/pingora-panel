@@ -100,8 +100,16 @@ async fn api(
             "scripts": [{
                 "id": "lua/auth.lua", "file": "lua/auth.lua", "line": 1, "module": "auth",
                 "sha256": "0123456789abcdef".repeat(4), "bytes": 20, "lines": 2, "code": "return",
-                "uses": [{"resource": "lua", "label": "http", "phase": "access"}], "requires": []
+                "uses": [{"resource": "lua", "label": "http", "phase": "access"}], "requires": ["resty.redis"]
             }]
+        }))
+        .into_response(),
+        ("GET", "/api/v1/config/lua/modules") => Json(json!({
+            "built_in": [
+                {"name": "cjson", "library": "lua-cjson"},
+                {"name": "resty.redis", "library": "lua-resty-redis"}
+            ],
+            "refused": [{"name": "ffi", "reason": "native code would run outside the sandbox"}]
         }))
         .into_response(),
         ("POST", "/api/v1/config/lua/test") => Json(json!({
@@ -1531,6 +1539,22 @@ fn lua_scripts_are_checked_listed_and_tested() {
     assert_eq!(
         stub.requests("GET", "/api/v1/config/lua")[0].query,
         "revision=3"
+    );
+
+    let modules = stub.ppanel(&["lua", "modules"]);
+    assert!(modules.status.success(), "{}", stderr(&modules));
+    let printed = stdout(&modules);
+    let redis = printed
+        .lines()
+        .find(|line| line.starts_with("resty.redis"))
+        .unwrap_or_default();
+    assert!(
+        redis.contains("lua-resty-redis") && redis.contains("lua/auth.lua"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains("refused: ffi: native code would run outside the sandbox"),
+        "{printed}"
     );
 
     std::fs::write(

@@ -10,7 +10,7 @@ use crate::{
 use clap::Subcommand;
 use reqwest::Method;
 use serde_json::{json, Value};
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
 
 const PHASES: [&str; 10] = [
     "set",
@@ -42,6 +42,10 @@ pub(crate) enum LuaCommand {
         #[arg(long)]
         revision: Option<u64>,
     },
+    /// The modules scripts load without a file of the configuration, each
+    /// with the OpenResty library it stands in for and the draft's scripts
+    /// that load it, then the modules scripts may not load.
+    Modules,
     /// Runs the draft's Lua handlers a request reaches, or one script in
     /// place of a phase's handler, on a request described here; nothing is
     /// proxied or changed.
@@ -114,6 +118,12 @@ const SCRIPTS: &[Column] = &[
     ("VERSION", |script| {
         text(&script["sha256"]).chars().take(12).collect()
     }),
+];
+
+const MODULES: &[Column] = &[
+    ("MODULE", |module| text(&module["name"])),
+    ("LIBRARY", |module| text(&module["library"])),
+    ("USED BY", |module| text(&module["used_by"])),
 ];
 
 const RUNS: &[Column] = &[
@@ -216,6 +226,63 @@ pub(crate) async fn run(api: &Api, output: &Output, command: LuaCommand) -> Resu
             print_diagnostics(&library["diagnostics"]);
             if library["disabled"] == true && !output.quiet {
                 println!("lua off: the scripts are kept, but none runs");
+            }
+        }
+        LuaCommand::Modules => {
+            let modules = api.get("/api/v1/config/lua/modules", &[]).await?.body;
+            let library = api.get("/api/v1/config/lua", &[]).await?.body;
+            let mut users: BTreeMap<String, Vec<String>> = BTreeMap::new();
+            for script in library["scripts"].as_array().into_iter().flatten() {
+                for name in script["requires"].as_array().into_iter().flatten() {
+                    users
+                        .entry(text(name))
+                        .or_default()
+                        .push(text(&script["id"]));
+                }
+            }
+            let built_in: Vec<Value> = modules["built_in"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|module| {
+                    let scripts = users.get(&text(&module["name"]));
+                    json!({
+                        "name": module["name"],
+                        "library": module["library"],
+                        "used_by": scripts.map_or_else(Vec::new, Clone::clone),
+                    })
+                })
+                .collect();
+            if output.format == Format::Json {
+                output.json(&json!({ "built_in": built_in, "refused": modules["refused"] }));
+                return Ok(());
+            }
+            let rows: Vec<Value> = built_in
+                .into_iter()
+                .map(|mut module| {
+                    let scripts: Vec<String> = module["used_by"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .map(text)
+                        .collect();
+                    module["used_by"] = json!(if scripts.is_empty() {
+                        "-".to_owned()
+                    } else {
+                        scripts.join(", ")
+                    });
+                    module
+                })
+                .collect();
+            output.list(&Value::Array(rows), MODULES);
+            if !output.quiet {
+                for refused in modules["refused"].as_array().into_iter().flatten() {
+                    println!(
+                        "refused: {}: {}",
+                        text(&refused["name"]),
+                        text(&refused["reason"])
+                    );
+                }
             }
         }
         LuaCommand::Test { test } => {

@@ -25,7 +25,10 @@ pub use explain::{explain, Explanation};
 pub use lower::{lower, Constant, Insertion, LowerOptions, Lowered, Origin, Written};
 pub use nginx::{import_nginx, NginxImport};
 pub use print::{print, print_sources};
-pub use scripts::{lua_library, LuaLibrary, LuaScriptInfo, LuaUse};
+pub use scripts::{
+    lua_library, lua_modules, LuaBuiltInModule, LuaLibrary, LuaModules, LuaRefusedModule,
+    LuaScriptInfo, LuaUse,
+};
 pub use source::{is_lua, Sources, ENTRY};
 pub use syntax::{syntax_tree, SyntaxNode, SyntaxTree};
 

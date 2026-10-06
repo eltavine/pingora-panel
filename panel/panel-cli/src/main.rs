@@ -344,6 +344,7 @@ mod tests {
             vec!["ppanel", "domain", "check", "bücher.example"],
             vec!["ppanel", "lua", "check", "conf"],
             vec!["ppanel", "lua", "scripts", "--revision", "3"],
+            vec!["ppanel", "lua", "modules"],
             vec![
                 "ppanel",
                 "lua",

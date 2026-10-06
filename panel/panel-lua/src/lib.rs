@@ -48,5 +48,23 @@ pub fn unavailable_functions() -> &'static [&'static str] {
 
 /// Modules `require` finds without a file in the configuration.
 pub fn built_in_modules() -> &'static [&'static str] {
+    static NAMES: std::sync::LazyLock<Vec<&'static str>> = std::sync::LazyLock::new(|| {
+        api::BUILT_IN_MODULES
+            .iter()
+            .map(|(name, _)| *name)
+            .collect()
+    });
+    &NAMES
+}
+
+/// The built-in modules, each with the library it stands in for: an
+/// OpenResty library such as `lua-resty-redis`, LuaJIT's extensions
+/// (`luajit`) or the gateway's own (`panel`).
+pub fn module_catalog() -> &'static [(&'static str, &'static str)] {
     &api::BUILT_IN_MODULES
+}
+
+/// The OpenResty modules scripts may not load, and why.
+pub fn refused_modules() -> &'static [(&'static str, &'static str)] {
+    &api::REFUSED_MODULES
 }

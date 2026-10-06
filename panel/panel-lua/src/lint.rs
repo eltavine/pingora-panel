@@ -620,7 +620,11 @@ impl Checker<'_> {
                 name.line,
                 format!("module {:?} is not available: {reason}", name.text),
             );
-        } else if !BUILT_IN_MODULES.contains(&name.text.as_str()) && !module(&name.text) {
+        } else if !BUILT_IN_MODULES
+            .iter()
+            .any(|(built_in, _)| *built_in == name.text)
+            && !module(&name.text)
+        {
             self.find(
                 FindingKind::UnknownModule,
                 name.line,

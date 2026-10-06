@@ -217,6 +217,7 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         )
         .route("/api/v1/config/check", post(language::check::<U>))
         .route("/api/v1/config/lua", get(lua::lua_library::<U>))
+        .route("/api/v1/config/lua/modules", get(lua::lua_modules))
         .route("/api/v1/config/lua/test", post(lua::test_lua::<U>))
         .route(
             "/api/v1/config/route-test",

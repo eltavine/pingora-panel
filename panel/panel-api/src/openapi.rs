@@ -37,7 +37,7 @@ mod tests;
         crate::configuration::apply,
         crate::language::source, crate::language::replace_source, crate::language::bundle,
         crate::language::import_bundle, crate::language::check, crate::route_test::test_route,
-        crate::lua::lua_library, crate::lua::test_lua,
+        crate::lua::lua_library, crate::lua::lua_modules, crate::lua::test_lua,
         crate::backups::list_backups, crate::backups::create_backup, crate::backups::get_backup,
         crate::backups::delete_backup, crate::backups::download_backup,
         crate::backups::restore_backup,

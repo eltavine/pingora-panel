@@ -64,6 +64,55 @@ pub struct LuaLibrary {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+/// A module `require` finds without a file of the configuration.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct LuaBuiltInModule {
+    /// What `require` loads it by.
+    pub name: String,
+    /// The library it stands in for: an OpenResty library such as
+    /// `lua-resty-redis`, `luajit` for LuaJIT's extensions, or `panel` for
+    /// the gateway's own.
+    pub library: String,
+}
+
+/// An OpenResty module scripts may not load.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct LuaRefusedModule {
+    pub name: String,
+    pub reason: String,
+}
+
+/// The modules scripts load without a file of the configuration, and
+/// those they may not load.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct LuaModules {
+    pub built_in: Vec<LuaBuiltInModule>,
+    pub refused: Vec<LuaRefusedModule>,
+}
+
+/// The modules the gateway's runtime provides and refuses.
+pub fn lua_modules() -> LuaModules {
+    LuaModules {
+        built_in: panel_lua::module_catalog()
+            .iter()
+            .map(|(name, library)| LuaBuiltInModule {
+                name: (*name).to_owned(),
+                library: (*library).to_owned(),
+            })
+            .collect(),
+        refused: panel_lua::refused_modules()
+            .iter()
+            .map(|(name, reason)| LuaRefusedModule {
+                name: (*name).to_owned(),
+                reason: (*reason).to_owned(),
+            })
+            .collect(),
+    }
+}
+
 /// How the configuration names `resource` of `model`.
 fn label(model: &ConfigModel, resource: &str) -> String {
     let parts: Vec<&str> = resource.split('/').collect();

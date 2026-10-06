@@ -14,10 +14,11 @@ use axum::{
     extract::{Query, State},
     http::{HeaderMap, StatusCode},
     response::Response,
+    Json,
 };
 use panel_application::GatewayUseCases;
 use panel_config_api::{LanguageQuery, LuaCommand, LuaTest, LuaTestResult};
-use panel_config_dsl::LuaScriptInfo;
+use panel_config_dsl::{LuaModules, LuaScriptInfo};
 use panel_config_model::LuaSharedDict;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -66,6 +67,15 @@ pub(crate) async fn lua_library<U: GatewayUseCases>(
         },
     )
     .await
+}
+
+/// The modules scripts load without a file of the configuration, each with
+/// the OpenResty library it stands in for, and the modules they may not
+/// load, with why.
+#[utoipa::path(get, path = "/api/v1/config/lua/modules", params(QueryHeaders),
+    responses((status = 200, body = LuaModules)), tag = "configuration")]
+pub(crate) async fn lua_modules() -> Json<LuaModules> {
+    Json(panel_config_dsl::lua_modules())
 }
 
 /// Runs the draft's Lua handlers a request reaches, or one script in place
