@@ -79,6 +79,18 @@ pub trait Host: Send {
     async fn send(&mut self, _output: crate::stream::Output) -> Result<(), String> {
         Err("the response cannot be sent before the handler ends here".into())
     }
+
+    /// Reads what the client sends next on the connection once the
+    /// response header went out (`ngx.req.socket(true)`), `None` once it
+    /// closed it.
+    async fn read_raw(&mut self) -> Result<Option<Bytes>, String> {
+        Err("the raw request socket cannot be read here".into())
+    }
+
+    /// Writes `data` to the client as it is, past every filter.
+    async fn write_raw(&mut self, _data: Bytes) -> Result<(), String> {
+        Err("the raw request socket cannot be written here".into())
+    }
 }
 
 /// A host for runs that have no request to read from.
@@ -540,6 +552,8 @@ pub(crate) async fn drive(
                         HostReply::Captured(host.capture(requests).await)
                     }
                     HostCall::Send(output) => HostReply::Sent(host.send(output).await),
+                    HostCall::ReadRaw => HostReply::Chunk(host.read_raw().await),
+                    HostCall::WriteRaw(data) => HostReply::Written(host.write_raw(data).await),
                 };
                 let _ = reply.send(answer);
             }

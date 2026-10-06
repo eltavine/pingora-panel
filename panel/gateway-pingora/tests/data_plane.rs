@@ -3247,3 +3247,80 @@ async fn handler_output_streams_through_the_filters_as_it_is_flushed() {
     assert!(whole.contains("data: two"), "{whole}");
     gateway.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn raw_request_sockets_carry_upgraded_connections() {
+    use panel_ir::{LuaHandler, LUA_SCRIPTS_CAPABILITY};
+
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    snapshot
+        .required_capabilities
+        .push(CapabilityRequirement::new(LUA_SCRIPTS_CAPABILITY, "1"));
+    snapshot.lua.scripts = vec![lua_script(
+        "echo",
+        r#"
+        local early, err = ngx.req.socket(true)
+        assert(early == nil and err:find("ngx.send_headers"), err)
+        ngx.status = 101
+        ngx.header["Upgrade"] = "echo"
+        ngx.header["Connection"] = "Upgrade"
+        assert(ngx.send_headers())
+        assert(ngx.flush(true))
+        local sock = assert(ngx.req.socket(true))
+        assert(select(2, sock:connect("127.0.0.1", 1)) == "not supported on the request socket")
+        local line = assert(sock:receive("*l"))
+        assert(sock:send("echo: " .. line .. "\n"))
+        "#,
+    )];
+    snapshot.sites.push(site(&["shop.test"]));
+    let mut echo = LuaHandler::new("echo");
+    echo.allow.body = true;
+    echo.time_limit_ms = 10_000;
+    snapshot.routes.push(route(
+        "echo",
+        1,
+        prefix("/"),
+        RouteAction::Lua { handler: echo },
+    ));
+    let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
+    wait_for(listen).await;
+
+    let mut stream = TcpStream::connect(listen).await.unwrap();
+    stream
+        .write_all(
+            b"GET /echo HTTP/1.1\r\nhost: shop.test\r\nconnection: upgrade\r\nupgrade: echo\r\n\r\n",
+        )
+        .await
+        .unwrap();
+    let mut seen = Vec::new();
+    let mut buffer = [0u8; 4096];
+    let read = |seen: &Vec<u8>, wanted: &str| String::from_utf8_lossy(seen).contains(wanted);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !read(&seen, "\r\n\r\n") {
+            let count = stream.read(&mut buffer).await.unwrap();
+            assert!(count > 0, "{}", String::from_utf8_lossy(&seen));
+            seen.extend_from_slice(&buffer[..count]);
+        }
+    })
+    .await
+    .unwrap();
+    let head = String::from_utf8_lossy(&seen).to_ascii_lowercase();
+    assert!(head.starts_with("http/1.1 101"), "{head}");
+    assert!(head.contains("upgrade: echo"), "{head}");
+    assert!(!head.contains("transfer-encoding"), "{head}");
+    stream.write_all(b"hello\n").await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !read(&seen, "echo: hello\n") {
+            let count = stream.read(&mut buffer).await.unwrap();
+            assert!(count > 0, "{}", String::from_utf8_lossy(&seen));
+            seen.extend_from_slice(&buffer[..count]);
+        }
+    })
+    .await
+    .unwrap();
+    gateway.stop().await;
+}

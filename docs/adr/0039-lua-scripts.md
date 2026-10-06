@@ -222,9 +222,18 @@ deep; `capture_multi` runs its subrequests at once. A named location
 (`location @name`, or `match named <name>` in a route) takes no request
 path: `ngx.exec("@name")` sends the request there with its URI and
 arguments as they are, starting at the route's rewrite phase as nginx's
-named locations do, and a name no route has is answered 500. The raw
-request socket of `ngx.req.socket(true)` and body files are not
-available.
+named locations do, and a name no route has is answered 500.
+`ngx.req.socket(true)` gives the client's connection as a full-duplex
+cosocket (`receive`, `receiveany`, `receiveuntil`, `send`, the timeouts
+and `close`) once the response header went out with `ngx.send_headers()`
+and `ngx.flush(true)`, as lua-resty-websocket's server sends its 101:
+what it sends passes no filter, and it receives what the client sends
+after the request head, the body included. Pingora writes every response
+header itself, so a script cannot write its own; before the header went
+out, or with output still kept, it returns `nil` and why. Request bodies
+are held in memory, never in files: `ngx.req.get_body_file` returns `nil`,
+as lua-nginx-module does for a body in memory, and `ngx.req.set_body_file`
+is refused, since scripts do not reach the file system.
 
 **Native API.** Next to `ngx`, `require("panel.v1")` returns the
 capabilities the specification names — `req`, `resp`, `ctx`, `upstream`,

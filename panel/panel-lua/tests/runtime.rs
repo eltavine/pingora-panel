@@ -1532,7 +1532,7 @@ async fn request_sockets_stream_the_body_across_its_pieces() {
     assert_eq!(scripts.run(raw, &mut NoHost).await, Outcome::Respond);
     assert_eq!(
         scripts.exchange().response.body,
-        b"nil raw request sockets are not available\n"
+        b"nil the raw request socket is not available here\n"
     );
 }
 
@@ -2345,4 +2345,33 @@ async fn output_goes_to_the_client_as_handlers_flush_it() {
     assert!(matches!(outcome, Outcome::Failed(_)), "{outcome:?}");
     assert_eq!(streamer.sent.len(), 1);
     assert!(broken.exchange().streaming() && !broken.exchange().ended());
+}
+
+#[tokio::test]
+async fn raw_request_sockets_wait_for_a_client_and_a_sent_header() {
+    let lua = start(
+        1,
+        handlers(&[r#"
+            local sock, err = ngx.req.socket(true)
+            ngx.say(tostring(sock), " ", err)
+        "#]),
+    );
+    let mut granted = handler(lua.handlers[0], Phase::Content);
+    granted.permissions.body = true;
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    run(&mut scripts, granted).await;
+    assert_eq!(
+        scripts.exchange().response.body,
+        b"nil the raw request socket is not available here\n"
+    );
+
+    let mut streamer = Streamer::default();
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    scripts.run(granted, &mut streamer).await;
+    assert!(streamer.sent.is_empty());
+    let printed = String::from_utf8(scripts.exchange().response.body.clone()).unwrap();
+    assert!(
+        printed.starts_with("nil the raw request socket follows"),
+        "{printed}"
+    );
 }

@@ -9,7 +9,7 @@ use crate::{
     exchange::{LogLevel, Sockets},
     vm::{refused, HostCall, HostReply, Slot},
 };
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use mlua::{
     AnyUserData, Lua, LuaString, MultiValue, Table, UserData, UserDataMethods, UserDataRefMut,
     Value,
@@ -59,6 +59,20 @@ enum Stream {
     Tls(Box<TlsStream<TcpStream>>),
     /// The body of the request, which the host hands over piece by piece.
     Request(Arc<Slot>),
+    /// The client's connection, once the response header went out.
+    Raw(Arc<Slot>),
+}
+
+/// Makes `call` on the host of the run under way and waits for its reply.
+async fn host_call(slot: &Slot, call: HostCall) -> std::io::Result<HostReply> {
+    let Some(cell) = slot.cell() else {
+        return Err(std::io::Error::other("closed"));
+    };
+    let (reply, answer) = oneshot::channel();
+    cell.run.lock().call = Some((call, reply));
+    answer
+        .await
+        .map_err(|_| std::io::Error::other("the client connection could not be used"))
 }
 
 impl Stream {
@@ -70,6 +84,16 @@ impl Stream {
                 stream.flush().await
             }
             Self::Request(_) => Err(std::io::Error::other("the request socket is read-only")),
+            Self::Raw(slot) => {
+                let data = Bytes::copy_from_slice(data);
+                match host_call(slot, HostCall::WriteRaw(data)).await? {
+                    HostReply::Written(Ok(())) => Ok(()),
+                    HostReply::Written(Err(error)) => Err(std::io::Error::other(error)),
+                    _ => Err(std::io::Error::other(
+                        "the client connection could not be used",
+                    )),
+                }
+            }
         }
     }
 
@@ -94,6 +118,17 @@ impl Stream {
                     _ => Err(std::io::Error::other("the request body could not be read")),
                 }
             }
+            Self::Raw(slot) => match host_call(slot, HostCall::ReadRaw).await? {
+                HostReply::Chunk(Ok(Some(chunk))) => {
+                    buffer.extend_from_slice(&chunk);
+                    Ok(chunk.len())
+                }
+                HostReply::Chunk(Ok(None)) => Ok(0),
+                HostReply::Chunk(Err(error)) => Err(std::io::Error::other(error)),
+                _ => Err(std::io::Error::other(
+                    "the client connection could not be used",
+                )),
+            },
         }
     }
 }
@@ -188,6 +223,9 @@ pub(crate) struct TcpSocket {
     reused: u32,
     /// `ngx.req.socket`: reads the request body and nothing else.
     request: bool,
+    /// `ngx.req.socket(true)`: the client's connection, which it neither
+    /// connects nor keeps.
+    raw: bool,
     tls: Option<crate::tls::TlsId>,
 }
 
@@ -207,6 +245,7 @@ impl TcpSocket {
             read_size: sockets.buffer_size.max(1024),
             reused: 0,
             request: false,
+            raw: false,
             tls: sockets.tls,
         }
     }
@@ -219,10 +258,23 @@ impl TcpSocket {
         socket
     }
 
+    /// The client's connection as a full-duplex cosocket.
+    fn raw(slot: Arc<Slot>, pool: Arc<Pool>) -> Self {
+        let mut socket = Self::new(Arc::clone(&slot), pool);
+        socket.stream = Some(Stream::Raw(slot));
+        socket.raw = true;
+        socket
+    }
+
     /// Refuses what the request socket does not do.
     fn writable(&self, lua: &Lua) -> Option<mlua::Result<MultiValue>> {
         self.request
             .then(|| failed(lua, "not supported on the request socket"))
+    }
+
+    /// Refuses what the request sockets do not do with their connection.
+    fn own_connection(&self, lua: &Lua) -> Option<mlua::Result<MultiValue>> {
+        (self.request || self.raw).then(|| failed(lua, "not supported on the request socket"))
     }
 
     fn failed(&self, lua: &Lua, action: &str, error: &str) -> mlua::Result<MultiValue> {
@@ -231,7 +283,7 @@ impl TcpSocket {
     }
 
     fn allowed(&self) -> mlua::Result<()> {
-        if self.request {
+        if self.request || self.raw {
             let cell = cell(&self.slot, Api::ReqSocket)?;
             return require_permission(&cell, Api::ReqSocket, |granted| granted.body, "body");
         }
@@ -300,7 +352,7 @@ impl TcpSocket {
                 self.stream = Some(tls);
                 return Ok(results([Value::Boolean(true)]));
             }
-            Some(request @ Stream::Request(_)) => {
+            Some(request @ (Stream::Request(_) | Stream::Raw(_))) => {
                 self.stream = Some(request);
                 return failed(lua, "not supported on the request socket");
             }
@@ -553,7 +605,7 @@ impl UserData for TcpSocket {
                 let Some(port) = port else {
                     return failed(&lua, "unix domain sockets are not available");
                 };
-                if let Some(refused) = this.writable(&lua) {
+                if let Some(refused) = this.own_connection(&lua) {
                     return refused;
                 }
                 let pool = options
@@ -568,7 +620,7 @@ impl UserData for TcpSocket {
             |lua,
              mut this,
              (_reused, server_name, verify): (Value, Option<String>, Option<bool>)| async move {
-                if let Some(refused) = this.writable(&lua) {
+                if let Some(refused) = this.own_connection(&lua) {
                     return refused;
                 }
                 this.handshake(&lua, server_name, verify != Some(false))
@@ -647,7 +699,7 @@ impl UserData for TcpSocket {
         methods.add_method_mut(
             "setkeepalive",
             |lua, this, (idle, size): (Option<f64>, Option<usize>)| {
-                if let Some(refused) = this.writable(lua) {
+                if let Some(refused) = this.own_connection(lua) {
                     return refused;
                 }
                 let Some(stream) = this.stream.take() else {
@@ -724,7 +776,25 @@ pub(super) fn install(
             let cell = cell(&request_slot, Api::ReqSocket)?;
             require_permission(&cell, Api::ReqSocket, |granted| granted.body, "body")?;
             if raw == Some(true) {
-                return failed(lua, "raw request sockets are not available");
+                let streams = cell.run.lock().streams;
+                let (streaming, pending) = {
+                    let exchange = cell.exchange.lock();
+                    (exchange.streaming(), !exchange.response.body.is_empty())
+                };
+                if !streams {
+                    return failed(lua, "the raw request socket is not available here");
+                }
+                if pending {
+                    return failed(lua, "pending data to write");
+                }
+                if !streaming {
+                    return failed(
+                        lua,
+                        "the raw request socket follows a response header the gateway sent: call ngx.send_headers() and ngx.flush(true) first",
+                    );
+                }
+                let socket = TcpSocket::raw(Arc::clone(&request_slot), Arc::clone(&request_pool));
+                return Ok(results([Value::UserData(lua.create_userdata(socket)?)]));
             }
             if cell.exchange.lock().request.body.is_some() {
                 return failed(lua, "request body already exists");

@@ -280,6 +280,23 @@ impl Host for StreamingHost<'_> {
         }
         Ok(())
     }
+
+    async fn read_raw(&mut self) -> Result<Option<Bytes>, String> {
+        self.host
+            .session
+            .read_request_body()
+            .await
+            .map_err(|error| format!("the client connection could not be read: {error}"))
+    }
+
+    async fn write_raw(&mut self, data: Bytes) -> Result<(), String> {
+        self.host
+            .session
+            .as_downstream_mut()
+            .write_response_body(data, false)
+            .await
+            .map_err(|error| format!("the client connection could not be written: {error}"))
+    }
 }
 
 /// A request's scripts between its phases, and its header filter.

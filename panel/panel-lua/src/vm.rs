@@ -79,6 +79,10 @@ pub(crate) enum HostCall {
     Capture(Vec<crate::capture::Capture>),
     /// Output sent to the client before the handler ends.
     Send(crate::stream::Output),
+    /// What the client sends next on the raw request socket.
+    ReadRaw,
+    /// Bytes for the client on the raw request socket.
+    WriteRaw(Bytes),
 }
 
 #[derive(Debug)]
@@ -87,6 +91,7 @@ pub(crate) enum HostReply {
     Chunk(Result<Option<Bytes>, String>),
     Captured(Result<Vec<crate::capture::Captured>, String>),
     Sent(Result<(), String>),
+    Written(Result<(), String>),
 }
 
 /// The run under way for a request.
