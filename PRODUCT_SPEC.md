@@ -901,47 +901,47 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | UP-042 | 147 | 上游失败次数 | 0.2 | A/C/G | Viewer | gatewayd | 查询“上游失败次数”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
 | UP-043 | 148 | 手动摘除节点 | 0.2 | A/C/G | Operator | gatewayd | 执行“手动摘除节点”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | UP-044 | 149 | 手动恢复节点 | 0.2 | A/C/G | Operator | gatewayd | 执行“手动恢复节点”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
-| UP-045 | 150 | 请求失败重试 | 0.6 | A/C/G | Operator | gatewayd | 执行“请求失败重试”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-046 | 151 | 重试次数 | 0.6 | A/C/G | Viewer | gatewayd | 查询“重试次数”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| UP-047 | 152 | 指定错误类型重试 | 0.6 | A/C/G | Operator | gatewayd | 执行“指定错误类型重试”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-048 | 153 | 幂等请求才重试 | 0.6 | A/C/G | Operator | gatewayd | 执行“幂等请求才重试”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-049 | 154 | Retry Budget | 0.6 | A/C/G | Operator | gatewayd | 执行“Retry Budget”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-050 | 155 | Circuit Breaker 基础版 | 0.6 | A/C/G | Operator | gatewayd | 执行“Circuit Breaker 基础版”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-051 | 156 | 最大并发请求 | 0.6 | A/C/G | Operator | gatewayd | 执行“最大并发请求”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-052 | 157 | Upstream Queue 基础版 | 0.6 | A/C/G | Operator | gatewayd | 执行“Upstream Queue 基础版”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-053 | 158 | WebSocket 代理 | 0.6 | A/C/G | Operator | gatewayd | 执行“WebSocket 代理”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-054 | 159 | WebSocket Upgrade 自动处理 | 0.6 | A/C/G | Operator | gatewayd | 执行“WebSocket Upgrade 自动处理”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-055 | 160 | SSE 代理 | 0.6 | A/C/G | Operator | gatewayd | 执行“SSE 代理”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| UP-056 | 161 | gRPC 代理 | 0.6 | A/C/G | Operator | gatewayd | 执行“gRPC 代理”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CONTENT-001 | 162 | 请求 URI 保留 | 0.6 | A/C/G | Operator | gatewayd | 执行“请求 URI 保留”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| UP-045 | 150 | 请求失败重试 | 0.6 | A/C/G | Operator | gatewayd | 执行“请求失败重试”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-046 | 151 | 重试次数 | 0.6 | A/C/G | Viewer | gatewayd | 查询“重试次数”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| UP-047 | 152 | 指定错误类型重试 | 0.6 | A/C/G | Operator | gatewayd | 执行“指定错误类型重试”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-048 | 153 | 幂等请求才重试 | 0.6 | A/C/G | Operator | gatewayd | 执行“幂等请求才重试”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-049 | 154 | Retry Budget | 0.6 | A/C/G | Operator | gatewayd | 执行“Retry Budget”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-050 | 155 | Circuit Breaker 基础版 | 0.6 | A/C/G | Operator | gatewayd | 执行“Circuit Breaker 基础版”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-051 | 156 | 最大并发请求 | 0.6 | A/C/G | Operator | gatewayd | 执行“最大并发请求”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-052 | 157 | Upstream Queue 基础版 | 0.6 | A/C/G | Operator | gatewayd | 执行“Upstream Queue 基础版”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-053 | 158 | WebSocket 代理 | 0.6 | A/C/G | Operator | gatewayd | 执行“WebSocket 代理”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-054 | 159 | WebSocket Upgrade 自动处理 | 0.6 | A/C/G | Operator | gatewayd | 执行“WebSocket Upgrade 自动处理”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-055 | 160 | SSE 代理 | 0.6 | A/C/G | Operator | gatewayd | 执行“SSE 代理”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| UP-056 | 161 | gRPC 代理 | 0.6 | A/C/G | Operator | gatewayd | 执行“gRPC 代理”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CONTENT-001 | 162 | 请求 URI 保留 | 0.6 | A/C/G | Operator | gatewayd | 执行“请求 URI 保留”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | CONTENT-002 | 163 | 请求 URI 改写 | 0.6 | A/C/G | Operator | gatewayd | 执行“请求 URI 改写”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | CONTENT-003 | 164 | Strip Prefix | 0.6 | A/C/G | Operator | gatewayd | 执行“Strip Prefix”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | CONTENT-004 | 165 | Add Prefix | 0.6 | A/C/G | Operator | gatewayd | 执行“Add Prefix”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | CONTENT-005 | 166 | Rewrite Regex | 0.6 | A/C/G | Operator | gatewayd | 执行“Rewrite Regex”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | CONTENT-006 | 167 | Internal Redirect | 0.6 | A/C/G | Operator | gatewayd | 执行“Internal Redirect”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CONTENT-007 | 168 | 返回固定状态码 | 0.6 | A/C/G | Viewer | gatewayd | 查询“返回固定状态码”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| CONTENT-008 | 169 | 返回固定文本 | 0.6 | A/C/G | Operator | gatewayd | 执行“返回固定文本”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CONTENT-009 | 170 | 返回固定 JSON | 0.6 | A/C/G | Operator | gatewayd | 执行“返回固定 JSON”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| CONTENT-007 | 168 | 返回固定状态码 | 0.6 | A/C/G | Viewer | gatewayd | 查询“返回固定状态码”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| CONTENT-008 | 169 | 返回固定文本 | 0.6 | A/C/G | Operator | gatewayd | 执行“返回固定文本”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CONTENT-009 | 170 | 返回固定 JSON | 0.6 | A/C/G | Operator | gatewayd | 执行“返回固定 JSON”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | CONTENT-010 | 171 | 自定义错误页 | 0.6 | A/C/G | Operator | gatewayd | 执行“自定义错误页”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | CONTENT-011 | 172 | 404 页面 | 0.6 | A/C/G | Operator | gatewayd | 执行“404 页面”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | CONTENT-012 | 173 | 403 页面 | 0.6 | A/C/G | Operator | gatewayd | 执行“403 页面”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | CONTENT-013 | 174 | 502 页面 | 0.6 | A/C/G | Operator | gatewayd | 执行“502 页面”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | CONTENT-014 | 175 | 503 页面 | 0.6 | A/C/G | Operator | gatewayd | 执行“503 页面”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CONTENT-015 | 176 | 维护模式 | 0.6 | A/C/G | Operator | gatewayd | 执行“维护模式”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| CONTENT-015 | 176 | 维护模式 | 0.6 | A/C/G | Operator | gatewayd | 执行“维护模式”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | CONTENT-016 | 177 | 维护模式白名单 | 0.6 | A/C/G | Operator | gatewayd | 执行“维护模式白名单”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CONTENT-017 | 178 | 静态根目录 | 0.6 | A/C/G | Operator | gatewayd | 执行“静态根目录”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CONTENT-018 | 179 | 静态文件服务 | 0.6 | A/C/G | Operator | gatewayd | 执行“静态文件服务”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CONTENT-019 | 180 | Index 文件 | 0.6 | A/C/G | Operator | gatewayd | 执行“Index 文件”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CONTENT-020 | 181 | 多 Index 候选 | 0.6 | A/C/G | Operator | gatewayd | 执行“多 Index 候选”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| CONTENT-017 | 178 | 静态根目录 | 0.6 | A/C/G | Operator | gatewayd | 执行“静态根目录”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CONTENT-018 | 179 | 静态文件服务 | 0.6 | A/C/G | Operator | gatewayd | 执行“静态文件服务”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CONTENT-019 | 180 | Index 文件 | 0.6 | A/C/G | Operator | gatewayd | 执行“Index 文件”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CONTENT-020 | 181 | 多 Index 候选 | 0.6 | A/C/G | Operator | gatewayd | 执行“多 Index 候选”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | CONTENT-021 | 182 | Autoindex 开关 | 0.6 | A/C/G | Operator | gatewayd | 执行“Autoindex 开关”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CONTENT-022 | 183 | MIME 类型识别 | 0.6 | A/C/G | Operator | gatewayd | 执行“MIME 类型识别”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| CONTENT-022 | 183 | MIME 类型识别 | 0.6 | A/C/G | Operator | gatewayd | 执行“MIME 类型识别”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | CONTENT-023 | 184 | 自定义 MIME 映射 | 0.6 | A/C/G | Operator | gatewayd | 执行“自定义 MIME 映射”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | CONTENT-024 | 185 | 静态文件缓存头 | 0.6 | A/C/G | Operator | gatewayd | 执行“静态文件缓存头”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CONTENT-025 | 186 | ETag | 0.6 | A/C/G | Operator | gatewayd | 执行“ETag”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CONTENT-026 | 187 | Last-Modified | 0.6 | A/C/G | Operator | gatewayd | 执行“Last-Modified”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CONTENT-027 | 188 | If-Modified-Since | 0.6 | A/C/G | Operator | gatewayd | 执行“If-Modified-Since”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CONTENT-028 | 189 | Range 请求 | 0.6 | A/C/G | Operator | gatewayd | 执行“Range 请求”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CONTENT-029 | 190 | SPA History Fallback | 0.6 | A/C/G | Operator | gatewayd | 执行“SPA History Fallback”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| CONTENT-025 | 186 | ETag | 0.6 | A/C/G | Operator | gatewayd | 执行“ETag”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CONTENT-026 | 187 | Last-Modified | 0.6 | A/C/G | Operator | gatewayd | 执行“Last-Modified”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CONTENT-027 | 188 | If-Modified-Since | 0.6 | A/C/G | Operator | gatewayd | 执行“If-Modified-Since”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CONTENT-028 | 189 | Range 请求 | 0.6 | A/C/G | Operator | gatewayd | 执行“Range 请求”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CONTENT-029 | 190 | SPA History Fallback | 0.6 | A/C/G | Operator | gatewayd | 执行“SPA History Fallback”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | CONTENT-030 | 191 | favicon 快捷配置 | 0.6 | A/C/G | Operator | gatewayd | 执行“favicon 快捷配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | CONTENT-031 | 192 | robots.txt 快捷配置 | 0.6 | A/C/G | Operator | gatewayd | 执行“robots.txt 快捷配置”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | HTTP-001 | 193 | 请求 Header 增加 | 0.6 | A/C/G | Operator | gatewayd | 执行“请求 Header 增加”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
@@ -1288,39 +1288,39 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | BACKUP-010 | 518 | SQLite 数据库备份 | 0.5 | A/C/G/I | Operator | automation-service | 执行“SQLite 数据库备份”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | BACKUP-011 | 519 | 全量配置包导出 | 0.5 | A/C/G/I | Operator | config-service | 执行“全量配置包导出”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | BACKUP-012 | 520 | 全量配置包导入 | 0.5 | A/C/G/I | Operator | config-service | 执行“全量配置包导入”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
-| CLI-001 | 521 | CLI `panel status` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'panel status'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CLI-002 | 522 | CLI `site list` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'site list'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CLI-003 | 523 | CLI `site create` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'site create'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CLI-004 | 524 | CLI `site show` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'site show'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CLI-005 | 525 | CLI `site enable` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'site enable'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CLI-006 | 526 | CLI `site disable` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'site disable'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CLI-007 | 527 | CLI `site delete` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'site delete'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CLI-008 | 528 | CLI `site clone` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'site clone'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CLI-009 | 529 | CLI `site export` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'site export'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CLI-010 | 530 | CLI `site import` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'site import'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CLI-011 | 531 | CLI `config test` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'config test'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| CLI-012 | 532 | CLI `config fmt` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'config fmt'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CLI-013 | 533 | CLI `config diff` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'config diff'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| CLI-014 | 534 | CLI `config apply` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'config apply'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| CLI-015 | 535 | CLI `config rollback` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'config rollback'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| CLI-016 | 536 | CLI `upstream list` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'upstream list'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CLI-017 | 537 | CLI `upstream check` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'upstream check'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CLI-018 | 538 | CLI `cert list` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'cert list'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CLI-019 | 539 | CLI `cert renew` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'cert renew'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| CLI-001 | 521 | CLI `panel status` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'panel status'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CLI-002 | 522 | CLI `site list` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'site list'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CLI-003 | 523 | CLI `site create` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'site create'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CLI-004 | 524 | CLI `site show` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'site show'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CLI-005 | 525 | CLI `site enable` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'site enable'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CLI-006 | 526 | CLI `site disable` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'site disable'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CLI-007 | 527 | CLI `site delete` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'site delete'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CLI-008 | 528 | CLI `site clone` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'site clone'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CLI-009 | 529 | CLI `site export` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'site export'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CLI-010 | 530 | CLI `site import` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'site import'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CLI-011 | 531 | CLI `config test` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'config test'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| CLI-012 | 532 | CLI `config fmt` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'config fmt'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CLI-013 | 533 | CLI `config diff` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'config diff'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| CLI-014 | 534 | CLI `config apply` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'config apply'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| CLI-015 | 535 | CLI `config rollback` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'config rollback'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| CLI-016 | 536 | CLI `upstream list` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'upstream list'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CLI-017 | 537 | CLI `upstream check` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'upstream check'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CLI-018 | 538 | CLI `cert list` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'cert list'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CLI-019 | 539 | CLI `cert renew` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'cert renew'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | CLI-020 | 540 | CLI `lua check` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'lua check'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | CLI-021 | 541 | CLI `lua test` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'lua test'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
-| CLI-022 | 542 | CLI `logs tail` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'logs tail'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CLI-023 | 543 | CLI `metrics` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'metrics'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CLI-024 | 544 | CLI `docker ps` 简化封装 | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'docker ps' 简化封装”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| CLI-025 | 545 | CLI 输出 table | 0.8 | C/S | Operator | panel-api | 在 CLI 完成“CLI 输出 table”；命令帮助、稳定退出码和 table/json/yaml 输出可验证。 | Planned | No |
-| CLI-026 | 546 | CLI 输出 JSON | 0.8 | C/S | Operator | panel-api | 在 CLI 完成“CLI 输出 JSON”；命令帮助、稳定退出码和 table/json/yaml 输出可验证。 | Planned | No |
-| CLI-027 | 547 | CLI `--quiet` | 0.8 | C/S | Operator | panel-api | 在 CLI 完成“CLI '--quiet'”；命令帮助、稳定退出码和 table/json/yaml 输出可验证。 | Planned | No |
-| CLI-028 | 548 | CLI Shell completion | 0.8 | C/S | Operator | panel-api | 在 CLI 完成“CLI Shell completion”；命令帮助、稳定退出码和 table/json/yaml 输出可验证。 | Planned | No |
-| API-001 | 549 | REST API | 0.8 | A/S | Operator | panel-api | 在公共接口完成“REST API”；OpenAPI/协议契约可渲染并通过兼容性检查。 | Planned | No |
-| API-002 | 550 | OpenAPI 文档 | 0.8 | A/S | Operator | panel-api | 在公共接口完成“OpenAPI 文档”；OpenAPI/协议契约可渲染并通过兼容性检查。 | Planned | No |
-| API-003 | 551 | Web GUI | 0.8 | A/C/G | Operator | panel-api | 执行“Web GUI”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| API-004 | 552 | Web GUI 与 CLI 共用 Service Layer | 0.8 | A/C/G | Operator | panel-api | 执行“Web GUI 与 CLI 共用 Service Layer”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
-| API-005 | 553 | WebSocket 实时状态 | 0.8 | A/S | Viewer | panel-api | 在公共接口完成“WebSocket 实时状态”；OpenAPI/协议契约可渲染并通过兼容性检查。 | Planned | No |
+| CLI-022 | 542 | CLI `logs tail` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'logs tail'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CLI-023 | 543 | CLI `metrics` | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'metrics'”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CLI-024 | 544 | CLI `docker ps` 简化封装 | 0.8 | A/C/G | Operator | panel-api | 执行“CLI 'docker ps' 简化封装”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| CLI-025 | 545 | CLI 输出 table | 0.8 | C/S | Operator | panel-api | 在 CLI 完成“CLI 输出 table”；命令帮助、稳定退出码和 table/json/yaml 输出可验证。 | Implemented | No |
+| CLI-026 | 546 | CLI 输出 JSON | 0.8 | C/S | Operator | panel-api | 在 CLI 完成“CLI 输出 JSON”；命令帮助、稳定退出码和 table/json/yaml 输出可验证。 | Implemented | No |
+| CLI-027 | 547 | CLI `--quiet` | 0.8 | C/S | Operator | panel-api | 在 CLI 完成“CLI '--quiet'”；命令帮助、稳定退出码和 table/json/yaml 输出可验证。 | Implemented | No |
+| CLI-028 | 548 | CLI Shell completion | 0.8 | C/S | Operator | panel-api | 在 CLI 完成“CLI Shell completion”；命令帮助、稳定退出码和 table/json/yaml 输出可验证。 | Implemented | No |
+| API-001 | 549 | REST API | 0.8 | A/S | Operator | panel-api | 在公共接口完成“REST API”；OpenAPI/协议契约可渲染并通过兼容性检查。 | Implemented | No |
+| API-002 | 550 | OpenAPI 文档 | 0.8 | A/S | Operator | panel-api | 在公共接口完成“OpenAPI 文档”；OpenAPI/协议契约可渲染并通过兼容性检查。 | Implemented | No |
+| API-003 | 551 | Web GUI | 0.8 | A/C/G | Operator | panel-api | 执行“Web GUI”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| API-004 | 552 | Web GUI 与 CLI 共用 Service Layer | 0.8 | A/C/G | Operator | panel-api | 执行“Web GUI 与 CLI 共用 Service Layer”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
+| API-005 | 553 | WebSocket 实时状态 | 0.8 | A/S | Viewer | panel-api | 在公共接口完成“WebSocket 实时状态”；OpenAPI/协议契约可渲染并通过兼容性检查。 | Implemented | No |
 | IAM-001 | 554 | 登录认证 | 0.4 | A/C/G | Administrator | identity | 执行“登录认证”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | IAM-002 | 555 | Session 管理 | 0.4 | A/C/G | Administrator | identity | 执行“Session 管理”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | IAM-003 | 556 | API Token | 0.4 | A/C/G | Administrator | identity | 执行“API Token”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
@@ -1337,15 +1337,15 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | SEC-034 | 567 | 后端监听 localhost/Unix Socket | 0.4 | A/C/G | Operator | policy-engine | 执行“后端监听 localhost/Unix Socket”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | SEC-035 | 568 | Web API 操作审计 | 0.4 | A/C/G | Operator | policy-engine | 执行“Web API 操作审计”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | GUI-001 | 569 | UI 配置编辑器 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“UI 配置编辑器”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | In Progress | No |
-| GUI-002 | 570 | UI DSL Monaco 高亮 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“UI DSL Monaco 高亮”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Planned | No |
+| GUI-002 | 570 | UI DSL Monaco 高亮 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“UI DSL Monaco 高亮”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Implemented | No |
 | GUI-003 | 571 | UI Lua Monaco 高亮 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“UI Lua Monaco 高亮”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Implemented | No |
-| GUI-004 | 572 | UI 配置错误行定位 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“UI 配置错误行定位”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Planned | No |
+| GUI-004 | 572 | UI 配置错误行定位 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“UI 配置错误行定位”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Implemented | No |
 | GUI-005 | 573 | UI 上游拓扑视图 | 0.8 | G/S | Viewer | web | 在 Web GUI 完成“UI 上游拓扑视图”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Planned | No |
-| GUI-006 | 574 | UI 网站状态卡片 | 0.8 | G/S | Viewer | web | 在 Web GUI 完成“UI 网站状态卡片”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Planned | No |
-| GUI-007 | 575 | UI 证书到期提示 | 0.8 | G/S | Viewer | web | 在 Web GUI 完成“UI 证书到期提示”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Planned | No |
-| GUI-008 | 576 | UI 配置 Diff | 0.8 | A/C/G | Viewer | web | 查询“UI 配置 Diff”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | Yes |
+| GUI-006 | 574 | UI 网站状态卡片 | 0.8 | G/S | Viewer | web | 在 Web GUI 完成“UI 网站状态卡片”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Implemented | No |
+| GUI-007 | 575 | UI 证书到期提示 | 0.8 | G/S | Viewer | web | 在 Web GUI 完成“UI 证书到期提示”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Implemented | No |
+| GUI-008 | 576 | UI 配置 Diff | 0.8 | A/C/G | Viewer | web | 查询“UI 配置 Diff”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | Yes |
 | GUI-009 | 577 | UI 发布确认 | 0.8 | A/C/G | Operator | web | 执行“UI 发布确认”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | In Progress | Yes |
-| GUI-010 | 578 | UI 回滚确认 | 0.8 | A/C/G | Operator | web | 执行“UI 回滚确认”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | Yes |
+| GUI-010 | 578 | UI 回滚确认 | 0.8 | A/C/G | Operator | web | 执行“UI 回滚确认”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | Yes |
 | GUI-011 | 579 | 暗色模式 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“暗色模式”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Implemented | No |
 | GUI-012 | 580 | 响应式布局 | 0.8 | G/S | Operator | web | 在 Web GUI 完成“响应式布局”；桌面与移动端无溢出，loading/error/empty 状态可验证。 | Implemented | No |
 | IAM-014 | - | 一次性 Bootstrap Token | 0.4 | A/C/G/I | Administrator | identity | 执行“一次性 Bootstrap Token”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
@@ -1429,25 +1429,25 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | SUPPLY-004 | - | Release Artifact 签名 | 0.9 | I | Administrator | CI/release | 执行“Release Artifact 签名”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | SUPPLY-005 | - | 容器镜像签名 | 0.9 | I | Administrator | CI/release | 执行“容器镜像签名”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | SUPPLY-006 | - | 构建 Provenance | 0.9 | I | Administrator | CI/release | 执行“构建 Provenance”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SUPPLY-007 | - | Rust 漏洞扫描 | 0.9 | I | Administrator | CI/release | 执行“Rust 漏洞扫描”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SUPPLY-008 | - | 依赖许可证策略 | 0.9 | I | Administrator | CI/release | 执行“依赖许可证策略”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| SUPPLY-007 | - | Rust 漏洞扫描 | 0.9 | I | Administrator | CI/release | 执行“Rust 漏洞扫描”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SUPPLY-008 | - | 依赖许可证策略 | 0.9 | I | Administrator | CI/release | 执行“依赖许可证策略”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | SUPPLY-009 | - | Web 依赖漏洞扫描 | 0.9 | I | Administrator | CI/release | 执行“Web 依赖漏洞扫描”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SUPPLY-010 | - | SAST 扫描 | 0.9 | I | Administrator | CI/release | 执行“SAST 扫描”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SUPPLY-011 | - | Secret 扫描 | 0.9 | I | Administrator | CI/release | 执行“Secret 扫描”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| SUPPLY-010 | - | SAST 扫描 | 0.9 | I | Administrator | CI/release | 执行“SAST 扫描”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SUPPLY-011 | - | Secret 扫描 | 0.9 | I | Administrator | CI/release | 执行“Secret 扫描”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | SUPPLY-012 | - | 容器镜像漏洞扫描 | 0.9 | I | Administrator | CI/release | 执行“容器镜像漏洞扫描”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | SUPPLY-013 | - | 第三方许可证报告 | 0.9 | I | Administrator | CI/release | 执行“第三方许可证报告”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SUPPLY-014 | - | 安全例外到期机制 | 0.9 | I | Administrator | CI/release | 执行“安全例外到期机制”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SUPPLY-015 | - | Pingora Security Advisory 监控 | 0.9 | I | Administrator | CI/release | 执行“Pingora Security Advisory 监控”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| OPS-001 | - | Docker Compose 安装 | 0.9 | A/C/G/I | Administrator | deployment | 执行“Docker Compose 安装”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| SUPPLY-014 | - | 安全例外到期机制 | 0.9 | I | Administrator | CI/release | 执行“安全例外到期机制”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SUPPLY-015 | - | Pingora Security Advisory 监控 | 0.9 | I | Administrator | CI/release | 执行“Pingora Security Advisory 监控”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| OPS-001 | - | Docker Compose 安装 | 0.9 | A/C/G/I | Administrator | deployment | 执行“Docker Compose 安装”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | OPS-002 | - | Podman Compose 安装 | 0.9 | A/C/G/I | Administrator | deployment | 执行“Podman Compose 安装”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | OPS-003 | - | 安装前 Preflight | 0.9 | A/C/G/I | Administrator | deployment | 执行“安装前 Preflight”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | OPS-004 | - | 部署版本清单 | 0.9 | A/C/G/I | Administrator | deployment | 查询“部署版本清单”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| OPS-005 | - | 数据库 Migration 执行器 | 0.9 | A/C/G/I | Administrator | deployment | 执行“数据库 Migration 执行器”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| OPS-005 | - | 数据库 Migration 执行器 | 0.9 | A/C/G/I | Administrator | deployment | 执行“数据库 Migration 执行器”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | OPS-006 | - | Expand/Contract Migration 门禁 | 0.9 | A/C/G/I | Administrator | deployment | 执行“Expand/Contract Migration 门禁”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | OPS-007 | - | 升级前自动备份 | 0.9 | A/C/G/I | Administrator | deployment | 执行“升级前自动备份”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | OPS-008 | - | 控制服务兼容顺序升级 | 0.9 | A/C/G/I | Administrator | deployment | 执行“控制服务兼容顺序升级”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| OPS-009 | - | Gateway Adapter 固定版本测试 | 0.9 | A/C/G/I | Administrator | deployment | 查询“Gateway Adapter 固定版本测试”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| OPS-010 | - | Pingora Upstream Main Canary | 0.9 | A/C/G/I | Administrator | deployment | 执行“Pingora Upstream Main Canary”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| OPS-009 | - | Gateway Adapter 固定版本测试 | 0.9 | A/C/G/I | Administrator | deployment | 查询“Gateway Adapter 固定版本测试”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| OPS-010 | - | Pingora Upstream Main Canary | 0.9 | A/C/G/I | Administrator | deployment | 执行“Pingora Upstream Main Canary”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | OPS-011 | - | 旧镜像快速回退 | 0.9 | A/C/G/I | Administrator | deployment | 执行“旧镜像快速回退”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | OPS-012 | - | 空主机恢复演练 | 0.9 | A/C/G/I | Administrator | deployment | 执行“空主机恢复演练”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
 | OPS-013 | - | 脱敏诊断包 | 0.9 | A/C/G/I | Administrator | deployment | 查询“脱敏诊断包”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
@@ -1462,7 +1462,7 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | 新增团队/平台需求 | 121 |
 | 总 Feature ID | 701 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
-| 当前 `Implemented` | 555（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-003`、`GUI-011`、`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-025`、`HTTP-001`～`HTTP-028`、`UP-001`～`UP-044`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-006`；身份：`IAM-001`～`IAM-038`；证书：`TLS-001`～`TLS-033`；安全：`SEC-001`～`SEC-035`；可观测：`OBS-001`～`OBS-053`；主机：`HOST-001`～`HOST-018`；容器：`CTR-001`～`CTR-038`；文件与备份：`BACKUP-001`～`BACKUP-012`；Lua：`LUA-001`～`LUA-063`；CLI：`CLI-020`、`CLI-021`） |
+| 当前 `Implemented` | 629（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-002`～`GUI-004`、`GUI-006`～`GUI-008`、`GUI-010`～`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-025`、`HTTP-001`～`HTTP-028`、`UP-001`～`UP-056`；高级流量：`CONTENT-001`、`CONTENT-007`～`CONTENT-009`、`CONTENT-015`、`CONTENT-017`～`CONTENT-020`、`CONTENT-022`、`CONTENT-025`～`CONTENT-029`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-006`；身份：`IAM-001`～`IAM-038`；证书：`TLS-001`～`TLS-033`；安全：`SEC-001`～`SEC-035`；可观测：`OBS-001`～`OBS-053`；主机：`HOST-001`～`HOST-018`；容器：`CTR-001`～`CTR-038`；文件与备份：`BACKUP-001`～`BACKUP-012`；Lua：`LUA-001`～`LUA-063`；三端：`API-001`～`API-005`、`CLI-001`～`CLI-028`；加固：`OPS-001`、`OPS-005`、`OPS-009`、`OPS-010`、`SUPPLY-007`、`SUPPLY-008`、`SUPPLY-010`、`SUPPLY-011`、`SUPPLY-014`、`SUPPLY-015`） |
 | 1.0 要求 `Verified` | 701 |
 
 分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 63、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。
