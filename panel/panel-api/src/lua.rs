@@ -70,8 +70,9 @@ pub(crate) async fn lua_library<U: GatewayUseCases>(
 
 /// Runs the draft's Lua handlers a request reaches, or one script in place
 /// of a phase's handler, on a request described in full, with the
-/// gateway's runtime and limits and without proxying it. Nothing changes;
-/// the test is recorded in the audit trail.
+/// gateway's runtime and limits and without proxying it. Nothing changes:
+/// the test opens no connections and runs no timers. It is recorded in the
+/// audit trail.
 #[utoipa::path(post, path = "/api/v1/config/lua/test", request_body = LuaTest,
     params(MutationHeaders), responses((status = 200, body = LuaTestResult)),
     tag = "configuration")]

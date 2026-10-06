@@ -27007,7 +27007,7 @@
         "tags": [
           "configuration"
         ],
-        "summary": "Runs the draft's Lua handlers a request reaches, or one script in place\nof a phase's handler, on a request described in full, with the\ngateway's runtime and limits and without proxying it. Nothing changes;\nthe test is recorded in the audit trail.",
+        "summary": "Runs the draft's Lua handlers a request reaches, or one script in place\nof a phase's handler, on a request described in full, with the\ngateway's runtime and limits and without proxying it. Nothing changes:\nthe test opens no connections and runs no timers. It is recorded in the\naudit trail.",
         "operationId": "test_lua",
         "parameters": [
           {
