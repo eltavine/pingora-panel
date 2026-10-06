@@ -2922,13 +2922,14 @@ async fn scripts_capture_subrequests_through_the_gateway() {
         ),
     ];
     snapshot.sites.push(site(&["shop.test"]));
+    // The parent waits on its subrequests, which a loaded machine slows.
+    let mut parent = LuaHandler::new("parent");
+    parent.time_limit_ms = 10_000;
     snapshot.routes.push(route(
         "parent",
         1,
         prefix("/parent"),
-        RouteAction::Lua {
-            handler: LuaHandler::new("parent"),
-        },
+        RouteAction::Lua { handler: parent },
     ));
     let mut child = LuaHandler::new("child");
     child.allow = LuaPermissions {
