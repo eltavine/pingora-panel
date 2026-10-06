@@ -88,7 +88,9 @@ once with `premature` true, as on a worker's exit. `ngx.socket.udp`
 sends and receives datagrams of at most 8192 bytes under the same network
 permission, `ngx.socket.stream` is the TCP cosocket, and
 `ngx.req.init_body`, `append_body` and `finish_body` build a new request
-body in memory. `ngx.exec` redirects internally: the request is handled
+body in memory, and `ngx.req.socket()` reads the request body as it
+arrives with `receive`, `receiveany` and `receiveuntil`, chunked bodies
+too. `ngx.exec` redirects internally: the request is handled
 again from `server_rewrite` with its new URI and arguments, and as in
 nginx a request that changes its URI more than ten times, by jumps and
 redirects together, is answered 500; `$request_uri` keeps the client's
@@ -118,8 +120,9 @@ read with a warning saying why, so configurations written for OpenResty
 still read. `sslhandshake` verifies the server's
 certificate with the system's trusted roots unless the script passes
 `ssl_verify` false, where lua-nginx-module verifies nothing by default.
-Subrequests (`ngx.location.capture`), named locations, the request's own
-socket, `ngx.on_abort`, worker threads and body files are not available.
+Subrequests (`ngx.location.capture`), named locations, the raw request
+socket of `ngx.req.socket(true)`, `ngx.on_abort`, worker threads and body
+files are not available.
 
 **Native API.** Next to `ngx`, `require("panel.v1")` returns the
 capabilities the specification names — `req`, `resp`, `ctx`, `upstream`,

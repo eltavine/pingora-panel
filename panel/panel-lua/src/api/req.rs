@@ -157,9 +157,9 @@ pub(super) fn table(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
                 let Some((cell, answer)) = call? else {
                     return Ok(());
                 };
-                let HostReply::Body(body) = answer
-                    .await
-                    .map_err(|_| mlua::Error::runtime("the request body could not be read"))?;
+                let Ok(HostReply::Body(body)) = answer.await else {
+                    return Err(mlua::Error::runtime("the request body could not be read"));
+                };
                 let body = body.map_err(mlua::Error::runtime)?;
                 cell.exchange.lock().request.body = Some(body);
                 Ok(())

@@ -273,6 +273,8 @@ pub(crate) struct SessionHost<'a> {
     pub session: &'a mut Session,
     /// The most the gateway holds: less for requests it proxies afterwards.
     pub limit: usize,
+    /// What `ngx.req.socket` has read so far.
+    pub streamed: usize,
 }
 
 #[async_trait]
@@ -310,6 +312,24 @@ impl Host for SessionHost<'_> {
             body.extend_from_slice(&chunk);
         }
         Ok(body.freeze())
+    }
+
+    async fn read_body_chunk(&mut self) -> std::result::Result<Option<Bytes>, String> {
+        let chunk = self
+            .session
+            .read_request_body()
+            .await
+            .map_err(|error| format!("the request body could not be read: {error}"))?;
+        if let Some(chunk) = &chunk {
+            self.streamed += chunk.len();
+            if self.streamed > self.limit {
+                return Err(format!(
+                    "the request body is larger than the {} bytes a script may read here",
+                    self.limit
+                ));
+            }
+        }
+        Ok(chunk)
     }
 }
 

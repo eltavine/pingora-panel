@@ -69,10 +69,11 @@ pub(crate) enum Api {
     ReqFinishBody,
     ReqGetBodyFile,
     Exec,
+    ReqSocket,
 }
 
 impl Api {
-    const ALL: [Api; 43] = [
+    const ALL: [Api; 44] = [
         Api::Arg,
         Api::Ctx,
         Api::Eof,
@@ -116,6 +117,7 @@ impl Api {
         Api::ReqFinishBody,
         Api::ReqGetBodyFile,
         Api::Exec,
+        Api::ReqSocket,
     ];
 
     /// The function a path such as `ngx.var.host` or `ngx.req.get_headers`
@@ -183,6 +185,7 @@ impl Api {
             Api::ReqFinishBody => "ngx.req.finish_body",
             Api::ReqGetBodyFile => "ngx.req.get_body_file",
             Api::Exec => "ngx.exec",
+            Api::ReqSocket => "ngx.req.socket",
         }
     }
 
@@ -217,7 +220,8 @@ impl Api {
             | Api::ReqAppendBody
             | Api::ReqFinishBody
             | Api::ReqGetBodyFile
-            | Api::Exec => bits(&[RW, AC, CT]),
+            | Api::Exec
+            | Api::ReqSocket => bits(&[RW, AC, CT]),
         }
     }
 

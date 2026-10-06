@@ -7,7 +7,7 @@
 use super::{cell, require_permission, results, Api};
 use crate::{
     exchange::{LogLevel, Sockets},
-    vm::{refused, Slot},
+    vm::{refused, HostCall, HostReply, Slot},
 };
 use bytes::BytesMut;
 use mlua::{
@@ -30,6 +30,7 @@ use std::{
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
+    sync::oneshot,
 };
 use tokio_rustls::{client::TlsStream, TlsConnector};
 
@@ -61,6 +62,8 @@ pub(super) fn log_failure(slot: &Slot, kind: &str, action: &str, error: &str) {
 enum Stream {
     Plain(TcpStream),
     Tls(Box<TlsStream<TcpStream>>),
+    /// The body of the request, which the host hands over piece by piece.
+    Request(Arc<Slot>),
 }
 
 impl Stream {
@@ -71,6 +74,7 @@ impl Stream {
                 stream.write_all(data).await?;
                 stream.flush().await
             }
+            Self::Request(_) => Err(std::io::Error::other("the request socket is read-only")),
         }
     }
 
@@ -79,6 +83,22 @@ impl Stream {
         match self {
             Self::Plain(stream) => stream.read_buf(buffer).await,
             Self::Tls(stream) => stream.read_buf(buffer).await,
+            Self::Request(slot) => {
+                let Some(cell) = slot.cell() else {
+                    return Err(std::io::Error::other("closed"));
+                };
+                let (reply, answer) = oneshot::channel();
+                cell.run.lock().call = Some((HostCall::ReadBodyChunk, reply));
+                match answer.await {
+                    Ok(HostReply::Chunk(Ok(Some(chunk)))) => {
+                        buffer.extend_from_slice(&chunk);
+                        Ok(chunk.len())
+                    }
+                    Ok(HostReply::Chunk(Ok(None))) => Ok(0),
+                    Ok(HostReply::Chunk(Err(error))) => Err(std::io::Error::other(error)),
+                    _ => Err(std::io::Error::other("the request body could not be read")),
+                }
+            }
         }
     }
 }
@@ -252,6 +272,8 @@ pub(crate) struct TcpSocket {
     read_timeout: Duration,
     read_size: usize,
     reused: u32,
+    /// `ngx.req.socket`: reads the request body and nothing else.
+    request: bool,
 }
 
 impl TcpSocket {
@@ -269,7 +291,22 @@ impl TcpSocket {
             read_timeout: sockets.read_timeout,
             read_size: sockets.buffer_size.max(1024),
             reused: 0,
+            request: false,
         }
+    }
+
+    /// The request body of the run under way as a read-only cosocket.
+    fn request(slot: Arc<Slot>, pool: Arc<Pool>) -> Self {
+        let mut socket = Self::new(Arc::clone(&slot), pool);
+        socket.stream = Some(Stream::Request(slot));
+        socket.request = true;
+        socket
+    }
+
+    /// Refuses what the request socket does not do.
+    fn writable(&self, lua: &Lua) -> Option<mlua::Result<MultiValue>> {
+        self.request
+            .then(|| failed(lua, "not supported on the request socket"))
     }
 
     fn failed(&self, lua: &Lua, action: &str, error: &str) -> mlua::Result<MultiValue> {
@@ -278,6 +315,10 @@ impl TcpSocket {
     }
 
     fn allowed(&self) -> mlua::Result<()> {
+        if self.request {
+            let cell = cell(&self.slot, Api::ReqSocket)?;
+            return require_permission(&cell, Api::ReqSocket, |granted| granted.body, "body");
+        }
         allowed(&self.slot, Api::Socket)
     }
 
@@ -342,6 +383,10 @@ impl TcpSocket {
             Some(tls @ Stream::Tls(_)) => {
                 self.stream = Some(tls);
                 return Ok(results([Value::Boolean(true)]));
+            }
+            Some(request @ Stream::Request(_)) => {
+                self.stream = Some(request);
+                return failed(lua, "not supported on the request socket");
             }
             None => return failed(lua, "closed"),
         };
@@ -580,6 +625,9 @@ impl UserData for TcpSocket {
                 let Some(port) = port else {
                     return failed(&lua, "unix domain sockets are not available");
                 };
+                if let Some(refused) = this.writable(&lua) {
+                    return refused;
+                }
                 let pool = options
                     .map(|options| options.get::<Option<String>>("pool"))
                     .transpose()?
@@ -592,11 +640,17 @@ impl UserData for TcpSocket {
             |lua,
              mut this,
              (_reused, server_name, verify): (Value, Option<String>, Option<bool>)| async move {
+                if let Some(refused) = this.writable(&lua) {
+                    return refused;
+                }
                 this.handshake(&lua, server_name, verify != Some(false))
                     .await
             },
         );
         methods.add_async_method_mut("send", |lua, mut this, data: Value| async move {
+            if let Some(refused) = this.writable(&lua) {
+                return refused;
+            }
             let data = payload(data)?;
             this.send(&lua, data).await
         });
@@ -665,6 +719,9 @@ impl UserData for TcpSocket {
         methods.add_method_mut(
             "setkeepalive",
             |lua, this, (idle, size): (Option<f64>, Option<usize>)| {
+                if let Some(refused) = this.writable(lua) {
+                    return refused;
+                }
                 let Some(stream) = this.stream.take() else {
                     return failed(lua, "closed");
                 };
@@ -729,6 +786,23 @@ pub(super) fn install(
                 }
                 Ok(results([Value::UserData(userdata)]))
             }
+        })?,
+    )?;
+    let req: Table = ngx.raw_get("req")?;
+    let (request_slot, request_pool) = (Arc::clone(slot), Arc::clone(pool));
+    req.raw_set(
+        "socket",
+        lua.create_function(move |lua, raw: Option<bool>| {
+            let cell = cell(&request_slot, Api::ReqSocket)?;
+            require_permission(&cell, Api::ReqSocket, |granted| granted.body, "body")?;
+            if raw == Some(true) {
+                return failed(lua, "raw request sockets are not available");
+            }
+            if cell.exchange.lock().request.body.is_some() {
+                return failed(lua, "request body already exists");
+            }
+            let socket = TcpSocket::request(Arc::clone(&request_slot), Arc::clone(&request_pool));
+            Ok(results([Value::UserData(lua.create_userdata(socket)?)]))
         })?,
     )?;
     Ok(())

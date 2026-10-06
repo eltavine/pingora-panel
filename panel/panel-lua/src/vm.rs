@@ -70,12 +70,17 @@ pub(crate) fn refused(message: impl Into<String>) -> mlua::Error {
 /// it between resumptions of the script.
 #[derive(Debug)]
 pub(crate) enum HostCall {
-    ReadBody { limit: usize },
+    ReadBody {
+        limit: usize,
+    },
+    /// The next piece of the request body, for `ngx.req.socket`.
+    ReadBodyChunk,
 }
 
 #[derive(Debug)]
 pub(crate) enum HostReply {
     Body(Result<Bytes, String>),
+    Chunk(Result<Option<Bytes>, String>),
 }
 
 /// The run under way for a request.

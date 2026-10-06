@@ -131,6 +131,11 @@ impl Host for TrialHost {
         }
         Ok(body)
     }
+
+    /// The whole body as one piece: a test has it all at once.
+    async fn read_body_chunk(&mut self) -> std::result::Result<Option<Bytes>, String> {
+        Ok(self.0.take().filter(|body| !body.is_empty()))
+    }
 }
 
 fn headers(lines: &[(String, String)]) -> Result<HeaderMap> {

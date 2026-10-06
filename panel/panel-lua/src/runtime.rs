@@ -47,6 +47,12 @@ impl Default for Settings {
 pub trait Host: Send {
     /// Reads the request body, refusing one of more than `limit` bytes.
     async fn read_body(&mut self, limit: usize) -> Result<Bytes, String>;
+
+    /// Reads the next piece of the request body, `None` at its end, for
+    /// `ngx.req.socket`.
+    async fn read_body_chunk(&mut self) -> Result<Option<Bytes>, String> {
+        Err("the request body cannot be streamed here".into())
+    }
 }
 
 /// A host for runs that have no request to read from.
@@ -366,6 +372,7 @@ pub(crate) async fn drive(
             Step::Serve(call, reply) => {
                 let answer = match call {
                     HostCall::ReadBody { limit } => HostReply::Body(host.read_body(limit).await),
+                    HostCall::ReadBodyChunk => HostReply::Chunk(host.read_body_chunk().await),
                 };
                 let _ = reply.send(answer);
             }

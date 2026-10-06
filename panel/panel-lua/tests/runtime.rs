@@ -1455,3 +1455,68 @@ async fn handlers_set_the_defaults_of_their_cosockets_and_headers() {
     assert!(exchange.response.headers.contains_key("x-custom-name"));
     assert!(exchange.default_type());
 }
+
+/// A request body that arrives in pieces.
+struct Pieces(std::collections::VecDeque<&'static [u8]>);
+
+#[async_trait]
+impl Host for Pieces {
+    async fn read_body(&mut self, _limit: usize) -> Result<Bytes, String> {
+        Err("read in pieces".into())
+    }
+
+    async fn read_body_chunk(&mut self) -> Result<Option<Bytes>, String> {
+        tokio::task::yield_now().await;
+        Ok(self.0.pop_front().map(Bytes::from_static))
+    }
+}
+
+#[tokio::test]
+async fn request_sockets_stream_the_body_across_its_pieces() {
+    let lua = start(
+        1,
+        handlers(&[
+            r#"
+            local sock = assert(ngx.req.socket())
+            local reader = sock:receiveuntil("--edge")
+            local before = assert(reader())
+            local line = assert(sock:receive())
+            local rest = assert(sock:receive("*a"))
+            local sent, err = sock:send("x")
+            ngx.say(before, "|", line, "|", rest, "|", tostring(sent), " ", err)
+            "#,
+            "local sock, err = ngx.req.socket(true) ngx.say(tostring(sock), ' ', err)",
+        ]),
+    );
+    let mut granted = handler(lua.handlers[0], Phase::Content);
+    granted.permissions.body = true;
+    let mut scripts = lua.runtime.scripts(request("POST", "/upload", &[]));
+    let mut body = Pieces(vec![&b"first pa"[..], b"rt--ed", b"ge\r\nheader line\r\ntail"].into());
+    let outcome = scripts.run(granted, &mut body).await;
+    assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+    assert_eq!(
+        scripts.exchange().response.body,
+        b"first part||header line\r\ntail|nil not supported on the request socket\n"
+    );
+
+    let mut scripts = lua.runtime.scripts(request("POST", "/", &[]));
+    let Outcome::Failed(failure) =
+        run(&mut scripts, handler(lua.handlers[0], Phase::Content)).await
+    else {
+        panic!("the request socket needs the body permission");
+    };
+    assert!(
+        failure.message.contains("lua_allow body"),
+        "{}",
+        failure.message
+    );
+
+    let mut raw = handler(lua.handlers[1], Phase::Content);
+    raw.permissions.body = true;
+    let mut scripts = lua.runtime.scripts(request("POST", "/", &[]));
+    assert_eq!(scripts.run(raw, &mut NoHost).await, Outcome::Respond);
+    assert_eq!(
+        scripts.exchange().response.body,
+        b"nil raw request sockets are not available\n"
+    );
+}

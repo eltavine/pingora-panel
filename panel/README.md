@@ -1435,7 +1435,8 @@ run later under the limits and permissions of the run that created them;
 when a new configuration takes over, pending ones run at once with
 `premature` true. `ngx.socket.udp` sends datagrams under the same
 permission, and `ngx.semaphore` coordinates the threads, timers and
-requests of a VM. `ngx.exec` handles the request again with a new URI, up
+requests of a VM. `ngx.req.socket()` streams the request body to a script,
+chunked bodies included. `ngx.exec` handles the request again with a new URI, up
 to ten URI changes as in nginx. Subrequests are not available.
 
 Reading the configuration compiles every script with the gateway's

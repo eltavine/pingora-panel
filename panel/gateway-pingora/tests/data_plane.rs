@@ -2479,6 +2479,10 @@ async fn lua_handlers_rewrite_answer_filter_and_choose_peers() {
         lua_script("cycle", "return ngx.exec('/cycle')"),
         lua_script("gate", "return ngx.exec('/target')"),
         lua_script("untyped", "ngx.say('plain')"),
+        lua_script(
+            "streamed",
+            "local sock = assert(ngx.req.socket()) local first = assert(sock:receiveuntil('|')()) local rest = assert(sock:receive('*a')) ngx.say(first, ' then ', rest)",
+        ),
     ];
     snapshot.lua.shared_dicts.push(LuaSharedDict {
         name: "hits".into(),
@@ -2508,6 +2512,8 @@ async fn lua_handlers_rewrite_answer_filter_and_choose_peers() {
     gate.lua.access = Some(LuaHandler::new("gate"));
     let mut untyped = LuaHandler::new("untyped");
     untyped.no_default_type = true;
+    let mut streamed = LuaHandler::new("streamed");
+    streamed.allow.body = true;
     snapshot.routes = vec![
         generated,
         route(
@@ -2570,6 +2576,12 @@ async fn lua_handlers_rewrite_answer_filter_and_choose_peers() {
             12,
             prefix("/untyped"),
             RouteAction::Lua { handler: untyped },
+        ),
+        route(
+            "streamed",
+            13,
+            prefix("/streamed"),
+            RouteAction::Lua { handler: streamed },
         ),
     ];
     snapshot.upstream_pools.push(pool("app", &[upstream]));
@@ -2646,6 +2658,16 @@ async fn lua_handlers_rewrite_answer_filter_and_choose_peers() {
     assert!(
         !untyped.headers.contains_key("content-type"),
         "lua_use_default_type off sends no Content-Type"
+    );
+    let chunked = send(
+        listen,
+        "POST /streamed HTTP/1.1\r\nhost: shop.test\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n6\r\nfirst|\r\n4\r\nsec\n\r\n3\r\nond\r\n0\r\n\r\n",
+    )
+    .await;
+    assert_eq!(
+        body(&chunked),
+        "first then sec\nond\n",
+        "ngx.req.socket reads a chunked body without its chunking"
     );
     assert!(body(&cycling).contains("internal redirection cycle"));
     gateway.stop().await;

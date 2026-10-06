@@ -366,7 +366,14 @@ impl PanelProxy {
         };
         let started = Instant::now();
         let outcome = scripts
-            .run(hook.handler, &mut SessionHost { session, limit })
+            .run(
+                hook.handler,
+                &mut SessionHost {
+                    session,
+                    limit,
+                    streamed: 0,
+                },
+            )
             .await;
         report.finished(hook, &scripts, &outcome, started.elapsed());
         match outcome {
