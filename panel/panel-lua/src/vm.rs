@@ -286,6 +286,8 @@ pub(crate) struct Vm {
     pub slot: Arc<Slot>,
     handlers: Vec<Function>,
     env_meta: Table,
+    /// `exit_worker_by_lua`, and the terms it runs on.
+    exit_worker: Option<(Function, Limits, Permissions)>,
 }
 
 impl fmt::Debug for Vm {
@@ -359,6 +361,11 @@ impl Vm {
         let env_meta = lua.create_table()?;
         env_meta.set("__index", base)?;
         env_meta.set_readonly(true);
+        let exit_worker = program
+            .exit_worker
+            .map(load)
+            .transpose()?
+            .map(|function| (function, program.init_limits, program.init_permissions));
         lua.set_memory_limit(settings.memory)?;
         Ok((
             Self {
@@ -366,6 +373,7 @@ impl Vm {
                 slot,
                 handlers,
                 env_meta,
+                exit_worker,
             },
             logs,
         ))
@@ -407,6 +415,42 @@ impl Vm {
             result?;
         }
         Ok(logs)
+    }
+
+    /// Runs `exit_worker_by_lua` as the VM stops, on the terms of
+    /// `init_by_lua`; nothing it starts may wait.
+    pub fn exit(&self, index: usize) -> Option<crate::timer::TimerRun> {
+        let (function, limits, permissions) = self.exit_worker.as_ref()?;
+        let started = Instant::now();
+        let mut exchange = Exchange::new(Default::default(), Default::default());
+        exchange.begin(Phase::ExitWorker);
+        let cell = Arc::new(Cell::new(Arc::new(Mutex::new(exchange))));
+        {
+            let mut run = cell.run.lock();
+            run.limits = *limits;
+            run.permissions = *permissions;
+            run.work_left = i64::try_from(limits.work).unwrap_or(i64::MAX);
+            run.deadline = self.slot.after(limits.time);
+        }
+        let key = self.lua.current_thread().to_pointer() as usize;
+        self.slot.enter(key, &cell);
+        let result = function.call::<()>(());
+        *self.slot.current.lock() = None;
+        let exceeded = cell.run.lock().exceeded;
+        let failure = match (exceeded, result) {
+            (Some(exceeded), _) => Some(crate::runtime::exceeded_failure(exceeded)),
+            (None, Err(error)) => Some(crate::runtime::failure(&error)),
+            (None, Ok(())) => None,
+        };
+        let logs = std::mem::take(&mut cell.exchange.lock().logs);
+        Some(crate::timer::TimerRun {
+            vm: index,
+            phase: Phase::ExitWorker,
+            premature: false,
+            duration: started.elapsed(),
+            failure,
+            logs,
+        })
     }
 
     /// A global environment for a request: writes stay in it, reads fall

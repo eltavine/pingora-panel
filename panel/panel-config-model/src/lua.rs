@@ -250,6 +250,9 @@ pub struct LuaConfig {
     /// Runs once in each VM after `init`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub init_worker: Option<LuaCode>,
+    /// Runs once in each VM when it stops.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_worker: Option<LuaCode>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shared_dicts: Vec<LuaSharedDict>,
     /// Bytes each VM may allocate.
@@ -294,7 +297,11 @@ impl LuaConfig {
 pub fn lua_handlers(model: &ConfigModel) -> Vec<(String, &'static str, &LuaCode)> {
     let lua = &model.lua;
     let mut found: Vec<(String, &'static str, &LuaCode)> = Vec::new();
-    for (phase, code) in [("init", &lua.init), ("init_worker", &lua.init_worker)] {
+    for (phase, code) in [
+        ("init", &lua.init),
+        ("init_worker", &lua.init_worker),
+        ("exit_worker", &lua.exit_worker),
+    ] {
         if let Some(code) = code {
             found.push(("lua".into(), phase, code));
         }
@@ -342,6 +349,7 @@ pub fn lua_codes_mut(model: &mut ConfigModel) -> Vec<&mut LuaCode> {
         .init
         .iter_mut()
         .chain(lua.init_worker.iter_mut())
+        .chain(lua.exit_worker.iter_mut())
         .collect();
     found.extend(lua.http.handlers_mut());
     found.extend(

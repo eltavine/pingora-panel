@@ -539,6 +539,7 @@ fn lua_programs_and_handlers_round_trip_and_unknown_kinds_are_refused() {
         ],
         init: Some(LuaHandler::new("lua/auth.lua")),
         init_worker: None,
+        exit_worker: Some(LuaHandler::new("main.conf:3")),
         shared_dicts: vec![LuaSharedDict {
             name: "hits".into(),
             capacity_bytes: 1 << 20,

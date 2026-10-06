@@ -180,6 +180,9 @@ pub fn problems(snapshot: &RuntimeSnapshot) -> Vec<(String, String)> {
     if let Some(init) = &program.init {
         check_handler(&mut found, &ids, "lua".into(), "init", init);
     }
+    if let Some(exit) = &program.exit_worker {
+        check_handler(&mut found, &ids, "lua".into(), "exit_worker", exit);
+    }
     if let Some(init) = &program.init_worker {
         check_handler(&mut found, &ids, "lua".into(), "init_worker", init);
     }

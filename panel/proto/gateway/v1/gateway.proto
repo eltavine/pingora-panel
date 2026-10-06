@@ -715,6 +715,8 @@ message LuaProgram {
   // Access handlers run before the security policies
   // (access_by_lua_no_postpone on).
   bool access_first = 11;
+  // Runs in each VM when it stops (exit_worker_by_lua).
+  LuaHandler exit_worker = 12;
 }
 
 message ValidateRequest {

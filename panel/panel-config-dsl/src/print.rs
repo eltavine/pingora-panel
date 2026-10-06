@@ -144,6 +144,9 @@ pub(crate) fn lua_http(lua: &LuaConfig) -> Vec<Directive> {
     if let Some(code) = &lua.init_worker {
         body.push(lua_handler("init_worker", code));
     }
+    if let Some(code) = &lua.exit_worker {
+        body.push(lua_handler("exit_worker", code));
+    }
     body.extend(handlers);
     body
 }

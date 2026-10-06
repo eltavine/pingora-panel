@@ -84,10 +84,10 @@ pub(crate) fn compile(
     }
     runtime.on_timer(|run| {
         for entry in &run.logs {
-            tracing::info!(event = "lua_log", phase = "timer", vm = run.vm, level = entry.level.name(), message = %entry.message);
+            tracing::info!(event = "lua_log", phase = run.phase.name(), vm = run.vm, level = entry.level.name(), message = %entry.message);
         }
         if let Some(failure) = &run.failure {
-            tracing::warn!(event = "lua_timer_failed", vm = run.vm, premature = run.premature, kind = failure.kind.name(), message = %failure.message);
+            tracing::warn!(event = "lua_failed", phase = run.phase.name(), vm = run.vm, premature = run.premature, kind = failure.kind.name(), message = %failure.message);
         }
     });
     Ok((

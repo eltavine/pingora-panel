@@ -122,6 +122,21 @@ struct Inner {
     _closing: tokio::sync::watch::Sender<()>,
 }
 
+impl Drop for Inner {
+    /// Runs each VM's `exit_worker_by_lua` before the pending timers are told
+    /// to run at once; a test's runtime runs neither.
+    fn drop(&mut self) {
+        if self.timers.iter().any(|timers| timers.is_discarded()) {
+            return;
+        }
+        for (index, vm) in self.vms.iter().enumerate() {
+            if let Some(run) = vm.exit(index) {
+                self.reports.send(run);
+            }
+        }
+    }
+}
+
 impl Runtime {
     /// Starts `settings.vms` VMs for `program`, each running its
     /// `init_by_lua` and `init_worker_by_lua`. Returns what they logged.
@@ -503,7 +518,7 @@ fn end_threads(slot: &Slot, cell: &Cell) {
     drop(threads);
 }
 
-fn exceeded_failure(exceeded: Exceeded) -> Failure {
+pub(crate) fn exceeded_failure(exceeded: Exceeded) -> Failure {
     Failure {
         kind: match exceeded {
             Exceeded::Time => FailureKind::Timeout,

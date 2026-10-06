@@ -49,6 +49,7 @@ inheritance, where a directive in an inner block replaces the outer one:
 | :--- | :--- | :--- |
 | `init_by_lua_block`, `_file` | once in each VM when a configuration is activated | `http` |
 | `init_worker_by_lua_block`, `_file` | once in each VM after `init_by_lua` | `http` |
+| `exit_worker_by_lua_block`, `_file` | once in each VM when a configuration replaces it, before its pending timers run | `http` |
 | `server_rewrite_by_lua_block`, `_file` | before the route is chosen; may change the URI and host it is chosen by | `http`, `server` |
 | `rewrite_by_lua_block`, `_file` | after the route is chosen, before security policies | `http`, `server`, `route` |
 | `access_by_lua_block`, `_file` | after security policies | `http`, `server`, `route` |

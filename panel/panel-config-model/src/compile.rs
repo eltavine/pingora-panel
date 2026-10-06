@@ -391,6 +391,10 @@ impl Compiler<'_> {
                 .init_worker
                 .as_ref()
                 .map(|code| lua::handler(self.scripts.add(code, &config.files), &config.http)),
+            exit_worker: config
+                .exit_worker
+                .as_ref()
+                .map(|code| lua::handler(self.scripts.add(code, &config.files), &config.http)),
             ..LuaProgram::default()
         };
         if self.scripts.is_empty() {

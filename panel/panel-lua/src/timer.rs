@@ -32,11 +32,13 @@ pub(crate) const MOST_RUNNING: usize = 256;
 /// Reports kept until the embedding takes them.
 const KEPT_REPORTS: usize = 64;
 
-/// What a timer's callback did.
+/// What a timer's callback, or a VM's `exit_worker_by_lua`, did.
 #[derive(Clone, Debug)]
 pub struct TimerRun {
     /// The VM it ran on.
     pub vm: usize,
+    /// [`Phase::Timer`], or [`Phase::ExitWorker`] when the VM stopped.
+    pub phase: Phase,
     /// It ran early because its runtime was dropped.
     pub premature: bool,
     pub duration: Duration,
@@ -85,7 +87,7 @@ impl TimerReports {
         }
     }
 
-    fn send(&self, run: TimerRun) {
+    pub(crate) fn send(&self, run: TimerRun) {
         let report = match &mut *self.sink.lock() {
             Sink::Attached(report) => Arc::clone(report),
             Sink::Kept(kept) => {
@@ -141,6 +143,10 @@ impl Timers {
     /// Makes the pending timers end without running.
     pub fn discard(&self) {
         self.discarded.store(true, Relaxed);
+    }
+
+    pub fn is_discarded(&self) -> bool {
+        self.discarded.load(Relaxed)
     }
 
     fn closed(&self) -> bool {
@@ -270,6 +276,7 @@ async fn fire(timer: Timer) {
         let ran = if timers.running.fetch_add(1, Relaxed) >= timers.most_running {
             TimerRun {
                 vm: timers.vm,
+                phase: Phase::Timer,
                 premature,
                 duration: Duration::ZERO,
                 failure: Some(Failure {
@@ -326,6 +333,7 @@ impl Timer {
         let logs = std::mem::take(&mut cell.exchange.lock().logs);
         TimerRun {
             vm: self.timers.vm,
+            phase: Phase::Timer,
             premature,
             duration: started.elapsed(),
             failure,

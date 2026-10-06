@@ -250,5 +250,6 @@ pub(crate) const fn context(phase: Phase) -> &'static str {
         Phase::BodyFilter => "body_filter_by_lua*",
         Phase::Log => "log_by_lua*",
         Phase::Timer => "ngx.timer",
+        Phase::ExitWorker => "exit_worker_by_lua*",
     }
 }

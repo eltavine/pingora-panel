@@ -1532,3 +1532,46 @@ async fn handlers_can_find_the_body_read_before_they_run() {
     assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
     assert_eq!(scripts.exchange().response.body, b"name=ann\n");
 }
+
+#[tokio::test]
+async fn vms_run_exit_worker_when_their_runtime_is_dropped() {
+    let runs = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let program = |builder: &mut ProgramBuilder| {
+        let exit = builder.handler(&source(
+            "ngx.log(ngx.NOTICE, 'leaving ', ngx.worker.id(), ' ', ngx.get_phase())",
+        ));
+        builder.exit_worker(exit);
+        Vec::new()
+    };
+    let lua = start(2, program);
+    let kept = std::sync::Arc::clone(&runs);
+    lua.runtime
+        .on_timer(move |run| kept.lock().unwrap().push(run));
+    drop(lua);
+    let runs = runs.lock().unwrap();
+    assert_eq!(runs.len(), 2, "one run in each VM");
+    for (index, run) in runs.iter().enumerate() {
+        assert_eq!(run.phase, Phase::ExitWorker);
+        assert!(run.failure.is_none(), "{:?}", run.failure);
+        assert!(
+            run.logs[0]
+                .message
+                .ends_with(&format!("leaving {index} exit_worker")),
+            "{:?}",
+            run.logs
+        );
+    }
+    drop(runs);
+
+    let quiet = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let lua = start(1, program);
+    let kept = std::sync::Arc::clone(&quiet);
+    lua.runtime
+        .on_timer(move |run| kept.lock().unwrap().push(run));
+    lua.runtime.isolate();
+    drop(lua);
+    assert!(
+        quiet.lock().unwrap().is_empty(),
+        "a test runs no exit_worker"
+    );
+}

@@ -28,6 +28,7 @@ pub(super) fn decode_program(value: Option<wire::LuaProgram>) -> Result<LuaProgr
             .collect(),
         init: value.init.map(decode_handler).transpose()?,
         init_worker: value.init_worker.map(decode_handler).transpose()?,
+        exit_worker: value.exit_worker.map(decode_handler).transpose()?,
         shared_dicts: value
             .shared_dicts
             .into_iter()
@@ -65,6 +66,7 @@ pub(super) fn encode_program(value: &LuaProgram) -> Option<wire::LuaProgram> {
             .collect(),
         init: value.init.as_ref().map(encode_handler),
         init_worker: value.init_worker.as_ref().map(encode_handler),
+        exit_worker: value.exit_worker.as_ref().map(encode_handler),
         shared_dicts: value
             .shared_dicts
             .iter()

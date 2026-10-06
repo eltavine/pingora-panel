@@ -402,6 +402,10 @@ pub static DIRECTIVES: &[DirectiveSpec] = &[
         "init_worker_by_lua_block { ... }", "Runs once in each VM after init_by_lua."),
     spec!("init_worker_by_lua_file" in &[Http], None, 1..Some(1), false,
         "init_worker_by_lua_file lua/<file>.lua;", "Runs a file once in each VM after init_by_lua."),
+    spec!("exit_worker_by_lua_block" in &[Http], None, 0..Some(0), false,
+        "exit_worker_by_lua_block { ... }", "Runs once in each VM when it stops, as a new configuration replaces it; nothing it starts may wait."),
+    spec!("exit_worker_by_lua_file" in &[Http], None, 1..Some(1), false,
+        "exit_worker_by_lua_file lua/<file>.lua;", "Runs a file once in each VM when it stops."),
     spec!("server_rewrite_by_lua_block" in &[Http, Server], None, 0..Some(0), false,
         "server_rewrite_by_lua_block { ... }", "Runs before the route is chosen, and may change the URI and arguments it is chosen by.",
         inherits "A server's replaces the one in http."),
@@ -564,9 +568,6 @@ pub fn refusal(name: &str) -> Option<String> {
         }
         "set_by_lua" | "set_by_lua_block" | "set_by_lua_file" => {
             "set variables with ngx.var in rewrite_by_lua_block"
-        }
-        "exit_worker_by_lua_block" | "exit_worker_by_lua_file" => {
-            "VMs run no script when they stop"
         }
         _ if name.starts_with("ssl_") && name.contains("_by_lua") => {
             "TLS handshakes run no script; certificates come from TLS profiles"

@@ -162,6 +162,8 @@ pub(super) const HTTP: &[&str] = &[
     "init_by_lua_file",
     "init_worker_by_lua_block",
     "init_worker_by_lua_file",
+    "exit_worker_by_lua_block",
+    "exit_worker_by_lua_file",
 ];
 
 /// The phase a handler directive runs in.
@@ -181,6 +183,7 @@ fn phase(name: &str) -> Option<&'static str> {
         "log",
         "init",
         "init_worker",
+        "exit_worker",
     ]
     .into_iter()
     .find(|phase| *phase == stem)
@@ -492,10 +495,10 @@ impl<'a> Lowerer<'a> {
             }
             _ => {
                 let mut config = std::mem::take(&mut self.lua);
-                let slot = if phase(name) == Some("init") {
-                    &mut config.init
-                } else {
-                    &mut config.init_worker
+                let slot = match phase(name) {
+                    Some("init") => &mut config.init,
+                    Some("exit_worker") => &mut config.exit_worker,
+                    _ => &mut config.init_worker,
                 };
                 self.lua_handler(file, directive, slot, "http");
                 self.lua = config;

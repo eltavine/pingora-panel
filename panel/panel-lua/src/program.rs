@@ -107,6 +107,7 @@ pub struct Program {
     pub(crate) modules: BTreeMap<String, Compiled>,
     pub(crate) init: Option<HandlerId>,
     pub(crate) init_worker: Option<HandlerId>,
+    pub(crate) exit_worker: Option<HandlerId>,
     pub(crate) init_limits: Limits,
     pub(crate) init_permissions: Permissions,
     pub(crate) dicts: Vec<SharedDict>,
@@ -177,6 +178,12 @@ impl ProgramBuilder {
 
     pub fn init_worker(&mut self, handler: HandlerId) -> &mut Self {
         self.program.init_worker = Some(handler);
+        self
+    }
+
+    /// What each VM runs when it stops, on the limits of `init_by_lua`.
+    pub fn exit_worker(&mut self, handler: HandlerId) -> &mut Self {
+        self.program.exit_worker = Some(handler);
         self
     }
 

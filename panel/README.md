@@ -1388,7 +1388,8 @@ Handlers run in `server_rewrite`, `rewrite`, `access`, `precontent`,
 `content` (the action of a server or route), `balancer`, `header_filter`, `body_filter`
 and `log`; a route's handler replaces its server's and a server's the one
 in `http`, as NGINX inherits them. `init_by_lua*` and `init_worker_by_lua*`
-run once in each VM. The code of a `*_by_lua_block` is read with Lua's
+run once in each VM, and `exit_worker_by_lua*` once in each when a new
+configuration replaces it. The code of a `*_by_lua_block` is read with Lua's
 lexical rules and kept as it is written. `lua off;` keeps every script
 checked without running any.
 

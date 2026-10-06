@@ -268,6 +268,9 @@ pub struct LuaProgram {
     pub init: Option<LuaHandler>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub init_worker: Option<LuaHandler>,
+    /// Runs in each VM when it stops.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_worker: Option<LuaHandler>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shared_dicts: Vec<LuaSharedDict>,
     /// Bytes each VM may allocate; zero for the gateway's default.

@@ -292,13 +292,15 @@ impl<'a> Compiler<'a> {
         for (phase, handler) in [
             (Phase::Init, &snapshot.lua.init),
             (Phase::InitWorker, &snapshot.lua.init_worker),
+            (Phase::ExitWorker, &snapshot.lua.exit_worker),
         ] {
             if let Some(handler) = handler {
                 let hook = compiler.hook(handler, phase)?;
                 let limits = hook.handler.limits;
                 match phase {
                     Phase::Init => compiler.builder.init(hook.handler.id),
-                    _ => compiler.builder.init_worker(hook.handler.id),
+                    Phase::InitWorker => compiler.builder.init_worker(hook.handler.id),
+                    _ => compiler.builder.exit_worker(hook.handler.id),
                 };
                 compiler.builder.init_limits(limits);
                 compiler.builder.init_permissions(hook.handler.permissions);

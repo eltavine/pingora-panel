@@ -189,6 +189,7 @@ fn phase(name: &str) -> Phase {
     match name {
         "init" => Phase::Init,
         "init_worker" => Phase::InitWorker,
+        "exit_worker" => Phase::ExitWorker,
         "server_rewrite" => Phase::ServerRewrite,
         "rewrite" => Phase::Rewrite,
         "access" => Phase::Access,

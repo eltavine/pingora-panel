@@ -719,3 +719,30 @@ http {
         .unwrap()
         .contains("            precontent_by_lua_block {\n"));
 }
+
+#[test]
+fn exit_worker_handlers_read_compile_and_print() {
+    let sources = Sources::single(
+        r#"language_version 1;
+http {
+    exit_worker_by_lua_block {
+        ngx.log(ngx.NOTICE, "bye")
+    }
+    server s {
+        server_name s.example;
+        respond 200;
+    }
+}
+"#,
+    );
+    let lowered = read(&sources);
+    assert!(lowered.is_valid(), "{:#?}", lowered.diagnostics);
+    assert!(lowered.model.lua.exit_worker.is_some());
+    let snapshot = compile(&lowered.model, RevisionId::new(1)).unwrap();
+    assert!(snapshot.lua.exit_worker.is_some());
+    let printed = print_sources(&lowered.model);
+    assert!(printed
+        .get("main.conf")
+        .unwrap()
+        .contains("    exit_worker_by_lua_block {\n"));
+}

@@ -21,10 +21,12 @@ pub enum Phase {
     BodyFilter,
     Log,
     Timer,
+    /// When a VM stops: `exit_worker_by_lua`.
+    ExitWorker,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 12] = [
+    pub const ALL: [Phase; 13] = [
         Phase::Init,
         Phase::InitWorker,
         Phase::ServerRewrite,
@@ -37,6 +39,7 @@ impl Phase {
         Phase::BodyFilter,
         Phase::Log,
         Phase::Timer,
+        Phase::ExitWorker,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -53,6 +56,7 @@ impl Phase {
             Phase::BodyFilter => "body_filter",
             Phase::Log => "log",
             Phase::Timer => "timer",
+            Phase::ExitWorker => "exit_worker",
         }
     }
 
