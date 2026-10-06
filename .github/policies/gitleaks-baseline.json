@@ -62,12 +62,13 @@
     },
     {
       "owner": "pingora-panel-platform",
-      "reason": "False positives: a PEM header in a certificate intake assertion, the sample WebSocket nonce of RFC 6455 in an access test, and a token's identifier, not its secret, in an audit presentation test.",
+      "reason": "False positives: a PEM header in a certificate intake assertion, the sample WebSocket nonce of RFC 6455 in an access test and in the Lua WebSocket handshake test, and a token's identifier, not its secret, in an audit presentation test.",
       "expires_on": "2027-03-01",
       "fingerprints": [
         "284a3e72811ddc36fc621497317c363f99143c60:panel/panel-certificates/tests/intake.rs:private-key:107",
         "838db320ba00e90ec1932c00e6ba0ab7a808f620:panel/panel-api/src/tests/access.rs:generic-api-key:394",
-        "2fad085ca00c6a708fc0cfe0e4be247b62472743:panel/web/src/features/audit/__tests__/presentation.spec.ts:generic-api-key:115"
+        "2fad085ca00c6a708fc0cfe0e4be247b62472743:panel/web/src/features/audit/__tests__/presentation.spec.ts:generic-api-key:115",
+        "d2a7049383badcbc28c8ff954b788ad39b6eae93:panel/panel-lua/tests/runtime.rs:generic-api-key:2710"
       ]
     },
     {
