@@ -8,7 +8,7 @@ use crate::{
     program::{HandlerId, Program},
     shared::SharedStore,
     timer::{TimerReports, TimerRun, Timers},
-    vm::{Cell, Exceeded, HostCall, HostReply, Refused, Slot, ThreadState, Vm},
+    vm::{Cell, Exceeded, HostCall, HostReply, LightThread, Refused, Slot, ThreadState, Vm},
 };
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -53,6 +53,12 @@ pub trait Host: Send {
     async fn read_body_chunk(&mut self) -> Result<Option<Bytes>, String> {
         Err("the request body cannot be streamed here".into())
     }
+
+    /// Ends once the client has closed the connection; never where there
+    /// is no client to watch.
+    async fn closed(&mut self) {
+        std::future::pending::<()>().await;
+    }
 }
 
 /// A host for runs that have no request to read from.
@@ -86,6 +92,9 @@ pub struct Handler {
     /// The request body is read before a rewrite, access or content
     /// handler runs, as `lua_need_request_body on` does.
     pub read_body_first: bool,
+    /// The run watches for the client closing the connection, as
+    /// `lua_check_client_abort on` does.
+    pub check_client_abort: bool,
 }
 
 impl Handler {
@@ -102,6 +111,7 @@ impl Handler {
             transform_underscores: true,
             default_type: true,
             read_body_first: false,
+            check_client_abort: false,
         }
     }
 }
@@ -274,6 +284,8 @@ enum Step {
     Exited,
     Sliced,
     Serve(HostCall, tokio::sync::oneshot::Sender<HostReply>),
+    /// The client closed the connection.
+    Closed,
 }
 
 impl Scripts {
@@ -335,6 +347,7 @@ impl Scripts {
                 log_level: Some(handler.log_level),
                 work_left: i64::try_from(handler.limits.work).unwrap_or(i64::MAX),
                 deadline: vm.slot.after(handler.limits.time),
+                check_abort: handler.check_client_abort && handler.phase.answers(),
                 ..Default::default()
             };
         }
@@ -437,7 +450,9 @@ pub(crate) async fn drive(
 ) -> mlua::Result<Value> {
     let mut running = pin!(thread.clone().into_async::<Value>(args)?);
     let mut entry: Option<mlua::Result<Value>> = None;
+    let mut watching = cell.run.lock().check_abort;
     loop {
+        let mut closed = watching.then(|| host.closed());
         let step = poll_fn(|context| {
             if entry.is_none() {
                 if let Poll::Ready(result) = running.as_mut().poll(context) {
@@ -465,9 +480,16 @@ pub(crate) async fn drive(
             if std::mem::take(&mut run.sliced) {
                 return Poll::Ready(Step::Sliced);
             }
+            drop(run);
+            if let Some(closed) = closed.as_mut() {
+                if closed.as_mut().poll(context).is_ready() {
+                    return Poll::Ready(Step::Closed);
+                }
+            }
             Poll::Pending
         })
         .await;
+        drop(closed);
         match step {
             Step::Done(result) => return result,
             Step::Exited => return Ok(Value::Nil),
@@ -478,6 +500,27 @@ pub(crate) async fn drive(
                     HostCall::ReadBodyChunk => HostReply::Chunk(host.read_body_chunk().await),
                 };
                 let _ = reply.send(answer);
+            }
+            Step::Closed => {
+                watching = false;
+                cell.exchange.lock().client_closed = true;
+                let Some(callback) = cell.run.lock().on_abort.take() else {
+                    // Without a callback the run stops, its threads with it.
+                    cell.exchange.lock().exit = Some(Exit::Abort);
+                    return Ok(Value::Nil);
+                };
+                let child = callback.to_pointer() as usize;
+                let future = Box::pin(callback.into_async::<MultiValue>(())?);
+                slot.entries.lock().insert(child, Arc::clone(cell));
+                let mut threads = cell.threads.lock();
+                threads.spawned.insert(
+                    child,
+                    LightThread {
+                        parent: thread.to_pointer() as usize,
+                        state: ThreadState::Running,
+                    },
+                );
+                threads.waiting.push((child, future));
             }
         }
     }

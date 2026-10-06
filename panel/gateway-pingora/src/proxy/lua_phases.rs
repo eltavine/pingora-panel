@@ -53,6 +53,15 @@ pub(super) fn abort() -> Box<Error> {
     Error::explain(ErrorType::HTTPStatus(444), "a script closed the connection")
 }
 
+/// Ends a request whose client closed the connection while a script
+/// watched for it, logged as nginx's 499.
+pub(super) fn client_closed() -> Box<Error> {
+    Error::explain(
+        ErrorType::HTTPStatus(499),
+        "the client closed the connection",
+    )
+}
+
 fn internal(error: PanelError) -> Box<Error> {
     Error::explain(ErrorType::InternalError, error.message)
 }
@@ -495,8 +504,9 @@ impl PanelProxy {
                 Ok(LuaStep::Go { jump })
             }
             Outcome::Abort => {
+                let left = scripts.exchange().client_closed();
                 put_scripts(session, scripts);
-                Err(abort())
+                Err(if left { client_closed() } else { abort() })
             }
             Outcome::Failed(_) => {
                 put_scripts(session, scripts);

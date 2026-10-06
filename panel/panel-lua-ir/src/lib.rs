@@ -164,6 +164,7 @@ pub fn handler(id: HandlerId, handler: &LuaHandler, phase: Phase) -> Handler {
     terms.transform_underscores = !handler.keep_underscores;
     terms.default_type = !handler.no_default_type;
     terms.read_body_first = handler.read_body_first;
+    terms.check_client_abort = handler.check_client_abort;
     terms
 }
 

@@ -1435,6 +1435,7 @@ that mean one thing in every phase.
 | `lua_transform_underscores_in_response_headers` | `on` | `ngx.header.x_trace_id` sets `X-Trace-Id` |
 | `lua_use_default_type` | `on` | answers without a `Content-Type` get `text/plain; charset=utf-8` |
 | `lua_need_request_body` | `off` | the request body is read before rewrite, access and content handlers run |
+| `lua_check_client_abort` | `off` | rewrite, access and content handlers learn that the client left: `ngx.on_abort`'s function runs, or the run stops and the request is logged as 499 |
 | `lua_ssl_trusted_certificate` | `system` | the authorities `sslhandshake` checks servers against: a secret of PEM certificates, or the system's trusted roots |
 | `lua_ssl_crl` | none | a secret of PEM revocation lists of those authorities |
 | `lua_ssl_certificate`, `lua_ssl_certificate_key` | none | secrets of the certificate chain cosockets present and its key |

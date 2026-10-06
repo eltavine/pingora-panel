@@ -21,7 +21,26 @@ pub(super) fn install(lua: &Lua, ngx: &mlua::Table, slot: &Arc<Slot>) -> mlua::R
     thread.raw_set("spawn", spawn(lua, slot)?)?;
     thread.raw_set("wait", wait(lua, slot)?)?;
     thread.raw_set("kill", kill(lua, slot)?)?;
+    ngx.raw_set("on_abort", on_abort(lua, slot)?)?;
     Ok(())
+}
+
+/// `ngx.on_abort`: the function to run as a light thread of the run when
+/// the client closes the connection, once per handler.
+fn on_abort(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Function> {
+    let slot = Arc::clone(slot);
+    lua.create_function(move |lua, callback: Function| {
+        let cell = cell(&slot, Api::OnAbort)?;
+        let mut run = cell.run.lock();
+        if !run.check_abort {
+            return failed(lua, 1, "lua_check_client_abort is off");
+        }
+        if run.on_abort.is_some() {
+            return failed(lua, 1, "duplicate call");
+        }
+        run.on_abort = Some(lua.create_thread(callback)?);
+        Ok(results([Value::Integer(1)]))
+    })
 }
 
 fn key(thread: &Thread) -> usize {

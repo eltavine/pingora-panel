@@ -221,6 +221,10 @@ pub struct LuaHandler {
     /// (`lua_need_request_body on`).
     #[serde(default, skip_serializing_if = "is_false")]
     pub read_body_first: bool,
+    /// The handler watches for the client closing the connection
+    /// (`lua_check_client_abort on`).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub check_client_abort: bool,
 }
 
 impl LuaHandler {
@@ -238,6 +242,7 @@ impl LuaHandler {
             keep_underscores: false,
             no_default_type: false,
             read_body_first: false,
+            check_client_abort: false,
         }
     }
 }

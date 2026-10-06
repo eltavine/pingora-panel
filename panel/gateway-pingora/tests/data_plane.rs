@@ -2816,3 +2816,70 @@ async fn variables_set_and_set_by_lua_reach_templates_and_scripts() {
     assert_eq!(String::from_utf8_lossy(&response.body), "acme-b alice b");
     gateway.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn scripts_watching_for_it_learn_that_the_client_left() {
+    use panel_ir::{LuaHandler, LuaSharedDict, LUA_SCRIPTS_CAPABILITY};
+    use tokio::io::AsyncWriteExt;
+
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    snapshot
+        .required_capabilities
+        .push(CapabilityRequirement::new(LUA_SCRIPTS_CAPABILITY, "1"));
+    snapshot.lua.scripts = vec![
+        lua_script(
+            "watch",
+            "ngx.on_abort(function() ngx.shared.seen:set('left', 'yes') ngx.exit(499) end) ngx.sleep(5) ngx.say('done')",
+        ),
+        lua_script("ask", "ngx.say(ngx.shared.seen:get('left') or 'no')"),
+    ];
+    snapshot.lua.shared_dicts = vec![LuaSharedDict {
+        name: "seen".into(),
+        capacity_bytes: 1 << 20,
+    }];
+    snapshot.sites.push(site(&["shop.test"]));
+    let mut watch = LuaHandler::new("watch");
+    watch.check_client_abort = true;
+    watch.time_limit_ms = 10_000;
+    snapshot.routes.push(route(
+        "watch",
+        1,
+        prefix("/watch"),
+        RouteAction::Lua { handler: watch },
+    ));
+    snapshot.routes.push(route(
+        "ask",
+        2,
+        prefix("/"),
+        RouteAction::Lua {
+            handler: LuaHandler::new("ask"),
+        },
+    ));
+    let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
+    wait_for(listen).await;
+    let seen = |response: Response| String::from_utf8_lossy(&response.body).into_owned();
+    assert_eq!(seen(get(listen, Some("shop.test"), "/", "").await), "no\n");
+    let mut leaving = TcpStream::connect(listen).await.unwrap();
+    leaving
+        .write_all(b"GET /watch HTTP/1.1\r\nhost: shop.test\r\n\r\n")
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    drop(leaving);
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        if seen(get(listen, Some("shop.test"), "/", "").await) == "yes\n" {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the callback did not run"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    gateway.stop().await;
+}

@@ -1811,3 +1811,87 @@ async fn tls_terms_set_the_authorities_client_certificate_and_chain_length() {
         ]
     );
 }
+
+/// A client that closes the connection at `at`.
+struct Leaving {
+    at: tokio::time::Instant,
+}
+
+#[async_trait]
+impl Host for Leaving {
+    async fn read_body(&mut self, _limit: usize) -> Result<Bytes, String> {
+        Ok(Bytes::new())
+    }
+
+    async fn closed(&mut self) {
+        tokio::time::sleep_until(self.at).await;
+    }
+}
+
+#[tokio::test]
+async fn clients_that_leave_run_the_abort_callback_or_stop_the_run() {
+    let lua = start(
+        1,
+        handlers(&[
+            r#"
+            assert(ngx.on_abort(function()
+                ngx.log(ngx.NOTICE, "the client left")
+                ngx.exit(499)
+            end))
+            local ok, err = ngx.on_abort(function() end)
+            assert(ok == nil and err == "duplicate call", err)
+            ngx.sleep(5)
+            ngx.say("never")
+            "#,
+            "ngx.sleep(5) ngx.say('never')",
+            r#"
+            local ok, err = ngx.on_abort(function() end)
+            ngx.sleep(0.05)
+            ngx.say(tostring(ok), " ", err)
+            "#,
+        ]),
+    );
+    let leaving = || Leaving {
+        at: tokio::time::Instant::now() + Duration::from_millis(20),
+    };
+    let watching = |index: usize| {
+        let mut watching = handler(lua.handlers[index], Phase::Content);
+        watching.check_client_abort = true;
+        watching.limits.time = Duration::from_secs(10);
+        watching
+    };
+    let started = Instant::now();
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = scripts.run(watching(0), &mut leaving()).await;
+    assert_eq!(outcome, Outcome::Respond);
+    {
+        let exchange = scripts.exchange();
+        assert!(exchange.client_closed());
+        assert_eq!(exchange.response.status, 499);
+        assert!(exchange.response.body.is_empty());
+        assert!(exchange
+            .logs
+            .iter()
+            .any(|entry| entry.message.ends_with("the client left")));
+    }
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    assert_eq!(
+        scripts.run(watching(1), &mut leaving()).await,
+        Outcome::Abort
+    );
+    assert!(scripts.exchange().client_closed());
+    assert!(started.elapsed() < Duration::from_secs(2));
+
+    let mut unwatched = handler(lua.handlers[2], Phase::Content);
+    unwatched.limits.time = Duration::from_secs(1);
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    assert_eq!(
+        scripts.run(unwatched, &mut leaving()).await,
+        Outcome::Respond
+    );
+    assert!(!scripts.exchange().client_closed());
+    assert_eq!(
+        scripts.exchange().response.body,
+        b"nil lua_check_client_abort is off\n"
+    );
+}

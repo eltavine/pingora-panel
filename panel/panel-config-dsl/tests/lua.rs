@@ -679,7 +679,6 @@ http {
     lua_load_resty_core on;
     lua_malloc_trim 1000;
     lua_capture_error_log 32k;
-    lua_check_client_abort on;
     upstream app {
         server 10.0.0.1:80;
         balancer_keepalive 32;
@@ -708,7 +707,6 @@ http {
         "lua_load_resty_core",
         "lua_malloc_trim",
         "lua_capture_error_log",
-        "lua_check_client_abort",
         "balancer_keepalive",
         "lua_http10_buffering",
         "lua_upstream_skip_openssl_default_verify",
@@ -1002,4 +1000,39 @@ http {
         .unwrap();
     assert_eq!(content.sockets.tls.trusted_certificate_secret_id, None);
     assert_eq!(content.sockets.tls.verify_depth, Some(3));
+}
+
+#[test]
+fn handlers_watch_for_clients_that_leave_with_lua_check_client_abort() {
+    let lowered = read(&Sources::single(
+        r#"language_version 1;
+http {
+    lua_check_client_abort on;
+    server s {
+        server_name s.example;
+        content_by_lua_block {
+            ngx.on_abort(function() ngx.exit(499) end)
+            ngx.sleep(1)
+        }
+    }
+}
+"#,
+    ));
+    assert!(lowered.is_valid(), "{:#?}", lowered.diagnostics);
+    assert_eq!(lowered.model.lua.http.check_client_abort, Some(true));
+    let snapshot = compile(&lowered.model, RevisionId::new(1)).unwrap();
+    let content = snapshot
+        .routes
+        .iter()
+        .find_map(|route| match &route.action {
+            panel_ir::RouteAction::Lua { handler } => Some(handler),
+            _ => None,
+        })
+        .unwrap();
+    assert!(content.check_client_abort);
+    let printed = print_sources(&lowered.model);
+    assert!(printed
+        .get("main.conf")
+        .unwrap()
+        .contains("    lua_check_client_abort on;\n"));
 }

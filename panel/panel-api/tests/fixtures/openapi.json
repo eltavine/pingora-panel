@@ -83406,6 +83406,13 @@
               }
             ]
           },
+          "check_client_abort": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "`lua_check_client_abort`."
+          },
           "debug": {
             "type": [
               "boolean",

@@ -692,6 +692,9 @@ message LuaHandler {
   // The request body is read before the handler runs
   // (lua_need_request_body on).
   bool read_body_first = 12;
+  // The handler watches for the client closing the connection
+  // (lua_check_client_abort on).
+  bool check_client_abort = 13;
 }
 
 // The handlers a site or route runs, by phase.

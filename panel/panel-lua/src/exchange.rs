@@ -315,6 +315,8 @@ pub struct Exchange {
     pub(crate) new_body: Option<Vec<u8>>,
     /// `ngx.exec` redirected the request internally.
     pub(crate) internal: bool,
+    /// The client closed the connection while a handler ran.
+    pub(crate) client_closed: bool,
     /// What the last run's handler says of `lua_use_default_type`.
     pub(crate) default_type: bool,
 }
@@ -338,8 +340,15 @@ impl Exchange {
             headers_sent: false,
             new_body: None,
             internal: false,
+            client_closed: false,
             default_type: true,
         }
+    }
+
+    /// Whether the client closed the connection while a handler watched
+    /// for it, as `lua_check_client_abort on` has it.
+    pub fn client_closed(&self) -> bool {
+        self.client_closed
     }
 
     /// What the last run changed.

@@ -1061,8 +1061,9 @@ impl ProxyHttp for PanelProxy {
     ) -> FailToProxy {
         http_policy::disable_compression(session);
         let code = match (error.etype(), error.esource()) {
-            // A script closed the connection without an answer.
-            (ErrorType::HTTPStatus(444), _) => 0,
+            // A script closed the connection without an answer, or the
+            // client closed it while a script watched.
+            (ErrorType::HTTPStatus(444 | 499), _) => 0,
             (ErrorType::HTTPStatus(code), _) => *code,
             (ErrorType::ReadTimedout, ErrorSource::Downstream) => 408,
             (_, ErrorSource::Upstream) => 502,
@@ -1098,9 +1099,13 @@ impl ProxyHttp for PanelProxy {
                 self.listener.connections.request_done(socket);
             }
         }
-        let status = session
-            .response_written()
-            .map_or(0, |response| response.status.as_u16());
+        let status = session.response_written().map_or_else(
+            || match error.map(|error| error.etype()) {
+                Some(ErrorType::HTTPStatus(499)) => 499,
+                _ => 0,
+            },
+            |response| response.status.as_u16(),
+        );
         if ctx.upstream().is_some() && !ctx.failure_recorded {
             ctx.record_outcome(
                 error.is_some_and(|error| error.esource() == &pingora_core::ErrorSource::Upstream)

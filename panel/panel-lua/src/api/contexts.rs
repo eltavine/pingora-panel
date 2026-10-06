@@ -74,10 +74,11 @@ pub(crate) enum Api {
     Exec,
     ReqSocket,
     RunWorkerThread,
+    OnAbort,
 }
 
 impl Api {
-    const ALL: [Api; 45] = [
+    const ALL: [Api; 46] = [
         Api::Arg,
         Api::Ctx,
         Api::Eof,
@@ -123,6 +124,7 @@ impl Api {
         Api::Exec,
         Api::ReqSocket,
         Api::RunWorkerThread,
+        Api::OnAbort,
     ];
 
     /// The function a path such as `ngx.var.host` or `ngx.req.get_headers`
@@ -192,6 +194,7 @@ impl Api {
             Api::Exec => "ngx.exec",
             Api::ReqSocket => "ngx.req.socket",
             Api::RunWorkerThread => "ngx.run_worker_thread",
+            Api::OnAbort => "ngx.on_abort",
         }
     }
 
@@ -225,9 +228,11 @@ impl Api {
             Api::Balancer => bits(&[BL]),
             Api::Socket | Api::Thread | Api::Udp | Api::SemaphoreWait => bits(&[RW, AC, CT, TM]),
             Api::ReqInitBody | Api::ReqAppendBody | Api::ReqFinishBody => bits(&[ST, RW, AC, CT]),
-            Api::ReqGetBodyFile | Api::Exec | Api::ReqSocket | Api::RunWorkerThread => {
-                bits(&[RW, AC, CT])
-            }
+            Api::ReqGetBodyFile
+            | Api::Exec
+            | Api::ReqSocket
+            | Api::RunWorkerThread
+            | Api::OnAbort => bits(&[RW, AC, CT]),
         }
     }
 

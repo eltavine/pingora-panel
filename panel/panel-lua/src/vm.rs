@@ -100,6 +100,12 @@ pub(crate) struct Run {
     /// The interrupt suspended the run to let other tasks go first.
     pub sliced: bool,
     pub call: Option<(HostCall, oneshot::Sender<HostReply>)>,
+    /// The run watches for the client closing the connection
+    /// (`lua_check_client_abort on`).
+    pub check_abort: bool,
+    /// What `ngx.on_abort` registered, to run as a light thread when the
+    /// client closes the connection.
+    pub on_abort: Option<mlua::Thread>,
 }
 
 /// A request on a VM: what its scripts read and change, its globals and

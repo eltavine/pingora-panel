@@ -139,8 +139,8 @@ honour for TCP, are refused.
 `lua_need_request_body` apply as in lua-nginx-module. Directives with nothing to tune here —
 `lua_load_resty_core`, `lua_malloc_trim`, `lua_sa_restart`,
 `lua_thread_cache_max_entries`, `lua_capture_error_log`,
-`lua_check_client_abort`, `lua_http10_buffering`,
-`rewrite_by_lua_no_postpone`, `precontent_by_lua_no_postpone`,
+`lua_http10_buffering`, `rewrite_by_lua_no_postpone`,
+`precontent_by_lua_no_postpone`,
 `lua_upstream_skip_openssl_default_verify` and `balancer_keepalive` — are
 read with a warning saying why, so configurations written for OpenResty
 still read. `sslhandshake` verifies the server's certificate unless the
@@ -159,9 +159,14 @@ of the inventory; the importer turns a system bundle such as
 `/etc/ssl/certs/ca-certificates.crt` into `system`. `lua_ssl_key_log`,
 which would write session keys out, and `lua_ssl_conf_command`, which
 takes OpenSSL commands, are refused.
+With `lua_check_client_abort on`, rewrite, access and content handlers
+watch the connection once the request body is in: when the client closes
+it, the function `ngx.on_abort` registered runs as a light thread of the
+run and may end the request with `ngx.exit`, and without one the run stops
+and the request is logged as nginx's 499; `ngx.on_abort` returns `nil,
+"lua_check_client_abort is off"` otherwise, as lua-nginx-module's does.
 Subrequests (`ngx.location.capture`), named locations, the raw request
-socket of `ngx.req.socket(true)`, `ngx.on_abort` and body files are not
-available.
+socket of `ngx.req.socket(true)` and body files are not available.
 
 **Native API.** Next to `ngx`, `require("panel.v1")` returns the
 capabilities the specification names — `req`, `resp`, `ctx`, `upstream`,

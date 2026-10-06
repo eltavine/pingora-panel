@@ -43,6 +43,7 @@ pub(super) const SCOPE: &[&str] = &[
     "lua_transform_underscores_in_response_headers",
     "lua_use_default_type",
     "lua_need_request_body",
+    "lua_check_client_abort",
     "lua_ssl_trusted_certificate",
     "lua_ssl_verify_depth",
     "lua_ssl_crl",
@@ -80,6 +81,7 @@ pub(crate) const GROUPS: &[&[&str]] = &[
     &["lua_transform_underscores_in_response_headers"],
     &["lua_use_default_type"],
     &["lua_need_request_body"],
+    &["lua_check_client_abort"],
     &["lua_ssl_trusted_certificate"],
     &["lua_ssl_verify_depth"],
     &["lua_ssl_crl"],
@@ -108,6 +110,7 @@ pub(crate) const DEFAULTS: &[(&str, &str)] = &[
     ("lua_transform_underscores_in_response_headers", "on"),
     ("lua_use_default_type", "on"),
     ("lua_need_request_body", "off"),
+    ("lua_check_client_abort", "off"),
     ("lua_ssl_trusted_certificate", "system"),
     ("lua_ssl_protocols", "TLSv1.2 TLSv1.3"),
     ("lua_ssl_ciphers", "DEFAULT"),
@@ -132,6 +135,7 @@ pub(crate) const TERMS: &[&str] = &[
     "lua_transform_underscores_in_response_headers",
     "lua_use_default_type",
     "lua_need_request_body",
+    "lua_check_client_abort",
     "lua_ssl_trusted_certificate",
     "lua_ssl_verify_depth",
     "lua_ssl_crl",
@@ -151,7 +155,6 @@ pub(crate) const INERT: &[(&str, &str)] = &[
     ("lua_capture_error_log", "ngx.errlog is not available, and what scripts log goes to the gateway's error log"),
     ("rewrite_by_lua_no_postpone", "nothing else runs in the rewrite phase for rewrite_by_lua to wait for"),
     ("precontent_by_lua_no_postpone", "nothing else runs in the precontent phase for precontent_by_lua to wait for"),
-    ("lua_check_client_abort", "ngx.on_abort is not available, so scripts are not told of clients that leave"),
     ("lua_http10_buffering", "the answers of scripts are always buffered and sent with a Content-Length"),
     ("lua_upstream_skip_openssl_default_verify", "cosockets verify certificates with the system's trusted roots, not OpenSSL's defaults"),
     ("balancer_keepalive", "the gateway pools connections to upstream nodes itself, and keepalive on|off turns reuse on or off"),
@@ -423,6 +426,7 @@ impl<'a> Lowerer<'a> {
             }
             "lua_use_default_type" => scope.use_default_type = self.bool_arg(file, arg),
             "lua_need_request_body" => scope.need_request_body = self.bool_arg(file, arg),
+            "lua_check_client_abort" => scope.check_client_abort = self.bool_arg(file, arg),
             "lua_ssl_trusted_certificate" => scope.ssl_trusted_certificate = self.value(file, arg),
             "lua_ssl_crl" => scope.ssl_crl = self.value(file, arg),
             "lua_ssl_certificate" => scope.ssl_certificate = self.value(file, arg),
@@ -725,6 +729,7 @@ pub(crate) fn print_terms(scope: &LuaScope) -> Vec<(&'static str, Vec<String>)> 
         ),
         ("lua_use_default_type", scope.use_default_type),
         ("lua_need_request_body", scope.need_request_body),
+        ("lua_check_client_abort", scope.check_client_abort),
     ] {
         if let Some(on) = on {
             terms.push((name, vec![values::print_bool(on).to_owned()]));

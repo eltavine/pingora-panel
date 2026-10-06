@@ -177,6 +177,9 @@ pub struct LuaScope {
     /// `lua_need_request_body`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub need_request_body: Option<bool>,
+    /// `lua_check_client_abort`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_client_abort: Option<bool>,
     /// `lua_ssl_trusted_certificate`: the secret of the authorities
     /// cosockets trust, or [`SYSTEM_ROOTS`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -253,6 +256,7 @@ impl LuaScope {
             transform_underscores: pick(&self.transform_underscores, &outer.transform_underscores),
             use_default_type: pick(&self.use_default_type, &outer.use_default_type),
             need_request_body: pick(&self.need_request_body, &outer.need_request_body),
+            check_client_abort: pick(&self.check_client_abort, &outer.check_client_abort),
             ssl_trusted_certificate: pick(
                 &self.ssl_trusted_certificate,
                 &outer.ssl_trusted_certificate,
@@ -326,6 +330,7 @@ impl LuaScope {
             || self.transform_underscores.is_some()
             || self.use_default_type.is_some()
             || self.need_request_body.is_some()
+            || self.check_client_abort.is_some()
             || self.ssl_trusted_certificate.is_some()
             || self.ssl_crl.is_some()
             || self.ssl_certificate.is_some()
@@ -695,6 +700,7 @@ pub(crate) fn handler(id: String, scope: &LuaScope) -> LuaHandler {
     handler.keep_underscores = scope.transform_underscores == Some(false);
     handler.no_default_type = scope.use_default_type == Some(false);
     handler.read_body_first = scope.need_request_body == Some(true);
+    handler.check_client_abort = scope.check_client_abort == Some(true);
     handler
 }
 

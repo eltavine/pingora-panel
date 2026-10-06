@@ -334,6 +334,23 @@ impl Host for SessionHost<'_> {
         }
         Ok(chunk)
     }
+
+    /// Watches the connection once the request body is in: the client
+    /// closing it, or resetting its HTTP/2 stream, ends the wait. A body
+    /// still arriving is left for the script to read.
+    async fn closed(&mut self) {
+        let session = self.session.as_mut();
+        if !session.is_body_empty() && !session.is_body_done() {
+            return std::future::pending().await;
+        }
+        if let Some(idle) = self.session.as_mut().watch_h2_stream_close() {
+            let _ = idle.await;
+            return;
+        }
+        if self.session.read_body_or_idle(true).await.is_ok() {
+            std::future::pending::<()>().await;
+        }
+    }
 }
 
 #[cfg(test)]
