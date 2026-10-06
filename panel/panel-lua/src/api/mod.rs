@@ -5,6 +5,7 @@ mod aes;
 mod bit;
 mod codec;
 pub(crate) mod contexts;
+mod dns;
 mod errlog;
 mod json;
 mod location;

@@ -22,6 +22,7 @@ ctr.workspace = true
 ecb.workspace = true
 getrandom.workspace = true
 hex.workspace = true
+hickory-proto.workspace = true
 hmac.workspace = true
 http.workspace = true
 httpdate.workspace = true

@@ -3672,6 +3672,7 @@ dependencies = [
  "ecb",
  "getrandom 0.4.3",
  "hex",
+ "hickory-proto",
  "hmac",
  "http",
  "httpdate",

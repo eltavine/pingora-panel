@@ -246,7 +246,10 @@ lua-tablepool's `tablepool`, `resty.redis`, lua-resty-redis's client with
 its replies, pipelines, transactions, Pub/Sub, module prefixes and connect
 options (`db`, `password` and `username`, with pools named after the
 database and user), whose `ssl` handshakes verify the server unless told
-not to, as the cosockets under it do, and
+not to, as the cosockets under it do, `resty.dns.resolver`, lua-resty-dns's
+resolver under the network permission, whose messages hickory-proto makes
+and reads, retrying the next nameserver after a timeout and over TCP when
+an answer is truncated, and whose `compress_ipv6_addr` follows RFC 5952, and
 `ngx.ssl` with `ngx.ssl.clienthello`, `ngx.ssl.session`,
 `ngx.ssl.proxysslcert` and `ngx.ssl.proxysslverify`, `ngx.proxyssl` and
 `ngx.ocsp`. `resty.core.base` gives libraries
