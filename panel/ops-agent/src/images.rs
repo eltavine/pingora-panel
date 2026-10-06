@@ -629,6 +629,12 @@ mod tests {
                 ),
             ]
         );
+        let ended = &messages[messages.len() - 2];
+        assert!(ended.pulled.is_none());
+        assert_eq!(
+            ended.layers, last.layers,
+            "where the layers ended goes out before the last message"
+        );
 
         let current = pull(&service, "nginx:1.27", None).await;
         let pulled = current.last().unwrap().pulled.as_ref().unwrap();

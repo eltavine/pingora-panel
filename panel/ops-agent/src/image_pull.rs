@@ -384,6 +384,11 @@ pub(crate) fn pull(
             }
         };
         drop(engine);
+        // Where the layers ended goes out on its own before the last
+        // message, for a pull that ended before a tick sent it.
+        if progress.changed && sender.send(progress.message()).await.is_err() {
+            return;
+        }
         let reference = wanted.reference();
         let last = match read {
             Ok(()) => match images::listed(&client, &reference, &installation).await {
