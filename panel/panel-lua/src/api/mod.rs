@@ -23,7 +23,7 @@ mod var;
 
 pub(crate) use contexts::Api;
 pub(crate) use errlog::ErrorLog;
-pub(crate) use modules::BUILT_IN as BUILT_IN_MODULES;
+pub(crate) use modules::{refusal as module_refusal, BUILT_IN as BUILT_IN_MODULES};
 pub(crate) use ngx::UNAVAILABLE;
 pub(crate) use re::{Regexes, CACHE_ENTRIES as REGEX_CACHE_ENTRIES};
 pub(crate) use req::MAX_BODY;

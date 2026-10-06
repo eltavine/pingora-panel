@@ -87,6 +87,11 @@ fn load(
     if let Some(module) = built_in(lua, name, ngx, globals, slot)? {
         return Ok(module);
     }
+    if let Some(reason) = refusal(name) {
+        return Err(refused(format!(
+            "module '{name}' is not available: {reason}"
+        )));
+    }
     let Some(compiled) = modules.get(name) else {
         return Err(mlua::Error::runtime(format!(
             "module '{name}' not found: it is neither built in nor a file in the configuration's lua/ directory"
@@ -208,6 +213,26 @@ fn panel_v1(lua: &Lua, module_meta: &Table) -> mlua::Result<Value> {
         .set_environment(env)
         .into_function()?
         .call::<Value>(native)
+}
+
+/// OpenResty's modules that scripts may not load, and why.
+const REFUSED: [(&str, &str); 2] = [
+    (
+        "ngx.pipe",
+        "it would start processes on the gateway's host, outside the sandbox",
+    ),
+    (
+        "ffi",
+        "native code called through an FFI would run outside the sandbox",
+    ),
+];
+
+/// Why scripts may not load `name`, an OpenResty module.
+pub(crate) fn refusal(name: &str) -> Option<&'static str> {
+    REFUSED
+        .iter()
+        .find(|(refused, _)| *refused == name)
+        .map(|(_, reason)| *reason)
 }
 
 /// The modules OpenResty scripts commonly load that come with the gateway.

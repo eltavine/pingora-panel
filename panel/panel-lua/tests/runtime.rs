@@ -2245,3 +2245,25 @@ async fn ssl_handlers_read_the_hello_and_choose_the_certificate() {
     .await;
     assert_eq!(outcome, Outcome::Abort);
 }
+
+#[tokio::test]
+async fn modules_refused_for_the_sandbox_say_why() {
+    let lua = start(
+        1,
+        handlers(&[r#"
+            for _, name in ipairs({ "ngx.pipe", "ffi" }) do
+                local ok, err = pcall(require, name)
+                ngx.say(name, " ", tostring(ok), " ", tostring(err))
+            end
+        "#]),
+    );
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = run(&mut scripts, handler(lua.handlers[0], Phase::Content)).await;
+    assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+    let body = String::from_utf8(scripts.exchange().response.body.clone()).unwrap();
+    assert!(
+        body.contains("ngx.pipe false") && body.contains("start processes"),
+        "{body}"
+    );
+    assert!(body.contains("ffi false") && body.contains("FFI"), "{body}");
+}

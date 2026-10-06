@@ -7,7 +7,7 @@
 //! time, such as a module name it builds, escapes the check.
 
 use crate::{
-    api::{contexts::context, Api, BUILT_IN_MODULES, UNAVAILABLE},
+    api::{contexts::context, module_refusal, Api, BUILT_IN_MODULES, UNAVAILABLE},
     exchange::Phase,
     program::Source,
 };
@@ -614,7 +614,13 @@ impl Checker<'_> {
             return;
         };
         self.lint.requires.insert(name.text.clone());
-        if !BUILT_IN_MODULES.contains(&name.text.as_str()) && !module(&name.text) {
+        if let Some(reason) = module_refusal(&name.text) {
+            self.find(
+                FindingKind::Unavailable,
+                name.line,
+                format!("module {:?} is not available: {reason}", name.text),
+            );
+        } else if !BUILT_IN_MODULES.contains(&name.text.as_str()) && !module(&name.text) {
             self.find(
                 FindingKind::UnknownModule,
                 name.line,
@@ -761,6 +767,26 @@ local s = "quoted = 1" .. [[long = 2]]
         assert_eq!(result.findings[0].kind, FindingKind::UnknownModule);
         assert_eq!(result.findings[0].line, 12);
         assert!(result.findings[0].message.contains("\"resty.redis\""));
+    }
+
+    #[test]
+    fn modules_refused_for_the_sandbox_say_why() {
+        let result = lint(
+            &Source::new(
+                "main.conf",
+                "local pipe = require \"ngx.pipe\"\nlocal ffi = require(\"ffi\")\n",
+                1,
+            ),
+            Role::Handler(Phase::Content),
+            &|_| false,
+        );
+        assert_eq!(result.findings.len(), 2);
+        assert!(result
+            .findings
+            .iter()
+            .all(|finding| finding.kind == FindingKind::Unavailable));
+        assert!(result.findings[0].message.contains("start processes"));
+        assert!(result.findings[1].message.contains("FFI"));
     }
 
     #[test]

@@ -1412,9 +1412,10 @@ in, written `${lua:name}`.
 
 Scripts are files of the configuration: `*_by_lua_file` names a file under
 `lua/`, and `require("a.b")` loads a built-in module (`cjson`, `bit`,
-`resty.string`, `resty.sha256`, `resty.lrucache`, `ngx.re`, `ngx.balancer`
-and others) or
-`lua/a/b.lua`. They are saved, compared and rolled back with every other
+`resty.string`, `resty.sha256`, `resty.lrucache`, `ngx.re`, `ngx.balancer`,
+`ngx.ssl` and others) or `lua/a/b.lua`; `ngx.pipe` and `ffi` are refused,
+since they would start processes or run native code outside the sandbox.
+They are saved, compared and rolled back with every other
 file, and each has the SHA-256 of its code as its version. `panel.v1` is
 the gateway's own API next to `ngx`, with `req`, `resp`, `ctx`,
 `upstream`, `log`, `json`, `re`, `time`, `random` and `crypto` functions

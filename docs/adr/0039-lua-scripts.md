@@ -164,7 +164,10 @@ run scripts with the gateway's own privileges outside the sandbox and
 `signal_graceful_exit` because scripts do not stop workers, and
 `resty.lrucache` (with `resty.lrucache.pureffi`), each VM holding its own
 caches, so the library scripts vendor for its FFI needs no FFI, and
-`ngx.ssl` with `ngx.ssl.clienthello`.
+`ngx.ssl` with `ngx.ssl.clienthello`. `require` refuses `ngx.pipe`,
+which would start processes on the gateway's host, and LuaJIT's `ffi`,
+whose native calls would leave the sandbox, saying so; the configuration
+check reports them where they are required.
 `lua_capture_error_log` keeps, for each VM, what its scripts log up to the
 size given, oldest messages dropped first, for `ngx.errlog.get_logs`;
 `ngx.errlog` also has `raw_log`, `set_filter_level` in `init_by_lua` and
