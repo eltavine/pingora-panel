@@ -2607,6 +2607,152 @@ async fn proxy_verify_handlers_judge_the_upstream_certificate() {
 }
 
 #[tokio::test]
+async fn websocket_frames_are_read_and_written_as_rfc_6455_gives_them() {
+    let lua = start(
+        1,
+        handlers(&[
+            r#"
+            assert(type(buffer) == "table" and type(bit32) == "table")
+            local protocol = require "resty.websocket.protocol"
+            local function wire(bytes)
+                local sent, at = { bytes }, 1
+                local sock = {}
+                function sock:send(data)
+                    sent[#sent + 1] = data
+                    return #data
+                end
+                function sock:receive(size)
+                    local all = table.concat(sent)
+                    if at + size - 1 > #all then
+                        return nil, "timeout"
+                    end
+                    local data = all:sub(at, at + size - 1)
+                    at += size
+                    return data
+                end
+                return sock
+            end
+            local function received(bytes, most, masked)
+                return protocol.recv_frame(wire(bytes), most or 125, masked)
+            end
+
+            -- RFC 6455 §5.7.
+            assert(protocol.build_frame(true, 0x1, 5, "Hello", false) == "\129\5Hello")
+            assert(received("\129\133\55\250\33\61\127\159\77\81\88", 125, true) == "Hello")
+            local fragmented = wire("\1\3Hel\128\2lo")
+            local data, typ, err = protocol.recv_frame(fragmented, 125)
+            assert(data == "Hel" and typ == "text" and err == "again")
+            data, typ, err = protocol.recv_frame(fragmented, 125)
+            assert(data == "lo" and typ == "continuation" and err == nil)
+            data, typ = received("\137\5Hello")
+            assert(data == "Hello" and typ == "ping")
+            data, typ = received("\138\133\55\250\33\61\127\159\77\81\88", 125, true)
+            assert(data == "Hello" and typ == "pong")
+            local long = string.rep("a", 256)
+            assert(protocol.build_frame(true, 0x2, 256, long, false) == "\130\126\1\0" .. long)
+            local longer = string.rep("b", 65536)
+            assert(protocol.build_frame(true, 0x2, 65536, longer, false) == "\130\127\0\0\0\0\0\1\0\0" .. longer)
+
+            local sock = wire("")
+            local odd = string.rep("abcdefg", 20001)
+            assert(protocol.send_frame(sock, true, 0x1, "hello", 65535, true))
+            assert(protocol.send_frame(sock, true, 0x2, odd, 1e6, true))
+            assert(protocol.send_frame(sock, true, 0x8, "\3\232bye", 125, true))
+            assert(protocol.send_frame(sock, true, 0x9, nil, 125, false))
+            data, typ, err = protocol.recv_frame(sock, 65535, true)
+            assert(data == "hello" and typ == "text" and err == nil)
+            data, typ = protocol.recv_frame(sock, 1e6, true)
+            assert(data == odd and typ == "binary")
+            data, typ, err = protocol.recv_frame(sock, 125, true)
+            assert(data == "bye" and typ == "close" and err == 1000)
+            data, typ, err = protocol.recv_frame(sock, 125, true)
+            assert(data == nil and typ == nil and err == "frame unmasked", err)
+            data, typ, err = protocol.recv_frame(sock, 125)
+            assert(data == nil and err == "failed to receive the first 2 bytes: timeout", err)
+
+            local function refused(bytes, most, masked)
+                local data, typ, err = received(bytes, most, masked)
+                assert(data == nil and typ == nil)
+                return err
+            end
+            assert(refused("\193\0") == "bad RSV1, RSV2, or RSV3 bits")
+            assert(refused("\131\0") == "reserved non-control frames")
+            assert(refused("\139\0") == "reserved control frames")
+            assert(refused("\9\0") == "fragmented control frame")
+            assert(refused("\137\126\0\126") == "too long payload for control frame")
+            assert(refused("\130\6abcdef", 5) == "exceeding max payload len")
+            assert(refused("\136\1x") == "bad close frame: the status code takes two bytes")
+            assert(select(2, protocol.send_frame(sock, true, 0x9, string.rep("p", 126), 200)) == "too much payload for control frame")
+            assert(select(2, protocol.send_frame(sock, false, 0x8, "", 125)) == "fragmented control frame")
+            assert(select(2, protocol.send_frame(sock, true, 0x1, "long", 3)) == "payload too big")
+            ngx.say("ok")
+        "#,
+            r#"
+            local server = require "resty.websocket.server"
+            local wb, err = server:new({ protocols = { "superchat" }, timeout = 1000 })
+            assert(wb == nil and err:find("raw request socket", 1, true), err)
+        "#,
+            r#"
+            local server = require "resty.websocket.server"
+            local wb, err = server:new()
+            ngx.say(err)
+        "#,
+        ]),
+    );
+    let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
+    let outcome = run(&mut scripts, handler(lua.handlers[0], Phase::Content)).await;
+    assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+    assert_eq!(scripts.exchange().response.body, b"ok\n");
+
+    let upgrade = [
+        ("upgrade", "websocket"),
+        ("connection", "keep-alive, Upgrade"),
+        ("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ=="),
+        ("sec-websocket-version", "13"),
+        ("sec-websocket-protocol", "chat, superchat"),
+    ];
+    let mut granted = handler(lua.handlers[1], Phase::Content);
+    granted.permissions.body = true;
+    let mut scripts = lua.runtime.scripts(request("GET", "/chat", &upgrade));
+    let outcome = run(&mut scripts, granted).await;
+    assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
+    {
+        let exchange = scripts.exchange();
+        assert_eq!(exchange.response.status, 101);
+        let headers = &exchange.response.headers;
+        assert_eq!(
+            headers["sec-websocket-accept"],
+            "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+        );
+        assert_eq!(headers["sec-websocket-protocol"], "superchat");
+        assert_eq!(headers["upgrade"], "websocket");
+    }
+
+    let mut versioned = upgrade;
+    versioned[3].1 = "8";
+    for (headers, expected) in [
+        (&upgrade[..0], "bad \"upgrade\" request header: nil"),
+        (&upgrade[..1], "bad \"connection\" request header"),
+        (&upgrade[..2], "bad \"sec-websocket-key\" request header"),
+        (
+            &upgrade[..3],
+            "bad \"sec-websocket-version\" request header",
+        ),
+        (
+            &versioned[..],
+            "bad \"sec-websocket-version\" request header",
+        ),
+    ] {
+        let mut scripts = lua.runtime.scripts(request("GET", "/chat", headers));
+        run(&mut scripts, handler(lua.handlers[2], Phase::Content)).await;
+        assert_eq!(
+            scripts.exchange().response.body,
+            format!("{expected}\n").as_bytes()
+        );
+    }
+}
+
+#[tokio::test]
 async fn cosockets_present_the_client_certificate_set_for_them() {
     use rustls::pki_types::PrivatePkcs8KeyDer;
     use std::sync::Arc;

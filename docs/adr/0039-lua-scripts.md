@@ -225,7 +225,14 @@ which refuses `enable_privileged_agent` because a privileged agent would
 run scripts with the gateway's own privileges outside the sandbox and
 `signal_graceful_exit` because scripts do not stop workers, and
 `resty.lrucache` (with `resty.lrucache.pureffi`), each VM holding its own
-caches, so the library scripts vendor for its FFI needs no FFI, and
+caches, so the library scripts vendor for its FFI needs no FFI,
+`resty.websocket.server`, `resty.websocket.client` and
+`resty.websocket.protocol`, lua-resty-websocket's API over the raw request
+socket and cosockets, written in Luau since its own needs the FFI, where
+the server answers with one of the subprotocols the client offers (the
+first its `protocols` option names, when given) and the client checks the
+server's `Sec-WebSocket-Accept`, as RFC 6455 requires and the library does
+not, and
 `ngx.ssl` with `ngx.ssl.clienthello`, `ngx.ssl.session`,
 `ngx.ssl.proxysslcert` and `ngx.ssl.proxysslverify`, `ngx.proxyssl` and
 `ngx.ocsp`. `resty.core.base` gives libraries

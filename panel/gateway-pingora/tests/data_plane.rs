@@ -3342,6 +3342,158 @@ async fn raw_request_sockets_carry_upgraded_connections() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn websocket_scripts_serve_and_open_websockets() {
+    use futures_util::{SinkExt, StreamExt};
+    use panel_ir::{LuaHandler, LUA_SCRIPTS_CAPABILITY};
+    use tokio_tungstenite::tungstenite::{
+        client::IntoClientRequest,
+        protocol::{frame::coding::CloseCode, CloseFrame},
+        Message,
+    };
+
+    let upstream = websocket_upstream().await;
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    snapshot
+        .required_capabilities
+        .push(CapabilityRequirement::new(LUA_SCRIPTS_CAPABILITY, "1"));
+    snapshot.lua.scripts = vec![
+        lua_script(
+            "serve",
+            r#"
+            local server = require "resty.websocket.server"
+            local wb = assert(server:new({ timeout = 5000, max_payload_len = 1048576, protocols = { "echo" } }))
+            assert(wb:send_ping("are you there"))
+            while true do
+                local data, typ, err = wb:recv_frame()
+                if not data then
+                    ngx.log(ngx.ERR, "failed to receive a frame: ", err)
+                    return ngx.exit(444)
+                end
+                if typ == "close" then
+                    assert(wb:send_close(1000, "bye after " .. data .. " " .. err))
+                    return
+                elseif typ == "pong" then
+                    assert(wb:send_text("pong: " .. data))
+                elseif typ == "text" then
+                    assert(wb:send_text("echo: " .. data))
+                elseif typ == "binary" then
+                    assert(wb:send_binary(data))
+                end
+            end
+            "#,
+        ),
+        lua_script(
+            "open",
+            &format!(
+                r#"
+                local client = require "resty.websocket.client"
+                local wb = assert(client:new({{ timeout = 5000, max_payload_len = 1048576 }}))
+                local nothing, err = wb:connect("http://127.0.0.1/")
+                assert(nothing == nil and err == "bad websocket uri", err)
+                local ok, err, head = wb:connect("ws://127.0.0.1:{port}/ws", {{ origin = "http://shop.test" }})
+                assert(ok, err)
+                assert(head:find("^HTTP/1.1 101"), head)
+                assert(wb:send_text("hello from lua"))
+                local data, typ = wb:recv_frame()
+                assert(typ == "text", typ)
+                local big = string.rep("0123456789", 7000)
+                assert(wb:send_binary(big))
+                local echoed, kind = wb:recv_frame()
+                assert(echoed == big and kind == "binary", kind)
+                assert(wb:close())
+                ngx.say(data)
+                "#,
+                port = upstream.port()
+            ),
+        ),
+    ];
+    snapshot.sites.push(site(&["shop.test"]));
+    let mut serve = LuaHandler::new("serve");
+    serve.allow.body = true;
+    serve.time_limit_ms = 10_000;
+    let mut open = LuaHandler::new("open");
+    open.allow.network = true;
+    open.time_limit_ms = 10_000;
+    snapshot.routes.push(route(
+        "serve",
+        2,
+        prefix("/serve"),
+        RouteAction::Lua { handler: serve },
+    ));
+    snapshot.routes.push(route(
+        "open",
+        1,
+        prefix("/open"),
+        RouteAction::Lua { handler: open },
+    ));
+    let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
+    wait_for(listen).await;
+
+    let opened = get(listen, Some("shop.test"), "/open", "").await;
+    assert_eq!(
+        opened.status,
+        200,
+        "{}",
+        String::from_utf8_lossy(&opened.body)
+    );
+    assert_eq!(opened.body, b"hello from lua\n");
+
+    let mut request = "ws://shop.test/serve".into_client_request().unwrap();
+    request
+        .headers_mut()
+        .insert("sec-websocket-protocol", "chat, echo".parse().unwrap());
+    let stream = TcpStream::connect(listen).await.unwrap();
+    let (mut socket, response) = tokio::time::timeout(
+        Duration::from_secs(5),
+        tokio_tungstenite::client_async(request, stream),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(response.status(), 101);
+    assert_eq!(response.headers()["sec-websocket-protocol"], "echo");
+    async fn receive(socket: &mut tokio_tungstenite::WebSocketStream<TcpStream>) -> Message {
+        tokio::time::timeout(Duration::from_secs(5), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()
+    }
+    assert_eq!(
+        receive(&mut socket).await,
+        Message::Ping("are you there".into())
+    );
+    socket.flush().await.unwrap();
+    assert_eq!(
+        receive(&mut socket).await,
+        Message::text("pong: are you there")
+    );
+    socket.send(Message::text("hello")).await.unwrap();
+    assert_eq!(receive(&mut socket).await, Message::text("echo: hello"));
+    let big = vec![7u8; 70_000];
+    socket.send(Message::binary(big.clone())).await.unwrap();
+    assert_eq!(receive(&mut socket).await, Message::binary(big));
+    socket
+        .close(Some(CloseFrame {
+            code: CloseCode::Normal,
+            reason: "done".into(),
+        }))
+        .await
+        .unwrap();
+    let closing = receive(&mut socket).await;
+    let Message::Close(Some(frame)) = closing else {
+        panic!("{closing:?}");
+    };
+    assert_eq!(frame.code, CloseCode::Normal);
+    assert_eq!(frame.reason, "bye after done 1000");
+    gateway.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn session_scripts_resume_sessions_another_listener_made() {
     use panel_ir::{LuaHandler, LuaSharedDict, LUA_SCRIPTS_CAPABILITY};
 

@@ -1422,9 +1422,12 @@ in, written `${lua:name}`.
 Scripts are files of the configuration: `*_by_lua_file` names a file under
 `lua/`, and `require("a.b")` loads a built-in module (`cjson`, `bit`,
 `resty.string`, `resty.sha256`, `resty.lrucache`, `ngx.re`, `ngx.balancer`,
-`ngx.ssl`, `resty.core.base` and others) or `lua/a/b.lua`; `ngx.pipe` and
+`ngx.ssl`, `resty.core.base`, `resty.websocket.server`,
+`resty.websocket.client` and others) or `lua/a/b.lua`; `ngx.pipe` and
 `ffi` are refused, since they would start processes or run native code
-outside the sandbox.
+outside the sandbox. The WebSocket modules keep lua-resty-websocket's API
+without its FFI, answer with a single subprotocol and check the server's
+`Sec-WebSocket-Accept`, as RFC 6455 asks.
 They are saved, compared and rolled back with every other
 file, and each has the SHA-256 of its code as its version. `panel.v1` is
 the gateway's own API next to `ngx`, with `req`, `resp`, `ctx`,

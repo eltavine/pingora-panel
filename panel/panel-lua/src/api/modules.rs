@@ -73,24 +73,13 @@ fn load(
     if name == "panel.v1" {
         return panel_v1(lua, module_meta);
     }
-    if name == "resty.core.base" {
+    if let Some((_, source)) = IN_LUA.iter().find(|(module, _)| *module == name) {
         let env = lua.create_table()?;
         env.set_metatable(Some(module_meta.clone()))?;
         env.set_safeenv(true);
         return lua
-            .load(include_str!("resty_core_base.lua"))
-            .set_name("=resty.core.base")
-            .set_environment(env)
-            .into_function()?
-            .call::<Value>(());
-    }
-    if name == "resty.lrucache" || name == "resty.lrucache.pureffi" {
-        let env = lua.create_table()?;
-        env.set_metatable(Some(module_meta.clone()))?;
-        env.set_safeenv(true);
-        return lua
-            .load(include_str!("lrucache.lua"))
-            .set_name("=resty.lrucache")
+            .load(*source)
+            .set_name(format!("={name}"))
             .set_environment(env)
             .into_function()?
             .call::<Value>(());
@@ -263,6 +252,25 @@ const RESTY_CORE: [&str; 20] = [
     "resty.core.worker",
 ];
 
+/// The built-in modules written in Lua, and their sources.
+const IN_LUA: [(&str, &str); 6] = [
+    ("resty.core.base", include_str!("resty_core_base.lua")),
+    ("resty.lrucache", include_str!("lrucache.lua")),
+    ("resty.lrucache.pureffi", include_str!("lrucache.lua")),
+    (
+        "resty.websocket.protocol",
+        include_str!("websocket_protocol.lua"),
+    ),
+    (
+        "resty.websocket.server",
+        include_str!("websocket_server.lua"),
+    ),
+    (
+        "resty.websocket.client",
+        include_str!("websocket_client.lua"),
+    ),
+];
+
 /// Why scripts may not load `name`, an OpenResty module.
 pub(crate) fn refusal(name: &str) -> Option<&'static str> {
     REFUSED
@@ -272,7 +280,7 @@ pub(crate) fn refusal(name: &str) -> Option<&'static str> {
 }
 
 /// The modules OpenResty scripts commonly load that come with the gateway.
-pub(crate) const BUILT_IN: [&str; 56] = [
+pub(crate) const BUILT_IN: [&str; 59] = [
     "panel.v1",
     "cjson",
     "cjson.safe",
@@ -321,6 +329,9 @@ pub(crate) const BUILT_IN: [&str; 56] = [
     "ngx.process",
     "resty.lrucache",
     "resty.lrucache.pureffi",
+    "resty.websocket.protocol",
+    "resty.websocket.server",
+    "resty.websocket.client",
     "ngx.errlog",
     "ngx.ssl",
     "ngx.ssl.clienthello",
