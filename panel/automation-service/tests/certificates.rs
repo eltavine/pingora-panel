@@ -500,7 +500,8 @@ async fn expiring_certificates_are_announced_once_per_threshold() {
     assert_eq!(reminded(&service, "example.com").await, Some(0));
     assert_eq!(reminded(&service, "lasting.example").await, None);
 
-    let renewed = material("example.com");
+    // Valid from `now`, so it is due at `now` whatever the clock read since.
+    let renewed = self_signed(&["example.com".to_owned()], 30, now).unwrap();
     inventory
         .replace(
             cause(&scope),
