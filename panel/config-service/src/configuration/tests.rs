@@ -256,7 +256,11 @@ async fn lua_tests_run_the_drafts_scripts_and_are_recorded() {
         .iter()
         .map(|script| script["id"].as_str().unwrap().to_owned())
         .collect();
-    assert_eq!(ids, ["lua/greet.lua", "main.conf:6", "main.conf:9"], "the service writes the server's id in");
+    assert_eq!(
+        ids,
+        ["lua/greet.lua", "main.conf:6", "main.conf:9"],
+        "the service writes the server's id in"
+    );
 
     let operator = by("operator", "op-test").with_site_scope(Some(SiteScope {
         unrestricted: vec![
