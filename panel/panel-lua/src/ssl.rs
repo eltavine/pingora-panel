@@ -43,6 +43,9 @@ pub struct Handshake {
     pub key: Option<Vec<u8>>,
     /// `clear_certs`: the gateway's certificate is not presented.
     pub cleared: bool,
+    /// The OCSP response stapled to the certificate presented
+    /// (`ngx.ocsp.set_ocsp_status_resp`).
+    pub ocsp: Option<Bytes>,
 }
 
 struct Reader<'a>(&'a [u8]);

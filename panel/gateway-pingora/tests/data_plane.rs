@@ -3480,3 +3480,136 @@ async fn session_scripts_resume_sessions_another_listener_made() {
     gateway.stop().await;
 }
 
+/// Verifies servers as webpki does, keeping the OCSP response they staple.
+#[derive(Debug)]
+struct Stapled {
+    inner: Arc<rustls::client::WebPkiServerVerifier>,
+    seen: Arc<std::sync::Mutex<Vec<u8>>>,
+}
+
+impl rustls::client::danger::ServerCertVerifier for Stapled {
+    fn verify_server_cert(
+        &self,
+        end_entity: &rustls_pki_types::CertificateDer<'_>,
+        intermediates: &[rustls_pki_types::CertificateDer<'_>],
+        server_name: &rustls_pki_types::ServerName<'_>,
+        ocsp: &[u8],
+        now: rustls_pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        *self.seen.lock().unwrap() = ocsp.to_vec();
+        self.inner
+            .verify_server_cert(end_entity, intermediates, server_name, ocsp, now)
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls_pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        self.inner.verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls_pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        self.inner.verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        self.inner.supported_verify_schemes()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn certificate_scripts_staple_ocsp_responses() {
+    use panel_ir::{LuaHandler, LUA_SCRIPTS_CAPABILITY};
+
+    let upstream = echo_upstream().await;
+    let secrets = tempfile::tempdir().unwrap();
+    let certified = rcgen::generate_simple_self_signed(vec!["shop.example".into()]).unwrap();
+    std::fs::write(
+        secrets.path().join("edge.crt"),
+        pem("CERTIFICATE", certified.cert.der()),
+    )
+    .unwrap();
+    std::fs::write(
+        secrets.path().join("edge.key"),
+        pem("PRIVATE KEY", &certified.signing_key.serialize_der()),
+    )
+    .unwrap();
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot.tls_profiles.push(TlsProfile {
+        id: "edge".into(),
+        certificate_secret_id: "edge.crt".into(),
+        private_key_secret_id: "edge.key".into(),
+        min_protocol: "TLSv1.2".into(),
+        max_protocol: None,
+        cipher_suites: Vec::new(),
+        session_resumption: false,
+        alpn: BTreeSet::new(),
+    });
+    let mut listener = ListenerRef::new("https", listen.to_string());
+    listener.tls_profile_id = Some("edge".into());
+    snapshot.listeners.push(listener);
+    snapshot
+        .required_capabilities
+        .push(CapabilityRequirement::new(LUA_SCRIPTS_CAPABILITY, "1"));
+    snapshot.lua.scripts = vec![lua_script(
+        "staple",
+        "assert(require('ngx.ocsp').set_ocsp_status_resp('a stapled response'))",
+    )];
+    let mut shop = site(&["shop.example"]);
+    shop.lua.ssl_cert = Some(LuaHandler::new("staple"));
+    snapshot.sites.push(shop);
+    snapshot.upstream_pools.push(pool("app", &[upstream]));
+    snapshot
+        .routes
+        .push(route("app", 1, prefix("/"), proxy("app")));
+    let gateway = Gateway::start(
+        AdapterOptions::default().with_secrets(Arc::new(DirectorySecrets::new(secrets.path()))),
+        snapshot,
+    )
+    .await;
+    wait_for(listen).await;
+
+    let mut roots = rustls::RootCertStore::empty();
+    roots.add(certified.cert.der().clone()).unwrap();
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let verifier = Stapled {
+        inner: rustls::client::WebPkiServerVerifier::builder_with_provider(
+            Arc::new(roots),
+            Arc::clone(&provider),
+        )
+        .build()
+        .unwrap(),
+        seen: Arc::clone(&seen),
+    };
+    let config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(verifier))
+        .with_no_client_auth();
+    let stream = TcpStream::connect(listen).await.unwrap();
+    let mut stream = tokio_rustls::TlsConnector::from(Arc::new(config))
+        .connect(
+            rustls_pki_types::ServerName::try_from("shop.example").unwrap(),
+            stream,
+        )
+        .await
+        .unwrap();
+    assert_eq!(seen.lock().unwrap().as_slice(), b"a stapled response");
+    let response = exchange(
+        &mut stream,
+        "GET / HTTP/1.1\r\nhost: shop.example\r\nconnection: close\r\n\r\n",
+    )
+    .await;
+    assert_eq!(response.status, 200);
+    gateway.stop().await;
+}

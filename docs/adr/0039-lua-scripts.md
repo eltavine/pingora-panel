@@ -112,7 +112,13 @@ presents the chain and key set with `set_der_cert` and `set_der_priv_key`,
 or `set_cert` and `set_priv_key`, in place of the TLS profile's after
 `clear_certs`. `ngx.exit(ngx.ERROR)` ends the handshake, as does a failed
 handler unless `lua_on_error continue`, and a certificate without its key
-or with a key that does not match it; the handlers have the functions
+or with a key that does not match it. `ngx.ocsp` gives the OCSP
+responder the leaf of a chain names, builds the request that asks about
+it (RFC 6960), checks a response — signed by the issuer or by a responder
+the issuer certified for OCSP, saying the leaf is good, within its
+validity give or take five minutes, as OpenSSL allows — and in
+`ssl_certificate_by_lua*` staples a response to the certificate presented,
+the script's or the TLS profile's. The handlers have the functions
 lua-nginx-module allows there (`ngx.exit`, `ngx.sleep`, cosockets, light
 threads, timers and `ngx.semaphore`), and neither `ngx.ctx` nor `ngx.var`.
 The functions that need OpenSSL return `nil` and why: `verify_client` and
@@ -183,7 +189,8 @@ run scripts with the gateway's own privileges outside the sandbox and
 `signal_graceful_exit` because scripts do not stop workers, and
 `resty.lrucache` (with `resty.lrucache.pureffi`), each VM holding its own
 caches, so the library scripts vendor for its FFI needs no FFI, and
-`ngx.ssl` with `ngx.ssl.clienthello` and `ngx.ssl.session`. `require` refuses `ngx.pipe`,
+`ngx.ssl` with `ngx.ssl.clienthello` and `ngx.ssl.session`, and
+`ngx.ocsp`. `require` refuses `ngx.pipe`,
 which would start processes on the gateway's host, and LuaJIT's `ffi`,
 whose native calls would leave the sandbox, saying so; the configuration
 check reports them where they are required.

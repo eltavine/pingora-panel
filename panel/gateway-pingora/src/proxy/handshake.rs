@@ -203,10 +203,11 @@ fn certified(
                 .map_err(|error| format!("the private key cannot be used: {error}"))?;
             let signing = rustls::crypto::ring::sign::any_supported_type(&key)
                 .map_err(|error| format!("the private key cannot be used: {error}"))?;
-            let key = CertifiedKey::new(chain, signing);
+            let mut key = CertifiedKey::new(chain, signing);
             key.keys_match().map_err(|error| {
                 format!("the private key does not match the certificate: {error}")
             })?;
+            key.ocsp = handshake.ocsp.as_ref().map(|response| response.to_vec());
             Ok(Some(Some(Arc::new(key))))
         }
         (Some(_), None) => Err("the scripts set a certificate without its private key".into()),
@@ -327,7 +328,19 @@ impl PreTlsProcess for HandshakeScripts {
         let handshake = std::mem::take(&mut scripts.exchange().handshake);
         match certified(&handshake) {
             Ok(Some(key)) => self.chosen.choose(key),
-            Ok(None) => {}
+            Ok(None) => {
+                // A response stapled to the TLS profile's certificate.
+                let Some(response) = &handshake.ocsp else {
+                    return Ok(());
+                };
+                let certificates = snapshot.certificates.load();
+                let presented = certificates.presented(listener, handshake.server_name.as_deref());
+                if let Some(certificate) = presented {
+                    let mut key = CertifiedKey::clone(&certificate.key);
+                    key.ocsp = Some(response.to_vec());
+                    self.chosen.choose(Some(Arc::new(key)));
+                }
+            }
             Err(message) => {
                 report.write(hook, "", "error", &message);
                 return Err(ended());

@@ -58,7 +58,7 @@ impl TlsVersion {
 }
 
 pub(crate) struct ServerCertificate {
-    key: Arc<CertifiedKey>,
+    pub(crate) key: Arc<CertifiedKey>,
     pub minimum: TlsVersion,
 }
 

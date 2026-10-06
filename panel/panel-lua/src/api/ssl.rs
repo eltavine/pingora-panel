@@ -14,7 +14,15 @@ use mlua::{
     FromLuaMulti, Lua, LuaString, MultiValue, Table, UserData, UserDataRef, Value, Variadic,
 };
 use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::SocketAddr,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+/// `status_request` (RFC 6066 §8): the client takes a stapled OCSP
+/// response.
+const STATUS_REQUEST: u16 = 5;
 
 const NO_CLIENT_AUTH: &str = "client certificates are requested by TLS profiles: the gateway's \
                               TLS asks every connection to a listener for one, or none";
@@ -404,6 +412,91 @@ pub(super) fn session(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
                 exchange.handshake.serialized = Some(Bytes::copy_from_slice(&session.as_bytes()));
             })?;
             Ok(done())
+        },
+    )?;
+    Ok(module)
+}
+
+/// What `max_len` allows of `value`.
+fn within_length(lua: &Lua, value: &[u8], most: Option<usize>) -> mlua::Result<MultiValue> {
+    match most {
+        Some(most) if value.len() > most => failed(lua, 1, "the result is longer than max_len"),
+        _ => Ok(results([text(lua, value)?])),
+    }
+}
+
+/// The `ngx.ocsp` module.
+pub(super) fn ocsp(lua: &Lua, slot: &Arc<Slot>) -> mlua::Result<Table> {
+    let module = lua.create_table()?;
+    define(
+        lua,
+        &module,
+        slot,
+        "get_ocsp_responder_from_der_chain",
+        |lua, _, (chain, most): (LuaString, Option<usize>)| {
+            let Some(chain) = der_chain(&chain.as_bytes()) else {
+                return failed(lua, 1, "the DER certificate chain cannot be read");
+            };
+            match crate::ocsp::responder(&chain) {
+                Ok(url) => within_length(lua, url.as_bytes(), most),
+                Err(error) => failed(lua, 1, &error),
+            }
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "create_ocsp_request",
+        |lua, _, (chain, most): (LuaString, Option<usize>)| {
+            let Some(chain) = der_chain(&chain.as_bytes()) else {
+                return failed(lua, 1, "the DER certificate chain cannot be read");
+            };
+            match crate::ocsp::request(&chain) {
+                Ok(request) => within_length(lua, &request, most),
+                Err(error) => failed(lua, 1, &error),
+            }
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "validate_ocsp_response",
+        |lua, _, (response, chain, _): (LuaString, LuaString, Option<usize>)| {
+            let Some(chain) = der_chain(&chain.as_bytes()) else {
+                return failed(lua, 1, "the DER certificate chain cannot be read");
+            };
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |since| {
+                    i64::try_from(since.as_secs()).unwrap_or(i64::MAX)
+                });
+            match crate::ocsp::validate(&response.as_bytes(), &chain, now) {
+                Ok(()) => Ok(done()),
+                Err(error) => failed(lua, 1, &error),
+            }
+        },
+    )?;
+    define(
+        lua,
+        &module,
+        slot,
+        "set_ocsp_status_resp",
+        |lua, slot, response: LuaString| {
+            let asked = with(slot, Some(Phase::SslCertificate), |exchange| {
+                exchange.handshake.ocsp = Some(Bytes::copy_from_slice(&response.as_bytes()));
+                exchange
+                    .handshake
+                    .extensions
+                    .iter()
+                    .any(|(kind, _)| *kind == STATUS_REQUEST)
+            })?;
+            if asked {
+                Ok(done())
+            } else {
+                Ok(results([Value::Boolean(true), text(lua, "no status req")?]))
+            }
         },
     )?;
     Ok(module)

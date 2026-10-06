@@ -13,6 +13,7 @@ mod api;
 mod capture;
 mod exchange;
 mod lint;
+mod ocsp;
 mod program;
 mod runtime;
 mod shared;

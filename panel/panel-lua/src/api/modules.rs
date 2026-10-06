@@ -236,7 +236,7 @@ pub(crate) fn refusal(name: &str) -> Option<&'static str> {
 }
 
 /// The modules OpenResty scripts commonly load that come with the gateway.
-pub(crate) const BUILT_IN: [&str; 32] = [
+pub(crate) const BUILT_IN: [&str; 33] = [
     "panel.v1",
     "cjson",
     "cjson.safe",
@@ -269,6 +269,7 @@ pub(crate) const BUILT_IN: [&str; 32] = [
     "ngx.ssl",
     "ngx.ssl.clienthello",
     "ngx.ssl.session",
+    "ngx.ocsp",
 ];
 
 fn built_in(
@@ -352,6 +353,7 @@ fn built_in(
         "ngx.ssl" => Value::Table(super::ssl::module(lua, slot)?),
         "ngx.ssl.clienthello" => Value::Table(super::ssl::client_hello(lua, slot)?),
         "ngx.ssl.session" => Value::Table(super::ssl::session(lua, slot)?),
+        "ngx.ocsp" => Value::Table(super::ssl::ocsp(lua, slot)?),
         "ngx.resp" | "ngx.req" => {
             let module = lua.create_table()?;
             let table: Table = ngx.raw_get(&name[4..])?;
