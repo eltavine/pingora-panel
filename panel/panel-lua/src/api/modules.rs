@@ -216,7 +216,7 @@ fn panel_v1(lua: &Lua, module_meta: &Table) -> mlua::Result<Value> {
 }
 
 /// OpenResty's modules that scripts may not load, and why.
-pub(crate) const REFUSED: [(&str, &str); 2] = [
+pub(crate) const REFUSED: [(&str, &str); 4] = [
     (
         "ngx.pipe",
         "it would start processes on the gateway's host, outside the sandbox",
@@ -224,6 +224,14 @@ pub(crate) const REFUSED: [(&str, &str); 2] = [
     (
         "ffi",
         "native code called through an FFI would run outside the sandbox",
+    ),
+    (
+        "resty.shell",
+        "it would run commands on the gateway's host through ngx.pipe, outside the sandbox",
+    ),
+    (
+        "resty.signal",
+        "it would send signals to processes on the gateway's host, outside the sandbox",
     ),
 ];
 

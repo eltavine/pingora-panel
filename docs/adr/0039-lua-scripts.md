@@ -275,9 +275,10 @@ each round, with its status pages in text and for Prometheus, and
 its table helpers, status codes, subsystem check and table references, and
 the other `resty.core` modules load and do nothing, since the `ngx` they
 would replace with FFI functions is native here. `require` refuses
-`ngx.pipe`, which would start processes on the gateway's host, LuaJIT's
-`ffi`, whose native calls would leave the sandbox, saying so; the
-configuration check reports them where they are required.
+`ngx.pipe`, which would start processes on the gateway's host, and
+`resty.shell` built on it, `resty.signal`, which would signal its
+processes, and LuaJIT's `ffi`, whose native calls would leave the sandbox,
+saying so; the configuration check reports them where they are required.
 `lua_capture_error_log` keeps, for each VM, what its scripts log up to the
 size given, oldest messages dropped first, for `ngx.errlog.get_logs`;
 `ngx.errlog` also has `raw_log`, `set_filter_level` in `init_by_lua` and

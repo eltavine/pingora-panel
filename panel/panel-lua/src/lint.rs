@@ -778,19 +778,21 @@ local s = "quoted = 1" .. [[long = 2]]
         let result = lint(
             &Source::new(
                 "main.conf",
-                "local pipe = require \"ngx.pipe\"\nlocal ffi = require(\"ffi\")\n",
+                "local pipe = require \"ngx.pipe\"\nlocal ffi = require(\"ffi\")\nlocal shell = require('resty.shell')\nlocal signal = require('resty.signal')\n",
                 1,
             ),
             Role::Handler(Phase::Content),
             &|_| false,
         );
-        assert_eq!(result.findings.len(), 2);
+        assert_eq!(result.findings.len(), 4);
         assert!(result
             .findings
             .iter()
             .all(|finding| finding.kind == FindingKind::Unavailable));
         assert!(result.findings[0].message.contains("start processes"));
         assert!(result.findings[1].message.contains("FFI"));
+        assert!(result.findings[2].message.contains("run commands"));
+        assert!(result.findings[3].message.contains("send signals"));
     }
 
     #[test]
