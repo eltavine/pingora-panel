@@ -6,9 +6,12 @@
 //! them to test scripts, with the same limits.
 
 use panel_errors::{Diagnostic, ErrorCode, PanelError, Result};
-use panel_ir::{LuaFallback, LuaHandler, LuaHandlers, LuaLogLevel, RouteAction, RuntimeSnapshot};
+use panel_ir::{
+    LuaFallback, LuaHandler, LuaHandlers, LuaLogLevel, LuaTls, RouteAction, RuntimeSnapshot,
+};
 use panel_lua::{
-    Handler, HandlerId, Limits, LogLevel, Permissions, Phase, Program, Settings, Source,
+    Handler, HandlerId, Limits, LogLevel, Permissions, Phase, Program, Settings, Source, TlsId,
+    TlsTerms,
 };
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
@@ -164,10 +167,15 @@ pub fn handler(id: HandlerId, handler: &LuaHandler, phase: Phase) -> Handler {
     terms
 }
 
+/// Reads the secrets the TLS terms of cosockets name, by their identifiers.
+pub type Secrets<'a> = &'a dyn Fn(&str) -> Result<Vec<u8>>;
+
 struct Compiler<'a> {
     snapshot: &'a RuntimeSnapshot,
     builder: panel_lua::ProgramBuilder,
     handlers: HashMap<String, HandlerId>,
+    secrets: Option<Secrets<'a>>,
+    tls: Vec<(LuaTls, Option<TlsId>)>,
 }
 
 impl Compiler<'_> {
@@ -190,8 +198,10 @@ impl Compiler<'_> {
                 id
             }
         };
+        let mut terms_of_run = handler(id, terms, phase);
+        terms_of_run.sockets.tls = self.tls(&terms.sockets.tls)?;
         Ok(Hook {
-            handler: handler(id, terms, phase),
+            handler: terms_of_run,
             fallback: terms.on_error,
             slow: match terms.slow_threshold_ms {
                 0 => DEFAULT_SLOW,
@@ -200,6 +210,57 @@ impl Compiler<'_> {
             debug: terms.debug,
             script: Arc::from(script.id.as_str()),
         })
+    }
+
+    /// The TLS terms of `given`, with the secrets they name read. Without a
+    /// way to read secrets, terms that name some are left out: cosockets
+    /// are refused where that is so.
+    fn tls(&mut self, given: &LuaTls) -> Result<Option<TlsId>> {
+        if given.is_default() {
+            return Ok(None);
+        }
+        if let Some((_, id)) = self.tls.iter().find(|(known, _)| known == given) {
+            return Ok(*id);
+        }
+        let named = [
+            &given.trusted_certificate_secret_id,
+            &given.crl_secret_id,
+            &given.certificate_secret_id,
+            &given.certificate_key_secret_id,
+        ];
+        let id = match self.secrets {
+            None if named.iter().any(|secret| secret.is_some()) => None,
+            secrets => {
+                let read = |directive: &str, secret: &Option<String>| -> Result<Option<Vec<u8>>> {
+                    let (Some(secret), Some(secrets)) = (secret, secrets) else {
+                        return Ok(None);
+                    };
+                    secrets(secret).map(Some).map_err(|error| {
+                        PanelError::validation_failed(format!(
+                            "{directive} names secret {secret}, which cannot be read: {}",
+                            error.message
+                        ))
+                    })
+                };
+                let mut terms = TlsTerms::default();
+                terms.roots = read(
+                    "lua_ssl_trusted_certificate",
+                    &given.trusted_certificate_secret_id,
+                )?;
+                terms.crls = read("lua_ssl_crl", &given.crl_secret_id)?;
+                terms.client = read("lua_ssl_certificate", &given.certificate_secret_id)?.zip(
+                    read("lua_ssl_certificate_key", &given.certificate_key_secret_id)?,
+                );
+                terms.verify_depth = given
+                    .verify_depth
+                    .map(|depth| usize::try_from(depth).unwrap_or(usize::MAX));
+                terms.versions.clone_from(&given.protocols);
+                terms.cipher_suites.clone_from(&given.cipher_suites);
+                Some(self.builder.tls(terms))
+            }
+        };
+        self.tls.push((given.clone(), id));
+        Ok(id)
     }
 
     fn hooks(&mut self, handlers: &LuaHandlers) -> Result<Hooks> {
@@ -235,12 +296,23 @@ impl Compiler<'_> {
 
 /// Compiles `snapshot`'s scripts for `vms` VMs; `None` when it has none.
 /// Scripts that do not compile refuse the snapshot, with each error at the
-/// line of the file it is in.
+/// line of the file it is in. Cosockets' TLS terms that name secrets are
+/// left out; [`compile_with_secrets`] reads them.
 pub fn compile(snapshot: &RuntimeSnapshot, vms: usize) -> Result<Option<Compiled>> {
+    compile_with_secrets(snapshot, vms, None)
+}
+
+/// [`compile`], reading the secrets cosockets' TLS terms name with
+/// `secrets`.
+pub fn compile_with_secrets(
+    snapshot: &RuntimeSnapshot,
+    vms: usize,
+    secrets: Option<Secrets<'_>>,
+) -> Result<Option<Compiled>> {
     if !panel_engine::uses_lua(snapshot) {
         return Ok(None);
     }
-    let mut compiler = Compiler::new(snapshot)?;
+    let mut compiler = Compiler::new(snapshot, secrets)?;
     let mut index = HookIndex::default();
     for site in &snapshot.sites {
         if !site.lua.is_empty() {
@@ -278,7 +350,7 @@ pub fn compile_script(
     terms: &LuaHandler,
     phase: Phase,
 ) -> Result<(Compiled, Hook)> {
-    let mut compiler = Compiler::new(snapshot)?;
+    let mut compiler = Compiler::new(snapshot, None)?;
     let id = compiler.builder.handler(source);
     let hook = Hook {
         handler: handler(id, terms, phase),
@@ -295,11 +367,13 @@ pub fn compile_script(
 
 impl<'a> Compiler<'a> {
     /// A compiler with the snapshot's modules, `init` and dictionaries.
-    fn new(snapshot: &'a RuntimeSnapshot) -> Result<Self> {
+    fn new(snapshot: &'a RuntimeSnapshot, secrets: Option<Secrets<'a>>) -> Result<Self> {
         let mut compiler = Compiler {
             snapshot,
             builder: Program::builder(),
             handlers: HashMap::new(),
+            secrets,
+            tls: Vec::new(),
         };
         compiler.program()?;
         Ok(compiler)
@@ -398,6 +472,64 @@ mod tests {
             sha256: String::new(),
             module: module.map(Into::into),
         }
+    }
+
+    #[test]
+    fn tls_terms_read_their_secrets_when_they_can() {
+        let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+        snapshot.lua.scripts = vec![script("main.conf:1", "ngx.say(1)", None)];
+        let mut content = LuaHandler::new("main.conf:1");
+        content.sockets.tls.verify_depth = Some(2);
+        content.sockets.tls.trusted_certificate_secret_id = Some("ca".into());
+        for id in ["r-1", "r-2"] {
+            snapshot.routes.push(RouteSpec::new(
+                RouteId::new(id).unwrap(),
+                SiteId::new("s-1").unwrap(),
+                10,
+                RouteMatcher::PathPrefix {
+                    path: PathPrefix::new("/").unwrap(),
+                },
+                RouteAction::Lua {
+                    handler: content.clone(),
+                },
+            ));
+        }
+        let unread = compile(&snapshot, 1).unwrap().unwrap();
+        assert_eq!(unread.index.contents["r-1"].handler.sockets.tls, None);
+
+        let pem = {
+            use base64::Engine;
+            let certified = rcgen::generate_simple_self_signed(vec!["ca.test".into()]).unwrap();
+            let text = base64::engine::general_purpose::STANDARD.encode(certified.cert.der());
+            format!("-----BEGIN CERTIFICATE-----\n{text}\n-----END CERTIFICATE-----\n")
+        };
+        let read = |id: &str| -> Result<Vec<u8>> {
+            match id {
+                "ca" => Ok(pem.as_bytes().to_vec()),
+                other => Err(PanelError::not_found(format!("no secret {other}"))),
+            }
+        };
+        let compiled = compile_with_secrets(&snapshot, 1, Some(&read))
+            .unwrap()
+            .unwrap();
+        let first = compiled.index.contents["r-1"].handler.sockets.tls;
+        assert!(first.is_some());
+        assert_eq!(compiled.index.contents["r-2"].handler.sockets.tls, first);
+
+        snapshot.routes[0].action = RouteAction::Lua {
+            handler: {
+                let mut missing = content.clone();
+                missing.sockets.tls.trusted_certificate_secret_id = Some("gone".into());
+                missing
+            },
+        };
+        let error = compile_with_secrets(&snapshot, 1, Some(&read)).unwrap_err();
+        assert!(
+            error
+                .message
+                .contains("lua_ssl_trusted_certificate names secret gone, which cannot be read"),
+            "{error:?}"
+        );
     }
 
     #[tokio::test]

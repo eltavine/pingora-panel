@@ -717,8 +717,67 @@ fn check_lua_variables(scope: &LuaScope, resource: &str, report: &mut Report) {
     }
 }
 
+fn check_lua_tls(scope: &LuaScope, resource: &str, report: &mut Report) {
+    for (directive, secret) in [
+        (
+            "lua_ssl_trusted_certificate",
+            &scope.ssl_trusted_certificate,
+        ),
+        ("lua_ssl_crl", &scope.ssl_crl),
+        ("lua_ssl_certificate", &scope.ssl_certificate),
+        ("lua_ssl_certificate_key", &scope.ssl_certificate_key),
+    ] {
+        if secret
+            .as_deref()
+            .is_some_and(|secret| secret.is_empty() || secret.contains(char::is_control))
+        {
+            report.error(resource, format!("{directive} names no valid secret"));
+        }
+    }
+    if scope.ssl_crl.is_some()
+        && scope.ssl_trusted_certificate.as_deref() == Some(crate::lua::SYSTEM_ROOTS)
+    {
+        report.error(
+            resource,
+            "lua_ssl_crl checks the authorities of lua_ssl_trusted_certificate, not the system's",
+        );
+    }
+    if scope
+        .ssl_verify_depth
+        .is_some_and(|depth| depth > u64::from(panel_engine::MOST_LUA_VERIFY_DEPTH))
+    {
+        report.error(
+            resource,
+            format!(
+                "lua_ssl_verify_depth is over {}",
+                panel_engine::MOST_LUA_VERIFY_DEPTH
+            ),
+        );
+    }
+    for protocol in scope.ssl_protocols.iter().flatten() {
+        if !panel_ir::tls::PROTOCOLS.contains(&protocol.as_str()) {
+            report.error(
+                resource,
+                format!("lua_ssl_protocols offers {protocol}, which is not TLSv1.2 or TLSv1.3"),
+            );
+        }
+    }
+    if scope.ssl_protocols.as_ref().is_some_and(Vec::is_empty) {
+        report.error(resource, "lua_ssl_protocols offers no protocol");
+    }
+    for suite in scope.ssl_ciphers.iter().flatten() {
+        if panel_ir::tls::suite_version(suite) != Some(panel_ir::tls::SuiteVersion::Tls12) {
+            report.error(
+                resource,
+                format!("lua_ssl_ciphers offers {suite}, which is not a TLS 1.2 cipher suite"),
+            );
+        }
+    }
+}
+
 fn check_lua_scope(scope: &LuaScope, resource: &str, route: bool, report: &mut Report) {
     check_lua_variables(scope, resource, report);
+    check_lua_tls(scope, resource, report);
     if route && scope.server_rewrite.is_some() {
         report.error(
             resource,

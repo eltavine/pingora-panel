@@ -120,6 +120,8 @@ pub struct Program {
     pub(crate) regex_match_limit: u32,
     /// The VMs `ngx.run_worker_thread` may run on; zero keeps 10.
     pub(crate) worker_vms: usize,
+    /// The client settings of the TLS terms handlers name, by `TlsId`.
+    pub(crate) tls: Vec<crate::tls::TlsConfigs>,
 }
 
 impl Program {
@@ -145,6 +147,7 @@ impl Program {
 pub struct ProgramBuilder {
     program: Program,
     diagnostics: Vec<Diagnostic>,
+    tls: Vec<crate::tls::TlsTerms>,
 }
 
 impl ProgramBuilder {
@@ -222,6 +225,19 @@ impl ProgramBuilder {
         self
     }
 
+    /// The TLS terms of cosockets that handlers name with
+    /// [`Sockets::tls`](crate::Sockets); terms given twice are held once.
+    pub fn tls(&mut self, terms: crate::tls::TlsTerms) -> crate::tls::TlsId {
+        let index = match self.tls.iter().position(|known| *known == terms) {
+            Some(index) => index,
+            None => {
+                self.tls.push(terms);
+                self.tls.len() - 1
+            }
+        };
+        crate::tls::TlsId(u32::try_from(index).unwrap_or(u32::MAX))
+    }
+
     /// Limits for `init_by_lua` and `init_worker_by_lua`.
     pub fn init_limits(&mut self, limits: Limits) -> &mut Self {
         self.program.init_limits = limits;
@@ -240,8 +256,18 @@ impl ProgramBuilder {
         &self.diagnostics
     }
 
-    /// The program, or every diagnostic its scripts have.
-    pub fn build(self) -> Result<Program, Vec<Diagnostic>> {
+    /// The program, or every diagnostic its scripts and TLS terms have.
+    pub fn build(mut self) -> Result<Program, Vec<Diagnostic>> {
+        for terms in &self.tls {
+            match terms.build() {
+                Ok(configs) => self.program.tls.push(configs),
+                Err(message) => self.diagnostics.push(Diagnostic {
+                    source: "lua_ssl".into(),
+                    line: None,
+                    message,
+                }),
+            }
+        }
         if self.diagnostics.is_empty() {
             Ok(self.program)
         } else {

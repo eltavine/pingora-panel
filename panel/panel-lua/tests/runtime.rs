@@ -9,6 +9,7 @@ use http::{HeaderMap, HeaderValue};
 use panel_lua::{
     Connection, Exchange, FailureKind, Handler, HandlerId, Host, Limits, LogLevel, NoHost, Outcome,
     Phase, Program, ProgramBuilder, Request, Runtime, Scripts, Settings, SharedStore, Source,
+    TlsTerms,
 };
 use std::time::{Duration, Instant};
 
@@ -1665,4 +1666,148 @@ async fn set_handlers_give_their_variable_what_they_return() {
         Outcome::Respond
     );
     assert_eq!(scripts.exchange().response.body, b"one-2-h-set 42 true\n");
+}
+
+fn pem(label: &str, der: &[u8]) -> Vec<u8> {
+    use base64::Engine;
+    let text = base64::engine::general_purpose::STANDARD.encode(der);
+    let mut out = format!("-----BEGIN {label}-----\n");
+    for line in text.as_bytes().chunks(64) {
+        out.push_str(std::str::from_utf8(line).unwrap());
+        out.push('\n');
+    }
+    out.push_str(&format!("-----END {label}-----\n"));
+    out.into_bytes()
+}
+
+#[tokio::test]
+async fn tls_terms_set_the_authorities_client_certificate_and_chain_length() {
+    use rcgen::{BasicConstraints, CertificateParams, CertifiedIssuer, DnType, IsCa, KeyPair};
+    use std::sync::Arc;
+    use tokio::io::AsyncWriteExt;
+    let authority = |name: &str| {
+        let mut params = CertificateParams::new(Vec::<String>::new()).unwrap();
+        params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        params.distinguished_name.push(DnType::CommonName, name);
+        params
+    };
+    let root =
+        CertifiedIssuer::self_signed(authority("root"), KeyPair::generate().unwrap()).unwrap();
+    let intermediate = CertifiedIssuer::signed_by(
+        authority("intermediate"),
+        KeyPair::generate().unwrap(),
+        &root,
+    )
+    .unwrap();
+    let server_key = KeyPair::generate().unwrap();
+    let server = CertificateParams::new(vec!["localhost".into()])
+        .unwrap()
+        .signed_by(&server_key, &intermediate)
+        .unwrap();
+    let client_key = KeyPair::generate().unwrap();
+    let client = CertificateParams::new(vec!["client".into()])
+        .unwrap()
+        .signed_by(&client_key, &root)
+        .unwrap();
+    let mut client_roots = rustls::RootCertStore::empty();
+    client_roots.add(root.der().clone()).unwrap();
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let verifier = rustls::server::WebPkiClientVerifier::builder_with_provider(
+        Arc::new(client_roots),
+        Arc::clone(&provider),
+    )
+    .build()
+    .unwrap();
+    let config = rustls::ServerConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_client_cert_verifier(verifier)
+        .with_single_cert(
+            vec![server.der().clone(), intermediate.der().clone()],
+            rustls::pki_types::PrivatePkcs8KeyDer::from(server_key.serialize_der()).into(),
+        )
+        .unwrap();
+    let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        loop {
+            let (stream, _) = listener.accept().await.unwrap();
+            let acceptor = acceptor.clone();
+            tokio::spawn(async move {
+                if let Ok(mut tls) = acceptor.accept(stream).await {
+                    let _ = tls.write_all(b"HELLO\r\n").await;
+                    let _ = tls.flush().await;
+                }
+            });
+        }
+    });
+    let script = format!(
+        r#"
+        local sock = ngx.socket.tcp()
+        assert(sock:connect("127.0.0.1", {port}))
+        local ok, err = sock:sslhandshake(nil, "localhost")
+        if not ok then return ngx.say("handshake: ", err) end
+        local line, err = sock:receive()
+        ngx.say(line or ("receive: " .. err))
+        "#
+    );
+    let roots = pem("CERTIFICATE", root.der());
+    let chain = pem("CERTIFICATE", client.der());
+    let key = pem("PRIVATE KEY", &client_key.serialize_der());
+    let terms = |presents: bool, depth: Option<usize>| {
+        let mut terms = TlsTerms::default();
+        terms.roots = Some(roots.clone());
+        if presents {
+            terms.client = Some((chain.clone(), key.clone()));
+        }
+        terms.verify_depth = depth;
+        terms
+    };
+    let mut builder = Program::builder();
+    let id = builder.handler(&source(&script));
+    let full = builder.tls(terms(true, None));
+    let anonymous = builder.tls(terms(false, None));
+    let short = builder.tls(terms(true, Some(0)));
+    let deep = builder.tls(terms(true, Some(1)));
+    assert_eq!(builder.tls(terms(true, None)), full);
+    let program = builder.build().unwrap();
+    let settings = Settings {
+        vms: 1,
+        memory: 16 << 20,
+    };
+    let (runtime, _) = Runtime::start(&program, &settings, &SharedStore::default()).unwrap();
+    let system = None;
+    for (tls, expected) in [
+        (Some(full), "HELLO"),
+        (Some(deep), "HELLO"),
+        (Some(short), "handshake: handshake failed"),
+        (Some(anonymous), "receive: "),
+        (system, "handshake: handshake failed"),
+    ] {
+        let mut granted = handler(id, Phase::Content);
+        granted.permissions.network = true;
+        granted.sockets.tls = tls;
+        let mut scripts = runtime.scripts(request("GET", "/", &[]));
+        assert_eq!(run(&mut scripts, granted).await, Outcome::Respond);
+        let body = String::from_utf8(scripts.exchange().response.body.clone()).unwrap();
+        assert!(body.starts_with(expected), "{tls:?}: {body}");
+    }
+
+    let mut builder = Program::builder();
+    let mut broken = TlsTerms::default();
+    broken.roots = Some(b"not a certificate".to_vec());
+    builder.tls(broken);
+    let mut unknown = TlsTerms::default();
+    unknown.cipher_suites = vec!["TLS_RSA_WITH_RC4_128_MD5".into()];
+    builder.tls(unknown);
+    let diagnostics = builder.build().unwrap_err();
+    let messages: Vec<_> = diagnostics.iter().map(|d| d.message.as_str()).collect();
+    assert_eq!(
+        messages,
+        [
+            "lua_ssl_trusted_certificate holds no certificate",
+            "cipher suite TLS_RSA_WITH_RC4_128_MD5 is not offered"
+        ]
+    );
 }

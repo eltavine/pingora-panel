@@ -19,5 +19,7 @@ panel-routing.workspace = true
 percent-encoding.workspace = true
 
 [dev-dependencies]
+base64.workspace = true
 panel-domain.workspace = true
+rcgen.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

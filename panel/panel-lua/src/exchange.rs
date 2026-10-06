@@ -459,6 +459,8 @@ pub struct Sockets {
     pub keepalive_timeout: Duration,
     /// Failures are written to the error log.
     pub log_errors: bool,
+    /// The TLS terms of `sslhandshake`; the system's trusted roots without.
+    pub tls: Option<crate::tls::TlsId>,
 }
 
 impl Default for Sockets {
@@ -472,6 +474,7 @@ impl Default for Sockets {
             pool_size: 30,
             keepalive_timeout: Duration::from_secs(60),
             log_errors: true,
+            tls: None,
         }
     }
 }

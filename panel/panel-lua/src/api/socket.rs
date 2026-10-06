@@ -15,16 +15,11 @@ use mlua::{
     Value,
 };
 use parking_lot::Mutex;
-use rustls::{
-    client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
-    crypto::CryptoProvider,
-    pki_types::{CertificateDer, ServerName, UnixTime},
-    ClientConfig, DigitallySignedStruct, SignatureScheme,
-};
+use rustls::pki_types::ServerName;
 use std::{
     collections::HashMap,
     future::Future,
-    sync::{Arc, OnceLock},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::{
@@ -140,87 +135,6 @@ impl Pool {
     }
 }
 
-/// Accepts any certificate chain but still checks the handshake's
-/// signatures, for `ssl_verify = false`.
-#[derive(Debug)]
-struct Unverified(Arc<CryptoProvider>);
-
-impl ServerCertVerifier for Unverified {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: UnixTime,
-    ) -> Result<ServerCertVerified, rustls::Error> {
-        Ok(ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.0.signature_verification_algorithms.supported_schemes()
-    }
-}
-
-/// TLS settings for connections that verify certificates against the
-/// system's trusted roots, or that do not.
-fn tls(verify: bool) -> Result<Arc<ClientConfig>, String> {
-    static VERIFYING: OnceLock<Result<Arc<ClientConfig>, String>> = OnceLock::new();
-    static TRUSTING: OnceLock<Result<Arc<ClientConfig>, String>> = OnceLock::new();
-    let build = move || -> Result<Arc<ClientConfig>, String> {
-        let provider = Arc::new(rustls::crypto::ring::default_provider());
-        let versions = ClientConfig::builder_with_provider(Arc::clone(&provider))
-            .with_safe_default_protocol_versions()
-            .map_err(|error| error.to_string())?;
-        let config = if verify {
-            use rustls_platform_verifier::BuilderVerifierExt;
-            versions
-                .with_platform_verifier()
-                .map_err(|error| format!("the system's trusted roots: {error}"))?
-                .with_no_client_auth()
-        } else {
-            versions
-                .dangerous()
-                .with_custom_certificate_verifier(Arc::new(Unverified(provider)))
-                .with_no_client_auth()
-        };
-        Ok(Arc::new(config))
-    };
-    if verify {
-        VERIFYING.get_or_init(build).clone()
-    } else {
-        TRUSTING.get_or_init(build).clone()
-    }
-}
-
 /// An I/O error as lua-nginx-module words it.
 pub(super) fn reason(error: &std::io::Error) -> String {
     use std::io::ErrorKind;
@@ -274,6 +188,7 @@ pub(crate) struct TcpSocket {
     reused: u32,
     /// `ngx.req.socket`: reads the request body and nothing else.
     request: bool,
+    tls: Option<crate::tls::TlsId>,
 }
 
 impl TcpSocket {
@@ -292,6 +207,7 @@ impl TcpSocket {
             read_size: sockets.buffer_size.max(1024),
             reused: 0,
             request: false,
+            tls: sockets.tls,
         }
     }
 
@@ -390,7 +306,19 @@ impl TcpSocket {
             }
             None => return failed(lua, "closed"),
         };
-        let config = match tls(verify) {
+        let config = match self.tls {
+            Some(id) => lua
+                .app_data_ref::<crate::tls::TlsTable>()
+                .and_then(|table| {
+                    table
+                        .0
+                        .get(id.0 as usize)
+                        .map(|configs| configs.get(verify))
+                })
+                .ok_or_else(|| "the TLS terms of this handler are not held".to_owned()),
+            None => crate::tls::system(verify),
+        };
+        let config = match config {
             Ok(config) => config,
             Err(error) => return failed(lua, &error),
         };

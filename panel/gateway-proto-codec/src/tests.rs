@@ -583,6 +583,15 @@ fn lua_programs_and_handlers_round_trip_and_unknown_kinds_are_refused() {
     access.sockets.read_timeout_ms = 5_000;
     access.sockets.pool_size = 10;
     access.sockets.quiet = true;
+    access.sockets.tls = Box::new(panel_ir::LuaTls {
+        trusted_certificate_secret_id: Some("ca".into()),
+        crl_secret_id: Some("crl".into()),
+        certificate_secret_id: Some("client".into()),
+        certificate_key_secret_id: Some("client-key".into()),
+        verify_depth: Some(0),
+        protocols: vec!["TLSv1.3".into()],
+        cipher_suites: vec!["TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256".into()],
+    });
     access.keep_underscores = true;
     access.no_default_type = true;
     access.read_body_first = true;

@@ -16,6 +16,7 @@ mod program;
 mod runtime;
 mod shared;
 mod timer;
+mod tls;
 mod vm;
 mod worker;
 
@@ -28,6 +29,7 @@ pub use program::{compile, Diagnostic, HandlerId, Program, ProgramBuilder, Share
 pub use runtime::{Handler, Host, NoHost, Runtime, Scripts, Settings};
 pub use shared::SharedStore;
 pub use timer::TimerRun;
+pub use tls::{TlsId, TlsTerms};
 
 /// `ngx` functions lua-nginx-module has and this runtime does not provide.
 pub fn unavailable_functions() -> &'static [&'static str] {

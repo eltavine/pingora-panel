@@ -10,6 +10,7 @@ use crate::{
     Sources, LANGUAGE_VERSION,
 };
 use globset::GlobBuilder;
+use panel_config_model::SYSTEM_ROOTS;
 use panel_dsl::{Body, Directive, Document, LineIndex};
 use panel_errors::Diagnostic;
 use std::collections::{BTreeMap, BTreeSet};
@@ -187,6 +188,17 @@ fn children(directive: &Directive) -> &[Directive] {
         _ => &[],
     }
 }
+
+/// Where distributions keep the bundle of the system's trusted roots.
+const SYSTEM_BUNDLES: &[&str] = &[
+    "/etc/ssl/certs/ca-certificates.crt",
+    "/etc/pki/tls/certs/ca-bundle.crt",
+    "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+    "/etc/ssl/ca-bundle.pem",
+    "/etc/pki/tls/cacert.pem",
+    "/etc/ssl/cert.pem",
+    "/usr/local/share/certs/ca-root-nss.crt",
+];
 
 fn args(directive: &Directive) -> Vec<&str> {
     directive
@@ -424,6 +436,24 @@ impl<'a> Importer<'a> {
                     *slot = target;
                 }
                 Some(Directive::simple(name, converted))
+            }
+            "lua_ssl_trusted_certificate"
+            | "lua_ssl_crl"
+            | "lua_ssl_certificate"
+            | "lua_ssl_certificate_key" => {
+                let path = args(directive).first().copied().unwrap_or_default();
+                if name == "lua_ssl_trusted_certificate" && SYSTEM_BUNDLES.contains(&path) {
+                    self.changed(
+                        located,
+                        format!("{path} holds the system's trusted roots, which cosockets use as `system`"),
+                    );
+                    return Some(Directive::simple(name, [SYSTEM_ROOTS]));
+                }
+                self.unsupported(
+                    located,
+                    format!("'{name}' is not carried over: store {path} as a secret and name the secret here"),
+                );
+                None
             }
             "lua_code_cache" if args(directive).as_slice() == ["off"] => {
                 self.unsupported(

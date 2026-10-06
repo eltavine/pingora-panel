@@ -6,13 +6,16 @@
 use crate::model::{Action, ConfigModel};
 use panel_domain::ContentHash;
 pub use panel_ir::{LuaFallback, LuaLogLevel, LuaPermissions, LuaSharedDict};
-use panel_ir::{LuaHandler, LuaHandlers, LuaScript, LuaSockets};
+use panel_ir::{LuaHandler, LuaHandlers, LuaScript, LuaSockets, LuaTls};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 /// The directory of the configuration that holds its Lua files.
 pub const LUA_DIRECTORY: &str = "lua/";
+
+/// What `lua_ssl_trusted_certificate` names for the system's trusted roots.
+pub const SYSTEM_ROOTS: &str = "system";
 
 fn is_false(value: &bool) -> bool {
     !*value
@@ -174,6 +177,30 @@ pub struct LuaScope {
     /// `lua_need_request_body`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub need_request_body: Option<bool>,
+    /// `lua_ssl_trusted_certificate`: the secret of the authorities
+    /// cosockets trust, or [`SYSTEM_ROOTS`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssl_trusted_certificate: Option<String>,
+    /// `lua_ssl_crl`: the secret of their revocation lists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssl_crl: Option<String>,
+    /// `lua_ssl_certificate`: the secret of the chain cosockets present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssl_certificate: Option<String>,
+    /// `lua_ssl_certificate_key`: the secret of its private key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssl_certificate_key: Option<String>,
+    /// `lua_ssl_verify_depth`: the most intermediate certificates a server
+    /// may send.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssl_verify_depth: Option<u64>,
+    /// `lua_ssl_protocols`: `TLSv1.2` and `TLSv1.3`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssl_protocols: Option<Vec<String>>,
+    /// `lua_ssl_ciphers`: IANA names of the TLS 1.2 suites offered; all
+    /// when empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssl_ciphers: Option<Vec<String>>,
     /// Set in order as the request reaches the level.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub variables: Vec<LuaVariable>,
@@ -226,6 +253,16 @@ impl LuaScope {
             transform_underscores: pick(&self.transform_underscores, &outer.transform_underscores),
             use_default_type: pick(&self.use_default_type, &outer.use_default_type),
             need_request_body: pick(&self.need_request_body, &outer.need_request_body),
+            ssl_trusted_certificate: pick(
+                &self.ssl_trusted_certificate,
+                &outer.ssl_trusted_certificate,
+            ),
+            ssl_crl: pick(&self.ssl_crl, &outer.ssl_crl),
+            ssl_certificate: pick(&self.ssl_certificate, &outer.ssl_certificate),
+            ssl_certificate_key: pick(&self.ssl_certificate_key, &outer.ssl_certificate_key),
+            ssl_verify_depth: pick(&self.ssl_verify_depth, &outer.ssl_verify_depth),
+            ssl_protocols: pick(&self.ssl_protocols, &outer.ssl_protocols),
+            ssl_ciphers: pick(&self.ssl_ciphers, &outer.ssl_ciphers),
             variables: self.variables.clone(),
         }
     }
@@ -289,6 +326,13 @@ impl LuaScope {
             || self.transform_underscores.is_some()
             || self.use_default_type.is_some()
             || self.need_request_body.is_some()
+            || self.ssl_trusted_certificate.is_some()
+            || self.ssl_crl.is_some()
+            || self.ssl_certificate.is_some()
+            || self.ssl_certificate_key.is_some()
+            || self.ssl_verify_depth.is_some()
+            || self.ssl_protocols.is_some()
+            || self.ssl_ciphers.is_some()
     }
 }
 
@@ -633,6 +677,20 @@ pub(crate) fn handler(id: String, scope: &LuaScope) -> LuaHandler {
         pool_size: scope.socket_pool_size.unwrap_or(0),
         keepalive_timeout_ms: scope.socket_keepalive_timeout_ms.unwrap_or(0),
         quiet: scope.socket_log_errors == Some(false),
+        tls: Box::new(LuaTls {
+            trusted_certificate_secret_id: scope
+                .ssl_trusted_certificate
+                .clone()
+                .filter(|secret| secret != SYSTEM_ROOTS),
+            crl_secret_id: scope.ssl_crl.clone(),
+            certificate_secret_id: scope.ssl_certificate.clone(),
+            certificate_key_secret_id: scope.ssl_certificate_key.clone(),
+            verify_depth: scope
+                .ssl_verify_depth
+                .map(|depth| u32::try_from(depth).unwrap_or(u32::MAX)),
+            protocols: scope.ssl_protocols.clone().unwrap_or_default(),
+            cipher_suites: scope.ssl_ciphers.clone().unwrap_or_default(),
+        }),
     };
     handler.keep_underscores = scope.transform_underscores == Some(false);
     handler.no_default_type = scope.use_default_type == Some(false);

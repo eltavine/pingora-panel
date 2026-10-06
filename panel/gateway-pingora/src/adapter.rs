@@ -406,7 +406,7 @@ impl PingoraGatewayAdapter {
                     .iter()
                     .map(|policy| SecurityGate::compile(policy, secrets.as_ref(), &limits))
                     .collect::<Result<Vec<_>>>()?;
-                let lua = lua::compile(&blocking, &lua_dicts, lua_vms)?;
+                let lua = lua::compile(&blocking, &lua_dicts, lua_vms, secrets.as_ref())?;
                 Ok::<_, PanelError>((certificates, statics, policies, lua))
             })
             .await

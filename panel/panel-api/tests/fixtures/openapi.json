@@ -83563,6 +83563,63 @@
             "description": "`lua_socket_send_timeout`, in milliseconds.",
             "minimum": 0
           },
+          "ssl_certificate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`lua_ssl_certificate`: the secret of the chain cosockets present."
+          },
+          "ssl_certificate_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`lua_ssl_certificate_key`: the secret of its private key."
+          },
+          "ssl_ciphers": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "`lua_ssl_ciphers`: IANA names of the TLS 1.2 suites offered; all\nwhen empty."
+          },
+          "ssl_crl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`lua_ssl_crl`: the secret of their revocation lists."
+          },
+          "ssl_protocols": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "`lua_ssl_protocols`: `TLSv1.2` and `TLSv1.3`."
+          },
+          "ssl_trusted_certificate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`lua_ssl_trusted_certificate`: the secret of the authorities\ncosockets trust, or [`SYSTEM_ROOTS`]."
+          },
+          "ssl_verify_depth": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "`lua_ssl_verify_depth`: the most intermediate certificates a server\nmay send.",
+            "minimum": 0
+          },
           "time_limit_ms": {
             "type": [
               "integer",

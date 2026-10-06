@@ -31,6 +31,9 @@ pub const MOST_LUA_SOCKET_POOL: u64 = 1 << 16;
 pub const MOST_LUA_WORKER_VMS: u64 = 1024;
 /// The most variables a site or a route may set.
 pub const MOST_LUA_VARIABLES: usize = 256;
+/// The most intermediate certificates `lua_ssl_verify_depth` may allow, as
+/// OpenSSL allows.
+pub const MOST_LUA_VERIFY_DEPTH: u32 = 100;
 /// The most `lua_max_pending_timers`, `lua_max_running_timers` and
 /// `lua_regex_cache_max_entries` may set.
 pub const MOST_LUA_TIMERS: u64 = 1 << 20;
@@ -123,6 +126,67 @@ fn check_handler(
             format!(
                 "{phase} handler's lua_socket_buffer_size is not {LEAST_LUA_SOCKET_BUFFER} to {MOST_LUA_SOCKET_BUFFER} bytes"
             ),
+        ));
+    }
+    let tls = &sockets.tls;
+    for (directive, secret) in [
+        (
+            "lua_ssl_trusted_certificate",
+            &tls.trusted_certificate_secret_id,
+        ),
+        ("lua_ssl_crl", &tls.crl_secret_id),
+        ("lua_ssl_certificate", &tls.certificate_secret_id),
+        ("lua_ssl_certificate_key", &tls.certificate_key_secret_id),
+    ] {
+        if secret
+            .as_deref()
+            .is_some_and(|secret| secret.is_empty() || secret.contains(char::is_control))
+        {
+            found.push((
+                resource.clone(),
+                format!("{phase} handler's {directive} names no valid secret"),
+            ));
+        }
+    }
+    if tls.crl_secret_id.is_some() && tls.trusted_certificate_secret_id.is_none() {
+        found.push((
+            resource.clone(),
+            format!("{phase} handler's lua_ssl_crl needs lua_ssl_trusted_certificate"),
+        ));
+    }
+    if tls.certificate_secret_id.is_some() != tls.certificate_key_secret_id.is_some() {
+        found.push((
+            resource.clone(),
+            format!(
+                "{phase} handler's lua_ssl_certificate and lua_ssl_certificate_key go together"
+            ),
+        ));
+    }
+    if tls
+        .verify_depth
+        .is_some_and(|depth| depth > MOST_LUA_VERIFY_DEPTH)
+    {
+        found.push((
+            resource.clone(),
+            format!("{phase} handler's lua_ssl_verify_depth is over {MOST_LUA_VERIFY_DEPTH}"),
+        ));
+    }
+    if let Some(protocol) = tls
+        .protocols
+        .iter()
+        .find(|protocol| !panel_ir::tls::PROTOCOLS.contains(&protocol.as_str()))
+    {
+        found.push((
+            resource.clone(),
+            format!("{phase} handler offers {protocol}, which is not TLSv1.2 or TLSv1.3"),
+        ));
+    }
+    if let Some(suite) = tls.cipher_suites.iter().find(|suite| {
+        panel_ir::tls::suite_version(suite) != Some(panel_ir::tls::SuiteVersion::Tls12)
+    }) {
+        found.push((
+            resource.clone(),
+            format!("{phase} handler offers {suite}, which is not a TLS 1.2 cipher suite"),
         ));
     }
     if sockets.pool_size > MOST_LUA_SOCKET_POOL {

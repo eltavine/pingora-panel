@@ -61,14 +61,17 @@ impl std::fmt::Debug for LuaPlan {
     }
 }
 
-/// Compiles `snapshot`'s scripts and starts `vms` VMs for them. Syntax
-/// errors and failing `init_by_lua` refuse the snapshot.
+/// Compiles `snapshot`'s scripts and starts `vms` VMs for them, with the
+/// secrets cosockets' TLS terms name read from `secrets`. Syntax errors,
+/// unreadable TLS terms and failing `init_by_lua` refuse the snapshot.
 pub(crate) fn compile(
     snapshot: &RuntimeSnapshot,
     store: &SharedStore,
     vms: usize,
+    secrets: &dyn crate::secrets::SecretSource,
 ) -> Result<(Option<Arc<LuaPlan>>, HookIndex)> {
-    let Some(compiled) = panel_lua_ir::compile(snapshot, vms)? else {
+    let read = |id: &str| secrets.read(id);
+    let Some(compiled) = panel_lua_ir::compile_with_secrets(snapshot, vms, Some(&read))? else {
         return Ok((None, HookIndex::default()));
     };
     let (runtime, logs) =

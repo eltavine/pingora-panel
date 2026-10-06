@@ -43,6 +43,13 @@ pub(super) const SCOPE: &[&str] = &[
     "lua_transform_underscores_in_response_headers",
     "lua_use_default_type",
     "lua_need_request_body",
+    "lua_ssl_trusted_certificate",
+    "lua_ssl_verify_depth",
+    "lua_ssl_crl",
+    "lua_ssl_certificate",
+    "lua_ssl_certificate_key",
+    "lua_ssl_protocols",
+    "lua_ssl_ciphers",
     "lua_code_cache",
 ];
 
@@ -73,6 +80,13 @@ pub(crate) const GROUPS: &[&[&str]] = &[
     &["lua_transform_underscores_in_response_headers"],
     &["lua_use_default_type"],
     &["lua_need_request_body"],
+    &["lua_ssl_trusted_certificate"],
+    &["lua_ssl_verify_depth"],
+    &["lua_ssl_crl"],
+    &["lua_ssl_certificate"],
+    &["lua_ssl_certificate_key"],
+    &["lua_ssl_protocols"],
+    &["lua_ssl_ciphers"],
 ];
 
 /// What each term is when no block around a handler writes it.
@@ -94,6 +108,9 @@ pub(crate) const DEFAULTS: &[(&str, &str)] = &[
     ("lua_transform_underscores_in_response_headers", "on"),
     ("lua_use_default_type", "on"),
     ("lua_need_request_body", "off"),
+    ("lua_ssl_trusted_certificate", "system"),
+    ("lua_ssl_protocols", "TLSv1.2 TLSv1.3"),
+    ("lua_ssl_ciphers", "DEFAULT"),
 ];
 
 /// The directives that set the terms handlers run on.
@@ -115,6 +132,13 @@ pub(crate) const TERMS: &[&str] = &[
     "lua_transform_underscores_in_response_headers",
     "lua_use_default_type",
     "lua_need_request_body",
+    "lua_ssl_trusted_certificate",
+    "lua_ssl_verify_depth",
+    "lua_ssl_crl",
+    "lua_ssl_certificate",
+    "lua_ssl_certificate_key",
+    "lua_ssl_protocols",
+    "lua_ssl_ciphers",
 ];
 
 /// OpenResty directives with nothing to tune here, and why. They are read
@@ -399,6 +423,24 @@ impl<'a> Lowerer<'a> {
             }
             "lua_use_default_type" => scope.use_default_type = self.bool_arg(file, arg),
             "lua_need_request_body" => scope.need_request_body = self.bool_arg(file, arg),
+            "lua_ssl_trusted_certificate" => scope.ssl_trusted_certificate = self.value(file, arg),
+            "lua_ssl_crl" => scope.ssl_crl = self.value(file, arg),
+            "lua_ssl_certificate" => scope.ssl_certificate = self.value(file, arg),
+            "lua_ssl_certificate_key" => scope.ssl_certificate_key = self.value(file, arg),
+            "lua_ssl_verify_depth" => {
+                if let Some(value) = self.value(file, arg) {
+                    scope.ssl_verify_depth = self.number(file, arg, &value, "a whole number");
+                }
+            }
+            "lua_ssl_protocols" => scope.ssl_protocols = self.lua_ssl_protocols(file, directive),
+            "lua_ssl_ciphers" => {
+                if let Some(value) = self.value(file, arg) {
+                    match panel_ir::tls::openssl_suites(&value) {
+                        Ok(suites) => scope.ssl_ciphers = Some(suites),
+                        Err(error) => self.error(file, arg.span, codes::TYPE, error),
+                    }
+                }
+            }
             "lua_allow" => scope.allow = self.lua_allow(file, directive),
             "lua_on_error" => {
                 let Some(value) = self.value(file, arg) else {
@@ -440,6 +482,50 @@ impl<'a> Lowerer<'a> {
             }
             _ => unreachable!("the schema has no other Lua term"),
         }
+    }
+
+    /// The versions `lua_ssl_protocols` offers; those rustls does not speak
+    /// are warned about.
+    fn lua_ssl_protocols(&mut self, file: &str, directive: &Directive) -> Option<Vec<String>> {
+        let mut offered: Vec<String> = Vec::new();
+        for arg in &directive.args {
+            match arg.value.as_str() {
+                known @ ("TLSv1.2" | "TLSv1.3") => {
+                    if !offered.iter().any(|protocol| protocol == known) {
+                        offered.push(known.to_owned());
+                    }
+                }
+                old @ ("SSLv2" | "SSLv3" | "TLSv1" | "TLSv1.1") => {
+                    let diagnostic = Diagnostic::warning(
+                        codes::NO_EFFECT,
+                        format!("{old} is not offered: RFC 8996 retires TLS 1.0 and 1.1, and SSL before them"),
+                    )
+                    .with_help("remove it");
+                    self.report(diagnostic, file, arg.span);
+                }
+                other => {
+                    self.error_with_help(
+                        file,
+                        arg.span,
+                        codes::TYPE,
+                        format!("{other:?} is not a protocol version"),
+                        "use TLSv1.2 or TLSv1.3",
+                    );
+                    return None;
+                }
+            }
+        }
+        if offered.is_empty() {
+            self.error_with_help(
+                file,
+                directive.span,
+                codes::TYPE,
+                "lua_ssl_protocols offers no version cosockets speak",
+                "add TLSv1.2 or TLSv1.3",
+            );
+            return None;
+        }
+        Some(offered)
     }
 
     fn lua_allow(&mut self, file: &str, directive: &Directive) -> Option<LuaPermissions> {
@@ -643,6 +729,38 @@ pub(crate) fn print_terms(scope: &LuaScope) -> Vec<(&'static str, Vec<String>)> 
         if let Some(on) = on {
             terms.push((name, vec![values::print_bool(on).to_owned()]));
         }
+    }
+    for (name, secret) in [
+        (
+            "lua_ssl_trusted_certificate",
+            &scope.ssl_trusted_certificate,
+        ),
+        ("lua_ssl_crl", &scope.ssl_crl),
+        ("lua_ssl_certificate", &scope.ssl_certificate),
+        ("lua_ssl_certificate_key", &scope.ssl_certificate_key),
+    ] {
+        if let Some(secret) = secret {
+            terms.push((name, vec![crate::variables::escape(secret).into_owned()]));
+        }
+    }
+    if let Some(depth) = scope.ssl_verify_depth {
+        terms.push(("lua_ssl_verify_depth", vec![depth.to_string()]));
+    }
+    if let Some(protocols) = &scope.ssl_protocols {
+        terms.push(("lua_ssl_protocols", protocols.clone()));
+    }
+    if let Some(suites) = &scope.ssl_ciphers {
+        let names: Vec<&str> = panel_ir::tls::OPENSSL_SUITES
+            .iter()
+            .filter(|(_, iana)| suites.iter().any(|suite| suite == iana))
+            .map(|(openssl, _)| *openssl)
+            .collect();
+        let list = if names.is_empty() {
+            "DEFAULT".to_owned()
+        } else {
+            names.join(":")
+        };
+        terms.push(("lua_ssl_ciphers", vec![list]));
     }
     terms
 }

@@ -15,6 +15,10 @@ fn is_zero(value: &u64) -> bool {
     *value == 0
 }
 
+fn is_default<T: Default + PartialEq>(value: &T) -> bool {
+    *value == T::default()
+}
+
 /// Lua source text and where it comes from.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -104,10 +108,47 @@ impl LuaLogLevel {
     }
 }
 
-/// The defaults of the cosockets a handler's scripts open, as the
-/// `lua_socket_*` directives set them; zero keeps the gateway's.
+/// The TLS terms of `sslhandshake`, as the `lua_ssl_*` directives set them,
+/// with the secrets the gateway reads them from.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LuaTls {
+    /// The PEM authorities to trust; the system's trusted roots when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trusted_certificate_secret_id: Option<String>,
+    /// PEM revocation lists of those authorities.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crl_secret_id: Option<String>,
+    /// The PEM certificate chain the client presents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certificate_secret_id: Option<String>,
+    /// The PEM private key of that certificate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certificate_key_secret_id: Option<String>,
+    /// The most intermediate certificates a server may send; not limited
+    /// when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verify_depth: Option<u32>,
+    /// `TLSv1.2` and `TLSv1.3`; both when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub protocols: Vec<String>,
+    /// IANA names of the TLS 1.2 suites offered; all when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cipher_suites: Vec<String>,
+}
+
+impl LuaTls {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// The defaults of the cosockets a handler's scripts open, as the
+/// `lua_socket_*` and `lua_ssl_*` directives set them; zero keeps the
+/// gateway's.
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LuaSockets {
     #[serde(default, skip_serializing_if = "is_zero")]
@@ -129,6 +170,8 @@ pub struct LuaSockets {
     /// (`lua_socket_log_errors off`).
     #[serde(default, skip_serializing_if = "is_false")]
     pub quiet: bool,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub tls: Box<LuaTls>,
 }
 
 impl LuaSockets {

@@ -31,7 +31,7 @@ pub use http::{FieldChanges, HttpPolicy};
 pub use lua::{
     lua_changes, lua_codes_mut, lua_handlers, module_name, script_id, LuaChanges, LuaCode,
     LuaConfig, LuaFallback, LuaLogLevel, LuaPermissions, LuaScope, LuaSharedDict, LuaVariable,
-    LUA_DIRECTORY,
+    LUA_DIRECTORY, SYSTEM_ROOTS,
 };
 pub use model::{
     entity_tag, Action, ConfigModel, Domain, Listener, MatchKind, Route, RouteCondition,

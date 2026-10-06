@@ -274,6 +274,9 @@ http {
     lua_package_path "/usr/local/openresty/lualib/?.lua;;";
     lua_shared_dict limits 10m;
     lua_code_cache on;
+    lua_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+    lua_ssl_verify_depth 5;
+    lua_ssl_certificate /etc/nginx/client.pem;
     init_by_lua_block {
         local cjson = require "cjson"
     }
@@ -321,7 +324,7 @@ http {
     let imported = import_nginx(&files, "nginx.conf").unwrap();
     let main = imported.sources.get("main.conf").unwrap();
     for expected in [
-        "    lua_shared_dict limits 10m;\n    init_by_lua_block {\n        local cjson = require \"cjson\"\n    }\n",
+        "    lua_shared_dict limits 10m;\n    lua_ssl_trusted_certificate system;\n    lua_ssl_verify_depth 5;\n    init_by_lua_block {\n        local cjson = require \"cjson\"\n    }\n",
         "        balancer_by_lua_file lua/pick.lua;\n",
         "        access_by_lua_file lua/auth.lua;\n",
         "            set_by_lua_block $x { return 1 }\n",
@@ -349,6 +352,14 @@ http {
         (
             codes::CHANGED,
             "/usr/local/openresty/nginx/lua/pick.lua is read from lua/pick.lua",
+        ),
+        (
+            codes::CHANGED,
+            "/etc/ssl/certs/ca-certificates.crt holds the system's trusted roots",
+        ),
+        (
+            codes::UNSUPPORTED,
+            "'lua_ssl_certificate' is not carried over: store /etc/nginx/client.pem as a secret",
         ),
     ] {
         assert!(

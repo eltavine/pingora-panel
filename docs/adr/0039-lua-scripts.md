@@ -143,9 +143,22 @@ honour for TCP, are refused.
 `rewrite_by_lua_no_postpone`, `precontent_by_lua_no_postpone`,
 `lua_upstream_skip_openssl_default_verify` and `balancer_keepalive` — are
 read with a warning saying why, so configurations written for OpenResty
-still read. `sslhandshake` verifies the server's
-certificate with the system's trusted roots unless the script passes
-`ssl_verify` false, where lua-nginx-module verifies nothing by default.
+still read. `sslhandshake` verifies the server's certificate unless the
+script passes `ssl_verify` false, where lua-nginx-module verifies nothing
+by default: against the system's trusted roots, or the authorities of
+`lua_ssl_trusted_certificate` with the revocation lists of `lua_ssl_crl`.
+`lua_ssl_certificate` and `lua_ssl_certificate_key` give the certificate
+cosockets present when a server asks for one, `lua_ssl_verify_depth` the
+most intermediate certificates a chain may have, not counting a root the
+server sends along (not limited unless written, where lua-nginx-module
+allows 1), `lua_ssl_protocols` the versions among TLSv1.2 and TLSv1.3, and
+`lua_ssl_ciphers` the TLS 1.2 suites by their OpenSSL names, TLS 1.3's
+being offered always, as OpenSSL offers them. These terms are inherited as
+the `lua_socket_*` ones are, and certificates, keys and lists are secrets
+of the inventory; the importer turns a system bundle such as
+`/etc/ssl/certs/ca-certificates.crt` into `system`. `lua_ssl_key_log`,
+which would write session keys out, and `lua_ssl_conf_command`, which
+takes OpenSSL commands, are refused.
 Subrequests (`ngx.location.capture`), named locations, the raw request
 socket of `ngx.req.socket(true)`, `ngx.on_abort` and body files are not
 available.

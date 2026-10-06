@@ -651,6 +651,25 @@ message LuaSockets {
   uint64 keepalive_timeout_ms = 6;
   // Failures are not written to the error log (lua_socket_log_errors off).
   bool quiet = 7;
+  // The TLS terms of sslhandshake (lua_ssl_*).
+  LuaTls tls = 8;
+}
+
+// The TLS terms of sslhandshake, with the secrets they are read from.
+message LuaTls {
+  // The PEM authorities to trust; the system's trusted roots when absent.
+  optional string trusted_certificate_secret_id = 1;
+  // PEM revocation lists of those authorities.
+  optional string crl_secret_id = 2;
+  // The PEM certificate chain the client presents, and its private key.
+  optional string certificate_secret_id = 3;
+  optional string certificate_key_secret_id = 4;
+  // The most intermediate certificates a server may send.
+  optional uint32 verify_depth = 5;
+  // TLSv1.2 and TLSv1.3; both when empty.
+  repeated string protocols = 6;
+  // IANA names of the TLS 1.2 suites offered; all when empty.
+  repeated string cipher_suites = 7;
 }
 
 // A script run in a phase, and the terms it runs on. Zero limits keep the

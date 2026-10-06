@@ -314,6 +314,7 @@ impl Vm {
             program.regex_cache.unwrap_or(api::REGEX_CACHE_ENTRIES),
             program.regex_match_limit,
         ));
+        lua.set_app_data(crate::tls::TlsTable(program.tls.clone().into()));
         let slot = Arc::new(Slot::new());
         {
             let slot = Arc::clone(&slot);

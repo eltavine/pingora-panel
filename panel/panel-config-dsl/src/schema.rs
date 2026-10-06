@@ -538,6 +538,27 @@ pub static DIRECTIVES: &[DirectiveSpec] = &[
     spec!("lua_need_request_body" in LUA_CONTEXTS, None, 1..Some(1), false,
         "lua_need_request_body on|off;", "Whether the request body is read before a rewrite, access or content handler runs, so scripts find it without ngx.req.read_body().",
         inherits "off when not written; a route's replaces its server's, and a server's the one in http."),
+    spec!("lua_ssl_trusted_certificate" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "lua_ssl_trusted_certificate system|<secret>;", "The authorities sock:sslhandshake checks a server's certificate against: a secret of PEM certificates, or the system's trusted roots.",
+        inherits "system when not written; a route's replaces its server's, and a server's the one in http."),
+    spec!("lua_ssl_verify_depth" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "lua_ssl_verify_depth <count>;", "The most intermediate certificates a server's chain may have.",
+        inherits "Not limited when not written, where lua-nginx-module allows 1; a route's replaces its server's, and a server's the one in http."),
+    spec!("lua_ssl_crl" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "lua_ssl_crl <secret>;", "A secret of PEM revocation lists that the authorities of lua_ssl_trusted_certificate published.",
+        inherits "A route's replaces its server's, and a server's the one in http."),
+    spec!("lua_ssl_certificate" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "lua_ssl_certificate <secret>;", "A secret of the PEM certificate chain cosockets present when a server asks for one.",
+        inherits "A route's replaces its server's, and a server's the one in http."),
+    spec!("lua_ssl_certificate_key" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "lua_ssl_certificate_key <secret>;", "A secret of the PEM private key of lua_ssl_certificate.",
+        inherits "A route's replaces its server's, and a server's the one in http."),
+    spec!("lua_ssl_protocols" in LUA_CONTEXTS, None, 1..None, false,
+        "lua_ssl_protocols TLSv1.2|TLSv1.3 ...;", "The protocol versions cosockets offer.",
+        inherits "TLSv1.2 TLSv1.3 when not written; a route's replaces its server's, and a server's the one in http."),
+    spec!("lua_ssl_ciphers" in LUA_CONTEXTS, None, 1..Some(1), false,
+        "lua_ssl_ciphers <OpenSSL cipher list>;", "The TLS 1.2 suites cosockets offer, by their OpenSSL names; TLS 1.3's are always offered.",
+        inherits "Every suite when not written; a route's replaces its server's, and a server's the one in http."),
     spec!("lua_code_cache" in LUA_CONTEXTS, None, 1..Some(1), false,
         "lua_code_cache on;", "Accepted from OpenResty: scripts are compiled once per activation, so off is refused."),
     DirectiveSpec {
@@ -579,8 +600,11 @@ pub fn refusal(name: &str) -> Option<String> {
         "lua_socket_send_lowat" => {
             "Linux, which the gateway runs on, sets no send low-water mark for TCP sockets"
         }
-        _ if name.starts_with("lua_ssl_") => {
-            "sock:sslhandshake verifies certificates with the system's trusted roots"
+        "lua_ssl_key_log" => {
+            "TLS session keys are never written out, so no capture can be decrypted with them"
+        }
+        "lua_ssl_conf_command" => {
+            "cosockets use rustls, which takes no OpenSSL configuration commands"
         }
         _ => return None,
     };

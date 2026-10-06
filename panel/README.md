@@ -1435,13 +1435,20 @@ that mean one thing in every phase.
 | `lua_transform_underscores_in_response_headers` | `on` | `ngx.header.x_trace_id` sets `X-Trace-Id` |
 | `lua_use_default_type` | `on` | answers without a `Content-Type` get `text/plain; charset=utf-8` |
 | `lua_need_request_body` | `off` | the request body is read before rewrite, access and content handlers run |
+| `lua_ssl_trusted_certificate` | `system` | the authorities `sslhandshake` checks servers against: a secret of PEM certificates, or the system's trusted roots |
+| `lua_ssl_crl` | none | a secret of PEM revocation lists of those authorities |
+| `lua_ssl_certificate`, `lua_ssl_certificate_key` | none | secrets of the certificate chain cosockets present and its key |
+| `lua_ssl_verify_depth` | not limited | the most intermediate certificates a server's chain may have |
+| `lua_ssl_protocols` | `TLSv1.2 TLSv1.3` | the versions cosockets offer |
+| `lua_ssl_ciphers` | every suite | the TLS 1.2 suites offered, by OpenSSL name; TLS 1.3's are always offered |
 
 The sandbox has no `io`, `os.execute`, native libraries, FFI or bytecode
 loading; globals are read-only and a request's writes stay with it. A run
 that keeps the CPU for more than a millisecond yields its thread. A failed
 run leaves the request as it was before it. TCP cosockets
-(`ngx.socket.tcp`) verify certificates with the system's trusted roots
-unless a script passes `ssl_verify` false. Light threads
+(`ngx.socket.tcp`) verify certificates with the system's trusted roots,
+or the authorities `lua_ssl_trusted_certificate` names, unless a script
+passes `ssl_verify` false. Light threads
 (`ngx.thread.spawn`) share the budget of the run that spawned them, which
 ends once they have all ended. Timers (`ngx.timer.at`, `ngx.timer.every`)
 run later under the limits and permissions of the run that created them;

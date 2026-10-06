@@ -5,7 +5,7 @@ use panel_contracts::gateway::v1 as wire;
 use panel_errors::{PanelError, Result};
 use panel_ir::{
     LuaFallback, LuaHandler, LuaHandlers, LuaLogLevel, LuaPermissions, LuaProgram, LuaScript,
-    LuaSharedDict, LuaSockets, LuaVariable,
+    LuaSharedDict, LuaSockets, LuaTls, LuaVariable,
 };
 
 pub(super) fn decode_program(value: Option<wire::LuaProgram>) -> Result<LuaProgram> {
@@ -183,6 +183,21 @@ pub(super) fn decode_handler(value: wire::LuaHandler) -> Result<LuaHandler> {
                 pool_size: sockets.pool_size,
                 keepalive_timeout_ms: sockets.keepalive_timeout_ms,
                 quiet: sockets.quiet,
+                tls: Box::new(
+                    sockets
+                        .tls
+                        .map(|tls| *tls)
+                        .map(|tls| LuaTls {
+                            trusted_certificate_secret_id: tls.trusted_certificate_secret_id,
+                            crl_secret_id: tls.crl_secret_id,
+                            certificate_secret_id: tls.certificate_secret_id,
+                            certificate_key_secret_id: tls.certificate_key_secret_id,
+                            verify_depth: tls.verify_depth,
+                            protocols: tls.protocols,
+                            cipher_suites: tls.cipher_suites,
+                        })
+                        .unwrap_or_default(),
+                ),
             })
             .unwrap_or_default(),
         keep_underscores: value.keep_underscores,
@@ -213,6 +228,18 @@ pub(super) fn encode_handler(value: &LuaHandler) -> wire::LuaHandler {
             pool_size: value.sockets.pool_size,
             keepalive_timeout_ms: value.sockets.keepalive_timeout_ms,
             quiet: value.sockets.quiet,
+            tls: (!value.sockets.tls.is_default()).then(|| {
+                let tls = &value.sockets.tls;
+                Box::new(wire::LuaTls {
+                    trusted_certificate_secret_id: tls.trusted_certificate_secret_id.clone(),
+                    crl_secret_id: tls.crl_secret_id.clone(),
+                    certificate_secret_id: tls.certificate_secret_id.clone(),
+                    certificate_key_secret_id: tls.certificate_key_secret_id.clone(),
+                    verify_depth: tls.verify_depth,
+                    protocols: tls.protocols.clone(),
+                    cipher_suites: tls.cipher_suites.clone(),
+                })
+            }),
         }),
         keep_underscores: value.keep_underscores,
         no_default_type: value.no_default_type,

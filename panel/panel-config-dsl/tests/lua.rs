@@ -34,7 +34,7 @@ http {
 
     server shop {
         server_name shop.example;
-        lua_on_error continue; lua_socket_read_timeout 5s; lua_socket_pool_size 10; lua_socket_log_errors off; lua_transform_underscores_in_response_headers off; lua_use_default_type off; lua_need_request_body on;
+        lua_on_error continue; lua_socket_read_timeout 5s; lua_socket_pool_size 10; lua_socket_log_errors off; lua_transform_underscores_in_response_headers off; lua_use_default_type off; lua_need_request_body on; lua_ssl_trusted_certificate shop-ca; lua_ssl_verify_depth 2; lua_ssl_protocols TLSv1.3; lua_ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:HIGH:!MD5; lua_ssl_certificate shop-client; lua_ssl_certificate_key shop-client-key; lua_ssl_crl shop-crl;
         lua_log_level warn;
         header_filter_by_lua_block {
             ngx.header["X-Served-By"] = "shop" -- } in a comment
@@ -155,6 +155,30 @@ fn lua_directives_read_into_the_model_at_each_level() {
         (Some(5_000), Some(10), Some(false), Some(false), Some(false))
     );
     assert_eq!(site.lua.need_request_body, Some(true));
+    assert_eq!(
+        (
+            site.lua.ssl_trusted_certificate.as_deref(),
+            site.lua.ssl_crl.as_deref(),
+            site.lua.ssl_certificate.as_deref(),
+            site.lua.ssl_certificate_key.as_deref(),
+            site.lua.ssl_verify_depth
+        ),
+        (
+            Some("shop-ca"),
+            Some("shop-crl"),
+            Some("shop-client"),
+            Some("shop-client-key"),
+            Some(2)
+        )
+    );
+    assert_eq!(
+        site.lua.ssl_protocols.as_deref(),
+        Some(&["TLSv1.3".to_owned()][..])
+    );
+    assert_eq!(
+        site.lua.ssl_ciphers.as_deref(),
+        Some(&["TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256".to_owned()][..])
+    );
     let Some(LuaCode::Inline { code, .. }) = &site.lua.header_filter else {
         panic!("the header filter is inline");
     };
@@ -194,6 +218,15 @@ fn lua_directives_read_into_the_model_at_each_level() {
         (5_000, 10, true, true, true)
     );
     assert!(filter.read_body_first);
+    let tls = &filter.sockets.tls;
+    assert_eq!(
+        (
+            tls.trusted_certificate_secret_id.as_deref(),
+            tls.verify_depth,
+            tls.protocols.as_slice()
+        ),
+        (Some("shop-ca"), Some(2), &["TLSv1.3".to_owned()][..])
+    );
 }
 
 #[test]
@@ -213,7 +246,7 @@ fn lua_prints_back_as_written() {
         "    lua_memory_limit 32m;\n    access_by_lua_no_postpone on;\n    lua_max_pending_timers 64;\n    lua_max_running_timers 8;\n    lua_regex_cache_max_entries 0;\n    lua_regex_match_limit 100000;\n    lua_worker_thread_vm_pool_size 4;\n    lua_shared_dict hits 1m;\n    lua_time_limit 50ms;\n    lua_allow upstream;\n    init_by_lua_block {\n        local limits",
         "    access_by_lua_file lua/auth.lua;\n    log_by_lua_block { local n",
         "        balancer_by_lua_file lua/pick.lua;\n",
-        "        lua_on_error continue;\n        lua_log_level warn;\n        lua_socket_read_timeout 5s;\n        lua_socket_pool_size 10;\n        lua_socket_log_errors off;\n        lua_transform_underscores_in_response_headers off;\n        lua_use_default_type off;\n        lua_need_request_body on;\n        header_filter_by_lua_block {\n",
+        "        lua_on_error continue;\n        lua_log_level warn;\n        lua_socket_read_timeout 5s;\n        lua_socket_pool_size 10;\n        lua_socket_log_errors off;\n        lua_transform_underscores_in_response_headers off;\n        lua_use_default_type off;\n        lua_need_request_body on;\n        lua_ssl_trusted_certificate shop-ca;\n        lua_ssl_crl shop-crl;\n        lua_ssl_certificate shop-client;\n        lua_ssl_certificate_key shop-client-key;\n        lua_ssl_verify_depth 2;\n        lua_ssl_protocols TLSv1.3;\n        lua_ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256;\n        header_filter_by_lua_block {\n",
         "            content_by_lua_block {\n                local t = { \"{\", [[}]] }\n",
     ] {
         assert!(main.contains(expected), "{expected}\n{main}");
@@ -886,4 +919,87 @@ http {
             .any(|(_, _, text)| text.contains("lua:anything")),
         "{found:#?}"
     );
+}
+
+#[test]
+fn lua_ssl_terms_refuse_what_cosockets_cannot_do() {
+    let sources = Sources::single(
+        r#"language_version 1;
+http {
+    lua_ssl_protocols TLSv1 TLSv1.2;
+    server s {
+        server_name s.example;
+        lua_ssl_protocols SSLv3;
+        lua_ssl_ciphers !ECDHE-ECDSA-AES256-GCM-SHA384:!ECDHE-ECDSA-AES128-GCM-SHA256:!ECDHE-ECDSA-CHACHA20-POLY1305:!ECDHE-RSA-AES256-GCM-SHA384:!ECDHE-RSA-AES128-GCM-SHA256:!ECDHE-RSA-CHACHA20-POLY1305;
+        lua_ssl_key_log /tmp/keys.log;
+        lua_ssl_conf_command Options -SessionTicket;
+        content_by_lua_block { ngx.say("hi") }
+    }
+}
+"#,
+    );
+    let found = messages(&read(&sources));
+    for (code, message) in [
+        (codes::NO_EFFECT, "TLSv1 is not offered: RFC 8996 retires"),
+        (
+            codes::TYPE,
+            "lua_ssl_protocols offers no version cosockets speak",
+        ),
+        (codes::TYPE, "leaves out every TLS 1.2 suite"),
+        (
+            codes::UNKNOWN_DIRECTIVE,
+            "'lua_ssl_key_log' is not available",
+        ),
+        (
+            codes::UNKNOWN_DIRECTIVE,
+            "'lua_ssl_conf_command' is not available",
+        ),
+    ] {
+        assert!(
+            found
+                .iter()
+                .any(|(found, _, text)| found == code && text.contains(message)),
+            "{message}: {found:#?}"
+        );
+    }
+    let mut model = read(&Sources::single(
+        r#"language_version 1;
+http {
+    server s {
+        server_name s.example;
+        lua_ssl_trusted_certificate system;
+        lua_ssl_crl revoked;
+        lua_ssl_verify_depth 101;
+        content_by_lua_block { ngx.say("hi") }
+    }
+}
+"#,
+    ))
+    .model;
+    let problems: Vec<String> = panel_config_model::validate(&model)
+        .into_iter()
+        .map(|problem| problem.message)
+        .collect();
+    for expected in [
+        "lua_ssl_crl checks the authorities of lua_ssl_trusted_certificate, not the system's",
+        "lua_ssl_verify_depth is over 100",
+    ] {
+        assert!(
+            problems.iter().any(|problem| problem.contains(expected)),
+            "{expected}: {problems:#?}"
+        );
+    }
+    model.sites[0].lua.ssl_crl = None;
+    model.sites[0].lua.ssl_verify_depth = Some(3);
+    let snapshot = compile(&model, RevisionId::new(1)).unwrap();
+    let content = snapshot
+        .routes
+        .iter()
+        .find_map(|route| match &route.action {
+            panel_ir::RouteAction::Lua { handler } => Some(handler),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(content.sockets.tls.trusted_certificate_secret_id, None);
+    assert_eq!(content.sockets.tls.verify_depth, Some(3));
 }

@@ -15,6 +15,7 @@ fn main() {
         // Debug for these is written by hand, without their secrets.
         .skip_debug([".pingora.panel.ops.v1.RegistryCredentials"])
         .boxed(".pingora.panel.automation.v1.BackupsDownloadResponse.message.backup")
+        .boxed(".pingora.panel.gateway.v1.LuaSockets.tls")
         .compile_protos(
             &[
                 "../proto/audit/v1/audit.proto",
