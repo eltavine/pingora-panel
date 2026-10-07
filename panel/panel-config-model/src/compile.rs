@@ -1288,6 +1288,7 @@ mod tests {
         model.sites[0].routes[0].cache_policy_id = Some("unused".into());
         model.cache_policies[0].key = Some(String::new());
         model.cache.max_bytes = Some(1024);
+        model.cache_policies.push(crate::CachePolicy::new("off"));
         let messages: Vec<String> = crate::validate(&model)
             .into_iter()
             .map(|diagnostic| diagnostic.message)
@@ -1296,6 +1297,7 @@ mod tests {
             "the route names a cache policy and keeps out of the cache",
             "the policy has a key of 0 bytes",
             "the cache store of 1024 bytes is not between",
+            "a cache policy is not named off",
         ] {
             assert!(
                 messages.iter().any(|message| message.starts_with(expected)),
@@ -1311,6 +1313,7 @@ mod tests {
         assert!(messages.contains(&"cache policy missing does not exist".to_string()));
 
         model.sites[0].routes[0].cache_policy_id = None;
+        model.cache_policies.pop();
         model.cache_policies[0].key = None;
         model.cache_policies[0].enabled = false;
         model.cache.max_bytes = None;

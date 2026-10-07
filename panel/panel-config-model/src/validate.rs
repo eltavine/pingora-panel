@@ -323,6 +323,11 @@ fn validate_cache<'a>(model: &'a ConfigModel, report: &mut Report) -> BTreeSet<&
                 &resource,
                 format!("cache policy id {:?} is invalid or duplicated", policy.id),
             );
+        } else if policy.id == "off" {
+            report.error(
+                &resource,
+                "a cache policy is not named off, which keeps sites and routes out of the cache",
+            );
         }
         for problem in panel_engine::cache_policy_problems(&policy.compile()) {
             report.error(&resource, format!("the policy {problem}"));
