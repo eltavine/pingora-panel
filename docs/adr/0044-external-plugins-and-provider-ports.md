@@ -107,12 +107,14 @@ which ran before it.
 | Secrets | `plugin.v1.SecretProvider`: resolve a path | `<plugin>:<path>` secret references |
 | Notifications | `plugin.v1.NotificationProvider`: deliver an alert | Alert channels of kind `plugin` (ADR 0027) |
 | Backup targets | `plugin.v1.BackupTarget`: store, list, fetch and delete archives | Backups copied to a target and restored from it (ADR 0035) |
-| Container engines | `plugin.v1.ContainerEngine`: list and operate containers | Engines named `plugin.<name>` beside the agent's (ADR 0031) |
-| Gateway engines | `gateway.v1.GatewayService`, the gateway's own contract | A gateway engine the configuration is applied to (ADR 0010) |
+| Container engines | `ops.v1.Containers`, the agent's own contract | Engines named `plugin.<name>` beside the agent's (ADR 0031) |
+| Gateway engines | `gateway.v1.GatewayEngine` and `gateway.v1.GatewayRuntime`, the gateway's own contracts | A gateway engine the configuration is applied to (ADR 0010) |
 
 A consumer names the plugin and calls the port through the host; nothing
-else in the consumer changes, so an internal port and its plugin port carry
-the same operations.
+else in the consumer changes. Where the product already has a gRPC contract
+for a port, the plugin implements that contract, so the consumer's client
+is the same; a plugin answers `UNIMPLEMENTED` for operations it does not
+offer, which the consumer reports as unsupported.
 
 **Access and audit.** Viewing plugins needs `plugins.read` and changing them
 `plugins.manage`, which only administrators hold. Plugins never reach the
