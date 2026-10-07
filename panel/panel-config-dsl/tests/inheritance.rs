@@ -430,3 +430,37 @@ http {
         )]
     );
 }
+
+#[test]
+fn routes_keep_their_servers_error_pages_until_they_write_one() {
+    let text = "language_version 1;\nhttp {\n    server shop {\n        server_name shop.example;\n        error_page 404 file=errors/404.html;\n        intercept_errors on;\n        respond 204;\n        route api {\n            match prefix /api;\n            respond 200;\n        }\n        route own {\n            match prefix /own;\n            error_page 500 body=oops;\n            respond 200;\n        }\n    }\n}\n";
+    let (sources, lowered) = read(text);
+    assert!(lowered.is_valid(), "{:#?}", lowered.diagnostics);
+    let (line, column) = position(text, "respond 200;");
+    let api = explain(&sources, &lowered, "main.conf", line, column).unwrap();
+    let pages = setting(&api.settings, "error_page", None);
+    assert_eq!(
+        (pages.source, pages.from.as_deref()),
+        (SettingSource::Inherited, Some("server shop"))
+    );
+    assert_eq!(
+        setting(&api.settings, "intercept_errors", None).source,
+        SettingSource::Inherited
+    );
+    let (line, column) = position(text, "error_page 500 body=oops;");
+    let own = explain(&sources, &lowered, "main.conf", line, column).unwrap();
+    assert_eq!(
+        setting(&own.settings, "error_page", None).source,
+        SettingSource::Here
+    );
+    assert_eq!(
+        setting(&own.settings, "intercept_errors", None).source,
+        SettingSource::Inherited
+    );
+    let (line, column) = position(text, "respond 204;");
+    let server = explain(&sources, &lowered, "main.conf", line, column).unwrap();
+    assert_eq!(
+        setting(&server.settings, "maintenance", None).source,
+        SettingSource::Default
+    );
+}

@@ -6,10 +6,10 @@ use crate::security::SecurityPolicy;
 use chrono::{DateTime, Utc};
 use panel_domain::{CertificateId, ContentHash, NormalizedHost};
 use panel_ir::{
-    AccessLog, ActiveHealthCheck, CircuitBreaker, ListenerProtocols, LoadBalancingPolicy,
-    LoggingPolicy, PassiveHealthPolicy, RealIpHeader, RetryBudget, RetryCondition, RetryPolicy,
-    RewriteRule, StrictTransportSecurity, UpstreamConnectionPolicy, UpstreamPoolSpec,
-    UpstreamQueue, UpstreamTlsPolicy, WwwRedirect,
+    AccessLog, ActiveHealthCheck, CircuitBreaker, ErrorPages, ListenerProtocols,
+    LoadBalancingPolicy, LoggingPolicy, PassiveHealthPolicy, RealIpHeader, RetryBudget,
+    RetryCondition, RetryPolicy, RewriteRule, StrictTransportSecurity, UpstreamConnectionPolicy,
+    UpstreamPoolSpec, UpstreamQueue, UpstreamTlsPolicy, WwwRedirect,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -248,6 +248,17 @@ pub struct Site {
     /// (ADR 0040).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rewrites: Vec<RewriteRule>,
+    /// Pages answering the site's errors (ADR 0041).
+    #[serde(default, skip_serializing_if = "ErrorPages::is_empty")]
+    pub error_pages: ErrorPages,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maintenance: Option<SiteMaintenance>,
+    /// How the site answers `/robots.txt` itself, ahead of its routes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub robots: Option<Robots>,
+    /// How the site answers `/favicon.ico` itself, ahead of its routes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub favicon: Option<Favicon>,
     #[serde(default)]
     pub group: Option<String>,
     #[serde(default)]
@@ -350,6 +361,88 @@ pub struct Route {
     /// to it, as nginx's `internal`; others get 404.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub internal: bool,
+    /// Pages answering the route's errors in place of its site's; an empty
+    /// list answers them without pages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_pages: Option<ErrorPages>,
+}
+
+/// A site's maintenance (ADR 0041): while it is enabled, clients outside
+/// `allow` get its response and the others reach the site as it is. It is
+/// kept while disabled, to be enabled again as it was.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
+pub struct SiteMaintenance {
+    #[serde(default = "enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_respond_status")]
+    pub status: u16,
+    /// A template of request variables; the site's error page for the status
+    /// answers when there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after_seconds: Option<u32>,
+    /// Networks such as `10.0.0.0/8`, or addresses, whose clients after
+    /// trusted proxies reach the site.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow: Vec<String>,
+}
+
+impl SiteMaintenance {
+    /// The maintenance as gateways apply it, enabled or not.
+    pub fn runtime(&self) -> panel_ir::Maintenance {
+        panel_ir::Maintenance {
+            status: self.status,
+            body: self.body.clone(),
+            content_type: self.content_type.clone(),
+            retry_after_seconds: self.retry_after_seconds,
+            allow: self.allow.clone(),
+        }
+    }
+}
+
+/// How a site answers `/robots.txt` (RFC 9309).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[non_exhaustive]
+pub enum Robots {
+    /// Every crawler may crawl every path.
+    AllowAll,
+    /// No crawler may crawl any path.
+    DisallowAll,
+    /// The site's own records, sent as written.
+    Custom { body: String },
+}
+
+impl Robots {
+    /// The file the site answers with.
+    pub fn body(&self) -> &str {
+        match self {
+            Self::AllowAll => "User-agent: *\nAllow: /\n",
+            Self::DisallowAll => "User-agent: *\nDisallow: /\n",
+            Self::Custom { body } => body,
+        }
+    }
+}
+
+/// How a site answers `/favicon.ico`.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[non_exhaustive]
+pub enum Favicon {
+    /// 204 No Content, so browsers stop asking.
+    NoContent,
+    /// A file in a directory below the gateway's static root, such as
+    /// `shop/favicon.ico`; its media type follows its extension.
+    File { path: String },
+    /// A redirect (302) to an icon elsewhere.
+    Redirect { location: String },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

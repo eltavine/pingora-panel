@@ -2,7 +2,7 @@
 
 use crate::lua::{self, LuaConfig, LuaScope, Scripts};
 use crate::model::{
-    Action, ConfigModel, MatchKind, Route, RouteCondition, Site, TlsProfile, ValueTest,
+    Action, ConfigModel, Favicon, MatchKind, Route, RouteCondition, Site, TlsProfile, ValueTest,
 };
 use panel_domain::{
     EndpointAddress, EndpointId, PathPrefix, RevisionId, RouteId, SiteId, UpstreamPoolId,
@@ -12,10 +12,10 @@ use panel_ir::logging::LOGGING_CAPABILITY;
 use panel_ir::template::{uses_variables, TEMPLATE_CAPABILITY};
 use panel_ir::tls::{HSTS_CAPABILITY, TLS_SETTINGS_CAPABILITY};
 use panel_ir::{
-    CapabilityRequirement, DomainSpec, ListenerRef, LoadBalancingPolicy, LuaProgram, RouteAction,
-    RouteMatcher, RouteSpec, RuntimeSnapshot, SiteSpec, StaticContentPolicy, UpstreamEndpoint,
-    UpstreamPoolSpec, WwwRedirect, HTTP_POLICIES_CAPABILITY, LUA_SCRIPTS_CAPABILITY,
-    REWRITE_CAPABILITY,
+    CapabilityRequirement, DomainSpec, ListenerRef, LoadBalancingPolicy, LuaProgram, RewriteRule,
+    RouteAction, RouteMatcher, RouteSpec, RuntimeSnapshot, SiteSpec, StaticContentPolicy,
+    UpstreamEndpoint, UpstreamPoolSpec, WwwRedirect, ERROR_PAGES_CAPABILITY,
+    HTTP_POLICIES_CAPABILITY, LUA_SCRIPTS_CAPABILITY, MAINTENANCE_CAPABILITY, REWRITE_CAPABILITY,
 };
 use panel_ir::{
     REQUEST_HEAD_TIMEOUT_CAPABILITY, REQUEST_SECURITY_CAPABILITY, ROUTE_CONDITIONS_CAPABILITY,
@@ -29,6 +29,10 @@ pub const NAMED_ROUTE_CAPABILITY: &str = "route.named";
 
 /// The site action runs after every route the operator defined.
 const SITE_ACTION_PRIORITY: u32 = u32::MAX;
+
+/// The paths a site may answer itself, ahead of its routes (ADR 0041).
+pub(crate) const ROBOTS_PATH: &str = "/robots.txt";
+pub(crate) const FAVICON_PATH: &str = "/favicon.ico";
 
 /// Compiles live sites and the upstreams they use; the result still needs
 /// engine validation before it can be prepared.
@@ -285,6 +289,18 @@ impl Compiler<'_> {
         if !site.rewrites.is_empty() {
             self.capabilities.insert(REWRITE_CAPABILITY);
         }
+        compiled.error_pages.clone_from(&site.error_pages);
+        if !site.error_pages.is_empty() {
+            self.capabilities.insert(ERROR_PAGES_CAPABILITY);
+        }
+        compiled.maintenance = site
+            .maintenance
+            .as_ref()
+            .filter(|maintenance| maintenance.enabled)
+            .map(crate::SiteMaintenance::runtime);
+        if compiled.maintenance.is_some() {
+            self.capabilities.insert(MAINTENANCE_CAPABILITY);
+        }
         if site.hsts.is_some() {
             self.capabilities.insert(HSTS_CAPABILITY);
         }
@@ -304,6 +320,7 @@ impl Compiler<'_> {
         );
         self.snapshot.sites.push(compiled);
 
+        self.site_files(site, &scope);
         for route in &site.routes {
             self.route(site, route, &scope);
         }
@@ -320,6 +337,78 @@ impl Compiler<'_> {
         fallback.name = Some("site".into());
         fallback.lua = lua::handlers(&scope, &mut self.scripts, &self.lua.files, true);
         self.snapshot.routes.push(fallback);
+    }
+
+    /// The exact-path routes answering `/robots.txt` and `/favicon.ico` for
+    /// a site that answers them itself, ahead of every route of its own.
+    fn site_files(&mut self, site: &Site, scope: &LuaScope) {
+        let mut answered = Vec::new();
+        if let Some(robots) = &site.robots {
+            self.capabilities.insert("action.respond");
+            let action = RouteAction::Respond {
+                status: 200,
+                body: Some(literal(robots.body())),
+                content_type: Some("text/plain; charset=utf-8".into()),
+                retry_after_seconds: None,
+            };
+            answered.push(("robots", ROBOTS_PATH, action, Vec::new()));
+        }
+        if let Some(favicon) = &site.favicon {
+            let (action, rewrites) = match favicon {
+                Favicon::NoContent => {
+                    self.capabilities.insert("action.respond");
+                    let action = RouteAction::Respond {
+                        status: 204,
+                        body: None,
+                        content_type: None,
+                        retry_after_seconds: None,
+                    };
+                    (action, Vec::new())
+                }
+                Favicon::File { path } => {
+                    let (directory, name) = path
+                        .rsplit_once('/')
+                        .expect("validation keeps favicon files in a directory");
+                    self.capabilities.insert("action.static");
+                    self.capabilities.insert(REWRITE_CAPABILITY);
+                    let policy_id = format!("{}-favicon-static", site.id);
+                    self.snapshot.static_content.push(StaticContentPolicy {
+                        id: policy_id.clone(),
+                        root: directory.to_owned(),
+                        index_files: Vec::new(),
+                        spa_fallback: false,
+                    });
+                    let rewrite = RewriteRule::SetUri {
+                        template: literal(&format!("/{name}")),
+                    };
+                    (RouteAction::Static { policy_id }, vec![rewrite])
+                }
+                Favicon::Redirect { location } => {
+                    self.capabilities.insert("action.redirect");
+                    let action = RouteAction::Redirect {
+                        location: literal(location),
+                        status: 302,
+                        preserve_path: false,
+                    };
+                    (action, Vec::new())
+                }
+            };
+            answered.push(("favicon", FAVICON_PATH, action, rewrites));
+        }
+        for (name, path, action, rewrites) in answered {
+            self.capabilities.insert("route.exact-path");
+            let mut route = RouteSpec::new(
+                route_id(&format!("{}-{name}", site.id)),
+                site_id(site.id),
+                0,
+                RouteMatcher::ExactPath { path: path.into() },
+                action,
+            );
+            route.name = Some(name.into());
+            route.rewrites = rewrites;
+            route.lua = lua::handlers(scope, &mut self.scripts, &self.lua.files, true);
+            self.snapshot.routes.push(route);
+        }
     }
 
     fn route(&mut self, site: &Site, route: &Route, site_scope: &LuaScope) {
@@ -395,6 +484,14 @@ impl Compiler<'_> {
         compiled.internal = route.internal;
         if !route.rewrites.is_empty() || route.internal {
             self.capabilities.insert(REWRITE_CAPABILITY);
+        }
+        compiled.error_pages.clone_from(&route.error_pages);
+        if route
+            .error_pages
+            .as_ref()
+            .is_some_and(|pages| !pages.is_empty())
+        {
+            self.capabilities.insert(ERROR_PAGES_CAPABILITY);
         }
         compiled.lua = lua::handlers(&scope, &mut self.scripts, &self.lua.files, true);
         compiled.lua.variables = lua::variables(
@@ -527,6 +624,11 @@ impl Compiler<'_> {
     }
 }
 
+/// `text` as a template without variables.
+fn literal(text: &str) -> String {
+    text.replace('$', "$$")
+}
+
 // UUIDs are valid IR identifiers, so these conversions cannot fail.
 fn site_id(id: Uuid) -> SiteId {
     SiteId::new(id.to_string()).expect("UUIDs are valid site ids")
@@ -653,6 +755,10 @@ mod tests {
             updated_at: Utc::now(),
         };
         let site = Site {
+            error_pages: Default::default(),
+            maintenance: None,
+            robots: None,
+            favicon: None,
             lua: Default::default(),
             id: Uuid::now_v7(),
             name: "shop".into(),
@@ -668,6 +774,7 @@ mod tests {
                 tls_profile_id: None,
             }],
             routes: vec![Route {
+                error_pages: None,
                 lua: Default::default(),
                 named: None,
                 id: Uuid::now_v7(),
@@ -1304,5 +1411,140 @@ mod tests {
         assert!(diagnostics
             .iter()
             .any(|diagnostic| diagnostic.message.contains("does not exist")));
+    }
+
+    #[test]
+    fn error_pages_maintenance_and_site_files_compile_to_what_gateways_know() {
+        use crate::model::{Favicon, Robots, SiteMaintenance};
+        use panel_ir::{ErrorPage, ErrorPages, ErrorResponse};
+
+        let (mut model, _) = model();
+        let pages = ErrorPages {
+            pages: vec![ErrorPage {
+                statuses: [404, 503].into(),
+                response: ErrorResponse::Body {
+                    body: "<h1>$host is resting</h1>".into(),
+                    content_type: None,
+                },
+                status: None,
+            }],
+            intercept: true,
+        };
+        let site = &mut model.sites[0];
+        site.error_pages = pages.clone();
+        site.maintenance = Some(SiteMaintenance {
+            enabled: true,
+            status: 503,
+            body: None,
+            content_type: None,
+            retry_after_seconds: Some(600),
+            allow: vec!["10.0.0.0/8".into()],
+        });
+        site.robots = Some(Robots::Custom {
+            body: "User-agent: *\nDisallow: /*.php$\n".into(),
+        });
+        site.favicon = Some(Favicon::File {
+            path: "shop/brand/favicon.png".into(),
+        });
+        site.routes[0].error_pages = Some(ErrorPages::default());
+        let snapshot = compile(&model, RevisionId::new(8)).unwrap();
+        assert_eq!(snapshot.sites[0].error_pages, pages);
+        let maintenance = snapshot.sites[0].maintenance.as_ref().unwrap();
+        assert_eq!(maintenance.retry_after_seconds, Some(600));
+        assert_eq!(maintenance.allow, ["10.0.0.0/8"]);
+        let named = |name: &str| {
+            snapshot
+                .routes
+                .iter()
+                .find(|route| route.name.as_deref() == Some(name))
+                .unwrap()
+        };
+        let robots = named("robots");
+        assert_eq!(
+            (&robots.matcher, robots.priority),
+            (
+                &RouteMatcher::ExactPath {
+                    path: "/robots.txt".into()
+                },
+                0
+            )
+        );
+        assert_eq!(
+            robots.action,
+            RouteAction::Respond {
+                status: 200,
+                body: Some("User-agent: *\nDisallow: /*.php$$\n".into()),
+                content_type: Some("text/plain; charset=utf-8".into()),
+                retry_after_seconds: None,
+            }
+        );
+        let favicon = named("favicon");
+        assert_eq!(
+            favicon.rewrites,
+            [RewriteRule::SetUri {
+                template: "/favicon.png".into()
+            }]
+        );
+        let RouteAction::Static { policy_id } = &favicon.action else {
+            panic!("{:?}", favicon.action);
+        };
+        let policy = snapshot
+            .static_content
+            .iter()
+            .find(|policy| &policy.id == policy_id)
+            .unwrap();
+        assert_eq!(policy.root, "shop/brand");
+        assert_eq!(named("assets").error_pages, Some(ErrorPages::default()));
+        let required: Vec<_> = snapshot
+            .required_capabilities
+            .iter()
+            .map(|capability| capability.name.as_str())
+            .collect();
+        for capability in [
+            ERROR_PAGES_CAPABILITY,
+            MAINTENANCE_CAPABILITY,
+            REWRITE_CAPABILITY,
+            "route.exact-path",
+            "action.respond",
+        ] {
+            assert!(
+                required.contains(&capability),
+                "{capability} in {required:?}"
+            );
+        }
+        let report = panel_engine::validate_engine_ir(
+            &snapshot,
+            &required
+                .iter()
+                .map(|name| panel_engine::EngineCapability::new(*name, "1"))
+                .collect(),
+        )
+        .unwrap();
+        assert!(report.valid, "{:?}", report.diagnostics);
+
+        let site = &mut model.sites[0];
+        site.maintenance.as_mut().unwrap().enabled = false;
+        site.favicon = Some(Favicon::Redirect {
+            location: "https://cdn.example.com/icon.png".into(),
+        });
+        let snapshot = compile(&model, RevisionId::new(9)).unwrap();
+        assert!(snapshot.sites[0].maintenance.is_none());
+        assert!(!snapshot
+            .required_capabilities
+            .iter()
+            .any(|capability| capability.name == MAINTENANCE_CAPABILITY));
+        let favicon = snapshot
+            .routes
+            .iter()
+            .find(|route| route.name.as_deref() == Some("favicon"))
+            .unwrap();
+        assert_eq!(
+            favicon.action,
+            RouteAction::Redirect {
+                location: "https://cdn.example.com/icon.png".into(),
+                status: 302,
+                preserve_path: false,
+            }
+        );
     }
 }

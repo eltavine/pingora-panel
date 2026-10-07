@@ -2,8 +2,9 @@
 //! value syntax. Engine-neutral IR validation still runs on the compiled
 //! snapshot; this layer exists so problems point at the resource to fix.
 
+use crate::compile::{FAVICON_PATH, ROBOTS_PATH};
 use crate::lua::{lua_handlers, module_name, LuaCode, LuaFallback, LuaScope};
-use crate::model::{Action, ConfigModel, MatchKind, Route, Site};
+use crate::model::{Action, ConfigModel, Favicon, MatchKind, Robots, Route, Site};
 use panel_domain::{EndpointAddress, IpNetwork};
 use panel_errors::{Diagnostic, ErrorCode};
 use panel_ir::template::parse_template;
@@ -21,6 +22,9 @@ const MAX_NOTE_BYTES: usize = 2048;
 pub(crate) const REDIRECT_STATUSES: [u16; 5] = [301, 302, 303, 307, 308];
 /// The longest request head timeout a listener may set.
 pub const MAX_HEAD_TIMEOUT_SECONDS: u64 = 300;
+/// The most of a `robots.txt` crawlers must read (RFC 9309 §2.5).
+const MOST_ROBOTS_BYTES: usize = 500 << 10;
+const MOST_FAVICON_BYTES: usize = 1024;
 
 struct Report(Vec<Diagnostic>);
 
@@ -152,6 +156,15 @@ pub fn validate(model: &ConfigModel) -> Vec<Diagnostic> {
         for problem in panel_engine::rewrite_problems(&site.rewrites) {
             report.error(&resource, format!("the site {problem}"));
         }
+        for problem in panel_engine::error_page_problems(&site.error_pages) {
+            report.error(&resource, format!("the site {problem}"));
+        }
+        if let Some(maintenance) = &site.maintenance {
+            for problem in panel_engine::maintenance_problems(&maintenance.runtime()) {
+                report.error(&resource, format!("the site {problem}"));
+            }
+        }
+        validate_site_files(site, &resource, &mut report);
         for route in &site.routes {
             if !route_ids.insert(route.id) {
                 report.error(
@@ -527,6 +540,13 @@ fn validate_route(
     for problem in panel_engine::rewrite_problems(&route.rewrites) {
         report.error(&resource, format!("the route {problem}"));
     }
+    for problem in route
+        .error_pages
+        .iter()
+        .flat_map(panel_engine::error_page_problems)
+    {
+        report.error(&resource, format!("the route {problem}"));
+    }
     if let Action::InternalRedirect { target } = &route.action {
         let named = |name: &str| {
             site.routes
@@ -535,6 +555,89 @@ fn validate_route(
         };
         if let Some(problem) = panel_engine::internal_target_problem(target, named) {
             report.error(&resource, format!("the route {problem}"));
+        }
+    }
+}
+
+/// The `robots.txt` and favicon a site answers itself, and the routes they
+/// would hide.
+fn validate_site_files(site: &Site, resource: &str, report: &mut Report) {
+    if let Some(Robots::Custom { body }) = &site.robots {
+        if body.trim().is_empty() {
+            report.error(
+                resource,
+                "the site's robots.txt is empty; allow or disallow every crawler instead",
+            );
+        } else if body.len() > MOST_ROBOTS_BYTES {
+            report.error(
+                resource,
+                format!(
+                    "the site's robots.txt has {} bytes, more than the {MOST_ROBOTS_BYTES} crawlers must read (RFC 9309 §2.5)",
+                    body.len()
+                ),
+            );
+        }
+        if body
+            .chars()
+            .any(|char| char.is_control() && !matches!(char, '\t' | '\n' | '\r'))
+        {
+            report.error(resource, "the site's robots.txt has control characters");
+        }
+    }
+    match &site.favicon {
+        Some(Favicon::File { path }) => {
+            let parts: Vec<&str> = path.split('/').collect();
+            let valid = path.len() <= MOST_FAVICON_BYTES
+                && parts.len() >= 2
+                && parts.iter().all(|part| {
+                    !matches!(*part, "" | "." | "..")
+                        && part
+                            .bytes()
+                            .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+                });
+            if !valid {
+                report.error(
+                    resource,
+                    format!(
+                        "the site's favicon {path:?} is not a file in a directory below the static root, such as \"shop/favicon.ico\", named with letters, digits, '.', '_' and '-'"
+                    ),
+                );
+            }
+        }
+        Some(Favicon::Redirect { location }) => {
+            let valid = location.len() <= MOST_FAVICON_BYTES
+                && !location
+                    .chars()
+                    .any(|char| char.is_whitespace() || char.is_control())
+                && (location.starts_with("https://")
+                    || location.starts_with("http://")
+                    || (location.starts_with('/') && !location.starts_with("//")));
+            if !valid {
+                report.error(
+                    resource,
+                    format!(
+                        "the site's favicon redirect {location:?} is not an absolute URL or path"
+                    ),
+                );
+            }
+        }
+        _ => {}
+    }
+    for (answered, path) in [
+        (site.robots.is_some(), ROBOTS_PATH),
+        (site.favicon.is_some(), FAVICON_PATH),
+    ] {
+        for route in site.routes.iter().filter(|route| {
+            answered
+                && route.enabled
+                && route.named.is_none()
+                && route.matcher.kind == MatchKind::Exact
+                && route.matcher.path == path
+        }) {
+            report.error(
+                format!("{resource}/routes/{}", route.id),
+                format!("the site answers {path} itself, so the route is never reached"),
+            );
         }
     }
 }
@@ -1098,6 +1201,10 @@ mod tests {
 
     pub(crate) fn site(name: &str, hosts: &[&str], action: Action) -> Site {
         Site {
+            error_pages: Default::default(),
+            maintenance: None,
+            robots: None,
+            favicon: None,
             lua: Default::default(),
             id: Uuid::now_v7(),
             name: name.into(),
@@ -1522,6 +1629,7 @@ mod tests {
         shop.domains[0].primary = true;
         shop.domains[1].redirect = true;
         shop.routes.push(Route {
+            error_pages: None,
             lua: Default::default(),
             named: None,
             id: Uuid::now_v7(),
@@ -1559,5 +1667,123 @@ mod tests {
                 "{expected}: {found:?}"
             );
         }
+    }
+
+    #[test]
+    fn pages_maintenance_and_site_files_are_checked() {
+        use crate::model::{Favicon, Robots, SiteMaintenance};
+        use panel_ir::{ErrorPage, ErrorPages, ErrorResponse};
+
+        let mut model = ConfigModel::default();
+        let mut shop = site(
+            "shop",
+            &["example.com"],
+            Action::Respond {
+                status: 200,
+                body: None,
+                content_type: None,
+                retry_after_seconds: None,
+            },
+        );
+        shop.error_pages = ErrorPages {
+            pages: vec![ErrorPage {
+                statuses: [302].into(),
+                response: ErrorResponse::File {
+                    path: "../outside.html".into(),
+                },
+                status: None,
+            }],
+            intercept: false,
+        };
+        shop.maintenance = Some(SiteMaintenance {
+            enabled: false,
+            status: 503,
+            body: None,
+            content_type: None,
+            retry_after_seconds: None,
+            allow: vec!["office".into()],
+        });
+        shop.robots = Some(Robots::Custom { body: " \n".into() });
+        shop.favicon = Some(Favicon::File {
+            path: "favicon.ico".into(),
+        });
+        let mut hidden = Route {
+            error_pages: Some(ErrorPages {
+                pages: vec![ErrorPage {
+                    statuses: [404].into(),
+                    response: ErrorResponse::Redirect {
+                        location: "/".into(),
+                        status: 200,
+                    },
+                    status: None,
+                }],
+                intercept: false,
+            }),
+            lua: Default::default(),
+            named: None,
+            id: Uuid::now_v7(),
+            name: None,
+            enabled: true,
+            priority: 5,
+            matcher: crate::model::RouteMatch {
+                kind: MatchKind::Exact,
+                path: "/robots.txt".into(),
+                host: None,
+                conditions: Vec::new(),
+            },
+            action: Action::Respond {
+                status: 200,
+                body: Some("User-agent: *".into()),
+                content_type: None,
+                retry_after_seconds: None,
+            },
+            security_policy_id: Default::default(),
+            http_policy_id: None,
+            access_log: Default::default(),
+            rewrites: Vec::new(),
+            internal: false,
+        };
+        shop.routes.push(hidden.clone());
+        hidden.id = Uuid::now_v7();
+        hidden.error_pages = None;
+        hidden.matcher.path = "/favicon.ico".into();
+        hidden.enabled = false;
+        shop.routes.push(hidden);
+        model.sites.push(shop);
+        let found = messages(&model);
+        for expected in [
+            "the site has an error page for 302, which is not an error status",
+            "the site has an error page file \"../outside.html\"",
+            "the site allows \"office\" during maintenance",
+            "the site's robots.txt is empty",
+            "the site's favicon \"favicon.ico\" is not a file in a directory",
+            "the route has an error page redirect with 200",
+            "the site answers /robots.txt itself, so the route is never reached",
+        ] {
+            assert!(
+                found.iter().any(|message| message.contains(expected)),
+                "{expected}: {found:#?}"
+            );
+        }
+        assert!(
+            !found
+                .iter()
+                .any(|message| message.contains("/favicon.ico itself")),
+            "a disabled route hides nothing: {found:#?}"
+        );
+
+        let shop = &mut model.sites[0];
+        shop.error_pages = ErrorPages::default();
+        shop.maintenance = None;
+        shop.robots = Some(Robots::DisallowAll);
+        shop.favicon = Some(Favicon::Redirect {
+            location: "//cdn.example.com/icon.png".into(),
+        });
+        shop.routes.clear();
+        let found = messages(&model);
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert!(found[0].contains("favicon redirect"), "{found:#?}");
+        model.sites[0].favicon = Some(Favicon::NoContent);
+        assert!(validate(&model).is_empty(), "{:?}", messages(&model));
     }
 }

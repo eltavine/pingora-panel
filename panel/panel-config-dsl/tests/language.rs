@@ -1504,3 +1504,183 @@ fn malformed_rewrites_are_reported_where_they_are_written() {
         "{found:#?}"
     );
 }
+
+const PAGED: &str = r#"language_version 1;
+http {
+    server shop {
+        server_name shop.example;
+        error_page 404 410 "body=<h1>$host has no $uri</h1>";
+        error_page 502 503 file=errors/50x.html status=503;
+        error_page 500 https://status.example/?from=$host;
+        error_page 403 =301 https://shop.example/denied;
+        error_page 401 /errors/401.html;
+        intercept_errors on;
+        maintenance on allow=10.0.0.0/8,192.0.2.7 retry_after=10m "body=Back at 10:00" type=text/plain;
+        robots "body=User-agent: *\nDisallow: /admin/\nDisallow: /*.php$$\n";
+        favicon file=shop/favicon.ico;
+        respond 200 body=ok;
+        route api {
+            match prefix /api;
+            error_page 404 "body={\"error\":\"not found\"}" type=application/json;
+            intercept_errors off;
+            respond 200;
+        }
+        route quiet {
+            match prefix /quiet;
+            error_page off;
+            respond 200;
+        }
+        route passthrough {
+            match prefix /passthrough;
+            intercept_errors off;
+            respond 200;
+        }
+        route plain {
+            match prefix /plain;
+            respond 200;
+        }
+    }
+}
+"#;
+
+#[test]
+fn error_pages_maintenance_and_site_files_read_and_print() {
+    use panel_config_model::{Favicon, Robots};
+    use panel_ir::{ErrorPage, ErrorPages, ErrorResponse};
+
+    let first = read(PAGED);
+    assert!(first.is_valid(), "{:#?}", first.diagnostics);
+    let site = &first.model.sites[0];
+    let page = |statuses: &[u16], response: ErrorResponse, status: Option<u16>| ErrorPage {
+        statuses: statuses.iter().copied().collect(),
+        response,
+        status,
+    };
+    assert_eq!(
+        site.error_pages,
+        ErrorPages {
+            pages: vec![
+                page(
+                    &[404, 410],
+                    ErrorResponse::Body {
+                        body: "<h1>$host has no $uri</h1>".into(),
+                        content_type: None
+                    },
+                    None
+                ),
+                page(
+                    &[502, 503],
+                    ErrorResponse::File {
+                        path: "errors/50x.html".into()
+                    },
+                    Some(503)
+                ),
+                page(
+                    &[500],
+                    ErrorResponse::Redirect {
+                        location: "https://status.example/?from=$host".into(),
+                        status: 302
+                    },
+                    None
+                ),
+                page(
+                    &[403],
+                    ErrorResponse::Redirect {
+                        location: "https://shop.example/denied".into(),
+                        status: 301
+                    },
+                    None
+                ),
+                page(
+                    &[401],
+                    ErrorResponse::File {
+                        path: "errors/401.html".into()
+                    },
+                    None
+                ),
+            ],
+            intercept: true,
+        }
+    );
+    let maintenance = site.maintenance.as_ref().unwrap();
+    assert!(maintenance.enabled);
+    assert_eq!(maintenance.allow, ["10.0.0.0/8", "192.0.2.7"]);
+    assert_eq!(maintenance.retry_after_seconds, Some(600));
+    assert_eq!(maintenance.body.as_deref(), Some("Back at 10:00"));
+    assert_eq!(
+        site.robots,
+        Some(Robots::Custom {
+            body: "User-agent: *\nDisallow: /admin/\nDisallow: /*.php$\n".into()
+        })
+    );
+    assert_eq!(
+        site.favicon,
+        Some(Favicon::File {
+            path: "shop/favicon.ico".into()
+        })
+    );
+    let route = |name: &str| {
+        site.routes
+            .iter()
+            .find(|route| route.name.as_deref() == Some(name))
+            .unwrap()
+    };
+    let api = route("api").error_pages.as_ref().unwrap();
+    assert_eq!(api.pages.len(), 1);
+    assert!(!api.intercept);
+    assert_eq!(
+        route("quiet").error_pages,
+        Some(ErrorPages {
+            pages: Vec::new(),
+            intercept: true
+        })
+    );
+    let passthrough = route("passthrough").error_pages.as_ref().unwrap();
+    assert_eq!(passthrough.pages, site.error_pages.pages);
+    assert!(!passthrough.intercept);
+    assert_eq!(route("plain").error_pages, None);
+
+    let printed = print(&first.model);
+    let second = read(&printed);
+    assert!(second.is_valid(), "{:#?}\n{printed}", second.diagnostics);
+    assert!(same_configuration(&first.model, &second.model), "{printed}");
+    assert_eq!(print(&second.model), printed);
+    for line in [
+        "        error_page 502 503 file=errors/50x.html status=503;\n",
+        "        error_page 403 redirect=https://shop.example/denied status=301;\n",
+        "        intercept_errors on;\n",
+        "        maintenance on allow=10.0.0.0/8,192.0.2.7 \"body=Back at 10:00\" type=text/plain retry_after=10m;\n",
+        "        robots \"body=User-agent: *\\nDisallow: /admin/\\nDisallow: /*.php$\\n\";\n",
+        "        favicon file=shop/favicon.ico;\n",
+        "            error_page off;\n",
+        "            intercept_errors off;\n",
+    ] {
+        assert!(printed.contains(line), "{line:?} in\n{printed}");
+    }
+}
+
+#[test]
+fn malformed_error_pages_and_site_files_are_reported_where_they_are_written() {
+    let text = "language_version 1;\nhttp {\n    server s {\n        server_name s.example;\n        error_page 302 /moved.html;\n        error_page 404 @fallback;\n        error_page 404 body=a file=b;\n        error_page off;\n        error_page 500 = /x.html;\n        maintenance sometimes;\n        robots everyone;\n        favicon file=a redirect=b;\n        error_page 404 file=a.html type=text/html;\n        respond 204;\n    }\n}\n";
+    let lowered = read(text);
+    let found = messages(&lowered);
+    for (line, expected) in [
+        (5, "302 is not an error status"),
+        (6, "\"@fallback\" is not an error page"),
+        (7, "written with body and file"),
+        (8, "left out rather than turned off"),
+        (9, "`=` without a status"),
+        (10, "\"sometimes\" is not on or off"),
+        (11, "robots allows every crawler"),
+        (12, "'favicon' does not take 2 arguments"),
+        (13, "type= goes with body="),
+    ] {
+        let at = format!("main.conf:{line}.");
+        assert!(
+            found
+                .iter()
+                .any(|(_, span, message)| span.starts_with(&at) && message.contains(expected)),
+            "{expected:?} at line {line}: {found:#?}"
+        );
+    }
+}

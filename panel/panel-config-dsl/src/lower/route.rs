@@ -37,10 +37,13 @@ impl<'a> Lowerer<'a> {
                 access_log: Default::default(),
                 rewrites: Vec::new(),
                 internal: false,
+                error_pages: None,
             },
             priority_set: false,
             action: None,
             origin: Self::origin(file, directive, depth),
+            pages: None,
+            intercept: None,
         };
         let mut matched = false;
         let mut conditions = Vec::new();
@@ -207,6 +210,18 @@ impl<'a> Lowerer<'a> {
                                 }
                             }
                             "internal" => draft.route.internal = true,
+                            "error_page" => match lowerer.error_page(file, directive, true) {
+                                Some(super::pages::PageWrite::Page(page)) => {
+                                    draft.pages.get_or_insert_with(Vec::new).push(page);
+                                }
+                                Some(super::pages::PageWrite::Off) => {
+                                    draft.pages.get_or_insert_with(Vec::new);
+                                }
+                                None => {}
+                            },
+                            "intercept_errors" => {
+                                draft.intercept = arg.and_then(|arg| lowerer.bool_arg(file, arg));
+                            }
                             action => {
                                 let Some(found) = lowerer.action(file, directive, action) else {
                                     return;
@@ -377,19 +392,7 @@ impl<'a> Lowerer<'a> {
                     None => None,
                 };
                 let retry_after_seconds = match params.named.get("retry_after") {
-                    Some((value, arg)) => {
-                        let ms = self.duration(file, arg, value)?;
-                        if !ms.is_multiple_of(1_000) {
-                            self.error(
-                                file,
-                                arg.span,
-                                codes::TYPE,
-                                "Retry-After counts whole seconds",
-                            );
-                            return None;
-                        }
-                        Some(u32::try_from(ms / 1_000).unwrap_or(u32::MAX))
-                    }
+                    Some((value, arg)) => Some(self.retry_after(file, arg, value)?),
                     None => None,
                 };
                 Some(ActionDraft::Ready(Action::Respond {

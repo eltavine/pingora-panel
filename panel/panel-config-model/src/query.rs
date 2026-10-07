@@ -341,6 +341,10 @@ mod tests {
 
     fn site(name: &str, host: &str, action: Action) -> Site {
         Site {
+            error_pages: Default::default(),
+            maintenance: None,
+            robots: None,
+            favicon: None,
             lua: Default::default(),
             id: Uuid::now_v7(),
             name: name.into(),

@@ -337,6 +337,8 @@ impl<'a> Explainer<'a> {
             ("security_policy", "none"),
             ("access_log", "on"),
             ("www_redirect", "off"),
+            ("intercept_errors", "off"),
+            ("maintenance", "off"),
         ] {
             self.or_default(&mut settings, &resource, Context::Server, directive, value);
         }
@@ -401,6 +403,23 @@ impl<'a> Explainer<'a> {
                     .from(from.clone())
                     .inherited(),
             );
+        }
+        // A route keeps its server's error pages until it writes one, and
+        // its interception until it writes its own.
+        for directive in ["error_page", "intercept_errors"] {
+            if self.first(&resource, directive).is_none() {
+                for written in self
+                    .written(&server)
+                    .iter()
+                    .filter(|written| written.directive == directive)
+                {
+                    settings.push(
+                        self.here(written, Context::Server)
+                            .from(from.clone())
+                            .inherited(),
+                    );
+                }
+            }
         }
         let http = &self.lowered.model.lua.http;
         let scope = route.lua.over(&site.lua.over(http));

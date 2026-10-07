@@ -81546,6 +81546,129 @@
           }
         }
       },
+      "ErrorPage": {
+        "type": "object",
+        "description": "A page answering errors with the statuses it names.",
+        "required": [
+          "statuses",
+          "response"
+        ],
+        "properties": {
+          "response": {
+            "$ref": "#/components/schemas/ErrorResponse"
+          },
+          "status": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The status a body or file answers with instead of the error's, as\nnginx's `=code`.",
+            "minimum": 0
+          },
+          "statuses": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "Between 400 and 599.",
+            "uniqueItems": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ErrorPages": {
+        "type": "object",
+        "description": "The error pages of a site or route.",
+        "properties": {
+          "intercept": {
+            "type": "boolean",
+            "description": "Upstreams' error responses with the pages' statuses get the pages\ntoo, as nginx's `proxy_intercept_errors`."
+          },
+          "pages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ErrorPage"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ErrorResponse": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A template of request variables; `text/html` unless a media type is\nwritten.",
+            "required": [
+              "body",
+              "kind"
+            ],
+            "properties": {
+              "body": {
+                "type": "string"
+              },
+              "content_type": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "body"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A file below the gateway's static root, read when an error needs it;\nits media type follows its extension.",
+            "required": [
+              "path",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "file"
+                ]
+              },
+              "path": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A redirect to a URL template.",
+            "required": [
+              "location",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "redirect"
+                ]
+              },
+              "location": {
+                "type": "string"
+              },
+              "status": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              }
+            }
+          }
+        ],
+        "description": "How an error page answers."
+      },
       "EscapingLinkResponse": {
         "type": "object",
         "description": "A link below a static root that leads out of it; it is not served.",
@@ -81652,6 +81775,64 @@
           }
         },
         "additionalProperties": false
+      },
+      "Favicon": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "204 No Content, so browsers stop asking.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "no_content"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A file in a directory below the gateway's static root, such as\n`shop/favicon.ico`; its media type follows its extension.",
+            "required": [
+              "path",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "file"
+                ]
+              },
+              "path": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A redirect (302) to an icon elsewhere.",
+            "required": [
+              "location",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "redirect"
+                ]
+              },
+              "location": {
+                "type": "string"
+              }
+            }
+          }
+        ],
+        "description": "How a site answers `/favicon.ico`."
       },
       "FieldChanges": {
         "type": "object",
@@ -86286,6 +86467,60 @@
           "high"
         ]
       },
+      "Robots": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Every crawler may crawl every path.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "allow_all"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "No crawler may crawl any path.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "disallow_all"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The site's own records, sent as written.",
+            "required": [
+              "body",
+              "kind"
+            ],
+            "properties": {
+              "body": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "custom"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "How a site answers `/robots.txt` (RFC 9309)."
+      },
       "RoleChange": {
         "type": "object",
         "description": "What a role that is not built in becomes.",
@@ -86358,6 +86593,17 @@
           },
           "enabled": {
             "type": "boolean"
+          },
+          "error_pages": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ErrorPages",
+                "description": "Pages answering the route's errors in place of its site's; an empty\nlist answers them without pages."
+              }
+            ]
           },
           "http_policy_id": {
             "type": [
@@ -86702,6 +86948,17 @@
           },
           "enabled": {
             "type": "boolean"
+          },
+          "error_pages": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ErrorPages",
+                "description": "Pages answering the route's errors in place of its site's; `null`\nanswers them with the site's and absent keeps the current ones."
+              }
+            ]
           },
           "http_policy_id": {
             "type": [
@@ -87511,6 +87768,21 @@
           "enabled": {
             "type": "boolean"
           },
+          "error_pages": {
+            "$ref": "#/components/schemas/ErrorPages",
+            "description": "Pages answering the site's errors (ADR 0041)."
+          },
+          "favicon": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Favicon",
+                "description": "How the site answers `/favicon.ico` itself, ahead of its routes."
+              }
+            ]
+          },
           "favorite": {
             "type": "boolean"
           },
@@ -87557,6 +87829,16 @@
             "$ref": "#/components/schemas/LuaScope",
             "description": "The Lua handlers and terms of the site's requests, over those for\nevery site."
           },
+          "maintenance": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SiteMaintenance"
+              }
+            ]
+          },
           "name": {
             "type": "string"
           },
@@ -87572,6 +87854,17 @@
               "$ref": "#/components/schemas/RewriteRule"
             },
             "description": "Rules every request to the site runs before a route is chosen\n(ADR 0040)."
+          },
+          "robots": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Robots",
+                "description": "How the site answers `/robots.txt` itself, ahead of its routes."
+              }
+            ]
           },
           "routes": {
             "type": "array",
@@ -87759,6 +88052,28 @@
           "enabled": {
             "type": "boolean"
           },
+          "error_pages": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ErrorPages",
+                "description": "Pages answering the site's errors; absent keeps the current ones."
+              }
+            ]
+          },
+          "favicon": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Favicon",
+                "description": "`null` leaves `/favicon.ico` to the routes; absent keeps the current\nanswer."
+              }
+            ]
+          },
           "favorite": {
             "type": "boolean"
           },
@@ -87796,6 +88111,17 @@
             },
             "uniqueItems": true
           },
+          "maintenance": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SiteMaintenance",
+                "description": "`null` takes the site out of maintenance for good; absent keeps the\ncurrent settings."
+              }
+            ]
+          },
           "name": {
             "type": "string"
           },
@@ -87814,6 +88140,17 @@
               "$ref": "#/components/schemas/RewriteRule"
             },
             "description": "Rules every request runs before a route is chosen; absent keeps the\ncurrent ones."
+          },
+          "robots": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Robots",
+                "description": "`null` leaves `/robots.txt` to the routes; absent keeps the current\nanswer."
+              }
+            ]
           },
           "routes": {
             "type": "array",
@@ -87956,6 +88293,49 @@
             "minimum": 0
           }
         }
+      },
+      "SiteMaintenance": {
+        "type": "object",
+        "description": "A site's maintenance (ADR 0041): while it is enabled, clients outside\n`allow` get its response and the others reach the site as it is. It is\nkept while disabled, to be enabled again as it was.",
+        "properties": {
+          "allow": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Networks such as `10.0.0.0/8`, or addresses, whose clients after\ntrusted proxies reach the site."
+          },
+          "body": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A template of request variables; the site's error page for the status\nanswers when there is none."
+          },
+          "content_type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "retry_after_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "SiteRemovalView": {
         "type": "object",

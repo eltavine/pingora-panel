@@ -492,3 +492,121 @@ fn rewrites_and_internal_locations_carry_over() {
         imported.report
     );
 }
+
+#[test]
+fn error_pages_and_interception_carry_over() {
+    use panel_ir::{ErrorPage, ErrorPages, ErrorResponse};
+
+    let site = r#"server {
+    listen 80;
+    server_name shop.example;
+    error_page 500 502 503 504 /50x.html;
+    error_page 404 =301 https://$host/;
+    location /api/ {
+        proxy_pass http://127.0.0.1:9000;
+        proxy_intercept_errors on;
+    }
+    location / {
+        error_page 404 /404.html;
+        proxy_pass http://127.0.0.1:9000;
+    }
+    location /odd/ {
+        error_page 404 @fallback;
+        error_page 302 /moved.html;
+        error_page 410 = /gone.html;
+        return 204;
+    }
+}
+"#;
+    let files = BTreeMap::from([(
+        "/etc/nginx/nginx.conf".to_owned(),
+        format!("http {{\n{site}}}\n"),
+    )]);
+    let imported = import_nginx(&files, "/etc/nginx/nginx.conf").unwrap();
+    let text = imported.sources.get("main.conf").unwrap();
+    let environment = BTreeMap::new();
+    let lowered = lower(
+        &imported.sources,
+        &LowerOptions {
+            environment: &environment,
+            previous: None,
+            now: Utc::now(),
+        },
+    );
+    assert!(
+        lowered
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.severity != panel_errors::DiagnosticSeverity::Error),
+        "{:#?}\n{text}",
+        lowered.diagnostics
+    );
+    let site = &lowered.model.sites[0];
+    let server_pages = vec![
+        ErrorPage {
+            statuses: [500, 502, 503, 504].into(),
+            response: ErrorResponse::File {
+                path: "50x.html".into(),
+            },
+            status: None,
+        },
+        ErrorPage {
+            statuses: [404].into(),
+            response: ErrorResponse::Redirect {
+                location: "https://$host/".into(),
+                status: 301,
+            },
+            status: None,
+        },
+    ];
+    assert_eq!(site.error_pages.pages, server_pages, "{text}");
+    assert!(!site.error_pages.intercept);
+    let route = |prefix: &str| {
+        site.routes
+            .iter()
+            .find(|route| route.matcher.path == prefix)
+            .unwrap_or_else(|| panic!("no route for {prefix} in\n{text}"))
+    };
+    assert_eq!(
+        route("/api/").error_pages,
+        Some(ErrorPages {
+            pages: server_pages,
+            intercept: true
+        }),
+        "{text}"
+    );
+    assert_eq!(
+        route("/")
+            .error_pages
+            .as_ref()
+            .map(|pages| pages.pages.len()),
+        Some(1),
+        "{text}"
+    );
+    assert_eq!(route("/odd/").error_pages, None, "{text}");
+    let reported = |code: &str, needle: &str| {
+        imported.report.iter().any(|diagnostic| {
+            diagnostic.code.as_str() == code && diagnostic.message.contains(needle)
+        })
+    };
+    assert!(
+        reported(codes::CHANGED, "/50x.html"),
+        "{:#?}",
+        imported.report
+    );
+    assert!(
+        reported(codes::UNSUPPORTED, "@fallback"),
+        "{:#?}",
+        imported.report
+    );
+    assert!(
+        reported(codes::UNSUPPORTED, "from 400 to 599"),
+        "{:#?}",
+        imported.report
+    );
+    assert!(
+        reported(codes::UNSUPPORTED, "'=' alone"),
+        "{:#?}",
+        imported.report
+    );
+}

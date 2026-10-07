@@ -28,6 +28,7 @@ mod http;
 mod listener;
 mod logging;
 mod lua;
+mod pages;
 mod resilience;
 mod rewrite;
 mod route;
@@ -42,6 +43,7 @@ pub(crate) use lua::{
     print_terms as print_lua_terms, runs as lua_runs, DEFAULTS as LUA_DEFAULTS,
     GROUPS as LUA_GROUPS, TERMS as LUA_TERMS,
 };
+pub(crate) use pages::{print_favicon, print_maintenance, print_pages, print_robots};
 pub(crate) use resilience::{print_breaker, print_queue, print_retry};
 pub(crate) use rewrite::{capture_end, groups as rewrite_groups};
 pub(crate) use security::{print_rate, DEFAULT_REALM};
@@ -158,6 +160,9 @@ struct RouteDraft {
     priority_set: bool,
     action: Option<ActionDraft>,
     origin: Origin,
+    /// The error pages the route writes, `error_page off;` writing none.
+    pages: Option<Vec<panel_ir::ErrorPage>>,
+    intercept: Option<bool>,
 }
 
 struct ServerDraft {
@@ -1161,6 +1166,8 @@ impl<'a> Lowerer<'a> {
                 if !priority_set {
                     route.priority = u32::try_from((index + 1) * 10).unwrap_or(u32::MAX);
                 }
+                route.error_pages =
+                    pages::route_pages(route_draft.pages, route_draft.intercept, &site.error_pages);
                 site.routes.push(route);
             }
             model.sites.push(site);

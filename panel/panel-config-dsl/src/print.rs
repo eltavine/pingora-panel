@@ -3,8 +3,9 @@
 
 use crate::{
     lower::{
-        print_access, print_breaker, print_lua_terms, print_policy, print_queue, print_rate,
-        print_retry, CODINGS, DEFAULT_REALM,
+        print_access, print_breaker, print_favicon, print_lua_terms, print_maintenance,
+        print_pages, print_policy, print_queue, print_rate, print_retry, print_robots, CODINGS,
+        DEFAULT_REALM,
     },
     source::{Sources, ENTRY},
     values::{print_bool, print_duration_ms, print_size},
@@ -747,7 +748,7 @@ fn condition(condition: &RouteCondition) -> Directive {
     }
 }
 
-fn route(route: &Route, model: &ConfigModel) -> Directive {
+fn route(route: &Route, site: &Site, model: &ConfigModel) -> Directive {
     let mut body = vec![Directive::simple("id", [route.id.to_string()])];
     let matcher = &route.matcher;
     let kind = match matcher.kind {
@@ -787,6 +788,9 @@ fn route(route: &Route, model: &ConfigModel) -> Directive {
         body.push(Directive::simple("internal", Vec::<String>::new()));
     }
     body.extend(rewrites(&route.rewrites));
+    if let Some(pages) = &route.error_pages {
+        body.extend(print_pages(pages, Some(&site.error_pages)));
+    }
     body.push(action(&route.action, model));
     Directive::with_block("route", route.name.clone(), body)
 }
@@ -886,9 +890,13 @@ pub fn server(site: &Site, model: &ConfigModel) -> Directive {
     }
     body.extend(lua_scope(&site.lua));
     body.extend(rewrites(&site.rewrites));
+    body.extend(print_pages(&site.error_pages, None));
+    body.extend(site.maintenance.as_ref().map(print_maintenance));
+    body.extend(site.robots.as_ref().map(print_robots));
+    body.extend(site.favicon.as_ref().map(print_favicon));
     body.push(action(&site.action, model));
     for item in &site.routes {
-        let mut directive = route(item, model);
+        let mut directive = route(item, site, model);
         directive.leading.push(Trivia::BlankLine);
         body.push(directive);
     }

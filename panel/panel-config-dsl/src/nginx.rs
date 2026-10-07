@@ -726,6 +726,8 @@ impl<'a> Importer<'a> {
                 "root" | "index" | "try_files" => {}
                 "access_log" => body.extend(self.access_log(inner)),
                 "rewrite" => body.extend(self.rewrite(inner)),
+                "error_page" => body.extend(self.error_page(inner)),
+                "proxy_intercept_errors" => body.extend(intercept_errors(&values)),
                 name if is_lua(name) => {
                     if let Some(directive) = self.lua(inner, Context::Server) {
                         body.push(directive);
@@ -753,6 +755,13 @@ impl<'a> Importer<'a> {
             if action.is_none() {
                 action = Some(vec![static_root(&root, &index, spa)]);
             }
+        }
+        if action.is_none() {
+            self.changed(
+                located,
+                format!("requests no location of the server {name:?} takes are answered with 404"),
+            );
+            action = Some(vec![Directive::simple("respond", ["404"])]);
         }
         body.extend(action.unwrap_or_default());
         routes.sort_by_key(|route| route.rank);
@@ -965,6 +974,7 @@ impl<'a> Importer<'a> {
         let mut logging = Vec::new();
         let mut lua = Vec::new();
         let mut rewrites = Vec::new();
+        let mut pages = Vec::new();
         let mut static_files = inherited.cloned();
         // A location whose proxy or return cannot be carried over is left
         // out rather than serving files in its place.
@@ -990,6 +1000,10 @@ impl<'a> Importer<'a> {
                 "access_log" => logging.extend(self.access_log(&inner)),
                 "rewrite" => rewrites.extend(self.rewrite(&inner)),
                 "internal" => rewrites.insert(0, Directive::simple("internal", Vec::<String>::new())),
+                "error_page" => pages.extend(self.error_page(&inner)),
+                "proxy_intercept_errors" => {
+                    pages.extend(intercept_errors(&args(&inner.directive)));
+                }
                 name if is_lua(name) => {
                     let content = name.starts_with("content_by_lua");
                     if let Some(directive) = self.lua(&inner, Context::Route) {
@@ -1026,6 +1040,7 @@ impl<'a> Importer<'a> {
             && server_action.is_none()
             && lua.is_empty()
             && rewrites.is_empty()
+            && pages.is_empty()
         {
             *server_action = Some(action);
             return None;
@@ -1034,8 +1049,66 @@ impl<'a> Importer<'a> {
         directives.extend(logging);
         directives.extend(lua);
         directives.extend(rewrites);
+        directives.extend(pages);
         directives.extend(action);
         Some(Route { rank, directives })
+    }
+
+    /// `error_page <code> ... [=<code>] <uri>;`, its URL's variables
+    /// renamed; a path names a file below the static directory.
+    fn error_page(&mut self, located: &Located) -> Option<Directive> {
+        let values = args(&located.directive);
+        let (target, rest) = values.split_last()?;
+        let (status, codes) = match rest.split_last() {
+            Some((status, codes)) if status.starts_with('=') => (Some(*status), codes),
+            _ => (None, rest),
+        };
+        if status == Some("=") {
+            self.unsupported(
+                located,
+                "an error page answering with its own status ('=' alone) is not supported".into(),
+            );
+            return None;
+        }
+        if codes.is_empty()
+            || !codes.iter().all(|code| {
+                code.parse::<u16>()
+                    .is_ok_and(|code| (400..=599).contains(&code))
+            })
+        {
+            self.unsupported(
+                located,
+                "error pages are for statuses from 400 to 599".into(),
+            );
+            return None;
+        }
+        let page = if target.starts_with("http://")
+            || target.starts_with("https://")
+            || target.starts_with("$scheme")
+        {
+            self.template(located, target)?
+        } else if target.starts_with('/') && !target.contains('$') {
+            self.changed(
+                located,
+                format!(
+                    "the error page {target} is read from the gateway's static directory: copy it to {:?} there",
+                    &target[1..]
+                ),
+            );
+            (*target).to_owned()
+        } else {
+            self.unsupported(
+                located,
+                format!(
+                    "the error page {target:?} is not supported; pages are files, bodies or redirects"
+                ),
+            );
+            return None;
+        };
+        let mut written: Vec<String> = codes.iter().map(|code| (*code).to_owned()).collect();
+        written.extend(status.map(str::to_owned));
+        written.push(page);
+        Some(Directive::simple("error_page", written))
     }
 
     /// `rewrite <regex> <replacement> [flag];`, its replacement's captures
@@ -1090,6 +1163,14 @@ impl<'a> Importer<'a> {
                 .into(),
         );
         None
+    }
+}
+
+/// `proxy_intercept_errors on|off;` as the setting it is.
+fn intercept_errors(values: &[&str]) -> Option<Directive> {
+    match values {
+        [value @ ("on" | "off")] => Some(Directive::simple("intercept_errors", [*value])),
+        _ => None,
     }
 }
 

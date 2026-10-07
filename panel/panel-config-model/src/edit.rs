@@ -5,8 +5,8 @@
 use crate::{
     http::HttpPolicy,
     model::{
-        Action, ConfigModel, Domain, Listener, Route, RouteMatch, Site, TlsProfile, Upstream,
-        UpstreamNode, UpstreamRetry,
+        Action, ConfigModel, Domain, Favicon, Listener, Robots, Route, RouteMatch, Site,
+        SiteMaintenance, TlsProfile, Upstream, UpstreamNode, UpstreamRetry,
     },
     security::SecurityPolicy,
     validate::validate,
@@ -16,11 +16,11 @@ use chrono::{DateTime, Utc};
 use panel_domain::NormalizedHost;
 use panel_errors::{Diagnostic, PanelError, Result};
 use panel_ir::{
-    AccessLog, ActiveHealthCheck, CircuitBreaker, LoadBalancingPolicy, PassiveHealthPolicy,
-    RewriteRule, StrictTransportSecurity, UpstreamConnectionPolicy, UpstreamQueue,
-    UpstreamTlsPolicy, WwwRedirect,
+    AccessLog, ActiveHealthCheck, CircuitBreaker, ErrorPages, LoadBalancingPolicy,
+    PassiveHealthPolicy, RewriteRule, StrictTransportSecurity, UpstreamConnectionPolicy,
+    UpstreamQueue, UpstreamTlsPolicy, WwwRedirect,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use uuid::Uuid;
 
@@ -30,6 +30,14 @@ const fn enabled() -> bool {
 
 const fn one() -> u32 {
     1
+}
+
+/// Reads a field that may be `null`, so leaving it out and clearing it are
+/// told apart.
+fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<Option<T>>, D::Error> {
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 /// A site as clients write it; identity and timestamps are server-managed.
@@ -69,6 +77,36 @@ pub struct SiteInput {
     /// current ones.
     #[serde(default)]
     pub rewrites: Option<Vec<RewriteRule>>,
+    /// Pages answering the site's errors; absent keeps the current ones.
+    #[serde(default)]
+    pub error_pages: Option<ErrorPages>,
+    /// `null` takes the site out of maintenance for good; absent keeps the
+    /// current settings.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<SiteMaintenance>))]
+    pub maintenance: Option<Option<SiteMaintenance>>,
+    /// `null` leaves `/robots.txt` to the routes; absent keeps the current
+    /// answer.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<Robots>))]
+    pub robots: Option<Option<Robots>>,
+    /// `null` leaves `/favicon.ico` to the routes; absent keeps the current
+    /// answer.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<Favicon>))]
+    pub favicon: Option<Option<Favicon>>,
     #[serde(default)]
     pub group: Option<String>,
     #[serde(default)]
@@ -111,6 +149,15 @@ pub struct RouteInput {
     /// absent keeps the current setting.
     #[serde(default)]
     pub internal: Option<bool>,
+    /// Pages answering the route's errors in place of its site's; `null`
+    /// answers them with the site's and absent keeps the current ones.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<ErrorPages>))]
+    pub error_pages: Option<Option<ErrorPages>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -246,6 +293,9 @@ fn routes_from(inputs: Vec<RouteInput>, existing: &[Route]) -> Vec<Route> {
                 internal: input
                     .internal
                     .unwrap_or_else(|| kept.is_some_and(|route| route.internal)),
+                error_pages: input
+                    .error_pages
+                    .unwrap_or_else(|| kept.and_then(|route| route.error_pages.clone())),
             }
         })
         .collect()
@@ -320,6 +370,10 @@ impl ConfigModel {
             http_policy_id: input.http_policy_id,
             access_log: input.access_log.unwrap_or_default(),
             rewrites: input.rewrites.unwrap_or_default(),
+            error_pages: input.error_pages.unwrap_or_default(),
+            maintenance: input.maintenance.flatten(),
+            robots: input.robots.flatten(),
+            favicon: input.favicon.flatten(),
             group: input.group,
             tags: input.tags,
             note: input.note,
@@ -353,6 +407,12 @@ impl ConfigModel {
             rewrites: input
                 .rewrites
                 .unwrap_or_else(|| std::mem::take(&mut site.rewrites)),
+            error_pages: input
+                .error_pages
+                .unwrap_or_else(|| std::mem::take(&mut site.error_pages)),
+            maintenance: input.maintenance.unwrap_or_else(|| site.maintenance.take()),
+            robots: input.robots.unwrap_or_else(|| site.robots.take()),
+            favicon: input.favicon.unwrap_or_else(|| site.favicon.take()),
             group: input.group,
             tags: input.tags,
             note: input.note,
@@ -543,6 +603,7 @@ impl ConfigModel {
                 .rewrites
                 .unwrap_or_else(|| std::mem::take(&mut slot.rewrites)),
             internal: input.internal.unwrap_or(slot.internal),
+            error_pages: input.error_pages.unwrap_or_else(|| slot.error_pages.take()),
         };
         Ok(())
     }
@@ -1011,6 +1072,10 @@ mod tests {
 
     fn input(name: &str, hosts: &[&str], action: Action) -> SiteInput {
         SiteInput {
+            error_pages: None,
+            maintenance: None,
+            robots: None,
+            favicon: None,
             name: name.into(),
             action,
             enabled: true,
@@ -1043,6 +1108,7 @@ mod tests {
 
     fn replaced_route(route: &Route) -> RouteInput {
         RouteInput {
+            error_pages: None,
             id: Some(route.id),
             name: route.name.clone(),
             enabled: route.enabled,
@@ -1105,6 +1171,7 @@ mod tests {
             ..AccessLog::default()
         });
         created.routes.push(RouteInput {
+            error_pages: None,
             id: None,
             name: Some("api".into()),
             enabled: true,
@@ -1137,6 +1204,7 @@ mod tests {
         let mut replaced = input("shop", &["shop.example.com"], maintenance());
         let route = &site.routes[0];
         replaced.routes.push(RouteInput {
+            error_pages: None,
             id: Some(route.id),
             name: route.name.clone(),
             enabled: true,
@@ -1234,6 +1302,7 @@ mod tests {
             now,
         );
         let route = |path: &str| RouteInput {
+            error_pages: None,
             id: None,
             name: None,
             enabled: true,
@@ -1359,5 +1428,91 @@ mod tests {
         assert_eq!(primaries, ["b.example"]);
         model.remove_domain(site, &host("a.example"), now).unwrap();
         assert!(model.remove_domain(site, &host("a.example"), now).is_err());
+    }
+
+    #[test]
+    fn site_settings_are_kept_unless_written_and_cleared_with_null() {
+        use crate::model::{Favicon, Robots};
+
+        let mut model = ConfigModel::default();
+        let input: SiteInput = serde_json::from_value(serde_json::json!({
+            "name": "shop",
+            "action": {"type": "respond", "status": 200},
+            "error_pages": {"pages": [{"statuses": [404], "response": {"kind": "body", "body": "gone"}}]},
+            "maintenance": {"allow": ["10.0.0.0/8"]},
+            "robots": {"kind": "disallow_all"},
+            "favicon": {"kind": "no_content"},
+            "routes": [{
+                "priority": 1,
+                "match": {"kind": "prefix", "path": "/api"},
+                "action": {"type": "respond", "status": 200},
+                "error_pages": {"pages": []}
+            }]
+        }))
+        .unwrap();
+        let id = model.create_site(input, Utc::now());
+        let site = model.site(id).unwrap();
+        let route = site.routes[0].id;
+        assert_eq!(site.error_pages.pages.len(), 1);
+        let maintenance = site.maintenance.as_ref().unwrap();
+        assert!(maintenance.enabled && maintenance.status == 503);
+        assert_eq!(site.robots, Some(Robots::DisallowAll));
+        assert_eq!(site.favicon, Some(Favicon::NoContent));
+        assert_eq!(site.routes[0].error_pages, Some(ErrorPages::default()));
+
+        let kept: SiteInput = serde_json::from_value(serde_json::json!({
+            "name": "shop",
+            "action": {"type": "respond", "status": 200},
+            "routes": [{
+                "id": route,
+                "priority": 1,
+                "match": {"kind": "prefix", "path": "/api"},
+                "action": {"type": "respond", "status": 200}
+            }]
+        }))
+        .unwrap();
+        assert!(kept.maintenance.is_none() && kept.routes[0].error_pages.is_none());
+        model.replace_site(id, kept, Utc::now()).unwrap();
+        let site = model.site(id).unwrap();
+        assert_eq!(site.error_pages.pages.len(), 1);
+        assert!(site.maintenance.is_some() && site.robots.is_some() && site.favicon.is_some());
+        assert_eq!(site.routes[0].error_pages, Some(ErrorPages::default()));
+
+        let cleared: SiteInput = serde_json::from_value(serde_json::json!({
+            "name": "shop",
+            "action": {"type": "respond", "status": 200},
+            "error_pages": {},
+            "maintenance": null,
+            "robots": null,
+            "favicon": null,
+            "routes": [{
+                "id": route,
+                "priority": 1,
+                "match": {"kind": "prefix", "path": "/api"},
+                "action": {"type": "respond", "status": 200},
+                "error_pages": null
+            }]
+        }))
+        .unwrap();
+        assert_eq!(cleared.maintenance, Some(None));
+        let written = serde_json::to_value(&cleared).unwrap();
+        assert!(written["maintenance"].is_null() && written.get("maintenance").is_some());
+        assert!(serde_json::to_value(kept_input())
+            .unwrap()
+            .get("robots")
+            .is_none());
+        model.replace_site(id, cleared, Utc::now()).unwrap();
+        let site = model.site(id).unwrap();
+        assert!(site.error_pages.is_empty());
+        assert!(site.maintenance.is_none() && site.robots.is_none() && site.favicon.is_none());
+        assert_eq!(site.routes[0].error_pages, None);
+    }
+
+    fn kept_input() -> SiteInput {
+        serde_json::from_value(serde_json::json!({
+            "name": "shop",
+            "action": {"type": "respond", "status": 200}
+        }))
+        .unwrap()
     }
 }

@@ -54,6 +54,10 @@ impl<'a> Lowerer<'a> {
                 http_policy_id: None,
                 access_log: Default::default(),
                 rewrites: Vec::new(),
+                error_pages: Default::default(),
+                maintenance: None,
+                robots: None,
+                favicon: None,
             },
             action: None,
             routes: Vec::new(),
@@ -273,6 +277,21 @@ impl<'a> Lowerer<'a> {
                     draft.site.rewrites.push(rule);
                 }
             }
+            "error_page" => {
+                if let Some(super::pages::PageWrite::Page(page)) =
+                    self.error_page(file, directive, false)
+                {
+                    draft.site.error_pages.pages.push(page);
+                }
+            }
+            "intercept_errors" => {
+                draft.site.error_pages.intercept = arg
+                    .and_then(|arg| self.bool_arg(file, arg))
+                    .unwrap_or_default();
+            }
+            "maintenance" => draft.site.maintenance = self.maintenance(file, directive),
+            "robots" => draft.site.robots = self.robots(file, directive),
+            "favicon" => draft.site.favicon = self.favicon(file, directive),
             action => {
                 let Some(found) = self.action(file, directive, action) else {
                     return;

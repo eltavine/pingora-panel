@@ -212,6 +212,7 @@ mod tests {
 
     fn route(name: &str, priority: u32, kind: MatchKind, path: &str, host: Option<&str>) -> Route {
         Route {
+            error_pages: None,
             lua: Default::default(),
             named: None,
             id: Uuid::now_v7(),
@@ -241,6 +242,10 @@ mod tests {
     fn findings(routes: Vec<Route>) -> Vec<(String, String)> {
         let now = chrono::Utc::now();
         let site = Site {
+            error_pages: Default::default(),
+            maintenance: None,
+            robots: None,
+            favicon: None,
             lua: Default::default(),
             id: Uuid::now_v7(),
             name: "shop".into(),
