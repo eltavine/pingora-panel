@@ -79,6 +79,16 @@
       "cancel_in_progress": true,
       "permissions": {
         "contents": "read"
+      },
+      "job_permissions": {
+        "report": {
+          "owner": "pingora-panel-platform",
+          "reason": "A scheduled canary that fails opens or updates the compatibility issue the specification asks for, and closes it once the canary passes again.",
+          "expires_on": "2027-03-01",
+          "permissions": {
+            "issues": "write"
+          }
+        }
       }
     },
     ".github/workflows/secret-scan.yml": {
