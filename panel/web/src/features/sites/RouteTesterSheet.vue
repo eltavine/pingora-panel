@@ -23,7 +23,7 @@ import {
 import { Spinner } from '@/components/ui/spinner'
 import { Textarea } from '@/components/ui/textarea'
 import { notifyFailure } from '@/lib/configuration'
-import { headerLines } from './conditions'
+import { headerLines } from '@/lib/conditions'
 
 const METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const
 

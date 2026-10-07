@@ -1,12 +1,8 @@
 import type { Component } from 'vue'
 import {
   ArrowLeftToLine,
-  ArrowRightLeft,
-  Ban,
-  Bot,
   Braces,
   Construction,
-  Cookie,
   CornerUpRight,
   FileCode,
   FileBraces,
@@ -14,15 +10,11 @@ import {
   FileType,
   FolderLock,
   FolderOpen,
-  Globe,
-  Heading,
   Hourglass,
   Image,
   ImageOff,
   Layers,
   LayoutList,
-  Link,
-  ListChecks,
   MessageSquareText,
   Network,
   Package,
@@ -36,18 +28,10 @@ import {
   ShieldCheck,
   ShieldOff,
   ShieldX,
-  Split,
   SquareDashed,
-  Variable,
   Waypoints,
 } from '@lucide/vue'
-import type {
-  Action,
-  DirectoryListing,
-  RouteCondition,
-  SiteKind,
-  SiteStatus,
-} from '@/api/generated'
+import type { Action, DirectoryListing, SiteKind, SiteStatus } from '@/api/generated'
 import type { FaviconChoice, PageKind, RobotsChoice, RoutePagesMode } from './pages'
 import type { RewriteKind } from './rewrites'
 import type { CacheMode, CachePreset } from './statics'
@@ -90,21 +74,6 @@ export function parseHosts(text: string): string[] {
     .split(/[\n,]/)
     .map((line) => line.split('#')[0]!.trim())
     .filter((line) => line.length > 0)
-}
-
-export const conditionIcons: Record<RouteCondition['kind'], Component> = {
-  method: ArrowRightLeft,
-  host: Globe,
-  header: Heading,
-  query: Variable,
-  cookie: Cookie,
-  client: Network,
-  user_agent: Bot,
-  referer: Link,
-  content_type: FileType,
-  any: Split,
-  all: ListChecks,
-  not: Ban,
 }
 
 export const pageIcons: Record<PageKind, Component> = {

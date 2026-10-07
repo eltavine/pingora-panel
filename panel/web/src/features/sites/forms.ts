@@ -11,7 +11,7 @@ import type {
   SiteView,
   WwwRedirect,
 } from '@/api/generated'
-import { conditionForm, toCondition, type ConditionForm } from './conditions'
+import { conditionForm, toCondition, type ConditionForm } from '@/lib/conditions'
 import { parseHosts } from './presentation'
 import {
   faviconForm,

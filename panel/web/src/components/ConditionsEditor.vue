@@ -1,7 +1,23 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { Plus, Trash2 } from '@lucide/vue'
+import { computed, type Component } from 'vue'
+import {
+  ArrowRightLeft,
+  Ban,
+  Bot,
+  Cookie,
+  FileType,
+  Globe,
+  Heading,
+  Link,
+  ListChecks,
+  Network,
+  Plus,
+  Split,
+  Trash2,
+  Variable,
+} from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
+import type { RouteCondition } from '@/api/generated'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -31,10 +47,24 @@ import {
   TEST_OPERATORS,
   type ConditionForm,
   type ConditionKind,
-} from './conditions'
-import { conditionIcons } from './presentation'
+} from '@/lib/conditions'
 
 defineOptions({ name: 'ConditionsEditor' })
+
+const conditionIcons: Record<RouteCondition['kind'], Component> = {
+  method: ArrowRightLeft,
+  host: Globe,
+  header: Heading,
+  query: Variable,
+  cookie: Cookie,
+  client: Network,
+  user_agent: Bot,
+  referer: Link,
+  content_type: FileType,
+  any: Split,
+  all: ListChecks,
+  not: Ban,
+}
 
 const conditions = defineModel<ConditionForm[]>({ required: true })
 const props = defineProps<{ idPrefix: string; depth?: number }>()

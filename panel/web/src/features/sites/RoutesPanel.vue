@@ -49,7 +49,7 @@ import {
   useRefreshConfiguration,
 } from '@/lib/configuration'
 import { nextPriority, routeInputOf } from './forms'
-import { describeCondition } from './conditions'
+import { describeCondition } from '@/lib/conditions'
 import RouteFormSheet from './RouteFormSheet.vue'
 import RouteTesterSheet from './RouteTesterSheet.vue'
 import { actionIcons } from './presentation'

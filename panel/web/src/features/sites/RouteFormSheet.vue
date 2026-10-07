@@ -37,8 +37,8 @@ import HttpPolicySelect from '@/components/HttpPolicySelect.vue'
 import SecurityPolicySelect from '@/components/SecurityPolicySelect.vue'
 import AccessLogFields from './AccessLogFields.vue'
 import ActionFields from './ActionFields.vue'
-import { conditionProblem } from './conditions'
-import ConditionsEditor from './ConditionsEditor.vue'
+import { conditionProblem } from '@/lib/conditions'
+import ConditionsEditor from '@/components/ConditionsEditor.vue'
 import {
   invalidFieldLines,
   MATCH_KINDS,
