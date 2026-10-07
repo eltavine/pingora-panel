@@ -318,6 +318,7 @@ pub struct SiteCacheReport {
 
 /// What to purge from the proxy cache.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum CachePurge {
     All,
     Sites(Vec<String>),
