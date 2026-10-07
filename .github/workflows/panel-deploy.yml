@@ -587,6 +587,67 @@ jobs:
           ppanel site delete "$site" --permanent
           ppanel config apply
 
+      - name: Answer errors with pages and keep a site in maintenance
+        run: |
+          ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
+          site=$(ppanel -o json site create --name ci-pages --domain pages.test \
+            --respond 200 --body open \
+            | python3 -c "import json, sys; print(json.load(sys.stdin)['id'])")
+          ppanel route add "$site" --name gone --match prefix:/gone --respond 404
+          ppanel route add "$site" --name soon --match prefix:/soon --respond 503 --retry-after 30
+          ppanel site error-pages "$site" --page '404 "body=<h1>No such page</h1>"' \
+            --page '503 "body=Back soon"'
+          ppanel site robots "$site" disallow-all
+          ppanel site favicon "$site" no-content
+          ppanel config apply
+          fetch() {
+            curl --silent --show-error --header 'Host: pages.test' "http://127.0.0.1:18080$1"
+          }
+          status() {
+            curl --silent --output /dev/null --write-out '%{http_code}' \
+              --header 'Host: pages.test' "http://127.0.0.1:18080$1"
+          }
+          for _ in $(seq 1 30); do
+            if [ "$(status /favicon.ico)" = 204 ]; then
+              break
+            fi
+            sleep 1
+          done
+          test "$(status /favicon.ico)" = 204
+          fetch /robots.txt | grep -qx 'Disallow: /'
+          # A fixed response without a body gets the page for its status.
+          test "$(fetch /gone)" = '<h1>No such page</h1>'
+          soon=$(curl --silent --show-error --dump-header - \
+            --header 'Host: pages.test' http://127.0.0.1:18080/soon)
+          grep -q '^HTTP/1.1 503' <<<"$soon"
+          grep -qi '^retry-after: 30' <<<"$soon"
+          grep -q 'Back soon' <<<"$soon"
+          # This host is not in the allowlist, so it gets the maintenance response.
+          ppanel site maintenance "$site" on --allow 192.0.2.0/24 --retry-after 120
+          ppanel config apply
+          for _ in $(seq 1 30); do
+            if [ "$(status /)" = 503 ]; then
+              break
+            fi
+            sleep 1
+          done
+          closed=$(curl --silent --show-error --dump-header - \
+            --header 'Host: pages.test' http://127.0.0.1:18080/)
+          grep -q '^HTTP/1.1 503' <<<"$closed"
+          grep -qi '^retry-after: 120' <<<"$closed"
+          grep -q 'Back soon' <<<"$closed"
+          ppanel site maintenance "$site" off
+          ppanel config apply
+          for _ in $(seq 1 30); do
+            if [ "$(status /)" = 200 ]; then
+              break
+            fi
+            sleep 1
+          done
+          test "$(fetch /)" = open
+          ppanel site delete "$site" --permanent
+          ppanel config apply
+
       - name: Move the configuration between installations as a bundle
         run: |
           ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
