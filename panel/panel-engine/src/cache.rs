@@ -62,6 +62,19 @@ pub(crate) fn validate_cache(snapshot: &RuntimeSnapshot, diagnostics: &mut Vec<D
                 .iter()
                 .map(|route| (route.id.as_str(), "route", route.cache_policy_id.as_deref())),
         );
+    for route in snapshot
+        .routes
+        .iter()
+        .filter(|route| route.no_cache && route.cache_policy_id.is_some())
+    {
+        report(
+            route.id.as_str(),
+            format!(
+                "route {} names a cache policy and keeps out of the cache",
+                route.id
+            ),
+        );
+    }
     for (owner, kind, policy) in references {
         if let Some(policy) = policy.filter(|policy| !ids.contains(policy)) {
             report(
@@ -226,6 +239,7 @@ mod tests {
             },
         );
         route.cache_policy_id = Some("missing".into());
+        route.no_cache = true;
         snapshot.routes.push(route);
         snapshot.cache_policies.push(CachePolicy::new("pages"));
         snapshot.cache_max_bytes = Some(1024);
@@ -234,6 +248,7 @@ mod tests {
         let messages: Vec<_> = diagnostics.iter().map(|d| d.message.as_str()).collect();
         for expected in [
             "route api references unknown cache policy missing",
+            "route api names a cache policy and keeps out of the cache",
             "cache store of 1024 bytes",
             "without requiring proxy.cache",
         ] {

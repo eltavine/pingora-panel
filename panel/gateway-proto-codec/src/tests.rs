@@ -92,6 +92,7 @@ fn populated_snapshot_round_trips_additive_v1_fields() {
         },
     );
     redirect.enabled = false;
+    redirect.no_cache = true;
     snapshot.routes.push(redirect);
     snapshot.routes.push(RouteSpec::new(
         RouteId::new("route-maintenance").unwrap(),

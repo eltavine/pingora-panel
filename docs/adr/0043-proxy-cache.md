@@ -17,7 +17,8 @@ snapshot, which gateways refuse.
 ## Decision
 
 **Policies.** Sites and routes name a cache policy; a route's replaces its
-site's, and a disabled policy caches nothing. A policy says:
+site's, a route can keep out of its site's cache (nginx's `proxy_cache off`),
+and a disabled policy caches nothing. A policy says:
 
 - the key, a template of request variables, `$scheme$host$request_uri`
   unless written (nginx's `proxy_cache_key`), and request fields whose

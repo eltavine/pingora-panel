@@ -206,6 +206,7 @@ impl RoutingTable {
                     let route = &snapshot.routes[matched.spec];
                     Ok(CompiledRoute {
                         cache: match route.cache_policy_id.as_deref() {
+                            _ if route.no_cache => None,
                             Some(id) => cache_plan(targets, &format!("route {}", route.id), id)?,
                             None => site_cache.clone(),
                         },

@@ -4894,6 +4894,9 @@ async fn cached_responses_follow_their_policy_and_are_purged() {
     snapshot
         .routes
         .push(route("origin", 1, prefix("/"), proxy("origin")));
+    let mut live = route("live", 0, prefix("/live"), proxy("origin"));
+    live.no_cache = true;
+    snapshot.routes.push(live);
     let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
     wait_for(listen).await;
     let ask =
@@ -4943,6 +4946,16 @@ async fn cached_responses_follow_their_policy_and_are_purged() {
         b"vary-en-1"
     );
     assert_eq!(served("/vary"), 2);
+    for _ in 0..2 {
+        let live = ask("/live", "").await;
+        assert_eq!(live.status, 404);
+        assert!(!live.headers.contains_key("cache-status"));
+    }
+    assert_eq!(
+        served("/live"),
+        2,
+        "a route can keep out of its site's cache"
+    );
     let missing = ask("/missing", "").await;
     assert_eq!(missing.status, 404);
     assert_eq!(

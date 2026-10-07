@@ -475,6 +475,10 @@ pub struct RouteSpec {
     pub retry_policy: Option<RetryPolicy>,
     pub header_policy_id: Option<String>,
     pub cache_policy_id: Option<String>,
+    /// Keeps the route's responses out of the cache whatever its site's
+    /// policy, as nginx's `proxy_cache off`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub no_cache: bool,
     pub security_policy_id: Option<String>,
     /// Reserved: gateways refuse it. Handlers are in `lua`.
     pub lua_policy_id: Option<String>,
@@ -517,6 +521,7 @@ impl RouteSpec {
             retry_policy: None,
             header_policy_id: None,
             cache_policy_id: None,
+            no_cache: false,
             security_policy_id: None,
             lua_policy_id: None,
             name: None,

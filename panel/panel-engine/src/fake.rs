@@ -233,6 +233,7 @@ mod tests {
         let engine = FakeGatewayEngine::with_default_capabilities();
         let mut candidate = snapshot(1);
         candidate.routes.push(panel_ir::RouteSpec {
+            no_cache: false,
             id: panel_domain::RouteId::new("route-1").unwrap(),
             site_id: panel_domain::SiteId::new("missing-site").unwrap(),
             priority: 1,

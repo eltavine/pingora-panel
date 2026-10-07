@@ -211,6 +211,7 @@ pub(super) fn decode_route(value: wire::RouteSpec) -> Result<RouteSpec> {
         lua: lua::decode_handlers(value.lua)?,
         rewrites: decode_rewrites(value.rewrites)?,
         internal: value.internal,
+        no_cache: value.no_cache,
         error_pages: value
             .error_pages
             .map(pages::decode_error_pages)
@@ -237,6 +238,7 @@ pub(super) fn encode_route(value: &RouteSpec) -> wire::RouteSpec {
         lua: lua::encode_handlers(&value.lua),
         rewrites: value.rewrites.iter().map(encode_rewrite).collect(),
         internal: value.internal,
+        no_cache: value.no_cache,
         error_pages: value.error_pages.as_ref().map(pages::encode_error_pages),
     }
 }

@@ -208,6 +208,9 @@ message RouteSpec {
   bool internal = 17;
   // Replaces the site's error pages for the route's requests when set.
   ErrorPages error_pages = 18;
+  // Keeps the route's responses out of the cache whatever its site's
+  // policy.
+  bool no_cache = 19;
 }
 
 // A condition on a request.
