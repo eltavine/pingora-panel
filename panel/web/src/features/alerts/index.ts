@@ -14,4 +14,8 @@ export const alertsFeature: FeatureModule = {
     },
   ],
   navigation: [{ id: 'alerts', title: 'nav.alerts', icon: BellRing, to: '/alerts' }],
+  messages: {
+    'zh-CN': () => import('./locales/zh-CN'),
+    en: () => import('./locales/en'),
+  },
 }
