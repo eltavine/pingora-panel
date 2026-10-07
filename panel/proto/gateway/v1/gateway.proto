@@ -101,6 +101,55 @@ message SiteSpec {
   // Rules every request for the site runs before a route is chosen
   // (ADR 0040).
   repeated RewriteRule rewrites = 13;
+  // Pages answering the errors of the site's requests, unless their route
+  // has its own (ADR 0041).
+  ErrorPages error_pages = 14;
+  // While set, only the clients it allows reach the site (ADR 0041).
+  Maintenance maintenance = 15;
+}
+
+// The error pages of a site or route.
+message ErrorPages {
+  repeated ErrorPage pages = 1;
+  // Upstreams' error responses with the pages' statuses get the pages too.
+  bool intercept = 2;
+}
+
+// A page answering errors with the statuses it names, between 400 and 599.
+// A gateway refuses kinds of response it does not know.
+message ErrorPage {
+  repeated uint32 statuses = 1;
+  oneof response {
+    ErrorBody body = 2;
+    // A file below the gateway's static root.
+    string file = 3;
+    ErrorRedirect redirect = 4;
+  }
+  // The status a body or file answers with instead of the error's.
+  optional uint32 status = 5;
+}
+
+message ErrorBody {
+  // A template of request variables.
+  string body = 1;
+  // `text/html` when empty.
+  string content_type = 2;
+}
+
+message ErrorRedirect {
+  // A URL template.
+  string location = 1;
+  uint32 status = 2;
+}
+
+// Clients outside `allow` get this response; the others reach the site.
+message Maintenance {
+  uint32 status = 1;
+  string body = 2;
+  bool has_body = 3;
+  string content_type = 4;
+  optional uint32 retry_after_seconds = 5;
+  repeated string allow = 6;
 }
 
 // An HTTP Strict Transport Security policy (RFC 6797 §6.1).
@@ -152,6 +201,8 @@ message RouteSpec {
   // Takes only requests a rewrite, an internal redirect or a script sent
   // to it; others get 404.
   bool internal = 17;
+  // Replaces the site's error pages for the route's requests when set.
+  ErrorPages error_pages = 18;
 }
 
 // A condition on a request.

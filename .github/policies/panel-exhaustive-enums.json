@@ -396,6 +396,12 @@
       "name": "RewriteFlag",
       "owner": "pingora-panel-platform",
       "reason": "The flags are nginx's, mapped onto the protobuf enum and acted on by the data plane. A new flag must fail to compile in both rather than be sent as running the next rule."
+    },
+    {
+      "package": "panel-ir",
+      "name": "ErrorResponse",
+      "owner": "pingora-panel-platform",
+      "reason": "gateway-proto-codec encodes every way an error page answers onto the wire and the data plane serves each. A new one must fail to compile there rather than be dropped, which would leave the error unanswered by its page."
     }
   ]
 }

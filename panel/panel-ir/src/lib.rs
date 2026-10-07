@@ -22,6 +22,10 @@ pub use lua::{
     LuaFallback, LuaHandler, LuaHandlers, LuaLogLevel, LuaPermissions, LuaProgram, LuaScript,
     LuaSharedDict, LuaSockets, LuaTls, LuaVariable, LUA_SCRIPTS_CAPABILITY,
 };
+pub use pages::{
+    ErrorPage, ErrorPages, ErrorResponse, Maintenance, ERROR_PAGES_CAPABILITY,
+    MAINTENANCE_CAPABILITY, MOST_ERROR_PAGES,
+};
 pub use resilience::{
     CircuitBreaker, RetryBudget, RetryCondition, UpstreamQueue, UPSTREAM_RESILIENCE_CAPABILITY,
 };
@@ -35,6 +39,7 @@ pub mod conditions;
 pub mod http;
 pub mod logging;
 pub mod lua;
+pub mod pages;
 pub mod resilience;
 pub mod rewrite;
 pub mod security;
@@ -327,6 +332,13 @@ pub struct SiteSpec {
     /// Rules every request for the site runs before a route is chosen.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rewrites: Vec<RewriteRule>,
+    /// Pages answering the errors of the site's requests, unless their route
+    /// has its own.
+    #[serde(default, skip_serializing_if = "ErrorPages::is_empty")]
+    pub error_pages: ErrorPages,
+    /// While set, only the clients it allows reach the site.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maintenance: Option<Maintenance>,
 }
 
 /// An HTTP Strict Transport Security policy (RFC 6797 §6.1).
@@ -373,6 +385,8 @@ impl SiteSpec {
             header_policy_id: None,
             lua: LuaHandlers::default(),
             rewrites: Vec::new(),
+            error_pages: ErrorPages::default(),
+            maintenance: None,
         }
     }
 }
@@ -456,6 +470,9 @@ pub struct RouteSpec {
     /// to it, as nginx's `internal`; others get 404.
     #[serde(default, skip_serializing_if = "is_false")]
     pub internal: bool,
+    /// Replaces the site's error pages for the route's requests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_pages: Option<ErrorPages>,
 }
 
 impl RouteSpec {
@@ -484,6 +501,7 @@ impl RouteSpec {
             lua: LuaHandlers::default(),
             rewrites: Vec::new(),
             internal: false,
+            error_pages: None,
         }
     }
 }
@@ -1056,7 +1074,21 @@ mod tests {
             },
         ];
         route.internal = true;
+        route.error_pages = Some(ErrorPages {
+            pages: vec![ErrorPage {
+                statuses: BTreeSet::from([404]),
+                response: ErrorResponse::File {
+                    path: "errors/404.html".into(),
+                },
+                status: Some(200),
+            }],
+            intercept: true,
+        });
         snapshot.routes.push(route);
+        snapshot.sites[0].maintenance = Some(Maintenance {
+            allow: vec!["10.0.0.0/8".into()],
+            ..Maintenance::default()
+        });
         snapshot.refresh_content_hash();
         let decoded: RuntimeSnapshot =
             serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();

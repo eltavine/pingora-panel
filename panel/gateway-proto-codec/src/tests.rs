@@ -483,6 +483,74 @@ fn rewrites_round_trip_and_unknown_kinds_and_flags_are_refused() {
 }
 
 #[test]
+fn error_pages_and_maintenance_round_trip_and_unknown_kinds_are_refused() {
+    use panel_ir::{ErrorPage, ErrorPages, ErrorResponse, Maintenance};
+    use std::collections::BTreeSet;
+
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(13));
+    let mut site = SiteSpec::new(SiteId::new("site").unwrap(), "site", Vec::new());
+    site.error_pages = ErrorPages {
+        pages: vec![
+            ErrorPage {
+                statuses: BTreeSet::from([502, 503]),
+                response: ErrorResponse::Body {
+                    body: "<h1>Back soon, $host</h1>".into(),
+                    content_type: None,
+                },
+                status: None,
+            },
+            ErrorPage {
+                statuses: BTreeSet::from([404]),
+                response: ErrorResponse::File {
+                    path: "errors/404.html".into(),
+                },
+                status: Some(200),
+            },
+        ],
+        intercept: true,
+    };
+    site.maintenance = Some(Maintenance {
+        body: Some(String::new()),
+        retry_after_seconds: Some(600),
+        allow: vec!["10.0.0.0/8".into(), "2001:db8::1".into()],
+        ..Maintenance::default()
+    });
+    snapshot.sites.push(site);
+    let mut route = RouteSpec::new(
+        RouteId::new("route").unwrap(),
+        SiteId::new("site").unwrap(),
+        10,
+        RouteMatcher::PathPrefix {
+            path: PathPrefix::new("/old").unwrap(),
+        },
+        RouteAction::respond(410, None),
+    );
+    route.error_pages = Some(ErrorPages {
+        pages: vec![ErrorPage {
+            statuses: BTreeSet::from([410]),
+            response: ErrorResponse::Redirect {
+                location: "https://shop.example/".into(),
+                status: 301,
+            },
+            status: None,
+        }],
+        intercept: false,
+    });
+    snapshot.routes.push(route.clone());
+    route.id = RouteId::new("bare").unwrap();
+    route.error_pages = Some(ErrorPages::default());
+    snapshot.routes.push(route);
+    snapshot.refresh_content_hash();
+    let wire = encode_snapshot(&snapshot);
+    assert_eq!(decode_snapshot(wire.clone()).unwrap(), snapshot);
+
+    let mut unknown = wire;
+    unknown.sites[0].error_pages.as_mut().unwrap().pages[0].response = None;
+    let refused = decode_snapshot(unknown).unwrap_err();
+    assert!(refused.message.contains("does not know"), "{refused}");
+}
+
+#[test]
 fn http_policies_round_trip_and_unknown_codings_are_refused() {
     use panel_ir::{
         CompressionAlgorithm, CompressionPolicy, CorsPolicy, HeaderField, ServerHeader,

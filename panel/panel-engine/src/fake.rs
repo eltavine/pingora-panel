@@ -254,6 +254,7 @@ mod tests {
             lua: Default::default(),
             rewrites: Vec::new(),
             internal: false,
+            error_pages: None,
         });
         candidate.refresh_content_hash();
         let report = engine.validate(candidate).await.unwrap();

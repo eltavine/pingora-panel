@@ -1,7 +1,7 @@
 //! Listener, site and route wire conversion.
 
 use crate::{
-    domain_error, logging, lua, optional_string, status_code,
+    domain_error, logging, lua, optional_string, pages, status_code,
     upstream::{decode_retry_policy, encode_retry_policy},
 };
 use panel_contracts::gateway::v1 as wire;
@@ -126,6 +126,15 @@ pub(super) fn decode_site(value: wire::SiteSpec) -> Result<SiteSpec> {
         header_policy_id: optional_string(value.header_policy_id),
         lua: lua::decode_handlers(value.lua)?,
         rewrites: decode_rewrites(value.rewrites)?,
+        error_pages: value
+            .error_pages
+            .map(pages::decode_error_pages)
+            .transpose()?
+            .unwrap_or_default(),
+        maintenance: value
+            .maintenance
+            .map(pages::decode_maintenance)
+            .transpose()?,
     })
 }
 
@@ -163,6 +172,9 @@ pub(super) fn encode_site(value: &SiteSpec) -> wire::SiteSpec {
         header_policy_id: value.header_policy_id.clone().unwrap_or_default(),
         lua: lua::encode_handlers(&value.lua),
         rewrites: value.rewrites.iter().map(encode_rewrite).collect(),
+        error_pages: (!value.error_pages.is_empty())
+            .then(|| pages::encode_error_pages(&value.error_pages)),
+        maintenance: value.maintenance.as_ref().map(pages::encode_maintenance),
     }
 }
 
@@ -197,6 +209,10 @@ pub(super) fn decode_route(value: wire::RouteSpec) -> Result<RouteSpec> {
         lua: lua::decode_handlers(value.lua)?,
         rewrites: decode_rewrites(value.rewrites)?,
         internal: value.internal,
+        error_pages: value
+            .error_pages
+            .map(pages::decode_error_pages)
+            .transpose()?,
     })
 }
 
@@ -219,6 +235,7 @@ pub(super) fn encode_route(value: &RouteSpec) -> wire::RouteSpec {
         lua: lua::encode_handlers(&value.lua),
         rewrites: value.rewrites.iter().map(encode_rewrite).collect(),
         internal: value.internal,
+        error_pages: value.error_pages.as_ref().map(pages::encode_error_pages),
     }
 }
 

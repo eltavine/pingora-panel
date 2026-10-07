@@ -28,6 +28,7 @@ pub fn validate_engine_ir(
     crate::resilience::validate_resilience(snapshot, &mut diagnostics);
     crate::lua::validate_lua(snapshot, &mut diagnostics);
     crate::rewrite::validate_rewrites(snapshot, &mut diagnostics);
+    crate::pages::validate_pages(snapshot, &mut diagnostics);
 
     let unsupported: Vec<_> = snapshot
         .required_capabilities()

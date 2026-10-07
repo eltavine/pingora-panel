@@ -8,6 +8,7 @@ pub mod fake;
 mod http;
 mod logging;
 mod lua;
+mod pages;
 pub mod ports;
 mod resilience;
 mod rewrite;
@@ -27,6 +28,7 @@ pub use lua::{
     MOST_LUA_SOCKET_MS, MOST_LUA_SOCKET_POOL, MOST_LUA_TIMERS, MOST_LUA_TIME_MS,
     MOST_LUA_VARIABLES, MOST_LUA_VERIFY_DEPTH, MOST_LUA_WORK, MOST_LUA_WORKER_VMS,
 };
+pub use pages::{error_page_problems, maintenance_problems};
 pub use ports::*;
 pub use resilience::{
     problems as resilience_problems, uses_resilience, MOST_BACKOFF_MS, MOST_OPEN_MS, MOST_QUEUE_MS,
