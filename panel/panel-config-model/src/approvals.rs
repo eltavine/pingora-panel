@@ -25,6 +25,8 @@ pub const RESOURCE_KINDS: &[&str] = &[
     "tls-profiles",
     "security-policies",
     "http-policies",
+    "cache-policies",
+    "cache",
     "lua",
 ];
 /// Changes to these kinds are high-risk, as are removals.
