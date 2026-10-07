@@ -85,7 +85,8 @@ Current feature areas, each linked to the decision record that explains what it 
 
 - **Gateway:** `gatewayd` runs Pingora 0.9 with an adapter that turns engine-neutral configuration snapshots into listeners, virtual hosts, routes, TLS, static content and upstream pools. A snapshot is prepared first and then activated atomically; the last good one is kept on disk and served again after a restart, and reloads and worker changes do not drop connections.
 - **Contracts:** the control plane reaches the gateway over gRPC with proto3 contracts and mutual TLS, issued and renewed by an internal certificate authority. Snapshots name the capabilities they need, and settings a gateway does not know are refused rather than ignored.
-- **Control plane:** `panel-control` runs the API, configuration, automation, observability and audit modules in one process. Each keeps its own SQLite database and publishes CloudEvents through a transactional outbox to NATS JetStream.
+- **Control plane:** `panel-control` runs the API, configuration, automation, observability, audit and plugins modules in one process. Each keeps its own SQLite database and publishes CloudEvents through a transactional outbox to NATS JetStream.
+- **Plugins:** signed plugins run as child processes under resource limits and speak gRPC over Unix sockets with HashiCorp go-plugin's protocol. They are granted nothing until an administrator grants them DNS-01, secret, notification, backup target, container engine or gateway engine ports, and every call carries a deadline.
 - **One API:** the REST API is described by OpenAPI and checked for breaking changes on every commit; the console's client is generated from it, and `ppanel` covers the same operations.
 - **Configuration as text:** the draft is an Nginx-style configuration language rooted at `main.conf`, with checks, formatting, completion and a plan of what applying would change. Existing Nginx configuration can be converted into it.
 - **Observability:** the gateway exposes Prometheus metrics and writes structured access logs, which the installation's collector ships to Loki; W3C Trace Context passes through to upstreams and its trace ID is logged with each request. The console charts traffic, searches and tails logs, and alerts notify signed webhooks.
@@ -96,7 +97,7 @@ Current feature areas, each linked to the decision record that explains what it 
 | :--- | :--- |
 | **Host** | Linux with Docker Engine and Compose v2, or Podman. The image and the running installation are built and checked in CI on Linux x86_64. |
 | **Protocols** | HTTP/1.1 and HTTP/2, over TLS by ALPN or as h2c on plaintext listeners, with WebSocket upgrades, Server-Sent Events and gRPC. HTTP/3 is reserved and refused. |
-| **TLS** | rustls with TLS 1.2 and 1.3 and a certificate per host by SNI, plus HSTS. Certificates are uploaded or issued through ACME (RFC 8555) with HTTP-01, or DNS-01 through RFC 2136, external account binding included. |
+| **TLS** | rustls with TLS 1.2 and 1.3 and a certificate per host by SNI, plus HSTS. Certificates are uploaded or issued through ACME (RFC 8555) with HTTP-01, or DNS-01 through RFC 2136 or a plugin, external account binding included. |
 | **Console** | Current desktop and mobile browsers; end-to-end tests run in Chromium and WebKit. English and Simplified Chinese, light and dark themes. |
 | **Toolchains** | Rust 1.94 or later; Node.js 22.18 or later, or 24.12 or later, with pnpm 11 for the console. |
 | **Pingora** | 0.9.0, kept in this repository. A scheduled job builds the adapter against Pingora's main branch to catch upcoming changes. |

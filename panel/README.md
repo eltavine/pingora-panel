@@ -136,9 +136,10 @@ readiness, recovery and current limits.
 
 `panel-control` runs the control plane as one process
 ([decision](../docs/adr/0032-one-control-plane-process-on-sqlite.md)): the
-`audit-service`, `config-service`, `automation-service`,
+`audit-service`, `plugins-service`, `config-service`, `automation-service`,
 `observability-service` and `panel-api` modules, which start in that order
-and stop in reverse, so the API stops taking requests first. Each module is
+and stop in reverse, so the API stops taking requests first and plugins stop
+after the modules that call them. Each module is
 composed by `panel-control-runtime`
 ([decision](../docs/adr/0007-service-processes-health-and-discovery.md)): it
 binds an operational listener with `/livez` and `/readyz`
@@ -157,11 +158,16 @@ module's readiness, as the container health check does.
 | `automation-service` | `automation.db` | `127.0.0.1:9182` | |
 | `observability-service` | `observability.db` | `127.0.0.1:9183` | queries Prometheus at `127.0.0.1:9090` |
 | `audit-service` | `audit.db` | `127.0.0.1:9184` | consumes every event |
+| `plugins-service` | `plugins.db` | `127.0.0.1:9186` | runs signed plugins as child processes |
 
 Each module keeps its SQLite file in `PINGORA_PANEL_DATA_DIR`
 (`/var/lib/pingora-panel/control` by default). The process reads
 `PINGORA_PANEL_NATS_URL`, and optionally `PINGORA_PANEL_HEALTH_INTERVAL_MS`.
-`config-service` also reads `PINGORA_PANEL_GATEWAY_URL`;
+`config-service` also reads `PINGORA_PANEL_GATEWAY_URL` and
+`PINGORA_PANEL_GATEWAY_ENGINE` (see [Plugins](#plugins));
+`plugins-service` reads the settings described there; the modules that call
+plugins reach `plugins-service` at `PINGORA_PANEL_PLUGINS_URL` when it runs
+in another process;
 `observability-service` reads `PINGORA_PANEL_PROMETHEUS_URL`; `panel-api` reads
 `PINGORA_PANEL_HTTP_ADDR`, `PINGORA_PANEL_GATEWAY_URL` for the gateway's
 runtime API,
@@ -758,6 +764,10 @@ and opens its merged logs, filtered by service, and its Compose files. A
 reachable engine's card opens its disk use, where operators see what
 pruning would remove and remove it after confirming.
 
+Plugins that provide the container engine port add their engines beside
+the agent's, named `<plugin>.<engine>` ([Plugins](#plugins)); every container
+operation reaches them through the plugin with the agent's own contract.
+
 ## Site files
 
 The control plane manages the files below the directory the gateway serves
@@ -845,6 +855,13 @@ docker compose run --rm --no-deps control /usr/local/bin/panel-control restore \
 docker compose up --detach --wait control
 ```
 
+A taken backup can also be copied to the backup target a plugin provides
+([Plugins](#plugins)), and an archive a target keeps fetched back: it becomes
+a backup of its own once every member checks against its manifest, and a
+damaged one leaves nothing behind. `POST /api/v1/backups/{id}/copies` and
+`/api/v1/backup-targets/{target}/archives` serve them, as do
+`ppanel backup copy` and `ppanel backup target`.
+
 ## Alerts
 
 `observability-service` evaluates alert rules
@@ -874,6 +891,11 @@ ppanel alert rule set shop-errors --measure server-error-ratio --above 0.05 \
 ppanel alert rule list
 ppanel alert notifications --rule shop-errors
 ```
+
+Channels may also notify through a plugin's notification port
+([Plugins](#plugins)): such a channel names the plugin and, in the plugin's
+terms, where it delivers; the plugin sends, so it keeps no URL or signing
+secret, and its notifications are queued and retried as a webhook's are.
 
 ## Accounts and access
 
@@ -1120,7 +1142,10 @@ propagation time before the CA looks. A provider sends RFC 2136 dynamic
 updates to the zones' primary, signed with a TSIG key (HMAC-SHA256 or
 HMAC-SHA512) whose base64 secret is sealed like keys, so BIND, Knot DNS and
 PowerDNS work as they are. For BIND, a key and an `update-policy` such as
-`grant acme-update. zonesub TXT;` limit the key to TXT records.
+`grant acme-update. zonesub TXT;` limit the key to TXT records. A DNS-01
+certificate may instead name a plugin whose DNS-01 port publishes its
+records (`--dns-plugin`, [Plugins](#plugins)); the port answers once the
+records are served, so the CA is asked to look at once.
 
 `/api/v1/acme-accounts`, `/api/v1/dns-providers` and
 `/api/v1/acme-certificates`, with `/api/v1/acme-certificates/{id}/renewals`
@@ -1810,6 +1835,66 @@ exports `pingora_panel_gateway_lua_runs_total`,
 into runs, failures by why, slow runs, run times and the handlers that
 fail most. The console's Lua page lists, edits and tests scripts.
 
+## Plugins
+
+Plugins add DNS providers, secret stores, notification services, backup
+storage, container engines and gateway engines without changing the product
+([decision](../docs/adr/0044-external-plugins-and-provider-ports.md)). Each
+runs as a child process of the plugins module, speaks HashiCorp go-plugin's
+process protocol over a Unix socket and serves the gRPC contracts in
+`proto/plugin/v1`; `plugin-sdk` serves them in Rust, and
+`pingora-panel-reference-plugin` provides every port and installs a signed
+copy of itself:
+
+```bash
+ppanel() { docker compose -f panel/deploy/compose.yaml exec -T -e PPANEL_TOKEN control ppanel "$@"; }
+key=$(docker compose -f panel/deploy/compose.yaml exec -T control \
+  pingora-panel-reference-plugin package /var/lib/pingora-panel/plugins 1.0.0)
+ppanel plugin key add reference --public-key "$key"   # its publisher, trusted
+ppanel plugin discover                                # reads the plugins directory again
+ppanel plugin versions reference                      # signature, protocol and problems
+ppanel plugin grant reference notifications,backups,secret-references
+printf 's3cret\n' | ppanel plugin secret set token --from -
+ppanel plugin configure reference --set token=vault:token
+ppanel plugin limit reference --concurrency 4 --call-timeout-ms 5000
+ppanel plugin enable reference
+ppanel plugin health reference
+ppanel plugin upgrade reference 1.1.0                 # a validated version in its place
+ppanel plugin rollback reference
+```
+
+A version is a directory, `<name>/<version>/`, in `PINGORA_PANEL_PLUGINS_DIR`
+(`plugins` in the data directory by default) holding `plugin.json`, its
+executable and `plugin.json.minisig`; it runs only once its manifest checks,
+its executable has the named SHA-256, a trusted publisher's minisign key
+signed it and it speaks a protocol version the host does. Nothing is granted
+until an administrator grants the ports and `secret-references` one by one;
+settings are checked against the version's JSON Schema, and strings in the
+`secret-reference` format name `vault:<name>`, sealed with the master keys,
+or `<plugin>:<path>`, which a secret-provider plugin resolves, so values
+reach only the plugin. A change starts the process it asks for before it is
+saved: a version or setting the plugin refuses changes nothing and leaves
+what ran running. On Linux each process is bounded by `prlimit` (address
+space, CPU time, open files, no core dumps); every call carries a deadline,
+at most 16 calls are in flight unless set, health is checked every 10
+seconds and a plugin that exits is started again. Sockets go in
+`PINGORA_PANEL_PLUGINS_RUNTIME_DIR` (`plugins-run` in the data directory)
+and each plugin's files in `plugin-data/<name>`.
+
+| Port | Used by |
+|---|---|
+| `dns01` | DNS-01 automatic certificates: `ppanel acme certificate request ... --challenge dns-01 --dns-plugin <name>` |
+| `secrets` | `<plugin>:<path>` references in other plugins' settings |
+| `notifications` | Alert channels: `ppanel alert channel create chat --plugin <name> --plugin-channel '#ops'` |
+| `backups` | `ppanel backup copy <id> --to <name>`, `ppanel backup target ls\|import\|rm <name> ...` |
+| `containers` | Engines named `<plugin>.<engine>` beside the host agent's, such as `ppanel container list --engine reference.main` |
+| `gateway` | `PINGORA_PANEL_GATEWAY_ENGINE=plugin:<name>` publishes the configuration to the plugin's engine in place of `gatewayd` |
+
+`/api/v1/plugins`, `/api/v1/plugin-keys` and `/api/v1/plugin-secrets` serve
+the same, behind `plugins.read` and `plugins.manage`, which only
+administrators hold; every change, refusal and move between serving and
+degraded is a `plugins.*` audit event.
+
 ## Activation invariant
 
 All fallible work required to build and durably publish the activation occurs
@@ -1956,8 +2041,8 @@ and the credentials of every module and of `gatewayd`, `pki` renews them,
 and `bootstrap` provisions the event streams and the service registry before
 the `control` service starts `panel-control`; it reaches `gatewayd` over
 mutual TLS. The control plane's SQLite files live in the `control-data`
-volume. `control` mounts the five module credential volumes and `gatewayd`
-its own, read-only, and every container runs with a read-only root file
+volume and signed plugin packages in the `plugins` volume. `control` mounts
+the six module credential volumes and `gatewayd` its own, read-only, and every container runs with a read-only root file
 system, no capabilities and `no-new-privileges`. The bootstrap token, the
 password pepper and the master key that seals certificate keys are
 generated into `deploy/secrets/` (never committed) and mounted as Compose

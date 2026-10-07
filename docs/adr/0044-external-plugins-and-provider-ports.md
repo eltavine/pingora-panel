@@ -51,14 +51,15 @@ publisher, a description, the executable's relative path and SHA-256, the
 application protocol versions it speaks, the ports it provides, the
 capabilities it asks for, its resource needs, its call timeout and the JSON
 Schema of its configuration. Discovery reads the directory when the host
-starts and whenever an administrator asks; each version found is recorded
-as discovered. A version becomes validated when its manifest is well formed,
+starts and whenever an administrator asks, and records how many versions it
+found and how many cannot run. A version is validated when its manifest is
+well formed,
 its executable has the named digest, a minisign signature (Ed25519) over
 `plugin.json` verifies with a trusted publisher key, it shares an
 application protocol version with the host, and every port it names is one
-the host knows. Trusted keys are administered like any resource and can be
-seeded at installation; unsigned plugins are refused. A version that fails
-validation keeps its reasons and cannot be enabled.
+the host knows. Trusted keys are administered like any resource; unsigned
+plugins are refused. A version that fails validation keeps its reasons and
+cannot be enabled, and a key that signs an enabled plugin cannot be removed.
 
 **Capabilities.** Each port a plugin provides is a capability it asks for,
 and so is `secret-references`, receiving the values its configuration
@@ -66,7 +67,8 @@ references.
 Plugins are granted nothing until an administrator grants capabilities one
 by one, among those the manifest asks for; the host routes a port's calls
 only to a plugin granted that port, and resolves secrets only for a plugin
-granted `secret-references`. A plugin cannot be enabled without a grant.
+granted `secret-references`. A plugin enabled without grants runs, but no
+call reaches it.
 
 **Configuration.** A plugin's settings are a JSON document validated
 against its manifest's JSON Schema (draft 2020-12) before they are stored. A
@@ -92,7 +94,12 @@ streaming call, such as an archive's transfer, has the caller's deadline,
 and each of its messages the call timeout to arrive. At most 16 calls are in
 flight per plugin unless set; calls beyond them, and calls to a degraded
 plugin, fail at once. Disabling a plugin stops it with
-`SIGTERM` and, after five seconds, `SIGKILL`.
+`SIGTERM` and, after five seconds, `SIGKILL`. The host keeps the plugin's
+standard input open while it runs and says so in
+`PINGORA_PANEL_PLUGIN_LIFELINE`; the SDK stops serving once it closes,
+which it does however the host stops, so no plugin outlives its host. A
+change that starts a process is saved only once the process is healthy;
+when saving fails, what ran before is started again.
 
 **Versions.** Installing a version beside another adds a directory, which
 discovery finds. Upgrading starts the chosen validated version with the
@@ -106,15 +113,16 @@ which ran before it.
 
 | Port | Service | Used by |
 |---|---|---|
-| DNS-01 | `plugin.v1.Dns01Provider`: add and remove TXT records | ACME DNS providers of kind `plugin` (ADR 0016) |
+| DNS-01 | `plugin.v1.Dns01Provider`: add and remove TXT records, answering once they are served | DNS-01 automatic certificates that name a plugin in place of a DNS provider (ADR 0016) |
 | Secrets | `plugin.v1.SecretProvider`: resolve a path | `<plugin>:<path>` secret references |
 | Notifications | `plugin.v1.NotificationProvider`: deliver an alert | Alert channels of kind `plugin` (ADR 0027) |
-| Backup targets | `plugin.v1.BackupTarget`: store, list, fetch and delete archives | Backups copied to a target and restored from it (ADR 0035) |
-| Container engines | `ops.v1.Containers`, the agent's own contract | Engines named `plugin.<name>` beside the agent's (ADR 0031) |
-| Gateway engines | `gateway.v1.GatewayEngine` and `gateway.v1.GatewayRuntime`, the gateway's own contracts | A gateway engine the configuration is applied to (ADR 0010) |
+| Backup targets | `plugin.v1.BackupTarget`: store, list, fetch and delete archives | Backups copied to a target, and archives fetched back as backups once they check against their manifest (ADR 0035) |
+| Container engines | `ops.v1.Containers`, the agent's own contract | Engines named `<plugin>.<engine>` beside the agent's (ADR 0031) |
+| Gateway engines | `gateway.v1.GatewayEngine` and `gateway.v1.GatewayRuntime`, the gateway's own contracts | The engine the configuration is published to and read from in place of `gatewayd`, chosen with `PINGORA_PANEL_GATEWAY_ENGINE=plugin:<name>` (ADR 0010) |
 
-A consumer names the plugin and calls the port through the host; nothing
-else in the consumer changes. Where the product already has a gRPC contract
+A consumer names the plugin in the call's `x-pingora-panel-plugin`
+metadata and calls the port through the host, in the same process or at
+`PINGORA_PANEL_PLUGINS_URL`; nothing else in the consumer changes. Where the product already has a gRPC contract
 for a port, the plugin implements that contract, so the consumer's client
 is the same; a plugin answers `UNIMPLEMENTED` for operations it does not
 offer, which the consumer reports as unsupported.
@@ -131,7 +139,9 @@ of the `plugins` module in the audit trail.
 **Surfaces.** The REST API, `ppanel plugin` and the console's plugin pages
 list plugins with their versions, signatures, compatibility, grants,
 configuration, health and limits, and perform every change; the Compose
-installation mounts the plugins directory and seeds trusted keys.
+installation keeps signed packages in a plugins volume and gives the module
+its own credentials, and publishers' keys are trusted through those
+surfaces.
 
 ## Alternatives
 

@@ -85,7 +85,8 @@ Web 控制台、`ppanel` 命令行和你自己的自动化都使用同一套 RES
 
 - **网关：** `gatewayd` 运行 Pingora 0.9，并通过适配器把与引擎无关的配置快照转换为监听、虚拟主机、路由、TLS、静态内容和上游池。快照先准备、再原子激活；最近一次可用的快照保存在磁盘上，重启后继续使用，重载和调整 worker 不会中断连接。
 - **契约：** 控制面通过 gRPC 访问网关，使用 proto3 契约和双向 TLS，证书由内部 CA 签发并自动续期。快照声明它需要的能力，网关不认识的设置会被拒绝，而不是被忽略。
-- **控制面：** `panel-control` 在一个进程中运行 API、配置、自动化、可观测与审计模块。每个模块拥有自己的 SQLite 数据库，并通过事务 outbox 把 CloudEvents 发布到 NATS JetStream。
+- **控制面：** `panel-control` 在一个进程中运行 API、配置、自动化、可观测、审计与插件模块。每个模块拥有自己的 SQLite 数据库，并通过事务 outbox 把 CloudEvents 发布到 NATS JetStream。
+- **插件：** 签名的插件作为子进程在资源限制下运行，通过 Unix socket 以 HashiCorp go-plugin 的协议使用 gRPC 通信。管理员授予之前，它们不获得任何权限；可授予的端口有 DNS-01、Secret、通知、备份目标、容器引擎与网关引擎，每次调用都带有截止时间。
 - **同一套 API：** REST API 由 OpenAPI 描述，每次提交都检查是否有破坏性变更；控制台的客户端由它生成，`ppanel` 覆盖同样的操作。
 - **配置即文本：** 草稿是以 `main.conf` 为入口的 Nginx 风格配置语言，支持检查、格式化、补全，以及应用前的变更计划。已有的 Nginx 配置可以转换过来。
 - **可观测：** 网关暴露 Prometheus 指标并写结构化访问日志，由安装中的采集器送往 Loki；W3C Trace Context 透传到上游，其追踪 ID 随每个请求记录。控制台绘制流量图表、搜索和实时查看日志，告警通过签名的 Webhook 通知。
@@ -96,7 +97,7 @@ Web 控制台、`ppanel` 命令行和你自己的自动化都使用同一套 RES
 | :--- | :--- |
 | **主机** | 安装 Docker Engine 与 Compose v2 或 Podman 的 Linux。镜像与运行中的安装在 CI 中于 Linux x86_64 上构建并检查。 |
 | **协议** | HTTP/1.1 与 HTTP/2（TLS 上经 ALPN 协商，明文监听上为 h2c），支持 WebSocket 升级、Server-Sent Events 与 gRPC。HTTP/3 已预留，目前会被拒绝。 |
-| **TLS** | 基于 rustls，支持 TLS 1.2 与 1.3、按 SNI 为每个主机选择证书，以及 HSTS。证书可以上传，也可以通过 ACME（RFC 8555）用 HTTP-01，或经 RFC 2136 用 DNS-01 签发，支持外部账号绑定。 |
+| **TLS** | 基于 rustls，支持 TLS 1.2 与 1.3、按 SNI 为每个主机选择证书，以及 HSTS。证书可以上传，也可以通过 ACME（RFC 8555）用 HTTP-01，或经 RFC 2136 或插件用 DNS-01 签发，支持外部账号绑定。 |
 | **控制台** | 当前的桌面与移动浏览器；端到端测试在 Chromium 与 WebKit 中运行。支持英文与简体中文，以及浅色与深色主题。 |
 | **工具链** | Rust 1.94 或更高版本；控制台需要 Node.js 22.18 或更高（或 24.12 或更高）及 pnpm 11。 |
 | **Pingora** | 0.9.0，随本仓库一起维护。定时任务会用 Pingora 的 main 分支构建适配器，以便提前发现上游变化。 |
