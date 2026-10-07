@@ -20,6 +20,7 @@ identity-oidc.workspace = true
 identity-sqlite.workspace = true
 observability-grpc-client.workspace = true
 ops-grpc-client.workspace = true
+plugin-contracts.workspace = true
 plugins-grpc-client.workspace = true
 site-files-local.workspace = true
 panel-api.workspace = true

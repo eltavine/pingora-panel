@@ -35,6 +35,7 @@ panel-platform-codec.workspace = true
 panel-platform.workspace = true
 panel-sqlite.workspace = true
 panel-service.workspace = true
+plugin-contracts.workspace = true
 prost.workspace = true
 serde.workspace = true
 serde_json.workspace = true

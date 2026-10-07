@@ -51,18 +51,25 @@ use panel_contracts::{
     CONFIG_V1,
 };
 use panel_control_runtime::{ControlPlaneProcess, DefaultAddresses, ProcessSettings};
-use panel_errors::Result;
+use panel_errors::{PanelError, Result};
 use panel_health::Impact;
 use panel_platform::{Capability, ServiceName};
 use panel_platform_codec::protocol_range;
-use panel_service::Environment;
+use panel_service::{loopback_channel, Environment};
 use panel_sqlite::{EventLog, SchemaMigration};
+use plugin_contracts::{plugin_of, PLUGIN_METADATA};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 pub const SERVICE: &str = "config-service";
 /// The module's SQLite file in the data directory, `config.db`.
 pub const MODULE: &str = "config";
 pub const GATEWAY_URL_ENV: &str = "PINGORA_PANEL_GATEWAY_URL";
+/// The engine that runs the configuration: `gatewayd`, the default, or
+/// `plugin:<name>` for the gateway engine a plugin provides (ADR 0044).
+pub const GATEWAY_ENGINE_ENV: &str = "PINGORA_PANEL_GATEWAY_ENGINE";
+/// `plugins-service`, which serves the gateway engines plugins provide.
+pub const PLUGINS_URL_ENV: &str = "PINGORA_PANEL_PLUGINS_URL";
+const DEFAULT_PLUGINS_URL: &str = "http://127.0.0.1:50066";
 /// How often the gateway is reconciled after the startup reconciliation.
 pub const RECONCILE_INTERVAL_MS_ENV: &str = "PINGORA_PANEL_RECONCILE_INTERVAL_MS";
 const DEFAULT_RECONCILE_INTERVAL: Duration = Duration::from_secs(30);
@@ -105,6 +112,21 @@ pub fn default_addresses() -> DefaultAddresses {
     }
 }
 
+/// The plugin whose gateway engine runs the configuration, when
+/// [`GATEWAY_ENGINE_ENV`] names one.
+fn gateway_plugin(engine: Option<&str>) -> Result<Option<String>> {
+    match engine {
+        None | Some("gatewayd") => Ok(None),
+        Some(value) => plugin_of(value)
+            .map(|plugin| Some(plugin.to_owned()))
+            .ok_or_else(|| {
+                PanelError::invalid_argument(format!(
+                    "{GATEWAY_ENGINE_ENV} is gatewayd or plugin:<name>, not {value:?}"
+                ))
+            }),
+    }
+}
+
 /// The process; while the gateway is unreachable the service stays
 /// readable but suspends publication.
 pub fn process(
@@ -120,12 +142,36 @@ pub fn process(
         settings,
         MODULE,
     )?;
-    let gateway = match process.peer_channel(&gateway_url, ServiceName::new("gatewayd")?)? {
-        Some(channel) => GatewayGrpcClient::from_channel_with_config(
-            channel,
-            GatewayGrpcClientConfig::default(),
-        )?,
-        None => GatewayGrpcClient::connect_lazy(gateway_url, GatewayGrpcClientConfig::default())?,
+    let gateway = match gateway_plugin(env.string(GATEWAY_ENGINE_ENV)?.as_deref())? {
+        Some(plugin) => {
+            let plugins_url = env
+                .string(PLUGINS_URL_ENV)?
+                .unwrap_or_else(|| DEFAULT_PLUGINS_URL.into());
+            let channel =
+                match process.peer_channel(&plugins_url, ServiceName::new("plugins-service")?)? {
+                    Some(channel) => channel,
+                    None => loopback_channel(
+                        "plugins service",
+                        plugins_url,
+                        Duration::from_secs(5),
+                        Duration::from_secs(60),
+                    )?,
+                };
+            GatewayGrpcClient::from_channel_with_config(
+                channel,
+                GatewayGrpcClientConfig::default(),
+            )?
+            .with_metadata(PLUGIN_METADATA, &plugin)?
+        }
+        None => match process.peer_channel(&gateway_url, ServiceName::new("gatewayd")?)? {
+            Some(channel) => GatewayGrpcClient::from_channel_with_config(
+                channel,
+                GatewayGrpcClientConfig::default(),
+            )?,
+            None => {
+                GatewayGrpcClient::connect_lazy(gateway_url, GatewayGrpcClientConfig::default())?
+            }
+        },
     };
     let gateway_health = gateway.health_check();
     let reconcile_interval = env.millis(RECONCILE_INTERVAL_MS_ENV, DEFAULT_RECONCILE_INTERVAL)?;

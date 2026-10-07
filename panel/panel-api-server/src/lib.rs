@@ -43,6 +43,7 @@ use panel_platform::ServiceName;
 use panel_secrets::{EnvelopeVault, SecretVault};
 use panel_service::{measured, Environment};
 use panel_sqlite::EventLog;
+use plugin_contracts::{plugin_of, PLUGIN_METADATA};
 use plugins_grpc_client::{ContainerEngines, PluginsClient};
 use site_files_local::LocalSiteFiles;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
@@ -67,6 +68,9 @@ pub const AUTOMATION_URL_ENV: &str = "PINGORA_PANEL_AUTOMATION_URL";
 pub const PLUGINS_URL_ENV: &str = "PINGORA_PANEL_PLUGINS_URL";
 /// The gateway's runtime API, for data plane operations and upstream health.
 pub const GATEWAY_URL_ENV: &str = "PINGORA_PANEL_GATEWAY_URL";
+/// The engine that runs the configuration: `gatewayd`, the default, or
+/// `plugin:<name>` for the gateway engine a plugin provides (ADR 0044).
+pub const GATEWAY_ENGINE_ENV: &str = "PINGORA_PANEL_GATEWAY_ENGINE";
 /// The host agent's Unix socket; without it host actions are not offered.
 pub const OPS_AGENT_SOCKET_ENV: &str = "PINGORA_PANEL_OPS_AGENT_SOCKET";
 /// Directory holding the built web console; the API is served without it.
@@ -139,6 +143,14 @@ pub fn process(
     let plugins_url = env
         .string(PLUGINS_URL_ENV)?
         .unwrap_or_else(|| DEFAULT_PLUGINS_URL.into());
+    let gateway_engine = match env.string(GATEWAY_ENGINE_ENV)?.as_deref() {
+        None | Some("gatewayd") => None,
+        Some(value) => Some(plugin_of(value).map(str::to_owned).ok_or_else(|| {
+            PanelError::invalid_argument(format!(
+                "{GATEWAY_ENGINE_ENV} is gatewayd or plugin:<name>, not {value:?}"
+            ))
+        })?),
+    };
     let agent_socket = env.string(OPS_AGENT_SOCKET_ENV)?.map(PathBuf::from);
     let sites_root = env.string(SITES_ROOT_ENV)?.map(PathBuf::from);
     let web_root = PathBuf::from(
@@ -187,12 +199,25 @@ pub fn process(
         }
         None => ConfigPublicationClient::connect_lazy(config_url, ConfigClientConfig::default())?,
     };
-    let gateway = match process.peer_channel(&gateway_url, ServiceName::new("gatewayd")?)? {
-        Some(channel) => GatewayGrpcClient::from_channel_with_config(
-            channel,
+    let plugins = match process.peer_channel(&plugins_url, ServiceName::new("plugins-service")?)? {
+        Some(channel) => PluginsClient::from_channel(channel),
+        None => PluginsClient::connect_lazy(plugins_url)?,
+    };
+    let gateway = match gateway_engine {
+        Some(plugin) => GatewayGrpcClient::from_channel_with_config(
+            plugins.channel(),
             GatewayGrpcClientConfig::default(),
-        )?,
-        None => GatewayGrpcClient::connect_lazy(gateway_url, GatewayGrpcClientConfig::default())?,
+        )?
+        .with_metadata(PLUGIN_METADATA, &plugin)?,
+        None => match process.peer_channel(&gateway_url, ServiceName::new("gatewayd")?)? {
+            Some(channel) => GatewayGrpcClient::from_channel_with_config(
+                channel,
+                GatewayGrpcClientConfig::default(),
+            )?,
+            None => {
+                GatewayGrpcClient::connect_lazy(gateway_url, GatewayGrpcClientConfig::default())?
+            }
+        },
     };
     let audit = match process.peer_channel(&audit_url, ServiceName::new("audit-service")?)? {
         Some(channel) => AuditClient::from_channel(channel),
@@ -209,10 +234,6 @@ pub fn process(
     )? {
         Some(channel) => ObservabilityClient::from_channel(channel),
         None => ObservabilityClient::connect_lazy(observability_url)?,
-    };
-    let plugins = match process.peer_channel(&plugins_url, ServiceName::new("plugins-service")?)? {
-        Some(channel) => PluginsClient::from_channel(channel),
-        None => PluginsClient::connect_lazy(plugins_url)?,
     };
     let agent = agent_socket
         .map(|socket| host_agent(&process, &socket))

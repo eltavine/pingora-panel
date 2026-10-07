@@ -29,6 +29,7 @@ tokio-stream.workspace = true
 tonic.workspace = true
 
 [dev-dependencies]
+gateway-grpc-client.workspace = true
 panel-application.workspace = true
 panel-errors.workspace = true
 panel-platform.workspace = true

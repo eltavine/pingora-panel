@@ -18,7 +18,7 @@ use panel_errors::{
 use panel_ir::RuntimeSnapshot;
 use std::{net::IpAddr, time::Duration};
 use tonic::{
-    metadata::MetadataValue,
+    metadata::{AsciiMetadataValue, MetadataValue},
     transport::{Channel, Endpoint},
     Code, Status,
 };
@@ -40,6 +40,9 @@ pub struct GatewayGrpcClient {
     channel: Channel,
     max_message_bytes: usize,
     request_timeout: Duration,
+    /// Metadata every request carries, such as the plugin a plugins module
+    /// routes the gateway's calls to.
+    metadata: Vec<(&'static str, AsciiMetadataValue)>,
 }
 
 /// Injectable connection and message policies keep operational limits out of
@@ -128,6 +131,7 @@ impl GatewayGrpcClient {
             channel,
             max_message_bytes: config.max_message_bytes,
             request_timeout: config.request_timeout,
+            metadata: Vec::new(),
         })
     }
 
@@ -151,6 +155,7 @@ impl GatewayGrpcClient {
             channel,
             max_message_bytes: config.max_message_bytes,
             request_timeout: config.request_timeout,
+            metadata: Vec::new(),
         })
     }
 
@@ -168,6 +173,7 @@ impl GatewayGrpcClient {
             channel,
             max_message_bytes: config.max_message_bytes,
             request_timeout: config.request_timeout,
+            metadata: Vec::new(),
         }
     }
 
@@ -180,7 +186,18 @@ impl GatewayGrpcClient {
             channel,
             max_message_bytes: config.max_message_bytes,
             request_timeout: config.request_timeout,
+            metadata: Vec::new(),
         })
+    }
+
+    /// Sends `key: value` with every request, such as the plugin whose
+    /// gateway engine port serves the calls (ADR 0044).
+    pub fn with_metadata(mut self, key: &'static str, value: &str) -> Result<Self> {
+        let value = value.parse().map_err(|_| {
+            PanelError::invalid_argument(format!("{value:?} cannot be sent as {key}"))
+        })?;
+        self.metadata.push((key, value));
+        Ok(self)
     }
 
     fn client(&self) -> wire::gateway_engine_client::GatewayEngineClient<Channel> {
@@ -190,7 +207,11 @@ impl GatewayGrpcClient {
     }
 
     fn request<T>(&self, value: T, trace: Option<&TraceContext>) -> tonic::Request<T> {
-        request(value, self.request_timeout, trace)
+        let mut request = request(value, self.request_timeout, trace);
+        for (key, value) in &self.metadata {
+            request.metadata_mut().insert(*key, value.clone());
+        }
+        request
     }
 }
 

@@ -42,6 +42,19 @@ pub const SECRETS_CAPABILITY: &str = "secret-references";
 /// host routes by and removes before the call reaches the plugin.
 pub const PLUGIN_METADATA: &str = "x-pingora-panel-plugin";
 
+/// The plugin a setting names as `plugin:<name>`, as settings that choose
+/// between what the product provides and what a plugin does write it.
+pub fn plugin_of(value: &str) -> Option<&str> {
+    let name = value.strip_prefix("plugin:")?;
+    let valid = !name.is_empty()
+        && name.len() <= 64
+        && name.starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    valid.then_some(name)
+}
+
 /// Sends each call of a port's client to one plugin, as a tonic
 /// interceptor: `Dns01ProviderClient::with_interceptor(channel, plugin)`.
 #[derive(Clone, Debug)]
@@ -73,6 +86,20 @@ pub const SECRET_REFERENCE_FORMAT: &str = "secret-reference";
 #[cfg(test)]
 mod tests {
     use super::v1::{Manifest, Resources};
+
+    #[test]
+    fn calls_name_their_plugin() {
+        use super::{plugin_of, Plugin, PLUGIN_METADATA};
+        use tonic::service::Interceptor;
+        let mut plugin = Plugin::named("acme-dns").unwrap();
+        let request = plugin.call(tonic::Request::new(())).unwrap();
+        assert_eq!(request.metadata().get(PLUGIN_METADATA).unwrap(), "acme-dns");
+        assert!(Plugin::named("bad\nname").is_err());
+        assert_eq!(plugin_of("plugin:edge-engine"), Some("edge-engine"));
+        for refused in ["gatewayd", "plugin:", "plugin:Edge", "plugin:a/b", "edge"] {
+            assert_eq!(plugin_of(refused), None, "{refused}");
+        }
+    }
 
     #[test]
     fn manifests_read_and_write_with_the_fields_own_names() {

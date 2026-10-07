@@ -6,6 +6,8 @@
 //! nothing changed, and every change and refusal is recorded.
 
 use base64::Engine;
+use gateway_grpc_client::GatewayGrpcClient;
+use panel_application::GatewayPort;
 use panel_application::{
     CommandContext, ContainerAction, ContainerFilter, ContainersPort, IdempotencyKey,
     RequestDeadline, RequestId, RequestScope,
@@ -19,8 +21,9 @@ use panel_plugin_api::{
 use panel_secrets::{EnvelopeVault, SecretVault};
 use panel_sqlite::{testing::TestDatabase, EventLog, ServiceDatabase};
 use plugin_contracts::v1::{secret_provider_client::SecretProviderClient, ResolveRequest};
+use plugin_contracts::PLUGIN_METADATA;
 use plugin_host::{
-    proxy::{Containers, PortProxy, Secrets, PLUGIN_HEADER},
+    proxy::{Containers, GatewayEngine, PortProxy, Secrets, PLUGIN_HEADER},
     runtime::Runtime,
 };
 use plugin_reference::package::{self, Publisher};
@@ -665,5 +668,63 @@ async fn the_engines_plugins_provide_run_their_containers() {
         .await
         .unwrap_err();
     assert_eq!(missing.code.as_str(), ErrorCode::NOT_FOUND);
+    module.plugins.runtime().stop_all().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_gateway_engine_a_plugin_provides_answers_the_gateway_client() {
+    let module = Module::new().await;
+    module.install("reference", "1.0.0");
+    module.change(module.trust()).await.unwrap();
+    module
+        .change(PluginCommand::Grant {
+            name: "reference".into(),
+            capabilities: vec!["gateway".into()],
+        })
+        .await
+        .unwrap();
+    module
+        .change(PluginCommand::Enable {
+            name: "reference".into(),
+            version: None,
+        })
+        .await
+        .unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap();
+    let engine = PortProxy::<GatewayEngine>::new(Arc::clone(module.plugins.runtime()));
+    tokio::spawn(async move {
+        let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+        tonic::transport::Server::builder()
+            .add_service(engine)
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+            .await
+    });
+    let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}"))
+        .unwrap()
+        .connect_lazy();
+    let gateway = GatewayGrpcClient::from_channel(channel.clone())
+        .with_metadata(PLUGIN_METADATA, "reference")
+        .unwrap();
+    let status = GatewayPort::status(&gateway).await.unwrap();
+    assert!(status.active_hash().is_none(), "{status:?}");
+    let unnamed = GatewayPort::status(&GatewayGrpcClient::from_channel(channel))
+        .await
+        .unwrap_err();
+    assert!(
+        unnamed.message.contains(PLUGIN_METADATA),
+        "{}",
+        unnamed.message
+    );
+    module
+        .change(PluginCommand::Grant {
+            name: "reference".into(),
+            capabilities: vec![],
+        })
+        .await
+        .unwrap();
+    let refused = GatewayPort::status(&gateway).await.unwrap_err();
+    assert!(refused.message.contains("gateway"), "{}", refused.message);
     module.plugins.runtime().stop_all().await;
 }

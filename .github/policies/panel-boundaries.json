@@ -100,7 +100,8 @@
         "panel-platform",
         "panel-platform-codec",
         "panel-service",
-        "panel-sqlite"
+        "panel-sqlite",
+        "plugin-contracts"
       ]
     },
     "gateway-grpc": {
@@ -326,6 +327,7 @@
         "panel-service",
         "panel-sqlite",
         "panel-tls",
+        "plugin-contracts",
         "plugins-grpc-client",
         "site-files-local",
         "tls-probe-rustls"
@@ -511,6 +513,7 @@
       "catalog": false,
       "allowed_workspace_dependencies": [
         "gateway-grpc",
+        "gateway-grpc-client",
         "panel-application",
         "panel-contracts",
         "panel-engine",
