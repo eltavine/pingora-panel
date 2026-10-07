@@ -34,6 +34,7 @@ mod rewrite;
 mod route;
 mod security;
 mod server;
+mod statics;
 mod tls;
 mod upstream;
 
@@ -47,6 +48,7 @@ pub(crate) use pages::{print_favicon, print_maintenance, print_pages, print_robo
 pub(crate) use resilience::{print_breaker, print_queue, print_retry};
 pub(crate) use rewrite::{capture_end, groups as rewrite_groups};
 pub(crate) use security::{print_rate, DEFAULT_REALM};
+pub(crate) use statics::print_statics;
 
 /// How references in a value are resolved.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -163,6 +165,7 @@ struct RouteDraft {
     /// The error pages the route writes, `error_page off;` writing none.
     pages: Option<Vec<panel_ir::ErrorPage>>,
     intercept: Option<bool>,
+    statics: statics::StaticSettings,
 }
 
 struct ServerDraft {
@@ -170,6 +173,7 @@ struct ServerDraft {
     action: Option<ActionDraft>,
     routes: Vec<RouteDraft>,
     origin: Origin,
+    statics: statics::StaticSettings,
 }
 
 struct ListenerDraft {

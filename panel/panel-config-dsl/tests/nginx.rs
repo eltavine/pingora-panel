@@ -138,6 +138,11 @@ fn the_documented_subset_converts_and_everything_else_is_reported() {
         ],
         "{text}"
     );
+    assert!(
+        matches!(&shop.routes[2].action, Action::Static { root, cache, .. }
+            if root == "images" && cache[0].max_age_seconds == Some(2_592_000)),
+        "expires carries over as a cache rule: {text}"
+    );
     let legacy = &model.sites[1];
     assert!(legacy.https_redirect);
     assert!(matches!(&legacy.action, Action::Proxy { .. }));
@@ -179,11 +184,6 @@ fn the_documented_subset_converts_and_everything_else_is_reported() {
             codes::CHANGED,
             "/etc/nginx/nginx.conf:15.9-21",
             "'keepalive' turns connection reuse on; its pool size is not carried over",
-        ),
-        (
-            codes::UNSUPPORTED,
-            "/etc/nginx/conf.d/shop.conf:10.32-43",
-            "'expires' is not supported in a location",
         ),
         (
             codes::UNSUPPORTED,
@@ -606,6 +606,133 @@ fn error_pages_and_interception_carry_over() {
     );
     assert!(
         reported(codes::UNSUPPORTED, "'=' alone"),
+        "{:#?}",
+        imported.report
+    );
+}
+
+#[test]
+fn listings_media_types_and_expires_carry_over() {
+    use panel_ir::{DirectoryListing, StaticCacheRule};
+
+    let site = r#"server {
+    listen 80;
+    server_name files.example;
+    root /var/www/files;
+    autoindex on;
+    autoindex_format json;
+    autoindex_exact_size off;
+    expires 7d;
+    types {
+        application/wasm wasm;
+    }
+    location /assets/ {
+        expires max;
+    }
+    location /api/ {
+        proxy_pass http://127.0.0.1:9000;
+        expires 1h;
+    }
+}
+"#;
+    let files = BTreeMap::from([
+        (
+            "/etc/nginx/nginx.conf".to_owned(),
+            format!(
+                "http {{\ninclude mime.types;\ndefault_type application/octet-stream;\n{site}}}\n"
+            ),
+        ),
+        (
+            "/etc/nginx/mime.types".to_owned(),
+            "types {\n    text/html html;\n}\n".to_owned(),
+        ),
+    ]);
+    let imported = import_nginx(&files, "/etc/nginx/nginx.conf").unwrap();
+    let text = imported.sources.get("main.conf").unwrap();
+    let environment = BTreeMap::new();
+    let lowered = lower(
+        &imported.sources,
+        &LowerOptions {
+            environment: &environment,
+            previous: None,
+            now: Utc::now(),
+        },
+    );
+    assert!(
+        lowered
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.severity != panel_errors::DiagnosticSeverity::Error),
+        "{:#?}\n{text}",
+        lowered.diagnostics
+    );
+    let site = &lowered.model.sites[0];
+    let week = StaticCacheRule {
+        max_age_seconds: Some(604_800),
+        ..StaticCacheRule::default()
+    };
+    match &site.action {
+        Action::Static {
+            listing,
+            media_types,
+            cache,
+            ..
+        } => {
+            assert_eq!(*listing, DirectoryListing::Json, "{text}");
+            assert_eq!(
+                media_types.get("wasm").map(String::as_str),
+                Some("application/wasm")
+            );
+            assert_eq!(cache, &[week], "{text}");
+        }
+        other => panic!("{other:?}\n{text}"),
+    }
+    let route = |prefix: &str| {
+        site.routes
+            .iter()
+            .find(|route| route.matcher.path == prefix)
+            .unwrap_or_else(|| panic!("no route for {prefix} in\n{text}"))
+    };
+    match &route("/assets/").action {
+        Action::Static { listing, cache, .. } => {
+            assert_eq!(*listing, DirectoryListing::Json, "{text}");
+            assert_eq!(cache[0].max_age_seconds, Some(315_360_000), "{text}");
+        }
+        other => panic!("{other:?}\n{text}"),
+    }
+    assert!(
+        matches!(route("/api/").action, Action::Proxy { .. }),
+        "{text}"
+    );
+    let reported = |code: &str, needle: &str| {
+        imported.report.iter().any(|diagnostic| {
+            diagnostic.code.as_str() == code && diagnostic.message.contains(needle)
+        })
+    };
+    assert!(
+        reported(
+            codes::UNSUPPORTED,
+            "'expires' carries over only where files are served"
+        ),
+        "{:#?}",
+        imported.report
+    );
+    assert!(
+        reported(codes::CHANGED, "exact sizes"),
+        "{:#?}",
+        imported.report
+    );
+    assert!(
+        reported(codes::CHANGED, "ahead of the gateway's own"),
+        "{:#?}",
+        imported.report
+    );
+    assert!(
+        !imported
+            .report
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("'types'")
+                || diagnostic.message.contains("'default_type'")),
         "{:#?}",
         imported.report
     );

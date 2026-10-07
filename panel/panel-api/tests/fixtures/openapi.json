@@ -77218,9 +77218,37 @@
               "type"
             ],
             "properties": {
+              "cache": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/StaticCacheRule"
+                },
+                "description": "Rules setting `Cache-Control`: the first naming a file's\nextension applies, then the first for every file."
+              },
+              "default_type": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The media type of files whose extension has none."
+              },
               "index_files": {
                 "type": "array",
                 "items": {
+                  "type": "string"
+                }
+              },
+              "listing": {
+                "$ref": "#/components/schemas/DirectoryListing",
+                "description": "How a directory without an index file is answered (ADR 0042)."
+              },
+              "media_types": {
+                "type": "object",
+                "description": "Media types by lowercase extension, ahead of the built-in guesses.",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "propertyNames": {
                   "type": "string"
                 }
               },
@@ -80693,6 +80721,15 @@
           "configuration",
           "logs",
           "certificates"
+        ]
+      },
+      "DirectoryListing": {
+        "type": "string",
+        "description": "How a directory without an index file is answered.",
+        "enum": [
+          "off",
+          "html",
+          "json"
         ]
       },
       "DirectoryUsageView": {
@@ -88499,6 +88536,34 @@
             "description": "Versioned source document interpreted by the injected ConfigCompiler."
           }
         }
+      },
+      "StaticCacheRule": {
+        "type": "object",
+        "description": "A rule setting `Cache-Control` on the files with its extensions.",
+        "properties": {
+          "extensions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Lowercase extensions without their dot; none for every file.",
+            "uniqueItems": true
+          },
+          "immutable": {
+            "type": "boolean",
+            "description": "The file never changes at its URL (RFC 8246)."
+          },
+          "max_age_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How long caches may reuse a file (`max-age`); without it they\nrevalidate it first (`no-cache`).",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "StaticRootCheckResponse": {
         "type": "object",

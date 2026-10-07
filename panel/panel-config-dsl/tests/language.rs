@@ -1046,6 +1046,10 @@ fn variables_includes_and_versions() {
     assert_eq!(
         lowered.model.sites[0].action,
         Action::Static {
+            listing: Default::default(),
+            media_types: Default::default(),
+            default_type: None,
+            cache: Vec::new(),
             root: "/srv/www".into(),
             index_files: vec!["index.html".into()],
             spa_fallback: false
@@ -1674,6 +1678,105 @@ fn malformed_error_pages_and_site_files_are_reported_where_they_are_written() {
         (11, "robots allows every crawler"),
         (12, "'favicon' does not take 2 arguments"),
         (13, "type= goes with body="),
+    ] {
+        let at = format!("main.conf:{line}.");
+        assert!(
+            found
+                .iter()
+                .any(|(_, span, message)| span.starts_with(&at) && message.contains(expected)),
+            "{expected:?} at line {line}: {found:#?}"
+        );
+    }
+}
+
+#[test]
+fn directory_listings_media_types_and_cache_rules_read_and_print() {
+    use panel_ir::{DirectoryListing, StaticCacheRule};
+
+    let text = "language_version 1;\nhttp {\n    server files {\n        server_name files.example;\n        root shop autoindex=json;\n        media_type application/wasm wasm;\n        media_type text/x-styles CSS .less;\n        default_type text/plain;\n        cache_control max_age=1y immutable for=css,JS;\n        cache_control no_cache for=html;\n        cache_control max_age=1h;\n        route docs {\n            match prefix /docs;\n            root docs autoindex=on;\n        }\n        route api {\n            match prefix /api;\n            respond 200;\n            cache_control max_age=1h;\n        }\n    }\n}\n";
+    let first = read(text);
+    assert!(first.is_valid(), "{:#?}", first.diagnostics);
+    let found = messages(&first);
+    assert!(
+        found
+            .iter()
+            .any(|(code, span, message)| code == "DSL_NO_EFFECT"
+                && span.starts_with("main.conf:19.")
+                && message.contains("cache_control has no effect")),
+        "{found:#?}"
+    );
+    let site = &first.model.sites[0];
+    let Action::Static {
+        listing,
+        media_types,
+        default_type,
+        cache,
+        ..
+    } = &site.action
+    else {
+        panic!("{:?}", site.action);
+    };
+    assert_eq!(*listing, DirectoryListing::Json);
+    assert_eq!(
+        media_types
+            .iter()
+            .map(|(e, t)| (e.as_str(), t.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("css", "text/x-styles"),
+            ("less", "text/x-styles"),
+            ("wasm", "application/wasm")
+        ]
+    );
+    assert_eq!(default_type.as_deref(), Some("text/plain"));
+    assert_eq!(
+        cache,
+        &[
+            StaticCacheRule {
+                extensions: ["css".to_owned(), "js".to_owned()].into(),
+                max_age_seconds: Some(31_536_000),
+                immutable: true,
+            },
+            StaticCacheRule {
+                extensions: ["html".to_owned()].into(),
+                max_age_seconds: None,
+                immutable: false,
+            },
+            StaticCacheRule {
+                extensions: Default::default(),
+                max_age_seconds: Some(3600),
+                immutable: false,
+            },
+        ]
+    );
+    assert!(matches!(
+        &site.routes[0].action,
+        Action::Static { listing: DirectoryListing::Html, cache, .. } if cache.is_empty()
+    ));
+
+    let printed = print(&first.model);
+    let second = read(&printed);
+    assert!(second.is_valid(), "{:#?}\n{printed}", second.diagnostics);
+    assert!(same_configuration(&first.model, &second.model), "{printed}");
+    assert_eq!(print(&second.model), printed);
+    for line in [
+        "        root shop autoindex=json;\n",
+        "        media_type text/x-styles css less;\n",
+        "        default_type text/plain;\n",
+        "        cache_control max_age=365d immutable for=css,js;\n",
+        "        cache_control no_cache for=html;\n",
+        "        cache_control max_age=1h;\n",
+        "            root docs autoindex=html;\n",
+    ] {
+        assert!(printed.contains(line), "{line:?} in\n{printed}");
+    }
+
+    let wrong = read("language_version 1;\nhttp {\n    server s {\n        server_name s.example;\n        root shop autoindex=sometimes;\n        cache_control immutable;\n        media_type text/css css;\n        media_type text/x-css css;\n        cache_control max_age=1d immutable for=..;\n    }\n}\n");
+    let found = messages(&wrong);
+    for (line, expected) in [
+        (5, "\"sometimes\" is not off, html or json"),
+        (6, "a cache rule is a max-age"),
+        (8, "css already has the media type text/css"),
     ] {
         let at = format!("main.conf:{line}.");
         assert!(

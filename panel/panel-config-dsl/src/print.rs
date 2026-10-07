@@ -4,8 +4,8 @@
 use crate::{
     lower::{
         print_access, print_breaker, print_favicon, print_lua_terms, print_maintenance,
-        print_pages, print_policy, print_queue, print_rate, print_retry, print_robots, CODINGS,
-        DEFAULT_REALM,
+        print_pages, print_policy, print_queue, print_rate, print_retry, print_robots,
+        print_statics, CODINGS, DEFAULT_REALM,
     },
     source::{Sources, ENTRY},
     values::{print_bool, print_duration_ms, print_size},
@@ -19,8 +19,8 @@ use panel_config_model::{
 };
 use panel_dsl::{Argument, Directive, Document, Trivia};
 use panel_ir::{
-    HealthCheckProtocol, ListenerProtocols, LoadBalancingPolicy, RateLimitKey, RealIpHeader,
-    RewriteFlag, RewriteRule, ServerHeader, WwwRedirect,
+    DirectoryListing, HealthCheckProtocol, ListenerProtocols, LoadBalancingPolicy, RateLimitKey,
+    RealIpHeader, RewriteFlag, RewriteRule, ServerHeader, WwwRedirect,
 };
 
 /// The whole model as `main.conf`.
@@ -604,6 +604,8 @@ fn action(action: &Action, model: &ConfigModel) -> Directive {
             root,
             index_files,
             spa_fallback,
+            listing,
+            ..
         } => {
             let mut args = vec![expanded(root)];
             if index_files.as_slice() != ["index.html"] {
@@ -611,6 +613,11 @@ fn action(action: &Action, model: &ConfigModel) -> Directive {
             }
             if *spa_fallback {
                 args.push("spa=on".into());
+            }
+            match listing {
+                DirectoryListing::Off => {}
+                DirectoryListing::Html => args.push("autoindex=html".into()),
+                DirectoryListing::Json => args.push("autoindex=json".into()),
             }
             Directive::simple("root", args)
         }
@@ -651,6 +658,20 @@ fn action(action: &Action, model: &ConfigModel) -> Directive {
             Directive::simple("internal_redirect", [target.clone()])
         }
         _ => Directive::simple("respond", ["503"]),
+    }
+}
+
+/// The settings written beside an action: a static action's media types
+/// and cache rules.
+fn action_settings(action: &Action) -> Vec<Directive> {
+    match action {
+        Action::Static {
+            media_types,
+            default_type,
+            cache,
+            ..
+        } => print_statics(media_types, default_type.as_deref(), cache),
+        _ => Vec::new(),
     }
 }
 
@@ -792,6 +813,7 @@ fn route(route: &Route, site: &Site, model: &ConfigModel) -> Directive {
         body.extend(print_pages(pages, Some(&site.error_pages)));
     }
     body.push(action(&route.action, model));
+    body.extend(action_settings(&route.action));
     Directive::with_block("route", route.name.clone(), body)
 }
 
@@ -895,6 +917,7 @@ pub fn server(site: &Site, model: &ConfigModel) -> Directive {
     body.extend(site.robots.as_ref().map(print_robots));
     body.extend(site.favicon.as_ref().map(print_favicon));
     body.push(action(&site.action, model));
+    body.extend(action_settings(&site.action));
     for item in &site.routes {
         let mut directive = route(item, site, model);
         directive.leading.push(Trivia::BlankLine);

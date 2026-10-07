@@ -62,6 +62,7 @@ impl<'a> Lowerer<'a> {
             action: None,
             routes: Vec::new(),
             origin: Self::origin(file, directive, depth),
+            statics: Default::default(),
         };
         let Some(block) = directive.block() else {
             return;
@@ -88,6 +89,8 @@ impl<'a> Lowerer<'a> {
             );
         });
         draft.site.lua.variables = variables;
+        let statics = std::mem::take(&mut draft.statics);
+        self.attach_statics(statics, &mut draft.action);
         if !explicit_primary {
             if let Some(first) = draft
                 .site
@@ -290,6 +293,9 @@ impl<'a> Lowerer<'a> {
                     .unwrap_or_default();
             }
             "maintenance" => draft.site.maintenance = self.maintenance(file, directive),
+            name if super::statics::STATICS.contains(&name) => {
+                self.static_setting(file, directive, name, &mut draft.statics);
+            }
             "robots" => draft.site.robots = self.robots(file, directive),
             "favicon" => draft.site.favicon = self.favicon(file, directive),
             action => {

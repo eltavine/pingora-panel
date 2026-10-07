@@ -1037,8 +1037,24 @@ fn check_action(action: &Action, resource: &str, upstreams: &BTreeSet<Uuid>, rep
             report.error(resource, format!("upstream {upstream_id} does not exist"));
         }
         Action::Static {
-            root, index_files, ..
+            root,
+            index_files,
+            listing,
+            media_types,
+            default_type,
+            cache,
+            ..
         } => {
+            let policy = panel_ir::StaticContentPolicy {
+                listing: *listing,
+                media_types: media_types.clone(),
+                default_type: default_type.clone(),
+                cache: cache.clone(),
+                ..panel_ir::StaticContentPolicy::default()
+            };
+            for problem in panel_engine::static_problems(&policy) {
+                report.error(resource, format!("the static content {problem}"));
+            }
             let relative = Path::new(root);
             if root.is_empty()
                 || !relative
@@ -1643,6 +1659,10 @@ mod tests {
                 conditions: Vec::new(),
             },
             action: Action::Static {
+                listing: Default::default(),
+                media_types: Default::default(),
+                default_type: None,
+                cache: Vec::new(),
                 root: "../escape".into(),
                 index_files: vec!["index.html".into()],
                 spa_fallback: false,

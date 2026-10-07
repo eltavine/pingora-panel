@@ -29,8 +29,21 @@ const DURATION_UNITS: [(&str, u64); 5] = [
     ("ms", 1),
 ];
 
+/// The units NGINX reads, largest first; `M` is 30 days and `y` 365.
+const PARSED_UNITS: [(&str, u64); 8] = [
+    ("y", 365 * 86_400_000),
+    ("M", 30 * 86_400_000),
+    ("w", 7 * 86_400_000),
+    ("d", 86_400_000),
+    ("h", 3_600_000),
+    ("m", 60_000),
+    ("s", 1_000),
+    ("ms", 1),
+];
+
 /// A duration in milliseconds, written as NGINX does: `500ms`, `30s`, `5m`,
-/// `1h`, `2d` or a sum such as `1m30s`; a bare number means seconds.
+/// `1h`, `2d`, `1w`, `1M`, `1y` or a sum such as `1m30s`; a bare number
+/// means seconds.
 pub fn parse_duration_ms(value: &str) -> Option<u64> {
     if value.is_empty() {
         return None;
@@ -49,7 +62,7 @@ pub fn parse_duration_ms(value: &str) -> Option<u64> {
         let amount: u64 = rest[..digits].parse().ok()?;
         rest = &rest[digits..];
         // `ms` must win over `m`, and units must not repeat or go back up.
-        let (index, (unit, factor)) = DURATION_UNITS
+        let (index, (unit, factor)) = PARSED_UNITS
             .iter()
             .enumerate()
             .filter(|(_, (unit, _))| rest.starts_with(unit))
@@ -173,6 +186,9 @@ mod tests {
         assert_eq!(parse_duration_ms("1m30s"), Some(90_000));
         assert_eq!(parse_duration_ms("2d"), Some(172_800_000));
         assert_eq!(parse_duration_ms("1h5ms"), Some(3_600_005));
+        assert_eq!(parse_duration_ms("1y"), Some(31_536_000_000));
+        assert_eq!(parse_duration_ms("1M2w"), Some(44 * 86_400_000));
+        assert_eq!(print_duration_ms(31_536_000_000), "365d");
         for invalid in ["", "s", "5x", "1s1m", "1s1s", "1.5s", "-1s"] {
             assert_eq!(parse_duration_ms(invalid), None, "{invalid}");
         }

@@ -5,6 +5,7 @@ use super::{ActionDraft, Expansion, Lowerer, RouteDraft};
 use crate::{codes, schema::Context, values::Params};
 use panel_config_model::{Action, MatchKind, Route, RouteMatch, Site};
 use panel_dsl::Directive;
+use panel_ir::DirectoryListing;
 use std::collections::BTreeSet;
 
 impl<'a> Lowerer<'a> {
@@ -44,6 +45,7 @@ impl<'a> Lowerer<'a> {
             origin: Self::origin(file, directive, depth),
             pages: None,
             intercept: None,
+            statics: Default::default(),
         };
         let mut matched = false;
         let mut conditions = Vec::new();
@@ -222,6 +224,9 @@ impl<'a> Lowerer<'a> {
                             "intercept_errors" => {
                                 draft.intercept = arg.and_then(|arg| lowerer.bool_arg(file, arg));
                             }
+                            name if super::statics::STATICS.contains(&name) => {
+                                lowerer.static_setting(file, directive, name, &mut draft.statics);
+                            }
                             action => {
                                 let Some(found) = lowerer.action(file, directive, action) else {
                                     return;
@@ -262,6 +267,8 @@ impl<'a> Lowerer<'a> {
                 "add one of proxy, root, return, respond, internal_redirect or content_by_lua_block",
             );
         }
+        let statics = std::mem::take(&mut draft.statics);
+        self.attach_statics(statics, &mut draft.action);
         self.origins.insert(
             format!("sites/{}/routes/{}", site.id, draft.route.id),
             draft.origin.clone(),
@@ -298,7 +305,7 @@ impl<'a> Lowerer<'a> {
                 })
             }
             "root" => {
-                self.only_params(file, &params, &["index", "spa"]);
+                self.only_params(file, &params, &["index", "spa", "autoindex"]);
                 let root = self.value(file, first?)?;
                 let mut index_files = vec!["index.html".to_owned()];
                 if let Some((value, arg)) = params.named.get("index") {
@@ -313,10 +320,31 @@ impl<'a> Lowerer<'a> {
                     Some((value, arg)) => self.flag(file, arg, value).unwrap_or_default(),
                     None => false,
                 };
+                let listing = match params.named.get("autoindex") {
+                    None => DirectoryListing::Off,
+                    Some((value, arg)) => match *value {
+                        "off" => DirectoryListing::Off,
+                        "on" | "html" => DirectoryListing::Html,
+                        "json" => DirectoryListing::Json,
+                        other => {
+                            self.error(
+                                file,
+                                arg.span,
+                                codes::TYPE,
+                                format!("{other:?} is not off, html or json"),
+                            );
+                            return None;
+                        }
+                    },
+                };
                 Some(ActionDraft::Ready(Action::Static {
                     root,
                     index_files,
                     spa_fallback,
+                    listing,
+                    media_types: Default::default(),
+                    default_type: None,
+                    cache: Vec::new(),
                 }))
             }
             "return" => {

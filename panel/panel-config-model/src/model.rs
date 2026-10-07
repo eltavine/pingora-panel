@@ -6,13 +6,13 @@ use crate::security::SecurityPolicy;
 use chrono::{DateTime, Utc};
 use panel_domain::{CertificateId, ContentHash, NormalizedHost};
 use panel_ir::{
-    AccessLog, ActiveHealthCheck, CircuitBreaker, ErrorPages, ListenerProtocols,
+    AccessLog, ActiveHealthCheck, CircuitBreaker, DirectoryListing, ErrorPages, ListenerProtocols,
     LoadBalancingPolicy, LoggingPolicy, PassiveHealthPolicy, RealIpHeader, RetryBudget,
-    RetryCondition, RetryPolicy, RewriteRule, StrictTransportSecurity, UpstreamConnectionPolicy,
-    UpstreamPoolSpec, UpstreamQueue, UpstreamTlsPolicy, WwwRedirect,
+    RetryCondition, RetryPolicy, RewriteRule, StaticCacheRule, StrictTransportSecurity,
+    UpstreamConnectionPolicy, UpstreamPoolSpec, UpstreamQueue, UpstreamTlsPolicy, WwwRedirect,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 const fn enabled() -> bool {
@@ -585,6 +585,19 @@ pub enum Action {
         index_files: Vec<String>,
         #[serde(default)]
         spa_fallback: bool,
+        /// How a directory without an index file is answered (ADR 0042).
+        #[serde(default, skip_serializing_if = "DirectoryListing::is_off")]
+        listing: DirectoryListing,
+        /// Media types by lowercase extension, ahead of the built-in guesses.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        media_types: BTreeMap<String, String>,
+        /// The media type of files whose extension has none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        default_type: Option<String>,
+        /// Rules setting `Cache-Control`: the first naming a file's
+        /// extension applies, then the first for every file.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        cache: Vec<StaticCacheRule>,
     },
     Redirect {
         location: String,

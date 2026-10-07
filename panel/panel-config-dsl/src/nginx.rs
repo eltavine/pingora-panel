@@ -7,6 +7,7 @@
 
 use crate::{
     schema::{self, Context},
+    values::parse_duration_ms,
     Sources, LANGUAGE_VERSION,
 };
 use globset::GlobBuilder;
@@ -361,6 +362,9 @@ impl<'a> Importer<'a> {
             match located.directive.name.value.as_str() {
                 "upstream" => self.upstream(&located),
                 "server" => self.server(&located),
+                // The gateway knows the media types nginx's mime.types lists.
+                "types" => {}
+                "default_type" if args(&located.directive) == ["application/octet-stream"] => {}
                 name if is_lua(name) => {
                     if let Some(directive) = self.lua(&located, Context::Http) {
                         self.out.http.push(directive);
@@ -674,13 +678,11 @@ impl<'a> Importer<'a> {
         let mut action: Option<Vec<Directive>> = None;
         let mut routes = Vec::new();
         // Locations inherit the server's files wherever they are written.
-        let mut static_files: Option<(String, Vec<String>, bool)> = None;
-        for inner in directives.iter().filter(|inner| {
-            matches!(
-                inner.directive.name.value.as_str(),
-                "root" | "index" | "try_files"
-            )
-        }) {
+        let mut static_files: Option<StaticFiles> = None;
+        for inner in directives
+            .iter()
+            .filter(|inner| is_static(&inner.directive.name.value))
+        {
             self.static_files(inner, &mut static_files);
         }
         for inner in &directives {
@@ -723,7 +725,7 @@ impl<'a> Importer<'a> {
                     Some(converted) => action = Some(converted),
                     None => {}
                 },
-                "root" | "index" | "try_files" => {}
+                name if is_static(name) => {}
                 "access_log" => body.extend(self.access_log(inner)),
                 "rewrite" => body.extend(self.rewrite(inner)),
                 "error_page" => body.extend(self.error_page(inner)),
@@ -751,9 +753,9 @@ impl<'a> Importer<'a> {
         if !listens.is_empty() {
             body.push(Directive::simple("listen", listens));
         }
-        if let Some((root, index, spa)) = static_files {
+        if let Some(files) = static_files {
             if action.is_none() {
-                action = Some(vec![static_root(&root, &index, spa)]);
+                action = Some(files.directives());
             }
         }
         if action.is_none() {
@@ -782,9 +784,9 @@ impl<'a> Importer<'a> {
             .push(Directive::with_block("server", [name], body));
     }
 
-    fn static_files(&mut self, located: &Located, state: &mut Option<(String, Vec<String>, bool)>) {
+    fn static_files(&mut self, located: &Located, state: &mut Option<StaticFiles>) {
         let values = args(&located.directive);
-        let entry = state.get_or_insert_with(|| (String::new(), Vec::new(), false));
+        let entry = state.get_or_insert_with(StaticFiles::default);
         match located.directive.name.value.as_str() {
             "root" => {
                 let Some(path) = values.first() else { return };
@@ -793,7 +795,7 @@ impl<'a> Importer<'a> {
                     .rsplit('/')
                     .next()
                     .unwrap_or_default();
-                entry.0 = if relative.is_empty() {
+                entry.root = if relative.is_empty() {
                     "html".to_owned()
                 } else {
                     relative.to_owned()
@@ -802,14 +804,65 @@ impl<'a> Importer<'a> {
                     located,
                     format!(
                         "static files are served from the gateway's static directory: copy {path} to its {:?} directory",
-                        entry.0
+                        entry.root
                     ),
                 );
             }
-            "index" => entry.1 = values.iter().map(|value| (*value).to_owned()).collect(),
+            "index" => entry.index = values.iter().map(|value| (*value).to_owned()).collect(),
+            "autoindex" => entry.autoindex = values.first() == Some(&"on"),
+            "autoindex_format" => match values.as_slice() {
+                ["html"] => entry.json = false,
+                ["json"] => entry.json = true,
+                _ => self.unsupported(
+                    located,
+                    format!(
+                        "listings as {} are not supported; html and json are",
+                        values.join(" ")
+                    ),
+                ),
+            },
+            "autoindex_exact_size" | "autoindex_localtime" => {
+                self.changed(located, "listings show exact sizes and times in UTC".into())
+            }
+            "types" => {
+                self.changed(
+                    located,
+                    "these media types are used ahead of the gateway's own, which still apply to other extensions".into(),
+                );
+                entry.media_types = located
+                    .directive
+                    .block()
+                    .map(|block| {
+                        block
+                            .directives
+                            .iter()
+                            .filter(|entry| !entry.args.is_empty())
+                            .map(|entry| {
+                                Directive::simple(
+                                    "media_type",
+                                    std::iter::once(entry.name.value.clone())
+                                        .chain(entry.args.iter().map(|arg| arg.value.clone())),
+                                )
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+            }
+            "default_type" => {
+                entry.default_type = values
+                    .first()
+                    .map(|value| Directive::simple("default_type", [*value]));
+            }
+            "expires" => match expires(&values) {
+                Ok(rule) => entry.cache = rule,
+                Err(()) => self.unsupported(
+                    located,
+                    format!("'expires {}' is not supported", values.join(" ")),
+                ),
+            },
             _ => match values.as_slice() {
                 ["$uri", .., last] if last.ends_with(".html") && last.starts_with('/') => {
-                    entry.2 = true
+                    entry.spa = true
                 }
                 ["$uri", .., last] if last.starts_with('=') => {}
                 _ => self.unsupported(
@@ -955,7 +1008,7 @@ impl<'a> Importer<'a> {
         &mut self,
         located: &Located,
         server_action: &mut Option<Vec<Directive>>,
-        inherited: Option<&(String, Vec<String>, bool)>,
+        inherited: Option<&StaticFiles>,
     ) -> Option<Route> {
         let values = args(&located.directive);
         let (kind, path, rank) = match values.as_slice() {
@@ -976,6 +1029,8 @@ impl<'a> Importer<'a> {
         let mut rewrites = Vec::new();
         let mut pages = Vec::new();
         let mut static_files = inherited.cloned();
+        // What the location writes about files, reported if it serves none.
+        let mut settings = Vec::new();
         // A location whose proxy or return cannot be carried over is left
         // out rather than serving files in its place.
         let mut directed = false;
@@ -996,7 +1051,12 @@ impl<'a> Importer<'a> {
                         action = converted;
                     }
                 },
-                "root" | "index" | "try_files" => self.static_files(&inner, &mut static_files),
+                name if is_static(name) => {
+                    if matches!(name, "expires" | "types" | "default_type") {
+                        settings.push(inner.clone());
+                    }
+                    self.static_files(&inner, &mut static_files);
+                }
                 "access_log" => logging.extend(self.access_log(&inner)),
                 "rewrite" => rewrites.extend(self.rewrite(&inner)),
                 "internal" => rewrites.insert(0, Directive::simple("internal", Vec::<String>::new())),
@@ -1023,8 +1083,16 @@ impl<'a> Importer<'a> {
             }
         }
         if action.is_none() && !directed {
-            if let Some((root, index, spa)) = static_files {
-                action = Some(vec![static_root(&root, &index, spa)]);
+            if let Some(files) = static_files {
+                action = Some(files.directives());
+            }
+        } else {
+            for written in &settings {
+                let name = written.directive.name.value.clone();
+                self.unsupported(
+                    written,
+                    format!("'{name}' carries over only where files are served"),
+                );
             }
         }
         let Some(action) = action else {
@@ -1178,19 +1246,83 @@ fn is_https_redirect(directives: &[Directive]) -> bool {
     matches!(directives, [directive] if directive.name.value == "https_redirect")
 }
 
-fn static_root(root: &str, index: &[String], spa: bool) -> Directive {
-    let mut values = vec![if root.is_empty() {
-        "html".to_owned()
-    } else {
-        root.to_owned()
-    }];
-    if !index.is_empty() {
-        values.push(format!("index={}", index.join(",")));
+/// What a server or location serves files with, as its locations
+/// inherit it.
+#[derive(Clone, Default)]
+struct StaticFiles {
+    root: String,
+    index: Vec<String>,
+    spa: bool,
+    autoindex: bool,
+    json: bool,
+    media_types: Vec<Directive>,
+    default_type: Option<Directive>,
+    cache: Option<Directive>,
+}
+
+impl StaticFiles {
+    fn directives(&self) -> Vec<Directive> {
+        let mut values = vec![if self.root.is_empty() {
+            "html".to_owned()
+        } else {
+            self.root.clone()
+        }];
+        if !self.index.is_empty() {
+            values.push(format!("index={}", self.index.join(",")));
+        }
+        if self.spa {
+            values.push("spa=on".to_owned());
+        }
+        if self.autoindex {
+            values.push(
+                if self.json {
+                    "autoindex=json"
+                } else {
+                    "autoindex=html"
+                }
+                .to_owned(),
+            );
+        }
+        let mut directives = vec![Directive::simple("root", values)];
+        directives.extend(self.media_types.iter().cloned());
+        directives.extend(self.default_type.iter().cloned());
+        directives.extend(self.cache.iter().cloned());
+        directives
     }
-    if spa {
-        values.push("spa=on".to_owned());
+}
+
+fn is_static(name: &str) -> bool {
+    matches!(
+        name,
+        "root"
+            | "index"
+            | "try_files"
+            | "autoindex"
+            | "autoindex_format"
+            | "autoindex_exact_size"
+            | "autoindex_localtime"
+            | "types"
+            | "default_type"
+            | "expires"
+    )
+}
+
+/// `expires` as the cache rule it sets for every file: `off` sets none,
+/// `epoch` and negative times mean `no-cache`, and `max` ten years.
+fn expires(values: &[&str]) -> Result<Option<Directive>, ()> {
+    let rule = |args: &[&str]| Some(Directive::simple("cache_control", args.iter().copied()));
+    match values {
+        ["off"] => Ok(None),
+        ["epoch"] => Ok(rule(&["no_cache"])),
+        ["max"] => Ok(rule(&["max_age=3650d"])),
+        [time] if time.starts_with('-') && parse_duration_ms(&time[1..]).is_some() => {
+            Ok(rule(&["no_cache"]))
+        }
+        [time] if parse_duration_ms(time).is_some() => {
+            Ok(rule(&[format!("max_age={time}").as_str()]))
+        }
+        _ => Err(()),
     }
-    Directive::simple("root", values)
 }
 
 /// The request variable an NGINX variable reads, when there is one.

@@ -15,7 +15,8 @@ use panel_ir::{
     CapabilityRequirement, DomainSpec, ListenerRef, LoadBalancingPolicy, LuaProgram, RewriteRule,
     RouteAction, RouteMatcher, RouteSpec, RuntimeSnapshot, SiteSpec, StaticContentPolicy,
     UpstreamEndpoint, UpstreamPoolSpec, WwwRedirect, ERROR_PAGES_CAPABILITY,
-    HTTP_POLICIES_CAPABILITY, LUA_SCRIPTS_CAPABILITY, MAINTENANCE_CAPABILITY, REWRITE_CAPABILITY,
+    HTTP_POLICIES_CAPABILITY, LISTING_CAPABILITY, LUA_SCRIPTS_CAPABILITY, MAINTENANCE_CAPABILITY,
+    MEDIA_TYPES_CAPABILITY, REWRITE_CAPABILITY, STATIC_CACHE_CAPABILITY,
 };
 use panel_ir::{
     REQUEST_HEAD_TIMEOUT_CAPABILITY, REQUEST_SECURITY_CAPABILITY, ROUTE_CONDITIONS_CAPABILITY,
@@ -569,15 +570,34 @@ impl Compiler<'_> {
                 root,
                 index_files,
                 spa_fallback,
+                listing,
+                media_types,
+                default_type,
+                cache,
             } => {
                 self.capabilities.insert("action.static");
+                for (used, capability) in [
+                    (!listing.is_off(), LISTING_CAPABILITY),
+                    (
+                        !media_types.is_empty() || default_type.is_some(),
+                        MEDIA_TYPES_CAPABILITY,
+                    ),
+                    (!cache.is_empty(), STATIC_CACHE_CAPABILITY),
+                ] {
+                    if used {
+                        self.capabilities.insert(capability);
+                    }
+                }
                 let policy_id = format!("{owner}-static");
                 self.snapshot.static_content.push(StaticContentPolicy {
                     id: policy_id.clone(),
                     root: root.clone(),
                     index_files: index_files.clone(),
                     spa_fallback: *spa_fallback,
-                    ..StaticContentPolicy::default()
+                    listing: *listing,
+                    media_types: media_types.clone(),
+                    default_type: default_type.clone(),
+                    cache: cache.clone(),
                 });
                 RouteAction::Static { policy_id }
             }
@@ -790,6 +810,10 @@ mod tests {
                     conditions: Vec::new(),
                 },
                 action: Action::Static {
+                    listing: Default::default(),
+                    media_types: Default::default(),
+                    default_type: None,
+                    cache: Vec::new(),
                     root: "shop".into(),
                     index_files: vec!["index.html".into()],
                     spa_fallback: false,
@@ -1547,6 +1571,68 @@ mod tests {
                 status: 302,
                 preserve_path: false,
             }
+        );
+    }
+
+    #[test]
+    fn static_settings_reach_the_snapshot_and_require_their_capabilities() {
+        use panel_ir::{DirectoryListing, StaticCacheRule};
+
+        let (mut model, _) = model();
+        let cache = vec![StaticCacheRule {
+            extensions: ["css".to_owned()].into(),
+            max_age_seconds: Some(31_536_000),
+            immutable: true,
+        }];
+        model.sites[0].routes[0].action = Action::Static {
+            root: "shop".into(),
+            index_files: vec!["index.html".into()],
+            spa_fallback: false,
+            listing: DirectoryListing::Html,
+            media_types: [("wasm".to_owned(), "application/wasm".to_owned())].into(),
+            default_type: Some("text/plain".into()),
+            cache: cache.clone(),
+        };
+        let snapshot = compile(&model, RevisionId::new(10)).unwrap();
+        let policy = &snapshot.static_content[0];
+        assert_eq!(policy.listing, DirectoryListing::Html);
+        assert_eq!(policy.media_types["wasm"], "application/wasm");
+        assert_eq!(policy.default_type.as_deref(), Some("text/plain"));
+        assert_eq!(policy.cache, cache);
+        for capability in [
+            LISTING_CAPABILITY,
+            MEDIA_TYPES_CAPABILITY,
+            STATIC_CACHE_CAPABILITY,
+        ] {
+            assert!(snapshot
+                .required_capabilities
+                .iter()
+                .any(|required| required.name == capability));
+        }
+
+        if let Action::Static {
+            media_types, cache, ..
+        } = &mut model.sites[0].routes[0].action
+        {
+            media_types.insert("CSS".into(), "text/css".into());
+            cache.push(StaticCacheRule {
+                immutable: true,
+                ..StaticCacheRule::default()
+            });
+        }
+        let diagnostics = compile(&model, RevisionId::new(11)).unwrap_err();
+        let messages: Vec<_> = diagnostics.iter().map(|d| d.message.as_str()).collect();
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.starts_with("the static content maps \"CSS\"")),
+            "{messages:?}"
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("immutable without a max-age")),
+            "{messages:?}"
         );
     }
 }
