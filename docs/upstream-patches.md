@@ -79,6 +79,25 @@ git diff 4487f7b2 HEAD -- 'pingora*' tinyufo
 - **Goes when:** the minimum Rust version reaches 1.91, or upstream
   bounds the requirement.
 
+### The server's certificate chain in rustls client digests
+
+- **Change:** a rustls client connection keeps the server's certificate
+  chain, its own first, in its digest's `extension` as a
+  `Vec<CertificateDer<'static>>` (`connect` in
+  `pingora-core/src/protocols/tls/rustls/stream.rs`, `a778c6eb`).
+- **Why:** `proxy_ssl_verify_by_lua` scripts judge the certificates an
+  upstream presented, and the gateway sees an upstream connection only
+  through its digest, which holds the certificate's organization, serial
+  number and hash but not the certificate. Only Pingora can set the
+  digest's extension.
+- **Upstream:** [#421](https://github.com/cloudflare/pingora/issues/421)
+  asks for the certificate itself in `SslDigest`; open.
+- **Affected versions:** every release through 0.9.0.
+- **Tests:** `proxy_verify_scripts_judge_upstream_certificates` in
+  `gateway-pingora`.
+- **Goes when:** an upstream release keeps the server's certificates where
+  the gateway can read them.
+
 ### Upgraded HTTP/1 tunnels past the request's own body end
 
 - **Change:** `proxy_handle_upstream` in `pingora-proxy/src/proxy_h1.rs`
