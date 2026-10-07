@@ -80,6 +80,8 @@ pub enum AlertChannelKind {
     Webhook,
     /// Reserved: refused until the panel can send mail.
     Email,
+    /// A plugin's notification port, which delivers the alert itself.
+    Plugin,
 }
 
 /// A channel; where it sends is shown only as its origin.
@@ -98,6 +100,16 @@ pub struct NewAlertChannel {
     pub kind: AlertChannelKind,
     /// A webhook's URL, which can authorize whoever holds it.
     pub url: Zeroizing<String>,
+    /// For a plugin channel, the plugin that delivers.
+    pub plugin: Option<AlertPlugin>,
+}
+
+/// The plugin a channel notifies through, and where it delivers in its own
+/// terms, such as a chat room; empty for its default.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct AlertPlugin {
+    pub name: String,
+    pub channel: String,
 }
 
 /// A channel with the signing secret receivers verify notifications with,

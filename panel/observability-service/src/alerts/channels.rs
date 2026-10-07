@@ -1,6 +1,7 @@
-//! The channels alert rules notify. Where a channel sends can authorize
+//! The channels alert rules notify. Where a webhook sends can authorize
 //! whoever holds it, so it is sealed with the channel's signing secret and
-//! shown only as its origin.
+//! shown only as its origin. A plugin channel names the plugin that
+//! delivers and the channel it delivers to, which authorize nobody.
 
 use super::{expected, model::identifier, publish, refused, Cause};
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -25,6 +26,8 @@ pub enum ChannelKind {
     Webhook,
     /// Reserved: refused until the panel can send mail.
     Email,
+    /// A plugin's notification port, which delivers the alert itself.
+    Plugin,
 }
 
 impl ChannelKind {
@@ -32,7 +35,59 @@ impl ChannelKind {
         match self {
             Self::Webhook => "webhook",
             Self::Email => "email",
+            Self::Plugin => "plugin",
         }
+    }
+}
+
+/// The plugin a channel notifies through and the channel it delivers to,
+/// in its own terms; empty for its default.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PluginTarget {
+    pub plugin: String,
+    pub channel: String,
+}
+
+impl PluginTarget {
+    /// The target as shown and kept: the plugin and, after a slash, the
+    /// channel.
+    fn shown(&self) -> String {
+        if self.channel.is_empty() {
+            self.plugin.clone()
+        } else {
+            format!("{}/{}", self.plugin, self.channel)
+        }
+    }
+
+    fn parse(target: &str) -> Self {
+        let (plugin, channel) = target.split_once('/').unwrap_or((target, ""));
+        Self {
+            plugin: plugin.to_owned(),
+            channel: channel.to_owned(),
+        }
+    }
+
+    fn checked(self) -> Result<Self> {
+        let plugin_name = self.plugin.len() <= 64
+            && self
+                .plugin
+                .starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit())
+            && self
+                .plugin
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+        if !plugin_name {
+            return Err(PanelError::invalid_argument(format!(
+                "{:?} is not a plugin name: lowercase letters, digits and hyphens",
+                self.plugin
+            )));
+        }
+        if self.channel.len() > 256 || self.channel.chars().any(char::is_control) {
+            return Err(PanelError::invalid_argument(
+                "a plugin's channel is at most 256 characters, none of them control characters",
+            ));
+        }
+        Ok(self)
     }
 }
 
@@ -54,10 +109,11 @@ struct Endpoint {
     secret: String,
 }
 
-/// Where a channel posts and the secret it signs with.
-pub(crate) struct Destination {
-    pub url: Url,
-    pub secret: Zeroizing<String>,
+/// Where a channel sends: a webhook's URL and the secret it signs with, or
+/// the plugin that delivers.
+pub(crate) enum Destination {
+    Webhook { url: Url, secret: Zeroizing<String> },
+    Plugin(PluginTarget),
 }
 
 fn webhook_url(raw: &str) -> Result<Url> {
@@ -102,6 +158,7 @@ fn record(row: &SqliteRow) -> Result<ChannelRecord> {
         id: row.try_get("channel_id").map_err(storage_error)?,
         kind: match kind.as_str() {
             "webhook" => ChannelKind::Webhook,
+            "plugin" => ChannelKind::Plugin,
             _ => return Err(corrupt("kind")),
         },
         target: row.try_get("target").map_err(storage_error)?,
@@ -172,35 +229,50 @@ impl AlertChannels {
         .collect()
     }
 
-    /// Creates a channel and returns it with its signing secret.
+    /// Creates a channel and returns it with its signing secret, which a
+    /// plugin channel has none of.
     pub async fn create(
         &self,
         cause: Cause<'_>,
         id: &str,
         kind: ChannelKind,
         url: &str,
+        plugin: Option<PluginTarget>,
     ) -> Result<(ChannelRecord, Zeroizing<String>)> {
         let result = async {
             let id = identifier(id, "a channel ID")?;
-            if kind == ChannelKind::Email {
-                return Err(PanelError::unsupported_capability(
-                    "email channels are not available; notify a webhook",
-                ));
-            }
-            let url = webhook_url(url)?;
-            let secret = new_secret()?;
-            let sealed = self.seal(&id, &url, &secret).await?;
+            let (target, sealed, secret) = match kind {
+                ChannelKind::Email => {
+                    return Err(PanelError::unsupported_capability(
+                        "email channels are not available; notify a webhook or a plugin",
+                    ));
+                }
+                ChannelKind::Plugin => {
+                    let plugin = plugin
+                        .ok_or_else(|| {
+                            PanelError::invalid_argument("a plugin channel names its plugin")
+                        })?
+                        .checked()?;
+                    (plugin.shown(), None, Zeroizing::new(String::new()))
+                }
+                ChannelKind::Webhook => {
+                    let url = webhook_url(url)?;
+                    let secret = new_secret()?;
+                    let sealed = self.seal(&id, &url, &secret).await?;
+                    (origin(&url), Some(sealed), secret)
+                }
+            };
             let now = Utc::now();
-            let target = origin(&url);
             let mut transaction = self.database.begin().await?;
             let inserted = sqlx::query(
                 "INSERT INTO alert_channels (channel_id, kind, target, sealed, version, \
-                 created_at, updated_at) VALUES (?1, 'webhook', ?2, ?3, 1, ?4, ?4) \
+                 created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 1, ?5, ?5) \
                  ON CONFLICT (channel_id) DO NOTHING",
             )
             .bind(&id)
+            .bind(kind.name())
             .bind(&target)
-            .bind(sealed.as_str())
+            .bind(sealed.as_ref().map(Sealed::as_str))
             .bind(now)
             .execute(&mut *transaction)
             .await
@@ -273,12 +345,17 @@ impl AlertChannels {
                     current.version
                 )));
             }
+            if current.kind != ChannelKind::Webhook {
+                return Err(PanelError::unsupported_capability(format!(
+                    "alert channel {id} notifies a plugin and has no signing secret to rotate"
+                )));
+            }
             let url = match url {
                 Some(url) => webhook_url(url)?,
                 None => {
                     let sealed =
                         Sealed::new(row.try_get::<String, _>("sealed").map_err(storage_error)?);
-                    self.open(id, &sealed).await?.url
+                    self.open(id, &sealed).await?.0
                 }
             };
             let secret = new_secret()?;
@@ -385,29 +462,35 @@ impl AlertChannels {
         .await
     }
 
-    async fn open(&self, id: &str, sealed: &Sealed) -> Result<Destination> {
+    async fn open(&self, id: &str, sealed: &Sealed) -> Result<(Url, Zeroizing<String>)> {
         let opened = Zeroizing::new(self.vault()?.open(&owner(id), sealed).await?.to_vec());
         let endpoint: Endpoint =
             serde_json::from_slice(&opened).map_err(|_| corrupt("endpoint"))?;
         let endpoint = Zeroizing::new(endpoint);
-        Ok(Destination {
-            url: Url::parse(&endpoint.url).map_err(|_| corrupt("URL"))?,
-            secret: Zeroizing::new(endpoint.secret.clone()),
-        })
+        Ok((
+            Url::parse(&endpoint.url).map_err(|_| corrupt("URL"))?,
+            Zeroizing::new(endpoint.secret.clone()),
+        ))
     }
 
-    /// Where channel `id` posts and the secret it signs with.
+    /// Where channel `id` sends.
     pub(crate) async fn destination(&self, id: &str) -> Result<Destination> {
-        let sealed: Option<String> =
-            sqlx::query_scalar("SELECT sealed FROM alert_channels WHERE channel_id = ?1")
+        let row =
+            sqlx::query("SELECT kind, target, sealed FROM alert_channels WHERE channel_id = ?1")
                 .bind(id)
                 .fetch_optional(self.database.pool())
                 .await
-                .map_err(storage_error)?;
-        let sealed = sealed
-            .map(Sealed::new)
-            .ok_or_else(|| PanelError::not_found(format!("there is no alert channel {id}")))?;
-        self.open(id, &sealed).await
+                .map_err(storage_error)?
+                .ok_or_else(|| PanelError::not_found(format!("there is no alert channel {id}")))?;
+        let kind: String = row.try_get("kind").map_err(storage_error)?;
+        if kind == "plugin" {
+            let target: String = row.try_get("target").map_err(storage_error)?;
+            return Ok(Destination::Plugin(PluginTarget::parse(&target)));
+        }
+        let sealed: Option<String> = row.try_get("sealed").map_err(storage_error)?;
+        let sealed = sealed.map(Sealed::new).ok_or_else(|| corrupt("endpoint"))?;
+        let (url, secret) = self.open(id, &sealed).await?;
+        Ok(Destination::Webhook { url, secret })
     }
 }
 

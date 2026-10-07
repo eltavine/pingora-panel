@@ -3076,7 +3076,7 @@ dependencies = [
 
 [[package]]
 name = "observability-service"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -3094,6 +3094,7 @@ dependencies = [
  "panel-secrets",
  "panel-service",
  "panel-sqlite",
+ "plugin-contracts",
  "prometheus-http-query",
  "prost-types",
  "regex",
@@ -3387,7 +3388,7 @@ dependencies = [
 
 [[package]]
 name = "panel-application"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "async-trait",
  "futures-core",

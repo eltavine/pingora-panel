@@ -21,13 +21,16 @@ pub(super) struct HttpConventions;
 /// challenge types; clients must accept values they do not know.
 const EXTENSIBLE_ENUMS: &[&str] = &[
     "AcmeChallenge",
+    "AlertChannelKindName",
     "CertificateSource",
     "Context",
     "CredentialKind",
     "DnsProviderKind",
     "HealthCheckProtocol",
+    "HealthStatus",
     "KeyAlgorithm",
     "PasswordSignInMode",
+    "PluginState",
     "TsigAlgorithm",
 ];
 

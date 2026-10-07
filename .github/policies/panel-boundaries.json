@@ -262,7 +262,8 @@
         "panel-platform-codec",
         "panel-secrets",
         "panel-service",
-        "panel-sqlite"
+        "panel-sqlite",
+        "plugin-contracts"
       ]
     },
     "panel-api": {

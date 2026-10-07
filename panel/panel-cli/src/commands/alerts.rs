@@ -153,13 +153,21 @@ pub(crate) enum RuleCommand {
 pub(crate) enum ChannelCommand {
     /// Every channel, with where it sends as its origin.
     List,
-    /// Creates a webhook channel and prints its signing secret once.
+    /// Creates a webhook channel and prints its signing secret once, or a
+    /// channel that notifies through a plugin with `--plugin`.
     Create {
         id: String,
         /// A file holding the webhook URL, or `-` for standard input; a URL
         /// can authorize whoever holds it, so it is never an argument.
+        #[arg(long, required_unless_present = "plugin", conflicts_with = "plugin")]
+        url_file: Option<PathBuf>,
+        /// The plugin that delivers notifications; it needs the
+        /// `notifications` grant.
         #[arg(long)]
-        url_file: PathBuf,
+        plugin: Option<String>,
+        /// Where the plugin delivers, in its own terms, such as a chat room.
+        #[arg(long, requires = "plugin")]
+        plugin_channel: Option<String>,
     },
     /// Replaces a channel's signing secret, and its URL with `--url-file`,
     /// and prints the new secret once.
@@ -323,17 +331,38 @@ pub async fn run(api: &Api, output: &Output, command: AlertCommand) -> Result<()
             let channels = api.get(CHANNELS, &[]).await?.body;
             output.list(&channels, CHANNEL_COLUMNS);
         }
-        AlertCommand::Channel(ChannelCommand::Create { id, url_file }) => {
-            let body = json!({"id": id, "kind": "webhook", "url": url(&url_file)?});
+        AlertCommand::Channel(ChannelCommand::Create {
+            id,
+            url_file,
+            plugin,
+            plugin_channel,
+        }) => {
+            let body = match (url_file, plugin) {
+                (Some(path), _) => json!({"id": id, "kind": "webhook", "url": url(&path)?}),
+                (None, plugin) => json!({
+                    "id": id,
+                    "kind": "plugin",
+                    "plugin": plugin,
+                    "plugin_channel": plugin_channel,
+                }),
+            };
             let reply = api
                 .change(Method::POST, CHANNELS, Some(&body), None)
                 .await?
                 .body;
-            let message = format!(
-                "Created channel {id}, posting to {}",
-                text(&reply["channel"]["target"])
-            );
-            secret(output, &message, &reply);
+            if body["kind"] == "plugin" {
+                let message = format!(
+                    "Created channel {id}, notifying through {}",
+                    text(&reply["channel"]["target"])
+                );
+                output.done(&message, &reply);
+            } else {
+                let message = format!(
+                    "Created channel {id}, posting to {}",
+                    text(&reply["channel"]["target"])
+                );
+                secret(output, &message, &reply);
+            }
         }
         AlertCommand::Channel(ChannelCommand::Rotate { id, url_file }) => {
             let current = existing(api, CHANNELS, &id, "alert channel").await?;

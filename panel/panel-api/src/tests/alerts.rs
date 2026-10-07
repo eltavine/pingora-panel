@@ -103,7 +103,16 @@ impl AlertsPort for Alerts {
         _context: CommandContext,
         channel_: NewAlertChannel,
     ) -> Result<AlertChannelSecret> {
-        self.called(format!("create {} {}", channel_.id, *channel_.url));
+        let plugin = channel_
+            .plugin
+            .map(|plugin| {
+                format!(
+                    " {:?} via {}/{}",
+                    channel_.kind, plugin.name, plugin.channel
+                )
+            })
+            .unwrap_or_default();
+        self.called(format!("create {} {}{plugin}", channel_.id, *channel_.url));
         Ok(AlertChannelSecret {
             channel: channel(1),
             secret: Zeroizing::new("whsec_c2VjcmV0".into()),
@@ -318,6 +327,18 @@ async fn channels_return_their_secret_once_and_are_tested() {
     assert_eq!(created["channel"]["target"], "https://hooks.example");
     assert_eq!(created["channel"]["kind"], "webhook");
 
+    let (status, _, _) = send(
+        &app,
+        command("POST", "/api/v1/alert-channels")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(json_body(json!({
+                "id": "chat", "kind": "plugin", "plugin": "chat", "plugin_channel": "#ops"
+            })))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
     let (status, _, listed) = send(
         &app,
         Request::get("/api/v1/alert-channels")
@@ -379,6 +400,7 @@ async fn channels_return_their_secret_once_and_are_tested() {
         *alerts.calls.lock().unwrap(),
         [
             "create ops https://hooks.example/T0/secret",
+            "create chat  Plugin via chat/#ops",
             "rotate ops None 1",
             "rotate ops Some(\"https://other.example/x\") 2",
             "test ops",

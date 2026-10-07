@@ -120,17 +120,22 @@ export function alertHandlers(): AnyHandler[] {
     http.get('*/api/v1/alert-channels', () => HttpResponse.json([...channels.values()])),
     http.post('*/api/v1/alert-channels', async ({ request }) => {
       const body = (await request.json()) as NewAlertChannelBody
+      const plugin = body.kind === 'plugin'
       const channel: AlertChannelView = {
         id: body.id,
-        kind: 'webhook',
-        target: new URL(body.url).origin,
+        kind: plugin ? 'plugin' : 'webhook',
+        target: plugin
+          ? [body.plugin, body.plugin_channel].filter(Boolean).join('/')
+          : new URL(body.url ?? '').origin,
         version: 1,
         etag: '"1"',
         created_at: now(),
         updated_at: now(),
       }
       channels.set(channel.id, channel)
-      return HttpResponse.json(secret(channel), { status: 201 })
+      return HttpResponse.json(plugin ? { channel, secret: '' } : secret(channel), {
+        status: 201,
+      })
     }),
     http.post('*/api/v1/alert-channels/:id/rotate', ({ params }) => {
       const current = channels.get(String(params.id))

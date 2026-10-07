@@ -85835,9 +85835,10 @@
       },
       "AlertChannelKindName": {
         "type": "string",
-        "enum": [
+        "x-extensible-enum": [
           "webhook",
-          "email"
+          "email",
+          "plugin"
         ]
       },
       "AlertChannelRotationBody": {
@@ -85866,7 +85867,7 @@
           },
           "secret": {
             "type": "string",
-            "description": "`whsec_` and the base64 key, as Standard Webhooks libraries take it."
+            "description": "`whsec_` and the base64 key, as Standard Webhooks libraries take it;\nempty for a plugin channel, which signs nothing."
           }
         }
       },
@@ -85898,7 +85899,7 @@
           },
           "target": {
             "type": "string",
-            "description": "A webhook URL's scheme, host and port."
+            "description": "A webhook URL's scheme, host and port, or a plugin's name and, after\na slash, the channel it delivers to."
           },
           "updated_at": {
             "type": "string"
@@ -90858,7 +90859,7 @@
       "HealthStatus": {
         "type": "string",
         "description": "Whether a running plugin answers its health checks.",
-        "enum": [
+        "x-extensible-enum": [
           "serving",
           "degraded"
         ]
@@ -93586,22 +93587,44 @@
         "type": "object",
         "description": "A channel to create.",
         "required": [
-          "id",
-          "url"
+          "id"
         ],
         "properties": {
           "id": {
             "type": "string"
           },
           "kind": {
-            "$ref": "#/components/schemas/AlertChannelKindName"
+            "$ref": "#/components/schemas/NewAlertChannelKind"
+          },
+          "plugin": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Plugins: the plugin that delivers notifications, which needs the\n`notifications` grant."
+          },
+          "plugin_channel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Plugins: where the plugin delivers, in its own terms."
           },
           "url": {
             "type": "string",
-            "description": "Where notifications are posted, `http` or `https`."
+            "description": "Webhooks: where notifications are posted, `http` or `https`."
           }
         },
         "additionalProperties": false
+      },
+      "NewAlertChannelKind": {
+        "type": "string",
+        "description": "The kind of channel to create.",
+        "enum": [
+          "webhook",
+          "email",
+          "plugin"
+        ]
       },
       "NewAutomaticCertificate": {
         "type": "object",
@@ -94266,7 +94289,7 @@
       "PluginState": {
         "type": "string",
         "description": "Whether a plugin runs.",
-        "enum": [
+        "x-extensible-enum": [
           "disabled",
           "enabled",
           "degraded"

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { reactive, watch } from 'vue'
 import { useMutation } from '@tanstack/vue-query'
-import { KeyRound, Plus } from '@lucide/vue'
+import { KeyRound, Plus, Puzzle, Webhook } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
-import type { AlertChannelSecretView, AlertChannelView } from '@/api/generated'
+import type { AlertChannelSecretView, AlertChannelView, NewAlertChannelKind } from '@/api/generated'
+import ChoiceCards, { type Choice } from '@/components/ChoiceCards.vue'
 import {
   createAlertChannelMutation,
   rotateAlertChannelMutation,
@@ -29,11 +30,19 @@ const emit = defineEmits<{ secret: [secret: AlertChannelSecretView] }>()
 const { t } = useI18n()
 const create = useMutation(createAlertChannelMutation())
 const rotate = useMutation(rotateAlertChannelMutation())
-const form = reactive({ id: '', url: '' })
+type Kind = Extract<NewAlertChannelKind, 'webhook' | 'plugin'>
+const form = reactive({ id: '', kind: 'webhook' as Kind, url: '', plugin: '', pluginChannel: '' })
+const kinds: readonly Choice<Kind>[] = [
+  { value: 'webhook', label: t('alerts.kinds.webhook'), icon: Webhook },
+  { value: 'plugin', label: t('alerts.kinds.plugin'), icon: Puzzle },
+]
 watch(open, (isOpen) => {
   if (isOpen) {
     form.id = ''
+    form.kind = 'webhook'
     form.url = ''
+    form.plugin = ''
+    form.pluginChannel = ''
   }
 })
 
@@ -55,13 +64,16 @@ function submit() {
       { onSuccess: done, onError },
     )
   } else {
-    create.mutate(
-      {
-        body: { id: form.id.trim(), kind: 'webhook', url: form.url.trim() },
-        headers: plainHeaders(),
-      },
-      { onSuccess: done, onError },
-    )
+    const body =
+      form.kind === 'plugin'
+        ? {
+            id: form.id.trim(),
+            kind: form.kind,
+            plugin: form.plugin.trim(),
+            plugin_channel: form.pluginChannel.trim() || null,
+          }
+        : { id: form.id.trim(), kind: form.kind, url: form.url.trim() }
+    create.mutate({ body, headers: plainHeaders() }, { onSuccess: done, onError })
   }
 }
 </script>
@@ -90,7 +102,44 @@ function submit() {
               autocomplete="off"
             />
           </FormField>
+          <ChoiceCards
+            v-if="!channel"
+            v-model="form.kind"
+            :label="t('alerts.columns.kind')"
+            :choices="kinds"
+          />
+          <template v-if="!channel && form.kind === 'plugin'">
+            <FormField
+              id="alert-channel-plugin"
+              :label="t('alerts.plugin')"
+              :hint="t('alerts.pluginHint')"
+            >
+              <Input
+                id="alert-channel-plugin"
+                v-model="form.plugin"
+                required
+                maxlength="64"
+                pattern="[a-z0-9][a-z0-9\-]*"
+                class="font-mono"
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </FormField>
+            <FormField
+              id="alert-channel-plugin-channel"
+              :label="t('alerts.pluginChannel')"
+              :hint="t('alerts.pluginChannelHint')"
+            >
+              <Input
+                id="alert-channel-plugin-channel"
+                v-model="form.pluginChannel"
+                maxlength="256"
+                autocomplete="off"
+              />
+            </FormField>
+          </template>
           <FormField
+            v-else
             id="alert-channel-url"
             :label="channel ? t('alerts.newUrl') : t('alerts.url')"
             :hint="t('alerts.urlHint')"

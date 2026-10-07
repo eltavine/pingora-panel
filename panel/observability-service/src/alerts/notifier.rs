@@ -1,19 +1,28 @@
 //! Delivers queued notifications to webhook channels, signed as Standard
-//! Webhooks specify, retrying failures for a day (ADR 0027).
+//! Webhooks specify, or through the plugins of plugin channels, retrying
+//! failures for a day (ADR 0027, ADR 0044).
 
 use super::{
-    channels::{AlertChannels, Destination},
+    channels::{AlertChannels, Destination, PluginTarget},
     payload::Notices,
 };
 use chrono::{DateTime, TimeDelta, Utc};
 use panel_errors::{PanelError, Result};
 use panel_sqlite::{storage_error, ServiceDatabase};
+use plugin_contracts::{
+    v1::{notification_provider_client::NotificationProviderClient, Alert, NotifyRequest},
+    Plugin,
+};
 use reqwest::{header, redirect::Policy, StatusCode};
+use serde_json::Value;
 use sqlx::Row;
 use standardwebhooks::Webhook;
 use std::{future::Future, sync::Arc, time::Duration};
 use tokio_util::sync::CancellationToken;
+use tonic::{transport::Channel, Code};
+use url::Url;
 use uuid::Uuid;
+use zeroize::Zeroizing;
 
 /// How long a receiver may take to answer.
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -29,10 +38,14 @@ const PURGE_EVERY: Duration = Duration::from_secs(3600);
 const MAX_LIST: u32 = 200;
 const DEFAULT_LIST: u32 = 50;
 
+/// Alertmanager's `endsAt` for an alert that has not ended.
+const UNENDED: &str = "0001-01-01T00:00:00Z";
+
 /// How one attempt ended.
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum Attempt {
-    Delivered(u16),
+    /// With the receiver's HTTP status; plugins answer none.
+    Delivered(Option<u16>),
     /// Worth trying again, with the receiver's status if it answered.
     Retry(Option<u16>, String),
     Abandon(Option<u16>, String),
@@ -65,6 +78,48 @@ pub struct NotificationRecord {
     pub last_failure: String,
 }
 
+/// The notification a plugin delivers, from the Alertmanager payload that
+/// holds its one alert.
+fn notify_request(channel: &str, payload: &str) -> Option<NotifyRequest> {
+    let payload: Value = serde_json::from_str(payload).ok()?;
+    let alert = payload["alerts"].get(0)?;
+    let text = |value: &Value| value.as_str().unwrap_or_default().to_owned();
+    let strings = |value: &Value| {
+        value
+            .as_object()
+            .map(|fields| {
+                fields
+                    .iter()
+                    .map(|(name, value)| {
+                        let value = value
+                            .as_str()
+                            .map_or_else(|| value.to_string(), str::to_owned);
+                        (name.clone(), value)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let ends_at = text(&alert["endsAt"]);
+    Some(NotifyRequest {
+        channel: channel.to_owned(),
+        alert: Some(Alert {
+            status: text(&alert["status"]),
+            labels: strings(&alert["labels"]),
+            annotations: strings(&alert["annotations"]),
+            starts_at: text(&alert["startsAt"]),
+            ends_at: if ends_at == UNENDED {
+                String::new()
+            } else {
+                ends_at
+            },
+            generator_url: text(&alert["generatorURL"]),
+            fingerprint: text(&alert["fingerprint"]),
+        }),
+        external_url: text(&payload["externalURL"]),
+    })
+}
+
 /// Sends notifications.
 #[derive(Clone)]
 pub struct Notifier {
@@ -72,6 +127,7 @@ pub struct Notifier {
     channels: AlertChannels,
     notices: Arc<Notices>,
     http: reqwest::Client,
+    plugins: Option<Channel>,
 }
 
 impl Notifier {
@@ -94,13 +150,59 @@ impl Notifier {
             channels,
             notices,
             http,
+            plugins: None,
         })
     }
 
-    /// Posts `body` to `destination`, signed as notification `id`.
-    async fn post(&self, destination: &Destination, id: &str, body: &str) -> Attempt {
+    /// Delivers the notifications of plugin channels through the plugins
+    /// module at `plugins`.
+    pub fn with_plugins(mut self, plugins: Channel) -> Self {
+        self.plugins = Some(plugins);
+        self
+    }
+
+    /// Sends `body` to `destination` as notification `id`.
+    async fn send(&self, destination: &Destination, id: &str, body: &str) -> Attempt {
+        match destination {
+            Destination::Webhook { url, secret } => self.post(url, secret, id, body).await,
+            Destination::Plugin(target) => self.notify_plugin(target, body).await,
+        }
+    }
+
+    async fn notify_plugin(&self, target: &PluginTarget, body: &str) -> Attempt {
+        let Some(plugins) = self.plugins.clone() else {
+            return Attempt::Retry(None, "plugins cannot be reached from here".into());
+        };
+        let Some(request) = notify_request(&target.channel, body) else {
+            return Attempt::Abandon(None, "the notification cannot be read".into());
+        };
+        let plugin = match Plugin::named(&target.plugin) {
+            Ok(plugin) => plugin,
+            Err(status) => return Attempt::Abandon(None, status.message().to_owned()),
+        };
+        let mut request = tonic::Request::new(request);
+        request.set_timeout(TIMEOUT);
+        let mut client = NotificationProviderClient::with_interceptor(plugins, plugin);
+        match tokio::time::timeout(TIMEOUT, client.notify(request)).await {
+            Ok(Ok(_)) => Attempt::Delivered(None),
+            Ok(Err(status)) => {
+                let failure = format!("plugin {}: {}", target.plugin, status.message());
+                match status.code() {
+                    Code::InvalidArgument | Code::Unimplemented => Attempt::Abandon(None, failure),
+                    _ => Attempt::Retry(None, failure),
+                }
+            }
+            Err(_) => Attempt::Retry(
+                None,
+                format!("plugin {} did not answer in time", target.plugin),
+            ),
+        }
+    }
+
+    /// Posts `body` to `url`, signed with `secret` as notification `id`.
+    async fn post(&self, url: &Url, secret: &Zeroizing<String>, id: &str, body: &str) -> Attempt {
         let timestamp = Utc::now().timestamp();
-        let signature = match Webhook::new(&destination.secret)
+        let signature = match Webhook::new(secret)
             .and_then(|webhook| webhook.sign(id, timestamp, body.as_bytes()))
         {
             Ok(signature) => signature,
@@ -108,7 +210,7 @@ impl Notifier {
         };
         let response = self
             .http
-            .post(destination.url.clone())
+            .post(url.clone())
             .header(header::CONTENT_TYPE, "application/json")
             .header("webhook-id", id)
             .header("webhook-timestamp", timestamp.to_string())
@@ -121,7 +223,7 @@ impl Notifier {
                 let status = response.status();
                 let code = Some(status.as_u16());
                 if status.is_success() {
-                    Attempt::Delivered(status.as_u16())
+                    Attempt::Delivered(code)
                 } else if status == StatusCode::REQUEST_TIMEOUT
                     || status == StatusCode::TOO_MANY_REQUESTS
                     || status.is_server_error()
@@ -160,7 +262,7 @@ impl Notifier {
         let attempts: i32 = row.try_get("attempts").map_err(storage_error)?;
         let created_at: DateTime<Utc> = row.try_get("created_at").map_err(storage_error)?;
         let attempt = match self.channels.destination(&channel).await {
-            Ok(destination) => self.post(&destination, &id.to_string(), &payload).await,
+            Ok(destination) => self.send(&destination, &id.to_string(), &payload).await,
             Err(error) => Attempt::Retry(None, error.message),
         };
         let now = Utc::now();
@@ -200,12 +302,12 @@ impl Notifier {
         let body = self.notices.test_payload(channel, Utc::now()).to_string();
         Ok(
             match self
-                .post(&destination, &Uuid::now_v7().to_string(), &body)
+                .send(&destination, &Uuid::now_v7().to_string(), &body)
                 .await
             {
                 Attempt::Delivered(status) => TestOutcome {
                     delivered: true,
-                    status: Some(status),
+                    status,
                     failure: String::new(),
                 },
                 Attempt::Retry(status, failure) | Attempt::Abandon(status, failure) => {
@@ -300,5 +402,38 @@ impl Notifier {
                 },
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plugins_receive_the_payloads_one_alert() {
+        let payload = serde_json::json!({
+            "version": "4",
+            "status": "firing",
+            "externalURL": "https://panel.example/",
+            "alerts": [{
+                "status": "firing",
+                "labels": {"alertname": "errors", "severity": "critical"},
+                "annotations": {"summary": "5xx above 5%", "value": 0.07},
+                "startsAt": "2026-10-07T10:00:00Z",
+                "endsAt": UNENDED,
+                "generatorURL": "https://panel.example/alerts/errors",
+                "fingerprint": "8a1f",
+            }],
+        });
+        let request = notify_request("ops", &payload.to_string()).unwrap();
+        assert_eq!(request.channel, "ops");
+        assert_eq!(request.external_url, "https://panel.example/");
+        let alert = request.alert.unwrap();
+        assert_eq!(alert.status, "firing");
+        assert_eq!(alert.labels["severity"], "critical");
+        assert_eq!(alert.annotations["value"], "0.07");
+        assert_eq!(alert.ends_at, "");
+        assert_eq!(alert.fingerprint, "8a1f");
+        assert!(notify_request("ops", "{}").is_none());
     }
 }

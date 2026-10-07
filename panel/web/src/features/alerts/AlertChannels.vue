@@ -44,7 +44,11 @@ function openForm(channel?: AlertChannelView) {
 }
 const secret = ref<AlertChannelSecretView>()
 function shown(created: AlertChannelSecretView) {
-  secret.value = created
+  if (created.secret) {
+    secret.value = created
+  } else {
+    toast.success(t('alerts.pluginChannelCreated', { id: created.channel.id }))
+  }
   void channels.refetch()
 }
 
@@ -155,6 +159,7 @@ function confirmRemove() {
                   <Send v-else aria-hidden="true" />
                 </Button>
                 <Button
+                  v-if="channel.kind === 'webhook'"
                   variant="ghost"
                   size="icon-sm"
                   :aria-label="t('alerts.rotateChannel', { id: channel.id })"

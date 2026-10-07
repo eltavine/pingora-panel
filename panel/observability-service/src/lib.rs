@@ -13,8 +13,8 @@ mod traffic;
 
 pub use alerts::{
     AlertChannels, AlertRules, AlertsService, Cause, ChannelKind, ChannelRecord, Comparison,
-    Evaluator, Measure, Notices, NotificationRecord, Notifier, RuleRecord, RuleSpec, Severity,
-    State, TestOutcome,
+    Evaluator, Measure, Notices, NotificationRecord, Notifier, PluginTarget, RuleRecord, RuleSpec,
+    Severity, State, TestOutcome,
 };
 pub use host::HostService;
 pub use logql::Filter;
@@ -32,7 +32,7 @@ use panel_errors::{PanelError, Result};
 use panel_platform::{Capability, ServiceName};
 use panel_platform_codec::protocol_range;
 use panel_secrets::{EnvelopeVault, SecretVault};
-use panel_service::Environment;
+use panel_service::{loopback_channel, Environment};
 use panel_sqlite::{EventLog, SchemaMigration};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
@@ -52,11 +52,24 @@ pub const MASTER_KEYS_ENV: &str = "PINGORA_PANEL_MASTER_KEYS";
 /// Origins the console is reached at; notifications link to the first.
 pub const PUBLIC_ORIGINS_ENV: &str = "PINGORA_PANEL_PUBLIC_ORIGINS";
 
-pub const MIGRATIONS: &[SchemaMigration] = &[SchemaMigration::new(
-    10_000,
-    "alert rules, channels and notifications",
-    include_str!("../migrations/10000_alerts.sql"),
-)];
+pub const MIGRATIONS: &[SchemaMigration] = &[
+    SchemaMigration::new(
+        10_000,
+        "alert rules, channels and notifications",
+        include_str!("../migrations/10000_alerts.sql"),
+    ),
+    SchemaMigration::rebuilding(
+        10_100,
+        "channels that notify through plugins",
+        include_str!("../migrations/10100_plugin_channels.sql"),
+    ),
+];
+
+/// `plugins-service`, whose plugins deliver plugin channels' notifications.
+pub const PLUGINS_URL_ENV: &str = "PINGORA_PANEL_PLUGINS_URL";
+const DEFAULT_PLUGINS_URL: &str = "http://127.0.0.1:50066";
+const PLUGINS_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const PLUGINS_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub fn default_addresses() -> DefaultAddresses {
     DefaultAddresses {
@@ -107,14 +120,27 @@ pub fn process(
             .find(|origin| !origin.is_empty())
             .map(str::to_owned)
     });
+    let plugins_url = env
+        .string(PLUGINS_URL_ENV)?
+        .unwrap_or_else(|| DEFAULT_PLUGINS_URL.to_owned());
     let service = ServiceName::new(SERVICE)?;
     let process =
         ControlPlaneProcess::new(service.clone(), env!("CARGO_PKG_VERSION"), settings, MODULE)?;
+    let plugins = match process.peer_channel(&plugins_url, ServiceName::new("plugins-service")?)? {
+        Some(channel) => channel,
+        None => loopback_channel(
+            "plugins service",
+            plugins_url,
+            PLUGINS_CONNECT_TIMEOUT,
+            PLUGINS_REQUEST_TIMEOUT,
+        )?,
+    };
     let events = EventLog::new(process.database(), service);
     let notices = Arc::new(Notices::new(console));
     let rules = AlertRules::new(process.database(), events.clone(), Arc::clone(&notices));
     let channels = AlertChannels::new(process.database(), events, vault);
-    let notifier = Notifier::new(process.database(), channels.clone(), notices)?;
+    let notifier =
+        Notifier::new(process.database(), channels.clone(), notices)?.with_plugins(plugins);
     let evaluator = Evaluator::new(rules.clone(), prometheus(&url)?, SERVICE)?;
     let alerts = AlertsService::new(rules, channels, notifier.clone());
     Ok(process

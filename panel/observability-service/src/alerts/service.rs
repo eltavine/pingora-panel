@@ -1,7 +1,7 @@
 //! The `Alerts` gRPC service over rules, channels and notifications.
 
 use super::{
-    channels::{AlertChannels, ChannelKind, ChannelRecord},
+    channels::{AlertChannels, ChannelKind, ChannelRecord, PluginTarget},
     model::{Comparison, Measure, RuleSpec, Severity, State},
     notifier::{NotificationRecord, Notifier},
     rules::{AlertRules, RuleRecord},
@@ -159,6 +159,7 @@ fn channel(value: ChannelRecord) -> wire::AlertChannel {
         kind: match value.kind {
             ChannelKind::Webhook => wire::AlertChannelKind::Webhook,
             ChannelKind::Email => wire::AlertChannelKind::Email,
+            ChannelKind::Plugin => wire::AlertChannelKind::Plugin,
         }
         .into(),
         target: value.target,
@@ -316,13 +317,19 @@ impl alerts_server::Alerts for AlertsService {
         let request = request.into_inner();
         let kind = match wire::AlertChannelKind::try_from(request.kind) {
             Ok(wire::AlertChannelKind::Email) => ChannelKind::Email,
+            Ok(wire::AlertChannelKind::Plugin) => ChannelKind::Plugin,
             _ => ChannelKind::Webhook,
         };
+        let plugin = (!request.plugin.is_empty()).then(|| PluginTarget {
+            plugin: request.plugin.clone(),
+            channel: request.plugin_channel.clone(),
+        });
         let result = changed_by!(request.context, |cause| self.channels.create(
             cause,
             &request.id,
             kind,
-            &request.url
+            &request.url,
+            plugin.clone()
         ));
         Ok(Response::new(match result {
             Ok((created, secret)) => wire::AlertsCreateChannelResponse {

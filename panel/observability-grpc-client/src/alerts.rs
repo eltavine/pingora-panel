@@ -127,6 +127,7 @@ fn wire_kind(kind: AlertChannelKind) -> wire::AlertChannelKind {
     match kind {
         AlertChannelKind::Webhook => wire::AlertChannelKind::Webhook,
         AlertChannelKind::Email => wire::AlertChannelKind::Email,
+        AlertChannelKind::Plugin => wire::AlertChannelKind::Plugin,
     }
 }
 
@@ -134,6 +135,7 @@ fn channel(value: wire::AlertChannel) -> AlertChannel {
     AlertChannel {
         kind: match wire::AlertChannelKind::try_from(value.kind) {
             Ok(wire::AlertChannelKind::Email) => AlertChannelKind::Email,
+            Ok(wire::AlertChannelKind::Plugin) => AlertChannelKind::Plugin,
             _ => AlertChannelKind::Webhook,
         },
         id: value.id,
@@ -248,6 +250,15 @@ impl AlertsPort for ObservabilityClient {
             kind: wire_kind(channel_.kind).into(),
             url: channel_.url.to_string(),
             recipients: Vec::new(),
+            plugin: channel_
+                .plugin
+                .as_ref()
+                .map(|plugin| plugin.name.clone())
+                .unwrap_or_default(),
+            plugin_channel: channel_
+                .plugin
+                .map(|plugin| plugin.channel)
+                .unwrap_or_default(),
         };
         let response = AlertsClient::new(self.channel.clone())
             .create_channel(self.request(message, &context.scope()))

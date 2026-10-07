@@ -67,6 +67,12 @@ const en: AlertsMessages = {
     newUrl: 'New webhook URL',
     urlHint:
       'Kept encrypted and shown afterwards only by its host, since a URL can authorize whoever holds it.',
+    plugin: 'Plugin',
+    pluginHint: 'An enabled plugin that provides notifications and has been granted them.',
+    pluginChannel: 'Plugin’s channel',
+    pluginChannelHint:
+      'Where the plugin delivers in its own terms, such as a chat room; empty for its default.',
+    pluginChannelCreated: 'Created channel {id}; its plugin delivers notifications',
     rotate: 'Rotate secret',
     rotateTitle: 'Rotate {id}',
     rotateDescription:
@@ -88,6 +94,7 @@ const en: AlertsMessages = {
     kinds: {
       webhook: 'Webhook',
       email: 'Email',
+      plugin: 'Plugin',
     },
     ofRule: 'Notifications of {rule}',
     everyRule: 'Every rule',

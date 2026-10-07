@@ -13,7 +13,7 @@ use axum::{
 use chrono::{TimeDelta, Utc};
 use observability_service::{
     prometheus, AlertChannels, AlertRules, Cause, ChannelKind, Comparison, Evaluator, Measure,
-    Notices, Notifier, RuleSpec, Severity, State, MIGRATIONS,
+    Notices, Notifier, PluginTarget, RuleSpec, Severity, State, MIGRATIONS,
 };
 use panel_domain::SiteId;
 use panel_errors::ErrorCode;
@@ -21,6 +21,13 @@ use panel_events::{Principal, RequestId, RequestScope};
 use panel_platform::ServiceName;
 use panel_secrets::{EnvelopeVault, SecretVault};
 use panel_sqlite::{testing::TestDatabase, EventLog, ServiceDatabase};
+use plugin_contracts::{
+    v1::{
+        notification_provider_server::{NotificationProvider, NotificationProviderServer},
+        NotifyRequest, NotifyResponse,
+    },
+    PLUGIN_METADATA,
+};
 use serde_json::{json, Value};
 use standardwebhooks::Webhook;
 use std::{
@@ -177,6 +184,7 @@ async fn firing_and_resolving_alerts_notify_signed_webhooks() {
             "ops",
             ChannelKind::Webhook,
             &format!("{base}/hook?token=abc"),
+            None,
         )
         .await
         .unwrap();
@@ -278,7 +286,13 @@ async fn alerts_wait_for_their_pending_period_and_unreadable_rules_keep_their_st
     };
     alerts
         .channels
-        .create(cause, "ops", ChannelKind::Webhook, &format!("{base}/hook"))
+        .create(
+            cause,
+            "ops",
+            ChannelKind::Webhook,
+            &format!("{base}/hook"),
+            None,
+        )
         .await
         .unwrap();
     alerts
@@ -351,7 +365,13 @@ async fn failed_notifications_are_retried_and_refused_ones_abandoned() {
     };
     alerts
         .channels
-        .create(cause, "ops", ChannelKind::Webhook, &format!("{base}/hook"))
+        .create(
+            cause,
+            "ops",
+            ChannelKind::Webhook,
+            &format!("{base}/hook"),
+            None,
+        )
         .await
         .unwrap();
     alerts
@@ -409,7 +429,7 @@ async fn rules_and_channels_refuse_what_they_cannot_keep() {
 
     let email = alerts
         .channels
-        .create(cause, "mail", ChannelKind::Email, "")
+        .create(cause, "mail", ChannelKind::Email, "", None)
         .await
         .unwrap_err();
     assert_eq!(email.code.as_str(), ErrorCode::UNSUPPORTED_CAPABILITY);
@@ -427,6 +447,7 @@ async fn rules_and_channels_refuse_what_they_cannot_keep() {
             "ops",
             ChannelKind::Webhook,
             "https://hooks.example/a",
+            None,
         )
         .await
         .unwrap();
@@ -491,4 +512,119 @@ async fn rules_and_channels_refuse_what_they_cannot_keep() {
             "{expected} in {recorded:?}"
         );
     }
+}
+
+/// What a stand-in plugin was asked to deliver, with the plugin each call
+/// named.
+type Delivered = Vec<(Option<String>, NotifyRequest)>;
+
+#[derive(Clone, Default)]
+struct PluginStandIn {
+    received: Arc<Mutex<Delivered>>,
+}
+
+#[tonic::async_trait]
+impl NotificationProvider for PluginStandIn {
+    async fn notify(
+        &self,
+        request: tonic::Request<NotifyRequest>,
+    ) -> Result<tonic::Response<NotifyResponse>, tonic::Status> {
+        let plugin = request
+            .metadata()
+            .get(PLUGIN_METADATA)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        self.received
+            .lock()
+            .unwrap()
+            .push((plugin, request.into_inner()));
+        Ok(tonic::Response::new(NotifyResponse {}))
+    }
+}
+
+async fn plugins_stand_in(plugin: PluginStandIn) -> tonic::transport::Channel {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(
+        tonic::transport::Server::builder()
+            .add_service(NotificationProviderServer::new(plugin))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)),
+    );
+    tonic::transport::Endpoint::from_shared(format!("http://{address}"))
+        .unwrap()
+        .connect_lazy()
+}
+
+#[tokio::test]
+async fn plugin_channels_notify_through_their_plugin() {
+    let (_database, service) = database().await;
+    let reading = Reading::default();
+    let mut alerts = alerts(service, &prometheus_stand_in(Arc::clone(&reading)).await);
+    let plugin = PluginStandIn::default();
+    alerts.notifier = alerts
+        .notifier
+        .with_plugins(plugins_stand_in(plugin.clone()).await);
+    let (scope, principal) = caller();
+    let cause = Cause {
+        scope: &scope,
+        principal: &principal,
+    };
+    let target = |plugin: &str, channel: &str| {
+        Some(PluginTarget {
+            plugin: plugin.into(),
+            channel: channel.into(),
+        })
+    };
+    for refused in [None, target("Chat!", ""), target("chat", "line\nbreak")] {
+        let error = alerts
+            .channels
+            .create(cause, "ops", ChannelKind::Plugin, "", refused)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code.as_str(), ErrorCode::INVALID_ARGUMENT);
+    }
+    let (channel, secret) = alerts
+        .channels
+        .create(
+            cause,
+            "ops",
+            ChannelKind::Plugin,
+            "",
+            target("chat", "#ops"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(channel.kind, ChannelKind::Plugin);
+    assert_eq!(channel.target, "chat/#ops");
+    assert!(secret.is_empty(), "a plugin channel signs nothing");
+    let rotated = alerts
+        .channels
+        .rotate(cause, "ops", None, 1)
+        .await
+        .unwrap_err();
+    assert_eq!(rotated.code.as_str(), ErrorCode::UNSUPPORTED_CAPABILITY);
+
+    alerts
+        .rules
+        .put(cause, "shop-errors", errors_rule(0), 0)
+        .await
+        .unwrap();
+    *reading.lock().unwrap() = Some(0.5);
+    alerts.evaluator.evaluate(Utc::now()).await.unwrap();
+    assert!(alerts.notifier.deliver_next().await.unwrap());
+    let delivered = alerts.notifier.list(None, Some("ops"), None).await.unwrap();
+    assert_eq!(delivered[0].state, "delivered");
+    let (named, request) = plugin.received.lock().unwrap()[0].clone();
+    assert_eq!(named.as_deref(), Some("chat"));
+    assert_eq!(request.channel, "#ops");
+    assert_eq!(request.external_url, "https://panel.example/");
+    let alert = request.alert.unwrap();
+    assert_eq!(alert.status, "firing");
+    assert_eq!(alert.ends_at, "", "a firing alert has not ended");
+    assert!(!alert.fingerprint.is_empty());
+
+    let tested = alerts.notifier.test("ops").await.unwrap();
+    assert!(tested.delivered, "{}", tested.failure);
+    assert_eq!(tested.status, None, "plugins answer no HTTP status");
+    assert_eq!(plugin.received.lock().unwrap().len(), 2);
 }

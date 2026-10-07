@@ -142,13 +142,17 @@ enum AlertChannelKind {
   ALERT_CHANNEL_KIND_WEBHOOK = 1;
   // Reserved: refused as unsupported until the panel can send mail.
   ALERT_CHANNEL_KIND_EMAIL = 2;
+  // A plugin's notification port (ADR 0044), which delivers the alert
+  // itself; such a channel has no signing secret.
+  ALERT_CHANNEL_KIND_PLUGIN = 3;
 }
 
 message AlertChannel {
   string id = 1;
   AlertChannelKind kind = 2;
   // Where it sends, without what can authorize a sender: a webhook URL's
-  // scheme, host and port, or an email channel's recipients.
+  // scheme, host and port, an email channel's recipients, or a plugin's
+  // name and, after a slash, the channel it delivers to.
   string target = 3;
   uint64 version = 4;
   google.protobuf.Timestamp created_at = 5;
@@ -172,6 +176,10 @@ message AlertsCreateChannelRequest {
   string url = 4;
   // Email: who receives notifications.
   repeated string recipients = 5;
+  // Plugins: the plugin that delivers notifications.
+  string plugin = 6;
+  // Plugins: where the plugin delivers, in its own terms; may be empty.
+  string plugin_channel = 7;
 }
 
 message AlertsCreateChannelResponse {

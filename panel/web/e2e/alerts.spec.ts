@@ -171,6 +171,44 @@ test('channels show their signing secret once and take test notifications', asyn
   await expect(page.getByText('ops took the test notification (200)')).toBeVisible()
 })
 
+test('channels can notify through a plugin, which keeps no signing secret', async ({ page }) => {
+  await setUp(page)
+  let created: Request | undefined
+  await page.route(/\/api\/v1\/alert-channels$/, (route) => {
+    if (route.request().method() !== 'POST') {
+      return route.fallback()
+    }
+    created = route.request()
+    return route.fulfill({
+      status: 201,
+      json: {
+        channel: { ...channel, id: 'chat', kind: 'plugin', target: 'chat/#ops' },
+        secret: '',
+      },
+    })
+  })
+
+  await page.goto('/alerts?tab=channels')
+  await page.getByRole('button', { name: 'New channel' }).click()
+  const sheet = page.getByRole('dialog')
+  await sheet.getByLabel('Channel ID').fill('chat')
+  await sheet.getByRole('radio', { name: 'Plugin' }).click()
+  await expect(sheet.getByLabel('Webhook URL')).toHaveCount(0)
+  await sheet.getByLabel('Plugin', { exact: true }).fill('chat')
+  await sheet.getByLabel('Plugin’s channel').fill('#ops')
+  await sheet.getByRole('button', { name: 'Create' }).click()
+  await expect(
+    page.getByText('Created channel chat; its plugin delivers notifications'),
+  ).toBeVisible()
+  await expect(page.getByRole('alertdialog')).toHaveCount(0)
+  expect(created?.postDataJSON()).toEqual({
+    id: 'chat',
+    kind: 'plugin',
+    plugin: 'chat',
+    plugin_channel: '#ops',
+  })
+})
+
 test('a rule leads to its notifications', async ({ page }) => {
   await setUp(page)
   const asked: URL[] = []

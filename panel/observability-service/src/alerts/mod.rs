@@ -10,7 +10,7 @@ mod payload;
 mod rules;
 mod service;
 
-pub use channels::{AlertChannels, ChannelKind, ChannelRecord};
+pub use channels::{AlertChannels, ChannelKind, ChannelRecord, PluginTarget};
 pub use evaluator::Evaluator;
 pub use model::{Comparison, Measure, RuleSpec, Severity, State};
 pub use notifier::{NotificationRecord, Notifier, TestOutcome};

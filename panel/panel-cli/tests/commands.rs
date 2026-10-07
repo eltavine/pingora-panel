@@ -2246,6 +2246,24 @@ fn alert_rules_and_channels_are_set_from_the_command_line() {
         stub.requests("POST", "/api/v1/alert-channels")[0].body,
         json!({"id": "ops", "kind": "webhook", "url": "https://hooks.example/T0/secret"})
     );
+    let through = stub.ppanel(&[
+        "alert",
+        "channel",
+        "create",
+        "chat",
+        "--plugin",
+        "chat",
+        "--plugin-channel",
+        "#ops",
+    ]);
+    assert!(through.status.success(), "{}", stderr(&through));
+    assert!(!stdout(&through).contains("whsec_"), "{}", stdout(&through));
+    assert_eq!(
+        stub.requests("POST", "/api/v1/alert-channels")[1].body,
+        json!({"id": "chat", "kind": "plugin", "plugin": "chat", "plugin_channel": "#ops"})
+    );
+    let neither = stub.ppanel(&["alert", "channel", "create", "chat"]);
+    assert_eq!(neither.status.code(), Some(2));
     let rotated = stub.ppanel_with_input(
         &["alert", "channel", "rotate", "ops", "--url-file", "-"],
         "https://other.example/x\n",

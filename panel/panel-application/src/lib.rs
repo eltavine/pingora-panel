@@ -68,7 +68,8 @@ mod traffic;
 pub use alerts::{
     AlertChannel, AlertChannelKind, AlertChannelSecret, AlertComparison, AlertMeasure,
     AlertNotification, AlertNotificationKind, AlertNotificationQuery, AlertNotificationState,
-    AlertRule, AlertRuleSpec, AlertSeverity, AlertState, AlertTest, AlertsPort, NewAlertChannel,
+    AlertPlugin, AlertRule, AlertRuleSpec, AlertSeverity, AlertState, AlertTest, AlertsPort,
+    NewAlertChannel,
 };
 pub use audit::{AuditFilter, AuditPage, AuditPort, AuditRecord, AuditVerification};
 pub use backups::{

@@ -16,7 +16,8 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use panel_application::{
     AlertChannel, AlertChannelKind, AlertChannelSecret, AlertComparison, AlertMeasure,
     AlertNotification, AlertNotificationKind, AlertNotificationQuery, AlertNotificationState,
-    AlertRule, AlertRuleSpec, AlertSeverity, AlertState, AlertTest, AlertsPort, NewAlertChannel,
+    AlertPlugin, AlertRule, AlertRuleSpec, AlertSeverity, AlertState, AlertTest, AlertsPort,
+    NewAlertChannel,
 };
 use panel_domain::{RouteId, SiteId, UpstreamPoolId};
 use panel_errors::PanelError;
@@ -275,7 +276,7 @@ impl From<AlertRule> for AlertRuleView {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, ToSchema)]
+#[derive(Clone, Copy, Debug, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum AlertChannelKindName {
@@ -283,6 +284,9 @@ pub enum AlertChannelKindName {
     Webhook,
     /// Reserved: refused as unsupported until the panel can send mail.
     Email,
+    /// A plugin's notification port, which delivers the alert itself; such
+    /// a channel has no signing secret.
+    Plugin,
 }
 
 /// A channel; where it sends is shown only as its origin.
@@ -290,7 +294,8 @@ pub enum AlertChannelKindName {
 pub struct AlertChannelView {
     pub id: String,
     pub kind: AlertChannelKindName,
-    /// A webhook URL's scheme, host and port.
+    /// A webhook URL's scheme, host and port, or a plugin's name and, after
+    /// a slash, the channel it delivers to.
     pub target: String,
     pub version: u64,
     /// For `If-Match` when rotating or deleting it.
@@ -307,6 +312,7 @@ impl From<AlertChannel> for AlertChannelView {
             kind: match value.kind {
                 AlertChannelKind::Webhook => AlertChannelKindName::Webhook,
                 AlertChannelKind::Email => AlertChannelKindName::Email,
+                AlertChannelKind::Plugin => AlertChannelKindName::Plugin,
             },
             target: value.target,
             version: value.version,
@@ -316,8 +322,21 @@ impl From<AlertChannel> for AlertChannelView {
     }
 }
 
-fn webhook() -> AlertChannelKindName {
-    AlertChannelKindName::Webhook
+/// The kind of channel to create.
+#[derive(Clone, Copy, Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum NewAlertChannelKind {
+    /// Alertmanager's webhook payload, signed as Standard Webhooks specify.
+    Webhook,
+    /// Reserved: refused as unsupported until the panel can send mail.
+    Email,
+    /// A plugin's notification port, which delivers the alert itself.
+    Plugin,
+}
+
+fn webhook() -> NewAlertChannelKind {
+    NewAlertChannelKind::Webhook
 }
 
 /// A channel to create.
@@ -326,10 +345,18 @@ fn webhook() -> AlertChannelKindName {
 pub struct NewAlertChannelBody {
     pub id: String,
     #[serde(default = "webhook")]
-    pub kind: AlertChannelKindName,
-    /// Where notifications are posted, `http` or `https`.
+    pub kind: NewAlertChannelKind,
+    /// Webhooks: where notifications are posted, `http` or `https`.
+    #[serde(default)]
     #[schema(value_type = String)]
     pub url: Zeroizing<String>,
+    /// Plugins: the plugin that delivers notifications, which needs the
+    /// `notifications` grant.
+    #[serde(default)]
+    pub plugin: Option<String>,
+    /// Plugins: where the plugin delivers, in its own terms.
+    #[serde(default)]
+    pub plugin_channel: Option<String>,
 }
 
 /// A new signing secret, and a new URL when one is given.
@@ -346,7 +373,8 @@ pub struct AlertChannelRotationBody {
 #[derive(Serialize, ToSchema)]
 pub struct AlertChannelSecretView {
     pub channel: AlertChannelView,
-    /// `whsec_` and the base64 key, as Standard Webhooks libraries take it.
+    /// `whsec_` and the base64 key, as Standard Webhooks libraries take it;
+    /// empty for a plugin channel, which signs nothing.
     pub secret: String,
 }
 
@@ -544,10 +572,15 @@ pub(crate) async fn create_alert_channel<U>(
     let channel = NewAlertChannel {
         id: body.id,
         kind: match body.kind {
-            AlertChannelKindName::Webhook => AlertChannelKind::Webhook,
-            AlertChannelKindName::Email => AlertChannelKind::Email,
+            NewAlertChannelKind::Webhook => AlertChannelKind::Webhook,
+            NewAlertChannelKind::Email => AlertChannelKind::Email,
+            NewAlertChannelKind::Plugin => AlertChannelKind::Plugin,
         },
         url: body.url,
+        plugin: body.plugin.map(|name| AlertPlugin {
+            name,
+            channel: body.plugin_channel.unwrap_or_default(),
+        }),
     };
     let secret = port(&state)?.create_channel(context, channel).await?;
     Ok(secret_response(StatusCode::CREATED, secret))
