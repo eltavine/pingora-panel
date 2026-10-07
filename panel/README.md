@@ -1345,6 +1345,88 @@ ppanel route add <site-id> --match prefix:/api --proxy <upstream-id> --http-poli
 ppanel http-policy list
 ```
 
+## Rewrites and internal redirects
+
+Sites and routes change the path a request goes on with, and routes serve
+one URL with what another does without telling the client
+([decision](../docs/adr/0040-rewrites-and-internal-redirects.md)). A site's
+rules run before a route is chosen, a route's once it is, in the order they
+are written.
+
+```nginx
+server shop {
+    server_name shop.example;
+    rewrite ^/old/(.*)$ /new/$1 permanent;     # 301 to /new/...
+    proxy app;
+
+    route api {
+        match prefix /api;
+        strip_prefix /api;                     # /api/users goes on as /users
+        add_prefix /v2;                        # ... and reaches app as /v2/users
+        proxy app;
+    }
+
+    route blog {
+        match prefix /blog;
+        set_uri /index.php?q=$uri;             # the query follows the request's own
+        proxy app;
+    }
+
+    route legacy {
+        match prefix /legacy;
+        rewrite "^/legacy/(?<id>\d+)$" /posts/$id last;   # choose the route again
+        respond 410;
+    }
+
+    route errors {
+        match prefix /errors;
+        internal;                              # 404 unless sent here from inside
+        root errors;
+    }
+
+    route gone {
+        match prefix /gone;
+        internal_redirect /errors/gone.html;   # or @name for a named route
+    }
+}
+```
+
+`rewrite` follows NGINX: `$1` to `$9` and named groups take what the
+expression captured; `last` chooses the route again, `break` keeps it,
+`redirect` and `permanent` answer 302 and 301, and a replacement starting
+with `http://`, `https://` or `$scheme` redirects as well. Without a flag
+the next rule runs, and a route whose rules changed the path is chosen again
+after its last rule; `strip_prefix`, `add_prefix` and `set_uri` keep the
+route. A `?` in a replacement sets the query, followed by the request's own
+unless the replacement ends with it. Expressions are matched in linear time,
+so patterns with back-references or look-around are refused, and a request
+changes its URI at most ten times, by rules, internal redirects and scripts
+together, before it is answered 500.
+
+Rules see the path as routes match it, normalized as RFC 3986 says with
+percent-encodings other than of unreserved characters kept, so an encoded `/`
+never becomes a segment boundary. Upstreams receive the changed path and
+query, and static content resolves it; `$uri` is the current path, `$args`
+(`$query_string`), `$is_args` and `$arg_<name>` read the current query,
+`$request_uri` keeps what the client asked for, and access records of a
+rewritten request add it as `url.original`. NGINX configurations imported
+with `ppanel config import-nginx` carry `rewrite` and `internal` over.
+
+Sites and routes take the rules as `rewrites` through the API, and routes
+take `internal` and the `internal_redirect` action; a client that leaves the
+fields out keeps the current ones. The site and route forms list the rules
+to add, reorder and remove, and the route list marks internal routes and
+rule counts.
+
+```sh
+ppanel site create --name shop --domain shop.example --proxy <upstream-id> \
+  --rewrite 'rewrite ^/old/(.*)$ /new/$1 permanent'
+ppanel route add <site-id> --match prefix:/api --proxy <upstream-id> \
+  --rewrite 'strip_prefix /api' --rewrite 'add_prefix /v2'
+ppanel route add <site-id> --match prefix:/errors --static errors --internal
+ppanel route add <site-id> --match prefix:/gone --internal-redirect /errors/gone.html
+```
+
 ## Lua scripts
 
 Sites, routes and upstreams run Lua in the gateway's request phases with
