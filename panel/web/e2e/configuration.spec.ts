@@ -435,19 +435,28 @@ test('the topology shows how sites reach pools and their nodes', async ({ page }
   )
   await expect(page.getByRole('region', { name: 'Pools' })).toContainText('1/1 healthy')
 
-  const connectors = page.getByTestId('topology-connectors').locator('path')
-  if (page.viewportSize()!.width >= 1024) {
-    await expect(connectors).toHaveCount(5)
-    await page.getByRole('link', { name: 'api-backend' }).hover()
-    await expect(connectors.and(page.locator('.stroke-foreground'))).toHaveCount(2)
-  } else {
-    await expect(connectors).toHaveCount(0)
-  }
   await expectNoHorizontalOverflow(page)
 
   await page.getByRole('tab', { name: 'Pools' }).click()
   await expect(page).not.toHaveURL(/view=/)
   await expect(page.getByRole('link', { name: 'api-backend' })).toBeVisible()
+})
+
+test('wide screens join the topology with connectors and narrow ones read it as lists', async ({
+  page,
+}) => {
+  await mockTopology(page)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('/upstreams?view=topology')
+  const connectors = page.getByTestId('topology-connectors').locator('path')
+  await expect(connectors).toHaveCount(5)
+  await page.getByRole('link', { name: 'api-backend' }).hover()
+  await expect(connectors.and(page.locator('.stroke-foreground'))).toHaveCount(2)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(connectors).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Routes' })).toContainText('Sends to api-backend')
+  await expectNoHorizontalOverflow(page)
 })
 
 test('the topology says when no site reaches an upstream or sites cannot be read', async ({
