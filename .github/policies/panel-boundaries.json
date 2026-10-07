@@ -506,11 +506,37 @@
       "catalog": false,
       "allowed_workspace_dependencies": [
         "gateway-grpc",
+        "panel-application",
         "panel-contracts",
         "panel-engine",
+        "panel-errors",
+        "panel-platform",
+        "panel-plugin-api",
+        "panel-secrets",
+        "panel-sqlite",
         "plugin-contracts",
         "plugin-host",
-        "plugin-sdk"
+        "plugin-sdk",
+        "plugins-service"
+      ]
+    },
+    "plugins-service": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-application",
+        "panel-contracts",
+        "panel-control-runtime",
+        "panel-errors",
+        "panel-event-contracts",
+        "panel-events",
+        "panel-platform",
+        "panel-platform-codec",
+        "panel-plugin-api",
+        "panel-secrets",
+        "panel-service",
+        "panel-sqlite",
+        "plugin-contracts",
+        "plugin-host"
       ]
     },
     "panel-events": {
@@ -720,7 +746,8 @@
         "panel-errors",
         "panel-health",
         "panel-service",
-        "panel-sqlite"
+        "panel-sqlite",
+        "plugins-service"
       ]
     }
   },

@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 //! The control plane: the public API with the configuration, automation,
-//! observability and audit modules, in one process (ADR 0032).
+//! observability, audit and plugins modules, in one process (ADR 0032).
 
 pub mod restore;
 
@@ -13,13 +13,19 @@ use std::{path::PathBuf, process::ExitCode};
 pub const RESTORE_ARGUMENT: &str = "restore";
 
 /// The modules in the order they start; they stop in reverse, so the API
-/// stops taking requests first.
-pub fn modules() -> [Module; 5] {
+/// stops taking requests first and plugins stop after the modules that
+/// call them.
+pub fn modules() -> [Module; 6] {
     [
         Module::new(
             audit_service::SERVICE,
             audit_service::default_addresses(),
             audit_service::process,
+        ),
+        Module::new(
+            plugins_service::SERVICE,
+            plugins_service::default_addresses(),
+            plugins_service::process,
         ),
         Module::new(
             config_service::SERVICE,
@@ -46,9 +52,10 @@ pub fn modules() -> [Module; 5] {
 
 /// Each module's database by module name, with the migrations that bring it
 /// up to this release.
-pub fn databases() -> [(&'static str, &'static [SchemaMigration]); 5] {
+pub fn databases() -> [(&'static str, &'static [SchemaMigration]); 6] {
     [
         (audit_service::MODULE, audit_service::MIGRATIONS),
+        (plugins_service::MODULE, plugins_service::MIGRATIONS),
         (config_service::MODULE, config_service::MIGRATIONS),
         (automation_service::MODULE, automation_service::MIGRATIONS),
         (

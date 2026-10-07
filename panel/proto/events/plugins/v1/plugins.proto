@@ -105,4 +105,6 @@ message ChangeRefused {
   string operation = 1;
   string resource = 2;
   string reason = 3;
+  // The error code, such as `VALIDATION_FAILED`.
+  string code = 4;
 }

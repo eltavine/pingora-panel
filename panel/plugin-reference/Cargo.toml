@@ -29,5 +29,13 @@ tokio-stream.workspace = true
 tonic.workspace = true
 
 [dev-dependencies]
+panel-application.workspace = true
+panel-errors.workspace = true
+panel-platform.workspace = true
+panel-plugin-api.workspace = true
+panel-secrets.workspace = true
+panel-sqlite = { workspace = true, features = ["test-support"] }
 plugin-host.workspace = true
+plugins-service.workspace = true
+sqlx.workspace = true
 tempfile.workspace = true

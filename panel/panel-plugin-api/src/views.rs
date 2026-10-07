@@ -57,6 +57,9 @@ pub struct PluginView {
     pub effective_limits: Option<PluginLimits>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health: Option<PluginHealth>,
+    /// Why the plugin, though enabled, does not run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<DateTime<Utc>>,
     pub etag: String,
