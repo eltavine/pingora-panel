@@ -482,6 +482,12 @@
       "catalog": true,
       "allowed_workspace_dependencies": []
     },
+    "plugin-sdk": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "plugin-contracts"
+      ]
+    },
     "panel-events": {
       "catalog": true,
       "allowed_workspace_dependencies": [

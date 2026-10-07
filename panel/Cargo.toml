@@ -10,6 +10,7 @@ members = [
     "panel-events",
     "panel-event-contracts",
     "plugin-contracts",
+    "plugin-sdk",
     "panel-event-codec",
     "panel-health",
     "panel-metrics",
@@ -201,6 +202,7 @@ panel-event-codec = { version = "=0.1.0", path = "panel-event-codec" }
 panel-events = { version = "=0.1.0", path = "panel-events" }
 panel-event-contracts = { version = "=0.1.0", path = "panel-event-contracts" }
 plugin-contracts = { version = "=0.1.0", path = "plugin-contracts" }
+plugin-sdk = { version = "=0.1.0", path = "plugin-sdk" }
 panel-health = { version = "=0.1.0", path = "panel-health" }
 panel-gateway-runtime = { version = "=0.2.0", path = "panel-gateway-runtime" }
 panel-ir = { version = "=0.16.0", path = "panel-ir" }

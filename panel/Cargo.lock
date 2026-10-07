@@ -4367,6 +4367,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "plugin-sdk"
+version = "0.1.0"
+dependencies = [
+ "http",
+ "hyper-util",
+ "plugin-contracts",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tonic-health",
+ "tower",
+]
+
+[[package]]
 name = "polyval"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
