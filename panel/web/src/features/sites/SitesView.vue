@@ -9,6 +9,7 @@ import {
   CircleCheck,
   CirclePause,
   Copy,
+  Construction,
   Download,
   Ellipsis,
   Globe,
@@ -562,10 +563,16 @@ function primaryHost(site: SiteView) {
               <span v-if="site.group" class="text-muted-foreground text-xs">{{ site.group }}</span>
             </TableCell>
             <TableCell>
-              <StatusIndicator
-                :tone="statusTones[site.status]"
-                :label="t(`sites.status.${site.status}`)"
-              />
+              <span class="inline-flex items-center gap-2">
+                <StatusIndicator
+                  :tone="statusTones[site.status]"
+                  :label="t(`sites.status.${site.status}`)"
+                />
+                <Badge v-if="site.maintenance?.enabled" variant="outline">
+                  <Construction aria-hidden="true" />
+                  {{ t('sites.maintenance.badge') }}
+                </Badge>
+              </span>
             </TableCell>
             <TableCell>
               <span class="inline-flex items-center gap-1.5 text-sm">

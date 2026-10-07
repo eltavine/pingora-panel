@@ -233,6 +233,105 @@ const en: Messages = {
       tagsHint: 'Separate with commas.',
       note: 'Note',
     },
+    errorPages: {
+      title: 'Error pages',
+      siteDescription:
+        "Answer the site's errors with your own pages: no route, a refused request, a missing file, an upstream that is down or busy.",
+      routeDescription: "A route answers its errors with the site's pages, its own, or none.",
+      add: 'Add a page',
+      remove: 'Remove page {position}',
+      statuses: 'Statuses',
+      kind: 'Answer with',
+      kinds: {
+        body: 'Body',
+        file: 'File',
+        redirect: 'Redirect',
+      },
+      body: 'Page body',
+      contentType: 'Content type, text/html unless set',
+      path: 'File',
+      pathHint:
+        "A path below the gateway's static root, read when an error needs it; its extension gives the content type.",
+      location: 'Redirect to',
+      redirectStatus: 'Redirect status',
+      status: 'Answer with status',
+      statusHint:
+        "Leave empty to keep the error's status, or answer with another, as nginx's =200.",
+      intercept: "Replace upstreams' error responses too",
+      interceptHint:
+        "Upstream responses with these statuses get the page instead, as nginx's proxy_intercept_errors.",
+      presets: {
+        404: '404 Not found',
+        403: '403 Forbidden',
+        502: '502 Bad gateway',
+        503: '503 Unavailable',
+        other: 'Another status',
+      },
+      modes: {
+        site: "The site's pages",
+        own: 'Its own pages',
+        none: 'No pages',
+      },
+      summary: '{count} error page | {count} error pages',
+      problems: {
+        statusShape: 'Write whole-number statuses separated by commas.',
+        statusesRequired: 'Enter at least one status.',
+        statusRange: '{status} is not an error status (400 to 599).',
+        repeated: '{status} already has a page.',
+        bodyRequired: 'Enter the page body.',
+        pathShape: 'Write a path below the static root, without . or ..',
+        locationRequired: 'Enter where to redirect.',
+        statusOverride: 'Answer with a status from 200 to 599.',
+      },
+    },
+    maintenance: {
+      title: 'Maintenance',
+      enabled: 'In maintenance',
+      description:
+        'Clients outside the allowlist get the maintenance response; the site keeps its action and routes for when maintenance ends.',
+      allow: 'Clients that still reach the site',
+      allowHint:
+        'One network or address per line, such as 10.0.0.0/8 or 2001:db8::1, judged after trusted proxies.',
+      status: 'Status',
+      body: 'Maintenance page',
+      bodyHint:
+        "Leave empty for the site's error page for the status; request variables such as $host are filled in.",
+      badge: 'Maintenance',
+      problems: {
+        network: 'Line {line} is not a network or address.',
+        status: 'Use a status from 200 to 599.',
+      },
+    },
+    robots: {
+      title: 'robots.txt',
+      description: 'The site answers /robots.txt itself, ahead of its routes.',
+      body: 'robots.txt rules',
+      choices: {
+        routes: 'Leave to the routes',
+        allow_all: 'Allow every crawler',
+        disallow_all: 'Disallow every crawler',
+        custom: 'Your own rules',
+      },
+      problems: {
+        bodyRequired: 'Enter the rules of robots.txt.',
+      },
+    },
+    favicon: {
+      title: 'favicon.ico',
+      description: 'The site answers /favicon.ico itself, ahead of its routes.',
+      path: 'Icon file',
+      location: 'Redirect to',
+      choices: {
+        routes: 'Leave to the routes',
+        no_content: 'Answer 204 No Content',
+        file: 'Serve a file',
+        redirect: 'Redirect',
+      },
+      problems: {
+        pathShape: 'Name a file in a directory below the static root, such as shop/favicon.ico.',
+        locationShape: 'Enter an address starting with http://, https:// or /.',
+      },
+    },
     containers: {
       title: 'Containers',
       description: "The containers its upstreams' nodes point at.",

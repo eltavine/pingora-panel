@@ -214,6 +214,17 @@ test('sites are summarized, listed and created', async ({ page }) => {
   await expect(sheet.getByRole('alert')).toHaveText('Line 1 is not name = template')
   await expect(sheet.getByRole('button', { name: 'Create' })).toBeDisabled()
   await fields.fill('tenant.id = $http_x_tenant')
+  await sheet.getByRole('button', { name: 'Add a page' }).click()
+  await page.getByRole('menuitem', { name: '503 Unavailable' }).click()
+  await sheet.getByLabel('Page body').fill('<h1>Back soon</h1>')
+  await sheet.getByRole('switch', { name: 'In maintenance' }).click()
+  const allowed = sheet.getByLabel('Clients that still reach the site')
+  await allowed.fill('10.0.0.0/8\noffice')
+  await expect(sheet.getByRole('alert')).toHaveText('Line 2 is not a network or address.')
+  await expect(sheet.getByRole('button', { name: 'Create' })).toBeDisabled()
+  await allowed.fill('10.0.0.0/8')
+  await sheet.getByRole('combobox', { name: 'robots.txt' }).click()
+  await page.getByRole('option', { name: 'Disallow every crawler' }).click()
   await sheet.getByRole('button', { name: 'Create' }).click()
   await expect(page.getByText('Created site Blog')).toBeVisible()
 
@@ -227,6 +238,13 @@ test('sites are summarized, listed and created', async ({ page }) => {
       { host: 'www.blog.example', primary: false, enabled: true },
     ],
     access_log: { enabled: null, format: 'combined', fields: { 'tenant.id': '$http_x_tenant' } },
+    error_pages: {
+      pages: [{ statuses: [503], response: { kind: 'body', body: '<h1>Back soon</h1>' } }],
+      intercept: false,
+    },
+    maintenance: { enabled: true, allow: ['10.0.0.0/8'], status: 503 },
+    robots: { kind: 'disallow_all' },
+    favicon: null,
   })
 })
 

@@ -8,22 +8,34 @@ import {
   Construction,
   Cookie,
   CornerUpRight,
+  FileCode,
   FileType,
   FolderOpen,
   Globe,
   Heading,
+  Image,
+  ImageOff,
+  Layers,
   Link,
   ListChecks,
   MessageSquareText,
   Network,
+  PencilLine,
   Regex,
   Replace,
   Scissors,
+  SearchX,
+  ServerCrash,
+  ShieldCheck,
+  ShieldOff,
+  ShieldX,
   Split,
+  SquareDashed,
   Variable,
   Waypoints,
 } from '@lucide/vue'
 import type { Action, RouteCondition, SiteKind, SiteStatus } from '@/api/generated'
+import type { FaviconChoice, PageKind, RobotsChoice, RoutePagesMode } from './pages'
 import type { RewriteKind } from './rewrites'
 import type { StatusTone } from '@/components/StatusIndicator.vue'
 
@@ -79,4 +91,38 @@ export const conditionIcons: Record<RouteCondition['kind'], Component> = {
   any: Split,
   all: ListChecks,
   not: Ban,
+}
+
+export const pageIcons: Record<PageKind, Component> = {
+  body: FileCode,
+  file: FileType,
+  redirect: CornerUpRight,
+}
+
+/** The errors pages are first given for, by the icon that tells them apart. */
+export const presetIcons: Record<number, Component> = {
+  404: SearchX,
+  403: ShieldX,
+  502: ServerCrash,
+  503: Construction,
+}
+
+export const pagesModeIcons: Record<RoutePagesMode, Component> = {
+  site: Layers,
+  own: FileCode,
+  none: SquareDashed,
+}
+
+export const robotsIcons: Record<RobotsChoice, Component> = {
+  routes: Waypoints,
+  allow_all: ShieldCheck,
+  disallow_all: ShieldOff,
+  custom: PencilLine,
+}
+
+export const faviconIcons: Record<FaviconChoice, Component> = {
+  routes: Waypoints,
+  no_content: ImageOff,
+  file: Image,
+  redirect: CornerUpRight,
 }

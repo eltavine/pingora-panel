@@ -12,6 +12,23 @@ import type {
 } from '@/api/generated'
 import { conditionForm, toCondition, type ConditionForm } from './conditions'
 import { parseHosts } from './presentation'
+import {
+  faviconForm,
+  maintenanceForm,
+  pagesForm,
+  robotsForm,
+  routePagesMode,
+  toFavicon,
+  toMaintenance,
+  toPages,
+  toRobots,
+  toRoutePages,
+  type FaviconForm,
+  type MaintenanceForm,
+  type PagesForm,
+  type RobotsForm,
+  type RoutePagesMode,
+} from './pages'
 import { rewriteForm, toRewrite, type RewriteForm } from './rewrites'
 import { optionalText, optionalNumber } from '@/lib/forms'
 
@@ -100,6 +117,10 @@ export interface SiteForm {
   accessLog: AccessLogForm
   /** Rules every request runs before a route is chosen, in order. */
   rewrites: RewriteForm[]
+  errorPages: PagesForm
+  maintenance: MaintenanceForm
+  robots: RobotsForm
+  favicon: FaviconForm
 }
 
 export interface RouteForm {
@@ -118,6 +139,9 @@ export interface RouteForm {
   rewrites: RewriteForm[]
   /** Takes only requests sent here from inside the gateway. */
   internal: boolean
+  pagesMode: RoutePagesMode
+  /** The route's own pages, kept while another mode is chosen. */
+  errorPages: PagesForm
 }
 
 export function splitList(value: string): string[] {
@@ -261,6 +285,10 @@ export function siteForm(site?: SiteView): SiteForm {
     note: site?.note ?? '',
     accessLog: accessLogForm(site?.access_log),
     rewrites: (site?.rewrites ?? []).map(rewriteForm),
+    errorPages: pagesForm(site?.error_pages),
+    maintenance: maintenanceForm(site?.maintenance),
+    robots: robotsForm(site?.robots),
+    favicon: faviconForm(site?.favicon),
   }
 }
 
@@ -297,6 +325,10 @@ export function siteInput(form: SiteForm, site?: SiteView): SiteInput {
     note: optionalText(form.note),
     access_log: toAccessLog(form.accessLog),
     rewrites: form.rewrites.map(toRewrite),
+    error_pages: toPages(form.errorPages),
+    maintenance: toMaintenance(form.maintenance, site?.maintenance),
+    robots: toRobots(form.robots),
+    favicon: toFavicon(form.favicon),
   }
 }
 
@@ -313,6 +345,7 @@ export function routeInputOf(route: Route): RouteInput {
     access_log: route.access_log ?? null,
     rewrites: route.rewrites ?? [],
     internal: route.internal ?? false,
+    error_pages: route.error_pages ?? null,
   }
 }
 
@@ -331,6 +364,8 @@ export function routeForm(route: Route | undefined, priority: number): RouteForm
     accessLog: accessLogForm(route?.access_log),
     rewrites: (route?.rewrites ?? []).map(rewriteForm),
     internal: route?.internal ?? false,
+    pagesMode: routePagesMode(route?.error_pages),
+    errorPages: pagesForm(route?.error_pages),
   }
 }
 
@@ -352,6 +387,7 @@ export function routeInput(form: RouteForm, id?: string): RouteInput {
     access_log: toAccessLog(form.accessLog),
     rewrites: form.rewrites.map(toRewrite),
     internal: form.internal,
+    error_pages: toRoutePages(form.pagesMode, form.errorPages),
   }
 }
 

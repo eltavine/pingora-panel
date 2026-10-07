@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import {
   ArrowLeft,
+  Construction,
   Container,
   Copy,
   Download,
@@ -142,6 +143,10 @@ const facts = computed(() => {
             :tone="statusTones[site.data.value.status]"
             :label="t(`sites.status.${site.data.value.status}`)"
           />
+          <Badge v-if="site.data.value.maintenance?.enabled" variant="outline">
+            <Construction aria-hidden="true" />
+            {{ t('sites.maintenance.badge') }}
+          </Badge>
           <Button
             variant="outline"
             size="icon-sm"

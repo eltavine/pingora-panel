@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
 import { useMutation, useQuery } from '@tanstack/vue-query'
-import { Save } from '@lucide/vue'
+import { Construction, Save } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import type { SiteKind, SiteView } from '@/api/generated'
@@ -54,7 +54,16 @@ import {
   siteKindAction,
   type SiteForm,
 } from './forms'
-import { kindIcons } from './presentation'
+import ErrorPagesEditor from './ErrorPagesEditor.vue'
+import {
+  FAVICON_CHOICES,
+  faviconProblem,
+  maintenanceProblem,
+  pagesProblem,
+  ROBOTS_CHOICES,
+  robotsProblem,
+} from './pages'
+import { faviconIcons, kindIcons, robotsIcons } from './presentation'
 import { rewriteProblem } from './rewrites'
 import RewritesEditor from './RewritesEditor.vue'
 
@@ -94,6 +103,20 @@ const profile = computed({
   get: () => form.tlsProfileId || NO_PROFILE,
   set: (value: string) => (form.tlsProfileId = value === NO_PROFILE ? '' : value),
 })
+
+const maintenanceIssue = computed(() => {
+  const found = maintenanceProblem(form.maintenance)
+  return found ? t(found.key, found.values ?? {}) : undefined
+})
+const unfinished = computed(
+  () =>
+    invalidFieldLines(form.accessLog.fields).length > 0 ||
+    form.rewrites.some((rule) => rewriteProblem(rule)) ||
+    pagesProblem(form.errorPages) ||
+    Boolean(maintenanceIssue.value) ||
+    Boolean(robotsProblem(form.robots)) ||
+    Boolean(faviconProblem(form.favicon)),
+)
 
 function toggleListener(id: string, checked: boolean | 'indeterminate') {
   form.listenerIds =
@@ -267,6 +290,156 @@ function submit() {
             <RewritesEditor v-model="form.rewrites" id-prefix="site-rewrite" />
           </fieldset>
 
+          <fieldset class="flex flex-col gap-2">
+            <legend class="text-sm font-medium">{{ t('sites.errorPages.title') }}</legend>
+            <p class="text-muted-foreground text-xs">{{ t('sites.errorPages.siteDescription') }}</p>
+            <ErrorPagesEditor v-model="form.errorPages" id-prefix="site-page" />
+          </fieldset>
+
+          <fieldset class="flex flex-col gap-2">
+            <legend class="flex items-center gap-2 text-sm font-medium">
+              <Construction class="text-muted-foreground size-4" aria-hidden="true" />
+              {{ t('sites.maintenance.title') }}
+            </legend>
+            <SwitchField
+              id="site-maintenance"
+              v-model="form.maintenance.enabled"
+              :label="t('sites.maintenance.enabled')"
+              :hint="t('sites.maintenance.description')"
+            />
+            <div v-if="form.maintenance.enabled" class="flex flex-col gap-3 rounded-md border p-3">
+              <FormField
+                id="site-maintenance-allow"
+                :label="t('sites.maintenance.allow')"
+                :hint="t('sites.maintenance.allowHint')"
+              >
+                <Textarea
+                  id="site-maintenance-allow"
+                  v-model="form.maintenance.allow"
+                  rows="3"
+                  class="font-mono text-xs"
+                  placeholder="10.0.0.0/8&#10;2001:db8::1"
+                />
+              </FormField>
+              <div class="grid gap-4 sm:grid-cols-2">
+                <FormField id="site-maintenance-status" :label="t('sites.maintenance.status')">
+                  <Input
+                    id="site-maintenance-status"
+                    v-model="form.maintenance.status"
+                    type="number"
+                    min="200"
+                    max="599"
+                  />
+                </FormField>
+                <FormField id="site-maintenance-retry" :label="t('sites.form.retryAfter')">
+                  <Input
+                    id="site-maintenance-retry"
+                    v-model="form.maintenance.retryAfter"
+                    type="number"
+                    min="0"
+                  />
+                </FormField>
+              </div>
+              <FormField
+                id="site-maintenance-body"
+                :label="t('sites.maintenance.body')"
+                :hint="t('sites.maintenance.bodyHint')"
+              >
+                <Textarea
+                  id="site-maintenance-body"
+                  v-model="form.maintenance.body"
+                  rows="3"
+                  class="font-mono text-xs"
+                />
+              </FormField>
+              <FormField id="site-maintenance-type" :label="t('sites.form.contentType')">
+                <Input
+                  id="site-maintenance-type"
+                  v-model="form.maintenance.contentType"
+                  class="font-mono text-xs"
+                  autocomplete="off"
+                  placeholder="text/html; charset=utf-8"
+                />
+              </FormField>
+              <p v-if="maintenanceIssue" class="text-destructive text-xs" role="alert">
+                {{ maintenanceIssue }}
+              </p>
+            </div>
+          </fieldset>
+
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div class="flex flex-col gap-2">
+              <FormField
+                id="site-robots"
+                :label="t('sites.robots.title')"
+                :hint="t('sites.robots.description')"
+              >
+                <Select v-model="form.robots.choice">
+                  <SelectTrigger id="site-robots" class="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="choice in ROBOTS_CHOICES" :key="choice" :value="choice">
+                      <component :is="robotsIcons[choice]" aria-hidden="true" />
+                      {{ t(`sites.robots.choices.${choice}`) }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </FormField>
+              <Textarea
+                v-if="form.robots.choice === 'custom'"
+                id="site-robots-body"
+                v-model="form.robots.body"
+                rows="4"
+                class="font-mono text-xs"
+                :aria-label="t('sites.robots.body')"
+              />
+              <p v-if="robotsProblem(form.robots)" class="text-destructive text-xs" role="alert">
+                {{ t(robotsProblem(form.robots) ?? '') }}
+              </p>
+            </div>
+            <div class="flex flex-col gap-2">
+              <FormField
+                id="site-favicon"
+                :label="t('sites.favicon.title')"
+                :hint="t('sites.favicon.description')"
+              >
+                <Select v-model="form.favicon.choice">
+                  <SelectTrigger id="site-favicon" class="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="choice in FAVICON_CHOICES" :key="choice" :value="choice">
+                      <component :is="faviconIcons[choice]" aria-hidden="true" />
+                      {{ t(`sites.favicon.choices.${choice}`) }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </FormField>
+              <Input
+                v-if="form.favicon.choice === 'file'"
+                id="site-favicon-path"
+                v-model="form.favicon.path"
+                class="font-mono text-xs"
+                autocomplete="off"
+                placeholder="shop/favicon.ico"
+                :aria-label="t('sites.favicon.path')"
+              />
+              <Input
+                v-else-if="form.favicon.choice === 'redirect'"
+                id="site-favicon-location"
+                v-model="form.favicon.location"
+                class="font-mono text-xs"
+                autocomplete="off"
+                placeholder="https://cdn.example.com/favicon.ico"
+                :aria-label="t('sites.favicon.location')"
+              />
+              <p v-if="faviconProblem(form.favicon)" class="text-destructive text-xs" role="alert">
+                {{ t(faviconProblem(form.favicon) ?? '') }}
+              </p>
+            </div>
+          </div>
+
           <AccessLogFields v-model="form.accessLog" id-prefix="site-access-log" scope="site" />
 
           <div class="grid gap-4 sm:grid-cols-2">
@@ -288,14 +461,7 @@ function submit() {
         </div>
 
         <SheetFooter>
-          <Button
-            type="submit"
-            :disabled="
-              busy ||
-              invalidFieldLines(form.accessLog.fields).length > 0 ||
-              form.rewrites.some((rule) => rewriteProblem(rule))
-            "
-          >
+          <Button type="submit" :disabled="busy || unfinished">
             <Save data-icon="inline-start" aria-hidden="true" />
             {{ site ? t('common.save') : t('common.create') }}
           </Button>

@@ -25,6 +25,7 @@ const route: Route = {
   access_log: { enabled: false, format: null, fields: {} },
   rewrites: [{ kind: 'strip_prefix', prefix: '/api' }],
   internal: false,
+  error_pages: null,
 }
 
 const site: SiteView = {

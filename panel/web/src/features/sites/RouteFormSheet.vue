@@ -47,7 +47,9 @@ import {
   routeInput,
   type RouteForm,
 } from './forms'
-import { actionIcons } from './presentation'
+import ErrorPagesEditor from './ErrorPagesEditor.vue'
+import { pagesProblem, ROUTE_PAGES_MODES } from './pages'
+import { actionIcons, pagesModeIcons } from './presentation'
 import { rewriteProblem, targetProblem } from './rewrites'
 import RewritesEditor from './RewritesEditor.vue'
 
@@ -65,6 +67,7 @@ const unfinished = computed(
   () =>
     form.conditions.some((condition) => conditionProblem(condition)) ||
     form.rewrites.some((rule) => rewriteProblem(rule)) ||
+    (form.pagesMode === 'own' && pagesProblem(form.errorPages)) ||
     (form.action.type === 'internal_redirect' && Boolean(targetProblem(form.action.target))),
 )
 
@@ -80,6 +83,13 @@ const actions = computed(() =>
     value,
     label: t(`routes.actions.${value}`),
     icon: actionIcons[value],
+  })),
+)
+const pagesModes = computed(() =>
+  ROUTE_PAGES_MODES.map((value) => ({
+    value,
+    label: t(`sites.errorPages.modes.${value}`),
+    icon: pagesModeIcons[value],
   })),
 )
 const host = computed({
@@ -191,6 +201,23 @@ function submit() {
             <legend class="text-sm font-medium">{{ t('routes.rewrites.title') }}</legend>
             <p class="text-muted-foreground text-xs">{{ t('routes.rewrites.description') }}</p>
             <RewritesEditor v-model="form.rewrites" id-prefix="route-rewrite" />
+          </fieldset>
+
+          <fieldset class="flex flex-col gap-2">
+            <legend class="text-sm font-medium">{{ t('sites.errorPages.title') }}</legend>
+            <p class="text-muted-foreground text-xs">
+              {{ t('sites.errorPages.routeDescription') }}
+            </p>
+            <ChoiceCards
+              v-model="form.pagesMode"
+              :label="t('sites.errorPages.title')"
+              :choices="pagesModes"
+            />
+            <ErrorPagesEditor
+              v-if="form.pagesMode === 'own'"
+              v-model="form.errorPages"
+              id-prefix="route-page"
+            />
           </fieldset>
 
           <SecurityPolicySelect
