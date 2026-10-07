@@ -28,6 +28,7 @@ async fn gateway() -> SocketAddr {
     let engine = FakeGatewayEngine::new(
         [
             "action.respond",
+            "action.static",
             "activation.cas",
             "http.policies",
             "listener.http",
@@ -38,6 +39,9 @@ async fn gateway() -> SocketAddr {
             "route.path-prefix",
             "route.rewrite",
             "site.maintenance",
+            "static.cache-control",
+            "static.listing",
+            "static.media-types",
             "upstream.http",
             "upstream.resilience",
         ]
@@ -1364,5 +1368,75 @@ async fn error_pages_maintenance_and_site_files_go_through_the_api() {
         .await;
     assert_eq!(applied["draft"]["pending"], false);
 
+    stack.stop().await;
+}
+
+#[tokio::test]
+async fn static_listings_media_types_and_cache_rules_go_through_the_api() {
+    let Some(stack) = stack().await else {
+        return;
+    };
+    let api = &stack.api;
+    use reqwest::Method;
+
+    api.json(
+        api.mutate(Method::PUT, "/api/v1/listeners/http", "listener")
+            .json(&json!({"id": "http", "address": "0.0.0.0:8080"})),
+        StatusCode::OK,
+    )
+    .await;
+    let action = json!({
+        "type": "static",
+        "root": "files",
+        "listing": "json",
+        "media_types": {"wasm": "application/wasm"},
+        "default_type": "text/plain",
+        "cache": [
+            {"extensions": ["css", "js"], "max_age_seconds": 31_536_000, "immutable": true},
+            {"extensions": ["html"]}
+        ]
+    });
+    let (site, _) = api
+        .json(
+            api.mutate(Method::POST, "/api/v1/sites", "site")
+                .json(&json!({
+                    "name": "Files",
+                    "action": action,
+                    "domains": [{"host": "files.example.com", "primary": true}]
+                })),
+            StatusCode::CREATED,
+        )
+        .await;
+    assert_eq!(site["action"]["listing"], "json");
+    assert_eq!(site["action"]["cache"][0]["immutable"], true);
+    assert!(site["action"]["cache"][1].get("max_age_seconds").is_none());
+
+    let mut broken = action.clone();
+    broken["media_types"] = json!({"CSS": "text/css"});
+    let refused = api
+        .mutate(Method::POST, "/api/v1/sites", "broken")
+        .json(&json!({
+            "name": "Broken",
+            "action": broken,
+            "domains": [{"host": "broken.example.com", "primary": true}]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+    let problem: Value = refused.json().await.unwrap();
+    assert!(problem.to_string().contains("CSS"), "{problem}");
+
+    let (draft, _) = api
+        .json(api.get("/api/v1/config/draft"), StatusCode::OK)
+        .await;
+    let (applied, _) = api
+        .json(
+            api.mutate(Method::POST, "/api/v1/config/apply", "apply")
+                .json(&json!({"expected_version": draft["version"]})),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(applied["draft"]["pending"], false);
     stack.stop().await;
 }
