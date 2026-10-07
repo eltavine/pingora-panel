@@ -28,7 +28,7 @@ use observability_grpc_client::ObservabilityClient;
 use ops_grpc_client::OpsAgentClient;
 use panel_api::{router_with_config, AccessSettings, ApiConfig, ApiState};
 use panel_application::{
-    RecordedBackups, RecordedCompose, RecordedContainers, RecordedEngineResources,
+    ContainersPort, RecordedBackups, RecordedCompose, RecordedContainers, RecordedEngineResources,
     RecordedHostAgent, RecordedImages, RecordedLogs, RecordedRuntime, RecordedSiteFiles,
 };
 use panel_control_runtime::{ControlPlaneProcess, DefaultAddresses, ProcessSettings};
@@ -43,7 +43,7 @@ use panel_platform::ServiceName;
 use panel_secrets::{EnvelopeVault, SecretVault};
 use panel_service::{measured, Environment};
 use panel_sqlite::EventLog;
-use plugins_grpc_client::PluginsClient;
+use plugins_grpc_client::{ContainerEngines, PluginsClient};
 use site_files_local::LocalSiteFiles;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tls_probe_rustls::RustlsProbe;
@@ -230,9 +230,16 @@ pub fn process(
     let recorded_agent = agent
         .clone()
         .map(|agent| RecordedHostAgent::new(Arc::new(agent), operations.clone()));
-    let recorded_containers = agent
-        .clone()
-        .map(|agent| RecordedContainers::new(Arc::new(agent), operations.clone()));
+    let recorded_containers = RecordedContainers::new(
+        Arc::new(ContainerEngines::new(
+            agent
+                .clone()
+                .map(|agent| Arc::new(agent) as Arc<dyn ContainersPort>),
+            Arc::new(plugins.clone()),
+            plugins.channel(),
+        )),
+        operations.clone(),
+    );
     let recorded_images = agent
         .clone()
         .map(|agent| RecordedImages::new(Arc::new(agent), operations.clone()));
@@ -318,10 +325,7 @@ pub fn process(
                 Some(agent) => state.with_host_agent(Arc::new(agent)),
                 None => state,
             };
-            let state = match recorded_containers {
-                Some(containers) => state.with_containers(Arc::new(containers)),
-                None => state,
-            };
+            let state = state.with_containers(Arc::new(recorded_containers));
             let state = match recorded_images {
                 Some(images) => state.with_images(Arc::new(images)),
                 None => state,

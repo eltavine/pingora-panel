@@ -1,7 +1,12 @@
 #![forbid(unsafe_code)]
 
 //! `PluginsPort` over `plugins-service`, so the public API manages plugins
-//! without running them or holding the secrets their settings name.
+//! without running them or holding the secrets their settings name, and
+//! the ports plugins provide to the API, such as their container engines.
+
+mod engines;
+
+pub use engines::ContainerEngines;
 
 use async_trait::async_trait;
 use panel_application::{CommandContext, RequestScope};

@@ -4,7 +4,13 @@ import type { StatusTone } from '@/components/StatusIndicator.vue'
 const ENGINE_NAMES: Record<string, string> = { docker: 'Docker', podman: 'Podman' }
 
 /** An engine's product name, or its identifier for one the console does not know. */
+/** An engine's name; a plugin's engines, `<plugin>.<engine>`, read as the
+ * plugin's and then the engine's. */
 export function engineName(id: string): string {
+  const [plugin, engine] = id.split('.', 2)
+  if (engine !== undefined) {
+    return `${plugin} · ${engine}`
+  }
   return ENGINE_NAMES[id] ?? id
 }
 

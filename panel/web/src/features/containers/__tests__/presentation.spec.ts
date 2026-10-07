@@ -57,6 +57,7 @@ describe('container engines', () => {
     expect(engineName('docker')).toBe('Docker')
     expect(engineName('podman')).toBe('Podman')
     expect(engineName('nerdctl')).toBe('nerdctl')
+    expect(engineName('reference.main')).toBe('reference · main')
   })
 
   it('explain a missing agent rather than report it as a failure', () => {

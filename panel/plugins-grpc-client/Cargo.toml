@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 async-trait.workspace = true
+ops-grpc-client.workspace = true
 panel-application.workspace = true
 panel-contracts.workspace = true
 panel-errors.workspace = true
@@ -16,6 +17,7 @@ panel-plugin-api.workspace = true
 panel-service.workspace = true
 serde_json.workspace = true
 tonic.workspace = true
+tracing.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]

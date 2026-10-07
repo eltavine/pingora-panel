@@ -6,7 +6,10 @@
 //! nothing changed, and every change and refusal is recorded.
 
 use base64::Engine;
-use panel_application::{CommandContext, IdempotencyKey, RequestDeadline, RequestId, RequestScope};
+use panel_application::{
+    CommandContext, ContainerAction, ContainerFilter, ContainersPort, IdempotencyKey,
+    RequestDeadline, RequestId, RequestScope,
+};
 use panel_errors::{ErrorCode, PanelError};
 use panel_platform::ServiceName;
 use panel_plugin_api::{
@@ -17,10 +20,11 @@ use panel_secrets::{EnvelopeVault, SecretVault};
 use panel_sqlite::{testing::TestDatabase, EventLog, ServiceDatabase};
 use plugin_contracts::v1::{secret_provider_client::SecretProviderClient, ResolveRequest};
 use plugin_host::{
-    proxy::{PortProxy, Secrets, PLUGIN_HEADER},
+    proxy::{Containers, PortProxy, Secrets, PLUGIN_HEADER},
     runtime::Runtime,
 };
 use plugin_reference::package::{self, Publisher};
+use plugins_grpc_client::ContainerEngines;
 use plugins_service::{Paths, PluginService, Store, MIGRATIONS};
 use serde_json::{json, Value};
 use std::{
@@ -563,5 +567,103 @@ async fn enabled_plugins_start_with_the_module_secret_providers_first() {
         module.resolve("reference", "token").await.unwrap(),
         b"from-keeper"
     );
+    module.plugins.runtime().stop_all().await;
+}
+
+/// The plugins module's container engine port, as the API reaches it.
+fn engines_channel(module: &Module) -> tonic::transport::Channel {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap();
+    let proxy = PortProxy::<Containers>::new(Arc::clone(module.plugins.runtime()));
+    tokio::spawn(async move {
+        let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+        tonic::transport::Server::builder()
+            .add_service(proxy)
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+            .await
+    });
+    tonic::transport::Endpoint::from_shared(format!("http://{address}"))
+        .unwrap()
+        .connect_lazy()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_engines_plugins_provide_run_their_containers() {
+    let module = Module::new().await;
+    module.install("reference", "1.0.0");
+    module.change(module.trust()).await.unwrap();
+    module
+        .change(PluginCommand::Configure {
+            name: "reference".into(),
+            settings: json!({"containers": [
+                {"name": "web", "image": "nginx:1.29"},
+                {"name": "jobs", "image": "busybox:1.37", "running": false}
+            ]}),
+        })
+        .await
+        .unwrap();
+    module
+        .change(PluginCommand::Enable {
+            name: "reference".into(),
+            version: None,
+        })
+        .await
+        .unwrap();
+    let engines = ContainerEngines::new(
+        None,
+        Arc::new(module.plugins.clone()),
+        engines_channel(&module),
+    );
+    assert!(
+        engines.engines(scope()).await.unwrap().is_empty(),
+        "an engine needs its grant"
+    );
+    module
+        .change(PluginCommand::Grant {
+            name: "reference".into(),
+            capabilities: vec!["containers".into()],
+        })
+        .await
+        .unwrap();
+
+    let listed = engines.engines(scope()).await.unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, "reference.main");
+    assert!(listed[0].reachable);
+    assert_eq!(listed[0].info.as_ref().unwrap().running, 1);
+    let containers = engines
+        .containers(scope(), "reference.main".into(), ContainerFilter::default())
+        .await
+        .unwrap();
+    let names: Vec<&[String]> = containers
+        .containers
+        .iter()
+        .map(|container| container.names.as_slice())
+        .collect();
+    assert_eq!(names, [["web".to_owned()], ["jobs".to_owned()]]);
+    let started = engines
+        .act(
+            context(),
+            "reference.main".into(),
+            "jobs".into(),
+            ContainerAction::Start,
+        )
+        .await
+        .unwrap();
+    assert_eq!(started.name, "jobs");
+    assert_eq!(
+        engines.engines(scope()).await.unwrap()[0]
+            .info
+            .as_ref()
+            .unwrap()
+            .running,
+        2
+    );
+    let missing = engines
+        .containers(scope(), "docker".into(), ContainerFilter::default())
+        .await
+        .unwrap_err();
+    assert_eq!(missing.code.as_str(), ErrorCode::NOT_FOUND);
     module.plugins.runtime().stop_all().await;
 }

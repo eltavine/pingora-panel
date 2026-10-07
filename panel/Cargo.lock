@@ -3212,6 +3212,7 @@ dependencies = [
  "panel-contracts",
  "panel-errors",
  "panel-service",
+ "plugin-contracts",
  "prost-types",
  "tokio",
  "tokio-stream",
@@ -4611,6 +4612,7 @@ dependencies = [
  "plugin-contracts",
  "plugin-host",
  "plugin-sdk",
+ "plugins-grpc-client",
  "plugins-service",
  "prost-types",
  "ring",
@@ -4645,6 +4647,7 @@ name = "plugins-grpc-client"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "ops-grpc-client",
  "panel-application",
  "panel-contracts",
  "panel-errors",
@@ -4653,6 +4656,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tonic",
+ "tracing",
  "zeroize",
 ]
 

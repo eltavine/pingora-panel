@@ -13,6 +13,7 @@ panel-application.workspace = true
 panel-contracts.workspace = true
 panel-errors.workspace = true
 panel-service.workspace = true
+plugin-contracts.workspace = true
 prost-types.workspace = true
 tokio-stream.workspace = true
 tonic.workspace = true

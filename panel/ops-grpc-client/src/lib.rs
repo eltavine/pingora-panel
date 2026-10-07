@@ -32,9 +32,10 @@ use panel_service::{
     command_context, propagate_trace, request_context, response_error, status_error,
     GrpcHealthCheck,
 };
+use plugin_contracts::PLUGIN_METADATA;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio_stream::StreamExt;
-use tonic::transport::Channel;
+use tonic::{metadata::AsciiMetadataValue, transport::Channel};
 
 /// Longer than the agent's own limit on a directory walk.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -48,11 +49,39 @@ const PREVIEW_TIMEOUT: Duration = Duration::from_secs(125);
 #[derive(Clone)]
 pub struct OpsAgentClient {
     channel: Channel,
+    /// The plugin every call names, when the client reaches the container
+    /// engine a plugin provides rather than the agent.
+    plugin: Option<AsciiMetadataValue>,
 }
 
 impl OpsAgentClient {
     pub fn from_channel(channel: Channel) -> Self {
-        Self { channel }
+        Self {
+            channel,
+            plugin: None,
+        }
+    }
+
+    /// A client of the container engines `plugin` provides through its
+    /// container engine port, which the plugins module at `channel` serves
+    /// (ADR 0044).
+    pub fn for_plugin(channel: Channel, plugin: &str) -> Result<Self> {
+        let plugin = plugin.parse().map_err(|_| {
+            PanelError::invalid_argument(format!("{plugin:?} is not a plugin name"))
+        })?;
+        Ok(Self {
+            channel,
+            plugin: Some(plugin),
+        })
+    }
+
+    fn named<T>(&self, mut request: tonic::Request<T>) -> tonic::Request<T> {
+        if let Some(plugin) = &self.plugin {
+            request
+                .metadata_mut()
+                .insert(PLUGIN_METADATA, plugin.clone());
+        }
+        request
     }
 
     /// A readiness check against the agent's standard gRPC health.
@@ -69,7 +98,7 @@ impl OpsAgentClient {
         let mut request = tonic::Request::new(message);
         request.set_timeout(REQUEST_TIMEOUT);
         propagate_trace(request.metadata_mut(), scope.trace_context());
-        request
+        self.named(request)
     }
 }
 
@@ -544,7 +573,7 @@ impl ContainersPort for OpsAgentClient {
         let mut request = tonic::Request::new(message);
         propagate_trace(request.metadata_mut(), scope.trace_context());
         let stream = ContainersClient::new(self.channel.clone())
-            .follow_logs(request)
+            .follow_logs(self.named(request))
             .await
             .map_err(status_error)?
             .into_inner();
@@ -782,7 +811,7 @@ impl ImagesPort for OpsAgentClient {
         let mut request = tonic::Request::new(message);
         propagate_trace(request.metadata_mut(), context.trace_context());
         let stream = ImagesClient::new(self.channel.clone())
-            .pull(request)
+            .pull(self.named(request))
             .await
             .map_err(status_error)?
             .into_inner();

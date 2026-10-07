@@ -407,6 +407,9 @@ fn container(container: &FakeContainer) -> ops::Container {
 
 type Lines = Pin<Box<dyn Stream<Item = Result<ops::ContainersFollowLogsResponse, Status>> + Send>>;
 
+/// The one engine the reference plugin provides.
+const ENGINE: &str = "main";
+
 fn unoffered(operation: &str) -> Status {
     Status::unimplemented(format!("the reference engine does not offer {operation}"))
 }
@@ -417,7 +420,39 @@ impl Containers for State {
         &self,
         _: Request<ops::ContainersEnginesRequest>,
     ) -> Result<Response<ops::ContainersEnginesResponse>, Status> {
-        Err(unoffered("engines"))
+        let (containers, running) = {
+            let kept = self
+                .containers
+                .lock()
+                .expect("containers are never poisoned");
+            let running = kept.iter().filter(|container| container.running).count();
+            (kept.len(), running)
+        };
+        let count = |count: usize| u32::try_from(count).unwrap_or(u32::MAX);
+        Ok(Response::new(ops::ContainersEnginesResponse {
+            engines: vec![ops::Engine {
+                id: ENGINE.into(),
+                socket: String::new(),
+                enabled: true,
+                reachable: true,
+                detail: String::new(),
+                version: Some(ops::EngineVersion {
+                    version: env!("CARGO_PKG_VERSION").into(),
+                    api_version: "1".into(),
+                    os: std::env::consts::OS.into(),
+                    architecture: std::env::consts::ARCH.into(),
+                    ..ops::EngineVersion::default()
+                }),
+                info: Some(ops::EngineInfo {
+                    containers: count(containers),
+                    running: count(running),
+                    stopped: count(containers - running),
+                    name: "reference".into(),
+                    ..ops::EngineInfo::default()
+                }),
+            }],
+            error: None,
+        }))
     }
 
     async fn set_engine(

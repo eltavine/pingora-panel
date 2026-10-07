@@ -234,7 +234,8 @@
         "panel-application",
         "panel-contracts",
         "panel-errors",
-        "panel-service"
+        "panel-service",
+        "plugin-contracts"
       ]
     },
     "site-files-local": {
@@ -521,6 +522,7 @@
         "plugin-contracts",
         "plugin-host",
         "plugin-sdk",
+        "plugins-grpc-client",
         "plugins-service"
       ]
     },
@@ -546,6 +548,7 @@
     "plugins-grpc-client": {
       "catalog": true,
       "allowed_workspace_dependencies": [
+        "ops-grpc-client",
         "panel-application",
         "panel-contracts",
         "panel-errors",
