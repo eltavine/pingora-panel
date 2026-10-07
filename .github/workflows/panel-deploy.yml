@@ -679,6 +679,56 @@ jobs:
           ppanel files rm ci-listing --recursive --yes
           ppanel config apply
 
+      - name: Cache proxied responses, show their Cache-Status and purge them
+        run: |
+          ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
+          upstream=$(ppanel -o json upstream list \
+            | python3 -c "import json, sys; print(next(u['id'] for u in json.load(sys.stdin) if u['name'] == 'console'))")
+          ppanel cache-policy set ci-pages --ttl 1m --ignore-origin --bypass-header x-no-cache
+          ppanel cache store --max-size 64m
+          site=$(ppanel -o json site create --name ci-cache --domain cache.test \
+            --proxy "$upstream" --cache-policy ci-pages \
+            | python3 -c "import json, sys; print(json.load(sys.stdin)['id'])")
+          ppanel route add "$site" --name live --match prefix:/api/v1/gateway --proxy "$upstream" \
+            --no-cache
+          ppanel cache-policy list
+          ppanel config apply
+          status() {
+            curl --fail --silent --show-error --dump-header - --output /dev/null \
+              --header 'Host: cache.test' "$@" http://127.0.0.1:18080/api/v1/openapi.json \
+              | tr -d '\r' | sed -n 's/^cache-status: //Ip'
+          }
+          for _ in $(seq 1 30); do
+            if [ -n "$(status 2>/dev/null)" ]; then
+              break
+            fi
+            sleep 1
+          done
+          # RFC 9211: the first answer was fetched and stored, the next comes
+          # from the cache, and a bypassing request goes upstream.
+          test "$(status)" = 'pingora-panel; hit'
+          test "$(status --header 'x-no-cache: 1')" = 'pingora-panel; fwd=bypass'
+          ppanel cache stats
+          ppanel -o json cache stats | SITE="$site" python3 -c "import json, os, sys; site = next(s for s in json.load(sys.stdin)['sites'] if s['site_id'] == os.environ['SITE']); assert site['hits'] >= 1 and site['bypasses'] >= 1, site"
+          ppanel cache purge --url http://cache.test/api/v1/openapi.json
+          test "$(status)" = 'pingora-panel; fwd=miss; stored'
+          ppanel cache purge --site "$site"
+          test "$(status)" = 'pingora-panel; fwd=miss; stored'
+          ppanel cache purge --all
+          # The route stays out of the site's cache.
+          live=$(curl --silent --show-error --dump-header - --output /dev/null \
+            --header 'Host: cache.test' --header "Authorization: Bearer $PPANEL_TOKEN" \
+            http://127.0.0.1:18080/api/v1/gateway/status)
+          if grep -qi '^cache-status' <<<"$live"; then
+            exit 1
+          fi
+          ppanel -o json audit list --type gateway.cache.purged --actor-id ci \
+            | python3 -c "import json, sys; assert len(json.load(sys.stdin)['items']) >= 3"
+          ppanel site delete "$site" --permanent
+          ppanel cache-policy delete ci-pages
+          ppanel cache store --default
+          ppanel config apply
+
       - name: Move the configuration between installations as a bundle
         run: |
           ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
