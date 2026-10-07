@@ -11,6 +11,28 @@ const en: UpstreamsMessages = {
     sites: 'Sites',
     usedBy: 'Used by {count} site | Used by {count} sites',
     unused: 'Not used',
+    views: {
+      pools: 'Pools',
+      topology: 'Topology',
+    },
+    topology: {
+      description:
+        'How live sites and their routes reach upstream pools and their nodes, with the health the gateway reports.',
+      sites: 'Sites',
+      routes: 'Routes',
+      pools: 'Pools',
+      nodes: 'Nodes',
+      moreHosts: 'and {count} more',
+      otherRequests: 'Requests no route takes go to {name}',
+      sendsTo: 'Sends to {name}',
+      noRoutes: 'No route sends to an upstream of its own',
+      noSites: 'No live site sends traffic to an upstream yet',
+      noSitesDetail:
+        'Sites and routes appear here once they proxy to an upstream; pools and their nodes are listed below already.',
+      firstSites: 'The first {shown} of {total} sites are shown',
+      inFlight: '{count} in flight',
+      healthUnavailable: 'Health is unavailable for now; nodes show what their configuration says.',
+    },
     balancing: 'Load balancing',
     hashKey: 'Hash key',
     hashKeyHint: 'client_ip, uri, header:name or cookie:name',

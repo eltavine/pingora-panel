@@ -324,6 +324,153 @@ test('upstream nodes show live health and can be drained', async ({ page }) => {
   await expectNoHorizontalOverflow(page)
 })
 
+const API_ID = '8f2a1d4b-6c3e-4d9f-a071-2b3c4d5e6f70'
+const API_NODE_ID = '4d3c2b1a-9f8e-4d7c-b6a5-1f2e3d4c5b6a'
+
+/** Shop sends /api to its own pool and everything else to shop-backend. */
+async function mockTopology(page: Page) {
+  await mockConfiguration(page)
+  await page.route(/\/api\/v1\/sites\?/, (route) =>
+    route.fulfill({
+      json: {
+        items: [
+          {
+            ...site,
+            routes: [
+              {
+                id: 'r1',
+                enabled: true,
+                priority: 1,
+                name: 'api',
+                match: { kind: 'prefix', path: '/api' },
+                action: { type: 'proxy', upstream_id: API_ID },
+              },
+            ],
+          },
+        ],
+        total: 1,
+        next_cursor: null,
+      },
+    }),
+  )
+  await page.route('**/api/v1/upstreams', (route) =>
+    route.fulfill({
+      json: [
+        upstream,
+        {
+          ...upstream,
+          id: API_ID,
+          name: 'api-backend',
+          nodes: [{ id: API_NODE_ID, host: '10.0.0.21', port: 9000, enabled: true }],
+          health_check: null,
+        },
+      ],
+    }),
+  )
+  await page.route('**/api/v1/upstreams/health', (route) =>
+    route.fulfill({
+      json: {
+        upstreams: [
+          {
+            upstream_id: UPSTREAM_ID,
+            checked: true,
+            nodes: [
+              {
+                node_id: NODE_ID,
+                address: '10.0.0.11:8080',
+                weight: 3,
+                enabled: true,
+                backup: false,
+                healthy: true,
+                drained: false,
+                in_flight: 2,
+                requests: 1200,
+                failures: 4,
+                latency_us: 1830,
+              },
+            ],
+          },
+        ],
+      },
+    }),
+  )
+}
+
+test('the topology shows how sites reach pools and their nodes', async ({ page }) => {
+  await mockTopology(page)
+  await page.goto('/upstreams?view=topology')
+  await expect(page.getByRole('tab', { name: 'Topology' })).toHaveAttribute('aria-selected', 'true')
+  for (const column of ['Sites', 'Routes', 'Pools', 'Nodes']) {
+    await expect(page.getByRole('heading', { name: column, exact: true })).toBeVisible()
+  }
+  const sites = page.getByRole('region', { name: 'Sites' })
+  await expect(sites.getByRole('link', { name: 'Shop' })).toBeVisible()
+  await expect(sites).toContainText('Requests no route takes go to shop-backend')
+  const routes = page.getByRole('region', { name: 'Routes' })
+  await expect(routes).toContainText('/api')
+  await expect(routes).toContainText('api · Shop')
+  await expect(routes).toContainText('Sends to api-backend')
+  const nodes = page.getByRole('region', { name: 'Nodes' })
+  await expect(nodes.getByRole('listitem').filter({ hasText: '10.0.0.11:8080' })).toContainText(
+    'Healthy',
+  )
+  await expect(nodes.getByRole('listitem').filter({ hasText: '10.0.0.11:8080' })).toContainText(
+    '1.83 ms · 2 in flight',
+  )
+  await expect(nodes.getByRole('listitem').filter({ hasText: '10.0.0.21:9000' })).toContainText(
+    'Not checked',
+  )
+  await expect(page.getByRole('region', { name: 'Pools' })).toContainText('1/1 healthy')
+
+  const connectors = page.getByTestId('topology-connectors').locator('path')
+  if (page.viewportSize()!.width >= 1024) {
+    await expect(connectors).toHaveCount(5)
+    await page.getByRole('link', { name: 'api-backend' }).hover()
+    await expect(connectors.and(page.locator('.stroke-foreground'))).toHaveCount(2)
+  } else {
+    await expect(connectors).toHaveCount(0)
+  }
+  await expectNoHorizontalOverflow(page)
+
+  await page.getByRole('tab', { name: 'Pools' }).click()
+  await expect(page).not.toHaveURL(/view=/)
+  await expect(page.getByRole('link', { name: 'api-backend' })).toBeVisible()
+})
+
+test('the topology says when no site reaches an upstream or sites cannot be read', async ({
+  page,
+}) => {
+  await mockTopology(page)
+  let reads = 0
+  await page.route(/\/api\/v1\/sites\?/, (route) => {
+    reads += 1
+    if (reads <= 2) {
+      return route.fulfill({
+        status: 503,
+        contentType: 'application/problem+json',
+        json: {
+          type: 'about:blank',
+          title: 'Service Unavailable',
+          status: 503,
+          code: 'SERVICE_UNAVAILABLE',
+          detail: 'the configuration service is starting',
+        },
+      })
+    }
+    return route.fulfill({ json: { items: [], total: 0, next_cursor: null } })
+  })
+  await page.goto('/upstreams?view=topology')
+  const failure = page
+    .getByRole('alert')
+    .filter({ hasText: 'the configuration service is starting' })
+  await expect(failure).toBeVisible()
+  await failure.getByRole('button', { name: 'Retry' }).click()
+  await expect(page.getByText('No live site sends traffic to an upstream yet')).toBeVisible()
+  await expect(page.getByText('No route sends to an upstream of its own')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Pools' })).toContainText('Not used')
+  await expectNoHorizontalOverflow(page)
+})
+
 test('listeners start from explanatory empty states', async ({ page }) => {
   await mockConfiguration(page)
   await page.goto('/listeners')

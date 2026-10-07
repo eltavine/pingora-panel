@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useMutation, useQuery } from '@tanstack/vue-query'
-import { Ellipsis, HeartPulse, Pencil, Plus, Server, Trash2 } from '@lucide/vue'
+import { Ellipsis, HeartPulse, List, Network, Pencil, Plus, Server, Trash2 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import type { UpstreamView } from '@/api/generated'
 import {
@@ -38,14 +39,26 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { changeHeaders, notifyFailure, useRefreshConfiguration } from '@/lib/configuration'
 import { algorithmOf } from './forms'
 import UpstreamFormSheet from './UpstreamFormSheet.vue'
+import UpstreamTopology from './UpstreamTopology.vue'
 
 const HEALTH_REFRESH_MS = 5_000
 
 const { t, d } = useI18n()
+const route = useRoute()
+const router = useRouter()
 const refresh = useRefreshConfiguration()
+/** The view lives in the address, so the topology can be linked to. */
+const view = computed({
+  get: () => (route.query.view === 'topology' ? 'topology' : 'pools'),
+  set: (value: string) =>
+    void router.replace({
+      query: { ...route.query, view: value === 'topology' ? value : undefined },
+    }),
+})
 const upstreams = useQuery(listUpstreamsOptions())
 const health = useQuery({
   ...upstreamHealthOptions(),
@@ -142,83 +155,109 @@ function confirmRemove() {
       </EmptyContent>
     </Empty>
 
-    <div v-else class="rounded-lg border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>{{ t('common.name') }}</TableHead>
-            <TableHead>{{ t('upstreams.balancing') }}</TableHead>
-            <TableHead>{{ t('upstreams.nodes') }}</TableHead>
-            <TableHead>{{ t('upstreams.healthy') }}</TableHead>
-            <TableHead>{{ t('upstreams.sites') }}</TableHead>
-            <TableHead>{{ t('common.updated') }}</TableHead>
-            <TableHead class="w-12"
-              ><span class="sr-only">{{ t('common.actions') }}</span></TableHead
-            >
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          <TableRow v-for="upstream in upstreams.data.value" :key="upstream.id">
-            <TableCell class="max-w-64">
-              <RouterLink
-                :to="`/upstreams/${upstream.id}`"
-                class="block truncate font-medium hover:underline"
-              >
-                {{ upstream.name }}
-              </RouterLink>
-              <span v-if="upstream.note" class="text-muted-foreground block truncate text-xs">
-                {{ upstream.note }}
-              </span>
-            </TableCell>
-            <TableCell>{{
-              t(`upstreams.algorithms.${algorithmOf(upstream.balancing)}`)
-            }}</TableCell>
-            <TableCell class="tabular-nums">{{ upstream.nodes?.length ?? 0 }}</TableCell>
-            <TableCell>
-              <span v-if="healthSummary(upstream)" class="inline-flex items-center gap-1.5 text-sm">
-                <HeartPulse class="size-4" aria-hidden="true" />
-                {{ t('upstreams.healthSummary', healthSummary(upstream)!) }}
-              </span>
-              <span v-else class="text-muted-foreground text-xs">{{
-                t('upstreams.unchecked')
-              }}</span>
-            </TableCell>
-            <TableCell>
-              <Badge v-if="upstream.used_by.length > 0" variant="secondary">
-                {{ t('upstreams.usedBy', { count: upstream.used_by.length }) }}
-              </Badge>
-              <span v-else class="text-muted-foreground text-xs">{{ t('upstreams.unused') }}</span>
-            </TableCell>
-            <TableCell class="text-muted-foreground text-xs tabular-nums">
-              {{ d(new Date(upstream.updated_at), 'datetime') }}
-            </TableCell>
-            <TableCell>
-              <DropdownMenu>
-                <DropdownMenuTrigger as-child>
-                  <Button variant="ghost" size="icon-sm" :aria-label="t('common.actions')">
-                    <Ellipsis aria-hidden="true" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem @select="openForm(upstream)">
-                    <Pencil aria-hidden="true" />
-                    {{ t('common.edit') }}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    variant="destructive"
-                    :disabled="upstream.used_by.length > 0"
-                    @select="removing = upstream"
+    <Tabs v-else v-model="view">
+      <TabsList>
+        <TabsTrigger value="pools">
+          <List aria-hidden="true" />
+          {{ t('upstreams.views.pools') }}
+        </TabsTrigger>
+        <TabsTrigger value="topology">
+          <Network aria-hidden="true" />
+          {{ t('upstreams.views.topology') }}
+        </TabsTrigger>
+      </TabsList>
+      <TabsContent value="pools" class="pt-2">
+        <div class="rounded-lg border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{{ t('common.name') }}</TableHead>
+                <TableHead>{{ t('upstreams.balancing') }}</TableHead>
+                <TableHead>{{ t('upstreams.nodes') }}</TableHead>
+                <TableHead>{{ t('upstreams.healthy') }}</TableHead>
+                <TableHead>{{ t('upstreams.sites') }}</TableHead>
+                <TableHead>{{ t('common.updated') }}</TableHead>
+                <TableHead class="w-12"
+                  ><span class="sr-only">{{ t('common.actions') }}</span></TableHead
+                >
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow v-for="upstream in upstreams.data.value" :key="upstream.id">
+                <TableCell class="max-w-64">
+                  <RouterLink
+                    :to="`/upstreams/${upstream.id}`"
+                    class="block truncate font-medium hover:underline"
                   >
-                    <Trash2 aria-hidden="true" />
-                    {{ t('common.delete') }}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </TableCell>
-          </TableRow>
-        </TableBody>
-      </Table>
-    </div>
+                    {{ upstream.name }}
+                  </RouterLink>
+                  <span v-if="upstream.note" class="text-muted-foreground block truncate text-xs">
+                    {{ upstream.note }}
+                  </span>
+                </TableCell>
+                <TableCell>{{
+                  t(`upstreams.algorithms.${algorithmOf(upstream.balancing)}`)
+                }}</TableCell>
+                <TableCell class="tabular-nums">{{ upstream.nodes?.length ?? 0 }}</TableCell>
+                <TableCell>
+                  <span
+                    v-if="healthSummary(upstream)"
+                    class="inline-flex items-center gap-1.5 text-sm"
+                  >
+                    <HeartPulse class="size-4" aria-hidden="true" />
+                    {{ t('upstreams.healthSummary', healthSummary(upstream)!) }}
+                  </span>
+                  <span v-else class="text-muted-foreground text-xs">{{
+                    t('upstreams.unchecked')
+                  }}</span>
+                </TableCell>
+                <TableCell>
+                  <Badge v-if="upstream.used_by.length > 0" variant="secondary">
+                    {{ t('upstreams.usedBy', { count: upstream.used_by.length }) }}
+                  </Badge>
+                  <span v-else class="text-muted-foreground text-xs">{{
+                    t('upstreams.unused')
+                  }}</span>
+                </TableCell>
+                <TableCell class="text-muted-foreground text-xs tabular-nums">
+                  {{ d(new Date(upstream.updated_at), 'datetime') }}
+                </TableCell>
+                <TableCell>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger as-child>
+                      <Button variant="ghost" size="icon-sm" :aria-label="t('common.actions')">
+                        <Ellipsis aria-hidden="true" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem @select="openForm(upstream)">
+                        <Pencil aria-hidden="true" />
+                        {{ t('common.edit') }}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        variant="destructive"
+                        :disabled="upstream.used_by.length > 0"
+                        @select="removing = upstream"
+                      >
+                        <Trash2 aria-hidden="true" />
+                        {{ t('common.delete') }}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+      </TabsContent>
+      <TabsContent value="topology" class="pt-2">
+        <UpstreamTopology
+          :upstreams="upstreams.data.value ?? []"
+          :health="health.data.value"
+          :health-failed="health.isError.value"
+        />
+      </TabsContent>
+    </Tabs>
 
     <UpstreamFormSheet v-model:open="formOpen" :upstream="editing" />
 
