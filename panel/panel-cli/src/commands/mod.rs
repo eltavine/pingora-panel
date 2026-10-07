@@ -101,6 +101,45 @@ pub struct ActionOptions {
     /// Serve the index file for unknown paths (single-page apps).
     #[arg(long)]
     pub spa: bool,
+    /// List directories without an index file, for --static.
+    #[arg(long, value_enum)]
+    pub autoindex: Option<Listing>,
+    /// EXTENSION=TYPE, ahead of the built-in media types, for --static;
+    /// repeat it for more.
+    #[arg(long = "media-type", value_name = "EXTENSION=TYPE")]
+    pub media_types: Vec<String>,
+    /// The media type of files whose extension has none, for --static.
+    #[arg(long, value_name = "TYPE")]
+    pub default_type: Option<String>,
+    /// A Cache-Control rule as the configuration language writes it, such as
+    /// "max_age=1y immutable for=css,js" or "no_cache for=html", for
+    /// --static; repeat it for more, the first naming an extension applying.
+    #[arg(long = "cache-control", value_name = "RULE")]
+    pub cache_control: Vec<String>,
+}
+
+/// How a directory without an index file is listed.
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+pub(crate) enum Listing {
+    Html,
+    Json,
+}
+
+impl ActionOptions {
+    /// Refuses the settings of served files for an action that serves none.
+    pub fn check_files(&self, serves_files: bool) -> Result<()> {
+        let written = self.autoindex.is_some()
+            || !self.media_types.is_empty()
+            || self.default_type.is_some()
+            || !self.cache_control.is_empty();
+        if written && !serves_files {
+            return Err(CliError::Usage(
+                "--autoindex, --media-type, --default-type and --cache-control go with --static"
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl ActionFlags {
@@ -113,6 +152,7 @@ impl ActionFlags {
     }
 
     pub fn to_json(&self, options: &ActionOptions) -> Result<Value> {
+        options.check_files(self.static_root.is_some())?;
         let mut action = Map::new();
         if let Some(upstream) = &self.proxy {
             action.insert("type".into(), json!("proxy"));
@@ -121,6 +161,37 @@ impl ActionFlags {
             action.insert("type".into(), json!("static"));
             action.insert("root".into(), json!(root));
             action.insert("spa_fallback".into(), json!(options.spa));
+            if let Some(listing) = options.autoindex {
+                let listing = match listing {
+                    Listing::Html => "html",
+                    Listing::Json => "json",
+                };
+                action.insert("listing".into(), json!(listing));
+            }
+            let mut media_types = Map::new();
+            for entry in &options.media_types {
+                let (extension, media_type) = entry.split_once('=').ok_or_else(|| {
+                    CliError::Usage(format!("--media-type {entry:?} is not EXTENSION=TYPE"))
+                })?;
+                media_types.insert(
+                    extension.trim_start_matches('.').to_ascii_lowercase(),
+                    json!(media_type),
+                );
+            }
+            if !media_types.is_empty() {
+                action.insert("media_types".into(), Value::Object(media_types));
+            }
+            if let Some(default_type) = &options.default_type {
+                action.insert("default_type".into(), json!(default_type));
+            }
+            if !options.cache_control.is_empty() {
+                let rules = options
+                    .cache_control
+                    .iter()
+                    .map(|rule| cache_rule(rule))
+                    .collect::<Result<Vec<_>>>()?;
+                action.insert("cache".into(), json!(rules));
+            }
         } else if let Some(location) = &self.redirect {
             action.insert("type".into(), json!("redirect"));
             action.insert("location".into(), json!(location));
@@ -171,6 +242,86 @@ pub fn rewrite_rules(rules: &[String]) -> Result<Vec<Value>> {
             })
         })
         .collect()
+}
+
+/// A Cache-Control rule as the configuration language writes it:
+/// `max_age=<duration> [immutable] [for=<extension>,...]` or
+/// `no_cache [for=...]`.
+fn cache_rule(rule: &str) -> Result<Value> {
+    let usage = || {
+        CliError::Usage(format!(
+            "{rule:?} is not max_age=DURATION [immutable] [for=EXTENSIONS] or no_cache [for=EXTENSIONS]"
+        ))
+    };
+    let (mut max_age, mut immutable, mut no_cache, mut extensions) =
+        (None, false, false, Vec::new());
+    for word in words(rule)? {
+        match word.split_once('=') {
+            Some(("max_age", value)) => max_age = Some(seconds(value).ok_or_else(usage)?),
+            Some(("for", value)) => {
+                extensions = value
+                    .split(',')
+                    .map(|extension| {
+                        extension
+                            .trim()
+                            .trim_start_matches('.')
+                            .to_ascii_lowercase()
+                    })
+                    .filter(|extension| !extension.is_empty())
+                    .collect();
+            }
+            None if word == "immutable" => immutable = true,
+            None if word == "no_cache" => no_cache = true,
+            _ => return Err(usage()),
+        }
+    }
+    let mut rule = Map::new();
+    if !extensions.is_empty() {
+        rule.insert("extensions".into(), json!(extensions));
+    }
+    match (max_age, no_cache) {
+        (Some(seconds), false) => {
+            rule.insert("max_age_seconds".into(), json!(seconds));
+            if immutable {
+                rule.insert("immutable".into(), json!(true));
+            }
+        }
+        (None, true) if !immutable => {}
+        _ => return Err(usage()),
+    }
+    Ok(Value::Object(rule))
+}
+
+/// Seconds in a duration written as nginx does: a bare number of seconds,
+/// or amounts of `y` (365 days), `M` (30 days), `w`, `d`, `h`, `m` and `s`.
+fn seconds(value: &str) -> Option<u64> {
+    if value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return value.parse().ok();
+    }
+    const UNITS: [(char, u64); 7] = [
+        ('y', 31_536_000),
+        ('M', 2_592_000),
+        ('w', 604_800),
+        ('d', 86_400),
+        ('h', 3_600),
+        ('m', 60),
+        ('s', 1),
+    ];
+    let (mut total, mut amount, mut last) = (0u64, String::new(), usize::MAX);
+    for char in value.chars() {
+        if char.is_ascii_digit() {
+            amount.push(char);
+            continue;
+        }
+        let index = UNITS.iter().position(|(unit, _)| *unit == char)?;
+        if amount.is_empty() || (last != usize::MAX && index <= last) {
+            return None;
+        }
+        total = total.checked_add(amount.parse::<u64>().ok()?.checked_mul(UNITS[index].1)?)?;
+        amount.clear();
+        last = index;
+    }
+    amount.is_empty().then_some(total)
 }
 
 /// On or off.
@@ -368,6 +519,58 @@ mod tests {
         ] {
             assert!(error_pages(&[wrong.into()]).is_err(), "{wrong}");
         }
+    }
+
+    #[test]
+    fn static_settings_are_read_as_the_language_writes_them() {
+        let options = ActionOptions {
+            autoindex: Some(Listing::Json),
+            media_types: vec![
+                "WASM=application/wasm".into(),
+                ".map=application/json".into(),
+            ],
+            default_type: Some("text/plain".into()),
+            cache_control: vec![
+                "max_age=1y immutable for=css,.JS".into(),
+                "no_cache for=html".into(),
+                "max_age=1h30m".into(),
+            ],
+            ..ActionOptions::default()
+        };
+        let files = ActionFlags {
+            static_root: Some("files".into()),
+            ..ActionFlags::default()
+        };
+        assert_eq!(
+            files.to_json(&options).unwrap(),
+            json!({
+                "type": "static", "root": "files", "spa_fallback": false, "listing": "json",
+                "media_types": {"wasm": "application/wasm", "map": "application/json"},
+                "default_type": "text/plain",
+                "cache": [
+                    {"extensions": ["css", "js"], "max_age_seconds": 31_536_000, "immutable": true},
+                    {"extensions": ["html"]},
+                    {"max_age_seconds": 5400},
+                ],
+            })
+        );
+        for wrong in [
+            "immutable",
+            "max_age=1y no_cache",
+            "no_cache immutable",
+            "max_age=soon",
+            "max_age=1d1d",
+        ] {
+            assert!(cache_rule(wrong).is_err(), "{wrong}");
+        }
+        assert_eq!(seconds("2w"), Some(1_209_600));
+        assert_eq!(seconds("90"), Some(90));
+        assert_eq!(seconds("1M"), Some(2_592_000));
+        let wrong_type = ActionOptions {
+            media_types: vec!["wasm".into()],
+            ..ActionOptions::default()
+        };
+        assert!(files.to_json(&wrong_type).is_err());
     }
 
     #[test]

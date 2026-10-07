@@ -284,7 +284,10 @@ pub async fn run(api: &Api, output: &Output, command: RouteCommand) -> Result<()
                 options,
             } = *add;
             let action = match internal_redirect {
-                Some(target) => json!({"type": "internal_redirect", "target": target}),
+                Some(target) => {
+                    options.check_files(false)?;
+                    json!({"type": "internal_redirect", "target": target})
+                }
                 None if action.is_set() => action.to_json(&options)?,
                 None => {
                     return Err(CliError::Usage(

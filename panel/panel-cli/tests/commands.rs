@@ -3993,3 +3993,59 @@ fn sites_take_error_pages_maintenance_robots_and_favicons() {
     assert_eq!(route["error_pages"], Value::Null);
     assert_eq!(route["security_policy_id"], "office");
 }
+
+#[test]
+fn static_routes_list_directories_map_types_and_set_cache_control() {
+    let stub = Stub::start();
+    let added = stub.ppanel(&[
+        "route",
+        "add",
+        "shop",
+        "--match",
+        "prefix:/files",
+        "--static",
+        "files",
+        "--autoindex",
+        "html",
+        "--media-type",
+        "wasm=application/wasm",
+        "--default-type",
+        "text/plain",
+        "--cache-control",
+        "max_age=1y immutable for=css,js",
+        "--cache-control",
+        "no_cache for=html",
+    ]);
+    assert!(added.status.success(), "{}", stderr(&added));
+    let posted = &stub.requests("POST", "/api/v1/sites/shop/routes")[0].body;
+    assert_eq!(posted["action"]["listing"], "html");
+    assert_eq!(
+        posted["action"]["media_types"],
+        json!({"wasm": "application/wasm"})
+    );
+    assert_eq!(posted["action"]["default_type"], "text/plain");
+    assert_eq!(
+        posted["action"]["cache"],
+        json!([
+            {"extensions": ["css", "js"], "max_age_seconds": 31_536_000, "immutable": true},
+            {"extensions": ["html"]},
+        ])
+    );
+    let orphan = stub.ppanel(&[
+        "route",
+        "add",
+        "shop",
+        "--match",
+        "prefix:/x",
+        "--respond",
+        "204",
+        "--autoindex",
+        "json",
+    ]);
+    assert!(!orphan.status.success());
+    assert!(
+        stderr(&orphan).contains("go with --static"),
+        "{}",
+        stderr(&orphan)
+    );
+}
