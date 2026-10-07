@@ -1274,6 +1274,9 @@ impl ProxyHttp for PanelProxy {
                 if let Some(snapshot) = &snapshot {
                     snapshot.cache.count(&cache.site, outcome);
                 }
+                if let Some(metrics) = &self.listener.metrics {
+                    metrics.cache_lookup(Arc::from(cache.site.as_str()), outcome.name());
+                }
                 // This cache is the last to handle the response, so its
                 // entry goes after any the upstream sent (RFC 9211 §2).
                 if cache.plan.policy.status_header {

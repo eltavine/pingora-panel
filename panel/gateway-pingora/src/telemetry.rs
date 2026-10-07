@@ -55,6 +55,15 @@ pub struct GatewayMetrics {
     lua_runs: Family<LuaRunLabels, Counter>,
     lua_durations: Family<LuaPhaseLabels, Histogram, fn() -> Histogram>,
     lua_slow: Family<LuaPhaseLabels, Counter>,
+    cache_lookups: Family<CacheLabels, Counter>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, EncodeLabelSet)]
+struct CacheLabels {
+    site: Arc<str>,
+    /// `hit`, `stale`, `updating`, `miss`, `expired`, `revalidated`,
+    /// `bypass` or `uncacheable`.
+    outcome: &'static str,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, EncodeLabelSet)]
@@ -111,6 +120,7 @@ impl GatewayMetrics {
             lua_runs: Family::default(),
             lua_durations: Family::new_with_constructor(lua_histogram),
             lua_slow: Family::default(),
+            cache_lookups: Family::default(),
         };
         registry.register(
             "pingora_panel_gateway_open_connections",
@@ -148,7 +158,19 @@ impl GatewayMetrics {
             "Number of Lua handler runs longer than their slow threshold",
             gateway.lua_slow.clone(),
         );
+        registry.register(
+            "pingora_panel_gateway_cache_lookups",
+            "Number of requests the proxy cache took part in, by site and outcome",
+            gateway.cache_lookups.clone(),
+        );
         gateway
+    }
+
+    /// Counts what the proxy cache did for a request of `site`.
+    pub(crate) fn cache_lookup(&self, site: Arc<str>, outcome: &'static str) {
+        self.cache_lookups
+            .get_or_create(&CacheLabels { site, outcome })
+            .inc();
     }
 
     /// Counts and measures a Lua handler run.
@@ -257,6 +279,36 @@ impl Collector for Configuration {
                 ConstGauge::<f64>::TYPE,
             )?)?;
         }
+        let cache = self.0.cache_report();
+        for (name, help, value) in [
+            (
+                "pingora_panel_gateway_cache_size",
+                "Bytes the proxy cache holds",
+                cache.bytes,
+            ),
+            (
+                "pingora_panel_gateway_cache_capacity",
+                "Bytes the proxy cache may hold",
+                cache.max_bytes,
+            ),
+        ] {
+            ConstGauge::new(i64::try_from(value).unwrap_or(i64::MAX)).encode(
+                encoder.encode_descriptor(
+                    name,
+                    help,
+                    Some(&Unit::Bytes),
+                    ConstGauge::<i64>::TYPE,
+                )?,
+            )?;
+        }
+        ConstGauge::new(i64::try_from(cache.entries).unwrap_or(i64::MAX)).encode(
+            encoder.encode_descriptor(
+                "pingora_panel_gateway_cache_entries",
+                "Responses the proxy cache holds",
+                None,
+                ConstGauge::<i64>::TYPE,
+            )?,
+        )?;
         let memory = self.0.lua_memory();
         if !memory.is_empty() {
             let mut family = encoder.encode_descriptor(
