@@ -770,6 +770,15 @@ const en: Messages = {
     confirmShutdownDetail:
       'The gateway exits after in-flight requests finish; every site stops serving until it starts again.',
     tls: 'TLS',
+    services: {
+      title: 'Control-plane services',
+      description:
+        'The modules running now, with the protocol revisions they speak and the capabilities they offer.',
+      none: 'No module has registered yet.',
+      started: 'started {time}',
+      protocol: '{name} {min}–{max}',
+      capabilities: 'Offers {names}',
+    },
     files: {
       title: 'File checks',
       description:

@@ -77,6 +77,35 @@ test('the overview reports readiness and the active configuration', async ({ pag
   await expectNoHorizontalOverflow(page)
 })
 
+test('the overview lists the control-plane modules running', async ({ page }) => {
+  await mockStatus(page)
+  await page.route('**/api/v1/platform/services', (route) =>
+    route.fulfill({
+      json: {
+        observed_at: '2026-10-08T10:00:00Z',
+        services: [
+          {
+            service: 'config-service',
+            instance_id: '0192a4e5-77aa-7c1b-9f00-3c4d5e6f7a8b',
+            build_version: '0.3.0',
+            started_at: '2026-10-08T08:00:00Z',
+            schema_version: null,
+            protocols: [{ name: 'pingora.panel', min_revision: 1, max_revision: 4 }],
+            capabilities: [{ name: 'configuration', version: '1' }],
+          },
+        ],
+      },
+    }),
+  )
+  await page.goto('/')
+
+  await expect(page.getByText('Control-plane services')).toBeVisible()
+  await expect(page.getByText('config-service', { exact: true })).toBeVisible()
+  await expect(page.getByText('pingora.panel 1–4')).toBeVisible()
+  await expect(page.getByText('Offers configuration')).toBeVisible()
+  await expectNoHorizontalOverflow(page)
+})
+
 test('the overview points at failed requests, failing upstreams and certificates', async ({
   page,
 }) => {

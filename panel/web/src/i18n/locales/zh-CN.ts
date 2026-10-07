@@ -745,6 +745,14 @@ const zhCN = {
     confirmShutdownTitle: '停止网关？',
     confirmShutdownDetail: '网关处理完进行中的请求后退出，所有站点停止服务，直到网关重新启动。',
     tls: 'TLS',
+    services: {
+      title: '控制面服务',
+      description: '当前运行的模块，以及它们支持的协议修订版本与提供的能力。',
+      none: '尚无模块注册。',
+      started: '启动于 {time}',
+      protocol: '{name} {min}–{max}',
+      capabilities: '提供 {names}',
+    },
     files: {
       title: '文件检查',
       description: 'TLS 私钥应只允许网关用户读取，静态网站的根目录应位于静态内容根目录内。',
