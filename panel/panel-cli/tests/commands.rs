@@ -163,6 +163,43 @@ async fn api(
             ],
         }))
         .into_response(),
+        ("GET", "/api/v1/plugins") | ("POST", "/api/v1/plugins/discover") => Json(json!({
+            "protocol_versions": [1], "ports": ["dns01", "secrets"],
+            "capabilities": ["dns01", "secrets", "secret-references"], "limits_enforced": true,
+            "discovered_at": "2027-01-15T08:00:00Z", "plugins": [plugin()],
+        }))
+        .into_response(),
+        ("GET", "/api/v1/plugins/dns") => with_etag("4", plugin()),
+        ("PUT", "/api/v1/plugins/dns/grants" | "/api/v1/plugins/dns/settings" | "/api/v1/plugins/dns/limits")
+        | (
+            "POST",
+            "/api/v1/plugins/dns/enable"
+            | "/api/v1/plugins/dns/disable"
+            | "/api/v1/plugins/dns/upgrade"
+            | "/api/v1/plugins/dns/rollback",
+        ) => with_etag("5", plugin()),
+        ("GET", "/api/v1/plugin-keys") => Json(json!([{
+            "id": "acme", "key_id": "0123456789ABCDEF", "public_key": "RWQ",
+            "created_at": "2027-01-15T08:00:00Z",
+        }]))
+        .into_response(),
+        ("POST", "/api/v1/plugin-keys") => (
+            StatusCode::CREATED,
+            Json(json!({
+                "id": body["id"], "key_id": "0123456789ABCDEF", "public_key": "RWQ",
+                "created_at": "2027-01-15T08:00:00Z",
+            })),
+        )
+            .into_response(),
+        ("DELETE", "/api/v1/plugin-keys/acme" | "/api/v1/plugin-secrets/dns") => {
+            StatusCode::NO_CONTENT.into_response()
+        }
+        ("GET", "/api/v1/plugin-secrets") => {
+            Json(json!([{ "name": "dns", "updated_at": "2027-01-15T08:00:00Z" }])).into_response()
+        }
+        ("PUT", "/api/v1/plugin-secrets/dns") => {
+            Json(json!({ "name": "dns", "updated_at": "2027-01-15T08:00:00Z" })).into_response()
+        }
         ("GET", "/api/v1/backups") => Json(json!({ "backups": [backup("completed")] })).into_response(),
         ("POST", "/api/v1/backups") => {
             let mut created = backup("pending");
@@ -1266,6 +1303,27 @@ fn backup(state: &str) -> Value {
         "requested_by": "ops", "requested_at": "2027-01-15T08:00:00Z",
         "size_bytes": ARCHIVE.len(), "sha256": "ab".repeat(32), "files": 4,
         "product_version": "1.2.3",
+    })
+}
+
+fn plugin() -> Value {
+    json!({
+        "name": "dns", "state": "enabled", "active_version": "1.0.0", "etag": "\"4\"",
+        "grants": ["dns01"], "settings": { "token": "vault:old", "old": 1 },
+        "limits": {}, "effective_limits": {
+            "memory_bytes": 536870912u64, "open_files": 256, "concurrency": 8,
+            "call_timeout_ms": 10000, "cpu_seconds": 0,
+        },
+        "health": {
+            "status": "serving", "version": "1.0.0", "started_at": "2027-01-15T08:00:00Z",
+            "failures": 0, "restarts": 1,
+        },
+        "versions": [
+            { "version": "1.0.0", "publisher": "Acme", "signed_by": "acme", "protocol_versions": [1],
+              "ports": ["dns01"], "problems": [] },
+            { "version": "1.1.0", "publisher": "Acme", "protocol_versions": [2], "ports": ["dns01"],
+              "problems": ["the signature is not by a trusted key"] },
+        ],
     })
 }
 
@@ -4183,4 +4241,173 @@ fn cache_policies_the_store_and_purges_go_through_the_cli() {
     let put = &stub.requests("PUT", "/api/v1/cache-settings")[0];
     assert_eq!(put.if_match.as_deref(), Some("\"store-1\""));
     assert_eq!(put.body, json!({"max_bytes": 1u64 << 30}));
+}
+
+#[test]
+fn plugins_are_listed_trusted_granted_configured_and_run() {
+    let stub = Stub::start();
+    let listed = stub.ppanel(&["plugin", "list"]);
+    assert!(listed.status.success(), "{}", stderr(&listed));
+    let printed = stdout(&listed);
+    assert!(printed.contains("1.0.0,1.1.0"), "{printed}");
+    assert!(printed.contains("serving"), "{printed}");
+    let versions = stub.ppanel(&["plugin", "versions", "dns"]);
+    assert!(
+        stdout(&versions).contains("the signature is not by a trusted key"),
+        "{}",
+        stdout(&versions)
+    );
+    let health = stub.ppanel(&["plugin", "health", "dns"]);
+    assert!(stdout(&health).contains("serving"), "{}", stdout(&health));
+    assert!(stub.ppanel(&["plugin", "discover"]).status.success());
+    assert_eq!(stub.requests("POST", "/api/v1/plugins/discover").len(), 1);
+
+    let granted = stub.ppanel(&[
+        "plugin",
+        "grant",
+        "dns",
+        "dns01,secret-references",
+        "--if-match",
+        "\"4\"",
+    ]);
+    assert!(granted.status.success(), "{}", stderr(&granted));
+    let grants = &stub.requests("PUT", "/api/v1/plugins/dns/grants")[0];
+    assert_eq!(
+        grants.body,
+        json!({ "capabilities": ["dns01", "secret-references"] })
+    );
+    assert_eq!(grants.if_match.as_deref(), Some("\"4\""));
+
+    let configured = stub.ppanel(&[
+        "plugin",
+        "configure",
+        "dns",
+        "--set",
+        "token=vault:dns",
+        "--set",
+        "delay_ms=5",
+        "--unset",
+        "old",
+    ]);
+    assert!(configured.status.success(), "{}", stderr(&configured));
+    let replaced = stub.ppanel_with_input(
+        &["plugin", "configure", "dns", "--settings", "-"],
+        r#"{"zones": ["example.com"]}"#,
+    );
+    assert!(replaced.status.success(), "{}", stderr(&replaced));
+    let settings = stub.requests("PUT", "/api/v1/plugins/dns/settings");
+    assert_eq!(
+        settings[0].body,
+        json!({ "token": "vault:dns", "delay_ms": 5 })
+    );
+    assert_eq!(settings[0].if_match.as_deref(), Some("\"4\""));
+    assert_eq!(settings[1].body, json!({ "zones": ["example.com"] }));
+    assert_eq!(settings[1].if_match, None);
+    assert_eq!(
+        stub.ppanel(&["plugin", "configure", "dns"]).status.code(),
+        Some(2)
+    );
+
+    assert!(stub
+        .ppanel(&["plugin", "limit", "dns", "--concurrency", "4"])
+        .status
+        .success());
+    assert_eq!(
+        stub.requests("PUT", "/api/v1/plugins/dns/limits")[0].body,
+        json!({
+            "memory_bytes": 0, "cpu_seconds": 0, "open_files": 0, "concurrency": 4,
+            "call_timeout_ms": 0,
+        })
+    );
+    for (arguments, path, body) in [
+        (
+            &["plugin", "enable", "dns", "--version", "1.1.0"][..],
+            "/api/v1/plugins/dns/enable",
+            json!({ "version": "1.1.0" }),
+        ),
+        (
+            &["plugin", "upgrade", "dns", "1.1.0"][..],
+            "/api/v1/plugins/dns/upgrade",
+            json!({ "version": "1.1.0" }),
+        ),
+        (
+            &["plugin", "rollback", "dns"][..],
+            "/api/v1/plugins/dns/rollback",
+            Value::Null,
+        ),
+        (
+            &["plugin", "disable", "dns"][..],
+            "/api/v1/plugins/dns/disable",
+            Value::Null,
+        ),
+    ] {
+        let changed = stub.ppanel(arguments);
+        assert!(
+            changed.status.success(),
+            "{arguments:?}: {}",
+            stderr(&changed)
+        );
+        assert!(stdout(&changed).contains("1.0.0"), "{}", stdout(&changed));
+        assert_eq!(stub.requests("POST", path)[0].body, body, "{arguments:?}");
+    }
+
+    let trusted = stub.ppanel_with_input(
+        &[
+            "plugin",
+            "key",
+            "add",
+            "acme",
+            "--file",
+            "-",
+            "--comment",
+            "Acme",
+        ],
+        "untrusted comment: minisign public key 0123456789ABCDEF\nRWQ\n",
+    );
+    assert!(trusted.status.success(), "{}", stderr(&trusted));
+    let added = &stub.requests("POST", "/api/v1/plugin-keys")[0].body;
+    assert_eq!(added["id"], "acme");
+    assert_eq!(added["comment"], "Acme");
+    assert!(added["public_key"].as_str().unwrap().contains("RWQ"));
+    let keys = stub.ppanel(&["plugin", "key", "list"]);
+    assert!(
+        stdout(&keys).contains("0123456789ABCDEF"),
+        "{}",
+        stdout(&keys)
+    );
+    assert_eq!(
+        stub.ppanel(&["plugin", "key", "rm", "acme"]).status.code(),
+        Some(2)
+    );
+    assert!(stub
+        .ppanel(&["plugin", "key", "rm", "acme", "--yes"])
+        .status
+        .success());
+
+    let sealed = stub.ppanel_with_input(
+        &["plugin", "secret", "set", "dns", "--from", "-"],
+        "s3cret\n",
+    );
+    assert!(sealed.status.success(), "{}", stderr(&sealed));
+    assert_eq!(
+        stub.requests("PUT", "/api/v1/plugin-secrets/dns")[0].body,
+        json!({ "value": "s3cret" })
+    );
+    assert!(!stdout(&sealed).contains("s3cret"));
+    let secrets = stub.ppanel(&["plugin", "secret", "list"]);
+    assert!(stdout(&secrets).contains("dns"), "{}", stdout(&secrets));
+    assert_eq!(
+        stub.ppanel(&["plugin", "secret", "rm", "dns"])
+            .status
+            .code(),
+        Some(2)
+    );
+    assert!(stub
+        .ppanel(&["plugin", "secret", "rm", "dns", "--yes"])
+        .status
+        .success());
+    assert_eq!(
+        stub.requests("DELETE", "/api/v1/plugin-secrets/dns").len(),
+        1
+    );
 }

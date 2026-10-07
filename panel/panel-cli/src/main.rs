@@ -195,6 +195,10 @@ enum Command {
     /// Backups of the databases and the sites' directory.
     #[command(subcommand)]
     Backup(commands::backups::BackupCommand),
+    /// External plugins: their versions, grants, settings, limits and
+    /// health, the publisher keys trusted and the secrets kept for them.
+    #[command(subcommand)]
+    Plugin(commands::plugins::PluginCommand),
     /// The running gateway.
     #[command(subcommand)]
     Gateway(commands::gateway::GatewayCommand),
@@ -312,6 +316,7 @@ async fn main() -> ExitCode {
             Command::Compose(command) => commands::compose::run(&api, &output, command).await,
             Command::Files(command) => commands::files::run(&api, &output, command).await,
             Command::Backup(command) => commands::backups::run(&api, &output, command).await,
+            Command::Plugin(command) => commands::plugins::run(&api, &output, command).await,
             Command::Gateway(command) => commands::gateway::gateway(&api, &output, command).await,
             Command::Completion { .. } => Ok(()),
         }
