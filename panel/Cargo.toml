@@ -181,7 +181,7 @@ panel-config-json = { version = "=0.1.0", path = "panel-config-json" }
 panel-config-model = { version = "=0.14.0", path = "panel-config-model" }
 panel-config-api = { version = "=0.2.0", path = "panel-config-api" }
 panel-certificate-api = { version = "=0.1.0", path = "panel-certificate-api" }
-panel-plugin-api = { version = "=0.1.0", path = "panel-plugin-api" }
+panel-plugin-api = { version = "=0.2.0", path = "panel-plugin-api" }
 panel-dsl = { version = "=0.2.0", path = "panel-dsl" }
 panel-config-dsl = { version = "=0.1.0", path = "panel-config-dsl" }
 panel-api = { version = "=0.3.0", path = "panel-api" }

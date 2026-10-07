@@ -6,7 +6,8 @@
 //! compiler checks what both sides agree on.
 //!
 //! The operation enums are exhaustive on purpose: a new operation is a new
-//! contract version that the service has to handle.
+//! contract version that the service has to handle. The views it answers
+//! with are not, so they can gain fields; build them from their defaults.
 
 mod operations;
 mod port;

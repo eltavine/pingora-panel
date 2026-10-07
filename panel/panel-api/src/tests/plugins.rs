@@ -15,21 +15,31 @@ struct FakePlugins {
 }
 
 fn view(name: &str) -> PluginView {
-    PluginView {
-        name: name.into(),
-        state: PluginState::Enabled,
-        active_version: Some("1.0.0".into()),
-        previous_version: None,
-        versions: Vec::new(),
-        grants: vec!["dns01".into()],
-        settings: json!({"token": "vault:dns"}),
-        limits: PluginLimits::default(),
-        effective_limits: None,
-        health: None,
-        error: None,
-        updated_at: Some(Utc::now()),
-        etag: "\"4\"".into(),
-    }
+    let mut view = PluginView::default();
+    view.name = name.into();
+    view.state = PluginState::Enabled;
+    view.active_version = Some("1.0.0".into());
+    view.grants = vec!["dns01".into()];
+    view.settings = json!({"token": "vault:dns"});
+    view.updated_at = Some(Utc::now());
+    view.etag = "\"4\"".into();
+    view
+}
+
+fn key(id: &str, public_key: &str) -> TrustedKeyView {
+    let mut key = TrustedKeyView::default();
+    key.id = id.into();
+    key.key_id = "0123456789ABCDEF".into();
+    key.public_key = public_key.into();
+    key.created_at = Utc::now();
+    key
+}
+
+fn secret(name: &str) -> SecretView {
+    let mut secret = SecretView::default();
+    secret.name = name.into();
+    secret.updated_at = Utc::now();
+    secret
 }
 
 fn json_output(value: &impl serde::Serialize, etag: Option<&str>) -> PluginOutput {
@@ -40,14 +50,14 @@ fn json_output(value: &impl serde::Serialize, etag: Option<&str>) -> PluginOutpu
 }
 
 fn list() -> PluginList {
-    PluginList {
-        protocol_versions: vec![1],
-        ports: vec!["dns01".into()],
-        capabilities: vec!["dns01".into(), "secret-references".into()],
-        limits_enforced: true,
-        discovered_at: Some(Utc::now()),
-        plugins: vec![view("dns")],
-    }
+    let mut list = PluginList::default();
+    list.protocol_versions = vec![1];
+    list.ports = vec!["dns01".into()];
+    list.capabilities = vec!["dns01".into(), "secret-references".into()];
+    list.limits_enforced = true;
+    list.discovered_at = Some(Utc::now());
+    list.plugins = vec![view("dns")];
+    list
 }
 
 #[async_trait]
@@ -62,23 +72,8 @@ impl PluginsPort for FakePlugins {
             PluginQuery::Plugin { name } => {
                 return Err(PanelError::not_found(format!("there is no plugin {name}")))
             }
-            PluginQuery::Keys => json_output(
-                &[TrustedKeyView {
-                    id: "acme".into(),
-                    key_id: "0123456789ABCDEF".into(),
-                    public_key: "RWQ".into(),
-                    comment: String::new(),
-                    created_at: Utc::now(),
-                }],
-                None,
-            ),
-            PluginQuery::Secrets => json_output(
-                &[SecretView {
-                    name: "dns".into(),
-                    updated_at: Utc::now(),
-                }],
-                None,
-            ),
+            PluginQuery::Keys => json_output(&[key("acme", "RWQ")], None),
+            PluginQuery::Secrets => json_output(&[secret("dns")], None),
         })
     }
 
@@ -86,23 +81,8 @@ impl PluginsPort for FakePlugins {
         assert_eq!(context.actor(), "admin");
         let output = match &change.command {
             PluginCommand::Discover => json_output(&list(), None),
-            PluginCommand::PutKey { key } => json_output(
-                &TrustedKeyView {
-                    id: key.id.clone(),
-                    key_id: "0123456789ABCDEF".into(),
-                    public_key: key.public_key.clone(),
-                    comment: key.comment.clone(),
-                    created_at: Utc::now(),
-                },
-                None,
-            ),
-            PluginCommand::PutSecret { name, .. } => json_output(
-                &SecretView {
-                    name: name.clone(),
-                    updated_at: Utc::now(),
-                },
-                None,
-            ),
+            PluginCommand::PutKey { key: new } => json_output(&key(&new.id, &new.public_key), None),
+            PluginCommand::PutSecret { name, .. } => json_output(&secret(name), None),
             PluginCommand::DeleteKey { .. } | PluginCommand::DeleteSecret { .. } => PluginOutput {
                 content: Vec::new(),
                 etag: None,

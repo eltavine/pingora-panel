@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Every plugin found, and what the host itself offers them.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[non_exhaustive]
 pub struct PluginList {
     /// The plugin protocol versions the host speaks.
     pub protocol_versions: Vec<u32>,
@@ -21,11 +22,12 @@ pub struct PluginList {
 }
 
 /// Whether a plugin runs.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum PluginState {
+    #[default]
     Disabled,
     Enabled,
     /// Enabled, but failing its health checks or exited.
@@ -33,8 +35,9 @@ pub enum PluginState {
 }
 
 /// A plugin: its versions, what it was granted and how it runs.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[non_exhaustive]
 pub struct PluginView {
     pub name: String,
     pub state: PluginState,
@@ -66,8 +69,9 @@ pub struct PluginView {
 }
 
 /// One version of a plugin as its signed manifest describes it.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[non_exhaustive]
 pub struct VersionView {
     pub version: String,
     pub publisher: String,
@@ -108,18 +112,20 @@ pub struct PluginLimits {
 }
 
 /// Whether a running plugin answers its health checks.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum HealthStatus {
     Serving,
+    #[default]
     Degraded,
 }
 
 /// What the health checks of a running plugin found.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[non_exhaustive]
 pub struct PluginHealth {
     pub status: HealthStatus,
     pub version: String,
@@ -134,8 +140,9 @@ pub struct PluginHealth {
 }
 
 /// A publisher key whose signatures the host accepts.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[non_exhaustive]
 pub struct TrustedKeyView {
     pub id: String,
     /// The minisign key ID, in hexadecimal.
@@ -160,8 +167,9 @@ pub struct NewTrustedKey {
 }
 
 /// A secret kept for plugins' settings; its value is never returned.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[non_exhaustive]
 pub struct SecretView {
     pub name: String,
     pub updated_at: DateTime<Utc>,

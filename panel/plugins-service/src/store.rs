@@ -70,13 +70,13 @@ fn plugin(row: &SqliteRow) -> Result<PluginRecord> {
 }
 
 fn key(row: &SqliteRow) -> Result<TrustedKeyView> {
-    Ok(TrustedKeyView {
-        id: row.try_get("id").map_err(storage_error)?,
-        key_id: row.try_get("key_id").map_err(storage_error)?,
-        public_key: row.try_get("public_key").map_err(storage_error)?,
-        comment: row.try_get("comment").map_err(storage_error)?,
-        created_at: row.try_get("created_at").map_err(storage_error)?,
-    })
+    let mut key = TrustedKeyView::default();
+    key.id = row.try_get("id").map_err(storage_error)?;
+    key.key_id = row.try_get("key_id").map_err(storage_error)?;
+    key.public_key = row.try_get("public_key").map_err(storage_error)?;
+    key.comment = row.try_get("comment").map_err(storage_error)?;
+    key.created_at = row.try_get("created_at").map_err(storage_error)?;
+    Ok(key)
 }
 
 macro_rules! plugin_columns {
@@ -223,10 +223,10 @@ impl Store {
             .map_err(storage_error)?
             .iter()
             .map(|row| {
-                Ok(SecretView {
-                    name: row.try_get("name").map_err(storage_error)?,
-                    updated_at: row.try_get("updated_at").map_err(storage_error)?,
-                })
+                let mut secret = SecretView::default();
+                secret.name = row.try_get("name").map_err(storage_error)?;
+                secret.updated_at = row.try_get("updated_at").map_err(storage_error)?;
+                Ok(secret)
             })
             .collect()
     }

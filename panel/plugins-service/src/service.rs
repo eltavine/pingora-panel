@@ -162,51 +162,50 @@ fn time(at: SystemTime) -> DateTime<Utc> {
 }
 
 fn health_view(version: &str, health: Health) -> PluginHealth {
-    PluginHealth {
-        status: match health.state {
-            State::Running => HealthStatus::Serving,
-            _ => HealthStatus::Degraded,
-        },
-        version: version.to_owned(),
-        started_at: time(health.started_at),
-        checked_at: health.checked_at.map(time),
-        failures: health.failures,
-        restarts: health.restarts,
-        error: health.error,
-    }
+    let mut view = PluginHealth::default();
+    view.status = match health.state {
+        State::Running => HealthStatus::Serving,
+        _ => HealthStatus::Degraded,
+    };
+    view.version = version.to_owned();
+    view.started_at = time(health.started_at);
+    view.checked_at = health.checked_at.map(time);
+    view.failures = health.failures;
+    view.restarts = health.restarts;
+    view.error = health.error;
+    view
 }
 
 fn version_view(found: &Found) -> VersionView {
     let manifest = found.manifest.clone().unwrap_or_default();
     let resources = manifest.resources.unwrap_or_default();
-    let mut problems = found.problems.clone();
-    if found.manifest.is_none() && problems.is_empty() {
-        problems.push("the manifest cannot be read".into());
+    let mut view = VersionView::default();
+    view.version = found.version.clone();
+    view.problems = found.problems.clone();
+    if found.manifest.is_none() && view.problems.is_empty() {
+        view.problems.push("the manifest cannot be read".into());
     }
-    VersionView {
-        version: found.version.clone(),
-        publisher: manifest.publisher,
-        description: manifest.description,
-        homepage: manifest.homepage,
-        ports: manifest.ports,
-        capabilities: manifest.capabilities,
-        compatible: manifest
-            .protocol_versions
-            .iter()
-            .any(|version| HOST_PROTOCOL_VERSIONS.contains(version)),
-        protocol_versions: manifest.protocol_versions,
-        signed_by: found.signed_by.clone(),
-        problems,
-        config_schema: settings::schema(&manifest.config_schema).ok().flatten(),
-        resources: PluginLimits {
-            memory_bytes: resources.memory_bytes,
-            cpu_seconds: resources.cpu_seconds,
-            open_files: resources.open_files,
-            concurrency: resources.concurrency,
-            call_timeout_ms: manifest.call_timeout_ms,
-        },
-        executable_sha256: manifest.executable_sha256,
-    }
+    view.compatible = manifest
+        .protocol_versions
+        .iter()
+        .any(|version| HOST_PROTOCOL_VERSIONS.contains(version));
+    view.config_schema = settings::schema(&manifest.config_schema).ok().flatten();
+    view.resources = PluginLimits {
+        memory_bytes: resources.memory_bytes,
+        cpu_seconds: resources.cpu_seconds,
+        open_files: resources.open_files,
+        concurrency: resources.concurrency,
+        call_timeout_ms: manifest.call_timeout_ms,
+    };
+    view.signed_by = found.signed_by.clone();
+    view.publisher = manifest.publisher;
+    view.description = manifest.description;
+    view.homepage = manifest.homepage;
+    view.ports = manifest.ports;
+    view.capabilities = manifest.capabilities;
+    view.protocol_versions = manifest.protocol_versions;
+    view.executable_sha256 = manifest.executable_sha256;
+    view
 }
 
 fn runnable<'c>(catalog: &'c Catalog, name: &str, version: &str) -> Result<&'c Found> {
@@ -493,23 +492,22 @@ impl PluginService {
             .map(|found| found.name.as_str())
             .collect();
         names.extend(records.keys().map(String::as_str));
-        let plugins = names
+        let mut list = PluginList::default();
+        list.plugins = names
             .into_iter()
             .map(|name| self.view(name, records.get(name), &catalog))
             .collect();
-        Ok(PluginList {
-            protocol_versions: HOST_PROTOCOL_VERSIONS.to_vec(),
-            ports: PORTS.iter().map(|port| (*port).to_owned()).collect(),
-            capabilities: PORTS
-                .iter()
-                .copied()
-                .chain([SECRETS_CAPABILITY])
-                .map(str::to_owned)
-                .collect(),
-            limits_enforced: limits::ENFORCED,
-            discovered_at: catalog.discovered_at,
-            plugins,
-        })
+        list.protocol_versions = HOST_PROTOCOL_VERSIONS.to_vec();
+        list.ports = PORTS.iter().map(|port| (*port).to_owned()).collect();
+        list.capabilities = PORTS
+            .iter()
+            .copied()
+            .chain([SECRETS_CAPABILITY])
+            .map(str::to_owned)
+            .collect();
+        list.limits_enforced = limits::ENFORCED;
+        list.discovered_at = catalog.discovered_at;
+        Ok(list)
     }
 
     async fn plugin_view(&self, name: &str) -> Result<PluginView> {
@@ -539,21 +537,21 @@ impl PluginService {
         let error = (record.enabled && instance.is_none())
             .then(|| self.failures().get(name).cloned())
             .flatten();
-        PluginView {
-            name: name.to_owned(),
-            state,
-            etag: record.etag(),
-            active_version: record.active_version,
-            previous_version: record.previous_version,
-            versions: catalog.versions(name).map(version_view).collect(),
-            grants: record.grants,
-            settings: record.settings,
-            limits: record.limits,
-            effective_limits,
-            health,
-            error,
-            updated_at: record.updated_at,
-        }
+        let mut view = PluginView::default();
+        view.name = name.to_owned();
+        view.state = state;
+        view.etag = record.etag();
+        view.active_version = record.active_version;
+        view.previous_version = record.previous_version;
+        view.versions = catalog.versions(name).map(version_view).collect();
+        view.grants = record.grants;
+        view.settings = record.settings;
+        view.limits = record.limits;
+        view.effective_limits = effective_limits;
+        view.health = health;
+        view.error = error;
+        view.updated_at = record.updated_at;
+        view
     }
 
     /// The process a plugin's record asks for, its secret references
@@ -893,13 +891,12 @@ impl PluginService {
         }
         let (public_key, key_id) =
             signature::public_key(&key.public_key).map_err(PanelError::invalid_argument)?;
-        let trusted = TrustedKeyView {
-            id: key.id,
-            key_id,
-            public_key,
-            comment: key.comment.trim().to_owned(),
-            created_at: Utc::now(),
-        };
+        let mut trusted = TrustedKeyView::default();
+        trusted.id = key.id;
+        trusted.key_id = key_id;
+        trusted.public_key = public_key;
+        trusted.comment = key.comment.trim().to_owned();
+        trusted.created_at = Utc::now();
         let data = event::KeyTrusted {
             id: trusted.id.clone(),
             key_id: trusted.key_id.clone(),
@@ -979,10 +976,10 @@ impl PluginService {
         SqliteOutbox::append(&mut transaction, &envelope).await?;
         transaction.commit().await.map_err(storage_error)?;
         database.committed();
-        Ok(SecretView {
-            name: name.to_owned(),
-            updated_at: now,
-        })
+        let mut kept = SecretView::default();
+        kept.name = name.to_owned();
+        kept.updated_at = now;
+        Ok(kept)
     }
 
     async fn delete_secret(&self, cause: Cause<'_>, name: &str) -> Result<()> {
