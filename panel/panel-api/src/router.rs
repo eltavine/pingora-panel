@@ -42,6 +42,11 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
             "/api/v1/gateway/file-checks",
             get(runtime::file_checks::<U>),
         )
+        .route("/api/v1/gateway/cache", get(runtime::cache_stats::<U>))
+        .route(
+            "/api/v1/gateway/cache/purge",
+            post(runtime::purge_cache::<U>),
+        )
         .route(
             "/api/v1/upstreams/health",
             get(runtime::upstream_health::<U>),

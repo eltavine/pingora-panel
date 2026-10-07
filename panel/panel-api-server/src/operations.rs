@@ -4,7 +4,7 @@
 use async_trait::async_trait;
 use panel_api::{AccessAudit, Refusal};
 use panel_application::{
-    BackupChange, CommandContext, ComposeAction, ContainerAction, DataPlaneState,
+    BackupChange, CachePurge, CommandContext, ComposeAction, ContainerAction, DataPlaneState,
     GatewayServiceAction, Operation, OperationLog, RequestScope, SiteFileChange,
 };
 use panel_errors::PanelError;
@@ -107,6 +107,25 @@ impl OperationLog for OutboxOperations {
                     site: site.unwrap_or_default().to_owned(),
                     since: Some(chrono::DateTime::<chrono::Utc>::from(deletion.since).into()),
                     until: Some(chrono::DateTime::<chrono::Utc>::from(deletion.until).into()),
+                });
+                self.outcome(context, target, outcome).await;
+            }
+            Operation::PurgeCache { purge, result } => {
+                let (all, site_ids, urls) = match purge {
+                    CachePurge::All => (true, Vec::new(), Vec::new()),
+                    CachePurge::Sites(sites) => (false, sites.clone(), Vec::new()),
+                    CachePurge::Urls(urls) => (false, Vec::new(), urls.clone()),
+                    _ => (false, Vec::new(), Vec::new()),
+                };
+                let target = match site_ids.as_slice() {
+                    [site] => ("site", site.as_str()),
+                    _ => ("gateway", "cache"),
+                };
+                let outcome = result.map(|purged| gateway::CachePurged {
+                    all,
+                    site_ids: site_ids.clone(),
+                    urls,
+                    keys: purged.keys,
                 });
                 self.outcome(context, target, outcome).await;
             }

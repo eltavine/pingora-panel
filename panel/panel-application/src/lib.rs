@@ -126,8 +126,9 @@ pub use persistence::{
     IdempotencyRepository, RevisionRepository,
 };
 pub use runtime::{
-    DataPlaneListener, DataPlaneState, EndpointHealth, EscapingLink, FileChecks,
-    GatewayRuntimePort, PrivateKeyCheck, StaticRootCheck, UpstreamHealth, UpstreamHealthReport,
+    CachePurge, CachePurged, CacheStats, DataPlaneListener, DataPlaneState, EndpointHealth,
+    EscapingLink, FileChecks, GatewayRuntimePort, PrivateKeyCheck, SiteCacheStats, StaticRootCheck,
+    UpstreamHealth, UpstreamHealthReport,
 };
 pub use site_files::{
     NoSiteFiles, RecordedSiteFiles, SiteDirectory, SiteEntry, SiteEntryKind, SiteFile,

@@ -112,6 +112,7 @@ mod tests;
         crate::gateway_runtime::data_plane, crate::gateway_runtime::reload, crate::gateway_runtime::workers,
         crate::gateway_runtime::shutdown, crate::gateway_runtime::upstream_health, crate::gateway_runtime::drain,
         crate::gateway_runtime::file_checks,
+        crate::gateway_runtime::cache_stats, crate::gateway_runtime::purge_cache,
         crate::gateway_runtime::restore,
         crate::identity::setup_status, crate::identity::setup, crate::identity::login,
         crate::identity::session, crate::identity::logout, crate::identity::permissions,

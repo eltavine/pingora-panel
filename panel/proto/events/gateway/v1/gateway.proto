@@ -67,6 +67,16 @@ message LogsDeleted {
   google.protobuf.Timestamp until = 3;
 }
 
+// `gateway.cache.purged`: the proxy cache dropped what it held for
+// everything, for sites, or for URLs (ADR 0043).
+message CachePurged {
+  bool all = 1;
+  repeated string site_ids = 2;
+  repeated string urls = 3;
+  // How many keys the URLs came to.
+  uint64 keys = 4;
+}
+
 // `gateway.operation.refused`
 message OperationRefused {
   // The type of the event the operation would have published, without

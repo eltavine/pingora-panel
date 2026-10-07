@@ -1,8 +1,8 @@
 use super::*;
 use panel_application::{
-    DataPlaneListener, DataPlaneState, EndpointHealth, EscapingLink, FileChecks,
-    GatewayRuntimePort, PrivateKeyCheck, RequestScope, StaticRootCheck, UpstreamHealth,
-    UpstreamHealthReport,
+    CachePurge, CachePurged, CacheStats, DataPlaneListener, DataPlaneState, EndpointHealth,
+    EscapingLink, FileChecks, GatewayRuntimePort, PrivateKeyCheck, RequestScope, SiteCacheStats,
+    StaticRootCheck, UpstreamHealth, UpstreamHealthReport,
 };
 use std::sync::Mutex;
 
@@ -87,6 +87,36 @@ impl GatewayRuntimePort for FakeRuntime {
         checks.private_keys = vec![key];
         checks.static_roots = vec![root];
         Ok(checks)
+    }
+
+    async fn cache_stats(&self, _scope: RequestScope) -> Result<CacheStats> {
+        let mut site = SiteCacheStats::default();
+        site.site_id = "01a0ff37-e4e0-7663-bd8e-0b23821a8315".into();
+        site.hits = 6;
+        site.misses = 2;
+        site.bypasses = 5;
+        let mut stats = CacheStats::default();
+        stats.observed_at = Some(std::time::UNIX_EPOCH);
+        stats.since = Some(std::time::UNIX_EPOCH);
+        stats.bytes = 2048;
+        stats.entries = 3;
+        stats.max_bytes = 256 << 20;
+        stats.sites = vec![site];
+        Ok(stats)
+    }
+
+    async fn purge_cache(
+        &self,
+        _context: CommandContext,
+        purge: CachePurge,
+    ) -> Result<CachePurged> {
+        self.calls.lock().unwrap().push(format!("purge {purge:?}"));
+        let mut purged = CachePurged::default();
+        purged.keys = match purge {
+            CachePurge::Urls(urls) => urls.len() as u64,
+            _ => 0,
+        };
+        Ok(purged)
     }
 
     async fn set_endpoint_drained(
@@ -263,4 +293,75 @@ async fn runtime_routes_are_unavailable_without_a_gateway() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn the_cache_reports_what_it_did_and_purges_one_target() {
+    let runtime = Arc::new(FakeRuntime::default());
+    let app = runtime_app(Arc::clone(&runtime));
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/gateway/cache")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json(response).await;
+    assert_eq!(body["observed_at"], "1970-01-01T00:00:00.000Z");
+    assert_eq!(body["entries"], 3);
+    assert_eq!(
+        body["sites"][0]["hit_ratio"], 0.75,
+        "bypasses are not looked up"
+    );
+
+    for (body, keys) in [
+        (r#"{"all":true}"#, 0),
+        (
+            r#"{"site_ids":["01a0ff37-e4e0-7663-bd8e-0b23821a8315"]}"#,
+            0,
+        ),
+        (
+            r#"{"urls":["https://shop.example/a","https://shop.example/b"]}"#,
+            2,
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(mutation(
+                "POST",
+                "/api/v1/gateway/cache/purge",
+                Body::from(body),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{body}");
+        assert_eq!(json(response).await["keys"], keys, "{body}");
+    }
+    for body in [
+        r#"{}"#,
+        r#"{"all":true,"urls":["https://shop.example/"]}"#,
+        r#"{"site_ids":["shop"]}"#,
+    ] {
+        let response = app
+            .clone()
+            .oneshot(mutation(
+                "POST",
+                "/api/v1/gateway/cache/purge",
+                Body::from(body),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status().as_u16() / 100, 4, "{body}");
+    }
+    let calls = runtime.calls.lock().unwrap();
+    assert_eq!(
+        calls.len(),
+        3,
+        "refused purges never reach the gateway: {calls:?}"
+    );
+    assert!(calls[0].ends_with("All"), "{calls:?}");
+    assert!(calls[1].contains("Sites"), "{calls:?}");
 }

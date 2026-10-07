@@ -1,5 +1,5 @@
 //! Operations on the running gateway: its data plane, worker count,
-//! shutdown, upstream health, drained nodes and file checks.
+//! shutdown, upstream health, drained nodes, file checks and proxy cache.
 
 use crate::{
     error::ApiError,
@@ -14,8 +14,9 @@ use axum::{
 };
 use chrono::{DateTime, SecondsFormat, Utc};
 use panel_application::{
-    DataPlaneState, EndpointHealth, FileChecks, GatewayRuntimePort, GatewayUseCases,
-    PrivateKeyCheck, StaticRootCheck, UpstreamHealth, UpstreamHealthReport,
+    CachePurge, CacheStats, DataPlaneState, EndpointHealth, FileChecks, GatewayRuntimePort,
+    GatewayUseCases, PrivateKeyCheck, SiteCacheStats, StaticRootCheck, UpstreamHealth,
+    UpstreamHealthReport,
 };
 use panel_errors::PanelError;
 use serde::{Deserialize, Serialize};
@@ -239,6 +240,149 @@ impl From<StaticRootCheck> for StaticRootCheckResponse {
             error: check.error,
         }
     }
+}
+
+/// The most sites or URLs one purge names.
+const MOST_PURGED: usize = 100;
+
+/// What the proxy cache holds and did since the gateway started (ADR 0043).
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct CacheStatsResponse {
+    pub observed_at: Option<String>,
+    /// When the counts started: the gateway's start.
+    pub since: Option<String>,
+    pub bytes: u64,
+    pub entries: u64,
+    pub max_bytes: u64,
+    pub sites: Vec<SiteCacheStatsResponse>,
+}
+
+/// Requests of a site by what the cache did for them.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct SiteCacheStatsResponse {
+    pub site_id: String,
+    pub hits: u64,
+    /// Served stale while revalidated or when the upstream failed.
+    pub stale: u64,
+    /// Served stale while another request revalidated.
+    pub updating: u64,
+    pub misses: u64,
+    /// Found stale and fetched again.
+    pub expired: u64,
+    /// Found stale and confirmed by the upstream with 304.
+    pub revalidated: u64,
+    pub bypasses: u64,
+    /// Fetched without being stored, as their responses said.
+    pub uncacheable: u64,
+    /// Of the requests the cache looked up, the share it answered, when it
+    /// looked any up.
+    pub hit_ratio: Option<f64>,
+}
+
+impl From<SiteCacheStats> for SiteCacheStatsResponse {
+    fn from(site: SiteCacheStats) -> Self {
+        let answered = site.hits + site.stale + site.updating + site.revalidated;
+        let looked_up = answered + site.misses + site.expired + site.uncacheable;
+        Self {
+            hit_ratio: (looked_up > 0).then(|| answered as f64 / looked_up as f64),
+            site_id: site.site_id,
+            hits: site.hits,
+            stale: site.stale,
+            updating: site.updating,
+            misses: site.misses,
+            expired: site.expired,
+            revalidated: site.revalidated,
+            bypasses: site.bypasses,
+            uncacheable: site.uncacheable,
+        }
+    }
+}
+
+impl From<CacheStats> for CacheStatsResponse {
+    fn from(stats: CacheStats) -> Self {
+        Self {
+            observed_at: rfc3339(stats.observed_at),
+            since: rfc3339(stats.since),
+            bytes: stats.bytes,
+            entries: stats.entries,
+            max_bytes: stats.max_bytes,
+            sites: stats.sites.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// What to purge from the proxy cache: everything, sites, or URLs; exactly
+/// one of them.
+#[derive(Clone, Debug, Default, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CachePurgeRequest {
+    #[serde(default)]
+    pub all: bool,
+    #[serde(default)]
+    pub site_ids: Vec<Uuid>,
+    /// Absolute URLs of the active configuration's sites; every variant
+    /// stored for each goes.
+    #[serde(default)]
+    pub urls: Vec<String>,
+}
+
+impl CachePurgeRequest {
+    fn purge(self) -> Result<CachePurge, PanelError> {
+        let named = [self.all, !self.site_ids.is_empty(), !self.urls.is_empty()]
+            .iter()
+            .filter(|named| **named)
+            .count();
+        if named != 1 {
+            return Err(PanelError::invalid_argument(
+                "a purge names exactly one of all, site_ids and urls",
+            ));
+        }
+        if self.site_ids.len() > MOST_PURGED || self.urls.len() > MOST_PURGED {
+            return Err(PanelError::invalid_argument(format!(
+                "a purge names at most {MOST_PURGED} sites or URLs"
+            )));
+        }
+        Ok(if self.all {
+            CachePurge::All
+        } else if self.urls.is_empty() {
+            CachePurge::Sites(self.site_ids.iter().map(Uuid::to_string).collect())
+        } else {
+            CachePurge::Urls(self.urls)
+        })
+    }
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct CachePurgeResponse {
+    /// How many keys the URLs came to; zero for sites and everything.
+    pub keys: u64,
+}
+
+/// What the proxy cache holds and did for each site since the gateway
+/// started.
+#[utoipa::path(get, path = "/api/v1/gateway/cache", params(QueryHeaders),
+    responses((status = 200, body = CacheStatsResponse)), tag = "gateway")]
+pub(crate) async fn cache_stats<U: GatewayUseCases>(
+    State(state): State<ApiState<U>>,
+    headers: HeaderMap,
+) -> Result<Json<CacheStatsResponse>, ApiError> {
+    let scope = request_scope(&headers)?;
+    Ok(Json(port(&state)?.cache_stats(scope).await?.into()))
+}
+
+/// Purges the proxy cache: everything at once, a site's responses, or URLs;
+/// what is purged is fetched again on its next request.
+#[utoipa::path(post, path = "/api/v1/gateway/cache/purge", request_body = CachePurgeRequest,
+    params(MutationHeaders), responses((status = 200, body = CachePurgeResponse)), tag = "gateway")]
+pub(crate) async fn purge_cache<U: GatewayUseCases>(
+    State(state): State<ApiState<U>>,
+    headers: HeaderMap,
+    Json(request): Json<CachePurgeRequest>,
+) -> Result<Json<CachePurgeResponse>, ApiError> {
+    let context = command_context(&headers)?;
+    let purge = request.purge()?;
+    let purged = port(&state)?.purge_cache(context, purge).await?;
+    Ok(Json(CachePurgeResponse { keys: purged.keys }))
 }
 
 /// What the gateway finds in the files the active configuration serves

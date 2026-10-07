@@ -210,6 +210,12 @@ pub(crate) static ROUTES: &[(&str, &str, Access)] = &[
     ),
     ("GET", "/api/v1/gateway/data-plane", Requires(GatewayRead)),
     ("GET", "/api/v1/gateway/file-checks", Requires(GatewayRead)),
+    ("GET", "/api/v1/gateway/cache", Requires(GatewayRead)),
+    (
+        "POST",
+        "/api/v1/gateway/cache/purge",
+        Requires(GatewayOperate),
+    ),
     ("POST", "/api/v1/gateway/reload", Requires(GatewayOperate)),
     ("PUT", "/api/v1/gateway/workers", Requires(GatewayOperate)),
     ("POST", "/api/v1/gateway/shutdown", Requires(GatewayOperate)),

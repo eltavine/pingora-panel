@@ -2,10 +2,11 @@
 //! such as calls to the gateway, for the audit trail.
 
 use crate::{
-    BackupChange, CommandContext, ComposeAction, ComposeChange, ContainerAction, ContainerChange,
-    ContainerEngine, DataPlaneState, FileChecks, GatewayRuntimePort, GatewayServiceAction,
-    GatewayServiceStatus, ImagePulled, ImageRemoval, LogDeletion, PruneReport, RequestScope,
-    SiteFileChange, SitePath, UpstreamHealth, UpstreamHealthReport,
+    BackupChange, CachePurge, CachePurged, CacheStats, CommandContext, ComposeAction,
+    ComposeChange, ContainerAction, ContainerChange, ContainerEngine, DataPlaneState, FileChecks,
+    GatewayRuntimePort, GatewayServiceAction, GatewayServiceStatus, ImagePulled, ImageRemoval,
+    LogDeletion, PruneReport, RequestScope, SiteFileChange, SitePath, UpstreamHealth,
+    UpstreamHealthReport,
 };
 use async_trait::async_trait;
 use panel_errors::{PanelError, Result};
@@ -23,6 +24,11 @@ pub enum Operation<'a> {
         endpoint: &'a str,
         drained: bool,
         result: std::result::Result<(), &'a PanelError>,
+    },
+    /// The proxy cache was asked to drop what it holds (ADR 0043).
+    PurgeCache {
+        purge: &'a CachePurge,
+        result: std::result::Result<&'a CachePurged, &'a PanelError>,
     },
     /// The log source was asked to delete records of `site`, or of every site.
     DeleteLogs {
@@ -154,6 +160,20 @@ impl GatewayRuntimePort for RecordedRuntime {
         self.inner.file_checks(scope).await
     }
 
+    async fn cache_stats(&self, scope: RequestScope) -> Result<CacheStats> {
+        self.inner.cache_stats(scope).await
+    }
+
+    async fn purge_cache(&self, context: CommandContext, purge: CachePurge) -> Result<CachePurged> {
+        let result = self.inner.purge_cache(context.clone(), purge.clone()).await;
+        let operation = Operation::PurgeCache {
+            purge: &purge,
+            result: result.as_ref(),
+        };
+        self.log.record(&context, operation).await;
+        result
+    }
+
     async fn set_endpoint_drained(
         &self,
         context: CommandContext,
@@ -266,6 +286,10 @@ mod tests {
                 Operation::DeleteLogs { site, result } => (
                     "delete-logs".to_owned(),
                     result.map(|_| site.unwrap_or("*").to_owned()),
+                ),
+                Operation::PurgeCache { purge, result } => (
+                    "purge-cache".to_owned(),
+                    result.map(|purged| format!("{purge:?}/{}", purged.keys)),
                 ),
                 Operation::GatewayService { action, result } => (
                     format!("gateway-service-{}", action.as_str()),

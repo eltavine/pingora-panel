@@ -1,8 +1,12 @@
 //! The gateway runtime API: data plane state, reloads, worker counts,
-//! shutdown, upstream health, endpoint drains and file checks.
+//! shutdown, upstream health, endpoint drains, file checks and the proxy
+//! cache.
 
 use crate::{runtime_settings::RuntimeSettingsStore, MAX_GATEWAY_WORKERS};
-use gateway_pingora::{DataPlane, DataPlaneStatus, FileChecks, PingoraGatewayAdapter, PoolHealth};
+use gateway_pingora::{
+    CachePurge, CacheReport, DataPlane, DataPlaneStatus, FileChecks, PingoraGatewayAdapter,
+    PoolHealth,
+};
 use gateway_proto_codec::encode_hash;
 use panel_contracts::{
     common::v1 as common,
@@ -37,6 +41,39 @@ fn timestamp(time: SystemTime) -> prost_types::Timestamp {
 
 fn failure(error: &PanelError) -> Option<common::Error> {
     Some(error.into())
+}
+
+fn encode_cache(report: CacheReport) -> wire::CacheStats {
+    wire::CacheStats {
+        observed_at: Some(timestamp(SystemTime::now())),
+        since: Some(timestamp(report.since)),
+        bytes: report.bytes,
+        entries: report.entries,
+        max_bytes: report.max_bytes,
+        sites: report
+            .sites
+            .into_iter()
+            .map(|site| {
+                let count = |name: &str| {
+                    site.outcomes
+                        .iter()
+                        .find(|(outcome, _)| *outcome == name)
+                        .map_or(0, |(_, count)| *count)
+                };
+                wire::SiteCacheStats {
+                    hits: count("hit"),
+                    stale: count("stale"),
+                    updating: count("updating"),
+                    misses: count("miss"),
+                    expired: count("expired"),
+                    revalidated: count("revalidated"),
+                    bypasses: count("bypass"),
+                    uncacheable: count("uncacheable"),
+                    site_id: site.site_id,
+                }
+            })
+            .collect(),
+    }
 }
 
 fn encode_checks(checks: FileChecks) -> wire::FileChecks {
@@ -273,6 +310,49 @@ impl GatewayRuntime for GatewayRuntimeService {
             },
             Err(error) => wire::CheckFilesResponse {
                 checks: None,
+                error: failure(&error),
+            },
+        }))
+    }
+
+    async fn get_cache_stats(
+        &self,
+        _request: Request<wire::GetCacheStatsRequest>,
+    ) -> std::result::Result<Response<wire::GetCacheStatsResponse>, Status> {
+        Ok(Response::new(wire::GetCacheStatsResponse {
+            stats: Some(encode_cache(self.adapter.cache_report())),
+            error: None,
+        }))
+    }
+
+    async fn purge_cache(
+        &self,
+        request: Request<wire::PurgeCacheRequest>,
+    ) -> std::result::Result<Response<wire::PurgeCacheResponse>, Status> {
+        let purge = match request.into_inner().target {
+            Some(wire::purge_cache_request::Target::All(true)) => Ok(CachePurge::All),
+            Some(wire::purge_cache_request::Target::Sites(sites)) if !sites.site_ids.is_empty() => {
+                Ok(CachePurge::Sites(sites.site_ids))
+            }
+            Some(wire::purge_cache_request::Target::Urls(urls)) if !urls.urls.is_empty() => {
+                Ok(CachePurge::Urls(urls.urls))
+            }
+            _ => Err(PanelError::invalid_argument(
+                "a purge names everything, sites or URLs",
+            )),
+        };
+        let result = purge.and_then(|purge| {
+            let keys = self.adapter.purge_cache(&purge)?;
+            tracing::info!(event = "proxy_cache_purged", target = ?purge, keys);
+            Ok(keys)
+        });
+        Ok(Response::new(match result {
+            Ok(keys) => wire::PurgeCacheResponse {
+                keys: u64::try_from(keys).unwrap_or(u64::MAX),
+                error: None,
+            },
+            Err(error) => wire::PurgeCacheResponse {
+                keys: 0,
                 error: failure(&error),
             },
         }))

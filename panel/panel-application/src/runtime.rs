@@ -81,6 +81,51 @@ pub struct UpstreamHealthReport {
     pub active_hash: Option<ContentHash>,
 }
 
+/// What the proxy cache holds and did since the gateway started.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct CacheStats {
+    pub observed_at: Option<SystemTime>,
+    pub since: Option<SystemTime>,
+    pub bytes: u64,
+    pub entries: u64,
+    pub max_bytes: u64,
+    pub sites: Vec<SiteCacheStats>,
+}
+
+/// Requests of a site by what the proxy cache did for them.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct SiteCacheStats {
+    pub site_id: String,
+    pub hits: u64,
+    pub stale: u64,
+    pub updating: u64,
+    pub misses: u64,
+    pub expired: u64,
+    pub revalidated: u64,
+    pub bypasses: u64,
+    pub uncacheable: u64,
+}
+
+/// What a purge of the proxy cache takes.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum CachePurge {
+    All,
+    Sites(Vec<String>),
+    /// Absolute URLs of the active configuration's sites.
+    Urls(Vec<String>),
+}
+
+/// What the gateway did for a purge.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct CachePurged {
+    /// How many keys URLs came to; zero for sites and everything.
+    pub keys: u64,
+}
+
 /// What the gateway finds in the files it serves from.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[non_exhaustive]
@@ -190,5 +235,19 @@ pub trait GatewayRuntimePort: Send + Sync {
         Err(PanelError::unavailable(
             "this gateway does not check its files",
         ))
+    }
+
+    /// What the proxy cache holds and did since the gateway started.
+    async fn cache_stats(&self, _scope: RequestScope) -> Result<CacheStats> {
+        Err(PanelError::unavailable("this gateway has no proxy cache"))
+    }
+
+    /// Purges the proxy cache.
+    async fn purge_cache(
+        &self,
+        _context: CommandContext,
+        _purge: CachePurge,
+    ) -> Result<CachePurged> {
+        Err(PanelError::unavailable("this gateway has no proxy cache"))
     }
 }

@@ -10,8 +10,8 @@ use gatewayd::{
     WORKER_COUNT_ENV,
 };
 use panel_application::{
-    CommandContext, GatewayPort, GatewayRuntimePort, IdempotencyKey, RequestDeadline, RequestId,
-    RequestScope,
+    CachePurge, CommandContext, GatewayPort, GatewayRuntimePort, IdempotencyKey, RequestDeadline,
+    RequestId, RequestScope,
 };
 use panel_domain::{
     EndpointAddress, EndpointId, NormalizedHost, PathPrefix, RevisionId, RouteId, SiteId,
@@ -222,6 +222,22 @@ async fn runtime_operations_persist_and_shut_the_gateway_down() {
     assert_eq!(files.active_revision_id, Some(1));
     assert!(files.checked_at.is_some());
     assert!(files.private_keys.is_empty() && files.static_roots.is_empty());
+    let cache = client.cache_stats(scope()).await.unwrap();
+    assert_eq!(cache.max_bytes, 256 << 20);
+    assert_eq!((cache.bytes, cache.entries), (0, 0));
+    assert!(cache.since.is_some() && cache.observed_at.is_some());
+    let purged = client
+        .purge_cache(command("purge"), CachePurge::All)
+        .await
+        .unwrap();
+    assert_eq!(purged.keys, 0);
+    assert!(client
+        .purge_cache(
+            command("purge-nowhere"),
+            CachePurge::Urls(vec!["https://nowhere.test/".into()])
+        )
+        .await
+        .is_err());
 
     client.shutdown(command("shutdown")).await.unwrap();
     assert_eq!(gateway.exit_code().await, Some(0));

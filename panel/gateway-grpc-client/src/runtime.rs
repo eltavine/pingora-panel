@@ -3,9 +3,9 @@
 use crate::{context, hash, query_context, response_error, status_error, GatewayGrpcClient};
 use async_trait::async_trait;
 use panel_application::{
-    CommandContext, DataPlaneListener, DataPlaneState, EndpointHealth, EscapingLink, FileChecks,
-    GatewayRuntimePort, PrivateKeyCheck, RequestScope, StaticRootCheck, UpstreamHealth,
-    UpstreamHealthReport,
+    CachePurge, CachePurged, CacheStats, CommandContext, DataPlaneListener, DataPlaneState,
+    EndpointHealth, EscapingLink, FileChecks, GatewayRuntimePort, PrivateKeyCheck, RequestScope,
+    SiteCacheStats, StaticRootCheck, UpstreamHealth, UpstreamHealthReport,
 };
 use panel_contracts::gateway::v1::{self as wire, gateway_runtime_client::GatewayRuntimeClient};
 use panel_errors::{PanelError, Result};
@@ -222,6 +222,74 @@ impl GatewayRuntimePort for GatewayGrpcClient {
             })
             .collect();
         Ok(report)
+    }
+
+    async fn cache_stats(&self, scope: RequestScope) -> Result<CacheStats> {
+        let request = wire::GetCacheStatsRequest {
+            context: Some(query_context(&scope)),
+        };
+        let response = self
+            .runtime()
+            .get_cache_stats(self.request(request, scope.trace_context()))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        let stats = response
+            .stats
+            .ok_or_else(|| PanelError::internal("the gateway sent no cache statistics"))?;
+        let mut report = CacheStats::default();
+        report.observed_at = time(stats.observed_at);
+        report.since = time(stats.since);
+        report.bytes = stats.bytes;
+        report.entries = stats.entries;
+        report.max_bytes = stats.max_bytes;
+        report.sites = stats
+            .sites
+            .into_iter()
+            .map(|site| {
+                let mut counts = SiteCacheStats::default();
+                counts.site_id = site.site_id;
+                counts.hits = site.hits;
+                counts.stale = site.stale;
+                counts.updating = site.updating;
+                counts.misses = site.misses;
+                counts.expired = site.expired;
+                counts.revalidated = site.revalidated;
+                counts.bypasses = site.bypasses;
+                counts.uncacheable = site.uncacheable;
+                counts
+            })
+            .collect();
+        Ok(report)
+    }
+
+    async fn purge_cache(&self, command: CommandContext, purge: CachePurge) -> Result<CachePurged> {
+        use wire::purge_cache_request::Target;
+        let target = match purge {
+            CachePurge::All => Target::All(true),
+            CachePurge::Sites(site_ids) => Target::Sites(wire::CacheSites { site_ids }),
+            CachePurge::Urls(urls) => Target::Urls(wire::CacheUrls { urls }),
+            _ => {
+                return Err(PanelError::invalid_argument(
+                    "this purge is not known to the gateway",
+                ))
+            }
+        };
+        let request = wire::PurgeCacheRequest {
+            context: Some(context(&command)),
+            target: Some(target),
+        };
+        let response = self
+            .runtime()
+            .purge_cache(self.request(request, command.trace_context()))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        let mut purged = CachePurged::default();
+        purged.keys = response.keys;
+        Ok(purged)
     }
 
     async fn set_endpoint_drained(
