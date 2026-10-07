@@ -400,6 +400,13 @@
         "panel-errors"
       ]
     },
+    "panel-plugin-api": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-application",
+        "panel-errors"
+      ]
+    },
     "panel-config-state-codec": {
       "catalog": false,
       "allowed_workspace_dependencies": [

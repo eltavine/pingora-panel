@@ -40,6 +40,7 @@ fn main() {
                 "../proto/gateway/v1/gateway.proto",
                 "../proto/gateway/v1/runtime.proto",
                 "../proto/platform/v1/platform.proto",
+                "../proto/plugins/v1/plugins.proto",
             ],
             &["../proto"],
         )

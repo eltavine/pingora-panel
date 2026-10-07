@@ -1,0 +1,108 @@
+syntax = "proto3";
+
+// The data of events about external plugins (ADR 0044). Each message is the
+// data of one event type, named in its comment; events carry it as JSON in
+// the proto3 JSON mapping, with the field names below. Settings are recorded
+// by the names they set and secrets by name, never by value.
+package pingora.panel.events.plugins.v1;
+
+// `plugins.catalog.discovered`
+message PluginsDiscovered {
+  // Versions found in the plugins directory.
+  uint32 versions = 1;
+  // Of those, the versions that cannot run.
+  uint32 invalid = 2;
+}
+
+// `plugins.plugin.granted`
+message PluginGranted {
+  string name = 1;
+  repeated string capabilities = 2;
+}
+
+// `plugins.plugin.configured`
+message PluginConfigured {
+  string name = 1;
+  // The top-level settings set.
+  repeated string keys = 2;
+  // JSON Pointers of the settings that name secrets.
+  repeated string references = 3;
+}
+
+// `plugins.plugin.limited`
+message PluginLimited {
+  string name = 1;
+  uint64 memory_bytes = 2;
+  uint32 cpu_seconds = 3;
+  uint32 open_files = 4;
+  uint32 concurrency = 5;
+  uint32 call_timeout_ms = 6;
+}
+
+// `plugins.plugin.enabled`
+message PluginEnabled {
+  string name = 1;
+  string version = 2;
+}
+
+// `plugins.plugin.disabled`
+message PluginDisabled {
+  string name = 1;
+  string version = 2;
+}
+
+// `plugins.plugin.upgraded`
+message PluginUpgraded {
+  string name = 1;
+  string from_version = 2;
+  string to_version = 3;
+}
+
+// `plugins.plugin.rolled_back`
+message PluginRolledBack {
+  string name = 1;
+  string from_version = 2;
+  string to_version = 3;
+}
+
+// `plugins.plugin.degraded`
+message PluginDegraded {
+  string name = 1;
+  string version = 2;
+  string reason = 3;
+}
+
+// `plugins.plugin.recovered`
+message PluginRecovered {
+  string name = 1;
+  string version = 2;
+}
+
+// `plugins.key.trusted`
+message KeyTrusted {
+  string id = 1;
+  // The minisign key ID, in hexadecimal.
+  string key_id = 2;
+}
+
+// `plugins.key.removed`
+message KeyRemoved {
+  string id = 1;
+}
+
+// `plugins.secret.sealed`
+message SecretSealed {
+  string name = 1;
+}
+
+// `plugins.secret.deleted`
+message SecretDeleted {
+  string name = 1;
+}
+
+// `plugins.change.refused`
+message ChangeRefused {
+  string operation = 1;
+  string resource = 2;
+  string reason = 3;
+}

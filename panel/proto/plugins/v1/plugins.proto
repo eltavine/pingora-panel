@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package pingora.panel.plugins.v1;
+
+import "common/v1/common.proto";
+
+// Keeps the external plugins (ADR 0044): the signed packages found in the
+// plugins directory, the capabilities, settings and limits each was given,
+// the publisher keys the host trusts and the secrets plugins' settings name.
+//
+// Operations and plugins travel as JSON documents of the plugins API's types
+// (the `panel-plugin-api` crate), which both ends share, so they can gain
+// fields without changing this contract. Each read and change is one
+// operation of a closed set, which audit records refer to by name. Secret
+// values are accepted in change requests and never returned.
+service Plugins {
+  rpc Read(ReadRequest) returns (ReadResponse);
+  rpc Change(ChangeRequest) returns (ChangeResponse);
+}
+
+message ReadRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  // The read, a `PluginQuery` as JSON.
+  bytes query = 2;
+}
+
+message ReadResponse {
+  // The result as JSON.
+  bytes content = 1;
+  // Entity tag of a single plugin, for conditional changes.
+  string etag = 2;
+  .pingora.panel.common.v1.Error error = 3;
+}
+
+message ChangeRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  // Entity tag the plugin must still have (RFC 9110 §13.1.1); empty skips
+  // the check.
+  string if_match = 2;
+  // The change, a `PluginCommand` as JSON; it may hold secrets.
+  bytes command = 3;
+}
+
+message ChangeResponse {
+  bytes content = 1;
+  string etag = 2;
+  .pingora.panel.common.v1.Error error = 3;
+}

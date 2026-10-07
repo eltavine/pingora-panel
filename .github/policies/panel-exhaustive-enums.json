@@ -338,6 +338,18 @@
       "reason": "The TSIG algorithms (RFC 8945) a provider signs updates with. Each maps onto the DNS client's, so a new one must fail to compile where it is not mapped yet."
     },
     {
+      "package": "panel-plugin-api",
+      "name": "PluginQuery",
+      "owner": "pingora-panel-platform",
+      "reason": "An operation of the plugins API contract. The plugins service matches it exhaustively, so a new operation must fail to compile where it is not handled yet instead of reaching a wildcard."
+    },
+    {
+      "package": "panel-plugin-api",
+      "name": "PluginCommand",
+      "owner": "pingora-panel-platform",
+      "reason": "An operation of the plugins API contract. The plugins service matches it exhaustively, so a new operation must fail to compile where it is not handled yet instead of reaching a wildcard."
+    },
+    {
       "package": "panel-lua-ir",
       "name": "RunOutcome",
       "owner": "pingora-panel-platform",

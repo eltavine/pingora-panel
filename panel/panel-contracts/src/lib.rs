@@ -54,11 +54,17 @@ pub mod pingora {
                 tonic::include_proto!("pingora.panel.platform.v1");
             }
         }
+
+        pub mod plugins {
+            pub mod v1 {
+                tonic::include_proto!("pingora.panel.plugins.v1");
+            }
+        }
     }
 }
 
 pub use pingora::panel::{
-    audit, automation, common, config, gateway, observability, ops, platform,
+    audit, automation, common, config, gateway, observability, ops, platform, plugins,
 };
 
 impl std::fmt::Debug for ops::v1::RegistryCredentials {
@@ -129,6 +135,12 @@ pub const OPS_V1: ProtocolRevisions = ProtocolRevisions {
 
 pub const PLATFORM_V1: ProtocolRevisions = ProtocolRevisions {
     package: "pingora.panel.platform.v1",
+    min: 1,
+    max: 1,
+};
+
+pub const PLUGINS_V1: ProtocolRevisions = ProtocolRevisions {
+    package: "pingora.panel.plugins.v1",
     min: 1,
     max: 1,
 };
@@ -281,6 +293,7 @@ mod tests {
             ),
             (OPS_V1, ops::v1::agent_server::SERVICE_NAME),
             (PLATFORM_V1, platform::v1::service_info_server::SERVICE_NAME),
+            (PLUGINS_V1, plugins::v1::plugins_server::SERVICE_NAME),
         ] {
             assert_eq!(service.rsplit_once('.').unwrap().0, revisions.package);
             assert!(1 <= revisions.min && revisions.min <= revisions.max);

@@ -3999,6 +3999,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "panel-plugin-api"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "panel-application",
+ "panel-errors",
+ "serde",
+ "serde_json",
+ "utoipa",
+ "zeroize",
+]
+
+[[package]]
 name = "panel-routing"
 version = "0.1.0"
 dependencies = [
