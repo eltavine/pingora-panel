@@ -51,6 +51,7 @@ async fn the_api_reaches_every_module_of_its_process() {
         audit_service::SERVICE,
         automation_service::SERVICE,
         observability_service::SERVICE,
+        plugins_service::SERVICE,
     ];
     tokio::time::timeout(Duration::from_secs(20), async {
         loop {

@@ -35,6 +35,7 @@ mod logs;
 mod lua;
 mod middleware;
 mod openapi;
+mod plugins;
 mod request_context;
 mod route_test;
 mod router;

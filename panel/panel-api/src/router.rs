@@ -3,8 +3,8 @@ use crate::{
     admission::{admit, Admission},
     alerts, approvals, audit, backups, certificates, compose, configuration as config,
     container_sites, containers, engine_resources, gateway_runtime as runtime, grants, host,
-    host_agent, identity, images, language, logs, lua, middleware, route_test, routes, sign_in,
-    site_files, tls_checks, traffic, workload, ApiConfig, ApiState,
+    host_agent, identity, images, language, logs, lua, middleware, plugins, route_test, routes,
+    sign_in, site_files, tls_checks, traffic, workload, ApiConfig, ApiState,
 };
 use axum::{
     extract::DefaultBodyLimit,
@@ -459,6 +459,56 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         .route(
             "/api/v1/certificate-inspections",
             post(certificates::inspect_certificate),
+        )
+        .route("/api/v1/plugins", get(plugins::list_plugins::<U>))
+        .route(
+            "/api/v1/plugins/discover",
+            post(plugins::discover_plugins::<U>),
+        )
+        .route("/api/v1/plugins/{name}", get(plugins::get_plugin::<U>))
+        .route(
+            "/api/v1/plugins/{name}/grants",
+            put(plugins::grant_plugin::<U>),
+        )
+        .route(
+            "/api/v1/plugins/{name}/settings",
+            put(plugins::configure_plugin::<U>),
+        )
+        .route(
+            "/api/v1/plugins/{name}/limits",
+            put(plugins::limit_plugin::<U>),
+        )
+        .route(
+            "/api/v1/plugins/{name}/enable",
+            post(plugins::enable_plugin::<U>),
+        )
+        .route(
+            "/api/v1/plugins/{name}/disable",
+            post(plugins::disable_plugin::<U>),
+        )
+        .route(
+            "/api/v1/plugins/{name}/upgrade",
+            post(plugins::upgrade_plugin::<U>),
+        )
+        .route(
+            "/api/v1/plugins/{name}/rollback",
+            post(plugins::rollback_plugin::<U>),
+        )
+        .route(
+            "/api/v1/plugin-keys",
+            get(plugins::list_plugin_keys::<U>).post(plugins::trust_plugin_key::<U>),
+        )
+        .route(
+            "/api/v1/plugin-keys/{id}",
+            delete(plugins::delete_plugin_key::<U>),
+        )
+        .route(
+            "/api/v1/plugin-secrets",
+            get(plugins::list_plugin_secrets::<U>),
+        )
+        .route(
+            "/api/v1/plugin-secrets/{name}",
+            put(plugins::put_plugin_secret::<U>).delete(plugins::delete_plugin_secret::<U>),
         )
         .route(
             "/api/v1/acme-accounts",

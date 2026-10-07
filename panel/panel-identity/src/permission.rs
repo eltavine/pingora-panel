@@ -38,6 +38,8 @@ pub enum Permission {
     IdentityRead,
     IdentityManage,
     ConfigLua,
+    PluginsRead,
+    PluginsManage,
 }
 
 /// Every permission with its name and what it allows.
@@ -186,6 +188,16 @@ const CATALOG: &[(Permission, &str, &str)] = &[
         Permission::IdentityManage,
         "identity.manage",
         "Create, change, disable and unlock accounts, grant roles and end sessions.",
+    ),
+    (
+        Permission::PluginsRead,
+        "plugins.read",
+        "Read plugins, their versions, grants, settings, limits and health, the trusted publisher keys and the names of kept secrets.",
+    ),
+    (
+        Permission::PluginsManage,
+        "plugins.manage",
+        "Trust publisher keys, keep secrets for plugins, and grant, configure, limit, enable, disable, upgrade and roll back plugins, which run on the host with what they are granted.",
     ),
 ];
 

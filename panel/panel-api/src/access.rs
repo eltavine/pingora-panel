@@ -438,6 +438,62 @@ pub(crate) static ROUTES: &[(&str, &str, Access)] = &[
         "/api/v1/certificates/{id}/coverage",
         Requires(CertificateRead),
     ),
+    ("GET", "/api/v1/plugins", Requires(PluginsRead)),
+    ("POST", "/api/v1/plugins/discover", Requires(PluginsManage)),
+    ("GET", "/api/v1/plugins/{name}", Requires(PluginsRead)),
+    (
+        "PUT",
+        "/api/v1/plugins/{name}/grants",
+        Requires(PluginsManage),
+    ),
+    (
+        "PUT",
+        "/api/v1/plugins/{name}/settings",
+        Requires(PluginsManage),
+    ),
+    (
+        "PUT",
+        "/api/v1/plugins/{name}/limits",
+        Requires(PluginsManage),
+    ),
+    (
+        "POST",
+        "/api/v1/plugins/{name}/enable",
+        Requires(PluginsManage),
+    ),
+    (
+        "POST",
+        "/api/v1/plugins/{name}/disable",
+        Requires(PluginsManage),
+    ),
+    (
+        "POST",
+        "/api/v1/plugins/{name}/upgrade",
+        Requires(PluginsManage),
+    ),
+    (
+        "POST",
+        "/api/v1/plugins/{name}/rollback",
+        Requires(PluginsManage),
+    ),
+    ("GET", "/api/v1/plugin-keys", Requires(PluginsRead)),
+    ("POST", "/api/v1/plugin-keys", Requires(PluginsManage)),
+    (
+        "DELETE",
+        "/api/v1/plugin-keys/{id}",
+        Requires(PluginsManage),
+    ),
+    ("GET", "/api/v1/plugin-secrets", Requires(PluginsRead)),
+    (
+        "PUT",
+        "/api/v1/plugin-secrets/{name}",
+        Requires(PluginsManage),
+    ),
+    (
+        "DELETE",
+        "/api/v1/plugin-secrets/{name}",
+        Requires(PluginsManage),
+    ),
     (
         "POST",
         "/api/v1/certificate-inspections",

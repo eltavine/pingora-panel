@@ -43,6 +43,7 @@ use panel_platform::ServiceName;
 use panel_secrets::{EnvelopeVault, SecretVault};
 use panel_service::{measured, Environment};
 use panel_sqlite::EventLog;
+use plugins_grpc_client::PluginsClient;
 use site_files_local::LocalSiteFiles;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tls_probe_rustls::RustlsProbe;
@@ -62,6 +63,8 @@ pub const AUDIT_URL_ENV: &str = "PINGORA_PANEL_AUDIT_URL";
 pub const OBSERVABILITY_URL_ENV: &str = "PINGORA_PANEL_OBSERVABILITY_URL";
 /// `automation-service`, which keeps the certificate inventory.
 pub const AUTOMATION_URL_ENV: &str = "PINGORA_PANEL_AUTOMATION_URL";
+/// `plugins-service`, which runs the external plugins.
+pub const PLUGINS_URL_ENV: &str = "PINGORA_PANEL_PLUGINS_URL";
 /// The gateway's runtime API, for data plane operations and upstream health.
 pub const GATEWAY_URL_ENV: &str = "PINGORA_PANEL_GATEWAY_URL";
 /// The host agent's Unix socket; without it host actions are not offered.
@@ -100,6 +103,7 @@ const DEFAULT_CONFIG_URL: &str = "http://127.0.0.1:50061";
 const DEFAULT_AUDIT_URL: &str = "http://127.0.0.1:50064";
 const DEFAULT_OBSERVABILITY_URL: &str = "http://127.0.0.1:50063";
 const DEFAULT_AUTOMATION_URL: &str = "http://127.0.0.1:50062";
+const DEFAULT_PLUGINS_URL: &str = "http://127.0.0.1:50066";
 const DEFAULT_GATEWAY_URL: &str = "http://127.0.0.1:50051";
 const DEFAULT_WEB_ROOT: &str = "/usr/share/pingora-panel/web";
 
@@ -132,6 +136,9 @@ pub fn process(
     let observability_url = env
         .string(OBSERVABILITY_URL_ENV)?
         .unwrap_or_else(|| DEFAULT_OBSERVABILITY_URL.into());
+    let plugins_url = env
+        .string(PLUGINS_URL_ENV)?
+        .unwrap_or_else(|| DEFAULT_PLUGINS_URL.into());
     let agent_socket = env.string(OPS_AGENT_SOCKET_ENV)?.map(PathBuf::from);
     let sites_root = env.string(SITES_ROOT_ENV)?.map(PathBuf::from);
     let web_root = PathBuf::from(
@@ -203,12 +210,17 @@ pub fn process(
         Some(channel) => ObservabilityClient::from_channel(channel),
         None => ObservabilityClient::connect_lazy(observability_url)?,
     };
+    let plugins = match process.peer_channel(&plugins_url, ServiceName::new("plugins-service")?)? {
+        Some(channel) => PluginsClient::from_channel(channel),
+        None => PluginsClient::connect_lazy(plugins_url)?,
+    };
     let agent = agent_socket
         .map(|socket| host_agent(&process, &socket))
         .transpose()?;
     let audit_health = audit.health_check();
     let observability_health = observability.health_check();
     let automation_health = automation.health_check();
+    let plugins_health = plugins.health_check();
     let config_health = config.health_check();
     let events = EventLog::new(process.database(), ServiceName::new(SERVICE)?);
     let operations = Arc::new(operations::OutboxOperations(events.clone()));
@@ -272,6 +284,7 @@ pub fn process(
         .with_check(Arc::new(audit_health), Impact::Informational)
         .with_check(Arc::new(automation_health), Impact::Informational)
         .with_check(Arc::new(observability_health), Impact::Informational)
+        .with_check(Arc::new(plugins_health), Impact::Informational)
         .on_start(move |running| {
             let config = Arc::new(config);
             let state = ApiState::new(Arc::clone(&config))
@@ -279,6 +292,7 @@ pub fn process(
                 .with_runtime(Arc::new(runtime))
                 .with_audit(Arc::new(audit))
                 .with_certificates(Arc::new(automation))
+                .with_plugins(Arc::new(plugins))
                 .with_backups(Arc::new(backups))
                 .with_traffic(Arc::new(observability.clone()))
                 .with_logs(Arc::new(logs))

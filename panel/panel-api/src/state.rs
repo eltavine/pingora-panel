@@ -13,6 +13,7 @@ use panel_config_api::ConfigurationPort;
 use panel_health::HealthWatch;
 use panel_identity::{Identity, ProviderDirectory, ProviderSignIns, WorkloadIdentity};
 use panel_platform::ServiceDirectory;
+use panel_plugin_api::PluginsPort;
 use std::sync::Arc;
 
 pub struct ApiState<U> {
@@ -23,6 +24,7 @@ pub struct ApiState<U> {
     pub(crate) runtime: Option<Arc<dyn GatewayRuntimePort>>,
     pub(crate) audit: Option<Arc<dyn AuditPort>>,
     pub(crate) certificates: Option<Arc<dyn CertificatePort>>,
+    pub(crate) plugins: Option<Arc<dyn PluginsPort>>,
     pub(crate) tls_probe: Option<Arc<dyn TlsProbe>>,
     pub(crate) traffic: Option<Arc<dyn TrafficPort>>,
     pub(crate) logs: Option<Arc<dyn LogsPort>>,
@@ -53,6 +55,7 @@ impl<U> Clone for ApiState<U> {
             runtime: self.runtime.clone(),
             audit: self.audit.clone(),
             certificates: self.certificates.clone(),
+            plugins: self.plugins.clone(),
             tls_probe: self.tls_probe.clone(),
             traffic: self.traffic.clone(),
             logs: self.logs.clone(),
@@ -84,6 +87,7 @@ impl<U> ApiState<U> {
             runtime: None,
             audit: None,
             certificates: None,
+            plugins: None,
             tls_probe: None,
             traffic: None,
             logs: None,
@@ -239,6 +243,14 @@ impl<U> ApiState<U> {
     /// Serves the certificate inventory under `/api/v1/certificates`.
     pub fn with_certificates(mut self, certificates: Arc<dyn CertificatePort>) -> Self {
         self.certificates = Some(certificates);
+        self
+    }
+
+    /// Serves the plugins under `/api/v1/plugins`, their publishers' keys
+    /// under `/api/v1/plugin-keys` and their secrets under
+    /// `/api/v1/plugin-secrets`.
+    pub fn with_plugins(mut self, plugins: Arc<dyn PluginsPort>) -> Self {
+        self.plugins = Some(plugins);
         self
     }
 

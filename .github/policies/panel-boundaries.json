@@ -278,9 +278,10 @@
         "panel-errors",
         "panel-health",
         "panel-identity",
-        "panel-routing",
         "panel-ir",
         "panel-platform",
+        "panel-plugin-api",
+        "panel-routing",
         "panel-schedule"
       ]
     },
@@ -322,6 +323,7 @@
         "panel-service",
         "panel-sqlite",
         "panel-tls",
+        "plugins-grpc-client",
         "site-files-local",
         "tls-probe-rustls"
       ]
@@ -537,6 +539,16 @@
         "panel-sqlite",
         "plugin-contracts",
         "plugin-host"
+      ]
+    },
+    "plugins-grpc-client": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "panel-application",
+        "panel-contracts",
+        "panel-errors",
+        "panel-plugin-api",
+        "panel-service"
       ]
     },
     "panel-events": {

@@ -27,6 +27,7 @@ panel-domain.workspace = true
 panel-errors.workspace = true
 panel-health.workspace = true
 panel-identity.workspace = true
+panel-plugin-api = { workspace = true, features = ["openapi"] }
 panel-routing.workspace = true
 panel-schedule = { workspace = true, features = ["openapi"] }
 panel-ir = { workspace = true, features = ["openapi"] }

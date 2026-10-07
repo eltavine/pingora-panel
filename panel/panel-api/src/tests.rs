@@ -31,6 +31,7 @@ mod host_agent;
 mod images;
 mod logs;
 mod platform;
+mod plugins;
 mod request_identity;
 mod route_test;
 mod runtime;

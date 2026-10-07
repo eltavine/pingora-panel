@@ -3306,6 +3306,7 @@ dependencies = [
  "panel-identity",
  "panel-ir",
  "panel-platform",
+ "panel-plugin-api",
  "panel-routing",
  "panel-schedule",
  "rustls-pki-types",
@@ -3365,6 +3366,7 @@ dependencies = [
  "panel-service",
  "panel-sqlite",
  "panel-tls",
+ "plugins-grpc-client",
  "reqwest",
  "rustls",
  "rustls-pki-types",
@@ -4633,6 +4635,22 @@ dependencies = [
  "tonic",
  "tonic-health",
  "tower",
+]
+
+[[package]]
+name = "plugins-grpc-client"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "panel-application",
+ "panel-contracts",
+ "panel-errors",
+ "panel-plugin-api",
+ "panel-service",
+ "serde_json",
+ "tokio",
+ "tonic",
+ "zeroize",
 ]
 
 [[package]]
