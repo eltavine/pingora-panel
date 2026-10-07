@@ -23,6 +23,14 @@ pub enum RequestVariable {
     RequestId,
     /// The upstream address the request went to; empty for local responses.
     UpstreamAddr,
+    /// The client's request target, unchanged by rewrites.
+    RequestUri,
+    /// The current query, without the `?`; `$query_string` too.
+    Args,
+    /// `?` when the request has a query, empty otherwise.
+    IsArgs,
+    /// A query parameter, by its name, as it is written in the query.
+    Arg(String),
     /// A request header, by its lowercase name with `_` for `-`.
     Header(String),
     Cookie(String),
@@ -42,14 +50,23 @@ impl RequestVariable {
             "client_ip" => Self::ClientIp,
             "request_id" => Self::RequestId,
             "upstream_addr" => Self::UpstreamAddr,
-            name => match name.strip_prefix("http_").filter(|rest| !rest.is_empty()) {
-                Some(header) => Self::Header(header.replace('_', "-")),
-                None => Self::Cookie(
-                    name.strip_prefix("cookie_")
-                        .filter(|rest| !rest.is_empty())?
-                        .to_owned(),
-                ),
-            },
+            "request_uri" => Self::RequestUri,
+            "args" | "query_string" => Self::Args,
+            "is_args" => Self::IsArgs,
+            name => {
+                let named = |prefix: &str| {
+                    name.strip_prefix(prefix)
+                        .filter(|rest| !rest.is_empty())
+                        .map(str::to_owned)
+                };
+                if let Some(header) = named("http_") {
+                    Self::Header(header.replace('_', "-"))
+                } else if let Some(arg) = named("arg_") {
+                    Self::Arg(arg)
+                } else {
+                    Self::Cookie(named("cookie_")?)
+                }
+            }
         })
     }
 }
@@ -64,6 +81,10 @@ impl fmt::Display for RequestVariable {
             Self::ClientIp => formatter.write_str("client_ip"),
             Self::RequestId => formatter.write_str("request_id"),
             Self::UpstreamAddr => formatter.write_str("upstream_addr"),
+            Self::RequestUri => formatter.write_str("request_uri"),
+            Self::Args => formatter.write_str("args"),
+            Self::IsArgs => formatter.write_str("is_args"),
+            Self::Arg(name) => write!(formatter, "arg_{name}"),
             Self::Header(name) => write!(formatter, "http_{}", name.replace('-', "_")),
             Self::Cookie(name) => write!(formatter, "cookie_{name}"),
             Self::Lua(name) => write!(formatter, "lua:{name}"),
@@ -212,6 +233,25 @@ mod tests {
             RequestVariable::Header("x-forwarded-for".into()).to_string(),
             "http_x_forwarded_for"
         );
+    }
+
+    #[test]
+    fn query_variables_are_named_as_nginx_names_them() {
+        assert_eq!(
+            parse_template("$request_uri $args $query_string$is_args $arg_page").unwrap(),
+            [
+                TemplatePart::Variable(RequestVariable::RequestUri),
+                TemplatePart::Text(" ".into()),
+                TemplatePart::Variable(RequestVariable::Args),
+                TemplatePart::Text(" ".into()),
+                TemplatePart::Variable(RequestVariable::Args),
+                TemplatePart::Variable(RequestVariable::IsArgs),
+                TemplatePart::Text(" ".into()),
+                TemplatePart::Variable(RequestVariable::Arg("page".into())),
+            ]
+        );
+        assert_eq!(RequestVariable::Arg("page".into()).to_string(), "arg_page");
+        assert!(parse_template("$arg_").is_err());
     }
 
     #[test]

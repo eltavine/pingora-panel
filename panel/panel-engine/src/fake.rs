@@ -252,6 +252,8 @@ mod tests {
             name: None,
             access_log: panel_ir::AccessLog::default(),
             lua: Default::default(),
+            rewrites: Vec::new(),
+            internal: false,
         });
         candidate.refresh_content_hash();
         let report = engine.validate(candidate).await.unwrap();

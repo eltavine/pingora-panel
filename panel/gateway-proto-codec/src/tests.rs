@@ -418,6 +418,71 @@ fn route_conditions_round_trip_and_unknown_kinds_are_refused() {
 }
 
 #[test]
+fn rewrites_round_trip_and_unknown_kinds_and_flags_are_refused() {
+    use panel_ir::{RewriteFlag, RewriteRule};
+
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(12));
+    let mut site = SiteSpec::new(SiteId::new("site").unwrap(), "site", Vec::new());
+    site.rewrites = vec![RewriteRule::Rewrite {
+        pattern: "^/old/(?<rest>.*)$".into(),
+        replacement: "/new/$rest".into(),
+        flag: RewriteFlag::Last,
+    }];
+    snapshot.sites.push(site);
+    let mut route = RouteSpec::new(
+        RouteId::new("route").unwrap(),
+        SiteId::new("site").unwrap(),
+        10,
+        RouteMatcher::PathPrefix {
+            path: PathPrefix::new("/api").unwrap(),
+        },
+        RouteAction::InternalRedirect {
+            target: "/fallback$uri".into(),
+        },
+    );
+    route.rewrites = vec![
+        RewriteRule::StripPrefix {
+            prefix: "/api".into(),
+        },
+        RewriteRule::AddPrefix {
+            prefix: "/v2".into(),
+        },
+        RewriteRule::SetUri {
+            template: "/index.php?q=$uri".into(),
+        },
+        RewriteRule::Rewrite {
+            pattern: "^/a$".into(),
+            replacement: "https://shop.example/a".into(),
+            flag: RewriteFlag::Permanent,
+        },
+        RewriteRule::Rewrite {
+            pattern: "^/b$".into(),
+            replacement: "/c".into(),
+            flag: RewriteFlag::None,
+        },
+    ];
+    route.internal = true;
+    snapshot.routes.push(route);
+    snapshot.refresh_content_hash();
+    let wire = encode_snapshot(&snapshot);
+    assert_eq!(decode_snapshot(wire.clone()).unwrap(), snapshot);
+
+    let mut unknown = wire.clone();
+    unknown.routes[0].rewrites[0].kind = None;
+    let refused = decode_snapshot(unknown).unwrap_err();
+    assert!(refused.message.contains("does not know"), "{refused}");
+
+    let mut unknown = wire;
+    if let Some(panel_contracts::gateway::v1::rewrite_rule::Kind::Rewrite(rule)) =
+        unknown.sites[0].rewrites[0].kind.as_mut()
+    {
+        rule.flag = 42;
+    }
+    let refused = decode_snapshot(unknown).unwrap_err();
+    assert!(refused.message.contains("rewrite flag 42"), "{refused}");
+}
+
+#[test]
 fn http_policies_round_trip_and_unknown_codings_are_refused() {
     use panel_ir::{
         CompressionAlgorithm, CompressionPolicy, CorsPolicy, HeaderField, ServerHeader,

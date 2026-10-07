@@ -10,6 +10,7 @@ mod logging;
 mod lua;
 pub mod ports;
 mod resilience;
+mod rewrite;
 mod traffic;
 mod validation;
 
@@ -31,5 +32,6 @@ pub use resilience::{
     problems as resilience_problems, uses_resilience, MOST_BACKOFF_MS, MOST_OPEN_MS, MOST_QUEUE_MS,
     MOST_RETRIES,
 };
+pub use rewrite::{problems as rewrite_problems, target_problem as internal_target_problem};
 pub use traffic::{route_regex_error, ROUTE_REGEX_SIZE_LIMIT};
 pub use validation::validate_engine_ir;

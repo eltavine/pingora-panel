@@ -25,6 +25,7 @@ pub use lua::{
 pub use resilience::{
     CircuitBreaker, RetryBudget, RetryCondition, UpstreamQueue, UPSTREAM_RESILIENCE_CAPABILITY,
 };
+pub use rewrite::{RewriteFlag, RewriteRule, MOST_REWRITE_RULES, REWRITE_CAPABILITY};
 pub use security::{
     BasicAuth, LimitedResponse, RateLimit, RateLimitKey, RealIpHeader, RefererRule, SecurityPolicy,
     REQUEST_HEAD_TIMEOUT_CAPABILITY, REQUEST_SECURITY_CAPABILITY, TRUSTED_PROXIES_CAPABILITY,
@@ -35,6 +36,7 @@ pub mod http;
 pub mod logging;
 pub mod lua;
 pub mod resilience;
+pub mod rewrite;
 pub mod security;
 pub mod template;
 pub mod tls;
@@ -322,6 +324,9 @@ pub struct SiteSpec {
     /// Lua handlers for the site's requests, `server_rewrite` among them.
     #[serde(default, skip_serializing_if = "LuaHandlers::is_empty")]
     pub lua: LuaHandlers,
+    /// Rules every request for the site runs before a route is chosen.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rewrites: Vec<RewriteRule>,
 }
 
 /// An HTTP Strict Transport Security policy (RFC 6797 §6.1).
@@ -367,6 +372,7 @@ impl SiteSpec {
             access_log: AccessLog::default(),
             header_policy_id: None,
             lua: LuaHandlers::default(),
+            rewrites: Vec::new(),
         }
     }
 }
@@ -443,6 +449,13 @@ pub struct RouteSpec {
     /// configuration's included.
     #[serde(default, skip_serializing_if = "LuaHandlers::is_empty")]
     pub lua: LuaHandlers,
+    /// Rules the route's requests run once it is chosen.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rewrites: Vec<RewriteRule>,
+    /// Takes only requests a rewrite, an internal redirect or a script sent
+    /// to it, as nginx's `internal`; others get 404.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub internal: bool,
 }
 
 impl RouteSpec {
@@ -469,6 +482,8 @@ impl RouteSpec {
             name: None,
             access_log: AccessLog::default(),
             lua: LuaHandlers::default(),
+            rewrites: Vec::new(),
+            internal: false,
         }
     }
 }
@@ -533,6 +548,11 @@ pub enum RouteAction {
     /// `content_by_lua`: a handler makes the response.
     Lua {
         handler: LuaHandler,
+    },
+    /// Serves the request as if it asked for `target`, a path [template] or
+    /// a named route as `@name`, without telling the client.
+    InternalRedirect {
+        target: String,
     },
 }
 
@@ -1002,6 +1022,41 @@ mod tests {
         let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(2));
         snapshot.listeners.push(listener);
         snapshot.upstream_pools.push(pool);
+        let mut site = SiteSpec::new(
+            SiteId::new("site").unwrap(),
+            "site",
+            vec![DomainSpec::new(NormalizedHost::new("example.com").unwrap())],
+        );
+        site.rewrites = vec![RewriteRule::Rewrite {
+            pattern: "^/old/(.*)$".into(),
+            replacement: "/new/$1".into(),
+            flag: RewriteFlag::Permanent,
+        }];
+        snapshot.sites.push(site);
+        let mut route = RouteSpec::new(
+            RouteId::new("route").unwrap(),
+            SiteId::new("site").unwrap(),
+            1,
+            RouteMatcher::PathPrefix {
+                path: PathPrefix::new("/api").unwrap(),
+            },
+            RouteAction::InternalRedirect {
+                target: "@fallback".into(),
+            },
+        );
+        route.rewrites = vec![
+            RewriteRule::StripPrefix {
+                prefix: "/api".into(),
+            },
+            RewriteRule::AddPrefix {
+                prefix: "/v2".into(),
+            },
+            RewriteRule::SetUri {
+                template: "/index.php?q=$uri".into(),
+            },
+        ];
+        route.internal = true;
+        snapshot.routes.push(route);
         snapshot.refresh_content_hash();
         let decoded: RuntimeSnapshot =
             serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();

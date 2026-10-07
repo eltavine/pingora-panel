@@ -8,8 +8,9 @@ use panel_contracts::gateway::v1 as wire;
 use panel_domain::{NormalizedHost, PathPrefix, RouteId, SiteId, UpstreamPoolId};
 use panel_errors::{PanelError, Result};
 use panel_ir::{
-    DomainSpec, ListenerProtocols, ListenerRef, RealIpHeader, RouteAction, RouteCondition,
-    RouteMatcher, RouteSpec, SiteSpec, StrictTransportSecurity, ValueTest, WwwRedirect,
+    DomainSpec, ListenerProtocols, ListenerRef, RealIpHeader, RewriteFlag, RewriteRule,
+    RouteAction, RouteCondition, RouteMatcher, RouteSpec, SiteSpec, StrictTransportSecurity,
+    ValueTest, WwwRedirect,
 };
 
 pub(super) fn decode_listener(value: wire::ListenerRef) -> Result<ListenerRef> {
@@ -124,6 +125,7 @@ pub(super) fn decode_site(value: wire::SiteSpec) -> Result<SiteSpec> {
         access_log: logging::decode_access_log(value.access_log)?,
         header_policy_id: optional_string(value.header_policy_id),
         lua: lua::decode_handlers(value.lua)?,
+        rewrites: decode_rewrites(value.rewrites)?,
     })
 }
 
@@ -160,6 +162,7 @@ pub(super) fn encode_site(value: &SiteSpec) -> wire::SiteSpec {
         access_log: logging::encode_access_log(&value.access_log),
         header_policy_id: value.header_policy_id.clone().unwrap_or_default(),
         lua: lua::encode_handlers(&value.lua),
+        rewrites: value.rewrites.iter().map(encode_rewrite).collect(),
     }
 }
 
@@ -192,6 +195,8 @@ pub(super) fn decode_route(value: wire::RouteSpec) -> Result<RouteSpec> {
         name: optional_string(value.name),
         access_log: logging::decode_access_log(value.access_log)?,
         lua: lua::decode_handlers(value.lua)?,
+        rewrites: decode_rewrites(value.rewrites)?,
+        internal: value.internal,
     })
 }
 
@@ -212,7 +217,69 @@ pub(super) fn encode_route(value: &RouteSpec) -> wire::RouteSpec {
         name: value.name.clone().unwrap_or_default(),
         access_log: logging::encode_access_log(&value.access_log),
         lua: lua::encode_handlers(&value.lua),
+        rewrites: value.rewrites.iter().map(encode_rewrite).collect(),
+        internal: value.internal,
     }
+}
+
+fn decode_rewrites(values: Vec<wire::RewriteRule>) -> Result<Vec<RewriteRule>> {
+    values.into_iter().map(decode_rewrite).collect()
+}
+
+fn decode_rewrite(value: wire::RewriteRule) -> Result<RewriteRule> {
+    use wire::rewrite_rule::Kind;
+    Ok(
+        match value.kind.ok_or_else(|| {
+            PanelError::invalid_argument("a rewrite rule is of a kind this gateway does not know")
+        })? {
+            Kind::StripPrefix(prefix) => RewriteRule::StripPrefix { prefix },
+            Kind::AddPrefix(prefix) => RewriteRule::AddPrefix { prefix },
+            Kind::SetUri(template) => RewriteRule::SetUri { template },
+            Kind::Rewrite(rule) => RewriteRule::Rewrite {
+                pattern: rule.pattern,
+                replacement: rule.replacement,
+                flag: match wire::RewriteFlag::try_from(rule.flag) {
+                    Ok(wire::RewriteFlag::Unspecified) => RewriteFlag::None,
+                    Ok(wire::RewriteFlag::Last) => RewriteFlag::Last,
+                    Ok(wire::RewriteFlag::Break) => RewriteFlag::Break,
+                    Ok(wire::RewriteFlag::Redirect) => RewriteFlag::Redirect,
+                    Ok(wire::RewriteFlag::Permanent) => RewriteFlag::Permanent,
+                    Err(_) => {
+                        return Err(PanelError::invalid_argument(format!(
+                            "unknown rewrite flag {}",
+                            rule.flag
+                        )))
+                    }
+                },
+            },
+        },
+    )
+}
+
+fn encode_rewrite(value: &RewriteRule) -> wire::RewriteRule {
+    use wire::rewrite_rule::Kind;
+    let kind = match value {
+        RewriteRule::StripPrefix { prefix } => Kind::StripPrefix(prefix.clone()),
+        RewriteRule::AddPrefix { prefix } => Kind::AddPrefix(prefix.clone()),
+        RewriteRule::SetUri { template } => Kind::SetUri(template.clone()),
+        RewriteRule::Rewrite {
+            pattern,
+            replacement,
+            flag,
+        } => Kind::Rewrite(wire::RegexRewrite {
+            pattern: pattern.clone(),
+            replacement: replacement.clone(),
+            flag: match flag {
+                RewriteFlag::None => wire::RewriteFlag::Unspecified,
+                RewriteFlag::Last => wire::RewriteFlag::Last,
+                RewriteFlag::Break => wire::RewriteFlag::Break,
+                RewriteFlag::Redirect => wire::RewriteFlag::Redirect,
+                RewriteFlag::Permanent => wire::RewriteFlag::Permanent,
+            }
+            .into(),
+        }),
+    };
+    wire::RewriteRule { kind: Some(kind) }
 }
 
 fn decode_condition(value: wire::RouteCondition) -> Result<RouteCondition> {
@@ -424,6 +491,7 @@ fn decode_action(value: wire::RouteAction) -> Result<RouteAction> {
         Kind::Lua(handler) => Ok(RouteAction::Lua {
             handler: lua::decode_handler(handler)?,
         }),
+        Kind::InternalRedirect(target) => Ok(RouteAction::InternalRedirect { target }),
     }
 }
 
@@ -456,6 +524,7 @@ fn encode_action(value: &RouteAction) -> wire::RouteAction {
             retry_after_seconds: *retry_after_seconds,
         }),
         RouteAction::Lua { handler } => Kind::Lua(lua::encode_handler(handler)),
+        RouteAction::InternalRedirect { target } => Kind::InternalRedirect(target.clone()),
     };
     wire::RouteAction { kind: Some(kind) }
 }

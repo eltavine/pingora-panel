@@ -98,6 +98,9 @@ message SiteSpec {
   string header_policy_id = 11;
   // Lua handlers for the site's requests, `server_rewrite` among them.
   LuaHandlers lua = 12;
+  // Rules every request for the site runs before a route is chosen
+  // (ADR 0040).
+  repeated RewriteRule rewrites = 13;
 }
 
 // An HTTP Strict Transport Security policy (RFC 6797 §6.1).
@@ -144,6 +147,11 @@ message RouteSpec {
   // The Lua handlers the route's requests run, the site's and the
   // configuration's included.
   LuaHandlers lua = 15;
+  // Rules the route's requests run once it is chosen (ADR 0040).
+  repeated RewriteRule rewrites = 16;
+  // Takes only requests a rewrite, an internal redirect or a script sent
+  // to it; others get 404.
+  bool internal = 17;
 }
 
 // A condition on a request.
@@ -290,7 +298,38 @@ message RouteAction {
     RespondAction respond = 6;
     // `content_by_lua`: a handler makes the response.
     LuaHandler lua = 7;
+    // Serves the request as if it asked for this path template, or for a
+    // named route written `@name`.
+    string internal_redirect = 8;
   }
+}
+
+// A change of a request's path (ADR 0040). A gateway refuses kinds it does
+// not know.
+message RewriteRule {
+  oneof kind {
+    string strip_prefix = 1;
+    string add_prefix = 2;
+    // A template of request variables; a `?` in it sets the query.
+    string set_uri = 3;
+    RegexRewrite rewrite = 4;
+  }
+}
+
+// nginx's `rewrite`.
+message RegexRewrite {
+  string pattern = 1;
+  string replacement = 2;
+  RewriteFlag flag = 3;
+}
+
+// What follows a rewrite that matched; unspecified runs the next rule.
+enum RewriteFlag {
+  REWRITE_FLAG_UNSPECIFIED = 0;
+  REWRITE_FLAG_LAST = 1;
+  REWRITE_FLAG_BREAK = 2;
+  REWRITE_FLAG_REDIRECT = 3;
+  REWRITE_FLAG_PERMANENT = 4;
 }
 
 message RedirectAction {

@@ -357,6 +357,11 @@ fn compile_target(
             content_type: content_type.clone(),
             retry_after: *retry_after_seconds,
         },
+        RouteAction::InternalRedirect { .. } => {
+            return Err(PanelError::unsupported_capability(format!(
+                "route {route} redirects internally, which this gateway does not do"
+            )))
+        }
     })
 }
 

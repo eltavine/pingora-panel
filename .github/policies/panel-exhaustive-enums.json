@@ -384,6 +384,18 @@
       "name": "LuaLogLevel",
       "owner": "pingora-panel-platform",
       "reason": "The levels are nginx's, mapped onto the protobuf enum and the runtime's levels. A new level must fail to compile in both rather than be sent as notice."
+    },
+    {
+      "package": "panel-ir",
+      "name": "RewriteRule",
+      "owner": "pingora-panel-platform",
+      "reason": "gateway-proto-codec encodes every rule onto the wire and the data plane applies each. A new rule must fail to compile there rather than be dropped, which would send requests on unchanged."
+    },
+    {
+      "package": "panel-ir",
+      "name": "RewriteFlag",
+      "owner": "pingora-panel-platform",
+      "reason": "The flags are nginx's, mapped onto the protobuf enum and acted on by the data plane. A new flag must fail to compile in both rather than be sent as running the next rule."
     }
   ]
 }
