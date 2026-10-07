@@ -24,6 +24,7 @@ pub struct SchemaMigration {
     version: i64,
     description: &'static str,
     sql: &'static str,
+    in_transaction: bool,
 }
 
 impl SchemaMigration {
@@ -34,6 +35,21 @@ impl SchemaMigration {
             version,
             description,
             sql,
+            in_transaction: true,
+        }
+    }
+
+    /// A migration that rebuilds a table other tables reference, as SQLite
+    /// changes what `ALTER TABLE` cannot: it runs outside a transaction, so
+    /// that it can turn foreign key enforcement off and the old table's
+    /// rows are not deleted or cascaded when it is dropped, and its SQL
+    /// brackets the rebuild in a transaction of its own.
+    pub const fn rebuilding(version: i64, description: &'static str, sql: &'static str) -> Self {
+        Self {
+            version,
+            description,
+            sql,
+            in_transaction: false,
         }
     }
 
@@ -58,7 +74,7 @@ impl SchemaMigration {
             Cow::Borrowed(self.description),
             MigrationType::Simple,
             self.sql.into_sql_str(),
-            false,
+            !self.in_transaction,
         )
     }
 }

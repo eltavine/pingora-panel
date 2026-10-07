@@ -51,6 +51,64 @@ async fn files_are_private_durable_and_migrate_once() {
     }
 }
 
+const LINKED: &[SchemaMigration] = &[
+    SchemaMigration::new(
+        SchemaMigration::SERVICE_VERSION_FLOOR,
+        "channels",
+        "CREATE TABLE channels (id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('a'))) STRICT;
+         CREATE TABLE sent (id INTEGER PRIMARY KEY,
+             channel TEXT NOT NULL REFERENCES channels (id) ON DELETE CASCADE) STRICT;
+         INSERT INTO channels VALUES ('one', 'a');
+         INSERT INTO sent (channel) VALUES ('one');",
+    ),
+    SchemaMigration::rebuilding(
+        SchemaMigration::SERVICE_VERSION_FLOOR + 1,
+        "channels of another kind",
+        "PRAGMA foreign_keys = OFF;
+         BEGIN IMMEDIATE;
+         CREATE TABLE channels_next (id TEXT PRIMARY KEY,
+             kind TEXT NOT NULL CHECK (kind IN ('a', 'b'))) STRICT;
+         INSERT INTO channels_next SELECT id, kind FROM channels;
+         DROP TABLE channels;
+         ALTER TABLE channels_next RENAME TO channels;
+         COMMIT;
+         PRAGMA foreign_keys = ON;",
+    ),
+];
+
+#[tokio::test]
+async fn rebuilt_tables_keep_what_references_them() {
+    let test = TestDatabase::migrated(LINKED).await;
+    let pool = test.database().pool();
+    let sent: i64 = sqlx::query_scalar("SELECT count(*) FROM sent")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(sent, 1, "dropping the old table cascaded nothing");
+    sqlx::query("INSERT INTO channels VALUES ('two', 'b')")
+        .execute(pool)
+        .await
+        .unwrap();
+    let broken = sqlx::query("INSERT INTO sent (channel) VALUES ('none')")
+        .execute(pool)
+        .await;
+    assert!(broken.is_err(), "the references hold against the new table");
+    sqlx::query("DELETE FROM channels WHERE id = 'one'")
+        .execute(pool)
+        .await
+        .unwrap();
+    let sent: i64 = sqlx::query_scalar("SELECT count(*) FROM sent")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(sent, 0, "and cascade from it");
+    let foreign_keys: i64 = sqlx::query_scalar("PRAGMA foreign_keys")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(foreign_keys, 1);
+}
+
 #[tokio::test]
 async fn module_names_become_file_names() {
     let directory = tempfile::tempdir().unwrap();
