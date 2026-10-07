@@ -4634,3 +4634,147 @@ async fn error_pages_answer_errors_and_maintenance_admits_its_allowlist() {
     );
     gateway.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn static_content_lists_directories_maps_types_and_sets_cache_control() {
+    use panel_ir::{
+        DirectoryListing, StaticCacheRule, LISTING_CAPABILITY, MEDIA_TYPES_CAPABILITY,
+        STATIC_CACHE_CAPABILITY,
+    };
+
+    let base = tempfile::tempdir().unwrap();
+    let files = base.path().join("site/files");
+    std::fs::create_dir_all(files.join("sub")).unwrap();
+    std::fs::write(base.path().join("site/index.html"), "<h1>home</h1>").unwrap();
+    std::fs::write(files.join("app.wasm"), "wasm").unwrap();
+    std::fs::write(files.join("style.css"), "a{}").unwrap();
+    std::fs::write(files.join("notes.unknownext"), "notes").unwrap();
+    std::fs::write(files.join(".hidden"), "secret").unwrap();
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    snapshot.required_capabilities.extend([
+        CapabilityRequirement::new(LISTING_CAPABILITY, "1"),
+        CapabilityRequirement::new(MEDIA_TYPES_CAPABILITY, "1"),
+        CapabilityRequirement::new(STATIC_CACHE_CAPABILITY, "1"),
+    ]);
+    let rule = |extensions: &[&str], max_age_seconds, immutable| StaticCacheRule {
+        extensions: extensions
+            .iter()
+            .map(|extension| (*extension).to_owned())
+            .collect(),
+        max_age_seconds,
+        immutable,
+    };
+    snapshot.static_content.push(StaticContentPolicy {
+        id: "html".into(),
+        root: "site".into(),
+        index_files: vec!["index.html".into()],
+        listing: DirectoryListing::Html,
+        media_types: [
+            ("wasm".to_owned(), "application/wasm".to_owned()),
+            ("css".to_owned(), "text/x-styles".to_owned()),
+        ]
+        .into(),
+        default_type: Some("text/plain; charset=utf-8".into()),
+        cache: vec![
+            rule(&["css"], Some(31_536_000), true),
+            rule(&["html"], None, false),
+            rule(&[], Some(60), false),
+        ],
+        ..StaticContentPolicy::default()
+    });
+    snapshot.static_content.push(StaticContentPolicy {
+        id: "json".into(),
+        root: "site".into(),
+        listing: DirectoryListing::Json,
+        ..StaticContentPolicy::default()
+    });
+    snapshot.sites.push(site(&["html.test"]));
+    snapshot.routes.push(route(
+        "html",
+        1,
+        prefix("/"),
+        RouteAction::Static {
+            policy_id: "html".into(),
+        },
+    ));
+    snapshot.sites.push(SiteSpec::new(
+        SiteId::new("other").unwrap(),
+        "other",
+        vec![DomainSpec::new(NormalizedHost::new("json.test").unwrap())],
+    ));
+    let mut json_route = route(
+        "json",
+        1,
+        prefix("/"),
+        RouteAction::Static {
+            policy_id: "json".into(),
+        },
+    );
+    json_route.site_id = SiteId::new("other").unwrap();
+    snapshot.routes.push(json_route);
+    let gateway = Gateway::start(
+        AdapterOptions::default().with_static_root(base.path()),
+        snapshot,
+    )
+    .await;
+    wait_for(listen).await;
+    let ask = |host: &'static str, target: &'static str, headers: String| async move {
+        get(listen, Some(host), target, &headers).await
+    };
+
+    let home = ask("html.test", "/", String::new()).await;
+    assert_eq!(
+        home.body, b"<h1>home</h1>",
+        "an index file comes before a listing"
+    );
+    assert_eq!(home.headers["cache-control"], "no-cache");
+    let listed = ask("html.test", "/files/", String::new()).await;
+    assert_eq!(listed.status, 200);
+    assert_eq!(listed.headers["content-type"], "text/html; charset=utf-8");
+    let page = String::from_utf8(listed.body).unwrap();
+    assert!(page.contains("<title>Index of /files/</title>"), "{page}");
+    let sub = page.find("href=\"sub/\"").unwrap();
+    let wasm = page.find("href=\"app.wasm\"").unwrap();
+    assert!(sub < wasm, "directories come first: {page}");
+    assert!(!page.contains(".hidden"), "{page}");
+
+    let entries = ask("json.test", "/files/", String::new()).await;
+    assert_eq!(entries.headers["content-type"], "application/json");
+    let entries: serde_json::Value = serde_json::from_slice(&entries.body).unwrap();
+    assert_eq!(entries[0]["name"], "sub");
+    assert_eq!(entries[0]["type"], "directory");
+    assert_eq!(entries.as_array().unwrap().len(), 4);
+
+    let styles = ask("html.test", "/files/style.css", String::new()).await;
+    assert_eq!(styles.headers["content-type"], "text/x-styles");
+    assert_eq!(
+        styles.headers["cache-control"],
+        "max-age=31536000, immutable"
+    );
+    let revalidated = ask(
+        "html.test",
+        "/files/style.css",
+        format!("if-none-match: {}\r\n", styles.headers["etag"]),
+    )
+    .await;
+    assert_eq!(revalidated.status, 304);
+    assert_eq!(
+        revalidated.headers["cache-control"],
+        "max-age=31536000, immutable"
+    );
+    let wasm = ask("html.test", "/files/app.wasm", String::new()).await;
+    assert_eq!(wasm.headers["content-type"], "application/wasm");
+    assert_eq!(wasm.headers["cache-control"], "max-age=60");
+    let notes = ask("html.test", "/files/notes.unknownext", String::new()).await;
+    assert_eq!(notes.headers["content-type"], "text/plain; charset=utf-8");
+    let plain = ask("json.test", "/files/style.css", String::new()).await;
+    assert_eq!(plain.headers["content-type"], "text/css; charset=utf-8");
+    assert!(!plain.headers.contains_key("cache-control"));
+    let missing = ask("json.test", "/files/sub/nothing/", String::new()).await;
+    assert_eq!(missing.status, 404);
+    gateway.stop().await;
+}

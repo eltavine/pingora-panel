@@ -2,16 +2,19 @@
 //!
 //! The request path is appended to the policy root (`root` semantics), and
 //! files must stay inside it after symbolic links are resolved. Responses
-//! follow RFC 9110 conditional requests (§13) and single byte ranges (§14).
+//! follow RFC 9110 conditional requests (§13) and single byte ranges (§14);
+//! directories without an index file may be listed, and media types and
+//! `Cache-Control` follow the policy (ADR 0042).
 
-use crate::responses;
+use crate::{listing, responses};
 use bytes::{Bytes, BytesMut};
 use http::{header, Method};
 use panel_errors::{PanelError, Result};
-use panel_ir::StaticContentPolicy;
+use panel_ir::{DirectoryListing, StaticCacheRule, StaticContentPolicy};
 use pingora_http::ResponseHeader;
 use pingora_proxy::Session;
 use std::{
+    collections::HashMap,
     fs::Metadata,
     path::{Component, Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
@@ -24,6 +27,10 @@ pub(crate) struct StaticContent {
     root: PathBuf,
     index_files: Vec<String>,
     spa_fallback: bool,
+    listing: DirectoryListing,
+    media_types: HashMap<String, String>,
+    default_type: Option<String>,
+    cache: Vec<StaticCacheRule>,
 }
 
 impl StaticContent {
@@ -63,7 +70,39 @@ impl StaticContent {
             root,
             index_files: policy.index_files.clone(),
             spa_fallback: policy.spa_fallback,
+            listing: policy.listing,
+            media_types: policy
+                .media_types
+                .iter()
+                .map(|(extension, media_type)| (extension.to_ascii_lowercase(), media_type.clone()))
+                .collect(),
+            default_type: policy.default_type.clone(),
+            cache: policy.cache.clone(),
         })
+    }
+
+    /// The media type of `file`: the policy's for its extension, the
+    /// built-in guess, or the policy's default.
+    fn media_type(&self, file: &Path) -> String {
+        let extension = extension(file);
+        if let Some(media_type) = extension
+            .as_deref()
+            .and_then(|extension| self.media_types.get(extension))
+        {
+            return media_type.clone();
+        }
+        match mime_guess::from_path(file).first() {
+            Some(mime) => with_charset(&mime),
+            None => self
+                .default_type
+                .clone()
+                .unwrap_or_else(|| "application/octet-stream".to_owned()),
+        }
+    }
+
+    fn cache_control(&self, file: &Path) -> Option<String> {
+        panel_ir::cache_rule(&self.cache, extension(file).as_deref())
+            .map(StaticCacheRule::header_value)
     }
 
     async fn locate(&self, components: &[String]) -> Located {
@@ -71,7 +110,8 @@ impl StaticContent {
         candidate.extend(components);
         match tokio::fs::metadata(&candidate).await {
             Ok(metadata) if metadata.is_dir() && self.contained(&candidate).await.is_some() => {
-                Located::Directory(self.index_in(&candidate).await)
+                let index = self.index_in(&candidate).await;
+                Located::Directory(candidate, index)
             }
             Ok(metadata) if metadata.is_file() => match self.contained(&candidate).await {
                 Some(path) => Located::File(path, metadata),
@@ -123,8 +163,8 @@ impl Failure {
 
 enum Located {
     File(PathBuf, Metadata),
-    /// A directory and its index file, if it has one; there are no listings.
-    Directory(Option<(PathBuf, Metadata)>),
+    /// A directory and its index file, if it has one.
+    Directory(PathBuf, Option<(PathBuf, Metadata)>),
     Missing,
 }
 
@@ -147,7 +187,7 @@ pub(crate) async fn serve(
     let directory_request = path.ends_with('/');
     let (file, metadata) = match content.locate(&components).await {
         Located::File(file, metadata) if !directory_request => (file, metadata),
-        Located::Directory(_) if !directory_request => {
+        Located::Directory(..) if !directory_request => {
             let query = session
                 .req_header()
                 .uri
@@ -158,8 +198,11 @@ pub(crate) async fn serve(
                 .await
                 .map(|()| None);
         }
-        Located::Directory(Some(found)) => found,
-        Located::Directory(None) | Located::File(..) | Located::Missing => {
+        Located::Directory(_, Some(found)) => found,
+        Located::Directory(directory, None) if !content.listing.is_off() => {
+            return list(session, content, &directory, path).await;
+        }
+        Located::Directory(_, None) | Located::File(..) | Located::Missing => {
             match content.spa_fallback {
                 true => match content.index_in(&content.root).await {
                     Some(found) => found,
@@ -171,6 +214,7 @@ pub(crate) async fn serve(
     };
     send_file(
         session,
+        content,
         &file,
         &metadata,
         method == Method::HEAD,
@@ -179,8 +223,39 @@ pub(crate) async fn serve(
     .await
 }
 
+/// Answers with a listing of `directory`, which has no index file.
+async fn list(
+    session: &mut Session,
+    content: &StaticContent,
+    directory: &Path,
+    path: &str,
+) -> pingora_core::Result<Option<Failure>> {
+    let Ok(found) = listing::read(directory, &content.root).await else {
+        return Ok(Some(Failure::new(500, "the directory cannot be listed")));
+    };
+    let (media_type, body) = match content.listing {
+        DirectoryListing::Json => ("application/json", listing::json(&found)),
+        DirectoryListing::Html | DirectoryListing::Off => (
+            "text/html; charset=utf-8",
+            listing::html(&found, path).into_bytes(),
+        ),
+    };
+    responses::send(
+        session,
+        200,
+        &[
+            (header::CONTENT_TYPE, media_type),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        ],
+        Bytes::from(body),
+    )
+    .await
+    .map(|()| None)
+}
+
 async fn send_file(
     session: &mut Session,
+    content: &StaticContent,
     file: &Path,
     metadata: &Metadata,
     head: bool,
@@ -232,6 +307,10 @@ async fn send_file(
         response.insert_header(header::LAST_MODIFIED, last_modified)?;
     }
     response.insert_header(header::ACCEPT_RANGES, "bytes")?;
+    // A 304 carries the Cache-Control its 200 would (RFC 9110 §15.4.5).
+    if let Some(cache_control) = content.cache_control(file) {
+        response.insert_header(header::CACHE_CONTROL, cache_control)?;
+    }
     if not_modified {
         response.set_status(304)?;
         return session
@@ -260,7 +339,7 @@ async fn send_file(
         }
         Some(Range::Ignored) | None => (0, length),
     };
-    response.insert_header(header::CONTENT_TYPE, content_type(file))?;
+    response.insert_header(header::CONTENT_TYPE, content.media_type(file))?;
     response.insert_header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")?;
     response.insert_header(header::CONTENT_LENGTH, (end - start).to_string())?;
     if head || start == end {
@@ -407,8 +486,12 @@ fn parse_range(value: &str, length: u64) -> Range {
     }
 }
 
+/// The built-in media type of `file`, from its extension.
 pub(crate) fn content_type(file: &Path) -> String {
-    let mime = mime_guess::from_path(file).first_or_octet_stream();
+    with_charset(&mime_guess::from_path(file).first_or_octet_stream())
+}
+
+fn with_charset(mime: &mime_guess::Mime) -> String {
     if mime.type_() == mime_guess::mime::TEXT
         || matches!(mime.subtype().as_str(), "javascript" | "json" | "xml")
     {
@@ -416,6 +499,12 @@ pub(crate) fn content_type(file: &Path) -> String {
     } else {
         mime.to_string()
     }
+}
+
+fn extension(file: &Path) -> Option<String> {
+    file.extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
 }
 
 #[cfg(test)]
