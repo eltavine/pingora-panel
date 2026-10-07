@@ -5,6 +5,7 @@ pub mod alerts;
 pub mod approvals;
 pub mod audit;
 pub mod backups;
+pub mod cache;
 pub mod certificates;
 pub mod compose;
 pub mod config;
@@ -294,7 +295,7 @@ fn cache_rule(rule: &str) -> Result<Value> {
 
 /// Seconds in a duration written as nginx does: a bare number of seconds,
 /// or amounts of `y` (365 days), `M` (30 days), `w`, `d`, `h`, `m` and `s`.
-fn seconds(value: &str) -> Option<u64> {
+pub(crate) fn seconds(value: &str) -> Option<u64> {
     if value.bytes().all(|byte| byte.is_ascii_digit()) {
         return value.parse().ok();
     }

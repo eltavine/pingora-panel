@@ -125,6 +125,14 @@ enum Command {
     /// routes.
     #[command(subcommand, name = "http-policy")]
     HttpPolicy(commands::http_policies::HttpPolicyCommand),
+    /// What sites' and routes' proxied responses are cached by, and for how
+    /// long.
+    #[command(subcommand, name = "cache-policy")]
+    CachePolicy(commands::cache::CachePolicyCommand),
+    /// The gateway's cache: what it holds, how it does, purges and its
+    /// size.
+    #[command(subcommand)]
+    Cache(commands::cache::CacheCommand),
     /// Certificates the panel keeps and delivers to the gateway.
     #[command(subcommand)]
     Certificate(commands::certificates::CertificateCommand),
@@ -275,6 +283,10 @@ async fn main() -> ExitCode {
             Command::HttpPolicy(command) => {
                 commands::http_policies::run(&api, &output, command).await
             }
+            Command::CachePolicy(command) => {
+                commands::cache::policies(&api, &output, command).await
+            }
+            Command::Cache(command) => commands::cache::run(&api, &output, command).await,
             Command::Config(command) => commands::config::run(&api, &output, command).await,
             Command::Approval(command) => {
                 commands::approvals::approval(&api, &output, command).await

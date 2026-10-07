@@ -915,6 +915,24 @@ async fn api(
              "used_by": ["0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"], "etag": "\"h1\""}
         ]))
         .into_response(),
+        ("PUT", "/api/v1/cache-policies/pages") => Json(body.clone()).into_response(),
+        ("GET", "/api/v1/cache-policies") => Json(json!([
+            {"id": "pages", "ttl_seconds": 600, "status_ttls": {"404": 60},
+             "bypass": [{"kind": "cookie", "name": "session", "test": {"op": "present"}}],
+             "used_by": ["0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b"], "etag": "\"c1\""}
+        ]))
+        .into_response(),
+        ("GET", "/api/v1/cache-settings") => with_etag("store-1", json!({})),
+        ("PUT", "/api/v1/cache-settings") => Json(body.clone()).into_response(),
+        ("GET", "/api/v1/gateway/cache") => Json(json!({
+            "observed_at": "2026-10-07T10:00:00Z", "since": "2026-10-07T09:00:00Z",
+            "bytes": 524_288, "entries": 12, "max_bytes": 268_435_456,
+            "sites": [{"site_id": "shop", "hits": 6, "stale": 0, "updating": 0, "misses": 2,
+                       "expired": 0, "revalidated": 0, "bypasses": 5, "uncacheable": 0,
+                       "hit_ratio": 0.75}]
+        }))
+        .into_response(),
+        ("POST", "/api/v1/gateway/cache/purge") => Json(json!({"keys": 3})).into_response(),
         ("PUT", "/api/v1/identity-providers/corp") => Json(body.clone()).into_response(),
         ("PUT", "/api/v1/sign-in-policy") => Json(body.clone()).into_response(),
         ("GET", "/api/v1/sign-in-policy") => {
@@ -4048,4 +4066,121 @@ fn static_routes_list_directories_map_types_and_set_cache_control() {
         "{}",
         stderr(&orphan)
     );
+}
+
+#[test]
+fn cache_policies_the_store_and_purges_go_through_the_cli() {
+    let stub = Stub::start();
+    let saved = stub.ppanel(&[
+        "cache-policy",
+        "set",
+        "pages",
+        "--ttl",
+        "10m",
+        "--status-ttl",
+        "404=1m",
+        "--status-ttl",
+        "500=0",
+        "--vary",
+        "Accept-Language",
+        "--bypass-cookie",
+        "session",
+        "--bypass-query",
+        "nocache",
+        "--stale-while-revalidate",
+        "30s",
+        "--max-object-size",
+        "16m",
+        "--ignore-origin",
+        "--no-status-header",
+    ]);
+    assert!(saved.status.success(), "{}", stderr(&saved));
+    let body = &stub.requests("PUT", "/api/v1/cache-policies/pages")[0].body;
+    assert_eq!(body["ttl_seconds"], 600);
+    assert_eq!(body["status_ttls"], json!({"404": 60, "500": 0}));
+    assert_eq!(body["vary_headers"], json!(["Accept-Language"]));
+    assert_eq!(
+        body["bypass"],
+        json!([{"kind": "cookie", "name": "session", "test": {"op": "present"}},
+               {"kind": "query", "name": "nocache", "test": {"op": "present"}}])
+    );
+    assert_eq!(body["stale_while_revalidate_seconds"], 30);
+    assert_eq!(body["max_object_bytes"], 16 << 20);
+    assert_eq!(
+        (&body["honor_origin"], &body["status_header"]),
+        (&json!(false), &json!(false))
+    );
+    assert!(body.get("enabled").is_none(), "{body}");
+    let refused = stub.ppanel(&["cache-policy", "set", "pages", "--status-ttl", "404"]);
+    assert!(!refused.status.success());
+
+    let listed = stub.ppanel(&["cache-policy", "list"]);
+    assert!(listed.status.success(), "{}", stderr(&listed));
+    let table = String::from_utf8_lossy(&listed.stdout);
+    assert!(
+        table.contains("404=60s") && table.contains("10m"),
+        "{table}"
+    );
+
+    for policy in ["pages", "off"] {
+        let set = stub.ppanel(&["site", "cache", "shop", policy]);
+        assert!(set.status.success(), "{}", stderr(&set));
+    }
+    let sites = stub.requests("PUT", "/api/v1/sites/shop");
+    assert_eq!(sites[0].if_match.as_deref(), Some("\"site-1\""));
+    assert_eq!(sites[0].body["cache_policy_id"], "pages");
+    assert!(sites[1].body["cache_policy_id"].is_null());
+    assert_eq!(sites[1].body["error_pages"]["intercept"], true);
+
+    for policy in ["off", "site", "pages"] {
+        let set = stub.ppanel(&["route", "cache", "r-1", policy]);
+        assert!(set.status.success(), "{}", stderr(&set));
+    }
+    let routes = stub.requests("PUT", "/api/v1/routes/r-1");
+    let cache = |index: usize| {
+        (
+            routes[index].body["cache_policy_id"].clone(),
+            routes[index].body["no_cache"].clone(),
+        )
+    };
+    assert_eq!(cache(0), (Value::Null, json!(true)));
+    assert_eq!(cache(1), (Value::Null, json!(false)));
+    assert_eq!(cache(2), (json!("pages"), json!(false)));
+    assert_eq!(routes[0].body["security_policy_id"], "office");
+
+    let stats = stub.ppanel(&["cache", "stats"]);
+    assert!(stats.status.success(), "{}", stderr(&stats));
+    let shown = String::from_utf8_lossy(&stats.stdout);
+    assert!(
+        shown.contains("512.0 KiB of 256.0 MiB") && shown.contains("75.0%"),
+        "{shown}"
+    );
+    let purged = stub.ppanel(&[
+        "cache",
+        "purge",
+        "--url",
+        "https://shop.example/",
+        "--url",
+        "https://shop.example/a",
+    ]);
+    assert!(purged.status.success(), "{}", stderr(&purged));
+    assert!(String::from_utf8_lossy(&purged.stdout).contains("Purged 3 cached keys"));
+    assert_eq!(
+        stub.requests("POST", "/api/v1/gateway/cache/purge")[0].body,
+        json!({"all": false, "site_ids": [], "urls": ["https://shop.example/", "https://shop.example/a"]})
+    );
+    for arguments in [
+        &["cache", "purge"][..],
+        &["cache", "purge", "--all", "--site", "shop"][..],
+    ] {
+        assert!(!stub.ppanel(arguments).status.success(), "{arguments:?}");
+    }
+
+    let store = stub.ppanel(&["cache", "store"]);
+    assert!(String::from_utf8_lossy(&store.stdout).contains("256.0 MiB (default)"));
+    let resized = stub.ppanel(&["cache", "store", "--max-size", "1g"]);
+    assert!(resized.status.success(), "{}", stderr(&resized));
+    let put = &stub.requests("PUT", "/api/v1/cache-settings")[0];
+    assert_eq!(put.if_match.as_deref(), Some("\"store-1\""));
+    assert_eq!(put.body, json!({"max_bytes": 1u64 << 30}));
 }

@@ -32,6 +32,14 @@ pub(crate) enum RouteCommand {
         #[arg(long, conflicts_with_all = ["pages", "intercept"])]
         inherit: bool,
     },
+    /// Caches a route's proxied responses with a cache policy in place of
+    /// its site's, with none, or with its site's again.
+    Cache {
+        id: String,
+        /// A cache policy, `off` to cache nothing, or `site` to follow the
+        /// site's policy.
+        policy: String,
+    },
     /// Replaces a route with a JSON document.
     Update {
         id: String,
@@ -95,6 +103,14 @@ pub(crate) struct AddRoute {
     /// after the site's.
     #[arg(long)]
     http_policy: Option<String>,
+    /// The route's proxied responses are cached by this cache policy in
+    /// place of the site's.
+    #[arg(long, conflicts_with = "no_cache")]
+    cache_policy: Option<String>,
+    /// The route's responses stay out of the cache whatever the site's
+    /// policy.
+    #[arg(long)]
+    no_cache: bool,
     #[command(flatten)]
     conditions: Box<ConditionFlags>,
     #[command(flatten)]
@@ -227,6 +243,16 @@ const COLUMNS: &[Column] = &[
         None | Some(Value::Null) => "site's".into(),
         Some(pages) => pages["pages"].as_array().map_or(0, Vec::len).to_string(),
     }),
+    ("CACHE", |route| {
+        if route["no_cache"] == true {
+            "off".into()
+        } else {
+            match route.get("cache_policy_id") {
+                None | Some(Value::Null) => "site's".into(),
+                Some(policy) => text(policy),
+            }
+        }
+    }),
     ("ENABLED", |route| text(&route["enabled"])),
 ];
 
@@ -274,6 +300,8 @@ pub async fn run(api: &Api, output: &Output, command: RouteCommand) -> Result<()
                 disabled,
                 security_policy,
                 http_policy,
+                cache_policy,
+                no_cache,
                 conditions,
                 action,
                 internal_redirect,
@@ -309,6 +337,8 @@ pub async fn run(api: &Api, output: &Output, command: RouteCommand) -> Result<()
                 "action": action,
                 "security_policy_id": security_policy,
                 "http_policy_id": http_policy,
+                "cache_policy_id": cache_policy,
+                "no_cache": no_cache,
                 "rewrites": rewrite_rules(&rewrite)?,
                 "internal": internal,
                 "error_pages": own_pages(&pages, intercept_errors)?,
@@ -361,6 +391,27 @@ pub async fn run(api: &Api, output: &Output, command: RouteCommand) -> Result<()
                 .await?
                 .body;
             output.done(&format!("Set the error pages of route {id}"), &route);
+        }
+        RouteCommand::Cache { id, policy } => {
+            let current = api.get(&format!("/api/v1/routes/{id}"), &[]).await?;
+            let mut body = input(&current.body);
+            let (named, off) = match policy.as_str() {
+                "off" => (Value::Null, true),
+                "site" => (Value::Null, false),
+                named => (json!(named), false),
+            };
+            body["cache_policy_id"] = named;
+            body["no_cache"] = json!(off);
+            let route = api
+                .change(
+                    Method::PUT,
+                    &format!("/api/v1/routes/{id}"),
+                    Some(&body),
+                    current.etag.as_deref(),
+                )
+                .await?
+                .body;
+            output.done(&format!("Set the cache policy of route {id}"), &route);
         }
         RouteCommand::Enable { id } => toggle(api, output, &id, true).await?,
         RouteCommand::Disable { id } => toggle(api, output, &id, false).await?,

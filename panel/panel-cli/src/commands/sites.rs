@@ -141,6 +141,13 @@ pub(crate) enum SiteCommand {
         #[arg(long, required_if_eq("answer", "custom"))]
         body: Option<String>,
     },
+    /// Caches a site's proxied responses with a cache policy, or with none.
+    Cache {
+        id: String,
+        /// A cache policy, or `off` to cache nothing; routes may name their
+        /// own.
+        policy: String,
+    },
     /// Sets how a site answers /favicon.ico itself, ahead of its routes.
     Favicon {
         id: String,
@@ -217,6 +224,9 @@ pub(crate) struct CreateSite {
     /// Requests and responses of the site go through this HTTP policy.
     #[arg(long)]
     http_policy: Option<String>,
+    /// The site's proxied responses are cached by this cache policy.
+    #[arg(long)]
+    cache_policy: Option<String>,
     /// A rewrite rule every request runs before a route is chosen, as the
     /// configuration language writes it; repeat it for more, in order.
     #[arg(long, value_name = "RULE")]
@@ -335,6 +345,7 @@ const DETAIL: &[Column] = &[
     ("HTTPS redirect", |site| text(&site["https_redirect"])),
     ("WWW redirect", |site| text(&site["www_redirect"])),
     ("Error pages", |site| pages(&site["error_pages"])),
+    ("Cache policy", |site| text(&site["cache_policy_id"])),
     ("Maintenance", |site| {
         let maintenance = &site["maintenance"];
         let allowed = maintenance["allow"]
@@ -442,6 +453,7 @@ pub async fn run(api: &Api, output: &Output, command: SiteCommand) -> Result<()>
                 hsts_preload,
                 security_policy,
                 http_policy,
+                cache_policy,
                 rewrite,
                 error_pages: pages,
                 disabled,
@@ -465,6 +477,7 @@ pub async fn run(api: &Api, output: &Output, command: SiteCommand) -> Result<()>
                     })),
                     "security_policy_id": security_policy,
                     "http_policy_id": http_policy,
+                    "cache_policy_id": cache_policy,
                     "rewrites": super::rewrite_rules(&rewrite)?,
                     "error_pages": {"pages": error_pages(&pages)?},
                 }),
@@ -680,6 +693,17 @@ pub async fn run(api: &Api, output: &Output, command: SiteCommand) -> Result<()>
                     RobotsAnswer::Off => Value::Null,
                 };
                 Ok("Set the robots.txt of")
+            })
+            .await?;
+        }
+        SiteCommand::Cache { id, policy } => {
+            edit(api, output, &id, |site| {
+                site["cache_policy_id"] = if policy == "off" {
+                    Value::Null
+                } else {
+                    json!(policy)
+                };
+                Ok("Set the cache policy of")
             })
             .await?;
         }
