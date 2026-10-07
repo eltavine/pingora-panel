@@ -18,6 +18,7 @@ import { backupHandlers } from './backups'
 import { containerHandlers } from './containers'
 import { hostAgentHandlers } from './host'
 import { logHandlers } from './logs'
+import { pluginHandlers } from './plugins'
 import { siteFileHandlers } from './siteFiles'
 import type { Sampler } from './openapi'
 
@@ -47,6 +48,8 @@ const PERMISSIONS = [
   'platform.read',
   'identity.read',
   'identity.manage',
+  'plugins.read',
+  'plugins.manage',
 ]
 
 const started = new Date(Date.now() - 3 * 86_400_000).toISOString()
@@ -320,6 +323,7 @@ export function handlers(sampler: Sampler): AnyHandler[] {
     ...containerHandlers(),
     ...siteFileHandlers(),
     ...backupHandlers(),
+    ...pluginHandlers(),
     ...logHandlers(),
     ...alertHandlers(),
     http.all('*/api/*', ({ request }) => {

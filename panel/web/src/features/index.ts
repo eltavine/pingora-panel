@@ -13,6 +13,7 @@ import { identityFeature } from './identity'
 import { listenersFeature } from './listeners'
 import { logsFeature } from './logs'
 import { luaFeature } from './lua'
+import { pluginsFeature } from './plugins'
 import { publishingFeature } from './publishing'
 import { receiptsFeature } from './receipts'
 import { revisionsFeature } from './revisions'
@@ -47,6 +48,7 @@ export const features: readonly FeatureModule[] = [
   luaFeature,
   siteFilesFeature,
   backupsFeature,
+  pluginsFeature,
   identityFeature,
 ]
 

@@ -23,6 +23,7 @@ const en: Messages = {
     lua: 'Lua scripts',
     siteFiles: 'Site files',
     backups: 'Backups',
+    plugins: 'Plugins',
     revisions: 'Revisions',
     audit: 'Audit log',
     traffic: 'Traffic',

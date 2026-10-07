@@ -115,6 +115,10 @@ const en: IdentityMessages = {
       'Read certificates, their names, validity and fingerprints, and check the hosts they cover',
     certificate_manage:
       'Upload, generate, replace and delete certificates; private keys are never returned',
+    plugins_read:
+      'Read plugins, their versions, grants, settings, limits and health, the trusted publisher keys and the names of kept secrets',
+    plugins_manage:
+      'Trust publisher keys, keep secrets for plugins, and grant, configure, limit, enable, disable, upgrade and roll back plugins',
   },
 }
 

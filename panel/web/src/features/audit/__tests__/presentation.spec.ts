@@ -304,4 +304,54 @@ describe('audit presentation', () => {
     expect(toneOf('tls.certificate.expiring')).toBe('warning')
     expect(toneOf('tls.acme.certificate.created')).toBe('positive')
   })
+
+  it('summarizes what happened to plugins', () => {
+    expect(toneOf('plugins.plugin.degraded')).toBe('warning')
+    expect(toneOf('plugins.change.refused')).toBe('negative')
+    expect(summaryOf(event('plugins.catalog.discovered', { versions: 3, invalid: 1 }), t)).toBe(
+      'audit.summary.versionsFound{"count":3,"invalid":1}',
+    )
+    expect(
+      summaryOf(
+        event('plugins.plugin.granted', { name: 'dns', capabilities: ['dns01', 'secrets'] }),
+        t,
+      ),
+    ).toBe('dns · dns01, secrets')
+    expect(summaryOf(event('plugins.plugin.granted', { name: 'dns', capabilities: [] }), t)).toBe(
+      'dns · audit.summary.noGrants',
+    )
+    expect(
+      summaryOf(
+        event('plugins.plugin.limited', { name: 'dns', concurrency: 4, memory_bytes: 0 }),
+        t,
+      ),
+    ).toBe('dns · concurrency=4')
+    expect(
+      summaryOf(
+        event('plugins.plugin.upgraded', {
+          name: 'dns',
+          from_version: '1.0.0',
+          to_version: '1.1.0',
+        }),
+        t,
+      ),
+    ).toBe('dns 1.0.0 → 1.1.0')
+    expect(
+      summaryOf(
+        event('plugins.plugin.degraded', { name: 'dns', version: '1.0.0', reason: 'exited' }),
+        t,
+      ),
+    ).toBe('dns 1.0.0 · exited')
+    expect(
+      summaryOf(
+        event('plugins.change.refused', {
+          operation: 'plugins.enable',
+          resource: 'dns',
+          code: 'VALIDATION_FAILED',
+          reason: 'unsigned',
+        }),
+        t,
+      ),
+    ).toBe('plugins.enable dns · VALIDATION_FAILED · unsigned')
+  })
 })

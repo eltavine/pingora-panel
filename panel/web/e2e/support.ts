@@ -31,6 +31,8 @@ export const ALL_PERMISSIONS = [
   'platform.read',
   'identity.read',
   'identity.manage',
+  'plugins.read',
+  'plugins.manage',
 ]
 
 export const CSRF_TOKEN = 'csrf-token-of-the-session'

@@ -103,6 +103,10 @@ const zhCN = {
     approval_bypass: '紧急情况下不经审批应用变更，须填写理由与事件编号',
     certificate_read: '读取证书及其域名、有效期与指纹，检查覆盖的域名',
     certificate_manage: '上传、生成、替换与删除证书；私钥不会被返回',
+    plugins_read:
+      '读取插件及其版本、授权、设置、资源限制与健康状态，受信任的发布者公钥，以及所保存 Secret 的名称',
+    plugins_manage:
+      '信任发布者公钥、为插件保存 Secret，以及授权、配置、限制、启用、停用、升级与回滚插件',
   },
 }
 

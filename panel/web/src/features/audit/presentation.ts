@@ -90,6 +90,21 @@ export const KNOWN_TYPES = [
   'container.compose.down',
   'container.compose.restarted',
   'container.operation.refused',
+  'plugins.catalog.discovered',
+  'plugins.plugin.granted',
+  'plugins.plugin.configured',
+  'plugins.plugin.limited',
+  'plugins.plugin.enabled',
+  'plugins.plugin.disabled',
+  'plugins.plugin.upgraded',
+  'plugins.plugin.rolled_back',
+  'plugins.plugin.degraded',
+  'plugins.plugin.recovered',
+  'plugins.key.trusted',
+  'plugins.key.removed',
+  'plugins.secret.sealed',
+  'plugins.secret.deleted',
+  'plugins.change.refused',
 ] as const
 
 export type KnownType = (typeof KNOWN_TYPES)[number]
@@ -109,7 +124,7 @@ export function toneOf(type: string): StatusTone {
   if (/\.(refused|failed|rejected|denied)$/.test(type)) {
     return 'negative'
   }
-  return /\.(expiring|fired)$/.test(type) ? 'warning' : 'positive'
+  return /\.(expiring|fired|degraded)$/.test(type) ? 'warning' : 'positive'
 }
 
 type Translate = (key: string, values?: Record<string, unknown>, plural?: number) => string
@@ -174,6 +189,49 @@ export function summaryOf(event: AuditEvent, t: Translate): string {
     }
     case 'files.operation.refused':
       return [`${text(data.operation)} ${text(data.path)}`, data.code, data.message]
+        .map(text)
+        .filter(Boolean)
+        .join(' · ')
+    case 'plugins.catalog.discovered': {
+      const versions = Number(data.versions ?? 0)
+      return t(
+        'audit.summary.versionsFound',
+        { count: versions, invalid: Number(data.invalid ?? 0) },
+        versions,
+      )
+    }
+    case 'plugins.plugin.granted':
+      return `${text(data.name)} · ${list(data.capabilities) || t('audit.summary.noGrants')}`
+    case 'plugins.plugin.configured':
+      return [text(data.name), list(data.keys)].filter(Boolean).join(' · ')
+    case 'plugins.plugin.limited':
+      return [
+        text(data.name),
+        ...['memory_bytes', 'cpu_seconds', 'open_files', 'concurrency', 'call_timeout_ms']
+          .filter((limit) => Number(data[limit] ?? 0) > 0)
+          .map((limit) => `${limit}=${text(data[limit])}`),
+      ].join(' · ')
+    case 'plugins.plugin.enabled':
+    case 'plugins.plugin.disabled':
+    case 'plugins.plugin.recovered':
+      return [data.name, data.version].map(text).filter(Boolean).join(' ')
+    case 'plugins.plugin.upgraded':
+    case 'plugins.plugin.rolled_back':
+      return `${text(data.name)} ${text(data.from_version)} → ${text(data.to_version)}`
+    case 'plugins.plugin.degraded':
+      return [`${text(data.name)} ${text(data.version)}`.trim(), data.reason]
+        .map(text)
+        .filter(Boolean)
+        .join(' · ')
+    case 'plugins.key.trusted':
+      return `${text(data.id)} · ${text(data.key_id)}`
+    case 'plugins.key.removed':
+      return text(data.id)
+    case 'plugins.secret.sealed':
+    case 'plugins.secret.deleted':
+      return text(data.name)
+    case 'plugins.change.refused':
+      return [`${text(data.operation)} ${text(data.resource)}`, data.code, data.reason]
         .map(text)
         .filter(Boolean)
         .join(' · ')
