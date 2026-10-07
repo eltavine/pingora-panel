@@ -1502,6 +1502,48 @@ ppanel route add <site-id> --match prefix:/api --proxy <upstream-id> \
 ppanel route error-pages <route-id> --inherit
 ```
 
+## Directory listings, media types and cache headers
+
+Static content lists directories that have no index file, maps media types
+and sets `Cache-Control` on the files it serves
+([decision](../docs/adr/0042-directory-listings-media-types-and-cache-headers.md)).
+
+```nginx
+server files {
+    server_name files.example;
+    root files autoindex=html;                       # or autoindex=json
+    media_type application/wasm wasm;
+    media_type text/markdown md markdown;
+    default_type text/plain;                         # extensions nothing knows
+    cache_control max_age=1y immutable for=css,js,woff2;
+    cache_control no_cache for=html;
+    cache_control max_age=1h;                        # every other file
+}
+```
+
+A listing names a directory's entries other than hidden ones and links
+leading out of the root, directories first, with sizes and modification
+times; JSON listings are nginx's `autoindex_format json`. Index files still
+come first, and a directory without either answers 404. A written media type
+is sent as written ahead of the built-in guesses, which keep
+`charset=utf-8` for text. For `Cache-Control`, the first rule naming a
+file's extension applies, then the first rule for every file; 304 responses
+carry the field too, and `Expires` is not sent. NGINX configurations
+imported with `ppanel config import-nginx` carry `autoindex`,
+`autoindex_format`, `types` and `default_type` of servers and locations, and
+`expires` as a rule for every file.
+
+Static actions take `listing`, `media_types`, `default_type` and `cache`
+through the API; the site and route forms choose the listing, edit media
+types and build cache rules from presets for hashed assets, pages and every
+file.
+
+```sh
+ppanel site create --name files --domain files.example --static files \
+  --autoindex json --media-type wasm=application/wasm --default-type text/plain \
+  --cache-control 'max_age=1y immutable for=css,js' --cache-control 'no_cache for=html'
+```
+
 ## Lua scripts
 
 Sites, routes and upstreams run Lua in the gateway's request phases with

@@ -26,7 +26,8 @@ name, with sizes and modification times. HTML escapes names and links to
 them percent-encoded as RFC 3986 §3.3 says; JSON entries are nginx's:
 `name`, `type` (`directory` or `file`), `mtime` as an HTTP date (RFC 9110
 §5.6.7) and a file's `size`. A listing stops at 10,000 entries so a huge
-directory cannot exhaust memory, and says so.
+directory cannot exhaust memory; an HTML listing says so, and a JSON one
+stays the array nginx writes.
 
 **Media types.** Static content may map extensions to media types, ahead of
 the built-in guesses, and name the type of files whose extension is unknown,
