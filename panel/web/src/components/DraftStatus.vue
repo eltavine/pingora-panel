@@ -1,14 +1,23 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useMutation, useQuery } from '@tanstack/vue-query'
-import { CircleCheck, CloudUpload, FilePen, ShieldCheck, TriangleAlert } from '@lucide/vue'
+import {
+  CircleCheck,
+  CloudUpload,
+  FilePen,
+  RefreshCw,
+  ShieldCheck,
+  TriangleAlert,
+} from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import {
   applyMutation,
   draftOptions,
+  planOptions,
   validationOptions,
 } from '@/api/generated/@tanstack/vue-query.gen'
+import PlanSummary from '@/components/PlanSummary.vue'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,6 +32,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { toApiFailure } from '@/lib/api'
+import { isApprovalRequest } from '@/lib/approvals'
 import { notifyFailure, plainHeaders, useRefreshApplied } from '@/lib/configuration'
 
 const { t } = useI18n()
@@ -31,27 +42,56 @@ const draft = useQuery({ ...draftOptions(), refetchInterval: 15_000 })
 const confirming = ref(false)
 const note = ref('')
 const validation = useQuery(computed(() => ({ ...validationOptions(), enabled: confirming.value })))
+const plan = useQuery(computed(() => ({ ...planOptions(), enabled: confirming.value })))
+/** Applying found another plan than the one shown, which is shown anew. */
+const stale = ref(false)
 const apply = useMutation(applyMutation())
+watch(confirming, (open) => {
+  if (open) {
+    stale.value = false
+    void plan.refetch()
+  }
+})
 const pending = computed(() => draft.data.value?.pending ?? false)
 const diagnostics = computed(
   () => (validation.data.value?.diagnostics ?? []) as { resource_id?: string; message: string }[],
 )
 
 function confirm() {
-  const version = draft.data.value?.version
+  const reviewed = plan.data.value
+  if (!reviewed) {
+    return
+  }
+  stale.value = false
   apply.mutate(
     {
-      body: { expected_version: version, note: note.value.trim() || undefined },
+      body: {
+        expected_version: reviewed.draft_version,
+        expected_plan: reviewed.digest,
+        note: note.value.trim() || undefined,
+      },
       headers: plainHeaders(),
     },
     {
       onSuccess: (result) => {
-        toast.success(t('draft.appliedRevision', { revision: result.revision }))
         confirming.value = false
+        if (isApprovalRequest(result)) {
+          toast.info(t('studio.waitingTitle'))
+          return
+        }
+        toast.success(t('draft.appliedRevision', { revision: result.revision }))
         note.value = ''
         void refresh()
       },
-      onError: (error) => notifyFailure(error, t('draft.applyFailed')),
+      onError: (error) => {
+        const failure = toApiFailure(error)
+        if (failure.kind === 'problem' && failure.problem.status === 409) {
+          stale.value = true
+          void plan.refetch()
+          return
+        }
+        notifyFailure(error, t('draft.applyFailed'))
+      },
     },
   )
 }
@@ -103,6 +143,14 @@ function confirm() {
             </ul>
           </template>
         </div>
+        <div v-if="stale" role="alert" class="flex flex-col gap-1 text-sm">
+          <p class="flex items-center gap-2 font-medium">
+            <RefreshCw class="size-4" aria-hidden="true" />
+            {{ t('plan.stale') }}
+          </p>
+          <p class="text-muted-foreground">{{ t('plan.staleDetail') }}</p>
+        </div>
+        <PlanSummary v-if="plan.data.value" :plan="plan.data.value" />
         <div class="flex flex-col gap-1.5">
           <Label for="apply-note">{{ t('draft.note') }}</Label>
           <Textarea
@@ -116,7 +164,9 @@ function confirm() {
         <AlertDialogFooter>
           <AlertDialogCancel>{{ t('common.cancel') }}</AlertDialogCancel>
           <AlertDialogAction
-            :disabled="apply.isPending.value || validation.data.value?.valid === false"
+            :disabled="
+              apply.isPending.value || validation.data.value?.valid === false || !plan.data.value
+            "
             @click.prevent="confirm"
           >
             {{ t('draft.apply') }}

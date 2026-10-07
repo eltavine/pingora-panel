@@ -253,6 +253,17 @@ test('a pending draft is validated before it is applied', async ({ page }) => {
   await page.route('**/api/v1/config/validation*', (route) =>
     route.fulfill({ json: { valid: true, diagnostics: [] } }),
   )
+  await page.route('**/api/v1/config/plan', (route) =>
+    route.fulfill({
+      json: {
+        resources: [{ resource: `sites/${SITE_ID}`, change: 'added', diff: '+server shop {\n' }],
+        files: [],
+        digest: 'f'.repeat(64),
+        draft_version: 4,
+        active_revision: 2,
+      },
+    }),
+  )
   const applied: Request[] = []
   await page.route('**/api/v1/config/apply', (route) => {
     applied.push(route.request())
@@ -270,9 +281,11 @@ test('a pending draft is validated before it is applied', async ({ page }) => {
   await page.getByRole('button', { name: 'Apply' }).click()
   const dialog = page.getByRole('alertdialog')
   await expect(dialog).toContainText('The draft is valid')
+  await expect(dialog).toContainText('These changes replace revision #2 on the gateway.')
+  await expect(dialog.getByRole('list', { name: 'What changes' })).toContainText('1 added')
   await dialog.getByRole('button', { name: 'Apply' }).click()
   await expect(page.getByText('Applied as revision #3')).toBeVisible()
-  expect(applied[0]!.postDataJSON()).toEqual({ expected_version: 4 })
+  expect(applied[0]!.postDataJSON()).toEqual({ expected_version: 4, expected_plan: 'f'.repeat(64) })
 })
 
 test('upstream nodes show live health and can be drained', async ({ page }) => {

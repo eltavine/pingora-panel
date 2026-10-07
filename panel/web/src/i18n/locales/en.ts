@@ -81,6 +81,20 @@ const en: Messages = {
     notePlaceholder: 'Why this is applied',
     appliedRevision: 'Applied as revision #{revision}',
   },
+  plan: {
+    first:
+      'Nothing has been applied yet: these changes become the first revision the gateway runs.',
+    against: 'These changes replace revision #{revision} on the gateway.',
+    summary: 'What changes',
+    added: '{count} added',
+    changed: '{count} changed',
+    removed: '{count} removed',
+    files: '{n} file differs | {n} files differ',
+    digest: 'Plan {digest}',
+    stale: 'The plan changed since it was shown',
+    staleDetail:
+      'The draft or the active revision changed meanwhile, so nothing was applied. Review the changes again before applying them.',
+  },
   sites: {
     accessLog: {
       title: 'Access log',
@@ -1425,18 +1439,6 @@ const en: Messages = {
       'Write directives below; main.conf reads them where it includes this file. NGINX configuration can be converted into the draft too.',
     placeholder: 'Write directives here, such as listener, upstream and server blocks',
     confirmTitle: 'Apply v{version} to the gateway?',
-    confirmFirst:
-      'Nothing has been applied yet: these changes become the first revision the gateway runs.',
-    confirmAgainst: 'These changes replace revision #{revision} on the gateway.',
-    confirmSummary: 'What changes',
-    confirmAdded: '{count} added',
-    confirmChanged: '{count} changed',
-    confirmRemoved: '{count} removed',
-    confirmFiles: '{n} file differs | {n} files differ',
-    confirmPlan: 'Plan {digest}',
-    planChanged: 'The plan changed since it was shown',
-    planChangedDetail:
-      'The draft or the active revision changed meanwhile, so nothing was applied. Review the changes again before applying them.',
     leave: 'Leave with unsaved changes?',
     outline: 'Outline',
     importNginx: 'Import NGINX',

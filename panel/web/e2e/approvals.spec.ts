@@ -184,6 +184,9 @@ test('applying a covered change waits, and Administrators can bypass it', async 
       json: {
         resources: [{ resource: 'sites/shop', change: 'changed', diff: '-a\n+b\n' }],
         files: [],
+        digest: 'd'.repeat(64),
+        draft_version: 6,
+        active_revision: 8,
       },
     }),
   )
@@ -206,6 +209,10 @@ test('applying a covered change waits, and Administrators can bypass it', async 
   await page.getByRole('button', { name: 'Review changes' }).click()
   const sheet = page.getByRole('dialog')
   await sheet.getByRole('button', { name: 'Apply v6' }).click()
+  await page
+    .getByRole('alertdialog', { name: 'Apply v6 to the gateway?' })
+    .getByRole('button', { name: 'Apply v6' })
+    .click()
   await expect(sheet.getByText('Waiting for approval')).toBeVisible()
   await expect(sheet.getByText(/The approval policies prod cover this change/)).toBeVisible()
   const bypass = sheet.getByRole('button', { name: 'Apply without approval' })

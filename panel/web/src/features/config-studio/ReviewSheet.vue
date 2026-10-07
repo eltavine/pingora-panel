@@ -3,12 +3,8 @@ import { computed, ref, watch } from 'vue'
 import { useMutation, useQuery } from '@tanstack/vue-query'
 import {
   CloudUpload,
-  FileDiff,
   FlaskConical,
   GitCompareArrows,
-  Minus,
-  PencilLine,
-  Plus,
   RefreshCw,
   ShieldCheck,
   Siren,
@@ -24,6 +20,7 @@ import ChangeSet from '@/components/ChangeSet.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import DiagnosticList from '@/components/DiagnosticList.vue'
 import FormField from '@/components/FormField.vue'
+import PlanSummary from '@/components/PlanSummary.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -77,15 +74,6 @@ const planned = computed(() => plan.data.value?.draft_version ?? props.version ?
 const confirming = ref(false)
 /** Applying found another plan than the one shown, which is shown anew. */
 const changed = ref(false)
-const counts = computed(() => {
-  const resources = plan.data.value?.resources ?? []
-  return {
-    added: resources.filter((item) => item.change === 'added').length,
-    changed: resources.filter((item) => item.change === 'changed').length,
-    removed: resources.filter((item) => item.change === 'removed').length,
-    files: plan.data.value?.files.length ?? 0,
-  }
-})
 
 watch(open, (value) => {
   if (value) {
@@ -190,8 +178,8 @@ function runApply(bypass = false) {
 
         <Alert v-if="changed" role="alert">
           <RefreshCw aria-hidden="true" />
-          <AlertTitle>{{ t('studio.planChanged') }}</AlertTitle>
-          <AlertDescription>{{ t('studio.planChangedDetail') }}</AlertDescription>
+          <AlertTitle>{{ t('plan.stale') }}</AlertTitle>
+          <AlertDescription>{{ t('plan.staleDetail') }}</AlertDescription>
         </Alert>
 
         <ApiFailureAlert v-if="plan.isError.value" :error="plan.error.value" />
@@ -288,37 +276,11 @@ function runApply(bypass = false) {
     v-model:open="confirming"
     :icon="CloudUpload"
     :title="t('studio.confirmTitle', { version: planned })"
-    :description="
-      plan.data.value?.active_revision == null
-        ? t('studio.confirmFirst')
-        : t('studio.confirmAgainst', { revision: plan.data.value.active_revision })
-    "
+    :description="t('draft.confirmDetail')"
     :confirm-label="t('studio.apply', { version: planned })"
     :busy="apply.isPending.value"
     @confirm="runApply()"
   >
-    <ul class="flex flex-wrap gap-2 text-sm" :aria-label="t('studio.confirmSummary')">
-      <li v-if="counts.added" class="flex items-center gap-1.5 rounded-md border px-2 py-1">
-        <Plus class="size-4" aria-hidden="true" />{{
-          t('studio.confirmAdded', { count: counts.added })
-        }}
-      </li>
-      <li v-if="counts.changed" class="flex items-center gap-1.5 rounded-md border px-2 py-1">
-        <PencilLine class="size-4" aria-hidden="true" />{{
-          t('studio.confirmChanged', { count: counts.changed })
-        }}
-      </li>
-      <li v-if="counts.removed" class="flex items-center gap-1.5 rounded-md border px-2 py-1">
-        <Minus class="size-4" aria-hidden="true" />{{
-          t('studio.confirmRemoved', { count: counts.removed })
-        }}
-      </li>
-      <li v-if="counts.files" class="flex items-center gap-1.5 rounded-md border px-2 py-1">
-        <FileDiff class="size-4" aria-hidden="true" />{{ t('studio.confirmFiles', counts.files) }}
-      </li>
-    </ul>
-    <p class="text-muted-foreground font-mono text-xs break-all">
-      {{ t('studio.confirmPlan', { digest: plan.data.value?.digest ?? '' }) }}
-    </p>
+    <PlanSummary v-if="plan.data.value" :plan="plan.data.value" />
   </ConfirmDialog>
 </template>
