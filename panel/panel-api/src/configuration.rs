@@ -301,6 +301,10 @@ pub struct ApplyRequest {
     /// `approval.bypass` and is recorded.
     #[serde(default)]
     pub bypass: Option<ApplyBypass>,
+    /// Refuses to apply unless the plan is still the one with this digest,
+    /// as `GET /api/v1/config/plan` reports it.
+    #[serde(default)]
+    pub expected_plan: Option<String>,
 }
 
 /// Why a change goes ahead without its approvals.
@@ -1151,6 +1155,9 @@ pub(crate) async fn apply<U: GatewayUseCases>(
     let mut apply = panel_config_api::ApplyRequest::new(request.expected_version.unwrap_or(0));
     if let Some(note) = request.note.filter(|note| !note.trim().is_empty()) {
         apply = apply.with_note(note);
+    }
+    if let Some(plan) = request.expected_plan.filter(|plan| !plan.is_empty()) {
+        apply = apply.expecting_plan(plan);
     }
     if let Some(bypass) = request.bypass {
         if principal.is_some_and(|Extension(principal)| !principal.can(Permission::ApprovalBypass))

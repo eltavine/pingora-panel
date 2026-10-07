@@ -31084,7 +31084,7 @@
         "tags": [
           "configuration"
         ],
-        "summary": "What applying the draft would change: resources and file differences\nagainst the active revision.",
+        "summary": "What applying the draft would change: resources and file differences\nagainst the active revision, named by a digest that applying can name.",
         "operationId": "plan",
         "parameters": [
           {
@@ -31115,7 +31115,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Changes"
+                  "$ref": "#/components/schemas/Plan"
                 }
               }
             }
@@ -87639,6 +87639,13 @@
               }
             ]
           },
+          "expected_plan": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Refuses to apply unless the plan is still the one with this digest,\nas `GET /api/v1/config/plan` reports it."
+          },
           "expected_version": {
             "type": [
               "integer",
@@ -95549,6 +95556,41 @@
             "type": "string"
           }
         }
+      },
+      "Plan": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Changes"
+          },
+          {
+            "type": "object",
+            "required": [
+              "digest",
+              "draft_version"
+            ],
+            "properties": {
+              "active_revision": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "description": "The revision the draft is compared with; none before the first apply.",
+                "minimum": 0
+              },
+              "digest": {
+                "type": "string",
+                "description": "Names this plan: applying with it as `expected_plan` refuses once\nthe draft or the active revision differs."
+              },
+              "draft_version": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          }
+        ],
+        "description": "What applying the draft would change, and what the plan compares."
       },
       "PlannedChange": {
         "type": "object",

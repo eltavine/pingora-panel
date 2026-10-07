@@ -526,6 +526,8 @@ async fn sites_are_edited_validated_and_applied_through_the_api() {
         .json(api.get("/api/v1/config/plan"), StatusCode::OK)
         .await;
     assert!(!plan["resources"].as_array().unwrap().is_empty());
+    assert_eq!(plan["draft_version"], saved["version"]);
+    assert_eq!(plan["active_revision"], 1);
     let (dry, _) = api
         .json(
             api.mutate(Method::POST, "/api/v1/config/dry-run", "dry-run"),
@@ -533,10 +535,21 @@ async fn sites_are_edited_validated_and_applied_through_the_api() {
         )
         .await;
     assert_eq!(dry["draft"]["pending"], true);
+    let (refused, _) = api
+        .json(
+            api.mutate(Method::POST, "/api/v1/config/apply", "apply-other-plan")
+                .json(&json!({"expected_plan": "0".repeat(64)})),
+            StatusCode::CONFLICT,
+        )
+        .await;
+    assert!(refused["detail"]
+        .as_str()
+        .unwrap()
+        .contains(plan["digest"].as_str().unwrap()));
     let (applied, _) = api
         .json(
             api.mutate(Method::POST, "/api/v1/config/apply", "apply-text")
-                .json(&json!({"note": "rename the shop"})),
+                .json(&json!({"note": "rename the shop", "expected_plan": plan["digest"]})),
             StatusCode::OK,
         )
         .await;

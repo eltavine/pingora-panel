@@ -111,6 +111,19 @@ pub struct LanguageSchema {
     pub directives: Vec<DirectiveSpec>,
 }
 
+/// What applying the draft would change, and what the plan compares.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct Plan {
+    /// Names this plan: applying with it as `expected_plan` refuses once
+    /// the draft or the active revision differs.
+    pub digest: String,
+    pub draft_version: u64,
+    /// The revision the draft is compared with; none before the first apply.
+    pub active_revision: Option<u64>,
+    #[serde(flatten)]
+    pub changes: Changes,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize, ToSchema)]
 pub struct DryRunRequest {
     /// Refuses if the draft changed since this version.
@@ -420,9 +433,9 @@ pub(crate) async fn schema<U: GatewayUseCases>(
 }
 
 /// What applying the draft would change: resources and file differences
-/// against the active revision.
+/// against the active revision, named by a digest that applying can name.
 #[utoipa::path(get, path = "/api/v1/config/plan", params(QueryHeaders),
-    responses((status = 200, body = Changes)), tag = "configuration")]
+    responses((status = 200, body = Plan)), tag = "configuration")]
 pub(crate) async fn plan<U: GatewayUseCases>(
     State(state): State<ApiState<U>>,
     headers: HeaderMap,
