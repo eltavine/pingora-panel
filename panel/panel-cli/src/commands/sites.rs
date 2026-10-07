@@ -132,6 +132,10 @@ pub(crate) struct CreateSite {
     /// Requests and responses of the site go through this HTTP policy.
     #[arg(long)]
     http_policy: Option<String>,
+    /// A rewrite rule every request runs before a route is chosen, as the
+    /// configuration language writes it; repeat it for more, in order.
+    #[arg(long, value_name = "RULE")]
+    rewrite: Vec<String>,
     /// Create the site stopped.
     #[arg(long)]
     disabled: bool,
@@ -333,6 +337,7 @@ pub async fn run(api: &Api, output: &Output, command: SiteCommand) -> Result<()>
                 hsts_preload,
                 security_policy,
                 http_policy,
+                rewrite,
                 disabled,
             } = *create;
             let body = match file {
@@ -354,6 +359,7 @@ pub async fn run(api: &Api, output: &Output, command: SiteCommand) -> Result<()>
                     })),
                     "security_policy_id": security_policy,
                     "http_policy_id": http_policy,
+                    "rewrites": super::rewrite_rules(&rewrite)?,
                 }),
             };
             let site = api

@@ -144,6 +144,78 @@ impl ActionFlags {
     }
 }
 
+/// Rewrite rules as the configuration language writes them, such as
+/// `strip_prefix /api` or `rewrite ^/old/(.*)$ /new/$1 permanent`; an
+/// argument with spaces is written in double quotes.
+pub fn rewrite_rules(rules: &[String]) -> Result<Vec<Value>> {
+    rules
+        .iter()
+        .map(|rule| {
+            let words = words(rule)?;
+            let usage = || {
+                CliError::Usage(format!(
+                    "{rule:?} is not strip_prefix PATH, add_prefix PATH, set_uri TEMPLATE or rewrite REGEX REPLACEMENT [last|break|redirect|permanent]"
+                ))
+            };
+            Ok(match words.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+                ["strip_prefix", prefix] => json!({"kind": "strip_prefix", "prefix": prefix}),
+                ["add_prefix", prefix] => json!({"kind": "add_prefix", "prefix": prefix}),
+                ["set_uri", template] => json!({"kind": "set_uri", "template": template}),
+                ["rewrite", pattern, replacement] => {
+                    json!({"kind": "rewrite", "pattern": pattern, "replacement": replacement})
+                }
+                ["rewrite", pattern, replacement, flag @ ("last" | "break" | "redirect" | "permanent")] => {
+                    json!({"kind": "rewrite", "pattern": pattern, "replacement": replacement, "flag": flag})
+                }
+                _ => return Err(usage()),
+            })
+        })
+        .collect()
+}
+
+/// `text` split at spaces outside double quotes, `\"` and `\\` escaping
+/// inside them.
+fn words(text: &str) -> Result<Vec<String>> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut quoted = false;
+    let mut started = false;
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => {
+                quoted = !quoted;
+                started = true;
+            }
+            '\\' if quoted => match chars.next() {
+                Some(next @ ('"' | '\\')) => word.push(next),
+                Some(next) => {
+                    word.push('\\');
+                    word.push(next);
+                }
+                None => word.push('\\'),
+            },
+            c if c.is_whitespace() && !quoted => {
+                if started {
+                    words.push(std::mem::take(&mut word));
+                    started = false;
+                }
+            }
+            c => {
+                word.push(c);
+                started = true;
+            }
+        }
+    }
+    if quoted {
+        return Err(CliError::Usage(format!("{text:?} leaves a quote open")));
+    }
+    if started {
+        words.push(word);
+    }
+    Ok(words)
+}
+
 /// `kind:path`, as in `prefix:/api` or `regex:^/v[0-9]+/`.
 pub fn route_match(value: &str, host: Option<&str>) -> Result<Value> {
     let (kind, path) = value.split_once(':').ok_or_else(|| {
@@ -162,6 +234,32 @@ pub fn route_match(value: &str, host: Option<&str>) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rewrite_rules_are_read_as_the_language_writes_them() {
+        let rules = rewrite_rules(&[
+            "strip_prefix /api".into(),
+            "rewrite ^/u/(\\d+)$ \"/users/$1?a b\" break".into(),
+            "set_uri /index.php?q=$uri".into(),
+        ])
+        .unwrap();
+        assert_eq!(
+            rules,
+            [
+                json!({"kind": "strip_prefix", "prefix": "/api"}),
+                json!({"kind": "rewrite", "pattern": "^/u/(\\d+)$", "replacement": "/users/$1?a b", "flag": "break"}),
+                json!({"kind": "set_uri", "template": "/index.php?q=$uri"}),
+            ]
+        );
+        for wrong in [
+            "drop /api",
+            "rewrite ^/a",
+            "rewrite ^/a /b sideways",
+            "set_uri \"/a",
+        ] {
+            assert!(rewrite_rules(&[wrong.into()]).is_err(), "{wrong}");
+        }
+    }
 
     #[test]
     fn action_flags_become_model_actions() {

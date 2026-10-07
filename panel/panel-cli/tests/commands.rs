@@ -1265,6 +1265,71 @@ fn configuration_files_round_trip_through_a_directory() {
 }
 
 #[test]
+fn routes_and_sites_take_rewrites_in_order_and_redirect_internally() {
+    let stub = Stub::start();
+    let added = stub.ppanel(&[
+        "route",
+        "add",
+        "shop",
+        "--match",
+        "prefix:/api",
+        "--internal-redirect",
+        "/errors$uri",
+        "--rewrite",
+        "strip_prefix /api",
+        "--rewrite",
+        r#"rewrite ^/v(\d+)/(.*)$ "/version $1/$2" break"#,
+        "--rewrite",
+        "add_prefix /v2",
+        "--internal",
+    ]);
+    assert!(added.status.success(), "{}", stderr(&added));
+    let posted = &stub.requests("POST", "/api/v1/sites/shop/routes")[0].body;
+    assert_eq!(
+        posted["action"],
+        json!({"type": "internal_redirect", "target": "/errors$uri"})
+    );
+    assert_eq!(
+        posted["rewrites"],
+        json!([
+            {"kind": "strip_prefix", "prefix": "/api"},
+            {"kind": "rewrite", "pattern": "^/v(\\d+)/(.*)$", "replacement": "/version $1/$2", "flag": "break"},
+            {"kind": "add_prefix", "prefix": "/v2"},
+        ])
+    );
+    assert_eq!(posted["internal"], true);
+    let both = stub.ppanel(&[
+        "route",
+        "add",
+        "shop",
+        "--match",
+        "prefix:/x",
+        "--respond",
+        "204",
+        "--internal-redirect",
+        "@fallback",
+    ]);
+    assert_eq!(both.status.code(), Some(2));
+    let wrong = stub.ppanel(&[
+        "route",
+        "add",
+        "shop",
+        "--match",
+        "prefix:/x",
+        "--respond",
+        "204",
+        "--rewrite",
+        "drop /x",
+    ]);
+    assert!(!wrong.status.success());
+    assert!(
+        stderr(&wrong).contains("strip_prefix PATH"),
+        "{}",
+        stderr(&wrong)
+    );
+}
+
+#[test]
 fn routes_take_conditions_and_the_route_a_request_takes_is_explained() {
     let stub = Stub::start();
     let added = stub.ppanel(&[

@@ -1,4 +1,4 @@
-use super::{read_json, route_match, ActionFlags, ActionOptions};
+use super::{read_json, rewrite_rules, route_match, ActionFlags, ActionOptions};
 use crate::{
     client::{Api, CliError, Result},
     output::{text, Column, Format, Output},
@@ -39,6 +39,22 @@ pub(crate) enum RouteCommand {
         conditions: Box<ConditionFlags>,
         #[command(flatten)]
         action: ActionFlags,
+        /// Serve requests as if they asked for this path template, or for
+        /// the named route @NAME, without telling the client.
+        #[arg(
+            long,
+            value_name = "TARGET",
+            conflicts_with_all = ["proxy", "static_root", "redirect", "respond", "maintenance"]
+        )]
+        internal_redirect: Option<String>,
+        /// A rewrite rule as the configuration language writes it, such as
+        /// "strip_prefix /api"; repeat it for more, in order.
+        #[arg(long, value_name = "RULE")]
+        rewrite: Vec<String>,
+        /// Take only requests a rewrite, an internal redirect or a script
+        /// sends here; others get 404.
+        #[arg(long)]
+        internal: bool,
         #[command(flatten)]
         options: ActionOptions,
     },
@@ -173,6 +189,12 @@ const COLUMNS: &[Column] = &[
         )
     }),
     ("ACTION", |route| text(&route["action"]["type"])),
+    ("REWRITES", |route| {
+        route["rewrites"].as_array().map_or(0, Vec::len).to_string()
+    }),
+    ("INTERNAL", |route| {
+        route["internal"].as_bool().unwrap_or_default().to_string()
+    }),
     ("ENABLED", |route| text(&route["enabled"])),
 ];
 
@@ -184,6 +206,8 @@ fn input(route: &Value) -> Value {
         "priority": route["priority"],
         "match": route["match"],
         "action": route["action"],
+        "rewrites": route.get("rewrites"),
+        "internal": route.get("internal"),
     })
 }
 
@@ -214,14 +238,21 @@ pub async fn run(api: &Api, output: &Output, command: RouteCommand) -> Result<()
             http_policy,
             conditions,
             action,
+            internal_redirect,
+            rewrite,
+            internal,
             options,
         } => {
-            if !action.is_set() {
-                return Err(CliError::Usage(
-                    "choose an action: --proxy, --static, --redirect, --respond or --maintenance"
-                        .into(),
-                ));
-            }
+            let action = match internal_redirect {
+                Some(target) => json!({"type": "internal_redirect", "target": target}),
+                None if action.is_set() => action.to_json(&options)?,
+                None => {
+                    return Err(CliError::Usage(
+                        "choose an action: --proxy, --static, --redirect, --respond, --maintenance or --internal-redirect"
+                            .into(),
+                    ))
+                }
+            };
             let mut matched = route_match(&matcher, host.as_deref())?;
             let conditions = conditions.to_json()?;
             if !conditions.is_empty() {
@@ -232,9 +263,11 @@ pub async fn run(api: &Api, output: &Output, command: RouteCommand) -> Result<()
                 "enabled": !disabled,
                 "priority": priority,
                 "match": matched,
-                "action": action.to_json(&options)?,
+                "action": action,
                 "security_policy_id": security_policy,
                 "http_policy_id": http_policy,
+                "rewrites": rewrite_rules(&rewrite)?,
+                "internal": internal,
             });
             let route = api
                 .change(
