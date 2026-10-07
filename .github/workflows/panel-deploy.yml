@@ -648,6 +648,37 @@ jobs:
           ppanel site delete "$site" --permanent
           ppanel config apply
 
+      - name: List directories, map media types and set cache headers on static files
+        run: |
+          ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
+          printf 'a{}\n' | ppanel files put - ci-listing/assets/app.css --new
+          printf 'wasm\n' | ppanel files put - ci-listing/app.wasm --new
+          site=$(ppanel -o json site create --name ci-listing --domain listing.test \
+            --static ci-listing --autoindex json --media-type wasm=application/wasm \
+            --cache-control 'max_age=1y immutable for=css' \
+            | python3 -c "import json, sys; print(json.load(sys.stdin)['id'])")
+          ppanel config apply
+          listed() {
+            curl --fail --silent --show-error --header 'Host: listing.test' http://127.0.0.1:18080/
+          }
+          headers() {
+            curl --silent --show-error --dump-header - --output /dev/null \
+              --header 'Host: listing.test' "http://127.0.0.1:18080$1"
+          }
+          for _ in $(seq 1 30); do
+            if listed >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+          # Directories come first, each group by name.
+          listed | python3 -c "import json, sys; names = [e['name'] for e in json.load(sys.stdin)]; assert names == ['assets', 'app.wasm'], names"
+          headers /assets/app.css | grep -qi '^cache-control: max-age=31536000, immutable'
+          headers /app.wasm | grep -qi '^content-type: application/wasm'
+          ppanel site delete "$site" --permanent
+          ppanel files rm ci-listing --recursive --yes
+          ppanel config apply
+
       - name: Move the configuration between installations as a bundle
         run: |
           ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
