@@ -130,12 +130,18 @@ impl OutboxRelay {
     }
 
     /// Relays until `shutdown` resolves. Errors are logged and retried with
-    /// backoff; the relay never exits on a transient failure.
+    /// backoff; the relay never exits on a transient failure. A pass under
+    /// way when `shutdown` resolves is abandoned, as a crash would leave it:
+    /// what it had not marked published is published again.
     pub async fn run(self, shutdown: impl Future<Output = ()> + Send) {
         tokio::pin!(shutdown);
         let mut backoff = self.options.backoff();
         loop {
-            let delay = match self.relay_once().await {
+            let pass = tokio::select! {
+                () = &mut shutdown => return,
+                pass = self.relay_once() => pass,
+            };
+            let delay = match pass {
                 Ok(report) if report.failed.is_some() => backoff.next(),
                 Ok(report) if report.published > 0 => {
                     backoff = self.options.backoff();

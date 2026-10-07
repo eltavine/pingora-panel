@@ -236,6 +236,42 @@ mod tests {
         assert_eq!(outbox.published(), appended);
     }
 
+    /// Never answers, as a broker that cannot be reached until its
+    /// acknowledgement times out.
+    struct SilentPublisher;
+
+    #[async_trait]
+    impl EventPublisher for SilentPublisher {
+        async fn publish(&self, _: &EventEnvelope) -> Result<PublishReceipt> {
+            std::future::pending().await
+        }
+    }
+
+    #[tokio::test]
+    async fn shutdown_abandons_a_publication_under_way() {
+        let outbox = MemoryOutbox::new();
+        let pending = event("11", 1);
+        outbox.append(pending.clone()).unwrap();
+        let relay = OutboxRelay::new(
+            Arc::new(outbox.clone()),
+            Arc::new(SilentPublisher),
+            Arc::new(outbox.clone()),
+            RelayOptions::default(),
+        );
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        let task = tokio::spawn(relay.run(async move {
+            let _ = stopped.await;
+        }));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        stop.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("the relay stops without waiting for the broker")
+            .unwrap();
+        assert_eq!(outbox.pending(1).await.unwrap()[0].envelope(), &pending);
+    }
+
     #[test]
     fn options_are_validated() {
         assert!(RelayOptions::default().with_batch_size(0).is_err());
