@@ -21,6 +21,9 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          # The vendored Pingora commit the local changes start from is found
+          # in the history.
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Install build dependencies

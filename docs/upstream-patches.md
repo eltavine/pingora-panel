@@ -11,6 +11,10 @@ equivalent fix. Every current difference shows with
 git diff 4487f7b2 HEAD -- 'pingora*' tinyufo
 ```
 
+The weekly canary applies that difference to Pingora's main and checks
+and tests the adapter there, so a change that no longer applies, as when
+upstream has taken it, fails the canary.
+
 ## Patches
 
 ### TLS settings from a rustls server configuration

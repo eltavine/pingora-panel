@@ -4248,9 +4248,6 @@ async fn tls_upstream(
 async fn proxy_verify_scripts_judge_upstream_certificates() {
     use panel_ir::LUA_SCRIPTS_CAPABILITY;
 
-    // Against an unpatched Pingora the upstream's chain is not kept, so the
-    // pinning script cannot find what it pins.
-    let kept = std::env::var_os("PANEL_PINGORA_CANARY").is_none();
     let served = rcgen::generate_simple_self_signed(vec!["upstream.example".into()]).unwrap();
     let upstream = tls_upstream(
         vec![served.cert.der().clone()],
@@ -4305,17 +4302,13 @@ async fn proxy_verify_scripts_judge_upstream_certificates() {
     wait_for(listen).await;
 
     let trusted = get(listen, Some("shop.test"), "/pinned", "").await;
-    if kept {
-        assert_eq!(
-            trusted.status,
-            200,
-            "{}",
-            String::from_utf8_lossy(&trusted.body)
-        );
-        assert_eq!(trusted.body, b"secure");
-    } else {
-        assert_eq!(trusted.status, 502);
-    }
+    assert_eq!(
+        trusted.status,
+        200,
+        "{}",
+        String::from_utf8_lossy(&trusted.body)
+    );
+    assert_eq!(trusted.body, b"secure");
     let refused = get(listen, Some("shop.test"), "/refused", "").await;
     assert_eq!(refused.status, 502);
     gateway.stop().await;

@@ -23,6 +23,24 @@ git -C "$upstream_root" remote add origin "$upstream_url"
 git -C "$upstream_root" fetch --quiet --depth=1 origin "$upstream_sha"
 git -C "$upstream_root" checkout --quiet --detach "$upstream_sha"
 
+# The adapter builds on the local changes docs/upstream-patches.md records,
+# so they are applied to main as they stand: one that no longer applies, as
+# when upstream has taken it, fails the canary.
+if [[ "$(git -C "$repo_root" rev-parse --is-shallow-repository)" == true ]]; then
+  printf 'The canary needs the full history to find the vendored Pingora commit.\n' >&2
+  exit 2
+fi
+git -C "$repo_root" fetch --quiet "$upstream_url" "$upstream_sha"
+vendored_sha="$(git -C "$repo_root" merge-base HEAD "$upstream_sha")"
+readonly vendored_sha
+local_changes="$operation_root/local-changes.patch"
+git -C "$repo_root" diff --binary "$vendored_sha" HEAD -- 'pingora*' tinyufo >"$local_changes"
+if [[ -s "$local_changes" ]] && ! git -C "$upstream_root" apply "$local_changes"; then
+  printf 'The local changes to Pingora since %s no longer apply to its main at %s.\n' \
+    "$vendored_sha" "$upstream_sha" >&2
+  exit 1
+fi
+
 git -C "$repo_root" archive HEAD panel .cargo | tar -x -C "$workspace_root"
 ln -s "$upstream_root/Cargo.toml" "$workspace_root/Cargo.toml"
 for package_path in "$upstream_root"/pingora-* "$upstream_root/tinyufo"; do
@@ -51,10 +69,8 @@ if replacements != 3:
 manifest.write_text(text)
 PY
 
-printf 'Testing Panel adapter against Cloudflare Pingora main at %s\n' "$upstream_sha"
-# Upstream Pingora keeps no TLS server certificate in its connection digests,
-# so the adapter's tests expect scripts to find none.
-export PANEL_PINGORA_CANARY=1
+printf 'Testing Panel adapter against Cloudflare Pingora main at %s with the local changes since %s\n' \
+  "$upstream_sha" "$vendored_sha"
 cargo check \
   --manifest-path "$workspace_root/panel/Cargo.toml" \
   --package gateway-pingora \
