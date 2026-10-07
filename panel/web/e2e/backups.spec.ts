@@ -143,3 +143,82 @@ test('accounts that only read backups cannot change them', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Take a backup' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: /^Actions for the backup of/ })).toHaveCount(0)
 })
+
+test('backups are copied to a plugin target and fetched back', async ({ page }) => {
+  await setUp(page)
+  const asked: { method: string; path: string; body: unknown }[] = []
+  const record = (route: import('@playwright/test').Route) => {
+    const request = route.request()
+    asked.push({
+      method: request.method(),
+      path: new URL(request.url()).pathname,
+      body: request.postDataJSON(),
+    })
+  }
+  await page.route('**/api/v1/backups/b-1/copies', (route) => {
+    record(route)
+    return route.fulfill({
+      status: 201,
+      json: {
+        name: 'pingora-panel-backup-b-1.tar.zst',
+        size_bytes: 2048,
+        sha256: 'ab'.repeat(32),
+      },
+    })
+  })
+  await page.route('**/api/v1/backup-targets/s3/archives', (route) =>
+    route.fulfill({
+      json: [
+        {
+          name: 'weekly.tar.zst',
+          size_bytes: 4096,
+          sha256: 'cd'.repeat(32),
+          created_at: '2026-10-03T10:00:00Z',
+        },
+      ],
+    }),
+  )
+  await page.route('**/api/v1/backup-targets/s3/archives/weekly.tar.zst/imports', (route) => {
+    record(route)
+    return route.fulfill({
+      status: 201,
+      headers: { location: '/api/v1/backups/b-9' },
+      json: backup('b-9', { files: 7 }),
+    })
+  })
+  await page.route('**/api/v1/backup-targets/s3/archives/weekly.tar.zst', (route) => {
+    record(route)
+    return route.fulfill({ status: 204 })
+  })
+
+  await page.goto('/backups')
+  await page
+    .getByRole('button', { name: /^Actions for the backup of/ })
+    .first()
+    .click()
+  await page.getByRole('menuitem', { name: 'Copy to a plugin target…' }).click()
+  const dialog = page.getByRole('alertdialog')
+  await dialog.getByLabel('Plugin').fill('s3')
+  await dialog.getByRole('button', { name: 'Copy' }).click()
+  await expect(page.getByText('Copied to s3 as pingora-panel-backup-b-1.tar.zst')).toBeVisible()
+
+  await page.getByLabel('The plugin whose archives to show').fill('s3')
+  await page.getByRole('button', { name: 'Show archives' }).click()
+  await expect(page.getByText('weekly.tar.zst')).toBeVisible()
+  await page.getByRole('button', { name: 'Actions for weekly.tar.zst' }).click()
+  await page.getByRole('menuitem', { name: 'Keep as a backup' }).click()
+  await expect(page.getByText('Kept weekly.tar.zst as a backup: 7 files')).toBeVisible()
+  await page.getByRole('button', { name: 'Actions for weekly.tar.zst' }).click()
+  await page.getByRole('menuitem', { name: 'Remove from the target' }).click()
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click()
+  await expect(page.getByText('Removed weekly.tar.zst')).toBeVisible()
+  expect(asked).toEqual([
+    { method: 'POST', path: '/api/v1/backups/b-1/copies', body: { target: 's3' } },
+    {
+      method: 'POST',
+      path: '/api/v1/backup-targets/s3/archives/weekly.tar.zst/imports',
+      body: null,
+    },
+    { method: 'DELETE', path: '/api/v1/backup-targets/s3/archives/weekly.tar.zst', body: null },
+  ])
+})

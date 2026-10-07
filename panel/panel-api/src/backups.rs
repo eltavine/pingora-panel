@@ -21,7 +21,7 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use futures_util::StreamExt;
 use panel_application::{
     Backup, BackupChange, BackupContent, BackupRequest, BackupState, Operation, RequestScope,
-    ACTIVE_BUNDLE, DRAFT_BUNDLE,
+    TargetArchive, ACTIVE_BUNDLE, DRAFT_BUNDLE,
 };
 use panel_config_api::{ConfigurationChange, ConfigurationPort, LanguageChange, RevisionQuery};
 use panel_config_model::{RevisionDetail, RevisionList, RevisionOutcome};
@@ -509,4 +509,107 @@ async fn restore_configuration(
         )
         .await?;
     Ok(saved.draft.version)
+}
+
+/// An archive a plugin's backup target keeps (ADR 0044).
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct TargetArchiveView {
+    pub name: String,
+    pub size_bytes: u64,
+    /// SHA-256 in lowercase hexadecimal, as the target was told it.
+    pub sha256: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+}
+
+impl From<TargetArchive> for TargetArchiveView {
+    fn from(archive: TargetArchive) -> Self {
+        Self {
+            name: archive.name,
+            size_bytes: archive.size_bytes,
+            sha256: archive.sha256,
+            created_at: archive.created_at.map(timestamp),
+        }
+    }
+}
+
+/// Where to copy a backup.
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NewBackupCopy {
+    /// The plugin whose backup target keeps the copy; it needs the
+    /// `backups` grant.
+    pub target: String,
+}
+
+/// Copies a taken backup's archive to a plugin's backup target, as
+/// `pingora-panel-backup-<id>.tar.zst`; a copy of that name is replaced.
+#[utoipa::path(post, path = "/api/v1/backups/{id}/copies", params(MutationHeaders, ("id" = String, Path)),
+    request_body = NewBackupCopy, responses((status = 201, body = TargetArchiveView)), tag = "backups")]
+pub(crate) async fn copy_backup<U>(
+    State(state): State<ApiState<U>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> Result<(StatusCode, Json<TargetArchiveView>), ApiError> {
+    let copy = crate::configuration::json::<NewBackupCopy>(&headers, &body)?;
+    let archive = state
+        .backups
+        .copy_to_target(command_context(&headers)?, &id, &copy.target)
+        .await?;
+    Ok((StatusCode::CREATED, Json(archive.into())))
+}
+
+/// The archives a plugin's backup target keeps.
+#[utoipa::path(get, path = "/api/v1/backup-targets/{target}/archives",
+    params(QueryHeaders, ("target" = String, Path, description = "The plugin")),
+    responses((status = 200, body = Vec<TargetArchiveView>)), tag = "backups")]
+pub(crate) async fn list_target_archives<U>(
+    State(state): State<ApiState<U>>,
+    headers: HeaderMap,
+    Path(target): Path<String>,
+) -> Result<Json<Vec<TargetArchiveView>>, ApiError> {
+    let archives = state
+        .backups
+        .target_archives(request_scope(&headers)?, &target)
+        .await?;
+    Ok(Json(archives.into_iter().map(Into::into).collect()))
+}
+
+/// Fetches an archive a plugin's backup target keeps and keeps it as a
+/// backup once every member checks against its manifest; it is then
+/// restored as any other.
+#[utoipa::path(post, path = "/api/v1/backup-targets/{target}/archives/{name}/imports",
+    params(MutationHeaders, ("target" = String, Path, description = "The plugin"), ("name" = String, Path)),
+    responses((status = 201, body = BackupDetails, headers(("Location" = String)))), tag = "backups")]
+pub(crate) async fn import_target_archive<U>(
+    State(state): State<ApiState<U>>,
+    headers: HeaderMap,
+    Path((target, name)): Path<(String, String)>,
+) -> Result<(StatusCode, [(HeaderName, String); 1], Json<BackupDetails>), ApiError> {
+    let backup = state
+        .backups
+        .import_from_target(command_context(&headers)?, &target, &name)
+        .await?;
+    Ok((
+        StatusCode::CREATED,
+        [location(&backup.id)],
+        Json(backup.into()),
+    ))
+}
+
+/// Removes an archive a plugin's backup target keeps.
+#[utoipa::path(delete, path = "/api/v1/backup-targets/{target}/archives/{name}",
+    params(MutationHeaders, ("target" = String, Path, description = "The plugin"), ("name" = String, Path)),
+    responses((status = 204)), tag = "backups")]
+pub(crate) async fn delete_target_archive<U>(
+    State(state): State<ApiState<U>>,
+    headers: HeaderMap,
+    Path((target, name)): Path<(String, String)>,
+) -> Result<StatusCode, ApiError> {
+    state
+        .backups
+        .delete_from_target(command_context(&headers)?, &target, &name)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }

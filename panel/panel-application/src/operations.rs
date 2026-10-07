@@ -345,6 +345,22 @@ mod tests {
                         "backup-restore-configuration".to_owned(),
                         result.map(|version| version.to_string()),
                     ),
+                    BackupChange::CopiedToTarget { target, result } => (
+                        format!("backup-copy-{target}"),
+                        result.map(|archive| archive.name.clone()),
+                    ),
+                    BackupChange::ImportedFromTarget { target, result, .. } => (
+                        format!("backup-import-{target}"),
+                        result.map(|backup| backup.id.clone()),
+                    ),
+                    BackupChange::DeletedFromTarget {
+                        target,
+                        name,
+                        result,
+                    } => (
+                        format!("backup-target-delete-{target}"),
+                        result.map(|()| (*name).to_owned()),
+                    ),
                 },
                 Operation::ImagePull {
                     reference, result, ..

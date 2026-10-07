@@ -3391,7 +3391,7 @@ dependencies = [
 
 [[package]]
 name = "panel-application"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "futures-core",

@@ -2,6 +2,32 @@ import type { DeepString } from '@/i18n/types'
 
 const zhCN = {
   backups: {
+    copy: '复制到插件目标…',
+    copyTitle: '把这个备份复制到插件目标',
+    copyDetail: '插件保存归档的副本，并按大小与摘要校验；同名的副本会被替换。',
+    copyConfirm: '复制',
+    copied: '已复制到 {target}，名为 {name}',
+    copyFailed: '未能复制备份',
+    targets: {
+      title: '插件备份目标',
+      description:
+        '由插件保存在别处（例如对象存储）的归档。取回的归档在每个文件都按清单校验通过后成为一个备份。',
+      plugin: '插件',
+      whose: '要查看其归档的插件',
+      look: '查看归档',
+      name: '归档',
+      created: '创建于',
+      empty: '{target} 没有保存归档',
+      import: '保存为备份',
+      imported: '已把 {name} 保存为备份：{files} 个文件',
+      importFailed: '未能取回归档',
+      remove: '从目标中删除',
+      removeTitle: '从目标中删除 {name}？',
+      removeDetail: '插件不再保存该归档；这里保存的备份不受影响。',
+      removed: '已删除 {name}',
+      removeFailed: '未能删除归档',
+      actionsFor: '{name} 的操作',
+    },
     title: '备份',
     description: '数据库与网站目录的归档，按清单校验后原位恢复；主密钥从不包含在内。',
     refresh: '刷新',

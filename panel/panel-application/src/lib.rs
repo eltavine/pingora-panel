@@ -74,7 +74,7 @@ pub use alerts::{
 pub use audit::{AuditFilter, AuditPage, AuditPort, AuditRecord, AuditVerification};
 pub use backups::{
     Backup, BackupChange, BackupContent, BackupDownload, BackupRequest, BackupState, BackupsPort,
-    NoBackups, RecordedBackups, SitesRestored, ACTIVE_BUNDLE, DRAFT_BUNDLE,
+    NoBackups, RecordedBackups, SitesRestored, TargetArchive, ACTIVE_BUNDLE, DRAFT_BUNDLE,
 };
 pub use compose::{
     ComposeAction, ComposeChange, ComposeFailure, ComposeFile, ComposeLogLine, ComposeLogs,

@@ -30,6 +30,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::Mutex;
+use tonic::transport::Channel;
 use uuid::Uuid;
 
 /// The job that takes a backup.
@@ -152,6 +153,8 @@ pub struct BackupRequest {
 #[derive(Clone)]
 pub struct Backups {
     inner: Arc<Inner>,
+    /// The plugins module, whose plugins keep copies of backups.
+    plugins: Option<Channel>,
 }
 
 struct Inner {
@@ -187,6 +190,7 @@ impl Backups {
                 release: release.into(),
                 restoring: Mutex::new(()),
             }),
+            plugins: None,
         }
     }
 
@@ -846,6 +850,10 @@ fn failure(error: io::Error) -> PanelError {
 fn corrupt(what: &str) -> PanelError {
     PanelError::corrupt_state(format!("a stored backup's {what} is unreadable"))
 }
+
+mod targets;
+
+pub use targets::TargetArchive;
 
 #[cfg(test)]
 mod tests;

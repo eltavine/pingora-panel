@@ -4,7 +4,7 @@ use base64::Engine;
 use futures_util::StreamExt;
 use panel_application::{
     Backup, BackupContent, BackupDownload, BackupRequest, BackupState, BackupsPort, CommandContext,
-    Operation, OperationLog, RequestScope, SitesRestored, ACTIVE_BUNDLE,
+    Operation, OperationLog, RequestScope, SitesRestored, TargetArchive, ACTIVE_BUNDLE,
 };
 use panel_config_api::{
     ApplyOutcome, ApplyRequest, ConfigurationChange, ConfigurationCommand, ConfigurationOutput,
@@ -95,6 +95,49 @@ impl BackupsPort for Backups {
             files: 2,
             bytes: 30,
         })
+    }
+
+    async fn copy_to_target(
+        &self,
+        _: CommandContext,
+        id: &str,
+        target: &str,
+    ) -> Result<TargetArchive> {
+        assert_eq!((id, target), (ID, "s3"));
+        Ok(kept(&format!("pingora-panel-backup-{id}.tar.zst")))
+    }
+
+    async fn target_archives(&self, _: RequestScope, target: &str) -> Result<Vec<TargetArchive>> {
+        match target {
+            "s3" => Ok(vec![kept("weekly.tar.zst")]),
+            _ => Err(PanelError::unavailable(format!(
+                "plugin {target} does not run"
+            ))),
+        }
+    }
+
+    async fn import_from_target(
+        &self,
+        _: CommandContext,
+        target: &str,
+        name: &str,
+    ) -> Result<Backup> {
+        assert_eq!((target, name), ("s3", "weekly.tar.zst"));
+        Ok(backup(BackupState::Completed))
+    }
+
+    async fn delete_from_target(&self, _: CommandContext, target: &str, name: &str) -> Result<()> {
+        assert_eq!((target, name), ("s3", "weekly.tar.zst"));
+        Ok(())
+    }
+}
+
+fn kept(name: &str) -> TargetArchive {
+    TargetArchive {
+        name: name.to_owned(),
+        size_bytes: ARCHIVE.len() as u64,
+        sha256: hex::encode(sha2::Sha256::digest(ARCHIVE)),
+        created_at: Some(UNIX_EPOCH + Duration::from_secs(1_800_000_000)),
     }
 }
 
@@ -423,4 +466,73 @@ async fn the_sites_and_the_configuration_are_restored_from_a_backup() {
         .as_str()
         .unwrap()
         .contains("no active configuration"));
+}
+
+#[tokio::test]
+async fn backups_are_copied_to_plugin_targets_and_fetched_back() {
+    let harness = harness(None);
+    let (status, _, body) = send(
+        &harness.app,
+        change(
+            "POST",
+            &format!("/api/v1/backups/{ID}/copies"),
+            &json!({"target": "s3"}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(
+        json_of(&body)["name"],
+        format!("pingora-panel-backup-{ID}.tar.zst")
+    );
+    let (status, _, body) = send(
+        &harness.app,
+        Request::get("/api/v1/backup-targets/s3/archives")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json_of(&body)[0]["name"], "weekly.tar.zst");
+    assert_eq!(json_of(&body)[0]["created_at"], "2027-01-15T08:00:00Z");
+    let (status, _, _) = send(
+        &harness.app,
+        Request::get("/api/v1/backup-targets/gone/archives")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    let (status, headers, body) = send(
+        &harness.app,
+        change(
+            "POST",
+            "/api/v1/backup-targets/s3/archives/weekly.tar.zst/imports",
+            &json!({}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(headers["location"], format!("/api/v1/backups/{ID}"));
+    assert_eq!(json_of(&body)["state"], "completed");
+    let (status, _, _) = send(
+        &harness.app,
+        change(
+            "DELETE",
+            "/api/v1/backup-targets/s3/archives/weekly.tar.zst",
+            &json!({}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _, _) = send(
+        &harness.app,
+        change(
+            "POST",
+            &format!("/api/v1/backups/{ID}/copies"),
+            &json!({"target": "s3", "extra": 1}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }

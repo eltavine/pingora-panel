@@ -151,6 +151,53 @@ pub trait BackupsPort: Send + Sync {
         id: &str,
         site_path: &str,
     ) -> Result<SitesRestored>;
+
+    /// Copies a taken backup's archive to the backup target plugin `target`
+    /// provides.
+    async fn copy_to_target(
+        &self,
+        _context: CommandContext,
+        _id: &str,
+        _target: &str,
+    ) -> Result<TargetArchive> {
+        Err(no_targets())
+    }
+
+    /// The archives the backup target plugin `target` provides keeps.
+    async fn target_archives(
+        &self,
+        _scope: RequestScope,
+        _target: &str,
+    ) -> Result<Vec<TargetArchive>> {
+        Err(no_targets())
+    }
+
+    /// Fetches archive `name` from the backup target plugin `target`
+    /// provides and keeps it as a backup once it checks against its
+    /// manifest.
+    async fn import_from_target(
+        &self,
+        _context: CommandContext,
+        _target: &str,
+        _name: &str,
+    ) -> Result<Backup> {
+        Err(no_targets())
+    }
+
+    /// Removes archive `name` from the backup target plugin `target`
+    /// provides.
+    async fn delete_from_target(
+        &self,
+        _context: CommandContext,
+        _target: &str,
+        _name: &str,
+    ) -> Result<()> {
+        Err(no_targets())
+    }
+}
+
+fn no_targets() -> PanelError {
+    PanelError::unsupported_capability("backups are not copied to backup targets here")
 }
 
 /// Backups where nothing takes them.
@@ -204,6 +251,33 @@ pub enum BackupChange<'a> {
     },
     /// The configuration was restored into the draft, at this version.
     ConfigurationRestored(std::result::Result<u64, &'a PanelError>),
+    /// The backup's archive was copied to the backup target of a plugin.
+    CopiedToTarget {
+        target: &'a str,
+        result: std::result::Result<&'a TargetArchive, &'a PanelError>,
+    },
+    /// An archive a plugin's backup target keeps was fetched as a backup.
+    ImportedFromTarget {
+        target: &'a str,
+        name: &'a str,
+        result: std::result::Result<&'a Backup, &'a PanelError>,
+    },
+    /// An archive was removed from a plugin's backup target.
+    DeletedFromTarget {
+        target: &'a str,
+        name: &'a str,
+        result: std::result::Result<(), &'a PanelError>,
+    },
+}
+
+/// An archive a plugin's backup target keeps (ADR 0044).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TargetArchive {
+    pub name: String,
+    pub size_bytes: u64,
+    /// In lowercase hexadecimal.
+    pub sha256: String,
+    pub created_at: Option<SystemTime>,
 }
 
 /// A backups port that records each change, refused or not.
@@ -276,6 +350,76 @@ impl BackupsPort for RecordedBackups {
         self.log.record(&context, operation).await;
         result
     }
+
+    async fn copy_to_target(
+        &self,
+        context: CommandContext,
+        id: &str,
+        target: &str,
+    ) -> Result<TargetArchive> {
+        let result = self.inner.copy_to_target(context.clone(), id, target).await;
+        let operation = Operation::Backup {
+            id,
+            change: BackupChange::CopiedToTarget {
+                target,
+                result: result.as_ref(),
+            },
+        };
+        self.log.record(&context, operation).await;
+        result
+    }
+
+    async fn target_archives(
+        &self,
+        scope: RequestScope,
+        target: &str,
+    ) -> Result<Vec<TargetArchive>> {
+        self.inner.target_archives(scope, target).await
+    }
+
+    async fn import_from_target(
+        &self,
+        context: CommandContext,
+        target: &str,
+        name: &str,
+    ) -> Result<Backup> {
+        let result = self
+            .inner
+            .import_from_target(context.clone(), target, name)
+            .await;
+        let operation = Operation::Backup {
+            id: result.as_ref().map_or("", |backup| backup.id.as_str()),
+            change: BackupChange::ImportedFromTarget {
+                target,
+                name,
+                result: result.as_ref(),
+            },
+        };
+        self.log.record(&context, operation).await;
+        result
+    }
+
+    async fn delete_from_target(
+        &self,
+        context: CommandContext,
+        target: &str,
+        name: &str,
+    ) -> Result<()> {
+        let result = self
+            .inner
+            .delete_from_target(context.clone(), target, name)
+            .await;
+        let operation = Operation::Backup {
+            id: "",
+            change: BackupChange::DeletedFromTarget {
+                target,
+                name,
+                result: result.as_ref().copied(),
+            },
+        };
+        self.log.record(&context, operation).await;
+        result
+    }
 }
 
 #[cfg(test)]
@@ -298,6 +442,9 @@ mod tests {
                 BackupChange::Deleted(result) => ("deleted", result.is_ok()),
                 BackupChange::SitesRestored { result, .. } => ("restored", result.is_ok()),
                 BackupChange::ConfigurationRestored(result) => ("configuration", result.is_ok()),
+                BackupChange::CopiedToTarget { result, .. } => ("copied", result.is_ok()),
+                BackupChange::ImportedFromTarget { result, .. } => ("imported", result.is_ok()),
+                BackupChange::DeletedFromTarget { result, .. } => ("removed", result.is_ok()),
             };
             self.0.lock().unwrap().push((format!("{what} {id}"), done));
         }

@@ -2,6 +2,33 @@ import type { BackupsMessages } from './zh-CN'
 
 const en: BackupsMessages = {
   backups: {
+    copy: 'Copy to a plugin target…',
+    copyTitle: 'Copy this backup to a plugin target',
+    copyDetail:
+      'The plugin keeps a copy of the archive, checked against its size and digest; a copy of the same name is replaced.',
+    copyConfirm: 'Copy',
+    copied: 'Copied to {target} as {name}',
+    copyFailed: 'Could not copy the backup',
+    targets: {
+      title: 'Plugin backup targets',
+      description:
+        'Archives that plugins keep elsewhere, such as in object storage. One fetched back becomes a backup once every file checks against its manifest.',
+      plugin: 'Plugin',
+      whose: 'The plugin whose archives to show',
+      look: 'Show archives',
+      name: 'Archive',
+      created: 'Created',
+      empty: '{target} keeps no archives',
+      import: 'Keep as a backup',
+      imported: 'Kept {name} as a backup: {files} files',
+      importFailed: 'Could not fetch the archive',
+      remove: 'Remove from the target',
+      removeTitle: 'Remove {name} from the target?',
+      removeDetail: 'The plugin no longer keeps the archive; backups kept here are not touched.',
+      removed: 'Removed {name}',
+      removeFailed: 'Could not remove the archive',
+      actionsFor: 'Actions for {name}',
+    },
     title: 'Backups',
     description:
       'Archives of the databases and the sites’ directory, checked against their manifests and restored in place. Master keys are never in them.',

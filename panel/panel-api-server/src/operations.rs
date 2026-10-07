@@ -510,6 +510,61 @@ impl OperationLog for OutboxOperations {
                         let data = refused("configuration.restore", error);
                         self.0.record(target, &scope, actor, &data).await;
                     }
+                    BackupChange::CopiedToTarget {
+                        target: plugin,
+                        result: Ok(archive),
+                    } => {
+                        let data = backups::ArchiveCopied {
+                            backup_id: id.to_owned(),
+                            target: plugin.to_owned(),
+                            name: archive.name.clone(),
+                            size_bytes: archive.size_bytes,
+                        };
+                        self.0.record(target, &scope, actor, &data).await;
+                    }
+                    BackupChange::CopiedToTarget {
+                        result: Err(error), ..
+                    } => {
+                        let data = refused("archive.copy", error);
+                        self.0.record(target, &scope, actor, &data).await;
+                    }
+                    BackupChange::ImportedFromTarget {
+                        target: plugin,
+                        name,
+                        result: Ok(backup),
+                    } => {
+                        let data = backups::ArchiveImported {
+                            backup_id: backup.id.clone(),
+                            target: plugin.to_owned(),
+                            name: name.to_owned(),
+                        };
+                        self.0
+                            .record((BACKUP, backup.id.as_str()), &scope, actor, &data)
+                            .await;
+                    }
+                    BackupChange::ImportedFromTarget {
+                        result: Err(error), ..
+                    } => {
+                        let data = refused("archive.import", error);
+                        self.0.record(target, &scope, actor, &data).await;
+                    }
+                    BackupChange::DeletedFromTarget {
+                        target: plugin,
+                        name,
+                        result: Ok(()),
+                    } => {
+                        let data = backups::TargetArchiveDeleted {
+                            target: plugin.to_owned(),
+                            name: name.to_owned(),
+                        };
+                        self.0.record(target, &scope, actor, &data).await;
+                    }
+                    BackupChange::DeletedFromTarget {
+                        result: Err(error), ..
+                    } => {
+                        let data = refused("target_archive.delete", error);
+                        self.0.record(target, &scope, actor, &data).await;
+                    }
                 }
             }
             Operation::ImagePull {

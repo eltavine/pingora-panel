@@ -36,10 +36,34 @@ message ConfigurationRestored {
   uint64 draft_version = 2;
 }
 
+// `backup.archive.copied`
+message ArchiveCopied {
+  string backup_id = 1;
+  // The plugin whose backup target keeps the copy.
+  string target = 2;
+  string name = 3;
+  uint64 size_bytes = 4;
+}
+
+// `backup.archive.imported`
+message ArchiveImported {
+  // The backup the archive became.
+  string backup_id = 1;
+  string target = 2;
+  string name = 3;
+}
+
+// `backup.target_archive.deleted`
+message TargetArchiveDeleted {
+  string target = 1;
+  string name = 2;
+}
+
 // `backup.operation.refused`
 message OperationRefused {
-  // `archive.request`, `archive.delete`, `sites.restore` or
-  // `configuration.restore`.
+  // `archive.request`, `archive.delete`, `sites.restore`,
+  // `configuration.restore`, `archive.copy`, `archive.import` or
+  // `target_archive.delete`.
   string operation = 1;
   // Empty when a request was refused before a backup was listed.
   string backup_id = 2;

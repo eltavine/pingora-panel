@@ -393,6 +393,26 @@ pub(crate) static ROUTES: &[(&str, &str, Access)] = &[
         "/api/v1/backups/{id}/restores",
         Requires(BackupsManage),
     ),
+    (
+        "POST",
+        "/api/v1/backups/{id}/copies",
+        Requires(BackupsManage),
+    ),
+    (
+        "GET",
+        "/api/v1/backup-targets/{target}/archives",
+        Requires(BackupsRead),
+    ),
+    (
+        "DELETE",
+        "/api/v1/backup-targets/{target}/archives/{name}",
+        Requires(BackupsManage),
+    ),
+    (
+        "POST",
+        "/api/v1/backup-targets/{target}/archives/{name}/imports",
+        Requires(BackupsManage),
+    ),
     ("PUT", "/api/v1/config/bundle", Requires(ConfigWrite)),
     ("POST", "/api/v1/config/check", Requires(ConfigRead)),
     ("GET", "/api/v1/config/lua", Requires(ConfigRead)),

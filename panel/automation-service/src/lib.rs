@@ -28,8 +28,8 @@ pub use acme::{
 };
 pub use backup_transport::BackupsTransport;
 pub use backups::{
-    Backup, BackupContent, BackupRequest, BackupState, Backups, TakeHandler, DEFAULT_KEPT,
-    KEPT_ENV, MOST_MEMBER_BYTES, SITES_ROOT_ENV, TAKE_JOB,
+    Backup, BackupContent, BackupRequest, BackupState, Backups, TakeHandler, TargetArchive,
+    DEFAULT_KEPT, KEPT_ENV, MOST_MEMBER_BYTES, SITES_ROOT_ENV, TAKE_JOB,
 };
 pub use certificate_api::CertificateService;
 pub use certificates::{Cause, CertificateInventory};
@@ -184,7 +184,7 @@ pub fn process(
         vault.clone(),
         Arc::new(StandardDnsProviders),
     )
-    .with_plugins(plugins);
+    .with_plugins(plugins.clone());
     let acme = AcmeAutomation::new(
         process.database(),
         events,
@@ -202,7 +202,8 @@ pub fn process(
         sites,
         kept,
         env!("CARGO_PKG_VERSION"),
-    );
+    )
+    .with_plugins(plugins);
     let mut handlers = handlers(&acme)?;
     handlers.push((
         JobKind::new(TAKE_JOB)?,

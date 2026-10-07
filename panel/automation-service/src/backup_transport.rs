@@ -2,7 +2,7 @@
 //! they answer encodes back. Application failures travel in each response's
 //! error, transport failures as status codes.
 
-use crate::backups::{Backup, BackupContent, BackupRequest, BackupState, Backups};
+use crate::backups::{Backup, BackupContent, BackupRequest, BackupState, Backups, TargetArchive};
 use futures_util::{stream::BoxStream, StreamExt};
 use panel_contracts::automation::v1::{self as wire, backups_server};
 use panel_errors::{PanelError, Result};
@@ -42,6 +42,15 @@ fn encoded_content(content: BackupContent) -> wire::BackupContent {
         BackupContent::Certificates => wire::BackupContent::Certificates,
         BackupContent::Databases => wire::BackupContent::Databases,
         BackupContent::Sites => wire::BackupContent::Sites,
+    }
+}
+
+fn encoded_archive(archive: TargetArchive) -> wire::TargetArchive {
+    wire::TargetArchive {
+        name: archive.name,
+        size_bytes: archive.size_bytes,
+        sha256: archive.sha256,
+        created_at: archive.created_at.map(|at| SystemTime::from(at).into()),
     }
 }
 
@@ -267,6 +276,95 @@ impl backups_server::Backups for BackupsTransport {
                 error: Some((&error).into()),
                 ..wire::BackupsRestoreSitesResponse::default()
             },
+        }))
+    }
+
+    async fn copy_to_target(
+        &self,
+        request: Request<wire::BackupsCopyToTargetRequest>,
+    ) -> std::result::Result<Response<wire::BackupsCopyToTargetResponse>, Status> {
+        let trace = trace_context(request.metadata());
+        let request = request.into_inner();
+        let copied = async {
+            decode_command(request.context, trace)?;
+            self.backups.copy_to(&request.id, &request.target).await
+        }
+        .await;
+        Ok(Response::new(match copied {
+            Ok(archive) => wire::BackupsCopyToTargetResponse {
+                archive: Some(encoded_archive(archive)),
+                error: None,
+            },
+            Err(error) => wire::BackupsCopyToTargetResponse {
+                archive: None,
+                error: Some((&error).into()),
+            },
+        }))
+    }
+
+    async fn list_target(
+        &self,
+        request: Request<wire::BackupsListTargetRequest>,
+    ) -> std::result::Result<Response<wire::BackupsListTargetResponse>, Status> {
+        let trace = trace_context(request.metadata());
+        let request = request.into_inner();
+        let listed = async {
+            decode_scope(request.context, trace)?;
+            self.backups.target_archives(&request.target).await
+        }
+        .await;
+        Ok(Response::new(match listed {
+            Ok(archives) => wire::BackupsListTargetResponse {
+                archives: archives.into_iter().map(encoded_archive).collect(),
+                error: None,
+            },
+            Err(error) => wire::BackupsListTargetResponse {
+                archives: Vec::new(),
+                error: Some((&error).into()),
+            },
+        }))
+    }
+
+    async fn import_from_target(
+        &self,
+        request: Request<wire::BackupsImportFromTargetRequest>,
+    ) -> std::result::Result<Response<wire::BackupsImportFromTargetResponse>, Status> {
+        let trace = trace_context(request.metadata());
+        let request = request.into_inner();
+        let imported = async {
+            let context = decode_command(request.context, trace)?;
+            self.backups
+                .import(&context, &request.target, &request.name)
+                .await
+        }
+        .await;
+        Ok(Response::new(match imported {
+            Ok(backup) => wire::BackupsImportFromTargetResponse {
+                backup: Some(encoded(&backup)),
+                error: None,
+            },
+            Err(error) => wire::BackupsImportFromTargetResponse {
+                backup: None,
+                error: Some((&error).into()),
+            },
+        }))
+    }
+
+    async fn delete_from_target(
+        &self,
+        request: Request<wire::BackupsDeleteFromTargetRequest>,
+    ) -> std::result::Result<Response<wire::BackupsDeleteFromTargetResponse>, Status> {
+        let trace = trace_context(request.metadata());
+        let request = request.into_inner();
+        let deleted = async {
+            decode_command(request.context, trace)?;
+            self.backups
+                .delete_from(&request.target, &request.name)
+                .await
+        }
+        .await;
+        Ok(Response::new(wire::BackupsDeleteFromTargetResponse {
+            error: deleted.err().map(|error| (&error).into()),
         }))
     }
 }

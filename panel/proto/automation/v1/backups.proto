@@ -24,6 +24,16 @@ service Backups {
   // Replaces a directory of the sites with the archive's copy: unpacked
   // beside it and renamed into place, so its files are never a mix of both.
   rpc RestoreSites(BackupsRestoreSitesRequest) returns (BackupsRestoreSitesResponse);
+  // Copies a taken backup's archive to the backup target a plugin provides
+  // (ADR 0044), replacing a copy of the same name.
+  rpc CopyToTarget(BackupsCopyToTargetRequest) returns (BackupsCopyToTargetResponse);
+  // The archives a plugin's backup target keeps.
+  rpc ListTarget(BackupsListTargetRequest) returns (BackupsListTargetResponse);
+  // Fetches an archive from a plugin's backup target and keeps it as a
+  // backup once every member checks against its manifest.
+  rpc ImportFromTarget(BackupsImportFromTargetRequest) returns (BackupsImportFromTargetResponse);
+  // Removes an archive a plugin's backup target keeps.
+  rpc DeleteFromTarget(BackupsDeleteFromTargetRequest) returns (BackupsDeleteFromTargetResponse);
 }
 
 enum BackupContent {
@@ -156,4 +166,56 @@ message BackupsRestoreSitesResponse {
   uint64 files = 1;
   uint64 bytes = 2;
   .pingora.panel.common.v1.Error error = 3;
+}
+
+// An archive a backup target keeps.
+message TargetArchive {
+  string name = 1;
+  uint64 size_bytes = 2;
+  // Lowercase hexadecimal.
+  string sha256 = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+
+message BackupsCopyToTargetRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string id = 2;
+  // The plugin whose backup target keeps the copy.
+  string target = 3;
+}
+
+message BackupsCopyToTargetResponse {
+  TargetArchive archive = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message BackupsListTargetRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string target = 2;
+}
+
+message BackupsListTargetResponse {
+  repeated TargetArchive archives = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message BackupsImportFromTargetRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string target = 2;
+  string name = 3;
+}
+
+message BackupsImportFromTargetResponse {
+  Backup backup = 1;
+  .pingora.panel.common.v1.Error error = 2;
+}
+
+message BackupsDeleteFromTargetRequest {
+  .pingora.panel.common.v1.RequestContext context = 1;
+  string target = 2;
+  string name = 3;
+}
+
+message BackupsDeleteFromTargetResponse {
+  .pingora.panel.common.v1.Error error = 1;
 }

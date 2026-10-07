@@ -231,6 +231,22 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
             post(backups::restore_backup::<U>),
         )
         .route(
+            "/api/v1/backups/{id}/copies",
+            post(backups::copy_backup::<U>),
+        )
+        .route(
+            "/api/v1/backup-targets/{target}/archives",
+            get(backups::list_target_archives::<U>),
+        )
+        .route(
+            "/api/v1/backup-targets/{target}/archives/{name}",
+            delete(backups::delete_target_archive::<U>),
+        )
+        .route(
+            "/api/v1/backup-targets/{target}/archives/{name}/imports",
+            post(backups::import_target_archive::<U>),
+        )
+        .route(
             "/api/v1/config/bundle",
             get(language::bundle::<U>).put(language::import_bundle::<U>),
         )

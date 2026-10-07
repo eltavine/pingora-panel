@@ -76,6 +76,9 @@ export const KNOWN_TYPES = [
   'backup.sites.restored',
   'backup.configuration.restored',
   'backup.operation.refused',
+  'backup.archive.copied',
+  'backup.archive.imported',
+  'backup.target_archive.deleted',
   'container.engine.enabled',
   'container.engine.disabled',
   'container.started',
@@ -245,6 +248,12 @@ export function summaryOf(event: AuditEvent, t: Translate): string {
     }
     case 'backup.configuration.restored':
       return t('audit.summary.draftVersion', { version: text(data.draft_version) })
+    case 'backup.archive.copied':
+      return `${text(data.backup_id).slice(0, 8)} → ${text(data.target)} · ${text(data.name)}`
+    case 'backup.archive.imported':
+      return `${text(data.target)} · ${text(data.name)} → ${text(data.backup_id).slice(0, 8)}`
+    case 'backup.target_archive.deleted':
+      return `${text(data.target)} · ${text(data.name)}`
     case 'backup.operation.refused':
       return [text(data.operation), data.code, data.message].map(text).filter(Boolean).join(' · ')
     case 'config.revision.noted':

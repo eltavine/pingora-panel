@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use futures_util::StreamExt;
 use panel_application::{
     Backup, BackupContent, BackupDownload, BackupRequest, BackupState, BackupsPort, CommandContext,
-    RequestScope, SitesRestored,
+    RequestScope, SitesRestored, TargetArchive,
 };
 use panel_contracts::automation::v1::{
     self as wire, backups_client::BackupsClient, backups_download_response::Message,
@@ -235,5 +235,105 @@ impl BackupsPort for AutomationClient {
             files: response.files,
             bytes: response.bytes,
         })
+    }
+
+    async fn copy_to_target(
+        &self,
+        context: CommandContext,
+        id: &str,
+        target: &str,
+    ) -> Result<TargetArchive> {
+        let scope = context.scope();
+        let message = wire::BackupsCopyToTargetRequest {
+            context: Some(command_context(&context)),
+            id: id.to_owned(),
+            target: target.to_owned(),
+        };
+        let response = self
+            .backups()
+            .copy_to_target(Self::lasting(message, &scope))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        response
+            .archive
+            .map(target_archive)
+            .ok_or_else(|| PanelError::internal("the copy was not described"))
+    }
+
+    async fn target_archives(
+        &self,
+        scope: RequestScope,
+        target: &str,
+    ) -> Result<Vec<TargetArchive>> {
+        let message = wire::BackupsListTargetRequest {
+            context: Some(request_context(&scope)),
+            target: target.to_owned(),
+        };
+        let response = self
+            .backups()
+            .list_target(Self::lasting(message, &scope))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        Ok(response.archives.into_iter().map(target_archive).collect())
+    }
+
+    async fn import_from_target(
+        &self,
+        context: CommandContext,
+        target: &str,
+        name: &str,
+    ) -> Result<Backup> {
+        let scope = context.scope();
+        let message = wire::BackupsImportFromTargetRequest {
+            context: Some(command_context(&context)),
+            target: target.to_owned(),
+            name: name.to_owned(),
+        };
+        let response = self
+            .backups()
+            .import_from_target(Self::lasting(message, &scope))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)?;
+        backup_of(
+            response
+                .backup
+                .ok_or_else(|| PanelError::internal("the imported backup was not described"))?,
+        )
+    }
+
+    async fn delete_from_target(
+        &self,
+        context: CommandContext,
+        target: &str,
+        name: &str,
+    ) -> Result<()> {
+        let scope = context.scope();
+        let message = wire::BackupsDeleteFromTargetRequest {
+            context: Some(command_context(&context)),
+            target: target.to_owned(),
+            name: name.to_owned(),
+        };
+        let response = self
+            .backups()
+            .delete_from_target(Self::lasting(message, &scope))
+            .await
+            .map_err(status_error)?
+            .into_inner();
+        response_error(response.error)
+    }
+}
+
+fn target_archive(archive: wire::TargetArchive) -> TargetArchive {
+    TargetArchive {
+        name: archive.name,
+        size_bytes: archive.size_bytes,
+        sha256: archive.sha256,
+        created_at: time(archive.created_at),
     }
 }

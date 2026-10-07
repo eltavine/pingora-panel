@@ -14,6 +14,7 @@ use panel_contracts::{
     },
     common::v1 as common,
 };
+use panel_errors::PanelError;
 use std::time::{Duration, SystemTime};
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{
@@ -146,6 +147,66 @@ impl Backups for FakeBackups {
             error: None,
         }))
     }
+
+    async fn copy_to_target(
+        &self,
+        request: Request<wire::BackupsCopyToTargetRequest>,
+    ) -> Result<Response<wire::BackupsCopyToTargetResponse>, Status> {
+        let request = request.into_inner();
+        Ok(Response::new(wire::BackupsCopyToTargetResponse {
+            archive: Some(kept(&format!("{}-{}", request.target, request.id))),
+            error: None,
+        }))
+    }
+
+    async fn list_target(
+        &self,
+        request: Request<wire::BackupsListTargetRequest>,
+    ) -> Result<Response<wire::BackupsListTargetResponse>, Status> {
+        Ok(Response::new(if request.into_inner().target == "s3" {
+            wire::BackupsListTargetResponse {
+                archives: vec![kept("weekly.tar.zst")],
+                error: None,
+            }
+        } else {
+            wire::BackupsListTargetResponse {
+                archives: Vec::new(),
+                error: Some((&PanelError::unavailable("the plugin does not run")).into()),
+            }
+        }))
+    }
+
+    async fn import_from_target(
+        &self,
+        request: Request<wire::BackupsImportFromTargetRequest>,
+    ) -> Result<Response<wire::BackupsImportFromTargetResponse>, Status> {
+        assert_eq!(request.into_inner().name, "weekly.tar.zst");
+        Ok(Response::new(wire::BackupsImportFromTargetResponse {
+            backup: Some(taken()),
+            error: None,
+        }))
+    }
+
+    async fn delete_from_target(
+        &self,
+        _: Request<wire::BackupsDeleteFromTargetRequest>,
+    ) -> Result<Response<wire::BackupsDeleteFromTargetResponse>, Status> {
+        Ok(Response::new(wire::BackupsDeleteFromTargetResponse {
+            error: None,
+        }))
+    }
+}
+
+fn kept(name: &str) -> wire::TargetArchive {
+    wire::TargetArchive {
+        name: name.to_owned(),
+        size_bytes: 7,
+        sha256: "ab".repeat(32),
+        created_at: Some(prost_types::Timestamp {
+            seconds: 1_800_000_000,
+            nanos: 0,
+        }),
+    }
 }
 
 async fn client() -> AutomationClient {
@@ -229,4 +290,27 @@ async fn backups_reach_the_application_in_its_terms() {
         .await
         .unwrap();
     assert_eq!((restored.files, restored.bytes), (2, 30));
+
+    let copy = client
+        .copy_to_target(context(), &backup.id, "s3")
+        .await
+        .unwrap();
+    assert_eq!(copy.name, format!("s3-{}", backup.id));
+    let archives = client.target_archives(scope(), "s3").await.unwrap();
+    assert_eq!(archives[0].name, "weekly.tar.zst");
+    assert_eq!(
+        archives[0].created_at,
+        Some(SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000))
+    );
+    let refused = client.target_archives(scope(), "gone").await.unwrap_err();
+    assert_eq!(refused.code.as_str(), "UNAVAILABLE");
+    let imported = client
+        .import_from_target(context(), "s3", "weekly.tar.zst")
+        .await
+        .unwrap();
+    assert_eq!(imported.id, backup.id);
+    client
+        .delete_from_target(context(), "s3", "weekly.tar.zst")
+        .await
+        .unwrap();
 }

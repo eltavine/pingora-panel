@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/vue-query'
 import {
   ArchiveRestore,
   CircleAlert,
+  CloudUpload,
   CircleCheck,
   Database,
   DatabaseBackup,
@@ -20,6 +21,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import {
+  copyBackup,
   createBackup,
   deleteBackup,
   restoreBackup,
@@ -55,6 +57,7 @@ import {
 import { notifyFailure, plainHeaders, useRefreshConfiguration } from '@/lib/configuration'
 import { formatters } from '@/lib/format'
 import { useSession } from '@/lib/session'
+import BackupTargetsCard from './BackupTargetsCard.vue'
 import {
   archiveUrl,
   CONTENTS,
@@ -176,6 +179,34 @@ async function restoreConfiguration() {
     }
   } catch (error) {
     notifyFailure(error, t('backups.restoreFailed'))
+  } finally {
+    working.value = false
+  }
+}
+
+const copyOpen = ref(false)
+const copyTarget = ref('')
+function askCopy(backup: BackupDetails) {
+  chosenBackup.value = backup
+  copyOpen.value = true
+}
+async function copy() {
+  const backup = chosenBackup.value
+  const target = copyTarget.value.trim()
+  if (!backup || !target) {
+    return
+  }
+  working.value = true
+  try {
+    const { data } = await copyBackup({
+      path: { id: backup.id },
+      body: { target },
+      headers: plainHeaders(),
+      throwOnError: true,
+    })
+    toast.success(t('backups.copied', { target, name: data.name }))
+  } catch (error) {
+    notifyFailure(error, t('backups.copyFailed'))
   } finally {
     working.value = false
   }
@@ -353,6 +384,12 @@ async function remove() {
                             t('backups.restoreConfiguration')
                           }}
                         </DropdownMenuItem>
+                        <DropdownMenuItem
+                          v-if="backup.state === 'completed'"
+                          @select="askCopy(backup)"
+                        >
+                          <CloudUpload aria-hidden="true" />{{ t('backups.copy') }}
+                        </DropdownMenuItem>
                         <DropdownMenuSeparator v-if="backup.state === 'completed'" />
                         <DropdownMenuItem
                           variant="destructive"
@@ -442,6 +479,27 @@ async function remove() {
       :busy="working"
       @confirm="restoreConfiguration"
     />
+
+    <BackupTargetsCard :manages="manages" />
+
+    <ConfirmDialog
+      v-model:open="copyOpen"
+      :icon="CloudUpload"
+      :title="t('backups.copyTitle')"
+      :description="t('backups.copyDetail')"
+      :confirm-label="t('backups.copyConfirm')"
+      :busy="working || !/^[a-z0-9][a-z0-9-]*$/.test(copyTarget.trim())"
+      @confirm="copy"
+    >
+      <Input
+        v-model="copyTarget"
+        class="font-mono"
+        autocomplete="off"
+        spellcheck="false"
+        :aria-label="t('backups.targets.plugin')"
+        :placeholder="t('backups.targets.plugin')"
+      />
+    </ConfirmDialog>
 
     <ConfirmDialog
       v-model:open="removeOpen"

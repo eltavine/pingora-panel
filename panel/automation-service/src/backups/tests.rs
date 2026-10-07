@@ -348,3 +348,248 @@ async fn requests_are_checked_before_anything_is_listed() {
     assert!(without_sites.list().await.unwrap().is_empty());
     assert_eq!(queued(&database).await, 0);
 }
+
+/// What a stand-in target keeps: each archive as it was described, with
+/// its bytes.
+type Kept = BTreeMap<String, (plugin_contracts::v1::ArchiveInfo, Vec<u8>)>;
+
+/// A plugin's backup target that keeps archives in memory, checking each
+/// against the size and digest it was told.
+#[derive(Clone, Default)]
+struct Target {
+    kept: Arc<std::sync::Mutex<Kept>>,
+}
+
+type Chunks = std::pin::Pin<
+    Box<
+        dyn tokio_stream::Stream<
+                Item = std::result::Result<
+                    plugin_contracts::v1::BackupTargetGetResponse,
+                    tonic::Status,
+                >,
+            > + Send,
+    >,
+>;
+
+#[tonic::async_trait]
+impl plugin_contracts::v1::backup_target_server::BackupTarget for Target {
+    async fn put(
+        &self,
+        request: tonic::Request<tonic::Streaming<plugin_contracts::v1::BackupTargetPutRequest>>,
+    ) -> std::result::Result<
+        tonic::Response<plugin_contracts::v1::BackupTargetPutResponse>,
+        tonic::Status,
+    > {
+        use plugin_contracts::v1::backup_target_put_request::Part;
+        let mut parts = request.into_inner();
+        let Some(Part::Archive(info)) = parts.message().await?.and_then(|first| first.part) else {
+            return Err(tonic::Status::invalid_argument(
+                "describe the archive first",
+            ));
+        };
+        let mut bytes = Vec::new();
+        while let Some(part) = parts.message().await? {
+            if let Some(Part::Chunk(chunk)) = part.part {
+                bytes.extend(chunk);
+            }
+        }
+        if bytes.len() as u64 != info.size || hex::encode(Sha256::digest(&bytes)) != info.sha256 {
+            return Err(tonic::Status::data_loss(
+                "the archive is not the one described",
+            ));
+        }
+        self.kept
+            .lock()
+            .unwrap()
+            .insert(info.name.clone(), (info, bytes));
+        Ok(tonic::Response::new(
+            plugin_contracts::v1::BackupTargetPutResponse {},
+        ))
+    }
+
+    async fn list(
+        &self,
+        _: tonic::Request<plugin_contracts::v1::BackupTargetListRequest>,
+    ) -> std::result::Result<
+        tonic::Response<plugin_contracts::v1::BackupTargetListResponse>,
+        tonic::Status,
+    > {
+        let archives = self
+            .kept
+            .lock()
+            .unwrap()
+            .values()
+            .map(|(info, _)| info.clone())
+            .collect();
+        Ok(tonic::Response::new(
+            plugin_contracts::v1::BackupTargetListResponse { archives },
+        ))
+    }
+
+    type GetStream = Chunks;
+
+    async fn get(
+        &self,
+        request: tonic::Request<plugin_contracts::v1::BackupTargetGetRequest>,
+    ) -> std::result::Result<tonic::Response<Chunks>, tonic::Status> {
+        let name = request.into_inner().name;
+        let (_, bytes) = self
+            .kept
+            .lock()
+            .unwrap()
+            .get(&name)
+            .cloned()
+            .ok_or_else(|| tonic::Status::not_found(format!("there is no archive {name}")))?;
+        let chunks: Vec<_> = bytes
+            .chunks(7)
+            .map(|chunk| {
+                Ok(plugin_contracts::v1::BackupTargetGetResponse {
+                    chunk: chunk.to_vec(),
+                })
+            })
+            .collect();
+        Ok(tonic::Response::new(Box::pin(tokio_stream::iter(chunks))))
+    }
+
+    async fn delete(
+        &self,
+        request: tonic::Request<plugin_contracts::v1::BackupTargetDeleteRequest>,
+    ) -> std::result::Result<
+        tonic::Response<plugin_contracts::v1::BackupTargetDeleteResponse>,
+        tonic::Status,
+    > {
+        self.kept.lock().unwrap().remove(&request.into_inner().name);
+        Ok(tonic::Response::new(
+            plugin_contracts::v1::BackupTargetDeleteResponse {},
+        ))
+    }
+}
+
+async fn target_channel(target: Target) -> tonic::transport::Channel {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(
+        tonic::transport::Server::builder()
+            .add_service(
+                plugin_contracts::v1::backup_target_server::BackupTargetServer::new(target),
+            )
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)),
+    );
+    tonic::transport::Endpoint::from_shared(format!("http://{address}"))
+        .unwrap()
+        .connect_lazy()
+}
+
+#[tokio::test]
+async fn backups_are_copied_to_targets_and_fetched_back_as_backups() {
+    let database = TestDatabase::migrated(MIGRATIONS).await;
+    configuration(database.directory()).await;
+    let sites = sites();
+    let target = Target::default();
+    let backups = backups(&database, Some(sites.path()), 10)
+        .await
+        .with_plugins(target_channel(target.clone()).await);
+    let requested = backups
+        .create(
+            &context(),
+            BackupRequest {
+                contents: vec![BackupContent::Sites],
+                site_path: "shop".into(),
+                attachments: BTreeMap::new(),
+            },
+        )
+        .await
+        .unwrap();
+    backups.take(requested.id).await.unwrap();
+    let taken = backups.get(&requested.id.to_string()).await.unwrap();
+
+    let copy = backups.copy_to(&taken.id.to_string(), "s3").await.unwrap();
+    assert_eq!(
+        copy.name,
+        format!("pingora-panel-backup-{}.tar.zst", taken.id)
+    );
+    assert_eq!(
+        (copy.size_bytes, copy.sha256.as_str()),
+        (taken.size_bytes, taken.sha256.as_str())
+    );
+    let listed = backups.target_archives("s3").await.unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].name, copy.name);
+    assert!(listed[0].created_at.is_some());
+
+    let imported = backups.import(&context(), "s3", &copy.name).await.unwrap();
+    assert_ne!(imported.id, taken.id);
+    assert_eq!(imported.state, BackupState::Completed);
+    assert_eq!(imported.contents, [BackupContent::Sites]);
+    assert_eq!(
+        (imported.size_bytes, imported.sha256.as_str()),
+        (taken.size_bytes, taken.sha256.as_str())
+    );
+    assert_eq!(imported.requested_by, "alice");
+    fs::remove_dir_all(sites.path().join("shop")).unwrap();
+    backups
+        .restore_sites(&imported.id.to_string(), "shop")
+        .await
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(sites.path().join("shop/index.html")).unwrap(),
+        "<h1>Shop</h1>\n"
+    );
+
+    for refused in ["../escape", "", "a/b"] {
+        assert_eq!(
+            backups
+                .import(&context(), "s3", refused)
+                .await
+                .unwrap_err()
+                .code
+                .as_str(),
+            panel_errors::ErrorCode::INVALID_ARGUMENT
+        );
+    }
+    assert_eq!(
+        backups
+            .import(&context(), "s3", "missing.tar.zst")
+            .await
+            .unwrap_err()
+            .code
+            .as_str(),
+        panel_errors::ErrorCode::NOT_FOUND
+    );
+    {
+        let mut kept = target.kept.lock().unwrap();
+        let (_, bytes) = kept.get_mut(&copy.name).unwrap();
+        let middle = bytes.len() / 2;
+        bytes[middle] ^= 0xff;
+    }
+    let before = backups.list().await.unwrap().len();
+    let damaged = backups
+        .import(&context(), "s3", &copy.name)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        damaged.code.as_str(),
+        panel_errors::ErrorCode::VALIDATION_FAILED
+    );
+    assert_eq!(backups.list().await.unwrap().len(), before);
+    let left: Vec<_> = fs::read_dir(database.directory().join("backups"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .filter(|name| !name.ends_with(".tar.zst"))
+        .collect();
+    assert!(
+        left.is_empty(),
+        "a damaged archive leaves nothing: {left:?}"
+    );
+
+    backups.delete_from("s3", &copy.name).await.unwrap();
+    assert!(backups.target_archives("s3").await.unwrap().is_empty());
+    let unreachable = backups
+        .copy_to(&taken.id.to_string(), "Not A Plugin")
+        .await
+        .unwrap_err();
+    assert_eq!(
+        unreachable.code.as_str(),
+        panel_errors::ErrorCode::INVALID_ARGUMENT
+    );
+}

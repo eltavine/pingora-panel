@@ -235,6 +235,32 @@ async fn api(
         })
         .into_response(),
         ("DELETE", "/api/v1/backups/b-1") => StatusCode::NO_CONTENT.into_response(),
+        ("POST", "/api/v1/backups/b-1/copies") => (
+            StatusCode::CREATED,
+            Json(json!({
+                "name": "pingora-panel-backup-b-1.tar.zst", "size_bytes": ARCHIVE.len(),
+                "sha256": "ab".repeat(32), "created_at": "2027-01-15T08:00:05Z",
+            })),
+        )
+            .into_response(),
+        ("GET", "/api/v1/backup-targets/s3/archives") => Json(json!([{
+            "name": "weekly.tar.zst", "size_bytes": 2048, "sha256": "cd".repeat(32),
+            "created_at": "2027-01-14T08:00:00Z",
+        }]))
+        .into_response(),
+        ("POST", "/api/v1/backup-targets/s3/archives/weekly.tar.zst/imports") => (
+            StatusCode::CREATED,
+            [("location", "/api/v1/backups/b-9")],
+            Json({
+                let mut imported = backup("completed");
+                imported["id"] = json!("b-9");
+                imported
+            }),
+        )
+            .into_response(),
+        ("DELETE", "/api/v1/backup-targets/s3/archives/weekly.tar.zst") => {
+            StatusCode::NO_CONTENT.into_response()
+        }
         ("GET", "/api/v1/site-files/content") => (
             [("content-type", "application/octet-stream"), ("etag", "\"t1\"")],
             "<h1>Shop</h1>",
@@ -1600,6 +1626,31 @@ fn backups_are_taken_downloaded_checked_restored_and_removed() {
     let unconfirmed = stub.ppanel(&["backup", "rm", "b-1"]);
     assert_eq!(unconfirmed.status.code(), Some(2));
     let removed = stub.ppanel(&["backup", "rm", "b-1", "--yes"]);
+    assert!(removed.status.success(), "{}", stderr(&removed));
+
+    let copied = stub.ppanel(&["backup", "copy", "b-1", "--to", "s3"]);
+    assert!(copied.status.success(), "{}", stderr(&copied));
+    assert!(stdout(&copied).contains("pingora-panel-backup-b-1.tar.zst"));
+    assert_eq!(
+        stub.requests("POST", "/api/v1/backups/b-1/copies")[0].body,
+        json!({ "target": "s3" })
+    );
+    let listed = stub.ppanel(&["backup", "target", "ls", "s3"]);
+    assert!(
+        stdout(&listed).contains("weekly.tar.zst"),
+        "{}",
+        stdout(&listed)
+    );
+    let imported = stub.ppanel(&["backup", "target", "import", "s3", "weekly.tar.zst"]);
+    assert!(imported.status.success(), "{}", stderr(&imported));
+    assert!(
+        stdout(&imported).contains("as backup b-9"),
+        "{}",
+        stdout(&imported)
+    );
+    let unconfirmed = stub.ppanel(&["backup", "target", "rm", "s3", "weekly.tar.zst"]);
+    assert_eq!(unconfirmed.status.code(), Some(2));
+    let removed = stub.ppanel(&["backup", "target", "rm", "s3", "weekly.tar.zst", "--yes"]);
     assert!(removed.status.success(), "{}", stderr(&removed));
 }
 

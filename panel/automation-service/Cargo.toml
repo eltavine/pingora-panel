@@ -36,6 +36,7 @@ sha2.workspace = true
 sqlx.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
+tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["io"] }
 tonic.workspace = true
 tracing.workspace = true
@@ -48,4 +49,3 @@ async-trait.workspace = true
 panel-acme = { workspace = true, features = ["test-support"] }
 panel-context.workspace = true
 panel-sqlite = { workspace = true, features = ["test-support"] }
-tokio-stream.workspace = true

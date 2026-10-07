@@ -92,6 +92,44 @@ pub(crate) enum BackupCommand {
         #[arg(long)]
         yes: bool,
     },
+    /// Copies a taken backup's archive to a plugin's backup target.
+    Copy {
+        id: String,
+        /// The plugin whose backup target keeps the copy.
+        #[arg(long = "to")]
+        target: String,
+    },
+    /// The archives a plugin's backup target keeps.
+    #[command(subcommand)]
+    Target(TargetCommand),
+}
+
+#[derive(Subcommand)]
+pub(crate) enum TargetCommand {
+    /// The archives a plugin's backup target keeps.
+    Ls { target: String },
+    /// Fetches an archive and keeps it as a backup once it checks against
+    /// its manifest.
+    Import { target: String, name: String },
+    /// Removes an archive from a plugin's backup target.
+    Rm {
+        target: String,
+        name: String,
+        /// Confirms the removal.
+        #[arg(long)]
+        yes: bool,
+    },
+}
+
+const ARCHIVES: &[Column] = &[
+    ("NAME", |archive| text(&archive["name"])),
+    ("SIZE", |archive| bytes(&archive["size_bytes"])),
+    ("CREATED", |archive| text(&archive["created_at"])),
+    ("SHA-256", |archive| text(&archive["sha256"])),
+];
+
+fn target_path(target: &str) -> String {
+    format!("/api/v1/backup-targets/{target}/archives")
 }
 
 const BACKUPS: &[Column] = &[
@@ -237,6 +275,68 @@ pub(crate) async fn run(api: &Api, output: &Output, command: BackupCommand) -> R
             }
             api.change(Method::DELETE, &path(&id), None, None).await?;
             output.done(&format!("Removed backup {id}"), &json!({ "id": id }));
+        }
+        BackupCommand::Copy { id, target } => {
+            let copy = api
+                .change_lasting(
+                    Method::POST,
+                    &format!("{}/copies", path(&id)),
+                    Some(&json!({ "target": target })),
+                    None,
+                    LASTING,
+                )
+                .await?
+                .body;
+            output.done(
+                &format!(
+                    "Copied backup {id} to {target} as {} ({})",
+                    text(&copy["name"]),
+                    bytes(&copy["size_bytes"])
+                ),
+                &copy,
+            );
+        }
+        BackupCommand::Target(TargetCommand::Ls { target }) => {
+            let archives = api.get(&target_path(&target), &[]).await?.body;
+            output.list(&archives, ARCHIVES);
+        }
+        BackupCommand::Target(TargetCommand::Import { target, name }) => {
+            let backup = api
+                .change_lasting(
+                    Method::POST,
+                    &format!("{}/{name}/imports", target_path(&target)),
+                    None,
+                    None,
+                    LASTING,
+                )
+                .await?
+                .body;
+            output.done(
+                &format!(
+                    "Kept {name} from {target} as backup {}: {} files",
+                    text(&backup["id"]),
+                    text(&backup["files"])
+                ),
+                &backup,
+            );
+        }
+        BackupCommand::Target(TargetCommand::Rm { target, name, yes }) => {
+            if !yes {
+                return Err(CliError::Usage(format!(
+                    "removing {name} from {target} cannot be undone; pass --yes"
+                )));
+            }
+            api.change(
+                Method::DELETE,
+                &format!("{}/{name}", target_path(&target)),
+                None,
+                None,
+            )
+            .await?;
+            output.done(
+                &format!("Removed {name} from {target}"),
+                &json!({ "target": target, "name": name }),
+            );
         }
     }
     Ok(())
