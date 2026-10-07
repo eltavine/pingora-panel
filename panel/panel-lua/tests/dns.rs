@@ -92,9 +92,14 @@ fn answer(query: &Message, over_tcp: bool) -> Message {
 
 /// A nameserver's port, the same for UDP and TCP.
 async fn nameserver() -> u16 {
-    let udp = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-    let port = udp.local_addr().unwrap().port();
-    let tcp = TcpListener::bind(("127.0.0.1", port)).await.unwrap();
+    // A UDP port's TCP twin may be taken, so draw ports until both are free.
+    let (udp, tcp, port) = loop {
+        let udp = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let port = udp.local_addr().unwrap().port();
+        if let Ok(tcp) = TcpListener::bind(("127.0.0.1", port)).await {
+            break (udp, tcp, port);
+        }
+    };
     tokio::spawn(async move {
         let mut buffer = vec![0; 65535];
         while let Ok((size, peer)) = udp.recv_from(&mut buffer).await {
