@@ -34,6 +34,7 @@ async fn gateway() -> SocketAddr {
             "listener.http2",
             "request.security",
             "route.path-prefix",
+            "route.rewrite",
             "upstream.http",
             "upstream.resilience",
         ]
@@ -1129,5 +1130,105 @@ async fn grants_limit_people_to_a_site_group_and_their_conditions() {
     remote
         .json(remote.get("/api/v1/sites"), StatusCode::FORBIDDEN)
         .await;
+    stack.stop().await;
+}
+
+#[tokio::test]
+async fn rewrites_and_internal_redirects_go_through_the_api() {
+    let Some(stack) = stack().await else {
+        return;
+    };
+    let api = &stack.api;
+    use reqwest::Method;
+
+    api.json(
+        api.mutate(Method::PUT, "/api/v1/listeners/http", "listener")
+            .json(&json!({"id": "http", "address": "0.0.0.0:8080"})),
+        StatusCode::OK,
+    )
+    .await;
+    let (site, _) = api
+        .json(
+            api.mutate(Method::POST, "/api/v1/sites", "site")
+                .json(&json!({
+                    "name": "Blog",
+                    "action": {"type": "respond", "status": 204},
+                    "domains": [{"host": "blog.example.com", "primary": true}],
+                    "rewrites": [{
+                        "kind": "rewrite",
+                        "pattern": "^/feed$",
+                        "replacement": "/rss.xml",
+                        "flag": "permanent"
+                    }]
+                })),
+            StatusCode::CREATED,
+        )
+        .await;
+    assert_eq!(site["rewrites"][0]["flag"], "permanent");
+    let routes_path = format!("/api/v1/sites/{}/routes", site["id"].as_str().unwrap());
+    let (errors, _) = api
+        .json(
+            api.mutate(Method::POST, &routes_path, "errors")
+                .json(&json!({
+                    "priority": 10,
+                    "match": {"kind": "prefix", "path": "/errors"},
+                    "action": {"type": "respond", "status": 404, "body": "gone"},
+                    "internal": true
+                })),
+            StatusCode::CREATED,
+        )
+        .await;
+    assert_eq!(errors["internal"], true);
+    let gone = json!({
+        "priority": 20,
+        "match": {"kind": "prefix", "path": "/gone"},
+        "action": {"type": "internal_redirect", "target": "/errors$uri"},
+        "rewrites": [{"kind": "strip_prefix", "prefix": "/gone"}]
+    });
+    let (created, headers) = api
+        .json(
+            api.mutate(Method::POST, &routes_path, "gone").json(&gone),
+            StatusCode::CREATED,
+        )
+        .await;
+    assert_eq!(created["action"]["target"], "/errors$uri");
+    let route_path = format!("/api/v1/routes/{}", created["id"].as_str().unwrap());
+    let mut unchanged = gone.clone();
+    unchanged.as_object_mut().unwrap().remove("rewrites");
+    let (replaced, _) = api
+        .json(
+            api.mutate(Method::PUT, &route_path, "replace")
+                .header("if-match", headers["etag"].to_str().unwrap())
+                .json(&unchanged),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(replaced["rewrites"][0]["prefix"], "/gone");
+
+    let mut broken = gone.clone();
+    broken["match"]["path"] = json!("/broken");
+    broken["rewrites"] = json!([{"kind": "add_prefix", "prefix": "/v2/"}]);
+    let refused = api
+        .mutate(Method::POST, &routes_path, "broken")
+        .json(&broken)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+    let problem: Value = refused.json().await.unwrap();
+    assert!(problem.to_string().contains("/v2/"), "{problem}");
+
+    let (draft, _) = api
+        .json(api.get("/api/v1/config/draft"), StatusCode::OK)
+        .await;
+    let (applied, _) = api
+        .json(
+            api.mutate(Method::POST, "/api/v1/config/apply", "apply")
+                .json(&json!({"expected_version": draft["version"]})),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(applied["draft"]["pending"], false);
+
     stack.stop().await;
 }
