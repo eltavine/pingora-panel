@@ -198,6 +198,8 @@ const COLUMNS: &[Column] = &[
     ("ENABLED", |route| text(&route["enabled"])),
 ];
 
+/// The fields of `route` clients write, so writing it back changes nothing
+/// it does not mean to.
 fn input(route: &Value) -> Value {
     json!({
         "id": route["id"],
@@ -206,6 +208,9 @@ fn input(route: &Value) -> Value {
         "priority": route["priority"],
         "match": route["match"],
         "action": route["action"],
+        "security_policy_id": route.get("security_policy_id"),
+        "http_policy_id": route.get("http_policy_id"),
+        "access_log": route.get("access_log"),
         "rewrites": route.get("rewrites"),
         "internal": route.get("internal"),
     })

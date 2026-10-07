@@ -95,6 +95,18 @@ async fn api(
             route["id"] = json!("r-1");
             (StatusCode::CREATED, Json(route)).into_response()
         }
+        ("GET", "/api/v1/routes/r-1") => with_etag(
+            "route-1",
+            json!({
+                "id": "r-1", "name": "api", "enabled": true, "priority": 10,
+                "match": {"kind": "prefix", "path": "/api"},
+                "action": {"type": "respond", "status": 204},
+                "security_policy_id": "office", "http_policy_id": "cors",
+                "access_log": {"enabled": false},
+                "lua": {"access": {"inline": "return"}}
+            }),
+        ),
+        ("PUT", "/api/v1/routes/r-1") => Json(body.clone()).into_response(),
         ("GET", "/api/v1/config/lua") => Json(json!({
             "disabled": false, "version": 7, "revision": 3, "shared_dicts": [], "diagnostics": [],
             "scripts": [{
@@ -3799,4 +3811,18 @@ fn the_sites_files_from_the_command_line() {
         stub.requests("DELETE", "/api/v1/site-files")[0].query,
         "path=shop%2Fold&recursive=true"
     );
+}
+
+#[test]
+fn toggling_a_route_keeps_everything_else_it_has() {
+    let stub = Stub::start();
+    let disabled = stub.ppanel(&["route", "disable", "r-1"]);
+    assert!(disabled.status.success(), "{}", stderr(&disabled));
+    let put = &stub.requests("PUT", "/api/v1/routes/r-1")[0];
+    assert_eq!(put.if_match.as_deref(), Some("\"route-1\""));
+    assert_eq!(put.body["enabled"], false);
+    assert_eq!(put.body["security_policy_id"], "office");
+    assert_eq!(put.body["http_policy_id"], "cors");
+    assert_eq!(put.body["access_log"], json!({"enabled": false}));
+    assert!(put.body.get("lua").is_none(), "{}", put.body);
 }
