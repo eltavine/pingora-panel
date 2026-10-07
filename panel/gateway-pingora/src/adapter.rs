@@ -1,6 +1,7 @@
 use crate::{
     access_log::LoggingPlan,
     acme::ChallengeDirectory,
+    cache::{self, Cache, CachePlan, CachePurge, CacheReport, PurgeScope},
     certificates::CertificateIndex,
     file_checks::{self, FileChecks},
     http_policy::HttpPolicy,
@@ -52,6 +53,7 @@ const CAPABILITIES: &[&str] = &[
     "listener.trusted-proxies",
     "log.access",
     "lua.scripts",
+    "proxy.cache",
     "request.security",
     "response.error-pages",
     "response.hsts",
@@ -148,6 +150,8 @@ pub struct PingoraGatewayAdapter {
     /// `ngx.shared` dictionaries, which keep their contents across
     /// snapshots.
     lua_dicts: Arc<panel_lua::SharedStore>,
+    /// The proxy cache, which keeps its contents across snapshots.
+    cache: &'static Cache,
 }
 
 /// Opaque immutable artifact built entirely before activation.
@@ -173,6 +177,8 @@ pub struct PreparedPingoraSnapshot {
     pub(crate) lua: Option<Arc<LuaPlan>>,
     /// The TLS listeners some of whose sites run TLS handshake scripts.
     pub(crate) scripted_handshakes: HashSet<String>,
+    /// The gateway's proxy cache.
+    pub(crate) cache: &'static Cache,
 }
 
 impl Default for PingoraGatewayAdapter {
@@ -196,6 +202,7 @@ impl PingoraGatewayAdapter {
             bound: Mutex::default(),
             limits: Arc::default(),
             lua_dicts: Arc::default(),
+            cache: Cache::leak(panel_ir::DEFAULT_CACHE_BYTES),
         }
     }
 
@@ -278,6 +285,30 @@ impl PingoraGatewayAdapter {
         )
     }
 
+    /// What the proxy cache holds and did since the gateway started.
+    pub fn cache_report(&self) -> CacheReport {
+        self.cache.report()
+    }
+
+    /// Purges the proxy cache; URLs are those of the active configuration's
+    /// sites. Returns how many keys URLs came to.
+    pub fn purge_cache(&self, purge: &CachePurge) -> Result<usize> {
+        let (scope, keys) = match purge {
+            CachePurge::All => (PurgeScope::All, 0),
+            CachePurge::Sites(sites) => (PurgeScope::Sites(sites.clone()), 0),
+            CachePurge::Urls(urls) => {
+                let active = self.active_prepared().ok_or_else(|| {
+                    PanelError::unavailable("no configuration is active, so no URL is cached")
+                })?;
+                let keys = cache::url_keys(&active.routing, urls)?;
+                let count = keys.len();
+                (PurgeScope::Keys(keys), count)
+            }
+        };
+        self.cache.purge(&scope);
+        Ok(keys)
+    }
+
     /// Live health of every upstream pool in the active snapshot.
     pub fn upstream_health(&self) -> Vec<PoolHealth> {
         self.active
@@ -348,9 +379,6 @@ impl PingoraGatewayAdapter {
 
     fn validate_supported_ir(snapshot: &RuntimeSnapshot) -> Result<()> {
         let mut unsupported = Vec::new();
-        if !snapshot.cache_policies.is_empty() {
-            unsupported.push("cache_policies");
-        }
         if !snapshot.lua_policies.is_empty() {
             unsupported.push("lua_policies");
         }
@@ -362,10 +390,7 @@ impl PingoraGatewayAdapter {
             unsupported.push("HTTP/3 listeners (reserved)");
         }
         for route in &snapshot.routes {
-            if route.retry_policy.is_some()
-                || route.cache_policy_id.is_some()
-                || route.lua_policy_id.is_some()
-            {
+            if route.retry_policy.is_some() || route.lua_policy_id.is_some() {
                 unsupported.push("route policy");
             }
         }
@@ -460,9 +485,21 @@ impl PingoraGatewayAdapter {
             .enumerate()
             .map(|(index, policy)| (policy.id.as_str(), index))
             .collect();
+        let cache_plans: HashMap<&str, Option<Arc<CachePlan>>> = snapshot
+            .cache_policies
+            .iter()
+            .map(|policy| {
+                let plan = policy
+                    .enabled
+                    .then(|| CachePlan::compile(policy).map(Arc::new))
+                    .transpose()?;
+                Ok((policy.id.as_str(), plan))
+            })
+            .collect::<Result<_>>()?;
         let routing = RoutingTable::compile(
             &snapshot,
             &Targets {
+                cache: &cache_plans,
                 pools: &pool_indexes,
                 statics: &static_indexes,
                 policies: &policy_indexes,
@@ -499,6 +536,7 @@ impl PingoraGatewayAdapter {
             logging,
             lua,
             scripted_handshakes,
+            cache: self.cache,
         })
     }
 
@@ -589,6 +627,12 @@ impl DataPlaneAdapter for PingoraGatewayAdapter {
                     .map(|endpoint| (pool.id.as_str().to_owned(), endpoint.id.as_str().to_owned()))
             })
             .collect();
+        self.cache.store.resize(
+            prepared
+                .snapshot
+                .cache_max_bytes
+                .unwrap_or(panel_ir::DEFAULT_CACHE_BYTES),
+        );
         self.active.store(Some(prepared));
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -605,9 +649,7 @@ impl DataPlaneAdapter for PingoraGatewayAdapter {
 mod tests {
     use super::*;
     use panel_domain::{EndpointAddress, EndpointId, UpstreamPoolId};
-    use panel_ir::{
-        CachePolicy, CapabilityRequirement, ListenerRef, UpstreamEndpoint, UpstreamPoolSpec,
-    };
+    use panel_ir::{CapabilityRequirement, ListenerRef, UpstreamEndpoint, UpstreamPoolSpec};
 
     fn mapped_snapshot(tls: bool) -> RuntimeSnapshot {
         let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
@@ -649,13 +691,14 @@ mod tests {
     async fn unsupported_and_reserved_nodes_fail_explicitly() {
         let adapter = PingoraGatewayAdapter::new();
         let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
-        snapshot.cache_policies.push(CachePolicy {
-            ttl_seconds: 60,
-            ..CachePolicy::new("cache")
+        snapshot.lua_policies.push(panel_ir::LuaPolicy {
+            id: "lua".into(),
+            script_secret_id: "script".into(),
+            instruction_limit: 1,
+            timeout_ms: 1,
+            memory_limit_bytes: 1,
+            capabilities: BTreeSet::new(),
         });
-        snapshot
-            .required_capabilities
-            .push(CapabilityRequirement::new("proxy.cache", "1"));
         snapshot.refresh_content_hash();
         let error = adapter.validate(&snapshot).await.unwrap_err();
         assert_eq!(error.code.as_str(), ErrorCode::UNSUPPORTED_CAPABILITY);

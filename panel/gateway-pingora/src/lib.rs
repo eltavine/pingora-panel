@@ -8,6 +8,7 @@
 mod access_log;
 mod acme;
 mod adapter;
+mod cache;
 mod certificates;
 mod dataplane;
 mod error_pages;
@@ -37,6 +38,7 @@ mod upstream;
 
 pub use acme::ChallengeDirectory;
 pub use adapter::{AdapterOptions, PingoraGatewayAdapter, PreparedPingoraSnapshot};
+pub use cache::{CachePurge, CacheReport, SiteCacheReport};
 pub use dataplane::{DataPlane, DataPlaneOptions, DataPlaneStatus, ListenerStatus};
 pub use file_checks::{
     EscapingLink, FileChecks, PrivateKeyCheck, StaticRootCheck, MAX_STATIC_ENTRIES,

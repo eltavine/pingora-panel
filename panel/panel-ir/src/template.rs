@@ -23,6 +23,10 @@ pub enum RequestVariable {
     RequestId,
     /// The upstream address the request went to; empty for local responses.
     UpstreamAddr,
+    /// What the proxy cache did, as nginx's `$upstream_cache_status` says
+    /// it: `HIT`, `MISS`, `BYPASS`, `EXPIRED`, `STALE`, `UPDATING` or
+    /// `REVALIDATED`; empty when it had no part (ADR 0043).
+    UpstreamCacheStatus,
     /// The client's request target, unchanged by rewrites.
     RequestUri,
     /// The current query, without the `?`; `$query_string` too.
@@ -50,6 +54,7 @@ impl RequestVariable {
             "client_ip" => Self::ClientIp,
             "request_id" => Self::RequestId,
             "upstream_addr" => Self::UpstreamAddr,
+            "upstream_cache_status" => Self::UpstreamCacheStatus,
             "request_uri" => Self::RequestUri,
             "args" | "query_string" => Self::Args,
             "is_args" => Self::IsArgs,
@@ -81,6 +86,7 @@ impl fmt::Display for RequestVariable {
             Self::ClientIp => formatter.write_str("client_ip"),
             Self::RequestId => formatter.write_str("request_id"),
             Self::UpstreamAddr => formatter.write_str("upstream_addr"),
+            Self::UpstreamCacheStatus => formatter.write_str("upstream_cache_status"),
             Self::RequestUri => formatter.write_str("request_uri"),
             Self::Args => formatter.write_str("args"),
             Self::IsArgs => formatter.write_str("is_args"),

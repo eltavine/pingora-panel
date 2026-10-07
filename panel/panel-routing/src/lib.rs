@@ -37,6 +37,29 @@ pub trait Request {
     fn client(&self) -> Option<IpAddr>;
 }
 
+/// Conditions compiled once per snapshot outside a route, such as the
+/// requests a cache policy bypasses (ADR 0043).
+pub struct CompiledConditions(Vec<Condition>);
+
+impl CompiledConditions {
+    pub fn compile(conditions: &[panel_ir::RouteCondition]) -> Result<Self> {
+        conditions
+            .iter()
+            .map(Condition::compile)
+            .collect::<Result<_>>()
+            .map(Self)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Whether at least one of the conditions holds for `request`.
+    pub fn any_holds(&self, request: &impl Request) -> bool {
+        self.0.iter().any(|condition| condition.holds(request))
+    }
+}
+
 /// A request described by its parts, as the route tester takes it.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct SimulatedRequest {

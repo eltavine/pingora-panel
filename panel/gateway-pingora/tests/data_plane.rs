@@ -4778,3 +4778,242 @@ async fn static_content_lists_directories_maps_types_and_sets_cache_control() {
     assert_eq!(missing.status, 404);
     gateway.stop().await;
 }
+
+/// An origin answering by path with what caches decide on, counting the
+/// requests each path gets and recording conditional ones.
+async fn caching_origin() -> (SocketAddr, Arc<std::sync::Mutex<HashMap<String, usize>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let seen: Arc<std::sync::Mutex<HashMap<String, usize>>> = Arc::default();
+    let counted = Arc::clone(&seen);
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let seen = Arc::clone(&counted);
+            tokio::spawn(async move {
+                let mut head = Vec::new();
+                let mut byte = [0; 1];
+                while !head.ends_with(b"\r\n\r\n") {
+                    if stream.read(&mut byte).await.unwrap_or(0) == 0 {
+                        return;
+                    }
+                    head.push(byte[0]);
+                }
+                let head = String::from_utf8_lossy(&head).to_lowercase();
+                let path = head.split(' ').nth(1).unwrap_or("/").to_owned();
+                let field = |name: &str| {
+                    head.lines()
+                        .find_map(|line| line.strip_prefix(&format!("{name}: ")))
+                        .map(str::to_owned)
+                };
+                let count = {
+                    let mut seen = seen.lock().unwrap();
+                    let count = seen.entry(path.clone()).or_default();
+                    *count += 1;
+                    *count
+                };
+                if path == "/etag" && field("if-none-match").as_deref() == Some("\"v1\"") {
+                    seen.lock()
+                        .unwrap()
+                        .entry("304".into())
+                        .and_modify(|n| *n += 1)
+                        .or_insert(1);
+                    let _ = stream
+                        .write_all(b"HTTP/1.1 304 Not Modified\r\netag: \"v1\"\r\ncache-control: no-cache\r\nconnection: close\r\n\r\n")
+                        .await;
+                    return;
+                }
+                let (status, headers, body) = match path.as_str() {
+                    "/fresh" => (
+                        200,
+                        "cache-control: max-age=60\r\n".to_owned(),
+                        format!("fresh-{count}"),
+                    ),
+                    "/policy" => (200, String::new(), format!("policy-{count}")),
+                    "/cookie" => (
+                        200,
+                        "set-cookie: session=1\r\n".to_owned(),
+                        format!("cookie-{count}"),
+                    ),
+                    "/private" => (
+                        200,
+                        "cache-control: private, max-age=60\r\n".to_owned(),
+                        format!("private-{count}"),
+                    ),
+                    "/vary" => (
+                        200,
+                        "vary: Accept-Language\r\ncache-control: max-age=60\r\n".to_owned(),
+                        format!(
+                            "vary-{}-{count}",
+                            field("accept-language").unwrap_or_default()
+                        ),
+                    ),
+                    "/etag" => (
+                        200,
+                        "etag: \"v1\"\r\ncache-control: no-cache\r\n".to_owned(),
+                        format!("etag-{count}"),
+                    ),
+                    _ => (404, String::new(), format!("missing-{count}")),
+                };
+                let response = format!(
+                    "HTTP/1.1 {status} Status\r\ncontent-type: text/plain\r\n{headers}content-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes()).await;
+            });
+        }
+    });
+    (address, seen)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cached_responses_follow_their_policy_and_are_purged() {
+    use gateway_pingora::CachePurge;
+    use panel_ir::{CachePolicy, RouteCondition, ValueTest, PROXY_CACHE_CAPABILITY};
+
+    let (origin, seen) = caching_origin().await;
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    snapshot
+        .required_capabilities
+        .push(CapabilityRequirement::new(PROXY_CACHE_CAPABILITY, "1"));
+    let mut policy = CachePolicy::new("pages");
+    policy.ttl_seconds = 60;
+    policy.status_ttls = [(404, 30)].into();
+    policy.bypass = vec![RouteCondition::Cookie {
+        name: "session".into(),
+        test: ValueTest::Present,
+    }];
+    snapshot.cache_policies.push(policy);
+    let mut shop = site(&["cache.test"]);
+    shop.cache_policy_id = Some("pages".into());
+    snapshot.sites.push(shop);
+    snapshot.upstream_pools.push(pool("origin", &[origin]));
+    snapshot
+        .routes
+        .push(route("origin", 1, prefix("/"), proxy("origin")));
+    let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
+    wait_for(listen).await;
+    let ask =
+        |target: &'static str, extra: &'static str| get(listen, Some("cache.test"), target, extra);
+    let served = |path: &str| seen.lock().unwrap().get(path).copied().unwrap_or(0);
+    let status = |response: &Response| {
+        response
+            .headers
+            .get("cache-status")
+            .cloned()
+            .unwrap_or_default()
+    };
+
+    let first = ask("/fresh", "").await;
+    assert_eq!(
+        (first.status, first.body.as_slice()),
+        (200, &b"fresh-1"[..])
+    );
+    assert_eq!(status(&first), "pingora-panel; fwd=miss; stored");
+    let second = ask("/fresh", "").await;
+    assert_eq!(second.body, b"fresh-1");
+    assert_eq!(status(&second), "pingora-panel; hit");
+    assert_eq!(served("/fresh"), 1);
+
+    ask("/policy", "").await;
+    assert_eq!(
+        ask("/policy", "").await.body,
+        b"policy-1",
+        "the policy keeps what the origin does not say"
+    );
+    for uncached in ["/cookie", "/private"] {
+        let first = ask(uncached, "").await;
+        assert_eq!(status(&first), "pingora-panel; fwd=miss");
+        ask(uncached, "").await;
+        assert_eq!(served(uncached), 2, "{uncached} is never stored");
+    }
+    assert_eq!(
+        ask("/vary", "accept-language: en\r\n").await.body,
+        b"vary-en-1"
+    );
+    assert_eq!(
+        ask("/vary", "accept-language: de\r\n").await.body,
+        b"vary-de-2"
+    );
+    assert_eq!(
+        ask("/vary", "accept-language: en\r\n").await.body,
+        b"vary-en-1"
+    );
+    assert_eq!(served("/vary"), 2);
+    let missing = ask("/missing", "").await;
+    assert_eq!(missing.status, 404);
+    assert_eq!(
+        ask("/missing", "").await.body,
+        b"missing-1",
+        "404 is kept for its own time"
+    );
+
+    let bypassed = ask("/fresh", "cookie: session=1\r\n").await;
+    assert_eq!(bypassed.body, b"fresh-2");
+    assert_eq!(status(&bypassed), "pingora-panel; fwd=bypass");
+    assert_eq!(
+        ask("/fresh", "").await.body,
+        b"fresh-1",
+        "a bypass leaves what is stored"
+    );
+
+    ask("/etag", "").await;
+    let revalidated = ask("/etag", "").await;
+    assert_eq!(revalidated.status, 200);
+    assert_eq!(revalidated.body, b"etag-1", "a 304 keeps the stored body");
+    assert_eq!(
+        status(&revalidated),
+        "pingora-panel; fwd=stale; fwd-status=304"
+    );
+    assert_eq!(served("304"), 1);
+
+    let keys = gateway
+        .adapter
+        .purge_cache(&CachePurge::Urls(vec!["http://cache.test/fresh".into()]))
+        .unwrap();
+    assert_eq!(keys, 1);
+    assert_eq!(
+        ask("/fresh", "").await.body,
+        b"fresh-3",
+        "a purged URL is fetched again"
+    );
+    assert_eq!(ask("/policy", "").await.body, b"policy-1");
+    gateway
+        .adapter
+        .purge_cache(&CachePurge::Sites(vec!["site".into()]))
+        .unwrap();
+    assert_eq!(
+        ask("/policy", "").await.body,
+        b"policy-2",
+        "a purged site starts over"
+    );
+    gateway.adapter.purge_cache(&CachePurge::All).unwrap();
+    assert_eq!(ask("/missing", "").await.body, b"missing-2");
+    assert!(gateway
+        .adapter
+        .purge_cache(&CachePurge::Urls(vec!["http://elsewhere.test/".into()]))
+        .is_err());
+
+    let report = gateway.adapter.cache_report();
+    assert!(report.entries > 0 && report.bytes > 0, "{report:?}");
+    assert_eq!(report.max_bytes, panel_ir::DEFAULT_CACHE_BYTES);
+    let site = report
+        .sites
+        .iter()
+        .find(|site| site.site_id == "site")
+        .unwrap();
+    let count = |name: &str| {
+        site.outcomes
+            .iter()
+            .find(|(outcome, _)| *outcome == name)
+            .unwrap()
+            .1
+    };
+    assert!(count("hit") >= 5, "{site:?}");
+    assert_eq!(count("bypass"), 1, "{site:?}");
+    assert!(count("uncacheable") >= 4, "{site:?}");
+    gateway.stop().await;
+}

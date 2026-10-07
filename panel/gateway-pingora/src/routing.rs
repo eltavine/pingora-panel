@@ -4,6 +4,7 @@
 
 use crate::{
     access_log::AccessPlan,
+    cache::CachePlan,
     error_pages::{MaintenancePlan, PageSet},
     lua::{Hook, HookIndex, Hooks},
     rewrite::{InternalTarget, Rewrites},
@@ -17,6 +18,7 @@ use panel_routing::{HostEntry, Request, Router};
 use std::{
     collections::{BTreeSet, HashMap},
     net::SocketAddr,
+    sync::Arc,
 };
 
 const HTTPS_PORT: u16 = 443;
@@ -75,6 +77,9 @@ pub(crate) struct CompiledRoute {
     pub internal: bool,
     /// Pages answering the route's errors in place of its site's.
     pub error_pages: Option<PageSet>,
+    /// The cache plan of the route's requests: its own policy's, or else
+    /// its site's; none when the policy is disabled.
+    pub cache: Option<Arc<CachePlan>>,
 }
 
 pub(crate) enum RouteTarget {
@@ -105,6 +110,19 @@ pub(crate) struct Targets<'a> {
     pub lua: &'a HookIndex,
     /// Where static content and error page files are below.
     pub static_root: Option<&'a std::path::Path>,
+    /// Cache plans by policy; disabled policies have none.
+    pub cache: &'a HashMap<&'a str, Option<Arc<CachePlan>>>,
+}
+
+/// The plan a policy named by `owner` caches with.
+fn cache_plan(
+    targets: &Targets<'_>,
+    owner: &dyn std::fmt::Display,
+    id: &str,
+) -> Result<Option<Arc<CachePlan>>> {
+    targets.cache.get(id).cloned().ok_or_else(|| {
+        PanelError::validation_failed(format!("{owner} names an unknown cache policy {id}"))
+    })
 }
 
 fn http_policy(
@@ -175,12 +193,22 @@ impl RoutingTable {
                     www.insert((*name).to_owned(), target);
                 }
             }
+            let site_cache = site
+                .cache_policy_id
+                .as_deref()
+                .map(|id| cache_plan(targets, &format!("site {}", site.id), id))
+                .transpose()?
+                .flatten();
             let routes = routing
                 .routes()
                 .iter()
                 .map(|matched| {
                     let route = &snapshot.routes[matched.spec];
                     Ok(CompiledRoute {
+                        cache: match route.cache_policy_id.as_deref() {
+                            Some(id) => cache_plan(targets, &format!("route {}", route.id), id)?,
+                            None => site_cache.clone(),
+                        },
                         id: route.id.clone(),
                         name: route.name.clone(),
                         target: compile_target(&route.id, &route.action, targets)?,
@@ -447,6 +475,7 @@ mod tests {
                 http: &http,
                 lua: &HookIndex::default(),
                 static_root: None,
+                cache: &HashMap::new(),
             },
         )
     }

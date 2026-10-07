@@ -35,6 +35,8 @@ pub(crate) struct Facts<'a> {
     pub headers: &'a HeaderMap,
     /// The upstream node the request went to, as `address:port`.
     pub upstream: Option<&'a str>,
+    /// What the proxy cache did, as `$upstream_cache_status` says it.
+    pub cache_status: Option<&'a str>,
     /// The variables `set` and scripts gave the request.
     pub variables: &'a HashMap<String, String>,
 }
@@ -148,6 +150,7 @@ pub(crate) fn value(variable: &RequestVariable, facts: &Facts<'_>) -> String {
         RequestVariable::Header(name) => header(facts.headers, name).unwrap_or_default().to_owned(),
         RequestVariable::Cookie(name) => cookie(facts.headers, name).unwrap_or_default(),
         RequestVariable::UpstreamAddr => facts.upstream.unwrap_or_default().to_owned(),
+        RequestVariable::UpstreamCacheStatus => facts.cache_status.unwrap_or_default().to_owned(),
         RequestVariable::Lua(name) => facts.variables.get(name).cloned().unwrap_or_default(),
         _ => String::new(),
     }
@@ -162,6 +165,7 @@ mod tests {
 
     fn facts(headers: &HeaderMap) -> Facts<'_> {
         Facts {
+            cache_status: None,
             variables: &NONE,
             host: "shop.example",
             uri: "/a/b",

@@ -30,6 +30,7 @@ panel-lua-ir.workspace = true
 panel-metrics.workspace = true
 panel-routing.workspace = true
 parking_lot.workspace = true
+pingora-cache = { workspace = true, features = ["rustls"] }
 pingora-core = { workspace = true, features = ["rustls"] }
 pingora-http.workspace = true
 pingora-load-balancing = { workspace = true, features = ["rustls"] }
@@ -44,6 +45,7 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 socket2.workspace = true
+TinyUFO.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true

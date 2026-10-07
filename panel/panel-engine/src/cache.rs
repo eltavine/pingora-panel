@@ -14,8 +14,9 @@ pub const MOST_CACHE_POLICIES: usize = 64;
 /// The smallest and largest store a gateway keeps.
 pub const LEAST_CACHE_BYTES: u64 = 1 << 20;
 pub const MOST_CACHE_BYTES: u64 = 64 << 30;
-/// The largest response a policy may store.
-pub const MOST_OBJECT_BYTES: u64 = 1 << 30;
+/// The largest response a policy may store, as large as the gateway's
+/// in-memory store weighs entries by.
+pub const MOST_OBJECT_BYTES: u64 = 64 << 20;
 const MOST_KEY_BYTES: usize = 1024;
 const MOST_VARY_HEADERS: usize = 16;
 const MOST_STATUS_TTLS: usize = 64;

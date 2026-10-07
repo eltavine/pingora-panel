@@ -460,3 +460,35 @@ fn mismatches_name_the_first_part_that_does_not_hold() {
     request.headers = vec![("x-env".into(), "staging".into())];
     assert_eq!(guarded.mismatch(&request), None);
 }
+
+#[test]
+fn compiled_conditions_hold_when_any_of_them_does() {
+    use panel_ir::{RouteCondition, ValueTest};
+
+    let conditions = crate::CompiledConditions::compile(&[
+        RouteCondition::Cookie {
+            name: "session".into(),
+            test: ValueTest::Present,
+        },
+        RouteCondition::Query {
+            name: "nocache".into(),
+            test: ValueTest::Present,
+        },
+    ])
+    .unwrap();
+    let request = |query: Option<&str>, headers: &[(&str, &str)]| crate::SimulatedRequest {
+        method: "GET".into(),
+        host: "shop.example".into(),
+        path: "/".into(),
+        query: query.map(str::to_owned),
+        headers: headers
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+            .collect(),
+        client: None,
+    };
+    assert!(!conditions.any_holds(&request(None, &[])));
+    assert!(conditions.any_holds(&request(Some("nocache=1"), &[])));
+    assert!(conditions.any_holds(&request(None, &[("cookie", "a=1; session=x")])));
+    assert!(!crate::CompiledConditions::compile(&[]).unwrap().any_holds(&request(None, &[])));
+}

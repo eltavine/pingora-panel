@@ -161,6 +161,8 @@ pub(crate) struct Served<'a> {
     pub node: Option<&'a str>,
     /// The client's request target when a rewrite changed it.
     pub original: Option<&'a str>,
+    /// What the proxy cache did for the request.
+    pub cache: Option<crate::cache::Outcome>,
 }
 
 /// A JSON object written one field at a time.
@@ -302,6 +304,10 @@ pub(crate) fn json(
     record.field("http.request.body.size", &served.request_bytes);
     record.field("http.response.body.size", &served.response_bytes);
     record.some("user_agent.original", header(headers, header::USER_AGENT));
+    record.some(
+        "pingora_panel.cache.status",
+        served.cache.map(crate::cache::Outcome::name),
+    );
     if let Some(referer) = header(headers, header::REFERER) {
         record.field("http.request.header.referer", &[referer]);
     }
@@ -330,6 +336,7 @@ pub(crate) fn json(
             client_ip: served.client,
             headers,
             upstream: served.node,
+            cache_status: served.cache.map(crate::cache::Outcome::variable),
             variables: served.variables,
         };
         for (name, template) in &plan.fields {
@@ -485,6 +492,7 @@ mod tests {
 
     fn served(request: &RequestHeader) -> Served<'_> {
         Served {
+            cache: None,
             variables: &NONE,
             request,
             scheme: "https",

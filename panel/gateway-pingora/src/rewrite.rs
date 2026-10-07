@@ -323,6 +323,7 @@ mod tests {
         )]);
         let variables = HashMap::new();
         let facts = Facts {
+            cache_status: None,
             host: "shop.example",
             uri: path,
             query,
@@ -450,6 +451,7 @@ mod tests {
         let headers = HeaderMap::new();
         let variables = HashMap::new();
         let facts = Facts {
+            cache_status: None,
             host: "",
             uri: "/",
             query: None,

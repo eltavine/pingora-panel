@@ -5,6 +5,7 @@ use crate::{
     access_log::{self, AccessPlan, LoggingPlan, Served},
     acme::ChallengeDirectory,
     adapter::{ActiveSnapshot, PreparedPingoraSnapshot},
+    cache::{Outcome, RequestCache, CACHE_NAME},
     certificates::{ChosenCertificates, Handshake},
     error_pages::Prepared,
     forwarding::{self, Forwarding},
@@ -29,6 +30,7 @@ use chrono::Utc;
 use http::{header, HeaderValue};
 use panel_ir::AccessLogFormat;
 use panel_metrics::{method, protocol_version, ActiveRequest, ClientRequest, ServerRequest};
+use pingora_cache::{key::HashBinary, CacheKey, CacheMeta, NoCacheReason, RespCacheable};
 use pingora_core::{
     modules::http::{compression::ResponseCompressionBuilder, HttpModules},
     protocols::http::v1::common::is_upgrade_req,
@@ -52,6 +54,9 @@ mod lua_phases;
 
 pub(crate) use handshake::{HandshakeScripts, Sessions};
 use lua_phases::LuaStep;
+
+/// RFC 9211's field.
+const CACHE_STATUS: http::HeaderName = http::HeaderName::from_static("cache-status");
 
 const REDIRECT_STATUS: u16 = 308;
 /// Times the rewrite phase may send a request to another route, as nginx
@@ -229,6 +234,12 @@ pub(crate) struct RequestContext {
     scheme: &'static str,
     /// An error page's body in place of the upstream's, until it is sent.
     replacement: Option<Option<bytes::Bytes>>,
+    /// The pool the route proxies to, whether the cache answers or not.
+    upstream_target: Option<usize>,
+    /// The cache of the route's requests (ADR 0043).
+    cache: Option<RequestCache>,
+    /// What the cache did, once the response is known.
+    cache_outcome: Option<Outcome>,
 }
 
 impl RequestContext {
@@ -363,6 +374,9 @@ impl ProxyHttp for PanelProxy {
             host: String::new(),
             scheme: "http",
             replacement: None,
+            upstream_target: None,
+            cache: None,
+            cache_outcome: None,
         }
     }
 
@@ -816,39 +830,43 @@ impl ProxyHttp for PanelProxy {
             }
             return match &route.target {
                 RouteTarget::Proxy(index) => {
-                    let pool = &snapshot.pools[*index];
-                    match pool.admit() {
-                        Ok(trial) => ctx.trial = trial,
-                        Err(seconds) => {
-                            let wait = seconds.to_string();
-                            Self::error(
-                                session,
-                                ctx,
-                                503,
-                                "the upstream is failing; try again later",
-                                &[(header::RETRY_AFTER, wait.as_str())],
-                            )
-                            .await?;
-                            return Ok(true);
-                        }
+                    // The upstream admits the request once the cache does not
+                    // answer it, in proxy_upstream_filter.
+                    ctx.upstream_target = Some(*index);
+                    let cacheable = matches!(
+                        session.req_header().method,
+                        http::Method::GET | http::Method::HEAD
+                    );
+                    if let Some(plan) = route
+                        .cache
+                        .clone()
+                        .filter(|_| cacheable && ctx.subrequest.is_none())
+                    {
+                        let request = Routed {
+                            header: session.req_header(),
+                            host: host_name,
+                            path: &path,
+                            client: ctx.client,
+                        };
+                        let primary = (!plan.bypasses(&request)).then(|| {
+                            let tls = self.listener.tls;
+                            lua_phases::with_variables(session, &ctx.variables, |variables| {
+                                plan.key(&facts(
+                                    session,
+                                    host_name,
+                                    &path,
+                                    tls,
+                                    variables,
+                                    &ctx.request_uri,
+                                ))
+                            })
+                        });
+                        ctx.cache = Some(RequestCache {
+                            plan,
+                            site: site.id.to_string(),
+                            primary,
+                        });
                     }
-                    match pool.place().await {
-                        Ok(place) => ctx.place = place,
-                        Err(busy) => {
-                            if std::mem::take(&mut ctx.trial) {
-                                pool.cancel_trial();
-                            }
-                            let message = match busy {
-                                Busy::Full => "the upstream is handling all the requests it takes",
-                                Busy::Waited => "the upstream did not take the request in time",
-                            };
-                            Self::error(session, ctx, 503, message, &[(header::RETRY_AFTER, "1")])
-                                .await?;
-                            return Ok(true);
-                        }
-                    }
-                    pool.count_request();
-                    ctx.pool = Some(*index);
                     Ok(false)
                 }
                 RouteTarget::Static(content) => {
@@ -999,6 +1017,112 @@ impl ProxyHttp for PanelProxy {
         }
     }
 
+    /// Admits the request to its upstream once the cache did not answer it:
+    /// a hit neither counts against the upstream's circuit nor waits for a
+    /// place among the requests it takes at once.
+    async fn proxy_upstream_filter(
+        &self,
+        session: &mut Session,
+        ctx: &mut RequestContext,
+    ) -> pingora_core::Result<bool> {
+        let Some((snapshot, index)) = ctx.snapshot.clone().zip(ctx.upstream_target) else {
+            return Ok(true);
+        };
+        if ctx.pool.is_some() {
+            return Ok(true);
+        }
+        let pool = &snapshot.pools[index];
+        match pool.admit() {
+            Ok(trial) => ctx.trial = trial,
+            Err(seconds) => {
+                let wait = seconds.to_string();
+                Self::error(
+                    session,
+                    ctx,
+                    503,
+                    "the upstream is failing; try again later",
+                    &[(header::RETRY_AFTER, wait.as_str())],
+                )
+                .await?;
+                return Ok(false);
+            }
+        }
+        match pool.place().await {
+            Ok(place) => ctx.place = place,
+            Err(busy) => {
+                if std::mem::take(&mut ctx.trial) {
+                    pool.cancel_trial();
+                }
+                let message = match busy {
+                    Busy::Full => "the upstream is handling all the requests it takes",
+                    Busy::Waited => "the upstream did not take the request in time",
+                };
+                Self::error(session, ctx, 503, message, &[(header::RETRY_AFTER, "1")]).await?;
+                return Ok(false);
+            }
+        }
+        pool.count_request();
+        ctx.pool = Some(index);
+        Ok(true)
+    }
+
+    fn request_cache_filter(
+        &self,
+        session: &mut Session,
+        ctx: &mut RequestContext,
+    ) -> pingora_core::Result<()> {
+        if let Some((snapshot, cache)) = ctx.snapshot.as_ref().zip(ctx.cache.as_ref()) {
+            if cache.primary.is_some() {
+                snapshot.cache.enable(session, &cache.plan);
+            }
+        }
+        Ok(())
+    }
+
+    fn cache_key_callback(
+        &self,
+        _session: &Session,
+        ctx: &mut RequestContext,
+    ) -> pingora_core::Result<CacheKey> {
+        let snapshot = ctx
+            .snapshot
+            .as_ref()
+            .ok_or_else(|| Error::explain(ErrorType::InternalError, "request has no snapshot"))?;
+        let (site, primary) = ctx
+            .cache
+            .as_ref()
+            .and_then(|cache| Some((&cache.site, cache.primary.as_ref()?)))
+            .ok_or_else(|| Error::explain(ErrorType::InternalError, "request has no cache key"))?;
+        Ok(snapshot.cache.key(site, primary))
+    }
+
+    fn cache_vary_filter(
+        &self,
+        meta: &CacheMeta,
+        ctx: &mut RequestContext,
+        request: &RequestHeader,
+    ) -> Option<HashBinary> {
+        ctx.cache.as_ref()?.plan.variance(meta, request)
+    }
+
+    fn response_cache_filter(
+        &self,
+        session: &Session,
+        response: &ResponseHeader,
+        ctx: &mut RequestContext,
+    ) -> pingora_core::Result<RespCacheable> {
+        Ok(match &ctx.cache {
+            Some(cache) => cache.plan.decide(
+                response,
+                session
+                    .req_header()
+                    .headers
+                    .contains_key(header::AUTHORIZATION),
+            ),
+            None => RespCacheable::Uncacheable(NoCacheReason::NeverEnabled),
+        })
+    }
+
     async fn upstream_peer(
         &self,
         session: &mut Session,
@@ -1114,9 +1238,10 @@ impl ProxyHttp for PanelProxy {
             .headers
             .get(header::CONTENT_LENGTH)
             .is_some_and(|length| length.as_bytes() == b"0");
-        // An upstream's error gets its page where the pages intercept it; a
-        // body that never comes could not carry the page, so it is left be.
-        if ctx.pool.is_some() && status >= 400 && (head || !bodiless) {
+        // An upstream's error gets its page where the pages intercept it,
+        // stored or not; a body that never comes could not carry the page,
+        // so it is left be.
+        if ctx.upstream_target.is_some() && status >= 400 && (head || !bodiless) {
             let intercepts = snapshot
                 .as_deref()
                 .zip(ctx.site)
@@ -1142,6 +1267,22 @@ impl ProxyHttp for PanelProxy {
             .and_then(|(snapshot, index)| snapshot.http[index].compression.as_ref())
         {
             compression.decide(session, upstream_response)?;
+        }
+        if let Some(cache) = &ctx.cache {
+            if let Some(outcome) = Outcome::of(&session.cache.phase(), cache.primary.is_none()) {
+                ctx.cache_outcome = Some(outcome);
+                if let Some(snapshot) = &snapshot {
+                    snapshot.cache.count(&cache.site, outcome);
+                }
+                // This cache is the last to handle the response, so its
+                // entry goes after any the upstream sent (RFC 9211 §2).
+                if cache.plan.policy.status_header {
+                    upstream_response.append_header(
+                        CACHE_STATUS,
+                        format!("{CACHE_NAME}; {}", outcome.status()),
+                    )?;
+                }
+            }
         }
         if upstream_response.status == http::StatusCode::SWITCHING_PROTOCOLS {
             // An upgraded connection idles as long as its protocol wants.
@@ -1793,6 +1934,7 @@ impl PanelProxy {
                         .path_and_query()
                         .is_none_or(|target| target.as_str() != ctx.request_uri))
                 .then_some(ctx.request_uri.as_str()),
+                cache: ctx.cache_outcome,
             };
             let now = Utc::now();
             if plan.enabled {
@@ -1954,6 +2096,7 @@ fn facts<'a>(
         client_ip: client_address(session).map(|address| address.ip()),
         headers: &session.req_header().headers,
         upstream: None,
+        cache_status: None,
         variables,
     }
 }
