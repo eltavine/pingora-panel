@@ -350,6 +350,32 @@ mod tests {
         Cli::command().debug_assert();
     }
 
+    /// Every command `panel/surfaces.json` names for an operation exists
+    /// (ADR 0045).
+    #[test]
+    fn every_command_the_surfaces_name_exists() {
+        let surfaces: serde_json::Value =
+            serde_json::from_str(include_str!("../../surfaces.json")).unwrap();
+        let root = Cli::command();
+        let mut missing = Vec::new();
+        for (operation, entry) in surfaces["operations"].as_object().unwrap() {
+            let Some(path) = entry["cli"].as_str() else {
+                continue;
+            };
+            let mut command = &root;
+            for word in path.split(' ') {
+                match command.find_subcommand(word) {
+                    Some(next) => command = next,
+                    None => {
+                        missing.push(format!("{operation}: ppanel {path}"));
+                        break;
+                    }
+                }
+            }
+        }
+        assert!(missing.is_empty(), "no such commands: {missing:#?}");
+    }
+
     #[test]
     fn resource_action_commands_parse() {
         for arguments in [

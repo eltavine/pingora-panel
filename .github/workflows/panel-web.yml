@@ -6,11 +6,13 @@ on:
     paths:
       - "panel/web/**"
       - "panel/panel-api/tests/fixtures/openapi.json"
+      - "panel/surfaces.json"
       - ".github/workflows/panel-web.yml"
   pull_request:
     paths:
       - "panel/web/**"
       - "panel/panel-api/tests/fixtures/openapi.json"
+      - "panel/surfaces.json"
       - ".github/workflows/panel-web.yml"
 
 permissions:

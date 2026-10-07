@@ -1,0 +1,1057 @@
+{
+  "description": "The ppanel command and the console route that offer each operation of the OpenAPI document, or why an operation belongs to some surfaces only (ADR 0045).",
+  "operations": {
+    "abort": {
+      "cli": "gateway snapshot abort",
+      "console": "/publish"
+    },
+    "account_sessions": {
+      "cli": "account sessions",
+      "console": "/accounts"
+    },
+    "account_tokens": {
+      "cli": "account tokens",
+      "console": "/accounts"
+    },
+    "act_on_container": {
+      "cli": "container stop",
+      "console": "/containers"
+    },
+    "act_on_project": {
+      "cli": "compose up",
+      "console": "/containers"
+    },
+    "activate": {
+      "cli": "gateway snapshot activate",
+      "console": "/publish"
+    },
+    "add_domains": {
+      "cli": "domain add",
+      "console": "/sites/:id"
+    },
+    "add_node": {
+      "cli": "upstream node add",
+      "console": "/upstreams/:id"
+    },
+    "apply": {
+      "cli": "config apply",
+      "console": "/config"
+    },
+    "approve_request": {
+      "cli": "approval approve",
+      "console": "/approvals"
+    },
+    "ast": {
+      "cli": "config ast",
+      "console": "/config"
+    },
+    "batch_sites": {
+      "cli": "site batch",
+      "console": "/sites"
+    },
+    "bundle": {
+      "cli": "config export",
+      "console": "/config"
+    },
+    "cache_settings": {
+      "cli": "cache store",
+      "console": "/cache"
+    },
+    "cache_stats": {
+      "cli": "cache stats",
+      "console": "/cache"
+    },
+    "certificate_coverage": {
+      "cli": "certificate check",
+      "console": "/certificates"
+    },
+    "change_gateway_service": {
+      "cli": "host gateway-service restart",
+      "console": "/host"
+    },
+    "change_password": {
+      "cli": "password",
+      "console": "/account"
+    },
+    "check": {
+      "cli": "config check",
+      "console": "/config"
+    },
+    "check_domains": {
+      "cli": "domain check",
+      "console": "/sites/:id"
+    },
+    "check_tls": {
+      "cli": "listener check",
+      "console": "/listeners"
+    },
+    "clone_site": {
+      "cli": "site clone",
+      "console": "/sites"
+    },
+    "configure_plugin": {
+      "cli": "plugin configure",
+      "console": "/plugins/:name"
+    },
+    "container_logs": {
+      "cli": "container logs",
+      "console": "/containers"
+    },
+    "container_stats": {
+      "cli": "container stats",
+      "console": "/containers"
+    },
+    "copy_backup": {
+      "cli": "backup copy",
+      "console": "/backups"
+    },
+    "create_account": {
+      "cli": "account create",
+      "console": "/accounts"
+    },
+    "create_acme_account": {
+      "cli": "acme account register",
+      "console": "/certificates"
+    },
+    "create_alert_channel": {
+      "cli": "alert channel create",
+      "console": "/alerts"
+    },
+    "create_automatic_certificate": {
+      "cli": "acme certificate request",
+      "console": "/certificates"
+    },
+    "create_backup": {
+      "cli": "backup create",
+      "console": "/backups"
+    },
+    "create_certificate": {
+      "cli": "certificate upload",
+      "console": "/certificates"
+    },
+    "create_container_site": {
+      "cli": "container proxy",
+      "console": "/containers"
+    },
+    "create_directory": {
+      "cli": "files mkdir",
+      "console": "/site-files"
+    },
+    "create_dns_provider": {
+      "cli": "acme dns-provider add",
+      "console": "/certificates"
+    },
+    "create_grant": {
+      "cli": "account grant",
+      "console": "/accounts"
+    },
+    "create_role": {
+      "cli": "role create",
+      "console": "/roles"
+    },
+    "create_route": {
+      "cli": "route add",
+      "console": "/sites/:id"
+    },
+    "create_site": {
+      "cli": "site create",
+      "console": "/sites"
+    },
+    "create_token": {
+      "cli": "token create",
+      "console": "/account"
+    },
+    "create_upstream": {
+      "cli": "upstream create",
+      "console": "/upstreams"
+    },
+    "data_plane": {
+      "cli": "gateway status",
+      "console": "/"
+    },
+    "delete_acme_account": {
+      "cli": "acme account delete",
+      "console": "/certificates"
+    },
+    "delete_alert_channel": {
+      "cli": "alert channel delete",
+      "console": "/alerts"
+    },
+    "delete_alert_rule": {
+      "cli": "alert rule delete",
+      "console": "/alerts"
+    },
+    "delete_approval_policy": {
+      "cli": "approval-policy delete",
+      "console": "/approvals"
+    },
+    "delete_automatic_certificate": {
+      "cli": "acme certificate delete",
+      "console": "/certificates"
+    },
+    "delete_backup": {
+      "cli": "backup rm",
+      "console": "/backups"
+    },
+    "delete_cache_policy": {
+      "cli": "cache-policy delete",
+      "console": "/cache"
+    },
+    "delete_certificate": {
+      "cli": "certificate delete",
+      "console": "/certificates"
+    },
+    "delete_dns_provider": {
+      "cli": "acme dns-provider delete",
+      "console": "/certificates"
+    },
+    "delete_grant": {
+      "cli": "account revoke-grant",
+      "console": "/accounts"
+    },
+    "delete_http_policy": {
+      "cli": "http-policy delete",
+      "console": "/http-policies"
+    },
+    "delete_identity_provider": {
+      "cli": "identity-provider delete",
+      "console": "/identity-providers"
+    },
+    "delete_listener": {
+      "cli": "listener delete",
+      "console": "/listeners"
+    },
+    "delete_logs": {
+      "cli": "logs delete",
+      "console": "/logs"
+    },
+    "delete_node": {
+      "cli": "upstream node remove",
+      "console": "/upstreams/:id"
+    },
+    "delete_plugin_key": {
+      "cli": "plugin key rm",
+      "console": "/plugins"
+    },
+    "delete_plugin_secret": {
+      "cli": "plugin secret rm",
+      "console": "/plugins"
+    },
+    "delete_role": {
+      "cli": "role delete",
+      "console": "/roles"
+    },
+    "delete_route": {
+      "cli": "route delete",
+      "console": "/sites/:id"
+    },
+    "delete_security_policy": {
+      "cli": "security-policy delete",
+      "console": "/security-policies"
+    },
+    "delete_site": {
+      "cli": "site delete",
+      "console": "/sites"
+    },
+    "delete_target_archive": {
+      "cli": "backup target rm",
+      "console": "/backups"
+    },
+    "delete_tls_profile": {
+      "cli": "tls-profile delete",
+      "console": "/listeners"
+    },
+    "delete_upstream": {
+      "cli": "upstream delete",
+      "console": "/upstreams"
+    },
+    "delete_workload_identity": {
+      "cli": "workload-identity delete",
+      "console": "/identity-providers"
+    },
+    "diff_revision": {
+      "cli": "revision diff",
+      "console": "/revisions/:id(\\d+)"
+    },
+    "disable_engine": {
+      "cli": "container engine disable",
+      "console": "/containers"
+    },
+    "disable_plugin": {
+      "cli": "plugin disable",
+      "console": "/plugins/:name"
+    },
+    "disable_site": {
+      "cli": "site disable",
+      "console": "/sites"
+    },
+    "discover_plugins": {
+      "cli": "plugin discover",
+      "console": "/plugins"
+    },
+    "disk_usage": {
+      "cli": "container engine df",
+      "console": "/containers"
+    },
+    "download_backup": {
+      "cli": "backup download",
+      "console": "/backups"
+    },
+    "download_logs": {
+      "cli": "logs download",
+      "console": "/logs"
+    },
+    "draft": {
+      "cli": "config draft",
+      "console": "/config"
+    },
+    "drain": {
+      "cli": "upstream drain",
+      "console": "/upstreams/:id"
+    },
+    "dry_run": {
+      "cli": "config apply",
+      "console": "/config"
+    },
+    "enable_engine": {
+      "cli": "container engine enable",
+      "console": "/containers"
+    },
+    "enable_plugin": {
+      "cli": "plugin enable",
+      "console": "/plugins/:name"
+    },
+    "enable_site": {
+      "cli": "site enable",
+      "console": "/sites"
+    },
+    "end_account_session": {
+      "cli": "account end-session",
+      "console": "/accounts"
+    },
+    "end_account_sessions": {
+      "cli": "account end-sessions",
+      "console": "/accounts"
+    },
+    "end_other_sessions": {
+      "cli": "logout",
+      "console": "/account"
+    },
+    "end_own_session": {
+      "cli": "session end",
+      "console": "/account"
+    },
+    "exchange_workload_token": {
+      "specific": "A workload's exchange of the identity token its platform issues for an API token, for jobs rather than people, whom the console signs in.",
+      "cli": "workload-identity exchange"
+    },
+    "explain": {
+      "cli": "config explain",
+      "console": "/config"
+    },
+    "export_sites": {
+      "cli": "site export",
+      "console": "/sites"
+    },
+    "favorite_site": {
+      "cli": "site favorite",
+      "console": "/sites"
+    },
+    "file_checks": {
+      "cli": "gateway files",
+      "console": "/"
+    },
+    "finish_sign_in": {
+      "specific": "Where an identity provider sends the browser back, which only the console's sign-in flow reaches; the command line signs in with a password or an API token.",
+      "console": "/login"
+    },
+    "format": {
+      "cli": "config fmt",
+      "console": "/config"
+    },
+    "gateway_service": {
+      "cli": "host gateway-service",
+      "console": "/host"
+    },
+    "get_account": {
+      "cli": "account show",
+      "console": "/accounts",
+      "console_via": "list_accounts"
+    },
+    "get_acme_account": {
+      "cli": "acme account show",
+      "console": "/certificates",
+      "console_via": "list_acme_accounts"
+    },
+    "get_approval_policy": {
+      "cli": "approval-policy show",
+      "console": "/approvals",
+      "console_via": "list_approval_policies"
+    },
+    "get_approval_request": {
+      "cli": "approval show",
+      "console": "/approvals",
+      "console_via": "list_approval_requests"
+    },
+    "get_audit_event": {
+      "cli": "audit show",
+      "console": "/audit",
+      "console_via": "list_audit_events"
+    },
+    "get_automatic_certificate": {
+      "cli": "acme certificate show",
+      "console": "/certificates",
+      "console_via": "list_automatic_certificates"
+    },
+    "get_backup": {
+      "cli": "backup show",
+      "console": "/backups"
+    },
+    "get_cache_policy": {
+      "cli": "cache-policy show",
+      "console": "/cache",
+      "console_via": "list_cache_policies"
+    },
+    "get_certificate": {
+      "cli": "certificate show",
+      "console": "/certificates",
+      "console_via": "list_certificates"
+    },
+    "get_dns_provider": {
+      "cli": "acme dns-provider show",
+      "console": "/certificates",
+      "console_via": "list_dns_providers"
+    },
+    "get_http_policy": {
+      "cli": "http-policy show",
+      "console": "/http-policies",
+      "console_via": "list_http_policies"
+    },
+    "get_identity_provider": {
+      "cli": "identity-provider show",
+      "console": "/identity-providers",
+      "console_via": "list_identity_providers"
+    },
+    "get_listener": {
+      "cli": "listener show",
+      "console": "/listeners",
+      "console_via": "list_listeners"
+    },
+    "get_plugin": {
+      "cli": "plugin show",
+      "console": "/plugins/:name"
+    },
+    "get_revision": {
+      "cli": "revision show",
+      "console": "/revisions/:id(\\d+)"
+    },
+    "get_route": {
+      "cli": "route show",
+      "console": "/sites/:id",
+      "console_via": "list_routes"
+    },
+    "get_security_policy": {
+      "cli": "security-policy show",
+      "console": "/security-policies",
+      "console_via": "list_security_policies"
+    },
+    "get_sign_in_policy": {
+      "cli": "sign-in-policy show",
+      "console": "/identity-providers"
+    },
+    "get_site": {
+      "cli": "site show",
+      "console": "/sites/:id"
+    },
+    "get_tls_profile": {
+      "cli": "tls-profile show",
+      "console": "/listeners",
+      "console_via": "list_tls_profiles"
+    },
+    "get_upstream": {
+      "cli": "upstream show",
+      "console": "/upstreams/:id"
+    },
+    "get_workload_identity": {
+      "cli": "workload-identity show",
+      "console": "/identity-providers",
+      "console_via": "list_workload_identities"
+    },
+    "grant_plugin": {
+      "cli": "plugin grant",
+      "console": "/plugins/:name"
+    },
+    "host_agent": {
+      "cli": "host agent",
+      "console": "/host"
+    },
+    "host_directories": {
+      "cli": "host directories",
+      "console": "/host"
+    },
+    "host_listeners": {
+      "cli": "host listeners",
+      "console": "/host"
+    },
+    "host_summary": {
+      "cli": "host",
+      "console": "/host"
+    },
+    "import_bundle": {
+      "cli": "config import",
+      "console": "/config"
+    },
+    "import_nginx": {
+      "cli": "config import-nginx",
+      "console": "/config"
+    },
+    "import_sites": {
+      "cli": "site import",
+      "console": "/sites"
+    },
+    "import_target_archive": {
+      "cli": "backup target import",
+      "console": "/backups"
+    },
+    "inspect_certificate": {
+      "cli": "certificate inspect",
+      "console": "/certificates"
+    },
+    "inspect_container": {
+      "cli": "container inspect",
+      "console": "/containers"
+    },
+    "inspect_image": {
+      "cli": "image inspect",
+      "console": "/containers"
+    },
+    "ir": {
+      "cli": "config ir",
+      "console": "/config"
+    },
+    "issue_token": {
+      "cli": "account issue-token",
+      "console": "/account"
+    },
+    "limit_plugin": {
+      "cli": "plugin limit",
+      "console": "/plugins/:name"
+    },
+    "list_accounts": {
+      "cli": "account list",
+      "console": "/accounts"
+    },
+    "list_acme_accounts": {
+      "cli": "acme account list",
+      "console": "/certificates"
+    },
+    "list_alert_channels": {
+      "cli": "alert channel list",
+      "console": "/alerts"
+    },
+    "list_alert_notifications": {
+      "cli": "alert notifications",
+      "console": "/alerts"
+    },
+    "list_alert_rules": {
+      "cli": "alert rule list",
+      "console": "/alerts"
+    },
+    "list_approval_policies": {
+      "cli": "approval-policy list",
+      "console": "/approvals"
+    },
+    "list_approval_requests": {
+      "cli": "approval list",
+      "console": "/approvals"
+    },
+    "list_audit_events": {
+      "cli": "audit list",
+      "console": "/audit"
+    },
+    "list_automatic_certificates": {
+      "cli": "acme certificate list",
+      "console": "/certificates"
+    },
+    "list_backups": {
+      "cli": "backup list",
+      "console": "/backups"
+    },
+    "list_cache_policies": {
+      "cli": "cache-policy list",
+      "console": "/cache"
+    },
+    "list_certificates": {
+      "cli": "certificate list",
+      "console": "/certificates"
+    },
+    "list_container_stats": {
+      "cli": "container stats",
+      "console": "/containers"
+    },
+    "list_containers": {
+      "cli": "container list",
+      "console": "/containers"
+    },
+    "list_directory": {
+      "cli": "files ls",
+      "console": "/site-files"
+    },
+    "list_dns_providers": {
+      "cli": "acme dns-provider list",
+      "console": "/certificates"
+    },
+    "list_domains": {
+      "cli": "domain list",
+      "console": "/sites",
+      "console_via": "list_sites"
+    },
+    "list_engines": {
+      "cli": "container engines",
+      "console": "/containers"
+    },
+    "list_grants": {
+      "cli": "account grants",
+      "console": "/accounts"
+    },
+    "list_http_policies": {
+      "cli": "http-policy list",
+      "console": "/http-policies"
+    },
+    "list_identity_providers": {
+      "cli": "identity-provider list",
+      "console": "/identity-providers"
+    },
+    "list_images": {
+      "cli": "image list",
+      "console": "/containers"
+    },
+    "list_listeners": {
+      "cli": "listener list",
+      "console": "/listeners"
+    },
+    "list_log_deletions": {
+      "cli": "logs deletions",
+      "console": "/logs"
+    },
+    "list_networks": {
+      "cli": "network list",
+      "console": "/containers"
+    },
+    "list_plugin_keys": {
+      "cli": "plugin key list",
+      "console": "/plugins"
+    },
+    "list_plugin_secrets": {
+      "cli": "plugin secret list",
+      "console": "/plugins"
+    },
+    "list_plugins": {
+      "cli": "plugin list",
+      "console": "/plugins"
+    },
+    "list_projects": {
+      "cli": "compose list",
+      "console": "/containers"
+    },
+    "list_revisions": {
+      "cli": "revision list",
+      "console": "/revisions"
+    },
+    "list_roles": {
+      "cli": "role list",
+      "console": "/roles"
+    },
+    "list_routes": {
+      "cli": "route list",
+      "console": "/sites/:id"
+    },
+    "list_security_policies": {
+      "cli": "security-policy list",
+      "console": "/security-policies"
+    },
+    "list_sites": {
+      "cli": "site list",
+      "console": "/sites"
+    },
+    "list_target_archives": {
+      "cli": "backup target ls",
+      "console": "/backups"
+    },
+    "list_tls_profiles": {
+      "cli": "tls-profile list",
+      "console": "/listeners"
+    },
+    "list_upstreams": {
+      "cli": "upstream list",
+      "console": "/upstreams"
+    },
+    "list_volumes": {
+      "cli": "volume list",
+      "console": "/containers"
+    },
+    "list_workload_identities": {
+      "cli": "workload-identity list",
+      "console": "/identity-providers"
+    },
+    "login": {
+      "cli": "login",
+      "console": "/login"
+    },
+    "logout": {
+      "cli": "logout",
+      "console": "/"
+    },
+    "lua_library": {
+      "cli": "lua scripts",
+      "console": "/lua"
+    },
+    "lua_modules": {
+      "cli": "lua modules",
+      "console": "/lua"
+    },
+    "note_revision": {
+      "cli": "revision note",
+      "console": "/revisions/:id(\\d+)"
+    },
+    "openapi": {
+      "specific": "The API's own description, for API clients and tools; the command line and the console are built from it rather than offering it."
+    },
+    "own_sessions": {
+      "cli": "session list",
+      "console": "/account"
+    },
+    "own_tokens": {
+      "cli": "token list",
+      "console": "/account"
+    },
+    "permissions": {
+      "cli": "role permissions",
+      "console": "/roles"
+    },
+    "plan": {
+      "cli": "config plan",
+      "console": "/config"
+    },
+    "prepare": {
+      "cli": "gateway snapshot prepare",
+      "console": "/publish"
+    },
+    "project_files": {
+      "cli": "compose config",
+      "console": "/containers"
+    },
+    "project_logs": {
+      "cli": "compose logs",
+      "console": "/containers"
+    },
+    "prune": {
+      "cli": "container engine prune",
+      "console": "/containers"
+    },
+    "prune_preview": {
+      "cli": "container engine prune",
+      "console": "/containers"
+    },
+    "pull_image": {
+      "cli": "image pull",
+      "console": "/containers"
+    },
+    "purge_cache": {
+      "cli": "cache purge",
+      "console": "/cache"
+    },
+    "put_alert_rule": {
+      "cli": "alert rule set",
+      "console": "/alerts"
+    },
+    "put_approval_policy": {
+      "cli": "approval-policy set",
+      "console": "/approvals"
+    },
+    "put_cache_policy": {
+      "cli": "cache-policy set",
+      "console": "/cache"
+    },
+    "put_cache_settings": {
+      "cli": "cache store",
+      "console": "/cache"
+    },
+    "put_http_policy": {
+      "cli": "http-policy set",
+      "console": "/http-policies"
+    },
+    "put_identity_provider": {
+      "cli": "identity-provider set",
+      "console": "/identity-providers"
+    },
+    "put_listener": {
+      "cli": "listener set",
+      "console": "/listeners"
+    },
+    "put_plugin_secret": {
+      "cli": "plugin secret set",
+      "console": "/plugins"
+    },
+    "put_security_policy": {
+      "cli": "security-policy set",
+      "console": "/security-policies"
+    },
+    "put_sign_in_policy": {
+      "cli": "sign-in-policy set",
+      "console": "/identity-providers"
+    },
+    "put_tls_profile": {
+      "cli": "tls-profile set",
+      "console": "/listeners"
+    },
+    "put_workload_identity": {
+      "cli": "workload-identity set",
+      "console": "/identity-providers"
+    },
+    "read_file": {
+      "cli": "files get",
+      "console": "/site-files"
+    },
+    "receipt": {
+      "cli": "gateway receipt",
+      "console": "/receipts"
+    },
+    "reject_request": {
+      "cli": "approval reject",
+      "console": "/approvals"
+    },
+    "reload": {
+      "cli": "gateway reload",
+      "console": "/"
+    },
+    "remove_container": {
+      "cli": "container remove",
+      "console": "/containers"
+    },
+    "remove_domain": {
+      "cli": "domain remove",
+      "console": "/sites/:id"
+    },
+    "remove_entry": {
+      "cli": "files rm",
+      "console": "/site-files"
+    },
+    "remove_image": {
+      "cli": "image remove",
+      "console": "/containers"
+    },
+    "renew_automatic_certificate": {
+      "cli": "acme certificate renew",
+      "console": "/certificates"
+    },
+    "reorder_routes": {
+      "cli": "route order",
+      "console": "/sites/:id"
+    },
+    "replace_certificate": {
+      "cli": "certificate replace",
+      "console": "/certificates"
+    },
+    "replace_domain": {
+      "cli": "domain update",
+      "console": "/sites/:id"
+    },
+    "replace_node": {
+      "cli": "upstream node update",
+      "console": "/upstreams/:id"
+    },
+    "replace_role": {
+      "cli": "role update",
+      "console": "/roles"
+    },
+    "replace_route": {
+      "cli": "route update",
+      "console": "/sites/:id"
+    },
+    "replace_site": {
+      "cli": "site update",
+      "console": "/sites"
+    },
+    "replace_source": {
+      "cli": "config import",
+      "console": "/config"
+    },
+    "replace_upstream": {
+      "cli": "upstream update",
+      "console": "/upstreams"
+    },
+    "reset_password": {
+      "cli": "account password",
+      "console": "/accounts"
+    },
+    "restore": {
+      "cli": "upstream undrain",
+      "console": "/upstreams/:id"
+    },
+    "restore_backup": {
+      "cli": "backup restore",
+      "console": "/backups"
+    },
+    "restore_revision": {
+      "cli": "revision restore",
+      "console": "/revisions/:id(\\d+)"
+    },
+    "restore_site": {
+      "cli": "site restore",
+      "console": "/sites"
+    },
+    "revoke_account_token": {
+      "cli": "account revoke-token",
+      "console": "/accounts"
+    },
+    "revoke_approval": {
+      "cli": "approval revoke",
+      "console": "/approvals"
+    },
+    "revoke_own_token": {
+      "cli": "token revoke",
+      "console": "/account"
+    },
+    "rollback_plugin": {
+      "cli": "plugin rollback",
+      "console": "/plugins/:name"
+    },
+    "rotate_alert_channel": {
+      "cli": "alert channel rotate",
+      "console": "/alerts"
+    },
+    "rotate_token": {
+      "cli": "token rotate",
+      "console": "/account"
+    },
+    "schema": {
+      "cli": "config schema",
+      "console": "/config"
+    },
+    "search_logs": {
+      "cli": "logs search",
+      "console": "/logs"
+    },
+    "services": {
+      "cli": "services",
+      "console": "/"
+    },
+    "session": {
+      "cli": "whoami",
+      "console": "/account"
+    },
+    "setup": {
+      "cli": "setup",
+      "console": "/setup"
+    },
+    "setup_status": {
+      "cli": "setup",
+      "console": "/setup"
+    },
+    "shutdown": {
+      "cli": "gateway shutdown",
+      "console": "/"
+    },
+    "sign_in_options": {
+      "specific": "What the sign-in page offers before anyone signs in; the command line signs in with a password or an API token, and identity-provider list shows administrators the providers.",
+      "console": "/login"
+    },
+    "site_links": {
+      "cli": "container links",
+      "console": "/containers"
+    },
+    "site_summary": {
+      "cli": "site summary",
+      "console": "/sites"
+    },
+    "source": {
+      "cli": "config export",
+      "console": "/config"
+    },
+    "start_sign_in": {
+      "specific": "A browser's redirect to an identity provider, which only the console's sign-in page follows; the command line signs in with a password or an API token.",
+      "console": "/login"
+    },
+    "status": {
+      "cli": "gateway snapshot status",
+      "console": "/publish"
+    },
+    "tail_container_logs": {
+      "cli": "container logs",
+      "console": "/containers"
+    },
+    "tail_logs": {
+      "cli": "logs tail",
+      "console": "/logs"
+    },
+    "test_alert_channel": {
+      "cli": "alert channel test",
+      "console": "/alerts"
+    },
+    "test_lua": {
+      "cli": "lua test",
+      "console": "/lua"
+    },
+    "test_route": {
+      "cli": "route test",
+      "console": "/sites/:id"
+    },
+    "traffic_series": {
+      "cli": "traffic series",
+      "console": "/traffic"
+    },
+    "traffic_summary": {
+      "cli": "traffic summary",
+      "console": "/traffic"
+    },
+    "trust_plugin_key": {
+      "cli": "plugin key add",
+      "console": "/plugins"
+    },
+    "unfavorite_site": {
+      "cli": "site unfavorite",
+      "console": "/sites"
+    },
+    "update_account": {
+      "cli": "account update",
+      "console": "/accounts"
+    },
+    "update_dns_provider": {
+      "cli": "acme dns-provider update",
+      "console": "/certificates"
+    },
+    "upgrade_plugin": {
+      "cli": "plugin upgrade",
+      "console": "/plugins/:name"
+    },
+    "upstream_health": {
+      "cli": "upstream health",
+      "console": "/upstreams"
+    },
+    "validate": {
+      "cli": "gateway snapshot validate",
+      "console": "/publish"
+    },
+    "validation": {
+      "cli": "config validate",
+      "console": "/sites"
+    },
+    "verify_audit_events": {
+      "cli": "audit verify",
+      "console": "/audit"
+    },
+    "withdraw_request": {
+      "cli": "approval withdraw",
+      "console": "/approvals"
+    },
+    "workers": {
+      "cli": "gateway workers",
+      "console": "/"
+    },
+    "write_file": {
+      "cli": "files put",
+      "console": "/site-files"
+    }
+  }
+}

@@ -28,6 +28,8 @@ on:
       - ".github/scripts/check-panel-docs.py"
       - ".github/scripts/check-panel-feature-matrix.py"
       - ".github/scripts/test-panel-feature-matrix.py"
+      - ".github/scripts/check-panel-surfaces.py"
+      - ".github/scripts/test-panel-surfaces.py"
       - ".github/scripts/check-panel-rust-api-breaking.sh"
       - ".github/scripts/list-workspace-package-names.py"
       - ".github/scripts/resolve-panel-compat-baseline.sh"
@@ -77,6 +79,8 @@ on:
       - ".github/scripts/check-panel-docs.py"
       - ".github/scripts/check-panel-feature-matrix.py"
       - ".github/scripts/test-panel-feature-matrix.py"
+      - ".github/scripts/check-panel-surfaces.py"
+      - ".github/scripts/test-panel-surfaces.py"
       - ".github/scripts/check-panel-rust-api-breaking.sh"
       - ".github/scripts/list-workspace-package-names.py"
       - ".github/scripts/resolve-panel-compat-baseline.sh"
@@ -476,6 +480,12 @@ jobs:
 
       - name: Check product feature matrix
         run: python3 .github/scripts/check-panel-feature-matrix.py
+
+      - name: Self-test surface parity guard
+        run: python3 .github/scripts/test-panel-surfaces.py
+
+      - name: Check that every operation has its command and console route
+        run: python3 .github/scripts/check-panel-surfaces.py
 
   dependency-hygiene:
     name: Dependency hygiene
