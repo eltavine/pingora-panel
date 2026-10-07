@@ -407,11 +407,12 @@ pub async fn run(api: &Api, output: &Output, command: AlertCommand) -> Result<()
                     text(&tested["failure"])
                 )));
             }
+            let status = match &tested["status"] {
+                Value::Null => String::new(),
+                status => format!(" ({})", text(status)),
+            };
             output.done(
-                &format!(
-                    "Channel {id} took the test notification ({})",
-                    text(&tested["status"])
-                ),
+                &format!("Channel {id} took the test notification{status}"),
                 &tested,
             );
         }

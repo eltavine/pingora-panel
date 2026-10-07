@@ -207,6 +207,18 @@ test('channels can notify through a plugin, which keeps no signing secret', asyn
     plugin: 'chat',
     plugin_channel: '#ops',
   })
+
+  await page.route(/\/api\/v1\/alert-channels$/, (route) =>
+    route.request().method() === 'GET'
+      ? route.fulfill({ json: [{ ...channel, id: 'chat', kind: 'plugin', target: 'chat/#ops' }] })
+      : route.fallback(),
+  )
+  await page.route(/\/api\/v1\/alert-channels\/chat\/test$/, (route) =>
+    route.fulfill({ json: { delivered: true, status: null } }),
+  )
+  await page.reload()
+  await page.getByRole('button', { name: 'Send a test to chat' }).click()
+  await expect(page.getByText('chat took the test notification', { exact: true })).toBeVisible()
 })
 
 test('a rule leads to its notifications', async ({ page }) => {

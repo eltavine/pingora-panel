@@ -85,6 +85,7 @@ const en: AlertsMessages = {
     rotateChannel: 'Rotate the secret of {id}',
     deleteChannel: 'Delete {id}',
     testDelivered: '{id} took the test notification ({status})',
+    testTaken: '{id} took the test notification',
     testFailed: '{id} did not take the test notification',
     channelDeleted: 'Deleted channel {id}',
     deleteChannelTitle: 'Delete channel',

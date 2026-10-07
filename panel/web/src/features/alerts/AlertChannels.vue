@@ -60,7 +60,11 @@ function send(channel: AlertChannelView) {
     {
       onSuccess: (outcome) => {
         if (outcome.delivered) {
-          toast.success(t('alerts.testDelivered', { id: channel.id, status: outcome.status ?? '' }))
+          toast.success(
+            outcome.status == null
+              ? t('alerts.testTaken', { id: channel.id })
+              : t('alerts.testDelivered', { id: channel.id, status: outcome.status }),
+          )
         } else {
           toast.error(t('alerts.testFailed', { id: channel.id }), {
             description: outcome.failure ?? undefined,

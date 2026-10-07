@@ -78,6 +78,7 @@ const zhCN = {
     rotateChannel: '轮换 {id} 的密钥',
     deleteChannel: '删除 {id}',
     testDelivered: '{id} 已接收测试通知（{status}）',
+    testTaken: '{id} 已接收测试通知',
     testFailed: '{id} 未接收测试通知',
     channelDeleted: '已删除渠道 {id}',
     deleteChannelTitle: '删除渠道',

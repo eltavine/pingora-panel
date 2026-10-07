@@ -801,6 +801,10 @@ async fn api(
             "delivered": false, "status": 503, "failure": "the receiver answered 503"
         }))
         .into_response(),
+        ("POST", "/api/v1/alert-channels/chat/test") => Json(json!({
+            "delivered": true, "status": null, "failure": null
+        }))
+        .into_response(),
         ("GET", "/api/v1/alert-notifications") => Json(json!([{
             "id": "0192", "rule": "shop-errors", "channel": "ops", "kind": "firing",
             "state": "abandoned", "attempts": 2, "created_at": "2026-10-04T09:58:00Z",
@@ -2389,6 +2393,9 @@ fn alert_rules_and_channels_are_set_from_the_command_line() {
     let tested = stub.ppanel(&["alert", "channel", "test", "ops"]);
     assert_eq!(tested.status.code(), Some(1));
     assert!(stderr(&tested).contains("the receiver answered 503"));
+    let tested = stub.ppanel(&["alert", "channel", "test", "chat"]);
+    assert!(tested.status.success(), "{}", stderr(&tested));
+    assert_eq!(stdout(&tested), "Channel chat took the test notification\n");
     let notifications = stub.ppanel(&["alert", "notifications", "--rule", "shop-errors"]);
     assert!(stdout(&notifications).contains("abandoned"));
     assert_eq!(
