@@ -647,7 +647,7 @@ impl PanelProxy {
             };
             let tls = self.listener.tls;
             let args = with_variables(session, &ctx.variables, |known| {
-                let facts = super::facts(session, host, path, tls, known);
+                let facts = super::facts(session, host, path, tls, known, &ctx.request_uri);
                 variable
                     .args
                     .iter()

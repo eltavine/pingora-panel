@@ -5,6 +5,7 @@
 use crate::{
     access_log::AccessPlan,
     lua::{Hook, HookIndex, Hooks},
+    rewrite::{InternalTarget, Rewrites},
     template::Template,
 };
 use http::HeaderValue;
@@ -45,6 +46,8 @@ pub(crate) struct SiteRoutes {
     /// Lua hooks for the site's requests; `server_rewrite` runs before the
     /// route is chosen.
     pub lua: Hooks,
+    /// Rules every request runs before a route is chosen.
+    pub rewrites: Rewrites,
     www: HashMap<String, String>,
     /// Aligned with the router's ranked routes of the site.
     routes: Vec<CompiledRoute>,
@@ -61,6 +64,10 @@ pub(crate) struct CompiledRoute {
     pub access: AccessPlan,
     /// The Lua hooks the route's requests run, inheritance resolved.
     pub lua: Hooks,
+    /// Rules the route's requests run once it is chosen.
+    pub rewrites: Rewrites,
+    /// Takes only requests sent to it from inside the gateway.
+    pub internal: bool,
 }
 
 pub(crate) enum RouteTarget {
@@ -79,6 +86,7 @@ pub(crate) enum RouteTarget {
     },
     /// `content_by_lua`.
     Lua(Hook),
+    InternalRedirect(InternalTarget),
 }
 
 /// Resolves IR references to compiled pool and static content indexes.
@@ -188,6 +196,10 @@ impl RoutingTable {
                             .get(route.id.as_str())
                             .cloned()
                             .unwrap_or_default(),
+                        rewrites: Rewrites::compile(&route.rewrites).map_err(|error| {
+                            rewrite_error(&format!("route {}", route.id), &error)
+                        })?,
+                        internal: route.internal,
                     })
                 })
                 .collect::<Result<_>>()?;
@@ -226,6 +238,8 @@ impl RoutingTable {
                     .get(site.id.as_str())
                     .cloned()
                     .unwrap_or_default(),
+                rewrites: Rewrites::compile(&site.rewrites)
+                    .map_err(|error| rewrite_error(&format!("site {}", site.id), &error))?,
                 www,
                 routes,
             });
@@ -301,6 +315,12 @@ fn template_error(route: &RouteId, error: &str) -> PanelError {
     PanelError::validation_failed(format!("route {route} has an invalid template: {error}"))
 }
 
+fn rewrite_error(owner: &str, error: &str) -> PanelError {
+    PanelError::validation_failed(format!(
+        "{owner} has a rewrite that does not compile: {error}"
+    ))
+}
+
 fn compile_target(
     route: &RouteId,
     action: &RouteAction,
@@ -357,11 +377,9 @@ fn compile_target(
             content_type: content_type.clone(),
             retry_after: *retry_after_seconds,
         },
-        RouteAction::InternalRedirect { .. } => {
-            return Err(PanelError::unsupported_capability(format!(
-                "route {route} redirects internally, which this gateway does not do"
-            )))
-        }
+        RouteAction::InternalRedirect { target } => RouteTarget::InternalRedirect(
+            InternalTarget::compile(target).map_err(|error| template_error(route, &error))?,
+        ),
     })
 }
 

@@ -23,6 +23,7 @@ mod proxy;
 mod request_identity;
 mod resilience;
 mod responses;
+mod rewrite;
 mod routing;
 mod secrets;
 mod security;

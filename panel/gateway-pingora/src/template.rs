@@ -25,6 +25,10 @@ pub(crate) enum Template {
 pub(crate) struct Facts<'a> {
     pub host: &'a str,
     pub uri: &'a str,
+    /// The current query, without the `?`.
+    pub query: Option<&'a str>,
+    /// The client's request target, as rewrites leave it.
+    pub request_uri: &'a str,
     pub method: &'a str,
     pub scheme: &'a str,
     pub client_ip: Option<IpAddr>,
@@ -110,10 +114,33 @@ fn request_id(headers: &HeaderMap) -> String {
         .map_or_else(|| uuid::Uuid::now_v7().to_string(), str::to_owned)
 }
 
-fn value(variable: &RequestVariable, facts: &Facts<'_>) -> String {
+/// The value of the query parameter `name`, compared ignoring ASCII case as
+/// nginx's `$arg_` does, as it is written in the query.
+fn argument<'a>(query: Option<&'a str>, name: &str) -> &'a str {
+    query
+        .into_iter()
+        .flat_map(|query| query.split('&'))
+        .find_map(|pair| {
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            key.eq_ignore_ascii_case(name).then_some(value)
+        })
+        .unwrap_or_default()
+}
+
+pub(crate) fn value(variable: &RequestVariable, facts: &Facts<'_>) -> String {
     match variable {
         RequestVariable::Host => facts.host.to_owned(),
         RequestVariable::Uri => facts.uri.to_owned(),
+        RequestVariable::RequestUri => facts.request_uri.to_owned(),
+        RequestVariable::Args => facts.query.unwrap_or_default().to_owned(),
+        RequestVariable::IsArgs => {
+            if facts.query.is_some_and(|query| !query.is_empty()) {
+                "?".to_owned()
+            } else {
+                String::new()
+            }
+        }
+        RequestVariable::Arg(name) => argument(facts.query, name).to_owned(),
         RequestVariable::Method => facts.method.to_owned(),
         RequestVariable::Scheme => facts.scheme.to_owned(),
         RequestVariable::ClientIp => facts.client_ip.map(|ip| ip.to_string()).unwrap_or_default(),
@@ -138,6 +165,8 @@ mod tests {
             variables: &NONE,
             host: "shop.example",
             uri: "/a/b",
+            query: Some("page=2&Sort=asc&flag"),
+            request_uri: "/old/b?page=2",
             method: "GET",
             scheme: "http",
             client_ip: Some("192.0.2.7".parse().unwrap()),
@@ -178,6 +207,25 @@ mod tests {
                 .unwrap()
                 .render(&scripted),
             "t1/."
+        );
+    }
+
+    #[test]
+    fn query_variables_read_the_current_query_and_the_original_target() {
+        let headers = HeaderMap::new();
+        let template =
+            Template::parse("$request_uri|$args|$is_args|$arg_sort|$arg_flag|$arg_none").unwrap();
+        assert_eq!(
+            template.render(&facts(&headers)),
+            "/old/b?page=2|page=2&Sort=asc&flag|?|asc||"
+        );
+        let bare = Facts {
+            query: None,
+            ..facts(&headers)
+        };
+        assert_eq!(
+            Template::parse("[$is_args$args]").unwrap().render(&bare),
+            "[]"
         );
     }
 

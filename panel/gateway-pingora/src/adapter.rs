@@ -61,6 +61,7 @@ const CAPABILITIES: &[&str] = &[
     "route.host",
     "route.path-prefix",
     "route.regex",
+    "route.rewrite",
     "site.redirect",
     "upstream.backup",
     "upstream.balancing",

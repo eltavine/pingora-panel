@@ -15,7 +15,8 @@ use crate::{
     request_identity,
     resilience::Busy,
     responses,
-    routing::{CompiledRoute, RouteTarget, SiteRoutes},
+    rewrite::{InternalTarget, Rewrites, Rewritten},
+    routing::{CompiledRoute, RouteTarget, RoutingTable, SiteRoutes},
     security::{Admission, Candidate, ClientResolution, Refusal},
     static_files,
     telemetry::{self, GatewayMetrics},
@@ -222,6 +223,12 @@ pub(crate) struct RequestContext {
     subrequest: Option<crate::subrequests::Subrequest>,
     /// The named location `ngx.exec("@name")` sent the request to.
     named: Option<String>,
+    /// The client's request target, which rewrites leave for
+    /// `$request_uri`.
+    request_uri: String,
+    /// Whether a rewrite, an internal redirect or a script sent the request
+    /// where it is, so an internal route takes it.
+    internal: bool,
 }
 
 impl RequestContext {
@@ -251,6 +258,18 @@ impl RequestContext {
             && !session.as_ref().retry_buffer_truncated()
             && session.response_written().is_none()
     }
+}
+
+/// What a site's or route's rules did to a request.
+enum Rewrite {
+    /// The request was answered, with a redirect or an error.
+    Answered,
+    Unchanged,
+    Changed {
+        path: String,
+        /// A route is chosen again.
+        reroute: bool,
+    },
 }
 
 /// A request as routing sees it: its normalized host and path, and the
@@ -339,6 +358,8 @@ impl ProxyHttp for PanelProxy {
             variables: HashMap::new(),
             subrequest: None,
             named: None,
+            request_uri: String::new(),
+            internal: false,
         }
     }
 
@@ -371,6 +392,14 @@ impl ProxyHttp for PanelProxy {
         }
         http_policy::disable_compression(session);
         request_identity::ensure_request_id(session.req_header_mut());
+        if ctx.request_uri.is_empty() {
+            ctx.request_uri = session
+                .req_header()
+                .uri
+                .path_and_query()
+                .map_or("/", |target| target.as_str())
+                .to_owned();
+        }
         if let Some(metrics) = self
             .listener
             .metrics
@@ -470,9 +499,10 @@ impl ProxyHttp for PanelProxy {
         let mut changes_left = MOST_URI_CHANGES;
         'request: loop {
             // A named location starts at its own rewrite phase, as nginx's
-            // does: the server's variables and handler do not run again.
+            // does: the server's variables, rules and handler do not run
+            // again.
             let named = ctx.named.take();
-            let site_path = panel_routing::path::normalize(session.req_header().uri.path())
+            let mut site_path = panel_routing::path::normalize(session.req_header().uri.path())
                 .map_or_else(
                     || session.req_header().uri.path().to_owned(),
                     |path| path.into_owned(),
@@ -488,6 +518,16 @@ impl ProxyHttp for PanelProxy {
                 .await?
             {
                 return Ok(true);
+            }
+            if named.is_none() && !site.rewrites.is_empty() {
+                match self
+                    .rewrite(session, ctx, &site.rewrites, &site_path, host_name)
+                    .await?
+                {
+                    Rewrite::Answered => return Ok(true),
+                    Rewrite::Unchanged => {}
+                    Rewrite::Changed { path, .. } => site_path = path,
+                }
             }
             if let Some(hook) = site.lua.server_rewrite.clone().filter(|_| named.is_none()) {
                 match self
@@ -539,6 +579,12 @@ impl ProxyHttp for PanelProxy {
             };
             ctx.route = Some(route_index);
             loop {
+                // nginx's internal locations answer requests from outside 404
+                // once they are found, before their rewrites run.
+                if site.route(route_index).internal && !ctx.internal && ctx.subrequest.is_none() {
+                    responses::plain(session, 404, "not found", &[]).await?;
+                    return Ok(true);
+                }
                 if let LuaStep::Done = self
                     .lua_variables(
                         session,
@@ -550,6 +596,34 @@ impl ProxyHttp for PanelProxy {
                     .await?
                 {
                     return Ok(true);
+                }
+                let rules = &site.route(route_index).rewrites;
+                if !rules.is_empty() {
+                    match self.rewrite(session, ctx, rules, &path, host_name).await? {
+                        Rewrite::Answered => return Ok(true),
+                        Rewrite::Unchanged => {}
+                        Rewrite::Changed {
+                            path: rewritten,
+                            reroute: false,
+                        } => path = rewritten,
+                        Rewrite::Changed { reroute: true, .. } => {
+                            let Some(next) = Self::choose_again(
+                                session,
+                                ctx,
+                                routing,
+                                site_index,
+                                host_name,
+                                &mut path,
+                                &mut changes_left,
+                            )
+                            .await?
+                            else {
+                                return Ok(true);
+                            };
+                            route_index = next;
+                            continue;
+                        }
+                    }
                 }
                 let Some(hook) = site.route(route_index).lua.rewrite.clone() else {
                     break;
@@ -568,37 +642,21 @@ impl ProxyHttp for PanelProxy {
                         continue 'request;
                     }
                     LuaStep::Go { jump: true } => {
-                        if changes_left == 0 {
-                            cycle(session).await?;
-                            return Ok(true);
-                        }
-                        changes_left -= 1;
-                        let Some(rewritten) =
-                            panel_routing::path::normalize(session.req_header().uri.path())
-                                .map(|path| path.into_owned())
+                        ctx.internal = true;
+                        let Some(next) = Self::choose_again(
+                            session,
+                            ctx,
+                            routing,
+                            site_index,
+                            host_name,
+                            &mut path,
+                            &mut changes_left,
+                        )
+                        .await?
                         else {
-                            responses::plain(
-                                session,
-                                400,
-                                "the rewritten target is not an absolute path",
-                                &[],
-                            )
-                            .await?;
-                            return Ok(true);
-                        };
-                        path = rewritten;
-                        let request = Routed {
-                            header: session.req_header(),
-                            host: host_name,
-                            path: &path,
-                            client: ctx.client,
-                        };
-                        let Some(next) = routing.select(site_index, &request) else {
-                            responses::plain(session, 404, "not found", &[]).await?;
                             return Ok(true);
                         };
                         route_index = next;
-                        ctx.route = Some(route_index);
                     }
                 }
             }
@@ -659,7 +717,7 @@ impl ProxyHttp for PanelProxy {
                 }
                 let tls = self.listener.tls;
                 let module = lua_phases::with_variables(session, &ctx.variables, |variables| {
-                    let facts = facts(session, host_name, &path, tls, variables);
+                    let facts = facts(session, host_name, &path, tls, variables, &ctx.request_uri);
                     for policy in &http {
                         policy.request_changes(&facts, &mut ctx.http_request);
                     }
@@ -754,7 +812,14 @@ impl ProxyHttp for PanelProxy {
                     let tls = self.listener.tls;
                     let rendered =
                         lua_phases::with_variables(session, &ctx.variables, |variables| {
-                            location.render(&facts(session, host_name, &path, tls, variables))
+                            location.render(&facts(
+                                session,
+                                host_name,
+                                &path,
+                                tls,
+                                variables,
+                                &ctx.request_uri,
+                            ))
                         });
                     let location = String::from_utf8_lossy(&rendered).into_owned();
                     let location = if *preserve_path {
@@ -778,7 +843,14 @@ impl ProxyHttp for PanelProxy {
                 } => {
                     let tls = self.listener.tls;
                     let body = lua_phases::with_variables(session, &ctx.variables, |variables| {
-                        body.render(&facts(session, host_name, &path, tls, variables))
+                        body.render(&facts(
+                            session,
+                            host_name,
+                            &path,
+                            tls,
+                            variables,
+                            &ctx.request_uri,
+                        ))
                     });
                     let retry_after = retry_after.map(|seconds| seconds.to_string());
                     let mut headers = Vec::with_capacity(2);
@@ -807,6 +879,35 @@ impl ProxyHttp for PanelProxy {
                         }
                         _ => Ok(true),
                     }
+                }
+                RouteTarget::InternalRedirect(target) => {
+                    match target {
+                        InternalTarget::Named(name) => ctx.named = Some(name.clone()),
+                        InternalTarget::Path(parts) => {
+                            let tls = self.listener.tls;
+                            let target =
+                                lua_phases::with_variables(session, &ctx.variables, |variables| {
+                                    InternalTarget::target(
+                                        parts,
+                                        &facts(
+                                            session,
+                                            host_name,
+                                            &path,
+                                            tls,
+                                            variables,
+                                            &ctx.request_uri,
+                                        ),
+                                    )
+                                });
+                            if !Self::retarget(session, target).await? {
+                                return Ok(true);
+                            }
+                        }
+                    }
+                    if !Self::restart(session, ctx, &mut changes_left).await? {
+                        return Ok(true);
+                    }
+                    continue 'request;
                 }
             };
         }
@@ -1290,6 +1391,7 @@ impl PanelProxy {
             return Ok(false);
         }
         *changes_left -= 1;
+        ctx.internal = true;
         ctx.route = None;
         ctx.admission = Admission::default();
         ctx.http_request.clear();
@@ -1300,6 +1402,116 @@ impl PanelProxy {
             *module = HttpPolicyModule::default();
         }
         Ok(true)
+    }
+
+    /// Runs a site's or route's rewrite rules on the request (ADR 0040).
+    async fn rewrite(
+        &self,
+        session: &mut Session,
+        ctx: &mut RequestContext,
+        rules: &Rewrites,
+        path: &str,
+        host: &str,
+    ) -> pingora_core::Result<Rewrite> {
+        let tls = self.listener.tls;
+        let outcome = lua_phases::with_variables(session, &ctx.variables, |variables| {
+            let facts = facts(session, host, path, tls, variables, &ctx.request_uri);
+            rules.apply(path, facts.query, &facts)
+        });
+        let (path, query, reroute) = match outcome {
+            Ok(Rewritten::Redirect { status, location }) => {
+                responses::redirect(session, status, &location).await?;
+                return Ok(Rewrite::Answered);
+            }
+            Ok(Rewritten::Path { changed: false, .. }) => return Ok(Rewrite::Unchanged),
+            Ok(Rewritten::Path {
+                path,
+                query,
+                reroute,
+                ..
+            }) => (path, query, reroute),
+            Err(message) => {
+                Self::retarget(session, Err(message)).await?;
+                return Ok(Rewrite::Answered);
+            }
+        };
+        if !Self::retarget(session, Ok((path.clone(), query))).await? {
+            return Ok(Rewrite::Answered);
+        }
+        ctx.internal = true;
+        Ok(Rewrite::Changed { path, reroute })
+    }
+
+    /// Gives the request `target`, a path and query; whether it could,
+    /// answering 500 when it could not.
+    async fn retarget(
+        session: &mut Session,
+        target: Result<(String, Option<String>), String>,
+    ) -> pingora_core::Result<bool> {
+        let uri = target.and_then(|(path, query)| {
+            let target = match query {
+                Some(query) => format!("{path}?{query}"),
+                None => path,
+            };
+            target
+                .parse::<http::Uri>()
+                .map_err(|error| format!("the rewritten target {target:?} is invalid: {error}"))
+        });
+        match uri {
+            Ok(uri) => {
+                session.req_header_mut().set_uri(uri);
+                Ok(true)
+            }
+            Err(message) => {
+                tracing::warn!(event = "rewrite_failed", message = %message);
+                responses::plain(session, 500, "the request could not be rewritten", &[]).await?;
+                Ok(false)
+            }
+        }
+    }
+
+    /// Chooses the route of the site at `site` again for the request's
+    /// path, one of the URI changes the request may make; `None` once the
+    /// request is answered.
+    async fn choose_again(
+        session: &mut Session,
+        ctx: &mut RequestContext,
+        routing: &RoutingTable,
+        site: usize,
+        host: &str,
+        path: &mut String,
+        changes_left: &mut usize,
+    ) -> pingora_core::Result<Option<usize>> {
+        if *changes_left == 0 {
+            cycle(session).await?;
+            return Ok(None);
+        }
+        *changes_left -= 1;
+        let Some(rewritten) = panel_routing::path::normalize(session.req_header().uri.path())
+            .map(|path| path.into_owned())
+        else {
+            responses::plain(
+                session,
+                400,
+                "the rewritten target is not an absolute path",
+                &[],
+            )
+            .await?;
+            return Ok(None);
+        };
+        *path = rewritten;
+        let request = Routed {
+            header: session.req_header(),
+            host,
+            path,
+            client: ctx.client,
+        };
+        let Some(next) = routing.select(site, &request) else {
+            responses::plain(session, 404, "not found", &[]).await?;
+            return Ok(None);
+        };
+        ctx.route = Some(next);
+        Ok(Some(next))
     }
 
     fn scheme(&self) -> &'static str {
@@ -1361,6 +1573,12 @@ impl PanelProxy {
                 route: route.as_deref(),
                 upstream: endpoint.as_ref().map(|endpoint| &*endpoint.upstream),
                 node: node.as_deref(),
+                original: (!ctx.request_uri.is_empty()
+                    && request
+                        .uri
+                        .path_and_query()
+                        .is_none_or(|target| target.as_str() != ctx.request_uri))
+                .then_some(ctx.request_uri.as_str()),
             };
             let now = Utc::now();
             if plan.enabled {
@@ -1510,10 +1728,13 @@ fn facts<'a>(
     path: &'a str,
     tls: bool,
     variables: &'a HashMap<String, String>,
+    request_uri: &'a str,
 ) -> Facts<'a> {
     Facts {
         host,
         uri: path,
+        query: session.req_header().uri.query(),
+        request_uri,
         method: session.req_header().method.as_str(),
         scheme: if tls { "https" } else { "http" },
         client_ip: client_address(session).map(|address| address.ip()),

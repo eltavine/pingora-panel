@@ -4313,3 +4313,130 @@ async fn proxy_verify_scripts_judge_upstream_certificates() {
     assert_eq!(refused.status, 502);
     gateway.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rewrites_change_paths_and_internal_redirects_reach_internal_routes() {
+    use panel_ir::{RewriteFlag, RewriteRule, REWRITE_CAPABILITY};
+
+    let upstream = echo_upstream().await;
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    snapshot.required_capabilities.extend([
+        CapabilityRequirement::new(REWRITE_CAPABILITY, "1"),
+        CapabilityRequirement::new(TEMPLATE_CAPABILITY, "1"),
+    ]);
+    let rewrite = |pattern: &str, replacement: &str, flag| RewriteRule::Rewrite {
+        pattern: pattern.into(),
+        replacement: replacement.into(),
+        flag,
+    };
+    let mut shop = site(&["shop.test"]);
+    shop.rewrites = vec![
+        rewrite("^/old/(.*)$", "/new/$1", RewriteFlag::Permanent),
+        rewrite("^/moved$", "https://elsewhere.test$uri?", RewriteFlag::None),
+        rewrite("^/legacy/(?<item>\\d+)$", "/items/$item", RewriteFlag::Last),
+    ];
+    snapshot.sites.push(shop);
+    snapshot.upstream_pools.push(pool("app", &[upstream]));
+    let respond = |body: &str| RouteAction::respond(200, Some(body.into()));
+    let mut api = route("api", 1, prefix("/api"), proxy("app"));
+    api.rewrites = vec![
+        RewriteRule::StripPrefix {
+            prefix: "/api".into(),
+        },
+        RewriteRule::AddPrefix {
+            prefix: "/v2".into(),
+        },
+    ];
+    let mut blog = route("blog", 2, prefix("/blog"), proxy("app"));
+    blog.rewrites = vec![RewriteRule::SetUri {
+        template: "/index.php?q=$uri".into(),
+    }];
+    let mut jump = route(
+        "jump",
+        3,
+        prefix("/r"),
+        RouteAction::respond(500, Some("not here".into())),
+    );
+    jump.rewrites = vec![rewrite("^/r/(\\d+)$", "/items/$1", RewriteFlag::None)];
+    let items = route(
+        "items",
+        4,
+        prefix("/items"),
+        respond("item $uri from $request_uri $is_args$args"),
+    );
+    let mut errors = route("errors", 5, prefix("/errors"), respond("error page $uri"));
+    errors.internal = true;
+    let broken = route(
+        "broken",
+        6,
+        prefix("/broken"),
+        RouteAction::InternalRedirect {
+            target: "/errors$uri".into(),
+        },
+    );
+    let fallback = route(
+        "fallback",
+        7,
+        RouteMatcher::Named {
+            name: "fallback".into(),
+        },
+        respond("fallback for $uri"),
+    );
+    let gone = route(
+        "gone",
+        8,
+        prefix("/gone"),
+        RouteAction::InternalRedirect {
+            target: "@fallback".into(),
+        },
+    );
+    let mut looping = route("loop", 9, prefix("/loop"), RouteAction::respond(204, None));
+    looping.rewrites = vec![rewrite("^/loop$", "/loop", RewriteFlag::Last)];
+    snapshot.routes.extend([
+        api, blog, jump, items, errors, broken, fallback, gone, looping,
+    ]);
+    let gateway = Gateway::start(AdapterOptions::default(), snapshot).await;
+    wait_for(listen).await;
+    let ask = |target: &'static str| get(listen, Some("shop.test"), target, "");
+
+    let moved = ask("/old/a?b=1").await;
+    assert_eq!(moved.status, 301);
+    assert_eq!(moved.headers["location"], "/new/a?b=1");
+    let away = ask("/moved?b=1").await;
+    assert_eq!(away.status, 302);
+    assert_eq!(away.headers["location"], "https://elsewhere.test/moved");
+    let legacy = ask("/legacy/7?x=1").await;
+    assert_eq!(legacy.body, b"item /items/7 from /legacy/7?x=1 ?x=1");
+
+    let proxied = ask("/api/users?a=1").await;
+    let head = String::from_utf8_lossy(&proxied.body).into_owned();
+    assert!(head.starts_with("GET /v2/users?a=1 HTTP/1.1\r\n"), "{head}");
+    let proxied = ask("/blog/post?a=1").await;
+    let head = String::from_utf8_lossy(&proxied.body).into_owned();
+    assert!(
+        head.starts_with("GET /index.php?q=/blog/post&a=1 HTTP/1.1\r\n"),
+        "{head}"
+    );
+    let jumped = ask("/r/42").await;
+    assert_eq!(
+        (jumped.status, jumped.body),
+        (200, b"item /items/42 from /r/42 ".to_vec())
+    );
+
+    assert_eq!(ask("/errors/x").await.status, 404);
+    let redirected = ask("/broken/y").await;
+    assert_eq!(
+        (redirected.status, redirected.body),
+        (200, b"error page /errors/broken/y".to_vec())
+    );
+    let named = ask("/gone/z").await;
+    assert_eq!(named.body, b"fallback for /gone/z");
+    let cycle = ask("/loop").await;
+    assert_eq!(cycle.status, 500);
+    assert!(String::from_utf8_lossy(&cycle.body).contains("cycle"));
+    gateway.stop().await;
+}

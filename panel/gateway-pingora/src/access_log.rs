@@ -159,6 +159,8 @@ pub(crate) struct Served<'a> {
     pub upstream: Option<&'a str>,
     /// The upstream node, as `address:port`.
     pub node: Option<&'a str>,
+    /// The client's request target when a rewrite changed it.
+    pub original: Option<&'a str>,
 }
 
 /// A JSON object written one field at a time.
@@ -280,6 +282,9 @@ pub(crate) fn json(
     if let Some(query) = request.uri.query() {
         record.field("url.query", &*logging.query(query));
     }
+    if let Some(original) = served.original {
+        record.field("url.original", &logged_target(original, logging));
+    }
     record.some("server.address", served.host);
     record.some(
         "client.address",
@@ -313,6 +318,13 @@ pub(crate) fn json(
         let facts = Facts {
             host: served.host.unwrap_or_default(),
             uri: request.uri.path(),
+            query: request.uri.query(),
+            request_uri: served.original.unwrap_or_else(|| {
+                request
+                    .uri
+                    .path_and_query()
+                    .map_or("/", |target| target.as_str())
+            }),
             method: request.method.as_str(),
             scheme: served.scheme,
             client_ip: served.client,
@@ -352,6 +364,14 @@ fn protocol(version: Version) -> &'static str {
     }
 }
 
+/// `target` as it is logged, its query's sensitive parameters redacted.
+fn logged_target(target: &str, logging: &LoggingPlan) -> String {
+    match target.split_once('?') {
+        Some((path, query)) => format!("{path}?{}", logging.query(query)),
+        None => target.to_owned(),
+    }
+}
+
 /// An access record in the Combined Log Format.
 pub(crate) fn combined(served: &Served<'_>, logging: &LoggingPlan, now: DateTime<Utc>) -> Vec<u8> {
     let request = served.request;
@@ -365,8 +385,17 @@ pub(crate) fn combined(served: &Served<'_>, logging: &LoggingPlan, now: DateTime
     line.push_str("] \"");
     escaped(&mut line, request.method.as_str());
     line.push(' ');
-    escaped(&mut line, request.uri.path());
-    if let Some(query) = request.uri.query() {
+    // The request line the client sent, as nginx's `$request`.
+    let (path, query) = served.original.map_or_else(
+        || (request.uri.path(), request.uri.query()),
+        |target| {
+            target
+                .split_once('?')
+                .map_or((target, None), |(path, query)| (path, Some(query)))
+        },
+    );
+    escaped(&mut line, path);
+    if let Some(query) = query {
         line.push('?');
         escaped(&mut line, &logging.query(query));
     }
@@ -472,6 +501,7 @@ mod tests {
             route: Some("checkout"),
             upstream: Some("shop-app"),
             node: Some("10.0.0.7:8080"),
+            original: None,
         }
     }
 
@@ -511,6 +541,33 @@ mod tests {
         assert_eq!(record["pingora_panel.revision.id"], 42);
         assert_eq!(record["pingora_panel.upstream.node"], "10.0.0.7:8080");
         assert!(record.get("error.type").is_none());
+    }
+
+    #[test]
+    fn rewritten_requests_log_what_the_client_asked_for() {
+        let request = request("/v2/pay?order=7");
+        let rewritten = Served {
+            original: Some("/api/pay?order=7&sig=secret"),
+            ..served(&request)
+        };
+        let record: Value =
+            serde_json::from_slice(&json(&rewritten, &AccessPlan::default(), &logging(), now()))
+                .unwrap();
+        assert_eq!(record["url.path"], "/v2/pay");
+        assert_eq!(record["url.original"], "/api/pay?order=7&sig=REDACTED");
+        let line = String::from_utf8(combined(&rewritten, &logging(), now())).unwrap();
+        assert!(
+            line.contains("\"GET /api/pay?order=7&sig=REDACTED HTTP/1.1\""),
+            "{line}"
+        );
+        let record: Value = serde_json::from_slice(&json(
+            &served(&request),
+            &AccessPlan::default(),
+            &logging(),
+            now(),
+        ))
+        .unwrap();
+        assert!(record.get("url.original").is_none());
     }
 
     #[test]
