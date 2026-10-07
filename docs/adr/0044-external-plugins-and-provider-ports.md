@@ -61,11 +61,12 @@ seeded at installation; unsigned plugins are refused. A version that fails
 validation keeps its reasons and cannot be enabled.
 
 **Capabilities.** Each port a plugin provides is a capability it asks for,
-and so is `secrets`, receiving the values its configuration references.
+and so is `secret-references`, receiving the values its configuration
+references.
 Plugins are granted nothing until an administrator grants capabilities one
 by one, among those the manifest asks for; the host routes a port's calls
 only to a plugin granted that port, and resolves secrets only for a plugin
-granted `secrets`. A plugin cannot be enabled without a grant.
+granted `secret-references`. A plugin cannot be enabled without a grant.
 
 **Configuration.** A plugin's settings are a JSON document validated
 against its manifest's JSON Schema (draft 2020-12) before they are stored. A

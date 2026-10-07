@@ -1,0 +1,125 @@
+syntax = "proto3";
+
+package pingora.panel.plugin.v1;
+
+// Publishes and withdraws the TXT records of ACME's DNS-01 challenges
+// (RFC 8555 §8.4). Port `dns01`.
+service Dns01Provider {
+  // Adds a TXT record beside any records already at the name.
+  rpc AddTxt(AddTxtRequest) returns (AddTxtResponse);
+  // Removes the TXT record with the value, leaving others; removing one
+  // that is not there succeeds.
+  rpc RemoveTxt(RemoveTxtRequest) returns (RemoveTxtResponse);
+}
+
+message AddTxtRequest {
+  // Fully qualified, such as `_acme-challenge.shop.example.`.
+  string name = 1;
+  string value = 2;
+}
+
+message AddTxtResponse {}
+
+message RemoveTxtRequest {
+  string name = 1;
+  string value = 2;
+}
+
+message RemoveTxtResponse {}
+
+// Returns secrets kept outside the panel, such as in a vault. Port
+// `secrets`.
+service SecretProvider {
+  // The secret at a path the plugin defines; NOT_FOUND when there is none.
+  rpc Resolve(ResolveRequest) returns (ResolveResponse);
+}
+
+message ResolveRequest {
+  string path = 1;
+}
+
+message ResolveResponse {
+  bytes value = 1;
+}
+
+// Delivers alert notifications, as an alert channel of kind `plugin`
+// (ADR 0027). Port `notifications`.
+service NotificationProvider {
+  rpc Notify(NotifyRequest) returns (NotifyResponse);
+}
+
+message NotifyRequest {
+  // The channel the notification is for.
+  string channel = 1;
+  Alert alert = 2;
+  // The console's public origin, when it has one.
+  string external_url = 3;
+}
+
+// An alert in the terms of Prometheus Alertmanager's webhook payload.
+message Alert {
+  // `firing` or `resolved`.
+  string status = 1;
+  map<string, string> labels = 2;
+  map<string, string> annotations = 3;
+  // RFC 3339.
+  string starts_at = 4;
+  // RFC 3339; empty while the alert fires.
+  string ends_at = 5;
+  string generator_url = 6;
+  string fingerprint = 7;
+}
+
+message NotifyResponse {}
+
+// Keeps copies of backup archives (ADR 0035) elsewhere, such as in object
+// storage. Port `backups`.
+service BackupTarget {
+  // Stores an archive: the first message names it, the rest carry its
+  // bytes in order. An archive of that name is replaced.
+  rpc Put(stream BackupTargetPutRequest) returns (BackupTargetPutResponse);
+  rpc List(BackupTargetListRequest) returns (BackupTargetListResponse);
+  // The archive's bytes in order; NOT_FOUND when there is none.
+  rpc Get(BackupTargetGetRequest) returns (stream BackupTargetGetResponse);
+  // Removing an archive that is not there succeeds.
+  rpc Delete(BackupTargetDeleteRequest) returns (BackupTargetDeleteResponse);
+}
+
+message BackupTargetPutRequest {
+  oneof part {
+    ArchiveInfo archive = 1;
+    bytes chunk = 2;
+  }
+}
+
+message ArchiveInfo {
+  // Such as `backup-20261007T120000Z.tar.zst`.
+  string name = 1;
+  uint64 size = 2;
+  // Lowercase hexadecimal.
+  string sha256 = 3;
+  // RFC 3339.
+  string created_at = 4;
+}
+
+message BackupTargetPutResponse {}
+
+message BackupTargetListRequest {}
+
+message BackupTargetListResponse {
+  repeated ArchiveInfo archives = 1;
+}
+
+message BackupTargetGetRequest {
+  string name = 1;
+}
+
+message BackupTargetGetResponse {
+  bytes chunk = 1;
+}
+
+message BackupTargetDeleteRequest {
+  string name = 1;
+}
+
+message BackupTargetDeleteResponse {}

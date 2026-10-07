@@ -478,6 +478,10 @@
         "panel-events"
       ]
     },
+    "plugin-contracts": {
+      "catalog": true,
+      "allowed_workspace_dependencies": []
+    },
     "panel-events": {
       "catalog": true,
       "allowed_workspace_dependencies": [

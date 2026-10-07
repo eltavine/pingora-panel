@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package pingora.panel.plugin.v1;
+
+// What every plugin serves beside the gRPC Health Checking Protocol, for
+// the service `plugin` (ADR 0044). Plugins speak the go-plugin process
+// protocol: the host starts the executable, and the plugin prints
+// `1|<application protocol version>|unix|<socket>|grpc` and serves there.
+service Plugin {
+  // The running plugin's manifest; the host refuses a process whose name,
+  // version or ports differ from those of the signed `plugin.json`.
+  rpc Describe(DescribeRequest) returns (DescribeResponse);
+  // Applies settings, their secret references replaced by the secrets'
+  // values. A refusal leaves the settings in force before it.
+  rpc Configure(ConfigureRequest) returns (ConfigureResponse);
+}
+
+// What a plugin version is and needs. A version's `plugin.json` holds it in
+// the Proto3 JSON mapping, signed with minisign.
+message Manifest {
+  // Lowercase letters, digits and hyphens.
+  string name = 1;
+  // SemVer 2.0.0.
+  string version = 2;
+  string publisher = 3;
+  string description = 4;
+  // The executable's path, relative to the version's directory.
+  string executable = 5;
+  // The executable's SHA-256, in lowercase hexadecimal.
+  string executable_sha256 = 6;
+  // Application protocol versions the plugin speaks; this package is 1.
+  repeated uint32 protocol_versions = 7;
+  // The ports the plugin provides: dns01, secrets, notifications, backups,
+  // containers or gateway.
+  repeated string ports = 8;
+  // The capabilities it asks for: the ports it provides and, to receive the
+  // secrets its configuration references, secret-references.
+  repeated string capabilities = 9;
+  Resources resources = 10;
+  // Milliseconds a call may take; 10,000 unless set, at most 60,000.
+  uint32 call_timeout_ms = 11;
+  // The JSON Schema (draft 2020-12) of the plugin's settings, as JSON; a
+  // string with `"format": "secret-reference"` names a secret.
+  string config_schema = 12;
+  // An https URL with more about the plugin.
+  string homepage = 13;
+}
+
+// What a plugin's process may use; zero leaves the host's default.
+message Resources {
+  // Bytes of address space.
+  uint64 memory_bytes = 1;
+  // Seconds of CPU time over the process's life.
+  uint32 cpu_seconds = 2;
+  // Files open at once.
+  uint32 open_files = 3;
+  // Calls in flight at once.
+  uint32 concurrency = 4;
+}
+
+message DescribeRequest {}
+
+message DescribeResponse {
+  Manifest manifest = 1;
+}
+
+message ConfigureRequest {
+  // The settings as a JSON object, secret references resolved.
+  string settings = 1;
+  // The capabilities the plugin is granted.
+  repeated string granted = 2;
+}
+
+message ConfigureResponse {}
