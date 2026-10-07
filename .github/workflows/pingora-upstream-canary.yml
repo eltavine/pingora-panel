@@ -54,8 +54,11 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           title='Pingora main canary fails'
-          open="$(gh issue list --state open --search "\"$title\" in:title" --json number,title \
-            --jq "map(select(.title == \"$title\")) | .[0].number // empty")"
+          search="\"$title\" in:title"
+          only="map(select(.title == \"$title\")) | .[0].number // empty"
+          open="$(gh issue list --state open --search "$search" --json number,title --jq "$only")"
+          failed="The Panel adapter does not build or pass its tests against Pingora's main with the local changes applied: $RUN_URL"
+          held='The production baseline stays where it is until the cause and any security impact are understood.'
           case "$OUTCOME" in
             success)
               if [[ -n "$open" ]]; then
@@ -66,9 +69,7 @@ jobs:
               if [[ -n "$open" ]]; then
                 gh issue comment "$open" --body "The canary fails again: $RUN_URL"
               else
-                gh issue create --title "$title" --body "The Panel adapter does not build or pass its tests against Pingora's main with the local changes applied: $RUN_URL
-
-          The production baseline stays where it is until the cause and any security impact are understood."
+                gh issue create --title "$title" --body "$(printf '%s\n\n%s' "$failed" "$held")"
               fi
               ;;
           esac
