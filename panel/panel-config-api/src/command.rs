@@ -1,8 +1,8 @@
 use crate::{Files, LuaTest};
 use panel_application::operations;
 use panel_config_model::{
-    ApprovalPolicyInput, BatchRequest, Domain, HttpPolicy, Listener, NodeInput, RouteInput,
-    SecurityPolicy, SiteBundle, SiteInput, TlsProfileInput, UpstreamInput,
+    ApprovalPolicyInput, BatchRequest, CachePolicy, CacheSettings, Domain, HttpPolicy, Listener,
+    NodeInput, RouteInput, SecurityPolicy, SiteBundle, SiteInput, TlsProfileInput, UpstreamInput,
 };
 use panel_domain::NormalizedHost;
 use serde::{Deserialize, Serialize};
@@ -51,6 +51,11 @@ operations! {
         /// Creates or replaces the HTTP policy of the policy's ID.
         "http_policies.put" => PutHttpPolicy { policy: HttpPolicy },
         "http_policies.delete" => DeleteHttpPolicy { id: String },
+        /// Creates or replaces the cache policy of the policy's ID.
+        "cache_policies.put" => PutCachePolicy { policy: CachePolicy },
+        "cache_policies.delete" => DeleteCachePolicy { id: String },
+        /// Sets how much the gateway's cache keeps.
+        "cache_settings.put" => PutCacheSettings { settings: CacheSettings },
     }
 }
 
@@ -133,6 +138,9 @@ impl ModelChange {
             Self::DeleteSecurityPolicy { id } => format!("security-policies/{id}"),
             Self::PutHttpPolicy { policy } => format!("http-policies/{}", policy.id),
             Self::DeleteHttpPolicy { id } => format!("http-policies/{id}"),
+            Self::PutCachePolicy { policy } => format!("cache-policies/{}", policy.id),
+            Self::DeleteCachePolicy { id } => format!("cache-policies/{id}"),
+            Self::PutCacheSettings { .. } => "cache".into(),
         }
     }
 }

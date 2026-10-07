@@ -4,8 +4,8 @@ use chrono::{DateTime, Utc};
 use panel_config_api::{ModelChange, ModelQuery};
 use panel_config_model::{
     abnormal_sites, checked, entity_tag, query_sites, summarize, validate, BatchAction,
-    ConfigModel, DomainCheck, DomainView, HttpPolicyView, ListenerView, Route, RouteView,
-    SecurityPolicyView, SiteList, SiteView, TlsProfile, TlsProfileView, UpstreamView,
+    CachePolicyView, ConfigModel, DomainCheck, DomainView, HttpPolicyView, ListenerView, Route,
+    RouteView, SecurityPolicyView, SiteList, SiteView, TlsProfile, TlsProfileView, UpstreamView,
     ValidationResult,
 };
 use panel_errors::{Diagnostic, PanelError, Result};
@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 const POLICY: &str = "security policy";
 const HTTP_POLICY: &str = "HTTP policy";
+const CACHE_POLICY: &str = "cache policy";
 
 /// A JSON result and, for single resources, its entity tag.
 #[derive(Debug)]
@@ -207,6 +208,19 @@ pub fn read(model: &ConfigModel, query: &ModelQuery) -> Result<Output> {
             let policy = named(&model.http_policies, id, |item| &item.id, HTTP_POLICY)?;
             Ok(Output::tagged(policy, entity_tag(policy)))
         }
+        ModelQuery::CachePolicies => {
+            let views: Vec<CachePolicyView> = model
+                .cache_policies
+                .iter()
+                .map(|policy| CachePolicyView::new(model, policy))
+                .collect();
+            Ok(Output::json(&views))
+        }
+        ModelQuery::CachePolicy { id } => {
+            let policy = named(&model.cache_policies, id, |item| &item.id, CACHE_POLICY)?;
+            Ok(Output::tagged(policy, entity_tag(policy)))
+        }
+        ModelQuery::CacheSettings => Ok(Output::tagged(&model.cache, entity_tag(&model.cache))),
         ModelQuery::Validate { site_ids } => {
             for site in site_ids {
                 model.site(*site)?;
@@ -478,6 +492,38 @@ pub fn change(
             let (next, ()) = checked(model, |model| model.delete_http_policy(&id))?;
             Ok((next, deleted()))
         }
+        ModelChange::PutCachePolicy { policy } => {
+            let id = policy.id.clone();
+            if let Ok(existing) = named(&model.cache_policies, &id, |item| &item.id, CACHE_POLICY) {
+                precondition(if_match, &entity_tag(existing))?;
+            }
+            let (next, _) = checked(model, |model| Ok(model.put_cache_policy(policy)))?;
+            let policy = named(&next.cache_policies, &id, |item| &item.id, CACHE_POLICY)?.clone();
+            let etag = entity_tag(&policy);
+            Ok((next, Output::tagged(&policy, etag)))
+        }
+        ModelChange::DeleteCachePolicy { id } => {
+            precondition(
+                if_match,
+                &entity_tag(named(
+                    &model.cache_policies,
+                    &id,
+                    |item| &item.id,
+                    CACHE_POLICY,
+                )?),
+            )?;
+            let (next, ()) = checked(model, |model| model.delete_cache_policy(&id))?;
+            Ok((next, deleted()))
+        }
+        ModelChange::PutCacheSettings { settings } => {
+            precondition(if_match, &entity_tag(&model.cache))?;
+            let (next, ()) = checked(model, |model| {
+                model.cache = settings;
+                Ok(())
+            })?;
+            let output = Output::tagged(&next.cache, entity_tag(&next.cache));
+            Ok((next, output))
+        }
     }
 }
 
@@ -585,6 +631,88 @@ mod tests {
                 .unwrap()
                 .len(),
             2
+        );
+    }
+
+    #[test]
+    fn cache_policies_and_the_store_are_named_resources() {
+        let model = ConfigModel::default();
+        let (model, policy) = apply(
+            &model,
+            ModelChange::PutCachePolicy {
+                policy: input(json!({
+                    "id": "pages", "ttl_seconds": 600, "status_ttls": {"404": 60},
+                    "bypass": [{"kind": "cookie", "name": "session", "test": {"op": "present"}}]
+                })),
+            },
+        );
+        assert_eq!(policy["status_ttls"]["404"], 60);
+        let (model, site) = apply(
+            &model,
+            ModelChange::CreateSite {
+                site: input(json!({
+                    "name": "shop",
+                    "action": {"type": "respond", "status": 200},
+                    "domains": [{"host": "shop.example"}],
+                    "cache_policy_id": "pages",
+                    "routes": [{"priority": 1, "match": {"kind": "prefix", "path": "/live"},
+                        "action": {"type": "respond", "status": 204}, "no_cache": true}]
+                })),
+            },
+        );
+        let list = get(&model, ModelQuery::CachePolicies);
+        assert_eq!(list[0]["used_by"][0], site["id"]);
+        let current = read(&model, &ModelQuery::CachePolicy { id: "pages".into() }).unwrap();
+        let refused = super::change(
+            &model,
+            ModelChange::DeleteCachePolicy { id: "pages".into() },
+            &current.etag,
+            Utc::now(),
+        );
+        assert_eq!(refused.unwrap_err().code.as_str(), ErrorCode::CONFLICT);
+        let invalid = super::change(
+            &model,
+            ModelChange::PutCachePolicy {
+                policy: input(json!({"id": "pages", "key": ""})),
+            },
+            &current.etag,
+            Utc::now(),
+        );
+        assert_eq!(
+            invalid.unwrap_err().code.as_str(),
+            ErrorCode::VALIDATION_FAILED
+        );
+
+        let store = read(&model, &ModelQuery::CacheSettings).unwrap();
+        let resize = |if_match: &str, settings: Value| {
+            super::change(
+                &model,
+                ModelChange::PutCacheSettings {
+                    settings: input(settings),
+                },
+                if_match,
+                Utc::now(),
+            )
+        };
+        assert_eq!(
+            resize("\"stale\"", json!({"max_bytes": 1_073_741_824}))
+                .unwrap_err()
+                .code
+                .as_str(),
+            ErrorCode::PRECONDITION_FAILED
+        );
+        assert_eq!(
+            resize(&store.etag, json!({"max_bytes": 1024}))
+                .unwrap_err()
+                .code
+                .as_str(),
+            ErrorCode::VALIDATION_FAILED
+        );
+        let (resized, _) = resize(&store.etag, json!({"max_bytes": 1_073_741_824})).unwrap();
+        assert_eq!(resized.cache.max_bytes, Some(1 << 30));
+        assert_eq!(
+            get(&resized, ModelQuery::CacheSettings)["max_bytes"],
+            1_073_741_824
         );
     }
 

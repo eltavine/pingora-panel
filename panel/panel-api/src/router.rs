@@ -159,6 +159,20 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
                 .put(config::put_http_policy::<U>)
                 .delete(config::delete_http_policy::<U>),
         )
+        .route(
+            "/api/v1/cache-policies",
+            get(config::list_cache_policies::<U>),
+        )
+        .route(
+            "/api/v1/cache-policies/{id}",
+            get(config::get_cache_policy::<U>)
+                .put(config::put_cache_policy::<U>)
+                .delete(config::delete_cache_policy::<U>),
+        )
+        .route(
+            "/api/v1/cache-settings",
+            get(config::cache_settings::<U>).put(config::put_cache_settings::<U>),
+        )
         .route("/api/v1/config/draft", get(config::draft::<U>))
         .route("/api/v1/config/validation", get(config::validation::<U>))
         .route("/api/v1/config/apply", post(config::apply::<U>))

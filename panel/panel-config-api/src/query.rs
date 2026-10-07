@@ -35,6 +35,9 @@ operations! {
         "security_policies.get" => SecurityPolicy { id: String },
         "http_policies.list" => HttpPolicies,
         "http_policies.get" => HttpPolicy { id: String },
+        "cache_policies.list" => CachePolicies,
+        "cache_policies.get" => CachePolicy { id: String },
+        "cache_settings.get" => CacheSettings,
         /// The draft's diagnostics, of the sites named when any are.
         "config.validate" => Validate { site_ids: Vec<Uuid> },
     }

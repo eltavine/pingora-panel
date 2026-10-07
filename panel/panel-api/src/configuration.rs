@@ -22,10 +22,11 @@ use panel_config_api::{
     ConfigurationPort, ConfigurationQuery, DraftInfo, ModelChange, ModelQuery,
 };
 use panel_config_model::{
-    ApprovalRequest, BatchRequest, Domain, DomainCheck, DomainView, HttpPolicy, HttpPolicyView,
-    Listener, ListenerView, NodeInput, RouteInput, RouteView, SecurityPolicy, SecurityPolicyView,
-    SiteBundle, SiteInput, SiteList, SiteQuery, SiteSummary, SiteView, TlsProfile, TlsProfileInput,
-    TlsProfileView, UpstreamInput, UpstreamView, ValidationResult,
+    ApprovalRequest, BatchRequest, CachePolicy, CachePolicyView, CacheSettings, Domain,
+    DomainCheck, DomainView, HttpPolicy, HttpPolicyView, Listener, ListenerView, NodeInput,
+    RouteInput, RouteView, SecurityPolicy, SecurityPolicyView, SiteBundle, SiteInput, SiteList,
+    SiteQuery, SiteSummary, SiteView, TlsProfile, TlsProfileInput, TlsProfileView, UpstreamInput,
+    UpstreamView, ValidationResult,
 };
 use panel_domain::NormalizedHost;
 use panel_errors::PanelError;
@@ -383,6 +384,20 @@ read_route!(
     ModelQuery::HttpPolicies,
     Vec<HttpPolicyView>,
     "Lists HTTP policies with the sites that use them."
+);
+read_route!(
+    list_cache_policies,
+    "/api/v1/cache-policies",
+    ModelQuery::CachePolicies,
+    Vec<CachePolicyView>,
+    "Lists cache policies with the sites that use them."
+);
+read_route!(
+    cache_settings,
+    "/api/v1/cache-settings",
+    ModelQuery::CacheSettings,
+    CacheSettings,
+    "How much the gateway's cache keeps."
 );
 read_route!(
     site_summary,
@@ -1050,6 +1065,38 @@ named_resource!(
     PutHttpPolicy { policy },
     DeleteHttpPolicy
 );
+named_resource!(
+    get_cache_policy,
+    put_cache_policy,
+    delete_cache_policy,
+    "/api/v1/cache-policies/{id}",
+    CachePolicy,
+    CachePolicy,
+    CachePolicy,
+    PutCachePolicy { policy },
+    DeleteCachePolicy
+);
+
+/// Sets how much the gateway's cache keeps; a new size empties it once
+/// applied.
+#[utoipa::path(put, path = "/api/v1/cache-settings", request_body = CacheSettings,
+    params(MutationHeaders, ("If-Match" = Option<String>, Header, description = "ETag of the settings")),
+    responses((status = 200, body = CacheSettings)), tag = "configuration")]
+pub(crate) async fn put_cache_settings<U: GatewayUseCases>(
+    State(state): State<ApiState<U>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, ApiError> {
+    let settings = json::<CacheSettings>(&headers, &body)?;
+    change(
+        &state,
+        &headers,
+        ModelChange::PutCacheSettings { settings },
+        Precondition::Optional,
+        StatusCode::OK,
+    )
+    .await
+}
 
 /// The draft's version and whether the gateway runs it.
 #[utoipa::path(get, path = "/api/v1/config/draft", params(QueryHeaders),

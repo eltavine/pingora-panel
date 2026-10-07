@@ -33,6 +33,7 @@ async fn gateway() -> SocketAddr {
             "http.policies",
             "listener.http",
             "listener.http2",
+            "proxy.cache",
             "request.security",
             "response.error-pages",
             "route.exact-path",
@@ -1427,6 +1428,127 @@ async fn static_listings_media_types_and_cache_rules_go_through_the_api() {
     let problem: Value = refused.json().await.unwrap();
     assert!(problem.to_string().contains("CSS"), "{problem}");
 
+    let (draft, _) = api
+        .json(api.get("/api/v1/config/draft"), StatusCode::OK)
+        .await;
+    let (applied, _) = api
+        .json(
+            api.mutate(Method::POST, "/api/v1/config/apply", "apply")
+                .json(&json!({"expected_version": draft["version"]})),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(applied["draft"]["pending"], false);
+    stack.stop().await;
+}
+
+#[tokio::test]
+async fn cache_policies_and_the_cache_store_go_through_the_api() {
+    let Some(stack) = stack().await else {
+        return;
+    };
+    let api = &stack.api;
+    use reqwest::Method;
+
+    api.json(
+        api.mutate(Method::PUT, "/api/v1/listeners/http", "listener")
+            .json(&json!({"id": "http", "address": "0.0.0.0:8080"})),
+        StatusCode::OK,
+    )
+    .await;
+    let (upstream, _) = api
+        .json(
+            api.mutate(Method::POST, "/api/v1/upstreams", "upstream")
+                .json(&json!({"name": "app", "nodes": [{"host": "127.0.0.1", "port": 9000}]})),
+            StatusCode::CREATED,
+        )
+        .await;
+    let (policy, headers) = api
+        .json(
+            api.mutate(Method::PUT, "/api/v1/cache-policies/pages", "policy")
+                .json(&json!({
+                    "id": "pages",
+                    "ttl_seconds": 600,
+                    "status_ttls": {"404": 60},
+                    "vary_headers": ["accept-language"],
+                    "bypass": [{"kind": "cookie", "name": "session", "test": {"op": "present"}}],
+                    "stale_while_revalidate_seconds": 30
+                })),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(policy["status_ttls"]["404"], 60);
+    let policy_etag = headers["etag"].to_str().unwrap().to_owned();
+    let refused = api
+        .mutate(Method::PUT, "/api/v1/cache-policies/keyless", "policy-bad")
+        .json(&json!({"id": "keyless", "key": "$nothing"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+
+    let (store, headers) = api
+        .json(api.get("/api/v1/cache-settings"), StatusCode::OK)
+        .await;
+    assert!(store.get("max_bytes").is_none(), "{store}");
+    let store_etag = headers["etag"].to_str().unwrap().to_owned();
+    let tiny = api
+        .mutate(Method::PUT, "/api/v1/cache-settings", "store-bad")
+        .header("if-match", &store_etag)
+        .json(&json!({"max_bytes": 1024}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(tiny.status(), StatusCode::BAD_REQUEST);
+    let (store, _) = api
+        .json(
+            api.mutate(Method::PUT, "/api/v1/cache-settings", "store")
+                .header("if-match", &store_etag)
+                .json(&json!({"max_bytes": 1_073_741_824})),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(store["max_bytes"], 1_073_741_824);
+
+    let (site, _) = api
+        .json(
+            api.mutate(Method::POST, "/api/v1/sites", "site")
+                .json(&json!({
+                    "name": "Shop",
+                    "action": {"type": "proxy", "upstream_id": upstream["id"]},
+                    "domains": [{"host": "shop.example.com", "primary": true}],
+                    "cache_policy_id": "pages",
+                    "routes": [{"priority": 1, "match": {"kind": "prefix", "path": "/live"},
+                        "action": {"type": "proxy", "upstream_id": upstream["id"]}, "no_cache": true}]
+                })),
+            StatusCode::CREATED,
+        )
+        .await;
+    assert_eq!(site["cache_policy_id"], "pages");
+    assert_eq!(site["routes"][0]["no_cache"], true);
+    let (policies, _) = api
+        .json(api.get("/api/v1/cache-policies"), StatusCode::OK)
+        .await;
+    assert_eq!(policies[0]["used_by"][0], site["id"]);
+    let in_use = api
+        .mutate(Method::DELETE, "/api/v1/cache-policies/pages", "delete")
+        .header("if-match", &policy_etag)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(in_use.status(), StatusCode::CONFLICT);
+
+    let (source, _) = api
+        .json(api.get("/api/v1/config/source"), StatusCode::OK)
+        .await;
+    for written in [
+        "cache_store max_size=1g;",
+        "cache_policy pages {",
+        "cache_policy pages;",
+        "cache_policy off;",
+    ] {
+        assert!(source.to_string().contains(written), "{written}: {source}");
+    }
     let (draft, _) = api
         .json(api.get("/api/v1/config/draft"), StatusCode::OK)
         .await;
