@@ -87,9 +87,11 @@ from the signed file. It checks health every 10 seconds; three failed
 checks in a row, or the process exiting, make the plugin degraded, and the
 host restarts it with a backoff from one second to a minute. Every call
 through the host carries a deadline, the caller's or the plugin's call
-timeout, whichever is sooner (10 seconds unless set, at most 60), and at
-most 16 calls are in flight per plugin unless set; calls beyond them, and
-calls to a degraded plugin, fail at once. Disabling a plugin stops it with
+timeout, whichever is sooner (10 seconds unless set, at most 60); a
+streaming call, such as an archive's transfer, has the caller's deadline,
+and each of its messages the call timeout to arrive. At most 16 calls are in
+flight per plugin unless set; calls beyond them, and calls to a degraded
+plugin, fail at once. Disabling a plugin stops it with
 `SIGTERM` and, after five seconds, `SIGKILL`.
 
 **Versions.** Installing a version beside another adds a directory, which

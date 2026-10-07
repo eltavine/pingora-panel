@@ -37,6 +37,16 @@ use tonic::{
 /// The variables the host sets, as go-plugin names them.
 pub const PROTOCOL_VERSIONS_ENV: &str = "PLUGIN_PROTOCOL_VERSIONS";
 pub const SOCKET_DIR_ENV: &str = "PLUGIN_UNIX_SOCKET_DIR";
+/// The plugin's own directory, which the host keeps from version to
+/// version; the plugin may write nowhere else.
+pub const DATA_DIR_ENV: &str = "PINGORA_PANEL_PLUGIN_DATA";
+
+/// The plugin's own directory, or the working directory outside a host.
+pub fn data_dir() -> PathBuf {
+    std::env::var_os(DATA_DIR_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
 
 /// Settings the host applies, their secret references resolved.
 #[derive(Clone, Debug, PartialEq)]

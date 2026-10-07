@@ -29,4 +29,4 @@ generated-from = "protobuf"
 
 [package.metadata.cargo-machete]
 # Referenced only by the generated code and JSON mappings.
-ignored = ["pbjson", "serde", "tonic-prost"]
+ignored = ["pbjson", "prost", "serde", "tonic-prost"]

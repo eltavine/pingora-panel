@@ -11,6 +11,8 @@ members = [
     "panel-event-contracts",
     "plugin-contracts",
     "plugin-sdk",
+    "plugin-host",
+    "plugin-reference",
     "panel-event-codec",
     "panel-health",
     "panel-metrics",
@@ -133,6 +135,7 @@ governor = { version = "=0.10.4", default-features = false, features = ["std"] }
 hickory-proto = { version = "=0.26.3", default-features = false, features = ["dnssec-ring", "std"] }
 hex = "=0.4.3"
 http = "=1.5.0"
+http-body = "=1.1.0"
 http-body-util = "=0.1.5"
 httpdate = "=1.0.3"
 humantime = "=2.4.0"
@@ -145,6 +148,7 @@ instant-acme = { version = "=0.8.5", default-features = false, features = ["hype
 ipnet = "=2.12.2"
 jsonwebtoken = { version = "=11.1.0", default-features = false }
 iri-string = "=0.7.14"
+jsonschema = { version = "=0.58.6", default-features = false }
 lru = "=0.18.5"
 mediatype = "=0.23.0"
 md-5 = "=0.11.0"
@@ -203,6 +207,7 @@ panel-events = { version = "=0.1.0", path = "panel-events" }
 panel-event-contracts = { version = "=0.1.0", path = "panel-event-contracts" }
 plugin-contracts = { version = "=0.1.0", path = "plugin-contracts" }
 plugin-sdk = { version = "=0.1.0", path = "plugin-sdk" }
+plugin-host = { version = "=0.1.0", path = "plugin-host" }
 panel-health = { version = "=0.1.0", path = "panel-health" }
 panel-gateway-runtime = { version = "=0.2.0", path = "panel-gateway-runtime" }
 panel-ir = { version = "=0.16.0", path = "panel-ir" }
@@ -263,6 +268,9 @@ zeroize = "=1.9.0"
 zstd = "=0.14.0"
 zxcvbn = { version = "=3.1.1", default-features = false }
 libc = "=0.2.189"
+minisign-verify = "=0.3.0"
+rustix = "=1.1.4"
+semver = "=1.0.28"
 tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.20", features = ["env-filter", "fmt", "json"] }
 

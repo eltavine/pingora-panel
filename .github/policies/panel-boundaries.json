@@ -488,6 +488,24 @@
         "plugin-contracts"
       ]
     },
+    "plugin-host": {
+      "catalog": true,
+      "allowed_workspace_dependencies": [
+        "plugin-contracts",
+        "plugin-sdk"
+      ]
+    },
+    "plugin-reference": {
+      "catalog": false,
+      "allowed_workspace_dependencies": [
+        "gateway-grpc",
+        "panel-contracts",
+        "panel-engine",
+        "plugin-contracts",
+        "plugin-host",
+        "plugin-sdk"
+      ]
+    },
     "panel-events": {
       "catalog": true,
       "allowed_workspace_dependencies": [
