@@ -21,4 +21,8 @@ export const revisionsFeature: FeatureModule = {
     },
   ],
   navigation: [{ id: 'revisions', title: 'nav.revisions', icon: History, to: '/revisions' }],
+  messages: {
+    'zh-CN': () => import('./locales/zh-CN'),
+    en: () => import('./locales/en'),
+  },
 }

@@ -21,4 +21,8 @@ export const httpPoliciesFeature: FeatureModule = {
       to: '/http-policies',
     },
   ],
+  messages: {
+    'zh-CN': () => import('./locales/zh-CN'),
+    en: () => import('./locales/en'),
+  },
 }

@@ -1974,7 +1974,10 @@ installation through its API.
 `create-vue` and shadcn-vue tooling, renders feature modules that register their own
 routes and navigation, and calls the API through a client generated from the reviewed
 OpenAPI fixture. See [`web/README.md`](web/README.md) and
-[the console decision](../docs/adr/0005-web-console-stack.md).
+[the console decision](../docs/adr/0005-web-console-stack.md). A feature's own messages
+live in its `locales` directory and are fetched in the chosen language when one of its
+pages opens; the shared files keep what the shell, shared components and several
+features use, so a new feature adds nothing to the first page's budget.
 
 `panel-api` sends the security headers in
 [`web/security-headers.json`](web/security-headers.json). The preview server used by

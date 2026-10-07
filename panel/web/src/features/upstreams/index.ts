@@ -23,4 +23,8 @@ export const upstreamsFeature: FeatureModule = {
   navigation: [
     { id: 'upstreams', title: 'nav.upstreams', icon: Server, to: '/upstreams', navigationBar: 50 },
   ],
+  messages: {
+    'zh-CN': () => import('./locales/zh-CN'),
+    en: () => import('./locales/en'),
+  },
 }

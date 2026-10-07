@@ -16,4 +16,8 @@ export const trafficFeature: FeatureModule = {
   navigation: [
     { id: 'traffic', title: 'nav.traffic', icon: Activity, to: '/traffic', navigationBar: 20 },
   ],
+  messages: {
+    'zh-CN': () => import('./locales/zh-CN'),
+    en: () => import('./locales/en'),
+  },
 }

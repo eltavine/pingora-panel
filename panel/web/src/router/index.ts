@@ -2,6 +2,7 @@ import { createRouter, createWebHistory, type RouteLocationRaw } from 'vue-route
 import { setupStatus } from '@/api/generated'
 import AppShell from '@/app/AppShell.vue'
 import { features } from '@/features'
+import { loadFeatureMessages, type FeatureMessages } from '@/i18n'
 import { loadSession } from '@/lib/session'
 
 declare module 'vue-router' {
@@ -12,6 +13,8 @@ declare module 'vue-router' {
     public?: boolean
     /** The API permission the page needs. */
     permission?: string
+    /** Messages of the feature the page belongs to. */
+    messages?: FeatureMessages
   }
 }
 
@@ -39,7 +42,7 @@ const router = createRouter({
       children: features.flatMap((feature) =>
         feature.routes.map((route) => ({
           ...route,
-          meta: { permission: feature.permission, ...route.meta },
+          meta: { permission: feature.permission, messages: feature.messages, ...route.meta },
         })),
       ),
     },
@@ -74,6 +77,10 @@ router.beforeEach(async (to) => {
     return ACCOUNT_PAGE
   }
   return true
+})
+
+router.beforeResolve(async (to) => {
+  await Promise.all(to.matched.map((record) => loadFeatureMessages(record.meta.messages)))
 })
 
 export default router

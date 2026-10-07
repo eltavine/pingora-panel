@@ -1,5 +1,6 @@
 import type { Component } from 'vue'
 import type { RouteRecordRaw } from 'vue-router'
+import type { FeatureMessages } from '@/i18n/types'
 
 /** One sidebar entry. Every entry carries an icon. */
 export interface NavigationItem {
@@ -32,4 +33,6 @@ export interface FeatureModule {
   permission?: string
   routes: RouteRecordRaw[]
   navigation: NavigationItem[]
+  /** Messages only its own pages use, fetched when one of them opens. */
+  messages?: FeatureMessages
 }

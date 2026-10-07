@@ -14,4 +14,8 @@ export const receiptsFeature: FeatureModule = {
     },
   ],
   navigation: [{ id: 'receipts', title: 'nav.receipts', icon: ReceiptText, to: '/receipts' }],
+  messages: {
+    'zh-CN': () => import('./locales/zh-CN'),
+    en: () => import('./locales/en'),
+  },
 }

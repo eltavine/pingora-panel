@@ -42,4 +42,8 @@ export const identityFeature: FeatureModule = {
       to: '/identity-providers',
     },
   ],
+  messages: {
+    'zh-CN': () => import('./locales/zh-CN'),
+    en: () => import('./locales/en'),
+  },
 }

@@ -14,4 +14,8 @@ export const backupsFeature: FeatureModule = {
     },
   ],
   navigation: [{ id: 'backups', title: 'nav.backups', icon: DatabaseBackup, to: '/backups' }],
+  messages: {
+    'zh-CN': () => import('./locales/zh-CN'),
+    en: () => import('./locales/en'),
+  },
 }

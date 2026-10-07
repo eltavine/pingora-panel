@@ -41,8 +41,13 @@ import `e2e/sample.ts` run against the same answers through
   the generated query keys carry their operations' tags.
 - `src/components/ui`: shadcn-vue components, added and updated with
   `pnpm dlx shadcn-vue@latest add <component>`.
-- `src/i18n`: Simplified Chinese and English messages. The English messages
-  must match the Chinese catalogue's shape.
+- `src/i18n`: Simplified Chinese and English messages the shell, shared
+  components and several features use. The English messages must match the
+  Chinese catalogue's shape.
+- `src/features/<feature>/locales`: messages only the feature's pages use,
+  registered as the feature's `messages` and fetched when one of its pages
+  opens. Tests check that both languages define the same keys and that none
+  repeats a shared one.
 
 ## Visual rules
 

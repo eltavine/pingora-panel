@@ -21,4 +21,8 @@ export const cacheFeature: FeatureModule = {
       to: '/cache',
     },
   ],
+  messages: {
+    'zh-CN': () => import('./locales/zh-CN'),
+    en: () => import('./locales/en'),
+  },
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AuditEvent } from '@/api/generated'
-import { messages } from '@/i18n/messages'
+import { messages, type Tree } from '@/i18n/messages'
 import { KNOWN_TYPES, isKnownType, summaryOf, toneOf, typeKey } from '../presentation'
 
 function event(event_type: string, data: Record<string, unknown>): AuditEvent {
@@ -27,7 +27,7 @@ const t = (key: string, values?: Record<string, unknown>) =>
 describe('audit presentation', () => {
   it('names every known type in both languages', () => {
     const missing = Object.values(messages).flatMap((locale) => {
-      const types = locale.audit.types as Record<string, string>
+      const types = (locale.audit as Tree).types as Record<string, string>
       return KNOWN_TYPES.filter((type) => !types[typeKey(type).split('.').pop()!])
     })
     expect(missing).toEqual([])

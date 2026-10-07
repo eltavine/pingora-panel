@@ -14,4 +14,8 @@ export const siteFilesFeature: FeatureModule = {
     },
   ],
   navigation: [{ id: 'site-files', title: 'nav.siteFiles', icon: FolderOpen, to: '/site-files' }],
+  messages: {
+    'zh-CN': () => import('./locales/zh-CN'),
+    en: () => import('./locales/en'),
+  },
 }

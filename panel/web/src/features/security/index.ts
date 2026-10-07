@@ -21,4 +21,8 @@ export const securityFeature: FeatureModule = {
       to: '/security-policies',
     },
   ],
+  messages: {
+    'zh-CN': () => import('./locales/zh-CN'),
+    en: () => import('./locales/en'),
+  },
 }

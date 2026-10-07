@@ -1,6 +1,6 @@
 import { createI18n } from 'vue-i18n'
 import { describe, expect, it } from 'vitest'
-import { messages } from '../messages'
+import { messages, type Tree } from '../messages'
 
 function* keys(tree: object, prefix = ''): Generator<string> {
   for (const [key, value] of Object.entries(tree)) {
@@ -13,7 +13,7 @@ function* keys(tree: object, prefix = ''): Generator<string> {
 }
 
 /** The keys whose message does not compile, such as one with a bare `@`. */
-function unreadable(tree: Record<string, object>): string[] {
+function unreadable(tree: Tree): string[] {
   const { t } = createI18n({ legacy: false, locale: 'xx', messages: { xx: tree } }).global
   return Array.from(keys(tree)).filter((key) => {
     try {

@@ -16,4 +16,8 @@ export const approvalsFeature: FeatureModule = {
   navigation: [
     { id: 'approvals', title: 'nav.approvals', icon: Stamp, to: '/approvals', navigationBar: 40 },
   ],
+  messages: {
+    'zh-CN': () => import('./locales/zh-CN'),
+    en: () => import('./locales/en'),
+  },
 }

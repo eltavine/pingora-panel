@@ -1,0 +1,65 @@
+import type { DeepString } from '@/i18n/types'
+
+const zhCN = {
+  traffic: {
+    lua: {
+      title: 'Lua 脚本',
+      description:
+        '窗口内 Lua 处理器的运行：失败及原因、慢运行、耗时和 VM 内存，按站点、路由和阶段列出失败最多、运行最多的处理器。',
+      runs: '运行',
+      failed: '失败',
+      slow: '慢运行',
+      p95: '耗时 P95',
+      memory: 'VM 内存',
+      why: '失败原因',
+      phase: '阶段',
+    },
+    title: '流量',
+    description: '网关处理的请求、状态码、延迟与流量，来自网关指标。',
+    site: '网站',
+    allSites: '全部网站',
+    window: '时间窗口',
+    minutes: '{n} 分钟',
+    hours: '{n} 小时',
+    days: '{n} 天',
+    requests: '请求数',
+    requestsPerSecond: '每秒请求',
+    serverErrors: '5xx 响应',
+    serverErrorsPerSecond: '每秒 5xx',
+    latencyP95: 'P95 延迟',
+    received: '入站流量',
+    sent: '出站流量',
+    connections: '活跃连接',
+    handshakes: 'TLS 握手',
+    quietTitle: '这段时间没有流量',
+    quietDescription: '网关在所选时间窗口内没有处理请求。',
+    rateChart: '请求速率',
+    rateChartDescription: '每秒请求与 5xx 响应',
+    latencyChart: '延迟',
+    latencyQuantiles: 'P50 {p50} · P90 {p90} · P99 {p99}',
+    upstreams: '上游',
+    upstream: '上游',
+    errorRatio: '失败率',
+    reused: '复用的连接',
+    noUpstreams: '这段时间没有请求发往上游。',
+    routes: '热门路由',
+    route: '路由',
+    noRoutes: '这段时间没有路由处理请求。',
+    upstreamFailures: '上游故障',
+    node: '节点',
+    errorType: '错误',
+    failures: '失败次数',
+    noUpstreamFailures: '这段时间没有失败的上游请求。',
+    domains: '热门域名',
+    domain: '域名',
+    noDomains: '这段时间没有网站经由域名处理请求。',
+    revision: '生效配置版本 #{revision}，激活于 {time}',
+    statuses: '状态码',
+    statusShare: '{status} 占 {share}%',
+  },
+}
+
+/** Messages of the traffic pages; each language defines all of them. */
+export type TrafficMessages = DeepString<typeof zhCN>
+
+export default zhCN
