@@ -48,6 +48,10 @@ dots become underscores, the unit becomes a suffix and counters end in
 - `pingora_panel_gateway_upstream_connections_total`, the connections used
   to reach each `upstream`, by whether they were `reused` from the pool, so
   the share reused shows how well the pool keeps connections.
+- `pingora_panel_gateway_cache_lookups`, the proxy cache's lookups by
+  `site` and `outcome` (ADR 0043), with `pingora_panel_gateway_cache_size`,
+  `pingora_panel_gateway_cache_capacity` and
+  `pingora_panel_gateway_cache_entries` for what the cache holds.
 
 A method outside the known set is recorded as `_OTHER`, as the conventions
 require. Sites, routes and upstreams are identifiers from the active

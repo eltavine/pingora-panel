@@ -1544,6 +1544,88 @@ ppanel site create --name files --domain files.example --static files \
   --cache-control 'max_age=1y immutable for=css,js' --cache-control 'no_cache for=html'
 ```
 
+## Proxy cache
+
+Sites and routes cache their proxied responses with named cache policies,
+kept in the gateway's memory
+([decision](../docs/adr/0043-proxy-cache.md)).
+
+```nginx
+http {
+    cache_store max_size=1g;                    # 256m when not written
+
+    cache_policy pages {
+        key $scheme$host$request_uri;           # the default
+        valid 10m;                              # 200, 203, 204, 300, 301, 308
+        valid 404 410 1m;
+        valid 500 0;                            # never stored
+        vary accept-language;
+        honor_origin off;                       # the policy alone decides
+        bypass {
+            cookie session present;
+            query nocache present;
+        }
+        stale_while_revalidate 30s;
+        stale_if_error 5m;
+        max_object_size 16m;                    # 8m by default, at most 64m
+    }
+
+    server shop {
+        server_name shop.example;
+        cache_policy pages;
+        proxy app;
+        route {
+            match prefix /account;
+            cache_policy off;                   # stays out of the cache
+            proxy app;
+        }
+    }
+}
+```
+
+A route's policy replaces its site's, and a disabled policy caches nothing.
+Only `GET` and `HEAD` use the cache. The origin's `Cache-Control` and
+`Expires` decide what is stored and for how long unless `honor_origin off`
+says otherwise (RFC 9111); responses with `Set-Cookie` are never stored,
+requests with `Authorization` use stored responses only when the response
+allows it, `Vary` keeps a response per variant and `Vary: *` is never
+stored. Entries are admitted and evicted by TinyUFO, concurrent misses for a
+key wait for one fetch behind Pingora's cache lock, and a new store size
+empties the cache. NGINX configurations imported with
+`ppanel config import-nginx` carry `proxy_cache_path` as the store and
+`proxy_cache` with its `proxy_cache_key`, `proxy_cache_valid`,
+`proxy_cache_bypass`, `proxy_no_cache`, `proxy_ignore_headers` and
+`proxy_cache_use_stale` as policies, and report what means something else
+here.
+
+Responses of cached routes carry `Cache-Status` (RFC 9211), such as
+`pingora-panel; hit` or `pingora-panel; fwd=miss; stored`, unless the policy
+says `status_header off`, and `$upstream_cache_status` gives nginx's `HIT`,
+`MISS` and the like to templates and access logs. The gateway exports
+`pingora_panel_gateway_cache_lookups` by site and outcome, and
+`pingora_panel_gateway_cache_size`, `pingora_panel_gateway_cache_capacity`
+and `pingora_panel_gateway_cache_entries`.
+
+`/api/v1/cache-policies` lists, reads, sets and deletes policies, and
+`/api/v1/cache-settings` sizes the store; both apply with the configuration.
+`GET /api/v1/gateway/cache` reports what the running gateway holds and how
+its lookups went for each site since it started, with `gateway.read`, and
+`POST /api/v1/gateway/cache/purge` purges everything, sites' responses or
+URLs, with `gateway.operate`; purges are audited as `gateway.cache.purged`.
+The console's cache page edits policies, shows the cache's use and hit
+ratios, purges it and sizes the store, and the site and route forms choose
+a policy.
+
+```sh
+ppanel cache-policy set pages --ttl 10m --status-ttl 404=1m --vary accept-language \
+  --bypass-cookie session --stale-while-revalidate 30s
+ppanel site cache shop pages
+ppanel route cache <route> off
+ppanel cache store --max-size 1g
+ppanel cache stats
+ppanel cache purge --url https://shop.example/products
+```
+
 ## Lua scripts
 
 Sites, routes and upstreams run Lua in the gateway's request phases with
