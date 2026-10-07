@@ -9,8 +9,10 @@ import {
   Filter,
   FlaskConical,
   GripVertical,
+  LockKeyhole,
   Pencil,
   Plus,
+  Replace,
   Route as RouteIcon,
   ShieldBan,
   Trash2,
@@ -51,6 +53,7 @@ import { describeCondition } from './conditions'
 import RouteFormSheet from './RouteFormSheet.vue'
 import RouteTesterSheet from './RouteTesterSheet.vue'
 import { actionIcons } from './presentation'
+import { describeRewrite } from './rewrites'
 
 const props = defineProps<{ site: SiteView }>()
 
@@ -182,6 +185,8 @@ function target(route: RouteView): string {
       return action.code.kind === 'file'
         ? action.code.path
         : `${action.code.file ?? 'Lua'}:${action.code.line ?? 1}`
+    case 'internal_redirect':
+      return action.target
   }
 }
 </script>
@@ -288,6 +293,22 @@ function target(route: RouteView): string {
               >
                 <Filter class="size-3.5" aria-hidden="true" />
                 {{ t('routes.conditions.summary', route.match.conditions.length) }}
+              </span>
+              <span
+                v-if="route.rewrites?.length"
+                class="text-muted-foreground inline-flex items-center gap-1 text-xs"
+                :title="route.rewrites.map(describeRewrite).join('\n')"
+              >
+                <Replace class="size-3.5" aria-hidden="true" />
+                {{ t('routes.rewrites.summary', route.rewrites.length) }}
+              </span>
+              <span
+                v-if="route.internal"
+                class="text-muted-foreground inline-flex items-center gap-1 text-xs"
+                :title="t('routes.internalHint')"
+              >
+                <LockKeyhole class="size-3.5" aria-hidden="true" />
+                {{ t('routes.internal') }}
               </span>
               <span
                 v-if="route.security_policy_id"

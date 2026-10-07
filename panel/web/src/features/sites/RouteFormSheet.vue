@@ -40,14 +40,16 @@ import ActionFields from './ActionFields.vue'
 import { conditionProblem } from './conditions'
 import ConditionsEditor from './ConditionsEditor.vue'
 import {
-  ACTION_TYPES,
   invalidFieldLines,
   MATCH_KINDS,
+  ROUTE_ACTION_TYPES,
   routeForm,
   routeInput,
   type RouteForm,
 } from './forms'
 import { actionIcons } from './presentation'
+import { rewriteProblem, targetProblem } from './rewrites'
+import RewritesEditor from './RewritesEditor.vue'
 
 const ANY_HOST = '-'
 
@@ -59,7 +61,12 @@ const refresh = useRefreshConfiguration()
 const create = useMutation(createRouteMutation())
 const replace = useMutation(replaceRouteMutation())
 const busy = computed(() => create.isPending.value || replace.isPending.value)
-const unfinished = computed(() => form.conditions.some((condition) => conditionProblem(condition)))
+const unfinished = computed(
+  () =>
+    form.conditions.some((condition) => conditionProblem(condition)) ||
+    form.rewrites.some((rule) => rewriteProblem(rule)) ||
+    (form.action.type === 'internal_redirect' && Boolean(targetProblem(form.action.target))),
+)
 
 const form = reactive<RouteForm>(routeForm(undefined, 10))
 watch(open, (isOpen) => {
@@ -69,7 +76,7 @@ watch(open, (isOpen) => {
 })
 
 const actions = computed(() =>
-  ACTION_TYPES.map((value) => ({
+  ROUTE_ACTION_TYPES.map((value) => ({
     value,
     label: t(`routes.actions.${value}`),
     icon: actionIcons[value],
@@ -180,6 +187,12 @@ function submit() {
             <ConditionsEditor v-model="form.conditions" id-prefix="route-condition" />
           </fieldset>
 
+          <fieldset class="flex flex-col gap-2">
+            <legend class="text-sm font-medium">{{ t('routes.rewrites.title') }}</legend>
+            <p class="text-muted-foreground text-xs">{{ t('routes.rewrites.description') }}</p>
+            <RewritesEditor v-model="form.rewrites" id-prefix="route-rewrite" />
+          </fieldset>
+
           <SecurityPolicySelect
             id="route-security-policy"
             v-model="form.securityPolicyId"
@@ -193,6 +206,12 @@ function submit() {
           />
 
           <SwitchField id="route-enabled" v-model="form.enabled" :label="t('common.enabled')" />
+          <SwitchField
+            id="route-internal"
+            v-model="form.internal"
+            :label="t('routes.internal')"
+            :hint="t('routes.internalHint')"
+          />
 
           <div class="flex flex-col gap-1.5">
             <Label>{{ t('routes.action') }}</Label>

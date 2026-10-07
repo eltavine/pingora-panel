@@ -1,5 +1,6 @@
 import type { Component } from 'vue'
 import {
+  ArrowLeftToLine,
   ArrowRightLeft,
   Ban,
   Bot,
@@ -15,10 +16,15 @@ import {
   ListChecks,
   MessageSquareText,
   Network,
+  Regex,
+  Replace,
+  Scissors,
   Split,
   Variable,
+  Waypoints,
 } from '@lucide/vue'
 import type { Action, RouteCondition, SiteKind, SiteStatus } from '@/api/generated'
+import type { RewriteKind } from './rewrites'
 import type { StatusTone } from '@/components/StatusIndicator.vue'
 
 export const kindIcons: Record<SiteKind, Component> = {
@@ -35,6 +41,14 @@ export const actionIcons: Record<Action['type'], Component> = {
   redirect: CornerUpRight,
   respond: MessageSquareText,
   lua: Braces,
+  internal_redirect: Waypoints,
+}
+
+export const rewriteIcons: Record<RewriteKind, Component> = {
+  strip_prefix: Scissors,
+  add_prefix: ArrowLeftToLine,
+  set_uri: Replace,
+  rewrite: Regex,
 }
 
 export const statusTones: Record<SiteStatus, StatusTone> = {

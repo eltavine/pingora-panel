@@ -23,6 +23,8 @@ const route: Route = {
   security_policy_id: 'api-limits',
   http_policy_id: 'api',
   access_log: { enabled: false, format: null, fields: {} },
+  rewrites: [{ kind: 'strip_prefix', prefix: '/api' }],
+  internal: false,
 }
 
 const site: SiteView = {
@@ -63,6 +65,7 @@ describe('action forms', () => {
         content_type: 'text/plain',
         retry_after_seconds: 60,
       },
+      { type: 'internal_redirect', target: '/errors$uri' },
     ]
     for (const action of actions) {
       expect(toAction(actionForm(action))).toEqual(action)

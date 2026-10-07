@@ -190,6 +190,11 @@ const en: Messages = {
       upstreamPlaceholder: 'Choose an upstream',
       luaAction:
         'Answers with a Lua script, written in the configuration files; change it in Configuration files or Lua scripts.',
+      target: 'Target',
+      targetHint:
+        "A path template such as /errors$uri, or {'@'}name for a named route. The client sees no redirect.",
+      targetRequired: 'Enter the path or named route to serve.',
+      targetShape: "Start the target with / for a path or {'@'} for a named route.",
       root: 'Site directory',
       rootHint: 'A path below the gateway static root.',
       indexFiles: 'Index files',
@@ -265,6 +270,46 @@ const en: Messages = {
     emptyDetail: 'Bind at least one domain for the site to receive traffic.',
   },
   routes: {
+    internal: 'Internal only',
+    internalHint:
+      'Takes only requests a rewrite, an internal redirect or a script sends here; others get 404.',
+    rewrites: {
+      title: 'Rewrites',
+      description:
+        'Change the path the request goes on with, in order. Strip prefix, add prefix and set URI keep this route; a regex rewrite chooses the route again unless its flag is break.',
+      siteDescription:
+        'Change the path of every request to the site, in order, before a route is chosen.',
+      add: 'Add a rule',
+      remove: 'Remove rule {position}',
+      moveUp: 'Move rule {position} up',
+      moveDown: 'Move rule {position} down',
+      prefix: 'Path prefix',
+      template: 'URI template',
+      pattern: 'Regular expression',
+      replacement: 'Replacement',
+      flag: 'Then',
+      summary: '{count} rewrite | {count} rewrites',
+      kinds: {
+        strip_prefix: 'Strip prefix',
+        add_prefix: 'Add prefix',
+        set_uri: 'Set URI',
+        rewrite: 'Regex rewrite',
+      },
+      flags: {
+        none: 'Next rule',
+        last: 'Choose route again',
+        break: 'Keep this route',
+        redirect: 'Redirect (302)',
+        permanent: 'Redirect (301)',
+      },
+      problems: {
+        prefixRequired: 'Enter the prefix.',
+        prefixShape: 'Write the prefix as a path starting with / and without a trailing /.',
+        templateRequired: 'Enter the URI to set.',
+        patternRequired: 'Enter the regular expression.',
+        replacementRequired: 'Enter the replacement.',
+      },
+    },
     conditions: {
       title: 'Conditions',
       description:
@@ -368,6 +413,7 @@ const en: Messages = {
       redirect: 'Redirect',
       respond: 'Fixed response',
       lua: 'Lua script',
+      internal_redirect: 'Internal redirect',
     },
   },
   upstreams: {

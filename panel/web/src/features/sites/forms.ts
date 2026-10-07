@@ -12,11 +12,14 @@ import type {
 } from '@/api/generated'
 import { conditionForm, toCondition, type ConditionForm } from './conditions'
 import { parseHosts } from './presentation'
+import { rewriteForm, toRewrite, type RewriteForm } from './rewrites'
 import { optionalText, optionalNumber } from '@/lib/forms'
 
 export type ActionType = Action['type']
 
 export const ACTION_TYPES: readonly ActionType[] = ['proxy', 'static', 'redirect', 'respond']
+/** Only a route serves a request as if it asked for another path. */
+export const ROUTE_ACTION_TYPES: readonly ActionType[] = [...ACTION_TYPES, 'internal_redirect']
 export const SITE_KINDS: readonly SiteKind[] = [
   'reverse_proxy',
   'static',
@@ -51,6 +54,8 @@ export interface ActionForm {
   body: string
   contentType: string
   retryAfter: number | string
+  /** An internal redirect's path template, or `@name` for a named route. */
+  target: string
   /** A Lua answer, kept as it is: Lua is written in the configuration files. */
   lua?: Extract<Action, { type: 'lua' }>
 }
@@ -93,6 +98,8 @@ export interface SiteForm {
   tags: string
   note: string
   accessLog: AccessLogForm
+  /** Rules every request runs before a route is chosen, in order. */
+  rewrites: RewriteForm[]
 }
 
 export interface RouteForm {
@@ -107,6 +114,10 @@ export interface RouteForm {
   securityPolicyId: string
   httpPolicyId: string
   accessLog: AccessLogForm
+  /** Rules the route's requests run once it is chosen, in order. */
+  rewrites: RewriteForm[]
+  /** Takes only requests sent here from inside the gateway. */
+  internal: boolean
 }
 
 export function splitList(value: string): string[] {
@@ -130,6 +141,7 @@ export function actionForm(action?: Action): ActionForm {
     body: '',
     contentType: '',
     retryAfter: '',
+    target: '',
   }
   switch (action?.type) {
     case 'proxy':
@@ -153,6 +165,9 @@ export function actionForm(action?: Action): ActionForm {
       break
     case 'lua':
       form.lua = action
+      break
+    case 'internal_redirect':
+      form.target = action.target
       break
   }
   return form
@@ -186,6 +201,8 @@ export function toAction(form: ActionForm): Action {
       }
     case 'lua':
       return form.lua ?? { type: 'lua', code: { kind: 'inline', code: '' } }
+    case 'internal_redirect':
+      return { type: 'internal_redirect', target: form.target.trim() }
   }
 }
 
@@ -243,6 +260,7 @@ export function siteForm(site?: SiteView): SiteForm {
     tags: (site?.tags ?? []).join(', '),
     note: site?.note ?? '',
     accessLog: accessLogForm(site?.access_log),
+    rewrites: (site?.rewrites ?? []).map(rewriteForm),
   }
 }
 
@@ -278,6 +296,7 @@ export function siteInput(form: SiteForm, site?: SiteView): SiteInput {
     tags: splitList(form.tags),
     note: optionalText(form.note),
     access_log: toAccessLog(form.accessLog),
+    rewrites: form.rewrites.map(toRewrite),
   }
 }
 
@@ -292,6 +311,8 @@ export function routeInputOf(route: Route): RouteInput {
     security_policy_id: route.security_policy_id ?? null,
     http_policy_id: route.http_policy_id ?? null,
     access_log: route.access_log ?? null,
+    rewrites: route.rewrites ?? [],
+    internal: route.internal ?? false,
   }
 }
 
@@ -308,6 +329,8 @@ export function routeForm(route: Route | undefined, priority: number): RouteForm
     securityPolicyId: route?.security_policy_id ?? '',
     httpPolicyId: route?.http_policy_id ?? '',
     accessLog: accessLogForm(route?.access_log),
+    rewrites: (route?.rewrites ?? []).map(rewriteForm),
+    internal: route?.internal ?? false,
   }
 }
 
@@ -327,6 +350,8 @@ export function routeInput(form: RouteForm, id?: string): RouteInput {
     security_policy_id: optionalText(form.securityPolicyId),
     http_policy_id: optionalText(form.httpPolicyId),
     access_log: toAccessLog(form.accessLog),
+    rewrites: form.rewrites.map(toRewrite),
+    internal: form.internal,
   }
 }
 

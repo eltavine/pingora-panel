@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { REDIRECT_STATUSES, type ActionForm } from './forms'
+import { targetProblem } from './rewrites'
 
 const action = defineModel<ActionForm>({ required: true })
 const props = defineProps<{ idPrefix: string }>()
@@ -97,6 +98,30 @@ const id = (field: string) => `${props.idPrefix}-${field}`
         :label="t('sites.form.preservePath')"
       />
     </template>
+
+    <FormField
+      v-else-if="action.type === 'internal_redirect'"
+      :id="id('target')"
+      :label="t('sites.form.target')"
+      :hint="t('sites.form.targetHint')"
+    >
+      <Input
+        :id="id('target')"
+        v-model="action.target"
+        required
+        class="font-mono text-xs"
+        autocomplete="off"
+        placeholder="/errors$uri"
+        :aria-invalid="Boolean(action.target) && Boolean(targetProblem(action.target))"
+      />
+      <p
+        v-if="action.target && targetProblem(action.target)"
+        class="text-destructive text-xs"
+        role="alert"
+      >
+        {{ t(targetProblem(action.target) ?? '') }}
+      </p>
+    </FormField>
 
     <p
       v-else-if="action.type === 'lua'"

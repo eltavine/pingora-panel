@@ -55,6 +55,8 @@ import {
   type SiteForm,
 } from './forms'
 import { kindIcons } from './presentation'
+import { rewriteProblem } from './rewrites'
+import RewritesEditor from './RewritesEditor.vue'
 
 const NO_PROFILE = '-'
 
@@ -259,6 +261,12 @@ function submit() {
             :hint="t('httpPolicies.select.siteHint')"
           />
 
+          <fieldset class="flex flex-col gap-2">
+            <legend class="text-sm font-medium">{{ t('routes.rewrites.title') }}</legend>
+            <p class="text-muted-foreground text-xs">{{ t('routes.rewrites.siteDescription') }}</p>
+            <RewritesEditor v-model="form.rewrites" id-prefix="site-rewrite" />
+          </fieldset>
+
           <AccessLogFields v-model="form.accessLog" id-prefix="site-access-log" scope="site" />
 
           <div class="grid gap-4 sm:grid-cols-2">
@@ -282,7 +290,11 @@ function submit() {
         <SheetFooter>
           <Button
             type="submit"
-            :disabled="busy || invalidFieldLines(form.accessLog.fields).length > 0"
+            :disabled="
+              busy ||
+              invalidFieldLines(form.accessLog.fields).length > 0 ||
+              form.rewrites.some((rule) => rewriteProblem(rule))
+            "
           >
             <Save data-icon="inline-start" aria-hidden="true" />
             {{ site ? t('common.save') : t('common.create') }}
