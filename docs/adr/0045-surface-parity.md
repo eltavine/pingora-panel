@@ -58,9 +58,10 @@ recorded with `config.apply.failed`, which names the plan expected, and
   terminal; `--yes` confirms the plan it printed, and `--plan <digest>`
   applies only a plan reviewed earlier. Without a terminal, apply needs
   one of them.
-- The console's review shows the plan; applying asks for confirmation
-  with what changes, against which revision, and sends the plan's digest.
-  A plan that changed meanwhile is shown again to review.
+- The console's review shows the plan; applying from it, or from the
+  Apply of the pages' headers, asks for confirmation with what changes,
+  against which revision, and sends the plan's digest. A plan that changed
+  meanwhile is shown again to review.
 - Dry runs check without activating and need no confirmation; approvals
   (ADR 0019) bind the draft's content as before.
 
