@@ -173,6 +173,85 @@ pub fn rewrite_rules(rules: &[String]) -> Result<Vec<Value>> {
         .collect()
 }
 
+/// On or off.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, clap::ValueEnum)]
+pub enum Switch {
+    On,
+    Off,
+}
+
+impl Switch {
+    pub fn is_on(self) -> bool {
+        self == Self::On
+    }
+}
+
+/// Error pages as the configuration language writes them, such as
+/// `404 file=errors/404.html`, `502 503 body="<h1>Back soon</h1>"` or, as
+/// nginx writes them, `404 =301 https://example.com/`.
+pub fn error_pages(pages: &[String]) -> Result<Vec<Value>> {
+    pages.iter().map(|page| error_page(page)).collect()
+}
+
+fn error_page(page: &str) -> Result<Value> {
+    let usage = || {
+        CliError::Usage(format!(
+            "{page:?} is not STATUS... body=TEXT [type=TYPE], file=PATH or redirect=URL, with [status=STATUS]"
+        ))
+    };
+    let words = words(page)?;
+    let mut statuses = Vec::new();
+    let mut rest = words.iter().map(String::as_str).peekable();
+    while let Some(status) = rest.peek().and_then(|word| word.parse::<u16>().ok()) {
+        statuses.push(status);
+        rest.next();
+    }
+    let (mut response, mut status, mut content_type) = (None, None, None);
+    for word in rest {
+        let named = word.split_once('=').filter(|(key, _)| {
+            matches!(*key, "" | "status" | "type" | "body" | "file" | "redirect")
+        });
+        let answer = match named {
+            Some(("" | "status", code)) => {
+                status = Some(code.parse::<u16>().map_err(|_| usage())?);
+                continue;
+            }
+            Some(("type", value)) => {
+                content_type = Some(value);
+                continue;
+            }
+            Some(("body", body)) => json!({"kind": "body", "body": body}),
+            Some(("file", path)) => json!({"kind": "file", "path": path}),
+            Some((_, location)) => json!({"kind": "redirect", "location": location}),
+            None if word.starts_with("http://") || word.starts_with("https://") => {
+                json!({"kind": "redirect", "location": word})
+            }
+            None if word.starts_with('/') => json!({"kind": "file", "path": &word[1..]}),
+            None => return Err(usage()),
+        };
+        if response.replace(answer).is_some() {
+            return Err(usage());
+        }
+    }
+    let mut response = response
+        .filter(|_| !statuses.is_empty())
+        .ok_or_else(usage)?;
+    if let Some(content_type) = content_type {
+        if response["kind"] != "body" {
+            return Err(CliError::Usage(format!(
+                "{page:?} gives type= to a page without body="
+            )));
+        }
+        response["content_type"] = json!(content_type);
+    }
+    Ok(if response["kind"] == "redirect" {
+        response["status"] = json!(status.unwrap_or(302));
+        json!({"statuses": statuses, "response": response})
+    } else {
+        json!({"statuses": statuses, "response": response, "status": status})
+    })
+}
+
 /// `text` split at spaces outside double quotes, `\"` and `\\` escaping
 /// inside them.
 fn words(text: &str) -> Result<Vec<String>> {
@@ -258,6 +337,36 @@ mod tests {
             "set_uri \"/a",
         ] {
             assert!(rewrite_rules(&[wrong.into()]).is_err(), "{wrong}");
+        }
+    }
+
+    #[test]
+    fn error_pages_are_read_as_the_language_and_nginx_write_them() {
+        let pages = error_pages(&[
+            "404 410 \"body=<h1>Gone</h1>\" type=text/html".into(),
+            "502 503 file=errors/50x.html status=503".into(),
+            "403 =301 https://example.com/?from=403".into(),
+            "401 /errors/401.html".into(),
+        ])
+        .unwrap();
+        assert_eq!(
+            pages,
+            [
+                json!({"statuses": [404, 410], "response": {"kind": "body", "body": "<h1>Gone</h1>", "content_type": "text/html"}, "status": null}),
+                json!({"statuses": [502, 503], "response": {"kind": "file", "path": "errors/50x.html"}, "status": 503}),
+                json!({"statuses": [403], "response": {"kind": "redirect", "location": "https://example.com/?from=403", "status": 301}}),
+                json!({"statuses": [401], "response": {"kind": "file", "path": "errors/401.html"}, "status": null}),
+            ]
+        );
+        for wrong in [
+            "file=errors/404.html",
+            "404",
+            "404 body=a file=b",
+            "404 file=a type=text/html",
+            "404 status=abc body=x",
+            "404 elsewhere",
+        ] {
+            assert!(error_pages(&[wrong.into()]).is_err(), "{wrong}");
         }
     }
 

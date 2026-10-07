@@ -107,6 +107,28 @@ async fn api(
             }),
         ),
         ("PUT", "/api/v1/routes/r-1") => Json(body.clone()).into_response(),
+        ("GET", "/api/v1/sites/shop") => with_etag(
+            "site-1",
+            json!({
+                "id": "shop", "name": "shop", "kind": "static", "status": "running",
+                "https": false, "etag": "\"site-1\"",
+                "action": {"type": "respond", "status": 204},
+                "domains": [{"host": "shop.example", "enabled": true, "primary": true,
+                             "redirect": false, "tls_profile_id": null}],
+                "lua": {"access": {"inline": "return"}},
+                "routes": [{"id": "r-1", "priority": 10, "named": "fallback",
+                            "match": {"kind": "prefix", "path": "/"},
+                            "action": {"type": "respond", "status": 204},
+                            "lua": {"access": {"inline": "return"}}}],
+                "error_pages": {"pages": [{"statuses": [404],
+                                           "response": {"kind": "file", "path": "errors/404.html"}}],
+                                "intercept": true},
+                "maintenance": {"enabled": false, "status": 503, "allow": ["192.0.2.0/24"]},
+                "robots": {"kind": "allow_all"},
+                "created_at": "2026-10-01T10:00:00Z", "updated_at": "2026-10-01T10:00:00Z"
+            }),
+        ),
+        ("PUT", "/api/v1/sites/shop") => Json(body.clone()).into_response(),
         ("GET", "/api/v1/config/lua") => Json(json!({
             "disabled": false, "version": 7, "revision": 3, "shared_dicts": [], "diagnostics": [],
             "scripts": [{
@@ -3825,4 +3847,149 @@ fn toggling_a_route_keeps_everything_else_it_has() {
     assert_eq!(put.body["http_policy_id"], "cors");
     assert_eq!(put.body["access_log"], json!({"enabled": false}));
     assert!(put.body.get("lua").is_none(), "{}", put.body);
+}
+
+#[test]
+fn sites_take_error_pages_maintenance_robots_and_favicons() {
+    let stub = Stub::start();
+    let put = |index: usize| stub.requests("PUT", "/api/v1/sites/shop")[index].clone();
+    let on = stub.ppanel(&[
+        "site",
+        "maintenance",
+        "shop",
+        "on",
+        "--allow",
+        "10.0.0.0/8",
+        "--allow",
+        "2001:db8::/32",
+        "--retry-after",
+        "600",
+    ]);
+    assert!(on.status.success(), "{}", stderr(&on));
+    let written = put(0);
+    assert_eq!(written.if_match.as_deref(), Some("\"site-1\""));
+    assert_eq!(
+        written.body["maintenance"],
+        json!({"enabled": true, "status": 503, "allow": ["10.0.0.0/8", "2001:db8::/32"],
+               "retry_after_seconds": 600})
+    );
+    for field in ["id", "kind", "status", "etag", "lua", "created_at"] {
+        assert!(
+            written.body.get(field).is_none(),
+            "{field} in {}",
+            written.body
+        );
+    }
+    assert_eq!(
+        written.body["routes"][0],
+        json!({"id": "r-1", "priority": 10,
+        "match": {"kind": "prefix", "path": "/"}, "action": {"type": "respond", "status": 204}})
+    );
+    assert!(
+        stdout(&on).contains("Took into maintenance shop"),
+        "{}",
+        stdout(&on)
+    );
+    let cleared = stub.ppanel(&["site", "maintenance", "shop", "clear"]);
+    assert!(cleared.status.success(), "{}", stderr(&cleared));
+    assert_eq!(put(1).body["maintenance"], Value::Null);
+
+    let pages = stub.ppanel(&[
+        "site",
+        "error-pages",
+        "shop",
+        "--page",
+        "502 503 \"body=<h1>Back soon</h1>\"",
+        "--page",
+        "404 =301 https://shop.example/",
+        "--intercept",
+        "on",
+    ]);
+    assert!(pages.status.success(), "{}", stderr(&pages));
+    assert_eq!(
+        put(2).body["error_pages"],
+        json!({"pages": [
+            {"statuses": [502, 503], "response": {"kind": "body", "body": "<h1>Back soon</h1>"}, "status": null},
+            {"statuses": [404], "response": {"kind": "redirect", "location": "https://shop.example/", "status": 301}},
+        ], "intercept": true})
+    );
+    let quiet = stub.ppanel(&["site", "error-pages", "shop", "--intercept", "off"]);
+    assert!(quiet.status.success(), "{}", stderr(&quiet));
+    assert_eq!(put(3).body["error_pages"]["intercept"], false);
+    assert_eq!(
+        put(3).body["error_pages"]["pages"][0]["statuses"],
+        json!([404])
+    );
+    let nothing = stub.ppanel(&["site", "error-pages", "shop"]);
+    assert!(!nothing.status.success());
+    assert!(stderr(&nothing).contains("--page"), "{}", stderr(&nothing));
+
+    let robots = stub.ppanel(&[
+        "site",
+        "robots",
+        "shop",
+        "custom",
+        "--body",
+        "User-agent: *\nDisallow: /cart",
+    ]);
+    assert!(robots.status.success(), "{}", stderr(&robots));
+    assert_eq!(
+        put(4).body["robots"],
+        json!({"kind": "custom", "body": "User-agent: *\nDisallow: /cart"})
+    );
+    assert_eq!(
+        stub.ppanel(&["site", "robots", "shop", "custom"])
+            .status
+            .code(),
+        Some(2)
+    );
+    let favicon = stub.ppanel(&["site", "favicon", "shop", "file", "shop/favicon.ico"]);
+    assert!(favicon.status.success(), "{}", stderr(&favicon));
+    assert_eq!(
+        put(5).body["favicon"],
+        json!({"kind": "file", "path": "shop/favicon.ico"})
+    );
+    let off = stub.ppanel(&["site", "favicon", "shop", "off"]);
+    assert!(off.status.success(), "{}", stderr(&off));
+    assert_eq!(put(6).body["favicon"], Value::Null);
+    assert_eq!(
+        stub.ppanel(&["site", "favicon", "shop", "redirect"])
+            .status
+            .code(),
+        Some(2)
+    );
+
+    let shown = stub.ppanel(&["site", "show", "shop"]);
+    assert!(shown.status.success(), "{}", stderr(&shown));
+    for line in ["404, upstreams' too", "off (settings kept)", "allow all"] {
+        assert!(
+            stdout(&shown).contains(line),
+            "{line:?} in {}",
+            stdout(&shown)
+        );
+    }
+
+    let added = stub.ppanel(&[
+        "route",
+        "add",
+        "shop",
+        "--match",
+        "prefix:/api",
+        "--respond",
+        "204",
+        "--error-page",
+        "404 body=missing",
+        "--intercept-errors",
+    ]);
+    assert!(added.status.success(), "{}", stderr(&added));
+    assert_eq!(
+        stub.requests("POST", "/api/v1/sites/shop/routes")[0].body["error_pages"],
+        json!({"pages": [{"statuses": [404], "response": {"kind": "body", "body": "missing"}, "status": null}],
+               "intercept": true})
+    );
+    let inherited = stub.ppanel(&["route", "error-pages", "r-1", "--inherit"]);
+    assert!(inherited.status.success(), "{}", stderr(&inherited));
+    let route = &stub.requests("PUT", "/api/v1/routes/r-1")[0].body;
+    assert_eq!(route["error_pages"], Value::Null);
+    assert_eq!(route["security_policy_id"], "office");
 }

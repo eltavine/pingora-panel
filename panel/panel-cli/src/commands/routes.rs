@@ -1,4 +1,6 @@
-use super::{read_json, rewrite_rules, route_match, ActionFlags, ActionOptions};
+use super::{
+    error_pages, read_json, rewrite_rules, route_match, ActionFlags, ActionOptions, Switch,
+};
 use crate::{
     client::{Api, CliError, Result},
     output::{text, Column, Format, Output},
@@ -14,49 +16,21 @@ pub(crate) enum RouteCommand {
     /// Shows a route with its match and action.
     Show { id: String },
     /// Adds a route; lower priorities are evaluated first.
-    Add {
-        site: String,
-        /// KIND:PATH with KIND exact, prefix, glob or regex.
-        #[arg(long = "match", value_name = "KIND:PATH")]
-        matcher: String,
-        /// Restricts a prefix route to one of the site's hosts.
-        #[arg(long)]
-        host: Option<String>,
-        #[arg(long, default_value_t = 100)]
-        priority: u32,
-        #[arg(long)]
-        name: Option<String>,
-        #[arg(long)]
-        disabled: bool,
-        /// The route's requests pass this security policy after the site's.
-        #[arg(long)]
-        security_policy: Option<String>,
-        /// The route's requests and responses go through this HTTP policy
-        /// after the site's.
-        #[arg(long)]
-        http_policy: Option<String>,
-        #[command(flatten)]
-        conditions: Box<ConditionFlags>,
-        #[command(flatten)]
-        action: ActionFlags,
-        /// Serve requests as if they asked for this path template, or for
-        /// the named route @NAME, without telling the client.
-        #[arg(
-            long,
-            value_name = "TARGET",
-            conflicts_with_all = ["proxy", "static_root", "redirect", "respond", "maintenance"]
-        )]
-        internal_redirect: Option<String>,
-        /// A rewrite rule as the configuration language writes it, such as
-        /// "strip_prefix /api"; repeat it for more, in order.
-        #[arg(long, value_name = "RULE")]
-        rewrite: Vec<String>,
-        /// Take only requests a rewrite, an internal redirect or a script
-        /// sends here; others get 404.
-        #[arg(long)]
-        internal: bool,
-        #[command(flatten)]
-        options: ActionOptions,
+    Add(Box<AddRoute>),
+    /// Sets the pages answering a route's errors in place of its site's.
+    ErrorPages {
+        id: String,
+        /// A page as the configuration language writes it; repeat it for
+        /// more. Without any, the route answers its errors without pages.
+        #[arg(long = "page", value_name = "PAGE")]
+        pages: Vec<String>,
+        /// Whether upstreams' error responses with a page's status get the
+        /// page too.
+        #[arg(long, value_enum, default_value_t = Switch::Off)]
+        intercept: Switch,
+        /// Answers the route's errors with its site's pages again.
+        #[arg(long, conflicts_with_all = ["pages", "intercept"])]
+        inherit: bool,
     },
     /// Replaces a route with a JSON document.
     Update {
@@ -97,6 +71,60 @@ pub(crate) enum RouteCommand {
         #[arg(long)]
         listener: Option<String>,
     },
+}
+
+#[derive(clap::Args)]
+pub(crate) struct AddRoute {
+    site: String,
+    /// KIND:PATH with KIND exact, prefix, glob or regex.
+    #[arg(long = "match", value_name = "KIND:PATH")]
+    matcher: String,
+    /// Restricts a prefix route to one of the site's hosts.
+    #[arg(long)]
+    host: Option<String>,
+    #[arg(long, default_value_t = 100)]
+    priority: u32,
+    #[arg(long)]
+    name: Option<String>,
+    #[arg(long)]
+    disabled: bool,
+    /// The route's requests pass this security policy after the site's.
+    #[arg(long)]
+    security_policy: Option<String>,
+    /// The route's requests and responses go through this HTTP policy
+    /// after the site's.
+    #[arg(long)]
+    http_policy: Option<String>,
+    #[command(flatten)]
+    conditions: Box<ConditionFlags>,
+    #[command(flatten)]
+    action: ActionFlags,
+    /// Serve requests as if they asked for this path template, or for
+    /// the named route @NAME, without telling the client.
+    #[arg(
+        long,
+        value_name = "TARGET",
+        conflicts_with_all = ["proxy", "static_root", "redirect", "respond", "maintenance"]
+    )]
+    internal_redirect: Option<String>,
+    /// A rewrite rule as the configuration language writes it, such as
+    /// "strip_prefix /api"; repeat it for more, in order.
+    #[arg(long, value_name = "RULE")]
+    rewrite: Vec<String>,
+    /// Take only requests a rewrite, an internal redirect or a script
+    /// sends here; others get 404.
+    #[arg(long)]
+    internal: bool,
+    /// An error page as the configuration language writes it, such as
+    /// "404 file=errors/404.html", answering in place of the site's;
+    /// repeat it for more, or give "off" to answer without pages.
+    #[arg(long = "error-page", value_name = "PAGE")]
+    error_pages: Vec<String>,
+    /// Upstreams' error responses with a page's status get the page too.
+    #[arg(long, requires = "error_pages")]
+    intercept_errors: bool,
+    #[command(flatten)]
+    options: ActionOptions,
 }
 
 /// Conditions every request the route takes meets.
@@ -195,6 +223,10 @@ const COLUMNS: &[Column] = &[
     ("INTERNAL", |route| {
         route["internal"].as_bool().unwrap_or_default().to_string()
     }),
+    ("ERROR PAGES", |route| match route.get("error_pages") {
+        None | Some(Value::Null) => "site's".into(),
+        Some(pages) => pages["pages"].as_array().map_or(0, Vec::len).to_string(),
+    }),
     ("ENABLED", |route| text(&route["enabled"])),
 ];
 
@@ -232,22 +264,25 @@ pub async fn run(api: &Api, output: &Output, command: RouteCommand) -> Result<()
                 COLUMNS,
             );
         }
-        RouteCommand::Add {
-            site,
-            matcher,
-            host,
-            priority,
-            name,
-            disabled,
-            security_policy,
-            http_policy,
-            conditions,
-            action,
-            internal_redirect,
-            rewrite,
-            internal,
-            options,
-        } => {
+        RouteCommand::Add(add) => {
+            let AddRoute {
+                site,
+                matcher,
+                host,
+                priority,
+                name,
+                disabled,
+                security_policy,
+                http_policy,
+                conditions,
+                action,
+                internal_redirect,
+                rewrite,
+                internal,
+                error_pages: pages,
+                intercept_errors,
+                options,
+            } = *add;
             let action = match internal_redirect {
                 Some(target) => json!({"type": "internal_redirect", "target": target}),
                 None if action.is_set() => action.to_json(&options)?,
@@ -273,6 +308,7 @@ pub async fn run(api: &Api, output: &Output, command: RouteCommand) -> Result<()
                 "http_policy_id": http_policy,
                 "rewrites": rewrite_rules(&rewrite)?,
                 "internal": internal,
+                "error_pages": own_pages(&pages, intercept_errors)?,
             });
             let route = api
                 .change(
@@ -298,6 +334,30 @@ pub async fn run(api: &Api, output: &Output, command: RouteCommand) -> Result<()
                 .await?
                 .body;
             output.done(&format!("Updated route {id}"), &route);
+        }
+        RouteCommand::ErrorPages {
+            id,
+            pages,
+            intercept,
+            inherit,
+        } => {
+            let current = api.get(&format!("/api/v1/routes/{id}"), &[]).await?;
+            let mut body = input(&current.body);
+            body["error_pages"] = if inherit {
+                Value::Null
+            } else {
+                json!({"pages": error_pages(&pages)?, "intercept": intercept.is_on()})
+            };
+            let route = api
+                .change(
+                    Method::PUT,
+                    &format!("/api/v1/routes/{id}"),
+                    Some(&body),
+                    current.etag.as_deref(),
+                )
+                .await?
+                .body;
+            output.done(&format!("Set the error pages of route {id}"), &route);
         }
         RouteCommand::Enable { id } => toggle(api, output, &id, true).await?,
         RouteCommand::Disable { id } => toggle(api, output, &id, false).await?,
@@ -384,6 +444,16 @@ pub async fn run(api: &Api, output: &Output, command: RouteCommand) -> Result<()
         }
     }
     Ok(())
+}
+
+/// A new route's own error pages: none written keeps its site's, and "off"
+/// answers without pages.
+fn own_pages(pages: &[String], intercept: bool) -> Result<Value> {
+    Ok(match pages {
+        [] => Value::Null,
+        [off] if off == "off" => json!({"pages": [], "intercept": intercept}),
+        pages => json!({"pages": error_pages(pages)?, "intercept": intercept}),
+    })
 }
 
 async fn toggle(api: &Api, output: &Output, id: &str, enabled: bool) -> Result<()> {

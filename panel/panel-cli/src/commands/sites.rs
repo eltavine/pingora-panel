@@ -1,4 +1,4 @@
-use super::{read_json, ActionFlags, ActionOptions};
+use super::{error_pages, read_json, ActionFlags, ActionOptions, Switch};
 use crate::{
     client::{Api, CliError, Result},
     output::{text, Column, Output},
@@ -90,6 +90,91 @@ pub(crate) enum SiteCommand {
         #[arg(required = true)]
         ids: Vec<String>,
     },
+    /// Sets the pages answering a site's errors, in place of its current
+    /// ones.
+    ErrorPages {
+        id: String,
+        /// A page as the configuration language writes it, such as
+        /// "404 file=errors/404.html" or "502 503 body=Back soon"; repeat it
+        /// for more.
+        #[arg(long = "page", value_name = "PAGE")]
+        pages: Vec<String>,
+        /// Whether upstreams' error responses with a page's status get the
+        /// page too; unchanged unless given.
+        #[arg(long, value_enum)]
+        intercept: Option<Switch>,
+        /// Removes every page.
+        #[arg(long, conflicts_with_all = ["pages", "intercept"])]
+        clear: bool,
+    },
+    /// Takes a site into maintenance or out of it; clients in the allowed
+    /// networks still reach it.
+    Maintenance {
+        id: String,
+        /// `off` keeps the settings for next time; `clear` removes them.
+        #[arg(value_enum)]
+        state: MaintenanceState,
+        /// A network or address whose clients, after trusted proxies, still
+        /// reach the site; repeat it for more. Replaces the current list.
+        #[arg(long = "allow", value_name = "NETWORK")]
+        allow: Vec<String>,
+        /// The status everyone else gets; 503 unless set.
+        #[arg(long)]
+        status: Option<u16>,
+        /// The body everyone else gets; the site's error page for the status
+        /// otherwise.
+        #[arg(long)]
+        body: Option<String>,
+        #[arg(long)]
+        content_type: Option<String>,
+        /// Seconds clients should wait, sent as Retry-After.
+        #[arg(long, value_name = "SECONDS")]
+        retry_after: Option<u32>,
+    },
+    /// Sets how a site answers /robots.txt itself, ahead of its routes.
+    Robots {
+        id: String,
+        /// `off` leaves /robots.txt to the routes.
+        #[arg(value_enum)]
+        answer: RobotsAnswer,
+        /// The file's text, for `custom`.
+        #[arg(long, required_if_eq("answer", "custom"))]
+        body: Option<String>,
+    },
+    /// Sets how a site answers /favicon.ico itself, ahead of its routes.
+    Favicon {
+        id: String,
+        /// `off` leaves /favicon.ico to the routes.
+        #[arg(value_enum)]
+        answer: FaviconAnswer,
+        /// The file below the gateway's static root, such as
+        /// shop/favicon.ico, for `file`; the URL, for `redirect`.
+        #[arg(required_if_eq_any([("answer", "file"), ("answer", "redirect")]))]
+        target: Option<String>,
+    },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum MaintenanceState {
+    On,
+    Off,
+    Clear,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum RobotsAnswer {
+    AllowAll,
+    DisallowAll,
+    Custom,
+    Off,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum FaviconAnswer {
+    NoContent,
+    File,
+    Redirect,
+    Off,
 }
 
 #[derive(clap::Args)]
@@ -136,6 +221,10 @@ pub(crate) struct CreateSite {
     /// configuration language writes it; repeat it for more, in order.
     #[arg(long, value_name = "RULE")]
     rewrite: Vec<String>,
+    /// An error page as the configuration language writes it, such as
+    /// "404 file=errors/404.html"; repeat it for more.
+    #[arg(long = "error-page", value_name = "PAGE")]
+    error_pages: Vec<String>,
     /// Create the site stopped.
     #[arg(long)]
     disabled: bool,
@@ -245,6 +334,22 @@ const DETAIL: &[Column] = &[
     }),
     ("HTTPS redirect", |site| text(&site["https_redirect"])),
     ("WWW redirect", |site| text(&site["www_redirect"])),
+    ("Error pages", |site| pages(&site["error_pages"])),
+    ("Maintenance", |site| {
+        let maintenance = &site["maintenance"];
+        let allowed = maintenance["allow"]
+            .as_array()
+            .map(|allow| allow.iter().map(text).collect::<Vec<_>>().join(", "))
+            .filter(|allow| !allow.is_empty());
+        match (maintenance["enabled"].as_bool(), allowed) {
+            (None, _) => "off".into(),
+            (Some(false), _) => "off (settings kept)".into(),
+            (Some(true), None) => "on".into(),
+            (Some(true), Some(allowed)) => format!("on, except for {allowed}"),
+        }
+    }),
+    ("robots.txt", |site| answered(&site["robots"])),
+    ("favicon.ico", |site| answered(&site["favicon"])),
     ("Group", |site| text(&site["group"])),
     ("Tags", |site| text(&site["tags"])),
     ("Note", |site| text(&site["note"])),
@@ -338,6 +443,7 @@ pub async fn run(api: &Api, output: &Output, command: SiteCommand) -> Result<()>
                 security_policy,
                 http_policy,
                 rewrite,
+                error_pages: pages,
                 disabled,
             } = *create;
             let body = match file {
@@ -360,6 +466,7 @@ pub async fn run(api: &Api, output: &Output, command: SiteCommand) -> Result<()>
                     "security_policy_id": security_policy,
                     "http_policy_id": http_policy,
                     "rewrites": super::rewrite_rules(&rewrite)?,
+                    "error_pages": {"pages": error_pages(&pages)?},
                 }),
             };
             let site = api
@@ -485,8 +592,163 @@ pub async fn run(api: &Api, output: &Output, command: SiteCommand) -> Result<()>
                 .body;
             output.list(&reply, COLUMNS);
         }
+        SiteCommand::ErrorPages {
+            id,
+            pages,
+            intercept,
+            clear,
+        } => {
+            if !clear && pages.is_empty() && intercept.is_none() {
+                return Err(CliError::Usage(
+                    "give pages with --page, --intercept on|off, or --clear".into(),
+                ));
+            }
+            let pages = error_pages(&pages)?;
+            edit(api, output, &id, |site| {
+                site["error_pages"] = if clear {
+                    json!({})
+                } else {
+                    let current = &site["error_pages"];
+                    json!({
+                        "pages": if pages.is_empty() {
+                            current.get("pages").cloned().unwrap_or_else(|| json!([]))
+                        } else {
+                            json!(pages)
+                        },
+                        "intercept": intercept.map_or(current["intercept"] == true, Switch::is_on),
+                    })
+                };
+                Ok(if clear {
+                    "Removed the error pages of"
+                } else {
+                    "Set the error pages of"
+                })
+            })
+            .await?;
+        }
+        SiteCommand::Maintenance {
+            id,
+            state,
+            allow,
+            status,
+            body,
+            content_type,
+            retry_after,
+        } => {
+            edit(api, output, &id, |site| {
+                if state == MaintenanceState::Clear {
+                    site["maintenance"] = Value::Null;
+                    return Ok("Removed the maintenance settings of");
+                }
+                let mut maintenance = site
+                    .get("maintenance")
+                    .filter(|maintenance| maintenance.is_object())
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
+                maintenance["enabled"] = json!(state == MaintenanceState::On);
+                if !allow.is_empty() {
+                    maintenance["allow"] = json!(allow);
+                }
+                for (field, value) in [
+                    ("status", status.map(|status| json!(status))),
+                    ("body", body.map(Value::from)),
+                    ("content_type", content_type.map(Value::from)),
+                    (
+                        "retry_after_seconds",
+                        retry_after.map(|seconds| json!(seconds)),
+                    ),
+                ] {
+                    if let Some(value) = value {
+                        maintenance[field] = value;
+                    }
+                }
+                site["maintenance"] = maintenance;
+                Ok(if state == MaintenanceState::On {
+                    "Took into maintenance"
+                } else {
+                    "Took out of maintenance"
+                })
+            })
+            .await?;
+        }
+        SiteCommand::Robots { id, answer, body } => {
+            edit(api, output, &id, |site| {
+                site["robots"] = match answer {
+                    RobotsAnswer::AllowAll => json!({"kind": "allow_all"}),
+                    RobotsAnswer::DisallowAll => json!({"kind": "disallow_all"}),
+                    RobotsAnswer::Custom => json!({"kind": "custom", "body": body}),
+                    RobotsAnswer::Off => Value::Null,
+                };
+                Ok("Set the robots.txt of")
+            })
+            .await?;
+        }
+        SiteCommand::Favicon { id, answer, target } => {
+            edit(api, output, &id, |site| {
+                site["favicon"] = match answer {
+                    FaviconAnswer::NoContent => json!({"kind": "no_content"}),
+                    FaviconAnswer::File => json!({"kind": "file", "path": target}),
+                    FaviconAnswer::Redirect => json!({"kind": "redirect", "location": target}),
+                    FaviconAnswer::Off => Value::Null,
+                };
+                Ok("Set the favicon of")
+            })
+            .await?;
+        }
     }
     Ok(())
+}
+
+/// Reads a site, changes what `change` changes and writes it back unless
+/// it changed meanwhile; `change` says what it did.
+async fn edit(
+    api: &Api,
+    output: &Output,
+    id: &str,
+    change: impl FnOnce(&mut Value) -> Result<&'static str>,
+) -> Result<()> {
+    let current = api.get(&format!("/api/v1/sites/{id}"), &[]).await?;
+    let mut body = input(current.body);
+    let done = change(&mut body)?;
+    let site = api
+        .change(
+            Method::PUT,
+            &format!("/api/v1/sites/{id}"),
+            Some(&body),
+            current.etag.as_deref(),
+        )
+        .await?
+        .body;
+    output.done(&format!("{done} {}", text(&site["name"])), &site);
+    Ok(())
+}
+
+/// The statuses error pages answer, and whether upstreams' errors get them.
+fn pages(pages: &Value) -> String {
+    let statuses: Vec<String> = pages["pages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|page| page["statuses"].as_array().cloned().unwrap_or_default())
+        .map(|status| text(&status))
+        .collect();
+    match (statuses.is_empty(), pages["intercept"] == true) {
+        (true, _) => "none".into(),
+        (false, false) => statuses.join(", "),
+        (false, true) => format!("{}, upstreams' too", statuses.join(", ")),
+    }
+}
+
+/// How a site answers a file of its own, or that its routes do.
+fn answered(answer: &Value) -> String {
+    let kind = text(&answer["kind"]).replace('_', " ");
+    match answer["kind"].as_str() {
+        None => "by the routes".into(),
+        Some("custom") => "its own text".into(),
+        Some("file") => format!("file {}", text(&answer["path"])),
+        Some("redirect") => format!("redirect to {}", text(&answer["location"])),
+        Some(_) => kind,
+    }
 }
 
 async fn action(api: &Api, output: &Output, id: &str, verb: &str, done: &str) -> Result<()> {
@@ -504,7 +766,8 @@ async fn action(api: &Api, output: &Output, id: &str, verb: &str, done: &str) ->
 }
 
 /// A site representation reduced to the fields clients may write, so the
-/// output of `show -o json` can be edited and sent back.
+/// output of `show -o json` can be edited and sent back. Scripts and route
+/// names it leaves out are kept by the service.
 pub fn input(mut site: Value) -> Value {
     if let Some(object) = site.as_object_mut() {
         for field in [
@@ -517,8 +780,19 @@ pub fn input(mut site: Value) -> Value {
             "created_at",
             "updated_at",
             "deleted_at",
+            "lua",
         ] {
             object.remove(field);
+        }
+        for route in object
+            .get_mut("routes")
+            .and_then(Value::as_array_mut)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_object_mut)
+        {
+            route.remove("lua");
+            route.remove("named");
         }
     }
     site
@@ -530,11 +804,22 @@ mod tests {
 
     #[test]
     fn shown_sites_become_writable_inputs() {
-        let site = json!({"id": "x", "name": "shop", "status": "running", "etag": "\"a\"", "action": {"type": "respond"}});
+        let site = json!({"id": "x", "name": "shop", "status": "running", "etag": "\"a\"", "action": {"type": "respond"},
+                          "lua": {"access": {"inline": "return"}},
+                          "routes": [{"id": "r", "named": "fallback", "lua": {}, "priority": 1}]});
         assert_eq!(
             input(site),
-            json!({"name": "shop", "action": {"type": "respond"}})
+            json!({"name": "shop", "action": {"type": "respond"}, "routes": [{"id": "r", "priority": 1}]})
         );
+        assert_eq!(pages(&json!({})), "none");
+        assert_eq!(
+            pages(
+                &json!({"pages": [{"statuses": [404]}, {"statuses": [502, 503]}], "intercept": true})
+            ),
+            "404, 502, 503, upstreams' too"
+        );
+        assert_eq!(answered(&Value::Null), "by the routes");
+        assert_eq!(answered(&json!({"kind": "disallow_all"})), "disallow all");
         assert_eq!(name(Sort::CreatedAt), "created_at");
         assert_eq!(name(Kind::ReverseProxy), "reverse_proxy");
     }
