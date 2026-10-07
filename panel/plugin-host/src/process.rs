@@ -9,7 +9,7 @@ use plugin_contracts::{
     v1::{plugin_client::PluginClient, ConfigureRequest, DescribeRequest, Manifest},
     HEALTH_SERVICE, MAGIC_COOKIE_KEY, MAGIC_COOKIE_VALUE,
 };
-use plugin_sdk::{DATA_DIR_ENV, PROTOCOL_VERSIONS_ENV, SOCKET_DIR_ENV};
+use plugin_sdk::{DATA_DIR_ENV, LIFELINE_ENV, PROTOCOL_VERSIONS_ENV, SOCKET_DIR_ENV};
 use std::{
     path::{Path, PathBuf},
     process::Stdio,
@@ -18,7 +18,7 @@ use std::{
 };
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    process::{Child, Command},
+    process::{Child, ChildStdin, Command},
 };
 use tonic::transport::Channel;
 use tonic_health::pb::{
@@ -57,6 +57,9 @@ pub struct Process {
     pub channel: Channel,
     pub protocol_version: u32,
     socket_dir: PathBuf,
+    /// The plugin's standard input, held open while it runs: the plugin
+    /// stops once it closes, as it does when the host is killed.
+    _lifeline: Option<ChildStdin>,
 }
 
 static STARTED: AtomicU64 = AtomicU64::new(0);
@@ -91,12 +94,14 @@ impl Process {
                 return Err(problem);
             }
         };
+        let lifeline = child.stdin.take();
         match Self::shake_hands(&mut child, launch, &socket_dir).await {
             Ok((protocol_version, channel)) => Ok(Self {
                 child,
                 channel,
                 protocol_version,
                 socket_dir,
+                _lifeline: lifeline,
             }),
             Err(problem) => {
                 let _ = child.kill().await;
@@ -195,7 +200,8 @@ fn spawn(launch: &Launch, socket_dir: &Path) -> Result<Child, String> {
         .env("HOME", &launch.data)
         .env("TMPDIR", socket_dir)
         .env("PATH", "/usr/local/bin:/usr/bin:/bin")
-        .stdin(Stdio::null())
+        .env(LIFELINE_ENV, "stdin")
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)

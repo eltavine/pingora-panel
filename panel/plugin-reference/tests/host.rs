@@ -502,3 +502,41 @@ async fn a_plugin_that_exits_is_degraded_and_started_again() {
     assert!(runtime.get("reference").unwrap().health().restarts >= 1);
     runtime.stop_all().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_plugin_stops_once_its_host_is_gone() {
+    use plugin_contracts::{MAGIC_COOKIE_KEY, MAGIC_COOKIE_VALUE};
+    use plugin_sdk::{DATA_DIR_ENV, LIFELINE_ENV, PROTOCOL_VERSIONS_ENV, SOCKET_DIR_ENV};
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    let host = Host::new();
+    let found = host.install("1.0.0");
+    let sockets = host.root.join("alone");
+    std::fs::create_dir_all(&sockets).unwrap();
+    let mut plugin = tokio::process::Command::new(found.executable().unwrap())
+        .current_dir(&found.directory)
+        .env_clear()
+        .env(MAGIC_COOKIE_KEY, MAGIC_COOKIE_VALUE)
+        .env(PROTOCOL_VERSIONS_ENV, "1")
+        .env(SOCKET_DIR_ENV, &sockets)
+        .env(DATA_DIR_ENV, host.root.join("data"))
+        .env(LIFELINE_ENV, "stdin")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut lines = BufReader::new(plugin.stdout.take().unwrap()).lines();
+    let handshake = tokio::time::timeout(Duration::from_secs(10), lines.next_line())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(handshake.starts_with("1|1|unix|"), "{handshake}");
+    drop(plugin.stdin.take());
+    let status = tokio::time::timeout(Duration::from_secs(10), plugin.wait())
+        .await
+        .expect("the plugin stops once its host's end closes")
+        .unwrap();
+    assert!(status.success(), "{status:?}");
+}

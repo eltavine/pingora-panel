@@ -40,6 +40,10 @@ pub const SOCKET_DIR_ENV: &str = "PLUGIN_UNIX_SOCKET_DIR";
 /// The plugin's own directory, which the host keeps from version to
 /// version; the plugin may write nowhere else.
 pub const DATA_DIR_ENV: &str = "PINGORA_PANEL_PLUGIN_DATA";
+/// Set to `stdin` by a host that keeps the plugin's standard input open
+/// for as long as it runs, so that the plugin stops when it closes, as it
+/// does when the host is killed.
+pub const LIFELINE_ENV: &str = "PINGORA_PANEL_PLUGIN_LIFELINE";
 
 /// The plugin's own directory, or the working directory outside a host.
 pub fn data_dir() -> PathBuf {
@@ -191,7 +195,14 @@ impl Plugin {
     /// [`Error::NotStartedByHost`] when no host did.
     pub async fn serve(self) -> Result<(), Error> {
         let handshake = Handshake::from_env()?.ok_or(Error::NotStartedByHost)?;
-        self.serve_with(handshake, tokio::io::stdout(), stopped())
+        let lifeline = std::env::var_os(LIFELINE_ENV).is_some_and(|value| value == "stdin");
+        let shutdown = async move {
+            tokio::select! {
+                () = stopped() => {}
+                () = host_gone(lifeline) => {}
+            }
+        };
+        self.serve_with(handshake, tokio::io::stdout(), shutdown)
             .await
     }
 
@@ -232,6 +243,25 @@ impl Plugin {
         let _ = std::fs::remove_file(&socket);
         Ok(served?)
     }
+}
+
+/// Resolves once the host's end of standard input closes, which happens
+/// however the host stops, when the host says it keeps one open; never
+/// otherwise. A thread of its own reads it, so that it holds up neither the
+/// runtime nor the process as they stop.
+async fn host_gone(lifeline: bool) {
+    if !lifeline {
+        return std::future::pending().await;
+    }
+    let (gone, closed) = tokio::sync::oneshot::channel::<()>();
+    std::thread::spawn(move || {
+        use std::io::Read;
+        let mut buffer = [0_u8; 64];
+        let mut stdin = std::io::stdin();
+        while matches!(stdin.read(&mut buffer), Ok(read) if read > 0) {}
+        let _ = gone.send(());
+    });
+    let _ = closed.await;
 }
 
 /// Resolves when the process receives `SIGTERM` or `SIGINT`.
