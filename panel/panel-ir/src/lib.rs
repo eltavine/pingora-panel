@@ -12,6 +12,10 @@ use panel_domain::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub use cache::{
+    CachePolicy, DEFAULT_CACHE_BYTES, DEFAULT_CACHE_KEY, DEFAULT_MOST_OBJECT_BYTES,
+    DEFAULT_TTL_STATUSES, PROXY_CACHE_CAPABILITY,
+};
 pub use conditions::{RouteCondition, ValueTest, ROUTE_CONDITIONS_CAPABILITY};
 pub use http::{
     CompressionAlgorithm, CompressionPolicy, CorsPolicy, HeaderField, ServerHeader,
@@ -39,6 +43,7 @@ pub use statics::{
     MOST_CACHE_RULES, MOST_LISTED, MOST_MAX_AGE_SECONDS, MOST_MEDIA_TYPES, STATIC_CACHE_CAPABILITY,
 };
 
+pub mod cache;
 pub mod conditions;
 pub mod http;
 pub mod logging;
@@ -91,6 +96,10 @@ pub struct RuntimeSnapshot {
     pub required_capabilities: Vec<CapabilityRequirement>,
     #[serde(default, skip_serializing_if = "LuaProgram::is_empty")]
     pub lua: LuaProgram,
+    /// The size of the gateway's cache store; [`DEFAULT_CACHE_BYTES`] when
+    /// none (ADR 0043).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_max_bytes: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -112,6 +121,8 @@ struct CanonicalSnapshot<'a> {
     required_capabilities: &'a [CapabilityRequirement],
     #[serde(skip_serializing_if = "LuaProgram::is_empty")]
     lua: &'a LuaProgram,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_max_bytes: &'a Option<u64>,
 }
 
 impl RuntimeSnapshot {
@@ -133,6 +144,7 @@ impl RuntimeSnapshot {
             logging: LoggingPolicy::default(),
             required_capabilities: Vec::new(),
             lua: LuaProgram::default(),
+            cache_max_bytes: None,
         };
         snapshot.refresh_content_hash();
         snapshot
@@ -192,6 +204,7 @@ impl RuntimeSnapshot {
             logging: &self.logging,
             required_capabilities: &required_capabilities,
             lua: &lua,
+            cache_max_bytes: &self.cache_max_bytes,
         };
         serde_json::to_vec(&canonical).expect("IR canonical values are always serializable")
     }
@@ -344,6 +357,10 @@ pub struct SiteSpec {
     /// While set, only the clients it allows reach the site.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub maintenance: Option<Maintenance>,
+    /// Caches the site's responses unless their route names its own
+    /// policy (ADR 0043).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_policy_id: Option<String>,
 }
 
 /// An HTTP Strict Transport Security policy (RFC 6797 §6.1).
@@ -392,6 +409,7 @@ impl SiteSpec {
             rewrites: Vec::new(),
             error_pages: ErrorPages::default(),
             maintenance: None,
+            cache_policy_id: None,
         }
     }
 }
@@ -920,15 +938,6 @@ pub struct StaticContentPolicy {
     /// Rules setting `Cache-Control` on the files served.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cache: Vec<StaticCacheRule>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CachePolicy {
-    pub id: String,
-    pub enabled: bool,
-    pub ttl_seconds: u64,
-    pub vary_headers: BTreeSet<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

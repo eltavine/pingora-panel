@@ -2,6 +2,7 @@
 
 //! Stable gateway ports and an in-memory contract implementation.
 
+mod cache;
 mod conditions;
 mod events;
 pub mod fake;
@@ -16,6 +17,10 @@ mod statics;
 mod traffic;
 mod validation;
 
+pub use cache::{
+    cache_policy_problems, LEAST_CACHE_BYTES, MOST_CACHE_BYTES, MOST_CACHE_POLICIES,
+    MOST_OBJECT_BYTES,
+};
 pub use conditions::{
     problems as condition_problems, token, MOST_CONDITIONS, MOST_CONDITION_DEPTH,
 };

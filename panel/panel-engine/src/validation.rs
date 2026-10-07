@@ -30,6 +30,7 @@ pub fn validate_engine_ir(
     crate::rewrite::validate_rewrites(snapshot, &mut diagnostics);
     crate::pages::validate_pages(snapshot, &mut diagnostics);
     crate::statics::validate_statics(snapshot, &mut diagnostics);
+    crate::cache::validate_cache(snapshot, &mut diagnostics);
 
     let unsupported: Vec<_> = snapshot
         .required_capabilities()

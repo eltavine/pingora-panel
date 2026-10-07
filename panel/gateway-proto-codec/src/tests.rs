@@ -195,11 +195,23 @@ fn populated_snapshot_round_trips_additive_v1_fields() {
         ],
     });
     snapshot.cache_policies.push(CachePolicy {
-        id: "cache".into(),
-        enabled: true,
         ttl_seconds: 60,
         vary_headers: ["accept-encoding".into()].into_iter().collect(),
+        status_ttls: [(404, 30), (301, 0)].into(),
+        key: Some("$host$uri".into()),
+        honor_origin: false,
+        bypass: vec![panel_ir::RouteCondition::Cookie {
+            name: "session".into(),
+            test: panel_ir::ValueTest::Present,
+        }],
+        stale_while_revalidate_seconds: 10,
+        stale_if_error_seconds: 300,
+        max_object_bytes: Some(1 << 20),
+        status_header: false,
+        ..CachePolicy::new("cache")
     });
+    snapshot.cache_max_bytes = Some(64 << 20);
+    snapshot.sites[0].cache_policy_id = Some("cache".into());
     snapshot.security_policies.push(SecurityPolicy {
         id: "security".into(),
         allowed_cidrs: ["10.0.0.0/8".into()].into_iter().collect(),

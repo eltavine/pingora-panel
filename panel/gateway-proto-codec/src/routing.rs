@@ -135,6 +135,7 @@ pub(super) fn decode_site(value: wire::SiteSpec) -> Result<SiteSpec> {
             .maintenance
             .map(pages::decode_maintenance)
             .transpose()?,
+        cache_policy_id: optional_string(value.cache_policy_id),
     })
 }
 
@@ -175,6 +176,7 @@ pub(super) fn encode_site(value: &SiteSpec) -> wire::SiteSpec {
         error_pages: (!value.error_pages.is_empty())
             .then(|| pages::encode_error_pages(&value.error_pages)),
         maintenance: value.maintenance.as_ref().map(pages::encode_maintenance),
+        cache_policy_id: value.cache_policy_id.clone().unwrap_or_default(),
     }
 }
 
@@ -299,7 +301,7 @@ fn encode_rewrite(value: &RewriteRule) -> wire::RewriteRule {
     wire::RewriteRule { kind: Some(kind) }
 }
 
-fn decode_condition(value: wire::RouteCondition) -> Result<RouteCondition> {
+pub(super) fn decode_condition(value: wire::RouteCondition) -> Result<RouteCondition> {
     use wire::route_condition::Kind;
     let field = |field: wire::FieldCondition| -> Result<(String, ValueTest)> {
         Ok((field.name, decode_test(field.test)?))
@@ -383,7 +385,7 @@ fn decode_test(value: Option<wire::ValueTest>) -> Result<ValueTest> {
     })
 }
 
-fn encode_condition(value: &RouteCondition) -> wire::RouteCondition {
+pub(super) fn encode_condition(value: &RouteCondition) -> wire::RouteCondition {
     use wire::route_condition::Kind;
     let field = |name: &str, test: &ValueTest| wire::FieldCondition {
         name: name.to_owned(),

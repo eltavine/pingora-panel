@@ -51,7 +51,7 @@ pub fn decode_snapshot(value: wire::RuntimeSnapshot) -> Result<RuntimeSnapshot> 
             .cache_policies
             .into_iter()
             .map(policies::decode_cache_policy)
-            .collect(),
+            .collect::<Result<_>>()?,
         security_policies: value
             .security_policies
             .into_iter()
@@ -69,6 +69,7 @@ pub fn decode_snapshot(value: wire::RuntimeSnapshot) -> Result<RuntimeSnapshot> 
             .map(|capability| CapabilityRequirement::new(capability.name, capability.version))
             .collect(),
         lua: lua::decode_program(value.lua)?,
+        cache_max_bytes: value.cache_max_bytes,
     };
     if !snapshot.has_valid_content_hash() {
         return Err(PanelError::validation_failed(
@@ -135,5 +136,6 @@ pub fn encode_snapshot(value: &RuntimeSnapshot) -> wire::RuntimeSnapshot {
             })
             .collect(),
         lua: lua::encode_program(&value.lua),
+        cache_max_bytes: value.cache_max_bytes,
     }
 }

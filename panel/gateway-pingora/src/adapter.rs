@@ -650,11 +650,12 @@ mod tests {
         let adapter = PingoraGatewayAdapter::new();
         let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
         snapshot.cache_policies.push(CachePolicy {
-            id: "cache".into(),
-            enabled: true,
             ttl_seconds: 60,
-            vary_headers: BTreeSet::new(),
+            ..CachePolicy::new("cache")
         });
+        snapshot
+            .required_capabilities
+            .push(CapabilityRequirement::new("proxy.cache", "1"));
         snapshot.refresh_content_hash();
         let error = adapter.validate(&snapshot).await.unwrap_err();
         assert_eq!(error.code.as_str(), ErrorCode::UNSUPPORTED_CAPABILITY);

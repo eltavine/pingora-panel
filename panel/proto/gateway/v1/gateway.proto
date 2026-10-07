@@ -44,6 +44,9 @@ message RuntimeSnapshot {
   // The scripts of the configuration (ADR 0039); a snapshot with any
   // requires the `lua.scripts` capability.
   LuaProgram lua = 16;
+  // The size of the gateway's cache store; absent keeps the gateway's
+  // default (ADR 0043).
+  optional uint64 cache_max_bytes = 17;
 }
 
 message ListenerRef {
@@ -106,6 +109,8 @@ message SiteSpec {
   ErrorPages error_pages = 14;
   // While set, only the clients it allows reach the site (ADR 0041).
   Maintenance maintenance = 15;
+  // Caches the site's responses unless their route names its own policy.
+  string cache_policy_id = 16;
 }
 
 // The error pages of a site or route.
@@ -618,11 +623,27 @@ message StaticCacheRule {
   bool immutable = 3;
 }
 
+// What a route's responses are cached by and for how long (ADR 0043).
 message CachePolicy {
   string id = 1;
   bool enabled = 2;
+  // Seconds responses the cache stores by default are fresh for when their
+  // origin does not say.
   uint64 ttl_seconds = 3;
   repeated string vary_headers = 4;
+  // Seconds by status, ahead of ttl_seconds; 0 keeps a status out.
+  map<uint32, uint64> status_ttls = 5;
+  // A template of request variables; absent is $scheme$host$request_uri.
+  optional string key = 6;
+  // The policy alone decides, whatever the origin's Cache-Control says.
+  bool ignore_origin = 7;
+  // Requests meeting any of these neither use nor fill the cache.
+  repeated RouteCondition bypass = 8;
+  uint32 stale_while_revalidate_seconds = 9;
+  uint32 stale_if_error_seconds = 10;
+  optional uint64 max_object_bytes = 11;
+  // Responses carry no Cache-Status field.
+  bool no_status_header = 12;
 }
 
 // Restrictions a request must pass before its site or route handles it.

@@ -244,13 +244,35 @@ pub(super) fn encode_static_content(value: &StaticContentPolicy) -> wire::Static
     }
 }
 
-pub(super) fn decode_cache_policy(value: wire::CachePolicy) -> CachePolicy {
-    CachePolicy {
-        id: value.id,
+pub(super) fn decode_cache_policy(value: wire::CachePolicy) -> Result<CachePolicy> {
+    let mut status_ttls = BTreeMap::new();
+    for (status, seconds) in value.status_ttls {
+        let status = u16::try_from(status).map_err(|_| {
+            PanelError::invalid_argument(format!(
+                "cache policy {} has a time for {status}, which is not a status",
+                value.id
+            ))
+        })?;
+        status_ttls.insert(status, seconds);
+    }
+    Ok(CachePolicy {
         enabled: value.enabled,
         ttl_seconds: value.ttl_seconds,
         vary_headers: value.vary_headers.into_iter().collect(),
-    }
+        status_ttls,
+        key: value.key,
+        honor_origin: !value.ignore_origin,
+        bypass: value
+            .bypass
+            .into_iter()
+            .map(crate::routing::decode_condition)
+            .collect::<Result<_>>()?,
+        stale_while_revalidate_seconds: value.stale_while_revalidate_seconds,
+        stale_if_error_seconds: value.stale_if_error_seconds,
+        max_object_bytes: value.max_object_bytes,
+        status_header: !value.no_status_header,
+        id: value.id,
+    })
 }
 
 pub(super) fn encode_cache_policy(value: &CachePolicy) -> wire::CachePolicy {
@@ -259,6 +281,22 @@ pub(super) fn encode_cache_policy(value: &CachePolicy) -> wire::CachePolicy {
         enabled: value.enabled,
         ttl_seconds: value.ttl_seconds,
         vary_headers: value.vary_headers.iter().cloned().collect(),
+        status_ttls: value
+            .status_ttls
+            .iter()
+            .map(|(status, seconds)| (u32::from(*status), *seconds))
+            .collect(),
+        key: value.key.clone(),
+        ignore_origin: !value.honor_origin,
+        bypass: value
+            .bypass
+            .iter()
+            .map(crate::routing::encode_condition)
+            .collect(),
+        stale_while_revalidate_seconds: value.stale_while_revalidate_seconds,
+        stale_if_error_seconds: value.stale_if_error_seconds,
+        max_object_bytes: value.max_object_bytes,
+        no_status_header: !value.status_header,
     }
 }
 
