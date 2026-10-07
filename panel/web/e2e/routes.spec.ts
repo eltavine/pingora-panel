@@ -158,3 +158,45 @@ test('routes take conditions and a request shows which route takes it', async ({
   )
   expect(overflow).toBeLessThanOrEqual(0)
 })
+
+test('static routes list directories, map media types and set cache headers', async ({ page }) => {
+  const seen = await setUp(page)
+  await page.goto(`/sites/${SITE_ID}`)
+  await page.getByRole('tab', { name: 'Routes' }).click()
+  await page.getByRole('button', { name: 'Add route' }).first().click()
+  const sheet = page.getByRole('dialog')
+  await sheet.getByLabel('Path').fill('/files/')
+  await sheet.getByRole('radio', { name: 'Static files' }).click()
+  await sheet.getByLabel('Site directory').fill('files')
+  await sheet.getByRole('combobox', { name: 'Directory listing' }).click()
+  await page.getByRole('option', { name: 'Listed as JSON' }).click()
+  await sheet.getByRole('button', { name: 'Add a media type' }).click()
+  await sheet.getByLabel('Extension', { exact: true }).fill('wasm')
+  const type = sheet.getByLabel('Media type', { exact: true })
+  await type.fill('application')
+  await expect(sheet.getByRole('alert')).toHaveText('Write type/subtype, such as application/wasm.')
+  await expect(sheet.getByRole('button', { name: 'Create' })).toBeDisabled()
+  await type.fill('application/wasm')
+  await sheet.getByRole('button', { name: 'Add a cache rule' }).click()
+  await page.getByRole('menuitem', { name: 'Hashed assets: a year' }).click()
+  await sheet.getByRole('button', { name: 'Add a cache rule' }).click()
+  await page.getByRole('menuitem', { name: 'Pages: revalidate' }).click()
+  await sheet.getByRole('button', { name: 'Create' }).click()
+  await expect.poll(() => seen.created.length).toBe(1)
+  expect(seen.created[0]!.postDataJSON().action).toEqual({
+    type: 'static',
+    root: 'files',
+    index_files: ['index.html'],
+    spa_fallback: false,
+    listing: 'json',
+    media_types: { wasm: 'application/wasm' },
+    cache: [
+      {
+        extensions: ['css', 'js', 'mjs', 'woff2', 'svg', 'png', 'jpg', 'webp', 'avif'],
+        max_age_seconds: 31_536_000,
+        immutable: true,
+      },
+      { extensions: ['html'] },
+    ],
+  })
+})

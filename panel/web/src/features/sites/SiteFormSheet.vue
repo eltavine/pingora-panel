@@ -66,6 +66,7 @@ import {
 import { faviconIcons, kindIcons, robotsIcons } from './presentation'
 import { rewriteProblem } from './rewrites'
 import RewritesEditor from './RewritesEditor.vue'
+import { staticProblem } from './statics'
 
 const NO_PROFILE = '-'
 
@@ -115,7 +116,8 @@ const unfinished = computed(
     pagesProblem(form.errorPages) ||
     Boolean(maintenanceIssue.value) ||
     Boolean(robotsProblem(form.robots)) ||
-    Boolean(faviconProblem(form.favicon)),
+    Boolean(faviconProblem(form.favicon)) ||
+    (form.action.type === 'static' && staticProblem(form.action)),
 )
 
 function toggleListener(id: string, checked: boolean | 'indeterminate') {

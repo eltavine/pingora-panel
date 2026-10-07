@@ -2,6 +2,7 @@ import type {
   AccessLog,
   AccessLogFormat,
   Action,
+  DirectoryListing,
   MatchKind,
   Route,
   RouteInput,
@@ -30,6 +31,14 @@ import {
   type RoutePagesMode,
 } from './pages'
 import { rewriteForm, toRewrite, type RewriteForm } from './rewrites'
+import {
+  cacheRuleForm,
+  mediaTypesForm,
+  toCacheRule,
+  toMediaTypes,
+  type CacheRuleForm,
+  type MediaTypeForm,
+} from './statics'
 import { optionalText, optionalNumber } from '@/lib/forms'
 
 export type ActionType = Action['type']
@@ -64,6 +73,12 @@ export interface ActionForm {
   root: string
   indexFiles: string
   spaFallback: boolean
+  /** How a directory without an index file is answered. */
+  listing: DirectoryListing
+  mediaTypes: MediaTypeForm[]
+  defaultType: string
+  /** Rules setting Cache-Control, the first naming a file's extension applying. */
+  cache: CacheRuleForm[]
   location: string
   redirectStatus: number
   preservePath: boolean
@@ -158,6 +173,10 @@ export function actionForm(action?: Action): ActionForm {
     root: '',
     indexFiles: 'index.html',
     spaFallback: false,
+    listing: 'off',
+    mediaTypes: [],
+    defaultType: '',
+    cache: [],
     location: '',
     redirectStatus: 308,
     preservePath: true,
@@ -175,6 +194,10 @@ export function actionForm(action?: Action): ActionForm {
       form.root = action.root
       form.indexFiles = (action.index_files ?? []).join(', ')
       form.spaFallback = action.spa_fallback ?? false
+      form.listing = action.listing ?? 'off'
+      form.mediaTypes = mediaTypesForm(action.media_types)
+      form.defaultType = action.default_type ?? ''
+      form.cache = (action.cache ?? []).map(cacheRuleForm)
       break
     case 'redirect':
       form.location = action.location
@@ -201,13 +224,21 @@ export function toAction(form: ActionForm): Action {
   switch (form.type) {
     case 'proxy':
       return { type: 'proxy', upstream_id: form.upstreamId }
-    case 'static':
-      return {
+    case 'static': {
+      // Settings left at their defaults are left out, as the model reads them.
+      const action: Extract<Action, { type: 'static' }> = {
         type: 'static',
         root: form.root.trim(),
         index_files: splitList(form.indexFiles),
         spa_fallback: form.spaFallback,
       }
+      const defaultType = optionalText(form.defaultType)
+      if (form.listing !== 'off') action.listing = form.listing
+      if (form.mediaTypes.length > 0) action.media_types = toMediaTypes(form.mediaTypes)
+      if (defaultType !== null) action.default_type = defaultType
+      if (form.cache.length > 0) action.cache = form.cache.map(toCacheRule)
+      return action
+    }
     case 'redirect':
       return {
         type: 'redirect',

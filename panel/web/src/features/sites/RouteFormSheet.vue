@@ -52,6 +52,7 @@ import { pagesProblem, ROUTE_PAGES_MODES } from './pages'
 import { actionIcons, pagesModeIcons } from './presentation'
 import { rewriteProblem, targetProblem } from './rewrites'
 import RewritesEditor from './RewritesEditor.vue'
+import { staticProblem } from './statics'
 
 const ANY_HOST = '-'
 
@@ -68,6 +69,7 @@ const unfinished = computed(
     form.conditions.some((condition) => conditionProblem(condition)) ||
     form.rewrites.some((rule) => rewriteProblem(rule)) ||
     (form.pagesMode === 'own' && pagesProblem(form.errorPages)) ||
+    (form.action.type === 'static' && staticProblem(form.action)) ||
     (form.action.type === 'internal_redirect' && Boolean(targetProblem(form.action.target))),
 )
 

@@ -9,18 +9,25 @@ import {
   Cookie,
   CornerUpRight,
   FileCode,
+  FileBraces,
+  Files,
   FileType,
+  FolderLock,
   FolderOpen,
   Globe,
   Heading,
+  Hourglass,
   Image,
   ImageOff,
   Layers,
+  LayoutList,
   Link,
   ListChecks,
   MessageSquareText,
   Network,
+  Package,
   PencilLine,
+  RefreshCcw,
   Regex,
   Replace,
   Scissors,
@@ -34,9 +41,16 @@ import {
   Variable,
   Waypoints,
 } from '@lucide/vue'
-import type { Action, RouteCondition, SiteKind, SiteStatus } from '@/api/generated'
+import type {
+  Action,
+  DirectoryListing,
+  RouteCondition,
+  SiteKind,
+  SiteStatus,
+} from '@/api/generated'
 import type { FaviconChoice, PageKind, RobotsChoice, RoutePagesMode } from './pages'
 import type { RewriteKind } from './rewrites'
+import type { CacheMode, CachePreset } from './statics'
 import type { StatusTone } from '@/components/StatusIndicator.vue'
 
 export const kindIcons: Record<SiteKind, Component> = {
@@ -125,4 +139,21 @@ export const faviconIcons: Record<FaviconChoice, Component> = {
   no_content: ImageOff,
   file: Image,
   redirect: CornerUpRight,
+}
+
+export const listingIcons: Record<DirectoryListing, Component> = {
+  off: FolderLock,
+  html: LayoutList,
+  json: FileBraces,
+}
+
+export const cacheIcons: Record<CacheMode, Component> = {
+  max_age: Hourglass,
+  no_cache: RefreshCcw,
+}
+
+export const cachePresetIcons: Record<CachePreset, Component> = {
+  assets: Package,
+  html: FileCode,
+  everything: Files,
 }

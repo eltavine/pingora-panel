@@ -16,6 +16,7 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { REDIRECT_STATUSES, type ActionForm } from './forms'
 import { targetProblem } from './rewrites'
+import StaticSettingsFields from './StaticSettingsFields.vue'
 
 const action = defineModel<ActionForm>({ required: true })
 const props = defineProps<{ idPrefix: string }>()
@@ -64,6 +65,7 @@ const id = (field: string) => `${props.idPrefix}-${field}`
         v-model="action.spaFallback"
         :label="t('sites.form.spaFallback')"
       />
+      <StaticSettingsFields v-model="action" :id-prefix="id('files')" />
     </template>
 
     <template v-else-if="action.type === 'redirect'">
