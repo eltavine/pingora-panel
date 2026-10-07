@@ -1427,6 +1427,81 @@ ppanel route add <site-id> --match prefix:/errors --static errors --internal
 ppanel route add <site-id> --match prefix:/gone --internal-redirect /errors/gone.html
 ```
 
+## Error pages and maintenance
+
+Sites and routes answer errors with their own pages, a site may be in
+maintenance for everyone outside an allowlist, and a site answers
+`/robots.txt` and `/favicon.ico` itself
+([decision](../docs/adr/0041-error-pages-and-maintenance.md)).
+
+```nginx
+server shop {
+    server_name shop.example;
+    error_page 404 410 "body=<h1>$host has no $uri</h1>";
+    error_page 502 503 file=errors/50x.html status=503;   # below the static root
+    error_page 403 =301 https://shop.example/denied;      # nginx's form reads the same
+    intercept_errors on;                                   # upstreams' errors too
+    maintenance on allow=10.0.0.0/8,2001:db8::/32 retry_after=10m;
+    robots disallow_all;
+    favicon file=shop/favicon.ico;
+    proxy app;
+
+    route api {
+        match prefix /api;
+        error_page 404 "body={\"error\":\"not found\"}" type=application/json;
+        proxy app;
+    }
+
+    route raw {
+        match prefix /raw;
+        error_page off;                                    # answered without pages
+        proxy app;
+    }
+}
+```
+
+A page names the statuses it answers, from 400 to 599, and answers with a
+body, a template of request variables that is `text/html` unless a type is
+written; with a file below the gateway's static root, read when an error
+needs it; or with a redirect, 302 unless another status is written. A body or
+file keeps the error's status unless `status=` or nginx's `=code` names
+another. Pages answer the errors the gateway makes once a site is known — no
+route, a refused request, a missing file, an upstream that cannot be reached,
+times out or sheds load, a rewrite cycle — and fixed responses without a
+body, keeping fields such as `Retry-After`. With `intercept_errors on`,
+upstreams' error responses with a page's status get the page instead; only
+`Date`, `WWW-Authenticate`, `Proxy-Authenticate`, `Retry-After` and `Allow`
+of theirs are kept. A route that writes any page answers with its own, and a
+route that writes only `intercept_errors` keeps its server's pages, as nginx's
+locations do.
+
+In maintenance, clients outside the allowlist — after trusted proxies — get
+503 with `Retry-After` and the site's 503 page unless `body=` is written,
+while the rest reach the site as it is. `maintenance off` keeps the settings
+for next time, and ACME challenges are answered throughout. `robots` allows or
+disallows every crawler, or writes its own rules with `body=`; `favicon`
+answers 204 with `no_content`, a file in a directory below the static root, or
+a redirect. NGINX configurations imported with `ppanel config import-nginx`
+carry `error_page` and `proxy_intercept_errors` over.
+
+Through the API, sites take `error_pages`, `maintenance`, `robots` and
+`favicon`, and routes `error_pages`; a client that leaves them out keeps the
+current ones and `null` removes them. The site form edits pages with 404, 403,
+502 and 503 to start from, the maintenance allowlist, robots.txt and the
+favicon, and the sites list marks sites in maintenance.
+
+```sh
+ppanel site error-pages <site-id> --page '404 file=errors/404.html' \
+  --page '502 503 "body=<h1>Back soon</h1>"' --intercept on
+ppanel site maintenance <site-id> on --allow 10.0.0.0/8 --retry-after 600
+ppanel site maintenance <site-id> off
+ppanel site robots <site-id> disallow-all
+ppanel site favicon <site-id> file shop/favicon.ico
+ppanel route add <site-id> --match prefix:/api --proxy <upstream-id> \
+  --error-page '404 body=missing' --intercept-errors
+ppanel route error-pages <route-id> --inherit
+```
+
 ## Lua scripts
 
 Sites, routes and upstreams run Lua in the gateway's request phases with
