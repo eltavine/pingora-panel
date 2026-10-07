@@ -490,5 +490,7 @@ fn compiled_conditions_hold_when_any_of_them_does() {
     assert!(!conditions.any_holds(&request(None, &[])));
     assert!(conditions.any_holds(&request(Some("nocache=1"), &[])));
     assert!(conditions.any_holds(&request(None, &[("cookie", "a=1; session=x")])));
-    assert!(!crate::CompiledConditions::compile(&[]).unwrap().any_holds(&request(None, &[])));
+    assert!(!crate::CompiledConditions::compile(&[])
+        .unwrap()
+        .any_holds(&request(None, &[])));
 }
