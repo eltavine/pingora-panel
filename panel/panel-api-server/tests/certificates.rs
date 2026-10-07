@@ -212,40 +212,38 @@ async fn certificates_are_kept_delivered_and_audited() {
 
     let web = tempfile::tempdir().unwrap();
     std::fs::write(web.path().join("index.html"), "<!doctype html>").unwrap();
-    let http = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap();
-    let mut api_env = environment(vec![
-        (DATA_DIR_ENV, data.path().display().to_string()),
-        (NATS_URL_ENV, nats),
-        (panel_api_server::HTTP_ADDRESS_ENV, http.to_string()),
-        (
-            panel_api_server::BOOTSTRAP_TOKEN_ENV,
-            support::BOOTSTRAP.into(),
-        ),
-        (
-            panel_api_server::CONFIG_URL_ENV,
-            format!("http://{}", config.grpc_address().unwrap()),
-        ),
-        (
-            panel_api_server::AUDIT_URL_ENV,
-            format!("http://{}", audit.grpc_address().unwrap()),
-        ),
-        (
-            panel_api_server::AUTOMATION_URL_ENV,
-            format!("http://{}", automation.grpc_address().unwrap()),
-        ),
-        (
-            panel_api_server::WEB_ROOT_ENV,
-            web.path().display().to_string(),
-        ),
-    ]);
-    let settings =
-        local(ProcessSettings::read(&mut api_env, panel_api_server::default_addresses()).unwrap());
-    let server = start(panel_api_server::process(&mut api_env, settings).unwrap())
-        .await
-        .unwrap();
+    let (http, server) = support::api_process(|http| {
+        let mut api_env = environment(vec![
+            (DATA_DIR_ENV, data.path().display().to_string()),
+            (NATS_URL_ENV, nats.clone()),
+            (panel_api_server::HTTP_ADDRESS_ENV, http.to_string()),
+            (
+                panel_api_server::BOOTSTRAP_TOKEN_ENV,
+                support::BOOTSTRAP.into(),
+            ),
+            (
+                panel_api_server::CONFIG_URL_ENV,
+                format!("http://{}", config.grpc_address().unwrap()),
+            ),
+            (
+                panel_api_server::AUDIT_URL_ENV,
+                format!("http://{}", audit.grpc_address().unwrap()),
+            ),
+            (
+                panel_api_server::AUTOMATION_URL_ENV,
+                format!("http://{}", automation.grpc_address().unwrap()),
+            ),
+            (
+                panel_api_server::WEB_ROOT_ENV,
+                web.path().display().to_string(),
+            ),
+        ]);
+        let settings = local(
+            ProcessSettings::read(&mut api_env, panel_api_server::default_addresses()).unwrap(),
+        );
+        panel_api_server::process(&mut api_env, settings)
+    });
+    let server = start(server).await.unwrap();
     ready(&server).await;
     let base = format!("http://{http}");
     let api = Api {

@@ -195,41 +195,40 @@ async fn every_internal_hop_is_mutually_authenticated() {
         .unwrap();
     ready(&audit).await;
 
-    let http = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap();
-    let mut api_env = environment(vec![
-        (DATA_DIR_ENV, data.path().display().to_string()),
-        (NATS_URL_ENV, nats),
-        (TLS_DIR_ENV, directories["panel-api"].display().to_string()),
-        (panel_api_server::HTTP_ADDRESS_ENV, http.to_string()),
-        (
-            panel_api_server::BOOTSTRAP_TOKEN_ENV,
-            support::BOOTSTRAP.into(),
-        ),
-        (
-            panel_api_server::CONFIG_URL_ENV,
-            format!("https://{}", config.grpc_address().unwrap()),
-        ),
-        (
-            panel_api_server::WEB_ROOT_ENV,
-            root.join("no-console").display().to_string(),
-        ),
-        (
-            panel_api_server::AUDIT_URL_ENV,
-            format!("https://{}", audit.grpc_address().unwrap()),
-        ),
-    ]);
-    let api_settings = ProcessSettings::read(&mut api_env, panel_api_server::default_addresses())
-        .unwrap()
-        .with_listeners(
-            "127.0.0.1:0".parse().unwrap(),
-            "127.0.0.1:0".parse().unwrap(),
-        )
-        .with_health_interval(Duration::from_millis(50));
-    let api = panel_api_server::process(&mut api_env, api_settings)
-        .unwrap()
+    let (http, api) = support::api_process(|http| {
+        let mut api_env = environment(vec![
+            (DATA_DIR_ENV, data.path().display().to_string()),
+            (NATS_URL_ENV, nats.clone()),
+            (TLS_DIR_ENV, directories["panel-api"].display().to_string()),
+            (panel_api_server::HTTP_ADDRESS_ENV, http.to_string()),
+            (
+                panel_api_server::BOOTSTRAP_TOKEN_ENV,
+                support::BOOTSTRAP.into(),
+            ),
+            (
+                panel_api_server::CONFIG_URL_ENV,
+                format!("https://{}", config.grpc_address().unwrap()),
+            ),
+            (
+                panel_api_server::WEB_ROOT_ENV,
+                root.join("no-console").display().to_string(),
+            ),
+            (
+                panel_api_server::AUDIT_URL_ENV,
+                format!("https://{}", audit.grpc_address().unwrap()),
+            ),
+        ]);
+        let api_settings =
+            ProcessSettings::read(&mut api_env, panel_api_server::default_addresses())
+                .unwrap()
+                .with_listeners(
+                    "127.0.0.1:0".parse().unwrap(),
+                    "127.0.0.1:0".parse().unwrap(),
+                )
+                .with_health_interval(Duration::from_millis(50));
+        panel_api_server::process(&mut api_env, api_settings)
+    });
+    let api = api
         .with_jetstream_settings((*broker.settings).clone())
         .start()
         .await

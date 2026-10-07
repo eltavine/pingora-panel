@@ -13,7 +13,7 @@ use reqwest::{
     Client, Response, StatusCode, Url,
 };
 use serde_json::{json, Value};
-use std::{collections::HashMap, ffi::OsString, net::SocketAddr, time::Duration};
+use std::{collections::HashMap, ffi::OsString, time::Duration};
 
 const ORIGIN: &str = "https://panel.test";
 
@@ -23,13 +23,6 @@ fn environment(values: Vec<(&'static str, String)>) -> Environment<'static> {
         .map(|(key, value)| (key, OsString::from(value)))
         .collect();
     Environment::from_lookup(move |name| values.get(name).cloned())
-}
-
-fn free_port() -> SocketAddr {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
 }
 
 fn location(response: &Response) -> String {
@@ -69,29 +62,30 @@ struct Server {
 async fn server() -> Option<Server> {
     let broker = TestBroker::create().await?;
     let data = tempfile::tempdir().unwrap();
-    let http = free_port();
-    let mut env = environment(vec![
-        (DATA_DIR_ENV, data.path().display().to_string()),
-        (NATS_URL_ENV, std::env::var(TEST_NATS_URL_ENV).unwrap()),
-        (panel_api_server::HTTP_ADDRESS_ENV, http.to_string()),
-        (
-            panel_api_server::BOOTSTRAP_TOKEN_ENV,
-            support::BOOTSTRAP.into(),
-        ),
-        (panel_api_server::PUBLIC_ORIGINS_ENV, ORIGIN.into()),
-        (
-            panel_api_server::MASTER_KEYS_ENV,
-            EnvelopeVault::generate_key().unwrap(),
-        ),
-    ]);
-    let settings = ProcessSettings::read(&mut env, panel_api_server::default_addresses())
-        .unwrap()
-        .with_listeners(
-            "127.0.0.1:0".parse().unwrap(),
-            "127.0.0.1:0".parse().unwrap(),
-        );
-    let api = panel_api_server::process(&mut env, settings)
-        .unwrap()
+    let (http, api) = support::api_process(|http| {
+        let mut env = environment(vec![
+            (DATA_DIR_ENV, data.path().display().to_string()),
+            (NATS_URL_ENV, std::env::var(TEST_NATS_URL_ENV).unwrap()),
+            (panel_api_server::HTTP_ADDRESS_ENV, http.to_string()),
+            (
+                panel_api_server::BOOTSTRAP_TOKEN_ENV,
+                support::BOOTSTRAP.into(),
+            ),
+            (panel_api_server::PUBLIC_ORIGINS_ENV, ORIGIN.into()),
+            (
+                panel_api_server::MASTER_KEYS_ENV,
+                EnvelopeVault::generate_key().unwrap(),
+            ),
+        ]);
+        let settings = ProcessSettings::read(&mut env, panel_api_server::default_addresses())
+            .unwrap()
+            .with_listeners(
+                "127.0.0.1:0".parse().unwrap(),
+                "127.0.0.1:0".parse().unwrap(),
+            );
+        panel_api_server::process(&mut env, settings)
+    });
+    let api = api
         .with_jetstream_settings((*broker.settings).clone())
         .start()
         .await

@@ -63,13 +63,6 @@ async fn ready(process: &RunningProcess) {
     .expect("the process becomes ready");
 }
 
-fn free_port() -> SocketAddr {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-}
-
 #[tokio::test]
 async fn the_public_api_publishes_through_config_service_and_serves_the_console() {
     let Some(broker) = TestBroker::create().await else {
@@ -115,29 +108,31 @@ async fn the_public_api_publishes_through_config_service_and_serves_the_console(
     )
     .unwrap();
     std::fs::write(web.join("assets/app.js"), "export {}").unwrap();
-    let http = free_port();
-    let mut api_env = environment(vec![
-        (DATA_DIR_ENV, data.path().display().to_string()),
-        (NATS_URL_ENV, nats),
-        (panel_api_server::HTTP_ADDRESS_ENV, http.to_string()),
-        (
-            panel_api_server::BOOTSTRAP_TOKEN_ENV,
-            support::BOOTSTRAP.into(),
-        ),
-        (
-            panel_api_server::CONFIG_URL_ENV,
-            format!("http://{}", config.grpc_address().unwrap()),
-        ),
-        (panel_api_server::WEB_ROOT_ENV, web.display().to_string()),
-        (
-            panel_api_server::AUDIT_URL_ENV,
-            format!("http://{}", audit.grpc_address().unwrap()),
-        ),
-    ]);
-    let api_settings =
-        local(ProcessSettings::read(&mut api_env, panel_api_server::default_addresses()).unwrap());
-    let api = panel_api_server::process(&mut api_env, api_settings)
-        .unwrap()
+    let (http, api) = support::api_process(|http| {
+        let mut api_env = environment(vec![
+            (DATA_DIR_ENV, data.path().display().to_string()),
+            (NATS_URL_ENV, nats.clone()),
+            (panel_api_server::HTTP_ADDRESS_ENV, http.to_string()),
+            (
+                panel_api_server::BOOTSTRAP_TOKEN_ENV,
+                support::BOOTSTRAP.into(),
+            ),
+            (
+                panel_api_server::CONFIG_URL_ENV,
+                format!("http://{}", config.grpc_address().unwrap()),
+            ),
+            (panel_api_server::WEB_ROOT_ENV, web.display().to_string()),
+            (
+                panel_api_server::AUDIT_URL_ENV,
+                format!("http://{}", audit.grpc_address().unwrap()),
+            ),
+        ]);
+        let api_settings = local(
+            ProcessSettings::read(&mut api_env, panel_api_server::default_addresses()).unwrap(),
+        );
+        panel_api_server::process(&mut api_env, api_settings)
+    });
+    let api = api
         .with_jetstream_settings((*broker.settings).clone())
         .start()
         .await

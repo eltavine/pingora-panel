@@ -44,3 +44,22 @@ pub async fn signed_in(base: &str) -> Client {
     let _ = rustls::crypto::ring::default_provider().install_default();
     Client::builder().default_headers(headers).build().unwrap()
 }
+
+/// Builds the API on a free loopback port of its own. A port found by binding
+/// port 0 can be taken by a test running alongside before the API binds it,
+/// so another is tried then.
+pub fn api_process<P, E: std::fmt::Display>(
+    mut build: impl FnMut(std::net::SocketAddr) -> Result<P, E>,
+) -> (std::net::SocketAddr, P) {
+    for _ in 0..16 {
+        let address = std::net::TcpListener::bind("127.0.0.1:0")
+            .and_then(|listener| listener.local_addr())
+            .unwrap();
+        match build(address) {
+            Ok(process) => return (address, process),
+            Err(error) if error.to_string().contains("Address already in use") => continue,
+            Err(error) => panic!("{error}"),
+        }
+    }
+    panic!("no loopback port stayed free long enough to bind");
+}
