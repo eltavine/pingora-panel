@@ -253,7 +253,7 @@ tokio-util = { version = "=0.7.19", features = ["rt"] }
 tower = { version = "=0.5.3", features = ["util"] }
 ring = "=0.17.14"
 rcgen = { version = "=0.14.10", default-features = false, features = ["crypto", "ring"] }
-reqwest = { version = "=0.13.4", default-features = false, features = ["json"] }
+reqwest = { version = "=0.13.5", default-features = false, features = ["json"] }
 rrule = "=0.14.0"
 rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std"] }
 rustls-pki-types = { version = "=1.15.1", features = ["std"] }
