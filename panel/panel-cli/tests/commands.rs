@@ -1152,6 +1152,57 @@ async fn api(
             "fingerprint": "0a1bff"
         }))
         .into_response(),
+        ("GET", "/api/v1/account/sessions") => Json(json!([
+            {"id": "s-1", "current": true, "transport": "bearer", "client_address": "127.0.0.1",
+             "created_at": "2026-10-08T09:00:00Z", "last_seen_at": "2026-10-08T10:00:00Z",
+             "expires_at": "2026-10-09T09:00:00Z"},
+            {"id": "s-2", "current": false, "transport": "cookie", "client_address": "10.0.0.7",
+             "created_at": "2026-10-07T09:00:00Z", "last_seen_at": "2026-10-07T18:00:00Z",
+             "expires_at": "2026-10-08T21:00:00Z"}
+        ]))
+        .into_response(),
+        ("DELETE", "/api/v1/account/sessions/s-2") => StatusCode::NO_CONTENT.into_response(),
+        ("GET", "/api/v1/gateway/status") => Json(json!({
+            "ready": true, "active_hash": "sha256:cc", "active_revision_id": 9,
+            "prepared_count": 0, "adapter_version": "0.9.0", "schema_version": "v1",
+            "message": null
+        }))
+        .into_response(),
+        ("POST", "/api/v1/gateway/validate") => {
+            let valid = body["snapshot"]["listeners"].is_array();
+            Json(json!({"valid": valid, "diagnostics": if valid { json!([]) } else {
+                json!([{"code": "SNAPSHOT_SCHEMA", "severity": "ERROR",
+                        "message": "listeners is missing"}])
+            }}))
+            .into_response()
+        }
+        ("POST", "/api/v1/gateway/prepare") => Json(json!({
+            "revision_id": 10, "content_hash": "sha256:dd", "prepare_token": "prep-10"
+        }))
+        .into_response(),
+        ("POST", "/api/v1/gateway/activate") => Json(json!({
+            "revision_id": 10, "content_hash": "sha256:dd", "previous_active_hash": "sha256:cc"
+        }))
+        .into_response(),
+        ("POST", "/api/v1/gateway/abort") => Json(json!({"aborted": true})).into_response(),
+        ("GET", "/api/v1/gateway/receipts/key-1") => Json(json!({
+            "request_hash": "ab",
+            "outcome": {"status": "succeeded", "revision_id": 10, "content_hash": "sha256:dd"}
+        }))
+        .into_response(),
+        ("GET", "/api/v1/gateway/receipts/key-2") => {
+            (StatusCode::ACCEPTED, Json(json!({"status": "pending"}))).into_response()
+        }
+        ("GET", "/api/v1/platform/services") => Json(json!({
+            "observed_at": "2026-10-08T10:00:00Z",
+            "services": [{
+                "service": "config-service", "instance_id": "i-1", "build_version": "0.3.0",
+                "started_at": "2026-10-08T08:00:00Z", "schema_version": null,
+                "protocols": [{"name": "pingora.panel", "min_revision": 1, "max_revision": 4}],
+                "capabilities": [{"name": "configuration", "version": "1"}]
+            }]
+        }))
+        .into_response(),
         _ => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -2406,6 +2457,83 @@ fn alert_rules_and_channels_are_set_from_the_command_line() {
     assert_eq!(
         stub.requests("GET", "/api/v1/alert-notifications")[0].query,
         "limit=50&rule=shop-errors"
+    );
+}
+
+#[test]
+fn own_sessions_raw_snapshots_and_services() {
+    let stub = Stub::start();
+
+    let sessions = stub.ppanel(&["session", "list"]);
+    assert!(stdout(&sessions).contains("s-1 *"), "{}", stdout(&sessions));
+    assert!(stdout(&sessions).contains("10.0.0.7"));
+    let ended = stub.ppanel(&["session", "end", "s-2"]);
+    assert!(ended.status.success(), "{}", stderr(&ended));
+    assert_eq!(
+        stub.requests("DELETE", "/api/v1/account/sessions/s-2")
+            .len(),
+        1
+    );
+
+    let status = stub.ppanel(&["gateway", "snapshot", "status"]);
+    assert!(stdout(&status).contains("sha256:cc"), "{}", stdout(&status));
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("snapshot.json");
+    std::fs::write(&file, r#"{"listeners": [], "sites": []}"#).unwrap();
+    let file = file.to_str().unwrap();
+    let valid = stub.ppanel(&["gateway", "snapshot", "validate", file]);
+    assert!(valid.status.success(), "{}", stderr(&valid));
+    assert_eq!(
+        stub.requests("POST", "/api/v1/gateway/validate")[0].body,
+        json!({"schema_version": "v1", "snapshot": {"listeners": [], "sites": []}})
+    );
+    let invalid = stub.ppanel_with_input(&["gateway", "snapshot", "validate", "-"], "{}");
+    assert_eq!(invalid.status.code(), Some(1));
+    assert!(
+        stderr(&invalid).contains("listeners is missing"),
+        "{}",
+        stderr(&invalid)
+    );
+    let prepared = stub.ppanel(&["gateway", "snapshot", "prepare", file]);
+    assert!(
+        stdout(&prepared).contains("token prep-10"),
+        "{}",
+        stdout(&prepared)
+    );
+    let activated = stub.ppanel(&[
+        "gateway",
+        "snapshot",
+        "activate",
+        "prep-10",
+        "--expected-active-hash",
+        "sha256:cc",
+    ]);
+    assert!(stdout(&activated).contains("Activated revision 10"));
+    assert_eq!(
+        stub.requests("POST", "/api/v1/gateway/activate")[0].body,
+        json!({"prepare_token": "prep-10", "expected_active_hash": "sha256:cc"})
+    );
+    let aborted = stub.ppanel(&["gateway", "snapshot", "abort", "prep-11"]);
+    assert!(aborted.status.success(), "{}", stderr(&aborted));
+    let done = stub.ppanel(&["gateway", "receipt", "key-1"]);
+    assert!(
+        stdout(&done).contains("key-1: succeeded"),
+        "{}",
+        stdout(&done)
+    );
+    let running = stub.ppanel(&["gateway", "receipt", "key-2"]);
+    assert!(
+        stdout(&running).contains("still running"),
+        "{}",
+        stdout(&running)
+    );
+
+    let services = stub.ppanel(&["services"]);
+    assert!(
+        stdout(&services).contains("config-service")
+            && stdout(&services).contains("pingora.panel 1..4"),
+        "{}",
+        stdout(&services)
     );
 }
 

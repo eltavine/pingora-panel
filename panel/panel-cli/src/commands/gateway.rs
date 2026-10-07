@@ -1,9 +1,10 @@
 use crate::{
     client::{Api, CliError, Result},
+    commands::read_json,
     output::{text, Column, Format, Output},
 };
 use clap::Subcommand;
-use reqwest::Method;
+use reqwest::{Method, StatusCode};
 use serde_json::{json, Value};
 
 #[derive(Subcommand)]
@@ -122,7 +123,82 @@ pub(crate) enum GatewayCommand {
     /// Checks that TLS private keys may be read only by their owner and
     /// that static roots stay inside the static content root.
     Files,
+    /// Snapshots published as they are, apart from the draft: checked,
+    /// prepared, then activated or abandoned.
+    #[command(subcommand)]
+    Snapshot(SnapshotCommand),
+    /// What a snapshot command answered, by the idempotency key it carried.
+    Receipt { key: String },
 }
+
+#[derive(Subcommand)]
+pub(crate) enum SnapshotCommand {
+    /// Whether the gateway is ready, what it runs and how many snapshots
+    /// wait prepared.
+    Status,
+    /// Checks a snapshot, a JSON file or `-` for standard input, against
+    /// what the gateway can do.
+    Validate {
+        file: String,
+        #[arg(long, default_value = "v1")]
+        schema_version: String,
+    },
+    /// Prepares a snapshot on the gateway and prints the token that
+    /// activates or abandons it.
+    Prepare {
+        file: String,
+        #[arg(long, default_value = "v1")]
+        schema_version: String,
+    },
+    /// Activates a prepared snapshot.
+    Activate {
+        token: String,
+        /// Refuses unless the gateway still runs the snapshot with this
+        /// content hash.
+        #[arg(long)]
+        expected_active_hash: Option<String>,
+    },
+    /// Abandons a prepared snapshot.
+    Abort { token: String },
+}
+
+const SNAPSHOT_STATUS: &[Column] = &[
+    ("Ready", |status| yes_no(&status["ready"])),
+    ("Active hash", |status| text(&status["active_hash"])),
+    ("Active revision", |status| {
+        text(&status["active_revision_id"])
+    }),
+    ("Prepared", |status| text(&status["prepared_count"])),
+    ("Adapter", |status| text(&status["adapter_version"])),
+    ("Schema", |status| text(&status["schema_version"])),
+    ("Message", |status| text(&status["message"])),
+];
+
+const SERVICES: &[Column] = &[
+    ("SERVICE", |instance| text(&instance["service"])),
+    ("INSTANCE", |instance| text(&instance["instance_id"])),
+    ("VERSION", |instance| text(&instance["build_version"])),
+    ("STARTED", |instance| text(&instance["started_at"])),
+    ("PROTOCOLS", |instance| {
+        instance["protocols"]
+            .as_array()
+            .map(|protocols| {
+                protocols
+                    .iter()
+                    .map(|protocol| {
+                        format!(
+                            "{} {}..{}",
+                            text(&protocol["name"]),
+                            text(&protocol["min_revision"]),
+                            text(&protocol["max_revision"])
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .unwrap_or_default()
+    }),
+];
 
 fn yes_no(value: &Value) -> String {
     if value.as_bool().unwrap_or_default() {
@@ -401,6 +477,121 @@ const DATA_PLANE: &[Column] = &[
     ("Observed", |state| text(&state["observed_at"])),
 ];
 
+/// The control-plane modules running now, with their versions, protocol
+/// revisions and capabilities.
+pub async fn services(api: &Api, output: &Output) -> Result<()> {
+    let listing = api.get("/api/v1/platform/services", &[]).await?.body;
+    if output.format == Format::Json {
+        output.json(&listing);
+    } else {
+        output.list(&listing["services"], SERVICES);
+    }
+    Ok(())
+}
+
+async fn snapshot(api: &Api, output: &Output, command: SnapshotCommand) -> Result<()> {
+    let envelope = |file: &str, schema_version: String| -> Result<Value> {
+        Ok(json!({ "schema_version": schema_version, "snapshot": read_json(file)? }))
+    };
+    match command {
+        SnapshotCommand::Status => {
+            output.item(
+                &api.get("/api/v1/gateway/status", &[]).await?.body,
+                SNAPSHOT_STATUS,
+            );
+        }
+        SnapshotCommand::Validate {
+            file,
+            schema_version,
+        } => {
+            let checked = api
+                .change(
+                    Method::POST,
+                    "/api/v1/gateway/validate",
+                    Some(&envelope(&file, schema_version)?),
+                    None,
+                )
+                .await?
+                .body;
+            for diagnostic in checked["diagnostics"].as_array().into_iter().flatten() {
+                eprintln!(
+                    "{}: {} {}",
+                    text(&diagnostic["severity"]),
+                    text(&diagnostic["code"]),
+                    text(&diagnostic["message"])
+                );
+            }
+            if checked["valid"] != true {
+                return Err(CliError::Failed(
+                    "the gateway would refuse the snapshot".into(),
+                ));
+            }
+            output.done("The gateway accepts the snapshot", &checked);
+        }
+        SnapshotCommand::Prepare {
+            file,
+            schema_version,
+        } => {
+            let prepared = api
+                .change(
+                    Method::POST,
+                    "/api/v1/gateway/prepare",
+                    Some(&envelope(&file, schema_version)?),
+                    None,
+                )
+                .await?
+                .body;
+            output.done(
+                &format!(
+                    "Prepared revision {} ({}); activate it with token {}",
+                    text(&prepared["revision_id"]),
+                    text(&prepared["content_hash"]),
+                    text(&prepared["prepare_token"])
+                ),
+                &prepared,
+            );
+        }
+        SnapshotCommand::Activate {
+            token,
+            expected_active_hash,
+        } => {
+            let activated = api
+                .change(
+                    Method::POST,
+                    "/api/v1/gateway/activate",
+                    Some(&json!({
+                        "prepare_token": token,
+                        "expected_active_hash": expected_active_hash,
+                    })),
+                    None,
+                )
+                .await?
+                .body;
+            output.done(
+                &format!(
+                    "Activated revision {} ({})",
+                    text(&activated["revision_id"]),
+                    text(&activated["content_hash"])
+                ),
+                &activated,
+            );
+        }
+        SnapshotCommand::Abort { token } => {
+            let aborted = api
+                .change(
+                    Method::POST,
+                    "/api/v1/gateway/abort",
+                    Some(&json!({ "prepare_token": token })),
+                    None,
+                )
+                .await?
+                .body;
+            output.done("The prepared snapshot was abandoned", &aborted);
+        }
+    }
+    Ok(())
+}
+
 pub async fn gateway(api: &Api, output: &Output, command: GatewayCommand) -> Result<()> {
     match command {
         GatewayCommand::Status => {
@@ -446,6 +637,23 @@ pub async fn gateway(api: &Api, output: &Output, command: GatewayCommand) -> Res
                 .await?
                 .body;
             output.done("The gateway is draining and will stop", &reply);
+        }
+        GatewayCommand::Snapshot(command) => snapshot(api, output, command).await?,
+        GatewayCommand::Receipt { key } => {
+            let reply = api
+                .get(&format!("/api/v1/gateway/receipts/{key}"), &[])
+                .await?;
+            if reply.status == StatusCode::ACCEPTED {
+                output.done(&format!("{key} is still running"), &reply.body);
+            } else {
+                output.done(
+                    &format!(
+                        "{key}: {}",
+                        text(&reply.body["outcome"]["status"]).replace('_', " ")
+                    ),
+                    &reply.body,
+                );
+            }
         }
         GatewayCommand::Files => {
             let checks = api.get("/api/v1/gateway/file-checks", &[]).await?.body;

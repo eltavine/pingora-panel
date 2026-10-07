@@ -62,6 +62,14 @@ pub(crate) enum TokenCommand {
 }
 
 #[derive(Subcommand)]
+pub(crate) enum SessionCommand {
+    /// Your sessions that have not ended; `*` marks this one.
+    List,
+    /// Ends one of your sessions, such as one left signed in elsewhere.
+    End { id: String },
+}
+
+#[derive(Subcommand)]
 pub(crate) enum AccountCommand {
     /// Every account.
     List,
@@ -447,6 +455,26 @@ pub(crate) async fn password(api: &Api, output: &Output, input: &SecretInput) ->
     )
     .await?;
     output.done("Password changed; your other sessions ended", &Value::Null);
+    Ok(())
+}
+
+pub(crate) async fn session(api: &Api, output: &Output, command: SessionCommand) -> Result<()> {
+    match command {
+        SessionCommand::List => {
+            let sessions = api.get("/api/v1/account/sessions", &[]).await?.body;
+            output.list(&sessions, SESSIONS);
+        }
+        SessionCommand::End { id } => {
+            api.change(
+                Method::DELETE,
+                &format!("/api/v1/account/sessions/{id}"),
+                None,
+                None,
+            )
+            .await?;
+            output.done("Session ended", &json!({ "id": id }));
+        }
+    }
     Ok(())
 }
 

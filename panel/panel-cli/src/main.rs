@@ -84,6 +84,9 @@ enum Command {
     /// Your API tokens, for scripts.
     #[command(subcommand)]
     Token(commands::identity::TokenCommand),
+    /// Your sessions in the console and on the command line.
+    #[command(subcommand)]
+    Session(commands::identity::SessionCommand),
     /// Accounts, their roles, sessions and tokens.
     #[command(subcommand)]
     Account(commands::identity::AccountCommand),
@@ -202,6 +205,9 @@ enum Command {
     /// The running gateway.
     #[command(subcommand)]
     Gateway(commands::gateway::GatewayCommand),
+    /// The control-plane modules running now: their versions, protocol
+    /// revisions and capabilities.
+    Services,
     /// Prints a shell completion script.
     Completion {
         #[arg(value_enum)]
@@ -258,6 +264,7 @@ async fn main() -> ExitCode {
                 commands::identity::password(&api, &output, &input).await
             }
             Command::Token(command) => commands::identity::token(&api, &output, command).await,
+            Command::Session(command) => commands::identity::session(&api, &output, command).await,
             Command::Account(command) => commands::identity::account(&api, &output, command).await,
             Command::Role(command) => commands::identity::role(&api, &output, command).await,
             Command::IdentityProvider(command) => {
@@ -318,6 +325,7 @@ async fn main() -> ExitCode {
             Command::Backup(command) => commands::backups::run(&api, &output, command).await,
             Command::Plugin(command) => commands::plugins::run(&api, &output, command).await,
             Command::Gateway(command) => commands::gateway::gateway(&api, &output, command).await,
+            Command::Services => commands::gateway::services(&api, &output).await,
             Command::Completion { .. } => Ok(()),
         }
     }
