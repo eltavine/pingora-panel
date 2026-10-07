@@ -2,7 +2,7 @@
 import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { lintGutter, linter } from '@codemirror/lint'
-import { keymap } from '@codemirror/view'
+import { keymap, placeholder } from '@codemirror/view'
 import { useEventListener, watchDebounced } from '@vueuse/core'
 import {
   ArrowDownUp,
@@ -10,6 +10,7 @@ import {
   CircleCheck,
   FileCode2,
   FileDown,
+  FilePen,
   FileInput,
   FileJson2,
   FileUp,
@@ -51,6 +52,14 @@ import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/u
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -288,6 +297,7 @@ function reveal(diagnostic: DiagnosticDetails) {
 }
 
 const extensions = [
+  placeholder(t('studio.placeholder')),
   configurationLanguage.data.of({
     autocomplete: directiveCompletion(
       () => schema.data.value?.directives,
@@ -503,6 +513,21 @@ useEventListener(window, 'beforeunload', (event: BeforeUnloadEvent) => {
               {{ t('studio.draftVersion', { version: config.version.value ?? 0 }) }}
             </span>
           </div>
+          <Empty v-if="text.trim() === ''" class="gap-3 rounded-none border-b p-6">
+            <EmptyHeader>
+              <EmptyMedia variant="icon"><FilePen aria-hidden="true" /></EmptyMedia>
+              <EmptyTitle>{{ t('studio.emptyFile') }}</EmptyTitle>
+              <EmptyDescription>{{
+                config.active.value === ENTRY ? t('studio.emptyEntry') : t('studio.emptyIncluded')
+              }}</EmptyDescription>
+            </EmptyHeader>
+            <EmptyContent>
+              <Button variant="outline" size="sm" @click="importing = true">
+                <FileInput data-icon="inline-start" aria-hidden="true" />
+                {{ t('studio.importNginx') }}
+              </Button>
+            </EmptyContent>
+          </Empty>
           <div class="h-[min(68vh,46rem)] min-h-80">
             <CodeEditor
               ref="editor"

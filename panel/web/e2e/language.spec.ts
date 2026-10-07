@@ -272,6 +272,67 @@ test('configuration files are checked as they are edited, saved and applied', as
   })
 })
 
+test('the editor says when its files load, cannot be read or are empty', async ({ page }) => {
+  await mockDraft(page)
+  await page.route('**/api/v1/config/check', (route) =>
+    route.fulfill({ json: { valid: true, diagnostics: [] } }),
+  )
+  let release!: () => void
+  const held = new Promise<void>((resolve) => (release = resolve))
+  let reads = 0
+  await page.route('**/api/v1/config/source', async (route) => {
+    reads += 1
+    if (reads <= 2) {
+      await held
+      return route.fulfill({
+        status: 503,
+        contentType: 'application/problem+json',
+        json: {
+          type: 'about:blank',
+          title: 'Service Unavailable',
+          status: 503,
+          code: 'SERVICE_UNAVAILABLE',
+          detail: 'the configuration service is starting',
+        },
+      })
+    }
+    return route.fulfill({
+      json: {
+        language_version: 1,
+        version: 0,
+        etag: '"draft-0"',
+        files: { 'main.conf': '' },
+        diagnostics: [],
+      },
+    })
+  })
+
+  await page.goto('/config')
+  await expect(page.locator('main [data-slot="skeleton"]').first()).toBeVisible()
+  release()
+  const failure = page
+    .getByRole('alert')
+    .filter({ hasText: 'the configuration service is starting' })
+  await expect(failure).toBeVisible()
+  await expectNoHorizontalOverflow(page)
+  await failure.getByRole('button', { name: 'Retry' }).click()
+
+  await expect(page.getByText('This file is empty')).toBeVisible()
+  await expect(page.getByText(/^Every configuration starts here/)).toBeVisible()
+  await expectNoHorizontalOverflow(page)
+  await page.getByRole('button', { name: 'Import NGINX' }).click()
+  await expect(page.getByRole('dialog', { name: 'Import NGINX' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'New file' }).click()
+  await page.getByLabel('File path').fill('sites/blog.conf')
+  await page.getByRole('button', { name: 'Create' }).click()
+  await expect(page.getByText(/main\.conf reads them where it includes this file/)).toBeVisible()
+  await paste(page.getByRole('textbox', { name: 'Contents of sites/blog.conf' }), SHOP)
+  await expect(page.getByText('This file is empty')).toHaveCount(0)
+})
+
 test('a plan that changed meanwhile is shown again before it is applied', async ({ page }) => {
   await mockDraft(page)
   await page.route('**/api/v1/config/source', (route) =>

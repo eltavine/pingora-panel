@@ -1409,6 +1409,12 @@ const en: Messages = {
     notePlaceholder: 'Why this is applied',
     apply: 'Apply v{version}',
     applied: 'Applied as revision #{revision}',
+    emptyFile: 'This file is empty',
+    emptyEntry:
+      'Every configuration starts here: write directives below, beginning with language_version 1;, or convert NGINX configuration into the draft.',
+    emptyIncluded:
+      'Write directives below; main.conf reads them where it includes this file. NGINX configuration can be converted into the draft too.',
+    placeholder: 'Write directives here, such as listener, upstream and server blocks',
     confirmTitle: 'Apply v{version} to the gateway?',
     confirmFirst:
       'Nothing has been applied yet: these changes become the first revision the gateway runs.',

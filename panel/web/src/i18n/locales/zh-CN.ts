@@ -1364,6 +1364,12 @@ const zhCN = {
     notePlaceholder: '说明这次应用的原因',
     apply: '应用 v{version}',
     applied: '已应用为版本 #{revision}',
+    emptyFile: '此文件为空',
+    emptyEntry:
+      '所有配置都从这里开始：在下方编写指令，以 language_version 1; 开头，或将 NGINX 配置转换到草稿中。',
+    emptyIncluded:
+      '在下方编写指令；main.conf 在 include 此文件的位置读取它们。也可以将 NGINX 配置转换到草稿中。',
+    placeholder: '在此编写指令，例如 listener、upstream 和 server 块',
     confirmTitle: '将 v{version} 应用到网关？',
     confirmFirst: '尚未应用过任何版本：这些变更将成为网关运行的第一个版本。',
     confirmAgainst: '这些变更将替换网关上的版本 #{revision}。',
