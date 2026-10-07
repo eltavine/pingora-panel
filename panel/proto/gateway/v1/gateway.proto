@@ -594,6 +594,28 @@ message StaticContentPolicy {
   string root = 2;
   bool spa_fallback = 3;
   repeated string index_files = 4;
+  // How a directory without an index file is answered; unspecified is 404.
+  DirectoryListing listing = 5;
+  // Media types by lowercase extension, ahead of the built-in guesses.
+  map<string, string> media_types = 6;
+  optional string default_type = 7;
+  // Rules setting Cache-Control; the first naming a file's extension
+  // applies, then the first for every file.
+  repeated StaticCacheRule cache = 8;
+}
+
+enum DirectoryListing {
+  DIRECTORY_LISTING_UNSPECIFIED = 0;
+  DIRECTORY_LISTING_HTML = 1;
+  DIRECTORY_LISTING_JSON = 2;
+}
+
+message StaticCacheRule {
+  // Lowercase extensions without their dot; none for every file.
+  repeated string extensions = 1;
+  // Without it, caches revalidate files first (no-cache).
+  optional uint64 max_age_seconds = 2;
+  bool immutable = 3;
 }
 
 message CachePolicy {

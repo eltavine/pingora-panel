@@ -643,6 +643,10 @@ async fn static_content_honours_conditionals_and_ranges() {
         .push(ListenerRef::new("http", listen.to_string()));
     snapshot.sites.push(site(&["static.test"]));
     snapshot.static_content.push(StaticContentPolicy {
+        listing: Default::default(),
+        media_types: Default::default(),
+        default_type: None,
+        cache: Vec::new(),
         id: "files".into(),
         root: "site".into(),
         index_files: vec!["index.html".into()],

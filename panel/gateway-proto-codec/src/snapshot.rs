@@ -46,7 +46,7 @@ pub fn decode_snapshot(value: wire::RuntimeSnapshot) -> Result<RuntimeSnapshot> 
             .static_content
             .into_iter()
             .map(policies::decode_static_content)
-            .collect(),
+            .collect::<Result<_>>()?,
         cache_policies: value
             .cache_policies
             .into_iter()

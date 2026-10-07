@@ -34,6 +34,10 @@ pub use security::{
     BasicAuth, LimitedResponse, RateLimit, RateLimitKey, RealIpHeader, RefererRule, SecurityPolicy,
     REQUEST_HEAD_TIMEOUT_CAPABILITY, REQUEST_SECURITY_CAPABILITY, TRUSTED_PROXIES_CAPABILITY,
 };
+pub use statics::{
+    cache_rule, DirectoryListing, StaticCacheRule, LISTING_CAPABILITY, MEDIA_TYPES_CAPABILITY,
+    MOST_CACHE_RULES, MOST_LISTED, MOST_MAX_AGE_SECONDS, MOST_MEDIA_TYPES, STATIC_CACHE_CAPABILITY,
+};
 
 pub mod conditions;
 pub mod http;
@@ -43,6 +47,7 @@ pub mod pages;
 pub mod resilience;
 pub mod rewrite;
 pub mod security;
+pub mod statics;
 pub mod template;
 pub mod tls;
 
@@ -896,13 +901,25 @@ pub struct TlsProfile {
     pub alpn: BTreeSet<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StaticContentPolicy {
     pub id: String,
     pub root: String,
     pub index_files: Vec<String>,
     pub spa_fallback: bool,
+    /// How a directory without an index file is answered (ADR 0042).
+    #[serde(default, skip_serializing_if = "DirectoryListing::is_off")]
+    pub listing: DirectoryListing,
+    /// Media types by lowercase extension, ahead of the built-in guesses.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub media_types: BTreeMap<String, String>,
+    /// The media type of files whose extension has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_type: Option<String>,
+    /// Rules setting `Cache-Control` on the files served.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cache: Vec<StaticCacheRule>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

@@ -4,9 +4,9 @@ use crate::optional_string;
 use panel_contracts::gateway::v1 as wire;
 use panel_errors::{PanelError, Result};
 use panel_ir::{
-    BasicAuth, CachePolicy, CompressionAlgorithm, CompressionPolicy, CorsPolicy, HeaderField,
-    HeaderPolicy, LimitedResponse, LuaPolicy, RateLimit, RateLimitKey, RefererRule, SecurityPolicy,
-    ServerHeader, StaticContentPolicy, TlsProfile,
+    BasicAuth, CachePolicy, CompressionAlgorithm, CompressionPolicy, CorsPolicy, DirectoryListing,
+    HeaderField, HeaderPolicy, LimitedResponse, LuaPolicy, RateLimit, RateLimitKey, RefererRule,
+    SecurityPolicy, ServerHeader, StaticCacheRule, StaticContentPolicy, TlsProfile,
 };
 use std::collections::BTreeMap;
 
@@ -181,13 +181,38 @@ pub(super) fn encode_header_policy(value: &HeaderPolicy) -> wire::HeaderPolicy {
     }
 }
 
-pub(super) fn decode_static_content(value: wire::StaticContentPolicy) -> StaticContentPolicy {
-    StaticContentPolicy {
+pub(super) fn decode_static_content(
+    value: wire::StaticContentPolicy,
+) -> Result<StaticContentPolicy> {
+    let listing = match wire::DirectoryListing::try_from(value.listing) {
+        Ok(wire::DirectoryListing::Unspecified) => DirectoryListing::Off,
+        Ok(wire::DirectoryListing::Html) => DirectoryListing::Html,
+        Ok(wire::DirectoryListing::Json) => DirectoryListing::Json,
+        Err(_) => {
+            return Err(PanelError::invalid_argument(format!(
+                "static content {} lists directories in a way this gateway does not know",
+                value.id
+            )))
+        }
+    };
+    Ok(StaticContentPolicy {
         id: value.id,
         root: value.root,
         index_files: value.index_files,
         spa_fallback: value.spa_fallback,
-    }
+        listing,
+        media_types: value.media_types.into_iter().collect(),
+        default_type: value.default_type,
+        cache: value
+            .cache
+            .into_iter()
+            .map(|rule| StaticCacheRule {
+                extensions: rule.extensions.into_iter().collect(),
+                max_age_seconds: rule.max_age_seconds,
+                immutable: rule.immutable,
+            })
+            .collect(),
+    })
 }
 
 pub(super) fn encode_static_content(value: &StaticContentPolicy) -> wire::StaticContentPolicy {
@@ -196,6 +221,26 @@ pub(super) fn encode_static_content(value: &StaticContentPolicy) -> wire::Static
         root: value.root.clone(),
         spa_fallback: value.spa_fallback,
         index_files: value.index_files.clone(),
+        listing: match value.listing {
+            DirectoryListing::Off => wire::DirectoryListing::Unspecified,
+            DirectoryListing::Html => wire::DirectoryListing::Html,
+            DirectoryListing::Json => wire::DirectoryListing::Json,
+        } as i32,
+        media_types: value
+            .media_types
+            .iter()
+            .map(|(extension, media_type)| (extension.clone(), media_type.clone()))
+            .collect(),
+        default_type: value.default_type.clone(),
+        cache: value
+            .cache
+            .iter()
+            .map(|rule| wire::StaticCacheRule {
+                extensions: rule.extensions.iter().cloned().collect(),
+                max_age_seconds: rule.max_age_seconds,
+                immutable: rule.immutable,
+            })
+            .collect(),
     }
 }
 

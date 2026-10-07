@@ -187,7 +187,7 @@ pub fn maintenance_problems(maintenance: &Maintenance) -> Vec<String> {
     found
 }
 
-fn media_type_problem(value: &str) -> Option<String> {
+pub(crate) fn media_type_problem(value: &str) -> Option<String> {
     let essence = value.split(';').next().unwrap_or_default().trim();
     let valid = value.len() <= 256
         && !value.bytes().any(|byte| byte.is_ascii_control())

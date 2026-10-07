@@ -402,6 +402,12 @@
       "name": "ErrorResponse",
       "owner": "pingora-panel-platform",
       "reason": "gateway-proto-codec encodes every way an error page answers onto the wire and the data plane serves each. A new one must fail to compile there rather than be dropped, which would leave the error unanswered by its page."
+    },
+    {
+      "package": "panel-ir",
+      "name": "DirectoryListing",
+      "owner": "pingora-panel-platform",
+      "reason": "gateway-proto-codec maps every way of listing a directory onto the protobuf enum and the data plane renders each. A new one must fail to compile there rather than be sent as no listing."
     }
   ]
 }

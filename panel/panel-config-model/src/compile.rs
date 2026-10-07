@@ -377,6 +377,7 @@ impl Compiler<'_> {
                         root: directory.to_owned(),
                         index_files: Vec::new(),
                         spa_fallback: false,
+                        ..StaticContentPolicy::default()
                     });
                     let rewrite = RewriteRule::SetUri {
                         template: literal(&format!("/{name}")),
@@ -576,6 +577,7 @@ impl Compiler<'_> {
                     root: root.clone(),
                     index_files: index_files.clone(),
                     spa_fallback: *spa_fallback,
+                    ..StaticContentPolicy::default()
                 });
                 RouteAction::Static { policy_id }
             }

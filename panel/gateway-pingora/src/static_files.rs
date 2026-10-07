@@ -464,6 +464,10 @@ mod tests {
         let base = tempfile::tempdir().unwrap();
         std::fs::create_dir(base.path().join("site")).unwrap();
         let policy = |root: &str| StaticContentPolicy {
+            listing: Default::default(),
+            media_types: Default::default(),
+            default_type: None,
+            cache: Vec::new(),
             id: "static".into(),
             root: root.into(),
             index_files: vec!["index.html".into()],
@@ -485,6 +489,10 @@ mod tests {
         use std::os::unix::fs::symlink;
         let base = tempfile::tempdir().unwrap();
         let policy = |root: &str| StaticContentPolicy {
+            listing: Default::default(),
+            media_types: Default::default(),
+            default_type: None,
+            cache: Vec::new(),
             id: "static".into(),
             root: root.into(),
             index_files: vec!["index.html".into()],
@@ -522,6 +530,10 @@ mod tests {
         symlink(outside.path(), site.join("elsewhere")).unwrap();
         symlink(outside.path(), base.path().join("linked-root")).unwrap();
         let policy = |root: &str| StaticContentPolicy {
+            listing: Default::default(),
+            media_types: Default::default(),
+            default_type: None,
+            cache: Vec::new(),
             id: "static".into(),
             root: root.into(),
             index_files: vec!["index.html".into()],

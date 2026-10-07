@@ -182,6 +182,17 @@ fn populated_snapshot_round_trips_additive_v1_fields() {
         root: "/srv/www".into(),
         index_files: vec!["index.html".into()],
         spa_fallback: true,
+        listing: panel_ir::DirectoryListing::Json,
+        media_types: [("wasm".to_owned(), "application/wasm".to_owned())].into(),
+        default_type: Some("text/plain".into()),
+        cache: vec![
+            panel_ir::StaticCacheRule {
+                extensions: ["css".to_owned(), "js".to_owned()].into(),
+                max_age_seconds: Some(31_536_000),
+                immutable: true,
+            },
+            panel_ir::StaticCacheRule::default(),
+        ],
     });
     snapshot.cache_policies.push(CachePolicy {
         id: "cache".into(),

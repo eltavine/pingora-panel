@@ -222,6 +222,10 @@ mod tests {
         }
         for (id, root) in [("site", "site"), ("linked", "linked"), ("gone", "gone")] {
             snapshot.static_content.push(StaticContentPolicy {
+                listing: Default::default(),
+                media_types: Default::default(),
+                default_type: None,
+                cache: Vec::new(),
                 id: id.into(),
                 root: root.into(),
                 index_files: Vec::new(),

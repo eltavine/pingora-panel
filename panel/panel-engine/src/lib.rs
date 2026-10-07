@@ -12,6 +12,7 @@ mod pages;
 pub mod ports;
 mod resilience;
 mod rewrite;
+mod statics;
 mod traffic;
 mod validation;
 
@@ -35,5 +36,6 @@ pub use resilience::{
     MOST_RETRIES,
 };
 pub use rewrite::{problems as rewrite_problems, target_problem as internal_target_problem};
+pub use statics::static_problems;
 pub use traffic::{route_regex_error, ROUTE_REGEX_SIZE_LIMIT};
 pub use validation::validate_engine_ir;
