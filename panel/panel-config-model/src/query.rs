@@ -369,6 +369,7 @@ mod tests {
             security_policy_id: Default::default(),
             http_policy_id: None,
             access_log: Default::default(),
+            rewrites: Vec::new(),
         }
     }
 

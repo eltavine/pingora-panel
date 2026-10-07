@@ -8,8 +8,8 @@ use panel_domain::{CertificateId, ContentHash, NormalizedHost};
 use panel_ir::{
     AccessLog, ActiveHealthCheck, CircuitBreaker, ListenerProtocols, LoadBalancingPolicy,
     LoggingPolicy, PassiveHealthPolicy, RealIpHeader, RetryBudget, RetryCondition, RetryPolicy,
-    StrictTransportSecurity, UpstreamConnectionPolicy, UpstreamPoolSpec, UpstreamQueue,
-    UpstreamTlsPolicy, WwwRedirect,
+    RewriteRule, StrictTransportSecurity, UpstreamConnectionPolicy, UpstreamPoolSpec,
+    UpstreamQueue, UpstreamTlsPolicy, WwwRedirect,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -244,6 +244,10 @@ pub struct Site {
     /// every site.
     #[serde(default, skip_serializing_if = "LuaScope::is_empty")]
     pub lua: LuaScope,
+    /// Rules every request to the site runs before a route is chosen
+    /// (ADR 0040).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rewrites: Vec<RewriteRule>,
     #[serde(default)]
     pub group: Option<String>,
     #[serde(default)]
@@ -267,6 +271,8 @@ impl Site {
             Action::Redirect { .. } => SiteKind::Redirect,
             Action::Respond { .. } => SiteKind::Maintenance,
             Action::Lua { .. } => SiteKind::Script,
+            // Only routes redirect internally; validation refuses it here.
+            Action::InternalRedirect { .. } => SiteKind::Redirect,
         }
     }
 
@@ -337,6 +343,13 @@ pub struct Route {
     /// `ngx.exec("@name")`, and its match is not used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub named: Option<String>,
+    /// Rules the route's requests run once it is chosen (ADR 0040).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rewrites: Vec<RewriteRule>,
+    /// Takes only requests a rewrite, an internal redirect or a script sent
+    /// to it, as nginx's `internal`; others get 404.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub internal: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -500,6 +513,11 @@ pub enum Action {
     /// Answers with a Lua script, as `content_by_lua` does.
     Lua {
         code: LuaCode,
+    },
+    /// Serves the request as if it asked for `target`, a path template or a
+    /// named route written `@name`, without telling the client.
+    InternalRedirect {
+        target: String,
     },
 }
 

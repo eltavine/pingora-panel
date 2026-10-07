@@ -77322,6 +77322,25 @@
                 ]
               }
             }
+          },
+          {
+            "type": "object",
+            "description": "Serves the request as if it asked for `target`, a path template or a\nnamed route written `@name`, without telling the client.",
+            "required": [
+              "target",
+              "type"
+            ],
+            "properties": {
+              "target": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_redirect"
+                ]
+              }
+            }
           }
         ]
       },
@@ -86121,6 +86140,105 @@
           "failed"
         ]
       },
+      "RewriteFlag": {
+        "type": "string",
+        "description": "What follows a [`RewriteRule::Rewrite`] that matched, as nginx's flags\nsay.",
+        "enum": [
+          "none",
+          "last",
+          "break",
+          "redirect",
+          "permanent"
+        ]
+      },
+      "RewriteRule": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Removes `prefix` from a path that is it or continues it with a `/`\nsegment, leaving `/` at least.",
+            "required": [
+              "prefix",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "strip_prefix"
+                ]
+              },
+              "prefix": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Puts `prefix` before the path.",
+            "required": [
+              "prefix",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "add_prefix"
+                ]
+              },
+              "prefix": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Replaces the path with a template of request variables; a `?` in it\nsets the query too.",
+            "required": [
+              "template",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "set_uri"
+                ]
+              },
+              "template": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "nginx's `rewrite`: when `pattern` matches the path, it becomes\n`replacement`, where `$1`…`$9` and named groups take the captures.",
+            "required": [
+              "pattern",
+              "replacement",
+              "kind"
+            ],
+            "properties": {
+              "flag": {
+                "$ref": "#/components/schemas/RewriteFlag"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "rewrite"
+                ]
+              },
+              "pattern": {
+                "type": "string"
+              },
+              "replacement": {
+                "type": "string"
+              }
+            }
+          }
+        ],
+        "description": "A change of a request's path, in the order a site or route lists them."
+      },
       "Rfc2136Settings": {
         "type": "object",
         "description": "Where an RFC 2136 provider sends updates and the key it signs them with.",
@@ -86252,6 +86370,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "internal": {
+            "type": "boolean",
+            "description": "Takes only requests a rewrite, an internal redirect or a script sent\nto it, as nginx's `internal`; others get 404."
+          },
           "lua": {
             "$ref": "#/components/schemas/LuaScope",
             "description": "The Lua handlers and terms of the route's requests, over its site's."
@@ -86277,6 +86399,13 @@
             "format": "int32",
             "description": "Lower values are evaluated first.",
             "minimum": 0
+          },
+          "rewrites": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RewriteRule"
+            },
+            "description": "Rules the route's requests run once it is chosen (ADR 0040)."
           },
           "security_policy_id": {
             "type": [
@@ -86589,6 +86718,13 @@
             "format": "uuid",
             "description": "Keeps an existing route's identity when a whole site is replaced."
           },
+          "internal": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether only requests sent from inside the gateway reach the route;\nabsent keeps the current setting."
+          },
           "match": {
             "$ref": "#/components/schemas/RouteMatch"
           },
@@ -86602,6 +86738,16 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          },
+          "rewrites": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/RewriteRule"
+            },
+            "description": "Rules the route's requests run once it is chosen; absent keeps the\ncurrent ones."
           },
           "security_policy_id": {
             "type": [
@@ -87420,6 +87566,13 @@
               "null"
             ]
           },
+          "rewrites": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RewriteRule"
+            },
+            "description": "Rules every request to the site runs before a route is chosen\n(ADR 0040)."
+          },
           "routes": {
             "type": "array",
             "items": {
@@ -87651,6 +87804,16 @@
               "string",
               "null"
             ]
+          },
+          "rewrites": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/RewriteRule"
+            },
+            "description": "Rules every request runs before a route is chosen; absent keeps the\ncurrent ones."
           },
           "routes": {
             "type": "array",

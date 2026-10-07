@@ -15,6 +15,7 @@ use panel_ir::{
     CapabilityRequirement, DomainSpec, ListenerRef, LoadBalancingPolicy, LuaProgram, RouteAction,
     RouteMatcher, RouteSpec, RuntimeSnapshot, SiteSpec, StaticContentPolicy, UpstreamEndpoint,
     UpstreamPoolSpec, WwwRedirect, HTTP_POLICIES_CAPABILITY, LUA_SCRIPTS_CAPABILITY,
+    REWRITE_CAPABILITY,
 };
 use panel_ir::{
     REQUEST_HEAD_TIMEOUT_CAPABILITY, REQUEST_SECURITY_CAPABILITY, ROUTE_CONDITIONS_CAPABILITY,
@@ -280,6 +281,10 @@ impl Compiler<'_> {
         if !site.access_log.is_unset() {
             self.capabilities.insert(LOGGING_CAPABILITY);
         }
+        compiled.rewrites.clone_from(&site.rewrites);
+        if !site.rewrites.is_empty() {
+            self.capabilities.insert(REWRITE_CAPABILITY);
+        }
         if site.hsts.is_some() {
             self.capabilities.insert(HSTS_CAPABILITY);
         }
@@ -385,6 +390,11 @@ impl Compiler<'_> {
         compiled.access_log.clone_from(&route.access_log);
         if !route.access_log.is_unset() {
             self.capabilities.insert(LOGGING_CAPABILITY);
+        }
+        compiled.rewrites.clone_from(&route.rewrites);
+        compiled.internal = route.internal;
+        if !route.rewrites.is_empty() || route.internal {
+            self.capabilities.insert(REWRITE_CAPABILITY);
         }
         compiled.lua = lua::handlers(&scope, &mut self.scripts, &self.lua.files, true);
         compiled.lua.variables = lua::variables(
@@ -507,6 +517,12 @@ impl Compiler<'_> {
             Action::Lua { code } => RouteAction::Lua {
                 handler: lua::handler(self.scripts.add(code, &self.lua.files), scope),
             },
+            Action::InternalRedirect { target } => {
+                self.capabilities.insert(REWRITE_CAPABILITY);
+                RouteAction::InternalRedirect {
+                    target: target.clone(),
+                }
+            }
         }
     }
 }
@@ -672,6 +688,8 @@ mod tests {
                 security_policy_id: Default::default(),
                 http_policy_id: None,
                 access_log: Default::default(),
+                rewrites: Vec::new(),
+                internal: false,
             }],
             listener_ids: BTreeSet::new(),
             https_redirect: false,
@@ -688,6 +706,7 @@ mod tests {
             security_policy_id: Default::default(),
             http_policy_id: None,
             access_log: Default::default(),
+            rewrites: Vec::new(),
         };
         let site_id = site.id;
         let model = ConfigModel {
@@ -1202,6 +1221,79 @@ mod tests {
                 .any(|diagnostic| diagnostic.message.contains("is not a network")),
             "{diagnostics:?}"
         );
+    }
+
+    #[test]
+    fn rewrites_reach_the_snapshot_and_require_their_capability() {
+        use panel_ir::{RewriteFlag, RewriteRule};
+
+        let (mut model, _) = model();
+        model.sites[0].rewrites = vec![RewriteRule::Rewrite {
+            pattern: "^/old/(.*)$".into(),
+            replacement: "/new/$1".into(),
+            flag: RewriteFlag::Permanent,
+        }];
+        let route = &mut model.sites[0].routes[0];
+        route.rewrites = vec![RewriteRule::StripPrefix {
+            prefix: "/assets".into(),
+        }];
+        route.internal = true;
+        let mut fallback = route.clone();
+        fallback.id = Uuid::now_v7();
+        fallback.named = Some("fallback".into());
+        fallback.rewrites.clear();
+        fallback.internal = false;
+        let mut redirect = fallback.clone();
+        redirect.id = Uuid::now_v7();
+        redirect.named = None;
+        redirect.matcher.path = "/gone".into();
+        redirect.action = Action::InternalRedirect {
+            target: "@fallback".into(),
+        };
+        model.sites[0].routes.extend([fallback, redirect]);
+        let snapshot = compile(&model, RevisionId::new(5)).unwrap();
+        assert_eq!(snapshot.sites[0].rewrites, model.sites[0].rewrites);
+        let assets = snapshot.routes.iter().find(|route| route.internal).unwrap();
+        assert_eq!(assets.rewrites, model.sites[0].routes[0].rewrites);
+        assert!(snapshot.routes.iter().any(|route| route.action
+            == RouteAction::InternalRedirect {
+                target: "@fallback".into()
+            }));
+        assert!(snapshot
+            .required_capabilities
+            .iter()
+            .any(|capability| capability.name == REWRITE_CAPABILITY));
+
+        model.sites[0].routes[2].action = Action::InternalRedirect {
+            target: "@nowhere".into(),
+        };
+        model.sites[0].rewrites = vec![RewriteRule::AddPrefix {
+            prefix: "/v2/".into(),
+        }];
+        let diagnostics = compile(&model, RevisionId::new(6)).unwrap_err();
+        let messages: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect();
+        assert!(
+            messages.iter().any(|message| message.contains("@nowhere")),
+            "{messages:?}"
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("the site has a rewrite prefix")),
+            "{messages:?}"
+        );
+
+        let (mut model, _) = self::model();
+        model.sites[0].action = Action::InternalRedirect {
+            target: "/elsewhere".into(),
+        };
+        let diagnostics = compile(&model, RevisionId::new(7)).unwrap_err();
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("does not redirect internally")));
     }
 
     #[test]

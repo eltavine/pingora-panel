@@ -19,7 +19,7 @@ use panel_config_model::{
 use panel_dsl::{Argument, Directive, Document, Trivia};
 use panel_ir::{
     HealthCheckProtocol, ListenerProtocols, LoadBalancingPolicy, RateLimitKey, RealIpHeader,
-    ServerHeader, WwwRedirect,
+    RewriteFlag, RewriteRule, ServerHeader, WwwRedirect,
 };
 
 /// The whole model as `main.conf`.
@@ -646,8 +646,40 @@ fn action(action: &Action, model: &ConfigModel) -> Directive {
             Directive::simple("respond", args)
         }
         Action::Lua { code } => lua_handler("content", code),
+        Action::InternalRedirect { target } => {
+            Directive::simple("internal_redirect", [target.clone()])
+        }
         _ => Directive::simple("respond", ["503"]),
     }
+}
+
+/// Rewrite rules as the directives that write them, in their order.
+fn rewrites(rules: &[RewriteRule]) -> impl Iterator<Item = Directive> + '_ {
+    rules.iter().map(|rule| match rule {
+        RewriteRule::StripPrefix { prefix } => {
+            Directive::simple("strip_prefix", [expanded(prefix)])
+        }
+        RewriteRule::AddPrefix { prefix } => Directive::simple("add_prefix", [expanded(prefix)]),
+        RewriteRule::SetUri { template } => Directive::simple("set_uri", [template.clone()]),
+        RewriteRule::Rewrite {
+            pattern,
+            replacement,
+            flag,
+        } => {
+            let mut args = vec![pattern.clone(), replacement.clone()];
+            args.extend(
+                match flag {
+                    RewriteFlag::None => None,
+                    RewriteFlag::Last => Some("last"),
+                    RewriteFlag::Break => Some("break"),
+                    RewriteFlag::Redirect => Some("redirect"),
+                    RewriteFlag::Permanent => Some("permanent"),
+                }
+                .map(str::to_owned),
+            );
+            Directive::simple("rewrite", args)
+        }
+    })
 }
 
 /// A route condition as the directive that writes it.
@@ -751,6 +783,10 @@ fn route(route: &Route, model: &ConfigModel) -> Directive {
     }
     body.extend(print_access(&route.access_log));
     body.extend(lua_scope(&route.lua));
+    if route.internal {
+        body.push(Directive::simple("internal", Vec::<String>::new()));
+    }
+    body.extend(rewrites(&route.rewrites));
     body.push(action(&route.action, model));
     Directive::with_block("route", route.name.clone(), body)
 }
@@ -849,6 +885,7 @@ pub fn server(site: &Site, model: &ConfigModel) -> Directive {
         body.push(Directive::simple("note", [note.clone()]));
     }
     body.extend(lua_scope(&site.lua));
+    body.extend(rewrites(&site.rewrites));
     body.push(action(&site.action, model));
     for item in &site.routes {
         let mut directive = route(item, model);

@@ -395,3 +395,100 @@ http {
     assert!(matches!(route.action, Action::Lua { .. }));
     assert!(route.lua.header_filter.is_some());
 }
+
+#[test]
+fn rewrites_and_internal_locations_carry_over() {
+    use panel_ir::{RewriteFlag, RewriteRule};
+
+    let site = r#"server {
+    listen 80;
+    server_name blog.example;
+    rewrite ^/feed$ /rss.xml permanent;
+    location / {
+        proxy_pass http://127.0.0.1:9000;
+    }
+    location /api/ {
+        rewrite ^/api/(?<rest>.*)$ /$rest?from=$host break;
+        proxy_pass http://127.0.0.1:9000;
+    }
+    location /errors/ {
+        internal;
+        return 404 "gone";
+    }
+    location /legacy/ {
+        rewrite ^/legacy/(\d+)$ /posts/$1?$args? last;
+        return 410;
+    }
+    location /look/ {
+        rewrite (?=x) /y;
+        return 204;
+    }
+}
+"#;
+    let files = BTreeMap::from([(
+        "/etc/nginx/nginx.conf".to_owned(),
+        format!("http {{\n{site}}}\n"),
+    )]);
+    let imported = import_nginx(&files, "/etc/nginx/nginx.conf").unwrap();
+    let text = imported.sources.get("main.conf").unwrap();
+    let environment = BTreeMap::new();
+    let lowered = lower(
+        &imported.sources,
+        &LowerOptions {
+            environment: &environment,
+            previous: None,
+            now: Utc::now(),
+        },
+    );
+    assert!(
+        lowered
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.severity != panel_errors::DiagnosticSeverity::Error),
+        "{:#?}\n{text}",
+        lowered.diagnostics
+    );
+    let site = &lowered.model.sites[0];
+    assert_eq!(
+        site.rewrites,
+        [RewriteRule::Rewrite {
+            pattern: "^/feed$".into(),
+            replacement: "/rss.xml".into(),
+            flag: RewriteFlag::Permanent,
+        }],
+        "{text}"
+    );
+    let route = |prefix: &str| {
+        site.routes
+            .iter()
+            .find(|route| route.matcher.path == prefix)
+            .unwrap_or_else(|| panic!("no route for {prefix} in\n{text}"))
+    };
+    assert_eq!(
+        route("/api/").rewrites,
+        [RewriteRule::Rewrite {
+            pattern: "^/api/(?<rest>.*)$".into(),
+            replacement: "/$rest?from=$host".into(),
+            flag: RewriteFlag::Break,
+        }]
+    );
+    assert!(route("/errors/").internal, "{text}");
+    assert_eq!(
+        route("/legacy/").rewrites,
+        [RewriteRule::Rewrite {
+            pattern: "^/legacy/(\\d+)$".into(),
+            replacement: "/posts/$1?$args?".into(),
+            flag: RewriteFlag::Last,
+        }]
+    );
+    assert!(route("/look/").rewrites.is_empty(), "{text}");
+    assert!(
+        imported
+            .report
+            .iter()
+            .any(|diagnostic| diagnostic.code.as_str() == codes::UNSUPPORTED
+                && diagnostic.message.contains("(?=x)")),
+        "{:#?}",
+        imported.report
+    );
+}

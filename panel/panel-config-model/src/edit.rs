@@ -17,8 +17,8 @@ use panel_domain::NormalizedHost;
 use panel_errors::{Diagnostic, PanelError, Result};
 use panel_ir::{
     AccessLog, ActiveHealthCheck, CircuitBreaker, LoadBalancingPolicy, PassiveHealthPolicy,
-    StrictTransportSecurity, UpstreamConnectionPolicy, UpstreamQueue, UpstreamTlsPolicy,
-    WwwRedirect,
+    RewriteRule, StrictTransportSecurity, UpstreamConnectionPolicy, UpstreamQueue,
+    UpstreamTlsPolicy, WwwRedirect,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
@@ -65,6 +65,10 @@ pub struct SiteInput {
     /// How the site's requests are logged; absent keeps the current settings.
     #[serde(default)]
     pub access_log: Option<AccessLog>,
+    /// Rules every request runs before a route is chosen; absent keeps the
+    /// current ones.
+    #[serde(default)]
+    pub rewrites: Option<Vec<RewriteRule>>,
     #[serde(default)]
     pub group: Option<String>,
     #[serde(default)]
@@ -99,6 +103,14 @@ pub struct RouteInput {
     /// How the route's requests are logged; absent keeps the current settings.
     #[serde(default)]
     pub access_log: Option<AccessLog>,
+    /// Rules the route's requests run once it is chosen; absent keeps the
+    /// current ones.
+    #[serde(default)]
+    pub rewrites: Option<Vec<RewriteRule>>,
+    /// Whether only requests sent from inside the gateway reach the route;
+    /// absent keeps the current setting.
+    #[serde(default)]
+    pub internal: Option<bool>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -228,6 +240,12 @@ fn routes_from(inputs: Vec<RouteInput>, existing: &[Route]) -> Vec<Route> {
                     kept.map(|route| route.access_log.clone())
                         .unwrap_or_default()
                 }),
+                rewrites: input.rewrites.unwrap_or_else(|| {
+                    kept.map(|route| route.rewrites.clone()).unwrap_or_default()
+                }),
+                internal: input
+                    .internal
+                    .unwrap_or_else(|| kept.is_some_and(|route| route.internal)),
             }
         })
         .collect()
@@ -301,6 +319,7 @@ impl ConfigModel {
             security_policy_id: input.security_policy_id,
             http_policy_id: input.http_policy_id,
             access_log: input.access_log.unwrap_or_default(),
+            rewrites: input.rewrites.unwrap_or_default(),
             group: input.group,
             tags: input.tags,
             note: input.note,
@@ -331,6 +350,9 @@ impl ConfigModel {
             security_policy_id: input.security_policy_id,
             http_policy_id: input.http_policy_id,
             access_log: input.access_log.unwrap_or_else(|| site.access_log.clone()),
+            rewrites: input
+                .rewrites
+                .unwrap_or_else(|| std::mem::take(&mut site.rewrites)),
             group: input.group,
             tags: input.tags,
             note: input.note,
@@ -517,6 +539,10 @@ impl ConfigModel {
             security_policy_id: input.security_policy_id,
             http_policy_id: input.http_policy_id,
             access_log,
+            rewrites: input
+                .rewrites
+                .unwrap_or_else(|| std::mem::take(&mut slot.rewrites)),
+            internal: input.internal.unwrap_or(slot.internal),
         };
         Ok(())
     }
@@ -1011,6 +1037,7 @@ mod tests {
             security_policy_id: Default::default(),
             http_policy_id: None,
             access_log: None,
+            rewrites: None,
         }
     }
 
@@ -1025,6 +1052,8 @@ mod tests {
             security_policy_id: None,
             http_policy_id: None,
             access_log: None,
+            rewrites: None,
+            internal: None,
         }
     }
 
@@ -1093,6 +1122,8 @@ mod tests {
                 format: Some(panel_ir::AccessLogFormat::Combined),
                 ..AccessLog::default()
             }),
+            rewrites: None,
+            internal: None,
         });
         let id = model.create_site(created, now);
         {
@@ -1115,6 +1146,8 @@ mod tests {
             security_policy_id: None,
             http_policy_id: None,
             access_log: None,
+            rewrites: None,
+            internal: None,
         });
         model.replace_site(id, replaced, now).unwrap();
         let kept = model.site(id).unwrap();
@@ -1215,6 +1248,8 @@ mod tests {
             security_policy_id: Default::default(),
             http_policy_id: None,
             access_log: None,
+            rewrites: None,
+            internal: None,
         };
         let first = model.create_route(site, route("/a"), now).unwrap();
         let second = model.create_route(site, route("/b"), now).unwrap();
@@ -1234,6 +1269,33 @@ mod tests {
         model.replace_upstream(upstream, replacement, now).unwrap();
         assert_eq!(model.upstream(upstream).unwrap().nodes[0].id, node);
         assert_eq!(model.upstream(upstream).unwrap().nodes[0].weight, 5);
+
+        let strip = vec![panel_ir::RewriteRule::StripPrefix {
+            prefix: "/a".into(),
+        }];
+        let mut rewritten = route("/a");
+        rewritten.rewrites = Some(strip.clone());
+        rewritten.internal = Some(true);
+        model.replace_route(first, rewritten, now).unwrap();
+        model.replace_route(first, route("/a"), now).unwrap();
+        let find = |model: &ConfigModel| {
+            model
+                .site(site)
+                .unwrap()
+                .routes
+                .iter()
+                .find(|route| route.id == first)
+                .cloned()
+                .unwrap()
+        };
+        let kept = find(&model);
+        assert_eq!((&kept.rewrites, kept.internal), (&strip, true));
+        let mut cleared = route("/a");
+        cleared.rewrites = Some(Vec::new());
+        cleared.internal = Some(false);
+        model.replace_route(first, cleared, now).unwrap();
+        let cleared = find(&model);
+        assert!(cleared.rewrites.is_empty() && !cleared.internal);
     }
 
     #[test]

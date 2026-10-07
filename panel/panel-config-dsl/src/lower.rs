@@ -29,6 +29,7 @@ mod listener;
 mod logging;
 mod lua;
 mod resilience;
+mod rewrite;
 mod route;
 mod security;
 mod server;
@@ -42,6 +43,7 @@ pub(crate) use lua::{
     GROUPS as LUA_GROUPS, TERMS as LUA_TERMS,
 };
 pub(crate) use resilience::{print_breaker, print_queue, print_retry};
+pub(crate) use rewrite::{capture_end, groups as rewrite_groups};
 pub(crate) use security::{print_rate, DEFAULT_REALM};
 
 /// How references in a value are resolved.

@@ -1,7 +1,7 @@
 //! Converts a documented subset of NGINX configuration into the language.
 //! `server`, `listen`, `server_name`, `location` with its modifiers,
-//! `proxy_pass`, `root`, `index`, `try_files`, `return` and `upstream` are
-//! carried over, and so are OpenResty's `*_by_lua*` handlers and
+//! `proxy_pass`, `root`, `index`, `try_files`, `return`, `rewrite`,
+//! `internal` and `upstream` are carried over, and so are OpenResty's `*_by_lua*` handlers and
 //! `lua_shared_dict`, with the Lua files moved under `lua/`; every other
 //! directive is reported at its position rather than dropped silently.
 
@@ -725,6 +725,7 @@ impl<'a> Importer<'a> {
                 },
                 "root" | "index" | "try_files" => {}
                 "access_log" => body.extend(self.access_log(inner)),
+                "rewrite" => body.extend(self.rewrite(inner)),
                 name if is_lua(name) => {
                     if let Some(directive) = self.lua(inner, Context::Server) {
                         body.push(directive);
@@ -963,6 +964,7 @@ impl<'a> Importer<'a> {
         let mut action = None;
         let mut logging = Vec::new();
         let mut lua = Vec::new();
+        let mut rewrites = Vec::new();
         let mut static_files = inherited.cloned();
         // A location whose proxy or return cannot be carried over is left
         // out rather than serving files in its place.
@@ -986,6 +988,8 @@ impl<'a> Importer<'a> {
                 },
                 "root" | "index" | "try_files" => self.static_files(&inner, &mut static_files),
                 "access_log" => logging.extend(self.access_log(&inner)),
+                "rewrite" => rewrites.extend(self.rewrite(&inner)),
+                "internal" => rewrites.insert(0, Directive::simple("internal", Vec::<String>::new())),
                 name if is_lua(name) => {
                     let content = name.starts_with("content_by_lua");
                     if let Some(directive) = self.lua(&inner, Context::Route) {
@@ -1021,6 +1025,7 @@ impl<'a> Importer<'a> {
             && rank.0 == 3
             && server_action.is_none()
             && lua.is_empty()
+            && rewrites.is_empty()
         {
             *server_action = Some(action);
             return None;
@@ -1028,8 +1033,50 @@ impl<'a> Importer<'a> {
         let mut directives = vec![Directive::simple("match", [kind.to_owned(), path])];
         directives.extend(logging);
         directives.extend(lua);
+        directives.extend(rewrites);
         directives.extend(action);
         Some(Route { rank, directives })
+    }
+
+    /// `rewrite <regex> <replacement> [flag];`, its replacement's captures
+    /// kept and its variables renamed.
+    fn rewrite(&mut self, located: &Located) -> Option<Directive> {
+        let values = args(&located.directive);
+        let (pattern, replacement, flag) = match values.as_slice() {
+            [pattern, replacement] => (*pattern, *replacement, None),
+            [pattern, replacement, flag]
+                if matches!(*flag, "last" | "break" | "redirect" | "permanent") =>
+            {
+                (*pattern, *replacement, Some(*flag))
+            }
+            _ => {
+                self.unsupported(located, "this 'rewrite' is not supported".into());
+                return None;
+            }
+        };
+        let groups = match crate::lower::rewrite_groups(pattern) {
+            Ok(groups) => groups,
+            Err(error) => {
+                self.unsupported(
+                    located,
+                    format!("the expression {pattern:?} is not supported: {error}"),
+                );
+                return None;
+            }
+        };
+        let replacement = match nginx_value(replacement, Some(&groups)) {
+            Ok(replacement) => replacement,
+            Err(variable) => {
+                self.unsupported(
+                    located,
+                    format!("the variable ${variable} has no counterpart"),
+                );
+                return None;
+            }
+        };
+        let mut values = vec![pattern.to_owned(), replacement];
+        values.extend(flag.map(str::to_owned));
+        Some(Directive::simple("rewrite", values))
     }
 
     /// `access_log off` carries over; log files and formats are the gateway's own.
@@ -1075,7 +1122,15 @@ fn variable(name: &str) -> Option<&str> {
         "remote_addr" => "client_ip",
         "request_id" => "request_id",
         "upstream_addr" => "upstream_addr",
-        name if name.starts_with("http_") || name.starts_with("cookie_") => name,
+        "request_uri" => "request_uri",
+        "args" | "query_string" => "args",
+        "is_args" => "is_args",
+        name if name.starts_with("http_")
+            || name.starts_with("cookie_")
+            || name.starts_with("arg_") =>
+        {
+            name
+        }
         _ => return None,
     })
 }
@@ -1083,10 +1138,22 @@ fn variable(name: &str) -> Option<&str> {
 /// An NGINX string as a template: variables renamed, other dollars
 /// escaped; the first variable without a counterpart otherwise.
 fn nginx_template(value: &str) -> Result<String, String> {
+    nginx_value(value, None)
+}
+
+/// [`nginx_template`], keeping the references to captures a rewrite's
+/// replacement makes when `groups` names its pattern's groups.
+fn nginx_value(value: &str, groups: Option<&[String]>) -> Result<String, String> {
     let mut out = String::with_capacity(value.len());
     let mut rest = value;
     while let Some(index) = rest.find('$') {
         out.push_str(&rest[..index]);
+        if let Some(end) = groups.and_then(|groups| crate::lower::capture_end(rest, index, groups))
+        {
+            out.push_str(&rest[index..end]);
+            rest = &rest[end..];
+            continue;
+        }
         let after = &rest[index + 1..];
         let (name, length) = if let Some(braced) = after.strip_prefix('{') {
             match braced.find('}') {
@@ -1142,8 +1209,16 @@ mod tests {
         );
         assert_eq!(nginx_template("costs $5").as_deref(), Ok("costs $$5"));
         assert_eq!(
-            nginx_template("$request_uri"),
-            Err("request_uri".to_owned())
+            nginx_template("$request_uri$is_args$args").as_deref(),
+            Ok("$request_uri$is_args$args")
+        );
+        assert_eq!(
+            nginx_template("$realpath_root"),
+            Err("realpath_root".to_owned())
+        );
+        assert_eq!(
+            nginx_value("/u/$1/$id?$args", Some(&["id".to_owned()])).as_deref(),
+            Ok("/u/$1/$id?$args")
         );
     }
 

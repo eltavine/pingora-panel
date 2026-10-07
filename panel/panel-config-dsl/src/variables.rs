@@ -15,18 +15,21 @@ pub const REQUEST_VARIABLES: &[&str] = &[
     "client_ip",
     "request_id",
     "upstream_addr",
+    "request_uri",
+    "args",
+    "query_string",
+    "is_args",
 ];
 
 /// Whether `name` is evaluated per request: one of [`REQUEST_VARIABLES`], or a
-/// header (`http_<name>`) or cookie (`cookie_<name>`).
+/// header (`http_<name>`), cookie (`cookie_<name>`) or query parameter
+/// (`arg_<name>`).
 pub fn is_request_variable(name: &str) -> bool {
     REQUEST_VARIABLES.contains(&name)
-        || name
-            .strip_prefix("http_")
-            .is_some_and(|rest| !rest.is_empty())
-        || name
-            .strip_prefix("cookie_")
-            .is_some_and(|rest| !rest.is_empty())
+        || ["http_", "cookie_", "arg_"].iter().any(|prefix| {
+            name.strip_prefix(prefix)
+                .is_some_and(|rest| !rest.is_empty())
+        })
 }
 
 /// Environment variables visible to `${env:NAME}` carry this prefix, so a

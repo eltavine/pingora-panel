@@ -143,6 +143,15 @@ pub fn validate(model: &ConfigModel) -> Vec<Diagnostic> {
             );
         }
         check_action(&site.action, &resource, &upstreams, &mut report);
+        if matches!(site.action, Action::InternalRedirect { .. }) {
+            report.error(
+                &resource,
+                "a site does not redirect internally; give a route the action",
+            );
+        }
+        for problem in panel_engine::rewrite_problems(&site.rewrites) {
+            report.error(&resource, format!("the site {problem}"));
+        }
         for route in &site.routes {
             if !route_ids.insert(route.id) {
                 report.error(
@@ -515,6 +524,19 @@ fn validate_route(
         }
     }
     check_action(&route.action, &resource, upstreams, report);
+    for problem in panel_engine::rewrite_problems(&route.rewrites) {
+        report.error(&resource, format!("the route {problem}"));
+    }
+    if let Action::InternalRedirect { target } = &route.action {
+        let named = |name: &str| {
+            site.routes
+                .iter()
+                .any(|other| other.named.as_deref() == Some(name))
+        };
+        if let Some(problem) = panel_engine::internal_target_problem(target, named) {
+            report.error(&resource, format!("the route {problem}"));
+        }
+    }
 }
 
 fn validate_lua(model: &ConfigModel, report: &mut Report) {
@@ -906,6 +928,8 @@ fn check_lua_scope(scope: &LuaScope, resource: &str, route: bool, report: &mut R
 
 fn check_action(action: &Action, resource: &str, upstreams: &BTreeSet<Uuid>, report: &mut Report) {
     match action {
+        // Where it leads is checked with the site's named routes.
+        Action::InternalRedirect { .. } => {}
         Action::Proxy { upstream_id } if !upstreams.contains(upstream_id) => {
             report.error(resource, format!("upstream {upstream_id} does not exist"));
         }
@@ -1105,6 +1129,7 @@ mod tests {
             security_policy_id: Default::default(),
             http_policy_id: None,
             access_log: Default::default(),
+            rewrites: Vec::new(),
         }
     }
 
@@ -1517,6 +1542,8 @@ mod tests {
             security_policy_id: Default::default(),
             http_policy_id: None,
             access_log: Default::default(),
+            rewrites: Vec::new(),
+            internal: false,
         });
         model.sites.push(shop);
         let found = messages(&model);

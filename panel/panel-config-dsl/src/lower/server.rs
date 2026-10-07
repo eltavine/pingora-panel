@@ -53,6 +53,7 @@ impl<'a> Lowerer<'a> {
                 security_policy_id: None,
                 http_policy_id: None,
                 access_log: Default::default(),
+                rewrites: Vec::new(),
             },
             action: None,
             routes: Vec::new(),
@@ -267,6 +268,11 @@ impl<'a> Lowerer<'a> {
                 self.lua_scope(file, directive, &mut draft.site.lua, "the server");
             }
             name if super::lua::inert(name).is_some() => self.lua_inert(file, directive),
+            name if super::rewrite::REWRITES.contains(&name) => {
+                if let Some(rule) = self.rewrite_rule(file, directive, name) {
+                    draft.site.rewrites.push(rule);
+                }
+            }
             action => {
                 let Some(found) = self.action(file, directive, action) else {
                     return;

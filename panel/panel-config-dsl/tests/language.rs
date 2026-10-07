@@ -1340,3 +1340,167 @@ fn malformed_conditions_are_reported_where_they_are_written() {
         "{found:#?}"
     );
 }
+
+const REWRITTEN: &str = r#"language_version 1;
+
+http {
+    upstream app {
+        server 10.0.0.1:8080;
+    }
+
+    server shop {
+        server_name shop.example;
+        set $section shop;
+        rewrite ^/old/(.*)$ /new/$1 permanent;
+        strip_prefix /app;
+        proxy app;
+
+        route api {
+            match prefix /api;
+            strip_prefix /api;
+            add_prefix /v2;
+            rewrite "^/v2/u/(?<id>\d+)$" /v2/$section/users/$id?from=$host break;
+            proxy app;
+        }
+
+        route blog {
+            match prefix /blog;
+            set_uri /index.php?q=$uri;
+            proxy app;
+        }
+
+        route gone {
+            match prefix /gone;
+            internal_redirect /errors$uri;
+        }
+
+        route errors {
+            match prefix /errors;
+            internal;
+            respond 404 "body=gone";
+        }
+
+        route fallback {
+            match named fallback;
+            respond 200 "body=fallback";
+        }
+
+        route moved {
+            match prefix /moved;
+            internal_redirect @fallback;
+        }
+    }
+}
+"#;
+
+#[test]
+fn rewrites_internal_routes_and_internal_redirects_read_and_print() {
+    use panel_ir::{RewriteFlag, RewriteRule};
+
+    let first = read(REWRITTEN);
+    assert!(first.is_valid(), "{:#?}", first.diagnostics);
+    let site = &first.model.sites[0];
+    assert_eq!(
+        site.rewrites,
+        [
+            RewriteRule::Rewrite {
+                pattern: "^/old/(.*)$".into(),
+                replacement: "/new/$1".into(),
+                flag: RewriteFlag::Permanent,
+            },
+            RewriteRule::StripPrefix {
+                prefix: "/app".into()
+            },
+        ]
+    );
+    let route = |name: &str| {
+        site.routes
+            .iter()
+            .find(|route| route.name.as_deref() == Some(name))
+            .unwrap()
+    };
+    assert_eq!(
+        route("api").rewrites,
+        [
+            RewriteRule::StripPrefix {
+                prefix: "/api".into()
+            },
+            RewriteRule::AddPrefix {
+                prefix: "/v2".into()
+            },
+            RewriteRule::Rewrite {
+                pattern: "^/v2/u/(?<id>\\d+)$".into(),
+                replacement: "/v2/shop/users/$id?from=$host".into(),
+                flag: RewriteFlag::Break,
+            },
+        ]
+    );
+    assert_eq!(
+        route("blog").rewrites,
+        [RewriteRule::SetUri {
+            template: "/index.php?q=$uri".into()
+        }]
+    );
+    assert_eq!(
+        route("gone").action,
+        Action::InternalRedirect {
+            target: "/errors$uri".into()
+        }
+    );
+    assert!(route("errors").internal);
+    assert_eq!(
+        route("moved").action,
+        Action::InternalRedirect {
+            target: "@fallback".into()
+        }
+    );
+
+    let printed = print(&first.model);
+    let second = read(&printed);
+    assert!(second.is_valid(), "{:#?}\n{printed}", second.diagnostics);
+    assert!(same_configuration(&first.model, &second.model), "{printed}");
+    assert_eq!(print(&second.model), printed);
+    for line in [
+        "        rewrite ^/old/(.*)$ /new/$1 permanent;\n",
+        "        strip_prefix /app;\n",
+        "            internal;\n",
+        "            internal_redirect @fallback;\n",
+    ] {
+        assert!(printed.contains(line), "{line:?} in\n{printed}");
+    }
+}
+
+#[test]
+fn malformed_rewrites_are_reported_where_they_are_written() {
+    let text = "language_version 1;\nhttp {\n    server s {\n        server_name s.example;\n        rewrite ^/a /b sideways;\n        rewrite \"(\" /b;\n        rewrite ^/a;\n        respond 204;\n        route {\n            match prefix /x;\n            internal_redirect @nowhere;\n        }\n    }\n}\n";
+    let lowered = read(text);
+    let found = messages(&lowered);
+    let codes: Vec<&str> = found.iter().map(|(code, _, _)| code.as_str()).collect();
+    assert!(codes.contains(&"DSL_TYPE"), "{found:#?}");
+    assert!(
+        found
+            .iter()
+            .any(|(_, span, message)| span.starts_with("main.conf:5.")
+                && message.contains("sideways")),
+        "{found:#?}"
+    );
+    assert!(
+        found
+            .iter()
+            .any(|(_, span, message)| span.starts_with("main.conf:6.")
+                && message.contains("does not compile")),
+        "{found:#?}"
+    );
+    assert!(
+        found
+            .iter()
+            .any(|(code, span, _)| code == "DSL_ARGUMENTS" && span.starts_with("main.conf:7.")),
+        "{found:#?}"
+    );
+    assert!(
+        found
+            .iter()
+            .any(|(_, _, message)| message.contains("@nowhere")),
+        "{found:#?}"
+    );
+}

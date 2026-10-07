@@ -35,6 +35,8 @@ impl<'a> Lowerer<'a> {
                 security_policy_id: None,
                 http_policy_id: None,
                 access_log: Default::default(),
+                rewrites: Vec::new(),
+                internal: false,
             },
             priority_set: false,
             action: None,
@@ -199,6 +201,12 @@ impl<'a> Lowerer<'a> {
                             "log_field" => {
                                 lowerer.log_field(file, directive, &mut draft.route.access_log)
                             }
+                            name if super::rewrite::REWRITES.contains(&name) => {
+                                if let Some(rule) = lowerer.rewrite_rule(file, directive, name) {
+                                    draft.route.rewrites.push(rule);
+                                }
+                            }
+                            "internal" => draft.route.internal = true,
                             action => {
                                 let Some(found) = lowerer.action(file, directive, action) else {
                                     return;
@@ -236,7 +244,7 @@ impl<'a> Lowerer<'a> {
                 directive.span,
                 codes::ARGUMENTS,
                 "the route has no action",
-                "add one of proxy, root, return, respond or content_by_lua_block",
+                "add one of proxy, root, return, respond, internal_redirect or content_by_lua_block",
             );
         }
         self.origins.insert(
@@ -395,6 +403,15 @@ impl<'a> Lowerer<'a> {
                 Some(ActionDraft::Ready(Action::Lua {
                     code: self.lua_code(file, directive)?,
                 }))
+            }
+            "internal_redirect" => {
+                let arg = first?;
+                let target = if arg.value.starts_with('@') {
+                    Self::literal(arg)
+                } else {
+                    self.expand(file, arg, &arg.value.clone(), Expansion::Template)?
+                };
+                Some(ActionDraft::Ready(Action::InternalRedirect { target }))
             }
             _ => unreachable!("the schema has no other actions"),
         }
