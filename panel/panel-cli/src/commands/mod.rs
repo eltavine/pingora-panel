@@ -175,7 +175,7 @@ pub fn rewrite_rules(rules: &[String]) -> Result<Vec<Value>> {
 
 /// On or off.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, clap::ValueEnum)]
-pub enum Switch {
+pub(crate) enum Switch {
     On,
     Off,
 }
