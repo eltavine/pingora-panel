@@ -233,6 +233,62 @@ fn http_policies_join_and_leave_the_text() {
 }
 
 #[test]
+fn cache_policies_and_the_store_join_and_leave_the_text() {
+    let (sources, lowered) = stored();
+    let mut next = lowered.model.clone();
+    let mut pages = panel_config_model::CachePolicy::new("pages");
+    pages.ttl_seconds = 300;
+    next.put_cache_policy(pages);
+    next.cache.max_bytes = Some(1 << 30);
+    let shop = next
+        .sites
+        .iter_mut()
+        .find(|site| site.name == "shop")
+        .unwrap();
+    shop.cache_policy_id = Some("pages".into());
+    let edited = reconcile(&sources, &lowered, &next);
+    let text = edited.get("main.conf").unwrap();
+    for expected in [
+        "    cache_policy pages {\n        valid 5m;\n    }\n",
+        "    cache_store max_size=1g;\n",
+        "        cache_policy pages;\n",
+    ] {
+        assert!(text.contains(expected), "{expected}{text}");
+    }
+    let again = read(&edited);
+    assert!(again.is_valid(), "{:#?}\n{text}", again.diagnostics);
+    assert_eq!(again.model.cache_policies, next.cache_policies);
+    assert_eq!(again.model.cache, next.cache);
+    let changes = plan(&lowered.model, &again.model);
+    for resource in ["cache-policies/pages", "cache"] {
+        assert!(
+            changes
+                .iter()
+                .any(|change| change.resource == resource && change.change == Change::Added),
+            "{resource}: {changes:#?}"
+        );
+    }
+
+    let mut resized = again.model.clone();
+    resized.cache.max_bytes = Some(512 << 20);
+    let edited_again = reconcile(&edited, &again, &resized);
+    let text = edited_again.get("main.conf").unwrap();
+    assert!(text.contains("    cache_store max_size=512m;\n"), "{text}");
+    assert_eq!(text.matches("cache_store").count(), 1, "{text}");
+
+    let mut back = again.model.clone();
+    back.sites
+        .iter_mut()
+        .for_each(|site| site.cache_policy_id = None);
+    back.delete_cache_policy("pages").unwrap();
+    back.cache = panel_config_model::CacheSettings::default();
+    let removed = reconcile(&edited, &again, &back);
+    let text = removed.get("main.conf").unwrap();
+    assert!(!text.contains("cache_"), "{text}");
+    assert!(read(&removed).is_valid());
+}
+
+#[test]
 fn security_policies_join_and_leave_the_text() {
     let (sources, lowered) = stored();
     let mut next = lowered.model.clone();

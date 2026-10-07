@@ -321,6 +321,14 @@ impl<'a> Explainer<'a> {
                     self.http_policy(&policy.id),
                 )
             }
+            ["cache-policies", id] => {
+                let policy = model.cache_policies.iter().find(|p| p.id == *id)?;
+                (
+                    Context::CachePolicy,
+                    Some(policy.id.clone()),
+                    self.cache_policy(&policy.id),
+                )
+            }
             _ => return None,
         })
     }
@@ -676,6 +684,28 @@ impl<'a> Explainer<'a> {
             "server_header",
             "keep",
         );
+        self.constants(&mut settings, &resource);
+        settings
+    }
+
+    fn cache_policy(&self, id: &str) -> Vec<Setting> {
+        let resource = format!("cache-policies/{id}");
+        let mut settings = self.own(&resource, Context::CachePolicy, &[]);
+        for (directive, value) in [
+            ("enabled", "on"),
+            ("key", panel_ir::DEFAULT_CACHE_KEY),
+            ("honor_origin", "on"),
+            ("max_object_size", "8m"),
+            ("status_header", "on"),
+        ] {
+            self.or_default(
+                &mut settings,
+                &resource,
+                Context::CachePolicy,
+                directive,
+                value,
+            );
+        }
         self.constants(&mut settings, &resource);
         settings
     }

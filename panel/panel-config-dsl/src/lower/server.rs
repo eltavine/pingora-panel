@@ -233,6 +233,11 @@ impl<'a> Lowerer<'a> {
             "tls_profile" => draft.site.tls_profile_id = arg.map(Self::literal),
             "security_policy" => draft.site.security_policy_id = arg.map(Self::literal),
             "http_policy" => draft.site.http_policy_id = arg.map(Self::literal),
+            "cache_policy" => {
+                draft.site.cache_policy_id = arg
+                    .map(Self::literal)
+                    .filter(|policy| policy != super::cache::OFF);
+            }
             "https_redirect" => {
                 draft.site.https_redirect = arg
                     .and_then(|arg| self.bool_arg(file, arg))

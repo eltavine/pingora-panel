@@ -737,3 +737,123 @@ fn listings_media_types_and_expires_carry_over() {
         imported.report
     );
 }
+
+#[test]
+fn the_proxy_cache_carries_over() {
+    let nginx = r#"
+http {
+    proxy_cache_path /var/cache/nginx levels=1:2 keys_zone=pages:10m max_size=1g inactive=30m use_temp_path=off;
+    proxy_cache_key $scheme$proxy_host$request_uri;
+    server {
+        listen 80;
+        server_name shop.example;
+        proxy_cache pages;
+        proxy_cache_valid 10m;
+        proxy_cache_valid 404 1m;
+        proxy_cache_bypass $cookie_nocache $arg_nocache;
+        proxy_cache_use_stale error timeout updating;
+        proxy_cache_lock on;
+        location / {
+            proxy_pass http://127.0.0.1:8080;
+        }
+        location /api/ {
+            proxy_cache off;
+            proxy_pass http://127.0.0.1:8080;
+        }
+        location /assets/ {
+            proxy_cache_valid any 1h;
+            proxy_ignore_headers Cache-Control Expires;
+            proxy_pass http://127.0.0.1:8080;
+        }
+        location /odd {
+            proxy_cache_min_uses 3;
+            proxy_cache other;
+            proxy_pass http://127.0.0.1:8080;
+        }
+    }
+}
+"#;
+    let files = BTreeMap::from([("nginx.conf".to_owned(), nginx.to_owned())]);
+    let imported = import_nginx(&files, "nginx.conf").unwrap();
+    let text = imported.sources.get("main.conf").unwrap();
+    for expected in [
+        "    cache_store max_size=1g;\n",
+        "    cache_policy pages {\n        key $scheme$host$request_uri;\n        valid 200 301 302 10m;\n        valid 404 1m;\n        bypass {\n            cookie nocache present;\n            query nocache present;\n        }\n        stale_while_revalidate 30m;\n        stale_if_error 30m;\n    }\n",
+        "    cache_policy pages-2 {\n        key $scheme$host$request_uri;\n        valid 1h;\n        honor_origin off;\n",
+        "        cache_policy pages;\n",
+        "            cache_policy off;\n",
+        "            cache_policy pages-2;\n",
+    ] {
+        assert!(text.contains(expected), "{expected}{text}");
+    }
+    let reported: Vec<(&str, &str)> = imported
+        .report
+        .iter()
+        .map(|diagnostic| (diagnostic.code.as_str(), diagnostic.message.as_str()))
+        .collect();
+    for (code, message) in [
+        (
+            codes::CHANGED,
+            "the zone pages is kept with the others in the gateway's memory",
+        ),
+        (codes::CHANGED, "$proxy_host is read as $host"),
+        (
+            codes::CHANGED,
+            "requests are bypassed when these are present",
+        ),
+        (
+            codes::CHANGED,
+            "stale responses are served for at most the zone's inactive time",
+        ),
+        (
+            codes::CHANGED,
+            "any is read as 200, 203, 204, 300, 301 and 308",
+        ),
+        (
+            codes::CHANGED,
+            "the origin's Cache-Control and Expires are ignored together",
+        ),
+        (
+            codes::UNSUPPORTED,
+            "'proxy_cache_min_uses' is not carried over",
+        ),
+        (codes::UNSUPPORTED, "the cache zone other is not declared"),
+    ] {
+        assert!(
+            reported
+                .iter()
+                .any(|(written, text)| *written == code && text.starts_with(message)),
+            "{code} {message}: {reported:#?}"
+        );
+    }
+
+    let environment = BTreeMap::new();
+    let lowered = lower(
+        &imported.sources,
+        &LowerOptions {
+            environment: &environment,
+            previous: None,
+            now: Utc::now(),
+        },
+    );
+    assert!(lowered.is_valid(), "{:#?}\n{text}", lowered.diagnostics);
+    let model = lowered.model;
+    assert_eq!(model.cache.max_bytes, Some(1 << 30));
+    let site = &model.sites[0];
+    assert_eq!(site.cache_policy_id.as_deref(), Some("pages"));
+    let route = |path: &str| {
+        site.routes
+            .iter()
+            .find(|route| route.matcher.path == path)
+            .unwrap()
+    };
+    assert!(route("/api/").no_cache);
+    assert_eq!(
+        route("/assets/").cache_policy_id.as_deref(),
+        Some("pages-2")
+    );
+    assert!(route("/odd").no_cache);
+    let pages = &model.cache_policies[0];
+    assert_eq!(pages.status_ttls.get(&302), Some(&600));
+    assert_eq!(pages.stale_if_error_seconds, 1_800);
+}

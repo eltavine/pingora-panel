@@ -15,6 +15,7 @@ pub const REQUEST_VARIABLES: &[&str] = &[
     "client_ip",
     "request_id",
     "upstream_addr",
+    "upstream_cache_status",
     "request_uri",
     "args",
     "query_string",

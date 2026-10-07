@@ -5,7 +5,7 @@ use crate::{
     lower::{
         print_access, print_breaker, print_favicon, print_lua_terms, print_maintenance,
         print_pages, print_policy, print_queue, print_rate, print_retry, print_robots,
-        print_statics, CODINGS, DEFAULT_REALM,
+        print_statics, CODINGS, DEFAULT_REALM, OFF,
     },
     source::{Sources, ENTRY},
     values::{print_bool, print_duration_ms, print_size},
@@ -13,9 +13,9 @@ use crate::{
     LANGUAGE_VERSION,
 };
 use panel_config_model::{
-    Action, ConfigModel, FieldChanges, HttpPolicy, Listener, LuaCode, LuaConfig, LuaScope,
-    LuaVariable, Route, RouteCondition, SecurityPolicy, Site, TlsProfile, Upstream, UpstreamNode,
-    ValueTest,
+    Action, CachePolicy, CacheSettings, ConfigModel, FieldChanges, HttpPolicy, Listener, LuaCode,
+    LuaConfig, LuaScope, LuaVariable, Route, RouteCondition, SecurityPolicy, Site, TlsProfile,
+    Upstream, UpstreamNode, ValueTest,
 };
 use panel_dsl::{Argument, Directive, Document, Trivia};
 use panel_ir::{
@@ -42,10 +42,12 @@ pub fn print_sources(model: &ConfigModel) -> Sources {
 pub fn document(model: &ConfigModel) -> Document {
     let mut http = print_policy(&model.logging);
     http.extend(lua_http(&model.lua));
+    http.extend(cache_store(&model.cache));
     let settings = http.len();
     http.extend(model.tls_profiles.iter().map(tls_profile));
     http.extend(model.security_policies.iter().map(security_policy));
     http.extend(model.http_policies.iter().map(http_policy));
+    http.extend(model.cache_policies.iter().map(cache_policy));
     http.extend(
         model
             .listeners
@@ -314,6 +316,76 @@ pub fn http_policy(policy: &HttpPolicy) -> Directive {
         body.push(Directive::simple("compress", args));
     }
     Directive::with_block("http_policy", [policy.id.clone()], body)
+}
+
+/// `cache_store`, unless the store keeps its default size.
+pub fn cache_store(settings: &CacheSettings) -> Option<Directive> {
+    let bytes = settings.max_bytes?;
+    Some(Directive::simple(
+        "cache_store",
+        [format!("max_size={}", print_size(bytes))],
+    ))
+}
+
+pub fn cache_policy(policy: &CachePolicy) -> Directive {
+    let seconds = |seconds: u64| print_duration_ms(seconds.saturating_mul(1_000));
+    let mut body = Vec::new();
+    if !policy.enabled {
+        body.push(Directive::simple("enabled", ["off"]));
+    }
+    if let Some(key) = &policy.key {
+        body.push(Directive::simple("key", [key.clone()]));
+    }
+    if policy.ttl_seconds > 0 {
+        body.push(Directive::simple("valid", [seconds(policy.ttl_seconds)]));
+    }
+    let mut by_time: Vec<(u64, Vec<String>)> = Vec::new();
+    for (status, time) in &policy.status_ttls {
+        match by_time.iter_mut().find(|(shared, _)| shared == time) {
+            Some((_, statuses)) => statuses.push(status.to_string()),
+            None => by_time.push((*time, vec![status.to_string()])),
+        }
+    }
+    for (time, statuses) in by_time {
+        body.push(Directive::simple(
+            "valid",
+            statuses.into_iter().chain(std::iter::once(seconds(time))),
+        ));
+    }
+    if !policy.vary_headers.is_empty() {
+        body.push(Directive::simple(
+            "vary",
+            policy.vary_headers.iter().cloned(),
+        ));
+    }
+    if !policy.honor_origin {
+        body.push(Directive::simple("honor_origin", ["off"]));
+    }
+    if !policy.bypass.is_empty() {
+        body.push(Directive::with_block(
+            "bypass",
+            Vec::<String>::new(),
+            policy.bypass.iter().map(condition).collect(),
+        ));
+    }
+    for (name, time) in [
+        (
+            "stale_while_revalidate",
+            policy.stale_while_revalidate_seconds,
+        ),
+        ("stale_if_error", policy.stale_if_error_seconds),
+    ] {
+        if time > 0 {
+            body.push(Directive::simple(name, [seconds(u64::from(time))]));
+        }
+    }
+    if let Some(bytes) = policy.max_object_bytes {
+        body.push(Directive::simple("max_object_size", [print_size(bytes)]));
+    }
+    if !policy.status_header {
+        body.push(Directive::simple("status_header", ["off"]));
+    }
+    Directive::with_block("cache_policy", [policy.id.clone()], body)
 }
 
 pub fn security_policy(policy: &SecurityPolicy) -> Directive {
@@ -803,6 +875,11 @@ fn route(route: &Route, site: &Site, model: &ConfigModel) -> Directive {
     if let Some(policy) = &route.http_policy_id {
         body.push(Directive::simple("http_policy", [policy.clone()]));
     }
+    if route.no_cache {
+        body.push(Directive::simple("cache_policy", [OFF]));
+    } else if let Some(policy) = &route.cache_policy_id {
+        body.push(Directive::simple("cache_policy", [policy.clone()]));
+    }
     body.extend(print_access(&route.access_log));
     body.extend(lua_scope(&route.lua));
     if route.internal {
@@ -891,6 +968,9 @@ pub fn server(site: &Site, model: &ConfigModel) -> Directive {
     }
     if let Some(policy) = &site.http_policy_id {
         body.push(Directive::simple("http_policy", [policy.clone()]));
+    }
+    if let Some(policy) = &site.cache_policy_id {
+        body.push(Directive::simple("cache_policy", [policy.clone()]));
     }
     body.extend(print_access(&site.access_log));
     match site.www_redirect {

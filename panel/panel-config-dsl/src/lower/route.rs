@@ -186,6 +186,13 @@ impl<'a> Lowerer<'a> {
                                 draft.route.security_policy_id = arg.map(Self::literal)
                             }
                             "http_policy" => draft.route.http_policy_id = arg.map(Self::literal),
+                            "cache_policy" => {
+                                let policy = arg.map(Self::literal);
+                                draft.route.no_cache =
+                                    policy.as_deref() == Some(super::cache::OFF);
+                                draft.route.cache_policy_id =
+                                    policy.filter(|policy| policy != super::cache::OFF);
+                            }
                             name if super::conditions::CONDITIONS.contains(&name) => {
                                 if let Some(condition) =
                                     lowerer.condition(file, directive, depth + 1)

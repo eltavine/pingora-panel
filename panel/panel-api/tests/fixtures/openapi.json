@@ -81052,6 +81052,7 @@
           "security_policy",
           "http_policy",
           "cors",
+          "cache_policy",
           "listener",
           "upstream",
           "server",

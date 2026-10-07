@@ -31,6 +31,13 @@ pub(crate) fn blocks(model: &ConfigModel) -> Vec<(String, Directive)> {
             print::http_policy(policy),
         )
     }));
+    blocks.extend(model.cache_policies.iter().map(|policy| {
+        (
+            format!("cache-policies/{}", policy.id),
+            print::cache_policy(policy),
+        )
+    }));
+    blocks.extend(print::cache_store(&model.cache).map(|store| ("cache".to_owned(), store)));
     blocks.extend(model.listeners.iter().map(|listener| {
         (
             format!("listeners/{}", listener.id),

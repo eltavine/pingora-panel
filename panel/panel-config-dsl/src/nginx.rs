@@ -1,9 +1,11 @@
 //! Converts a documented subset of NGINX configuration into the language.
 //! `server`, `listen`, `server_name`, `location` with its modifiers,
 //! `proxy_pass`, `root`, `index`, `try_files`, `return`, `rewrite`,
-//! `internal` and `upstream` are carried over, and so are OpenResty's `*_by_lua*` handlers and
+//! `internal`, `upstream` and the proxy cache are carried over, and so are OpenResty's `*_by_lua*` handlers and
 //! `lua_shared_dict`, with the Lua files moved under `lua/`; every other
 //! directive is reported at its position rather than dropped silently.
+
+mod cache;
 
 use crate::{
     schema::{self, Context},
@@ -75,6 +77,7 @@ struct Converted {
     upstream_names: BTreeSet<String>,
     servers: Vec<Directive>,
     server_names: BTreeSet<String>,
+    caches: cache::Caches,
 }
 
 struct Importer<'a> {
@@ -83,6 +86,8 @@ struct Importer<'a> {
     entry_directory: String,
     report: Vec<Diagnostic>,
     out: Converted,
+    /// The cache settings of `http`, which servers inherit.
+    http_cache: cache::CacheScope,
 }
 
 /// A route converted from a `location`, ordered as NGINX would match it.
@@ -107,6 +112,7 @@ pub fn import_nginx(files: &BTreeMap<String, String>, entry: &str) -> Result<Ngi
             .map_or(String::new(), |(directory, _)| format!("{directory}/")),
         report: Vec::new(),
         out: Converted::default(),
+        http_cache: cache::CacheScope::default(),
     };
     for (path, text) in files.iter().filter(|(path, _)| path.ends_with(".lua")) {
         importer.out.lua_files.insert(lua_path(path), text.clone());
@@ -141,9 +147,11 @@ pub fn import_nginx(files: &BTreeMap<String, String>, entry: &str) -> Result<Ngi
         listeners,
         upstreams,
         servers,
+        caches,
         ..
     } = importer.out;
     let mut http = lua;
+    http.extend(caches.directives());
     http.extend(listeners.into_iter().map(|(id, (address, extra))| {
         let mut children = vec![Directive::simple("address", [address])];
         children.extend(extra);
@@ -358,8 +366,21 @@ impl<'a> Importer<'a> {
     }
 
     fn http(&mut self, directives: Vec<Located>) {
+        let mut scope = cache::CacheScope::default();
+        for located in &directives {
+            match located.directive.name.value.as_str() {
+                "proxy_cache_path" => self.cache_path(located),
+                name if cache::DIRECTIVES.contains(&name) => {
+                    self.cache_setting(located, &mut scope)
+                }
+                _ => {}
+            }
+        }
+        self.http_cache = scope;
         for located in directives {
             match located.directive.name.value.as_str() {
+                "proxy_cache_path" => {}
+                name if cache::DIRECTIVES.contains(&name) => {}
                 "upstream" => self.upstream(&located),
                 "server" => self.server(&located),
                 // The gateway knows the media types nginx's mime.types lists.
@@ -685,6 +706,14 @@ impl<'a> Importer<'a> {
         {
             self.static_files(inner, &mut static_files);
         }
+        let mut cache = self.http_cache.inner();
+        for inner in directives
+            .iter()
+            .filter(|inner| cache::DIRECTIVES.contains(&inner.directive.name.value.as_str()))
+        {
+            self.cache_setting(inner, &mut cache);
+        }
+        let cache_policy = self.cache_policy(located, &cache);
         for inner in &directives {
             let values = args(&inner.directive);
             match inner.directive.name.value.as_str() {
@@ -716,7 +745,12 @@ impl<'a> Importer<'a> {
                     }
                 }
                 "location" => {
-                    if let Some(route) = self.location(inner, &mut action, static_files.as_ref()) {
+                    if let Some(route) = self.location(
+                        inner,
+                        &mut action,
+                        static_files.as_ref(),
+                        (&cache, cache_policy.as_deref()),
+                    ) {
                         routes.push(route);
                     }
                 }
@@ -725,7 +759,7 @@ impl<'a> Importer<'a> {
                     Some(converted) => action = Some(converted),
                     None => {}
                 },
-                name if is_static(name) => {}
+                name if is_static(name) || cache::DIRECTIVES.contains(&name) => {}
                 "access_log" => body.extend(self.access_log(inner)),
                 "rewrite" => body.extend(self.rewrite(inner)),
                 "error_page" => body.extend(self.error_page(inner)),
@@ -764,6 +798,9 @@ impl<'a> Importer<'a> {
                 format!("requests no location of the server {name:?} takes are answered with 404"),
             );
             action = Some(vec![Directive::simple("respond", ["404"])]);
+        }
+        if let Some(policy) = cache_policy {
+            body.push(Directive::simple("cache_policy", [policy]));
         }
         body.extend(action.unwrap_or_default());
         routes.sort_by_key(|route| route.rank);
@@ -1009,6 +1046,7 @@ impl<'a> Importer<'a> {
         located: &Located,
         server_action: &mut Option<Vec<Directive>>,
         inherited: Option<&StaticFiles>,
+        (server_cache, server_policy): (&cache::CacheScope, Option<&str>),
     ) -> Option<Route> {
         let values = args(&located.directive);
         let (kind, path, rank) = match values.as_slice() {
@@ -1029,6 +1067,7 @@ impl<'a> Importer<'a> {
         let mut rewrites = Vec::new();
         let mut pages = Vec::new();
         let mut static_files = inherited.cloned();
+        let mut cache = server_cache.inner();
         // What the location writes about files, reported if it serves none.
         let mut settings = Vec::new();
         // A location whose proxy or return cannot be carried over is left
@@ -1058,6 +1097,7 @@ impl<'a> Importer<'a> {
                     self.static_files(&inner, &mut static_files);
                 }
                 "access_log" => logging.extend(self.access_log(&inner)),
+                name if cache::DIRECTIVES.contains(&name) => self.cache_setting(&inner, &mut cache),
                 "rewrite" => rewrites.extend(self.rewrite(&inner)),
                 "internal" => rewrites.insert(0, Directive::simple("internal", Vec::<String>::new())),
                 "error_page" => pages.extend(self.error_page(&inner)),
@@ -1109,11 +1149,21 @@ impl<'a> Importer<'a> {
             && lua.is_empty()
             && rewrites.is_empty()
             && pages.is_empty()
+            && !cache.written
         {
             *server_action = Some(action);
             return None;
         }
         let mut directives = vec![Directive::simple("match", [kind.to_owned(), path])];
+        if cache.written {
+            match (self.cache_policy(located, &cache), server_policy) {
+                (None, Some(_)) => directives.push(Directive::simple("cache_policy", ["off"])),
+                (Some(policy), server) if server != Some(policy.as_str()) => {
+                    directives.push(Directive::simple("cache_policy", [policy]));
+                }
+                _ => {}
+            }
+        }
         directives.extend(logging);
         directives.extend(lua);
         directives.extend(rewrites);
@@ -1338,6 +1388,7 @@ fn variable(name: &str) -> Option<&str> {
         "request_uri" => "request_uri",
         "args" | "query_string" => "args",
         "is_args" => "is_args",
+        "upstream_cache_status" => "upstream_cache_status",
         name if name.starts_with("http_")
             || name.starts_with("cookie_")
             || name.starts_with("arg_") =>

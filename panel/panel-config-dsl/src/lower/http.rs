@@ -110,7 +110,7 @@ impl Lowerer<'_> {
     }
 
     /// A value the gateway fills in per request, checked where it is written.
-    fn template(&mut self, file: &str, arg: &Argument) -> Option<String> {
+    pub(super) fn template(&mut self, file: &str, arg: &Argument) -> Option<String> {
         let value = self.expand(file, arg, &arg.value.clone(), Expansion::Template)?;
         if let Err(error) = parse_template(&value) {
             self.error(file, arg.span, codes::TYPE, error);

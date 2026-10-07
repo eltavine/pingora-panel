@@ -685,6 +685,169 @@ http {
 }
 
 #[test]
+fn cache_policies_read_print_and_refuse_mistakes() {
+    let text = r#"language_version 1;
+http {
+    cache_store max_size=512m;
+    log_field cache $upstream_cache_status;
+    cache_policy pages {
+        key $scheme$host$request_uri$cookie_lang;
+        valid 10m;
+        valid 404 410 1m;
+        valid 500 0;
+        vary Accept-Language;
+        honor_origin off;
+        bypass {
+            cookie session present;
+            query nocache present;
+        }
+        stale_while_revalidate 30s;
+        stale_if_error 5m;
+        max_object_size 16m;
+        status_header off;
+    }
+    cache_policy assets {
+        enabled off;
+    }
+    upstream app {
+        server 10.0.0.1:8080;
+    }
+    server shop {
+        server_name shop.example;
+        cache_policy pages;
+        proxy app;
+        route {
+            match prefix /live;
+            cache_policy off;
+            proxy app;
+        }
+        route {
+            match prefix /static;
+            cache_policy assets;
+            proxy app;
+        }
+    }
+}
+"#;
+    let lowered = read(text);
+    assert!(
+        lowered.errors().next().is_none(),
+        "{:#?}",
+        lowered.diagnostics
+    );
+    let model = &lowered.model;
+    assert_eq!(model.cache.max_bytes, Some(512 << 20));
+    let [pages, assets] = model.cache_policies.as_slice() else {
+        panic!("{:#?}", model.cache_policies);
+    };
+    assert_eq!(
+        pages.key.as_deref(),
+        Some("$scheme$host$request_uri$cookie_lang")
+    );
+    assert_eq!(pages.ttl_seconds, 600);
+    assert_eq!(pages.status_ttls, [(404, 60), (410, 60), (500, 0)].into());
+    assert_eq!(pages.vary_headers, ["accept-language".to_owned()].into());
+    assert!(!pages.honor_origin && !pages.status_header);
+    assert_eq!(pages.bypass.len(), 2);
+    assert_eq!(
+        (
+            pages.stale_while_revalidate_seconds,
+            pages.stale_if_error_seconds
+        ),
+        (30, 300)
+    );
+    assert_eq!(pages.max_object_bytes, Some(16 << 20));
+    assert!(!assets.enabled);
+    let site = &model.sites[0];
+    assert_eq!(site.cache_policy_id.as_deref(), Some("pages"));
+    let route = |path: &str| {
+        site.routes
+            .iter()
+            .find(|route| route.matcher.path == path)
+            .unwrap()
+    };
+    assert!(route("/live").no_cache && route("/live").cache_policy_id.is_none());
+    assert_eq!(route("/static").cache_policy_id.as_deref(), Some("assets"));
+
+    let printed = print(model);
+    for line in [
+        "    cache_store max_size=512m;\n",
+        "        key $scheme$host$request_uri$cookie_lang;\n",
+        "        valid 10m;\n",
+        "        valid 404 410 1m;\n",
+        "        valid 500 0s;\n",
+        "        vary accept-language;\n",
+        "        honor_origin off;\n",
+        "        bypass {\n            cookie session present;\n            query nocache present;\n        }\n",
+        "        stale_while_revalidate 30s;\n",
+        "        stale_if_error 5m;\n",
+        "        max_object_size 16m;\n",
+        "        status_header off;\n",
+        "        enabled off;\n",
+        "        cache_policy pages;\n",
+        "            cache_policy off;\n",
+        "            cache_policy assets;\n",
+    ] {
+        assert!(printed.contains(line), "{line}{printed}");
+    }
+    assert!(same_configuration(model, &read(&printed).model));
+
+    for (from, to, message) in [
+        (
+            "cache_policy assets {",
+            "cache_policy off {",
+            "a cache policy is not named off",
+        ),
+        (
+            "cache_policy assets {",
+            "cache_policy pages {",
+            "is defined twice",
+        ),
+        ("valid 404 410 1m;", "valid 4040 1m;", "is not a status"),
+        ("valid 10m;", "valid 1500ms;", "whole number of seconds"),
+        (
+            "key $scheme$host$request_uri$cookie_lang;",
+            "key $nothing;",
+            "nothing",
+        ),
+        (
+            "max_object_size 16m;",
+            "max_object_size 128m;",
+            "stores responses of up to 134217728 bytes",
+        ),
+        (
+            "            cookie session present;\n            query nocache present;\n",
+            "",
+            "'bypass' holds no condition",
+        ),
+        (
+            "cache_store max_size=512m;",
+            "cache_store max_size=1k;",
+            "the cache store of 1024 bytes is not between",
+        ),
+        (
+            "cache_store max_size=512m;",
+            "cache_store 512m;",
+            "is not a setting",
+        ),
+        (
+            "cache_policy pages;\n        proxy",
+            "cache_policy missing;\n        proxy",
+            "cache policy missing does not exist",
+        ),
+    ] {
+        let lowered = read(&text.replace(from, to));
+        assert!(
+            lowered
+                .errors()
+                .any(|diagnostic| diagnostic.message.contains(message)),
+            "{message}: {:#?}",
+            lowered.diagnostics
+        );
+    }
+}
+
+#[test]
 fn upstreams_retry_break_circuits_and_queue() {
     let text = r#"language_version 1;
 http {

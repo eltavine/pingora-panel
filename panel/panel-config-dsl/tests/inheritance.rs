@@ -293,6 +293,27 @@ fn http_policies_explain_their_settings() {
 }
 
 #[test]
+fn cache_policies_explain_their_settings() {
+    let text = "language_version 1;\nhttp {\n    cache_policy pages {\n        valid 10m;\n    }\n    upstream app {\n        server 10.0.0.1:80;\n    }\n    server s {\n        server_name s.example;\n        cache_policy pages;\n        proxy app;\n    }\n}\n";
+    let (sources, lowered) = read(text);
+    let (line, column) = position(text, "valid 10m");
+    let explained = explain(&sources, &lowered, "main.conf", line, column).unwrap();
+    assert_eq!(explained.block, Context::CachePolicy);
+    assert_eq!(setting(&explained.settings, "valid", None).value, "10m");
+    for (directive, value) in [
+        ("key", "$scheme$host$request_uri"),
+        ("honor_origin", "on"),
+        ("max_object_size", "8m"),
+    ] {
+        let default = setting(&explained.settings, directive, None);
+        assert_eq!(
+            (default.value.as_str(), default.source),
+            (value, SettingSource::Default)
+        );
+    }
+}
+
+#[test]
 fn settings_without_effect_are_reported_where_they_are_written() {
     let text = r#"language_version 1;
 http {

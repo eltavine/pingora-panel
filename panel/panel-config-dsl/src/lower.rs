@@ -11,8 +11,8 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use panel_config_model::{
-    validate, Action, ConfigModel, HttpPolicy, Listener, LuaConfig, LuaVariable, Route,
-    SecurityPolicy, Site, TlsProfile, Upstream,
+    validate, Action, CachePolicy, CacheSettings, ConfigModel, HttpPolicy, Listener, LuaConfig,
+    LuaVariable, Route, SecurityPolicy, Site, TlsProfile, Upstream,
 };
 use panel_domain::NormalizedHost;
 use panel_dsl::{Argument, Body, Directive, Document, LineIndex, Span};
@@ -23,6 +23,7 @@ use std::{
 };
 use uuid::Uuid;
 
+mod cache;
 mod conditions;
 mod http;
 mod listener;
@@ -38,6 +39,7 @@ mod statics;
 mod tls;
 mod upstream;
 
+pub(crate) use cache::OFF;
 pub(crate) use http::CODINGS;
 pub(crate) use logging::{print_access, print_policy};
 pub(crate) use lua::{
@@ -238,6 +240,9 @@ struct Lowerer<'a> {
     profiles: Vec<(TlsProfile, Origin)>,
     policies: Vec<(SecurityPolicy, Origin)>,
     http_policies: Vec<(HttpPolicy, Origin)>,
+    cache_policies: Vec<(CachePolicy, Origin)>,
+    /// The `cache_store` of `http`.
+    cache: CacheSettings,
     listeners: Vec<ListenerDraft>,
     upstreams: Vec<(Upstream, Origin)>,
     servers: Vec<ServerDraft>,
@@ -270,6 +275,8 @@ impl<'a> Lowerer<'a> {
             profiles: Vec::new(),
             policies: Vec::new(),
             http_policies: Vec::new(),
+            cache_policies: Vec::new(),
+            cache: CacheSettings::default(),
             listeners: Vec::new(),
             upstreams: Vec::new(),
             servers: Vec::new(),
@@ -896,6 +903,8 @@ impl<'a> Lowerer<'a> {
                     "tls_profile" => lowerer.tls_profile(file, directive, depth),
                     "security_policy" => lowerer.security_policy(file, directive, depth),
                     "http_policy" => lowerer.http_policy(file, directive, depth),
+                    "cache_policy" => lowerer.cache_policy(file, directive, depth),
+                    "cache_store" => lowerer.cache_store(file, directive, depth),
                     "listener" => lowerer.listener(file, directive, depth),
                     "upstream" => lowerer.upstream(file, directive, depth),
                     "server" => lowerer.server(file, directive, depth),
@@ -1128,6 +1137,11 @@ impl<'a> Lowerer<'a> {
                 .into_iter()
                 .map(|(policy, _)| policy)
                 .collect(),
+            cache_policies: std::mem::take(&mut self.cache_policies)
+                .into_iter()
+                .map(|(policy, _)| policy)
+                .collect(),
+            cache: self.cache,
             upstreams: std::mem::take(&mut self.upstreams)
                 .into_iter()
                 .map(|(upstream, _)| upstream)
