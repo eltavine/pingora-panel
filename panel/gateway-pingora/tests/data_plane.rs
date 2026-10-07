@@ -38,21 +38,25 @@ use tokio::{
     sync::oneshot,
 };
 
-/// A free loopback address no other test here was given, as the system may
-/// hand out a port again once it is released.
+/// A free loopback address no other test here was given. It comes from
+/// below the systems' ephemeral port ranges (from 32768 on Linux, 49152
+/// elsewhere), so the stand-ins that bind port 0 cannot be handed it while
+/// the gateway has yet to listen on it; each process starts elsewhere.
 fn free_address() -> SocketAddr {
-    static GIVEN: std::sync::Mutex<Vec<u16>> = std::sync::Mutex::new(Vec::new());
-    loop {
-        let address = std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap();
-        let mut given = GIVEN.lock().unwrap();
-        if !given.contains(&address.port()) {
-            given.push(address.port());
+    static NEXT: std::sync::Mutex<Option<u16>> = std::sync::Mutex::new(None);
+    const FIRST: u16 = 20_000;
+    const SPAN: u16 = 12_000;
+    let mut next = NEXT.lock().unwrap();
+    let start = next.unwrap_or(FIRST + (std::process::id() % u32::from(SPAN)) as u16);
+    for offset in 0..SPAN {
+        let port = FIRST + (start - FIRST + offset) % SPAN;
+        let address = SocketAddr::from(([127, 0, 0, 1], port));
+        if std::net::TcpListener::bind(address).is_ok() {
+            *next = Some(FIRST + (port - FIRST + 1) % SPAN);
             return address;
         }
     }
+    panic!("no loopback port below the ephemeral range is free");
 }
 
 /// An upstream that answers every request with its request head.
