@@ -10,6 +10,7 @@ mod acme;
 mod adapter;
 mod certificates;
 mod dataplane;
+mod error_pages;
 mod file_checks;
 mod forwarding;
 mod head_deadline;

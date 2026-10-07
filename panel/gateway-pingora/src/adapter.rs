@@ -53,6 +53,7 @@ const CAPABILITIES: &[&str] = &[
     "log.access",
     "lua.scripts",
     "request.security",
+    "response.error-pages",
     "response.hsts",
     "route.conditions",
     "route.exact-path",
@@ -62,6 +63,7 @@ const CAPABILITIES: &[&str] = &[
     "route.path-prefix",
     "route.regex",
     "route.rewrite",
+    "site.maintenance",
     "site.redirect",
     "upstream.backup",
     "upstream.balancing",
@@ -463,6 +465,7 @@ impl PingoraGatewayAdapter {
                 policies: &policy_indexes,
                 http: &http_indexes,
                 lua: &lua_hooks,
+                static_root: self.options.static_root.as_deref(),
             },
         )?;
         let labels = SnapshotLabels::new(&routing, &pools);

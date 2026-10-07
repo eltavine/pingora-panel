@@ -6,6 +6,7 @@ use crate::{
     acme::ChallengeDirectory,
     adapter::{ActiveSnapshot, PreparedPingoraSnapshot},
     certificates::{ChosenCertificates, Handshake},
+    error_pages::Prepared,
     forwarding::{self, Forwarding},
     head_deadline::Connections,
     hosts::{self, HostError, RequestHost},
@@ -62,12 +63,6 @@ const MOST_URI_CHANGES: usize = 10;
 /// upstreams are not told a forged client.
 const UNTRUSTED_FORWARDING: [&str; 3] = ["x-forwarded-for", "x-real-ip", "forwarded"];
 static X_REAL_IP: header::HeaderName = header::HeaderName::from_static("x-real-ip");
-
-/// Answers a request that changed its URI more often than it may, as
-/// nginx does.
-async fn cycle(session: &mut Session) -> pingora_core::Result<()> {
-    responses::plain(session, 500, "rewrite or internal redirection cycle", &[]).await
-}
 
 /// Answers a request a security policy refused.
 async fn refuse(session: &mut Session, refusal: Refusal) -> pingora_core::Result<()> {
@@ -229,6 +224,11 @@ pub(crate) struct RequestContext {
     /// Whether a rewrite, an internal redirect or a script sent the request
     /// where it is, so an internal route takes it.
     internal: bool,
+    /// The requested host, once it is known, for error pages.
+    host: String,
+    scheme: &'static str,
+    /// An error page's body in place of the upstream's, until it is sent.
+    replacement: Option<Option<bytes::Bytes>>,
 }
 
 impl RequestContext {
@@ -360,6 +360,9 @@ impl ProxyHttp for PanelProxy {
             named: None,
             request_uri: String::new(),
             internal: false,
+            host: String::new(),
+            scheme: "http",
+            replacement: None,
         }
     }
 
@@ -392,6 +395,7 @@ impl ProxyHttp for PanelProxy {
         }
         http_policy::disable_compression(session);
         request_identity::ensure_request_id(session.req_header_mut());
+        ctx.scheme = self.scheme();
         if ctx.request_uri.is_empty() {
             ctx.request_uri = session
                 .req_header()
@@ -458,6 +462,7 @@ impl ProxyHttp for PanelProxy {
             }
         };
         let host_name = host.as_ref().map_or("", |host| host.name.as_str());
+        ctx.host = host_name.to_owned();
         if let Some(rejection) = self.tls_rejection(session, &snapshot, host_name) {
             let (status, message) = rejection;
             responses::plain(session, status, message, &[]).await?;
@@ -494,6 +499,54 @@ impl ProxyHttp for PanelProxy {
             session.req_header(),
         ) {
             responses::redirect(session, REDIRECT_STATUS, &location).await?;
+            return Ok(true);
+        }
+        // A script's subrequest belongs to a request the site admitted.
+        if let Some(maintenance) = site
+            .maintenance
+            .as_ref()
+            .filter(|maintenance| ctx.subrequest.is_none() && !maintenance.admits(ctx.client))
+        {
+            let retry_after = maintenance.retry_after.as_deref();
+            let headers: Vec<(header::HeaderName, &str)> = retry_after
+                .map(|seconds| (header::RETRY_AFTER, seconds))
+                .into_iter()
+                .collect();
+            match &maintenance.body {
+                Some(body) => {
+                    let rendered =
+                        lua_phases::with_variables(session, &ctx.variables, |variables| {
+                            let path = session.req_header().uri.path();
+                            body.render(&facts(
+                                session,
+                                host_name,
+                                path,
+                                self.listener.tls,
+                                variables,
+                                &ctx.request_uri,
+                            ))
+                        });
+                    let mut all = headers.clone();
+                    all.push((
+                        header::CONTENT_TYPE,
+                        maintenance
+                            .content_type
+                            .as_deref()
+                            .unwrap_or("text/plain; charset=utf-8"),
+                    ));
+                    responses::send(session, maintenance.status, &all, rendered).await?;
+                }
+                None => {
+                    Self::error(
+                        session,
+                        ctx,
+                        maintenance.status,
+                        "the site is under maintenance",
+                        &headers,
+                    )
+                    .await?;
+                }
+            }
             return Ok(true);
         }
         let mut changes_left = MOST_URI_CHANGES;
@@ -548,8 +601,9 @@ impl ProxyHttp for PanelProxy {
             let Some(mut path) = panel_routing::path::normalize(session.req_header().uri.path())
                 .map(|path| path.into_owned())
             else {
-                responses::plain(
+                Self::error(
                     session,
+                    ctx,
                     400,
                     "the request target is not an absolute path",
                     &[],
@@ -571,9 +625,9 @@ impl ProxyHttp for PanelProxy {
                 match &named {
                     Some(name) => {
                         let message = format!("could not find named location \"@{name}\"");
-                        responses::plain(session, 500, &message, &[]).await?;
+                        Self::error(session, ctx, 500, &message, &[]).await?;
                     }
-                    None => responses::plain(session, 404, "not found", &[]).await?,
+                    None => Self::error(session, ctx, 404, "not found", &[]).await?,
                 }
                 return Ok(true);
             };
@@ -582,7 +636,7 @@ impl ProxyHttp for PanelProxy {
                 // nginx's internal locations answer requests from outside 404
                 // once they are found, before their rewrites run.
                 if site.route(route_index).internal && !ctx.internal && ctx.subrequest.is_none() {
-                    responses::plain(session, 404, "not found", &[]).await?;
+                    Self::error(session, ctx, 404, "not found", &[]).await?;
                     return Ok(true);
                 }
                 if let LuaStep::Done = self
@@ -767,8 +821,9 @@ impl ProxyHttp for PanelProxy {
                         Ok(trial) => ctx.trial = trial,
                         Err(seconds) => {
                             let wait = seconds.to_string();
-                            responses::plain(
+                            Self::error(
                                 session,
+                                ctx,
                                 503,
                                 "the upstream is failing; try again later",
                                 &[(header::RETRY_AFTER, wait.as_str())],
@@ -787,7 +842,7 @@ impl ProxyHttp for PanelProxy {
                                 Busy::Full => "the upstream is handling all the requests it takes",
                                 Busy::Waited => "the upstream did not take the request in time",
                             };
-                            responses::plain(session, 503, message, &[(header::RETRY_AFTER, "1")])
+                            Self::error(session, ctx, 503, message, &[(header::RETRY_AFTER, "1")])
                                 .await?;
                             return Ok(true);
                         }
@@ -800,8 +855,23 @@ impl ProxyHttp for PanelProxy {
                     let compression = ctx
                         .compression
                         .and_then(|index| snapshot.http[index].compression.as_ref());
-                    static_files::serve(session, &snapshot.statics[*content], &path, compression)
+                    if let Some(failure) = static_files::serve(
+                        session,
+                        &snapshot.statics[*content],
+                        &path,
+                        compression,
+                    )
+                    .await?
+                    {
+                        Self::error(
+                            session,
+                            ctx,
+                            failure.status,
+                            failure.message,
+                            &failure.headers,
+                        )
                         .await?;
+                    }
                     Ok(true)
                 }
                 RouteTarget::Redirect {
@@ -862,6 +932,22 @@ impl ProxyHttp for PanelProxy {
                     if let Some(retry_after) = &retry_after {
                         headers.push((header::RETRY_AFTER, retry_after.as_str()));
                     }
+                    // As nginx's error pages answer `return 503;`, a response
+                    // without a body gets the page for its status.
+                    if body.is_empty() && content_type.is_none() {
+                        if let Some(answer) = match Self::page(session, ctx, *status) {
+                            Some(prepared) => prepared.load().await,
+                            None => None,
+                        } {
+                            let kept: Vec<_> = headers
+                                .iter()
+                                .filter(|(name, _)| *name == header::RETRY_AFTER)
+                                .cloned()
+                                .collect();
+                            answer.send(session, &kept).await?;
+                            return Ok(true);
+                        }
+                    }
                     responses::send(session, *status, &headers, body).await?;
                     Ok(true)
                 }
@@ -899,7 +985,7 @@ impl ProxyHttp for PanelProxy {
                                         ),
                                     )
                                 });
-                            if !Self::retarget(session, target).await? {
+                            if !Self::retarget(session, ctx, target).await? {
                                 return Ok(true);
                             }
                         }
@@ -1022,6 +1108,34 @@ impl ProxyHttp for PanelProxy {
         ctx: &mut RequestContext,
     ) -> pingora_core::Result<()> {
         let snapshot = ctx.snapshot.clone();
+        let status = upstream_response.status.as_u16();
+        let head = session.req_header().method == http::Method::HEAD;
+        let bodiless = upstream_response
+            .headers
+            .get(header::CONTENT_LENGTH)
+            .is_some_and(|length| length.as_bytes() == b"0");
+        // An upstream's error gets its page where the pages intercept it; a
+        // body that never comes could not carry the page, so it is left be.
+        if ctx.pool.is_some() && status >= 400 && (head || !bodiless) {
+            let intercepts = snapshot
+                .as_deref()
+                .zip(ctx.site)
+                .is_some_and(|(snapshot, site)| {
+                    let site = snapshot.routing.site(site);
+                    ctx.route
+                        .and_then(|route| site.route(route).error_pages.as_ref())
+                        .unwrap_or(&site.error_pages)
+                        .intercepts(status)
+                });
+            let answer = match Self::page(session, ctx, status).filter(|_| intercepts) {
+                Some(prepared) => prepared.load().await,
+                None => None,
+            };
+            if let Some(answer) = answer {
+                let body = answer.replace(upstream_response)?;
+                ctx.replacement = Some((!head).then_some(body));
+            }
+        }
         if let Some(compression) = snapshot
             .as_ref()
             .zip(ctx.compression)
@@ -1052,6 +1166,9 @@ impl ProxyHttp for PanelProxy {
         end_of_stream: bool,
         ctx: &mut RequestContext,
     ) -> pingora_core::Result<Option<std::time::Duration>> {
+        if let Some(replacement) = ctx.replacement.as_mut() {
+            *body = replacement.take();
+        }
         if let Some(hook) = Self::lua_hook(ctx, |hooks| &hooks.body_filter) {
             self.lua_body_filter(session, ctx, &hook, body, end_of_stream)
                 .await?;
@@ -1236,7 +1353,7 @@ impl ProxyHttp for PanelProxy {
         &self,
         session: &mut Session,
         error: &Error,
-        _ctx: &mut RequestContext,
+        ctx: &mut RequestContext,
     ) -> FailToProxy {
         http_policy::disable_compression(session);
         let code = match (error.etype(), error.esource()) {
@@ -1253,10 +1370,19 @@ impl ProxyHttp for PanelProxy {
             (_, ErrorSource::Downstream) => 400,
             _ => 500,
         };
-        if code > 0 {
-            if let Err(failure) = session.respond_error(code).await {
-                tracing::debug!(%failure, "the error response did not reach the client");
-            }
+        let page = match Self::page(session, ctx, code)
+            .filter(|_| code > 0 && session.response_written().is_none())
+        {
+            Some(prepared) => prepared.load().await,
+            None => None,
+        };
+        let sent = match page {
+            Some(answer) => answer.send(session, &[]).await,
+            None if code > 0 => session.respond_error(code).await,
+            None => Ok(()),
+        };
+        if let Err(failure) = sent {
+            tracing::debug!(%failure, "the error response did not reach the client");
         }
         FailToProxy {
             error_code: code,
@@ -1368,7 +1494,7 @@ impl PanelProxy {
             }
         }
         if let Some(refusal) = refused {
-            refuse(session, refusal).await?;
+            Self::refuse(session, ctx, refusal).await?;
             return Ok(true);
         }
         if let Some(timeout) = admission.body_timeout {
@@ -1387,7 +1513,7 @@ impl PanelProxy {
         changes_left: &mut usize,
     ) -> pingora_core::Result<bool> {
         if *changes_left == 0 {
-            cycle(session).await?;
+            Self::cycle(session, ctx).await?;
             return Ok(false);
         }
         *changes_left -= 1;
@@ -1431,11 +1557,11 @@ impl PanelProxy {
                 ..
             }) => (path, query, reroute),
             Err(message) => {
-                Self::retarget(session, Err(message)).await?;
+                Self::retarget(session, ctx, Err(message)).await?;
                 return Ok(Rewrite::Answered);
             }
         };
-        if !Self::retarget(session, Ok((path.clone(), query))).await? {
+        if !Self::retarget(session, ctx, Ok((path.clone(), query))).await? {
             return Ok(Rewrite::Answered);
         }
         ctx.internal = true;
@@ -1446,6 +1572,7 @@ impl PanelProxy {
     /// answering 500 when it could not.
     async fn retarget(
         session: &mut Session,
+        ctx: &RequestContext,
         target: Result<(String, Option<String>), String>,
     ) -> pingora_core::Result<bool> {
         let uri = target.and_then(|(path, query)| {
@@ -1464,7 +1591,7 @@ impl PanelProxy {
             }
             Err(message) => {
                 tracing::warn!(event = "rewrite_failed", message = %message);
-                responses::plain(session, 500, "the request could not be rewritten", &[]).await?;
+                Self::error(session, ctx, 500, "the request could not be rewritten", &[]).await?;
                 Ok(false)
             }
         }
@@ -1483,15 +1610,16 @@ impl PanelProxy {
         changes_left: &mut usize,
     ) -> pingora_core::Result<Option<usize>> {
         if *changes_left == 0 {
-            cycle(session).await?;
+            Self::cycle(session, ctx).await?;
             return Ok(None);
         }
         *changes_left -= 1;
         let Some(rewritten) = panel_routing::path::normalize(session.req_header().uri.path())
             .map(|path| path.into_owned())
         else {
-            responses::plain(
+            Self::error(
                 session,
+                ctx,
                 400,
                 "the rewritten target is not an absolute path",
                 &[],
@@ -1507,11 +1635,97 @@ impl PanelProxy {
             client: ctx.client,
         };
         let Some(next) = routing.select(site, &request) else {
-            responses::plain(session, 404, "not found", &[]).await?;
+            Self::error(session, ctx, 404, "not found", &[]).await?;
             return Ok(None);
         };
         ctx.route = Some(next);
         Ok(Some(next))
+    }
+
+    /// The page answering the request's errors with `status`: its route's,
+    /// or else its site's.
+    fn page(session: &Session, ctx: &RequestContext, status: u16) -> Option<Prepared> {
+        let snapshot = ctx.snapshot.as_deref()?;
+        let site = snapshot.routing.site(ctx.site?);
+        let pages = ctx
+            .route
+            .and_then(|route| site.route(route).error_pages.as_ref())
+            .unwrap_or(&site.error_pages);
+        let page = pages.page(status)?;
+        let path = panel_routing::path::normalize(session.req_header().uri.path()).map_or_else(
+            || session.req_header().uri.path().to_owned(),
+            |path| path.into_owned(),
+        );
+        Some(lua_phases::with_variables(
+            session,
+            &ctx.variables,
+            |variables| {
+                page.prepare(
+                    status,
+                    &facts(
+                        session,
+                        &ctx.host,
+                        &path,
+                        ctx.scheme == "https",
+                        variables,
+                        &ctx.request_uri,
+                    ),
+                )
+            },
+        ))
+    }
+
+    /// Answers an error the gateway makes: with the request's page for
+    /// `status`, keeping `headers`, or with `message` (ADR 0041).
+    async fn error(
+        session: &mut Session,
+        ctx: &RequestContext,
+        status: u16,
+        message: &str,
+        headers: &[(header::HeaderName, &str)],
+    ) -> pingora_core::Result<()> {
+        if let Some(prepared) = Self::page(session, ctx, status) {
+            if let Some(answer) = prepared.load().await {
+                return answer.send(session, headers).await;
+            }
+        }
+        responses::plain(session, status, message, headers).await
+    }
+
+    /// Answers a request that changed its URI more often than it may, as
+    /// nginx does.
+    async fn cycle(session: &mut Session, ctx: &RequestContext) -> pingora_core::Result<()> {
+        Self::error(
+            session,
+            ctx,
+            500,
+            "rewrite or internal redirection cycle",
+            &[],
+        )
+        .await
+    }
+
+    /// Answers a request a security policy refused, with the page for its
+    /// status when the policy gives no body of its own.
+    async fn refuse(
+        session: &mut Session,
+        ctx: &RequestContext,
+        refusal: Refusal,
+    ) -> pingora_core::Result<()> {
+        if refusal.custom.is_none() {
+            let headers: Vec<(header::HeaderName, &str)> = refusal
+                .headers
+                .iter()
+                .map(|(name, value)| (name.clone(), value.as_str()))
+                .collect();
+            if let Some(answer) = match Self::page(session, ctx, refusal.status) {
+                Some(prepared) => prepared.load().await,
+                None => None,
+            } {
+                return answer.send(session, &headers).await;
+            }
+        }
+        refuse(session, refusal).await
     }
 
     fn scheme(&self) -> &'static str {

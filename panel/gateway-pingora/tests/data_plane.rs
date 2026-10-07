@@ -4440,3 +4440,193 @@ async fn rewrites_change_paths_and_internal_redirects_reach_internal_routes() {
     assert!(String::from_utf8_lossy(&cycle.body).contains("cycle"));
     gateway.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn error_pages_answer_errors_and_maintenance_admits_its_allowlist() {
+    use panel_ir::{
+        ErrorPage, ErrorPages, ErrorResponse, Maintenance, ERROR_PAGES_CAPABILITY,
+        MAINTENANCE_CAPABILITY,
+    };
+
+    let statics = tempfile::tempdir().unwrap();
+    std::fs::create_dir(statics.path().join("errors")).unwrap();
+    std::fs::write(
+        statics.path().join("errors/502.html"),
+        "<h1>upstream down</h1>",
+    )
+    .unwrap();
+    let (upstream, _) = status_upstream(Arc::new(AtomicU16::new(404)), Duration::ZERO).await;
+    let listen = free_address();
+    let mut snapshot = RuntimeSnapshot::empty(RevisionId::new(1));
+    snapshot
+        .listeners
+        .push(ListenerRef::new("http", listen.to_string()));
+    snapshot.required_capabilities.extend([
+        CapabilityRequirement::new(ERROR_PAGES_CAPABILITY, "1"),
+        CapabilityRequirement::new(MAINTENANCE_CAPABILITY, "1"),
+        CapabilityRequirement::new(REQUEST_SECURITY_CAPABILITY, "1"),
+    ]);
+    let page = |statuses: &[u16], response: ErrorResponse| ErrorPage {
+        statuses: statuses.iter().copied().collect(),
+        response,
+        status: None,
+    };
+    let text = |body: &str| ErrorResponse::Body {
+        body: body.into(),
+        content_type: Some("text/plain".into()),
+    };
+    let mut shop = site(&["shop.test"]);
+    shop.error_pages = ErrorPages {
+        pages: vec![
+            page(
+                &[404],
+                ErrorResponse::Body {
+                    body: "<p>no $uri on $host</p>".into(),
+                    content_type: None,
+                },
+            ),
+            page(&[403], text("keep out")),
+            page(
+                &[502],
+                ErrorResponse::File {
+                    path: "errors/502.html".into(),
+                },
+            ),
+            page(&[503], text("back soon")),
+        ],
+        intercept: true,
+    };
+    snapshot.sites.push(shop);
+    snapshot.security_policies.push(SecurityPolicy {
+        id: "office".into(),
+        allowed_cidrs: BTreeSet::from(["10.0.0.0/8".to_owned()]),
+        ..SecurityPolicy::default()
+    });
+    snapshot.upstream_pools.push(pool("app", &[upstream]));
+    snapshot
+        .upstream_pools
+        .push(pool("gone", &[free_address()]));
+    let mut secure = route("secure", 3, prefix("/secure"), proxy("app"));
+    secure.security_policy_id = Some("office".into());
+    let mut soon = route("soon", 4, prefix("/soon"), RouteAction::respond(503, None));
+    if let RouteAction::Respond {
+        retry_after_seconds,
+        ..
+    } = &mut soon.action
+    {
+        *retry_after_seconds = Some(30);
+    }
+    let mut own = route("own", 5, prefix("/own"), proxy("app"));
+    own.error_pages = Some(ErrorPages {
+        pages: vec![page(
+            &[404],
+            ErrorResponse::Redirect {
+                location: "https://$host/elsewhere".into(),
+                status: 302,
+            },
+        )],
+        intercept: true,
+    });
+    let mut raw = route("raw", 6, prefix("/raw"), proxy("app"));
+    raw.error_pages = Some(ErrorPages::default());
+    snapshot.routes.extend([
+        route("app", 1, prefix("/app"), proxy("app")),
+        route("down", 2, prefix("/down"), proxy("gone")),
+        secure,
+        soon,
+        own,
+        raw,
+    ]);
+    for (id, host, allow) in [
+        ("closed", "closed.test", "10.0.0.0/8"),
+        ("allowed", "allowed.test", "127.0.0.1"),
+    ] {
+        let mut maintained = SiteSpec::new(
+            SiteId::new(id).unwrap(),
+            id,
+            vec![DomainSpec::new(NormalizedHost::new(host).unwrap())],
+        );
+        maintained.maintenance = Some(Maintenance {
+            retry_after_seconds: Some(120),
+            allow: vec![allow.into()],
+            ..Maintenance::default()
+        });
+        maintained.error_pages = ErrorPages {
+            pages: vec![page(&[503], text("maintenance page"))],
+            intercept: false,
+        };
+        snapshot.sites.push(maintained);
+        let mut open = route(
+            id,
+            1,
+            prefix("/"),
+            RouteAction::respond(200, Some("open".into())),
+        );
+        open.site_id = SiteId::new(id).unwrap();
+        snapshot.routes.push(open);
+    }
+    let gateway = Gateway::start(
+        AdapterOptions::default().with_static_root(statics.path()),
+        snapshot,
+    )
+    .await;
+    wait_for(listen).await;
+    let ask = |host: &'static str, target: &'static str| get(listen, Some(host), target, "");
+
+    let missing = ask("shop.test", "/missing").await;
+    assert_eq!(missing.status, 404);
+    assert_eq!(missing.headers["content-type"], "text/html; charset=utf-8");
+    assert_eq!(missing.body, b"<p>no /missing on shop.test</p>");
+    let intercepted = ask("shop.test", "/app/x").await;
+    assert_eq!(
+        (intercepted.status, intercepted.body.as_slice()),
+        (404, &b"<p>no /app/x on shop.test</p>"[..])
+    );
+    assert_eq!(
+        intercepted.headers["content-type"],
+        "text/html; charset=utf-8"
+    );
+    let down = ask("shop.test", "/down").await;
+    assert_eq!(
+        (down.status, down.body.as_slice()),
+        (502, &b"<h1>upstream down</h1>"[..])
+    );
+    assert_eq!(down.headers["content-type"], "text/html; charset=utf-8");
+    let refused = ask("shop.test", "/secure").await;
+    assert_eq!(
+        (refused.status, refused.body.as_slice()),
+        (403, &b"keep out"[..])
+    );
+    let soon = ask("shop.test", "/soon").await;
+    assert_eq!(
+        (soon.status, soon.body.as_slice()),
+        (503, &b"back soon"[..])
+    );
+    assert_eq!(soon.headers["retry-after"], "30");
+    let redirected = ask("shop.test", "/own").await;
+    assert_eq!(redirected.status, 302);
+    assert_eq!(
+        redirected.headers["location"],
+        "https://shop.test/elsewhere"
+    );
+    let raw = ask("shop.test", "/raw").await;
+    assert_eq!(raw.status, 404);
+    assert!(
+        raw.body.starts_with(b"404 from "),
+        "{:?}",
+        String::from_utf8_lossy(&raw.body)
+    );
+
+    let closed = ask("closed.test", "/").await;
+    assert_eq!(
+        (closed.status, closed.body.as_slice()),
+        (503, &b"maintenance page"[..])
+    );
+    assert_eq!(closed.headers["retry-after"], "120");
+    let allowed = ask("allowed.test", "/").await;
+    assert_eq!(
+        (allowed.status, allowed.body.as_slice()),
+        (200, &b"open"[..])
+    );
+    gateway.stop().await;
+}

@@ -4,6 +4,7 @@
 
 use crate::{
     access_log::AccessPlan,
+    error_pages::{MaintenancePlan, PageSet},
     lua::{Hook, HookIndex, Hooks},
     rewrite::{InternalTarget, Rewrites},
     template::Template,
@@ -48,6 +49,10 @@ pub(crate) struct SiteRoutes {
     pub lua: Hooks,
     /// Rules every request runs before a route is chosen.
     pub rewrites: Rewrites,
+    /// Pages answering errors of requests whose route has none.
+    pub error_pages: PageSet,
+    /// While set, only the clients it admits reach the site.
+    pub maintenance: Option<MaintenancePlan>,
     www: HashMap<String, String>,
     /// Aligned with the router's ranked routes of the site.
     routes: Vec<CompiledRoute>,
@@ -68,6 +73,8 @@ pub(crate) struct CompiledRoute {
     pub rewrites: Rewrites,
     /// Takes only requests sent to it from inside the gateway.
     pub internal: bool,
+    /// Pages answering the route's errors in place of its site's.
+    pub error_pages: Option<PageSet>,
 }
 
 pub(crate) enum RouteTarget {
@@ -96,6 +103,8 @@ pub(crate) struct Targets<'a> {
     pub policies: &'a HashMap<&'a str, usize>,
     pub http: &'a HashMap<&'a str, usize>,
     pub lua: &'a HookIndex,
+    /// Where static content and error page files are below.
+    pub static_root: Option<&'a std::path::Path>,
 }
 
 fn http_policy(
@@ -200,6 +209,17 @@ impl RoutingTable {
                             rewrite_error(&format!("route {}", route.id), &error)
                         })?,
                         internal: route.internal,
+                        error_pages: route
+                            .error_pages
+                            .as_ref()
+                            .map(|pages| {
+                                PageSet::compile(
+                                    pages,
+                                    targets.static_root,
+                                    &format!("route {}", route.id),
+                                )
+                            })
+                            .transpose()?,
                     })
                 })
                 .collect::<Result<_>>()?;
@@ -240,6 +260,18 @@ impl RoutingTable {
                     .unwrap_or_default(),
                 rewrites: Rewrites::compile(&site.rewrites)
                     .map_err(|error| rewrite_error(&format!("site {}", site.id), &error))?,
+                error_pages: PageSet::compile(
+                    &site.error_pages,
+                    targets.static_root,
+                    &format!("site {}", site.id),
+                )?,
+                maintenance: site
+                    .maintenance
+                    .as_ref()
+                    .map(|maintenance| {
+                        MaintenancePlan::compile(maintenance, &format!("site {}", site.id))
+                    })
+                    .transpose()?,
                 www,
                 routes,
             });
@@ -414,6 +446,7 @@ mod tests {
                 policies: &policies,
                 http: &http,
                 lua: &HookIndex::default(),
+                static_root: None,
             },
         )
     }

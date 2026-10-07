@@ -103,6 +103,24 @@ impl StaticContent {
     }
 }
 
+/// An error the caller answers, with the request's error page when it has
+/// one (ADR 0041).
+pub(crate) struct Failure {
+    pub status: u16,
+    pub message: &'static str,
+    pub headers: Vec<(header::HeaderName, &'static str)>,
+}
+
+impl Failure {
+    fn new(status: u16, message: &'static str) -> Self {
+        Self {
+            status,
+            message,
+            headers: Vec::new(),
+        }
+    }
+}
+
 enum Located {
     File(PathBuf, Metadata),
     /// A directory and its index file, if it has one; there are no listings.
@@ -115,19 +133,16 @@ pub(crate) async fn serve(
     content: &StaticContent,
     path: &str,
     compression: Option<&crate::http_policy::Compression>,
-) -> pingora_core::Result<()> {
+) -> pingora_core::Result<Option<Failure>> {
     let method = session.req_header().method.clone();
     if method != Method::GET && method != Method::HEAD {
-        return responses::plain(
-            session,
-            405,
-            "method not allowed",
-            &[(header::ALLOW, "GET, HEAD")],
-        )
-        .await;
+        return Ok(Some(Failure {
+            headers: vec![(header::ALLOW, "GET, HEAD")],
+            ..Failure::new(405, "method not allowed")
+        }));
     }
     let Some(components) = decode_components(path) else {
-        return responses::plain(session, 400, "invalid path", &[]).await;
+        return Ok(Some(Failure::new(400, "invalid path")));
     };
     let directory_request = path.ends_with('/');
     let (file, metadata) = match content.locate(&components).await {
@@ -139,16 +154,18 @@ pub(crate) async fn serve(
                 .query()
                 .map(|query| format!("?{query}"))
                 .unwrap_or_default();
-            return responses::redirect(session, 301, &format!("{path}/{query}")).await;
+            return responses::redirect(session, 301, &format!("{path}/{query}"))
+                .await
+                .map(|()| None);
         }
         Located::Directory(Some(found)) => found,
         Located::Directory(None) | Located::File(..) | Located::Missing => {
             match content.spa_fallback {
                 true => match content.index_in(&content.root).await {
                     Some(found) => found,
-                    None => return responses::plain(session, 404, "not found", &[]).await,
+                    None => return Ok(Some(Failure::new(404, "not found"))),
                 },
-                false => return responses::plain(session, 404, "not found", &[]).await,
+                false => return Ok(Some(Failure::new(404, "not found"))),
             }
         }
     };
@@ -168,7 +185,7 @@ async fn send_file(
     metadata: &Metadata,
     head: bool,
     compression: Option<&crate::http_policy::Compression>,
-) -> pingora_core::Result<()> {
+) -> pingora_core::Result<Option<Failure>> {
     let length = metadata.len();
     let modified = metadata.modified().ok().map(truncate_to_seconds);
     let etag = entity_tag(metadata);
@@ -189,7 +206,9 @@ async fn send_file(
             .is_some_and(|(since, modified)| modified > since),
     };
     if precondition_failed {
-        return responses::plain(session, 412, "precondition failed", &[]).await;
+        return responses::plain(session, 412, "precondition failed", &[])
+            .await
+            .map(|()| None);
     }
     let not_modified = match header_text(header::IF_NONE_MATCH) {
         Some(value) => matches_list(value, &etag, false),
@@ -217,7 +236,8 @@ async fn send_file(
         response.set_status(304)?;
         return session
             .write_response_header(Box::new(response), true)
-            .await;
+            .await
+            .map(|()| None);
     }
     let (start, end) = match range {
         Some(Range::Unsatisfiable) => {
@@ -227,7 +247,8 @@ async fn send_file(
                 "range not satisfiable",
                 &[(header::CONTENT_RANGE, &format!("bytes */{length}"))],
             )
-            .await;
+            .await
+            .map(|()| None);
         }
         Some(Range::Bytes(start, end)) => {
             response.set_status(206)?;
@@ -245,14 +266,15 @@ async fn send_file(
     if head || start == end {
         return session
             .write_response_header(Box::new(response), true)
-            .await;
+            .await
+            .map(|()| None);
     }
     let mut handle = match tokio::fs::File::open(file).await {
         Ok(handle) => handle,
-        Err(_) => return responses::plain(session, 404, "not found", &[]).await,
+        Err(_) => return Ok(Some(Failure::new(404, "not found"))),
     };
     if start > 0 && handle.seek(std::io::SeekFrom::Start(start)).await.is_err() {
-        return responses::plain(session, 500, "read failed", &[]).await;
+        return Ok(Some(Failure::new(500, "read failed")));
     }
     if let Some(compression) = compression {
         if start == 0 && end == length {
@@ -287,7 +309,7 @@ async fn send_file(
             .write_response_body(Some(Bytes::from(buffer)), remaining == 0)
             .await?;
     }
-    Ok(())
+    Ok(None)
 }
 
 /// Percent-decodes each segment; rejects segments that could leave the root.
@@ -385,7 +407,7 @@ fn parse_range(value: &str, length: u64) -> Range {
     }
 }
 
-fn content_type(file: &Path) -> String {
+pub(crate) fn content_type(file: &Path) -> String {
     let mime = mime_guess::from_path(file).first_or_octet_stream();
     if mime.type_() == mime_guess::mime::TEXT
         || matches!(mime.subtype().as_str(), "javascript" | "json" | "xml")
