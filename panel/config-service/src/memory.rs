@@ -101,6 +101,7 @@ impl DraftStore for MemoryDrafts {
         version: u64,
         _revision: u64,
         _note: Option<&str>,
+        _plan: &str,
         _scope: &RequestScope,
         _actor: &str,
     ) -> Result<DraftState> {

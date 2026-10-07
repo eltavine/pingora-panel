@@ -83,6 +83,7 @@ impl ConfigurationPort for ConfigPublicationClient {
             dry_run: request.dry_run,
             bypass_reason: bypass.reason,
             bypass_incident: bypass.incident,
+            expected_plan: request.expected_plan.unwrap_or_default(),
         };
         let response = self
             .configuration()

@@ -74,12 +74,14 @@ pub trait DraftStore: Send + Sync {
         edit: DraftEdit<'_>,
     ) -> Result<(DraftState, ChangeOutput)>;
 
-    /// Records that `version`, as `revision`, now runs on the gateway.
+    /// Records that `version`, as `revision`, now runs on the gateway, as
+    /// the plan with the digest `plan` said it would.
     async fn mark_applied(
         &self,
         version: u64,
         revision: u64,
         note: Option<&str>,
+        plan: &str,
         scope: &RequestScope,
         actor: &str,
     ) -> Result<DraftState>;

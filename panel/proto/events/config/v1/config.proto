@@ -19,6 +19,8 @@ message DraftApplied {
   uint64 version = 1;
   uint64 revision = 2;
   optional string note = 3;
+  // The digest of the plan applied.
+  string plan = 4;
 }
 
 // `config.apply.checked`: a check, or an apply that only checked.
@@ -43,6 +45,8 @@ message ApplyFailed {
   bool dry_run = 2;
   string code = 3;
   string message = 4;
+  // The plan the apply named, if it named one.
+  string expected_plan = 5;
 }
 
 // `config.revision.noted`

@@ -65,6 +65,9 @@ pub struct ApplyRequest {
     pub dry_run: bool,
     /// Applies without the approvals policies ask for.
     pub bypass: Option<ApprovalBypass>,
+    /// Refuses unless the plan is still the one with this digest, as the
+    /// plan query reports it.
+    pub expected_plan: Option<String>,
 }
 
 /// Why an approval was bypassed; only for actors allowed to.
@@ -105,6 +108,11 @@ impl ApplyRequest {
 
     pub fn bypassing(mut self, bypass: ApprovalBypass) -> Self {
         self.bypass = Some(bypass);
+        self
+    }
+
+    pub fn expecting_plan(mut self, digest: impl Into<String>) -> Self {
+        self.expected_plan = Some(digest.into());
         self
     }
 }

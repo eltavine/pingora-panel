@@ -80,6 +80,9 @@ message ApplyRequest {
   string bypass_reason = 5;
   // The incident the bypass answers, such as a ticket reference.
   string bypass_incident = 6;
+  // Refuses to apply unless the plan, as `plan` in the language queries
+  // digests it, is still this one; empty skips the check.
+  string expected_plan = 7;
 }
 
 message ApplyResponse {

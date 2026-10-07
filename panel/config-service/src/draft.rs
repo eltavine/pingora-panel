@@ -146,6 +146,7 @@ impl DraftStore for SqliteDrafts {
         version: u64,
         revision: u64,
         note: Option<&str>,
+        plan: &str,
         scope: &RequestScope,
         actor: &str,
     ) -> Result<DraftState> {
@@ -167,6 +168,7 @@ impl DraftStore for SqliteDrafts {
                 version,
                 revision,
                 note: note.map(str::to_owned),
+                plan: plan.to_owned(),
             },
         )?;
         SqliteOutbox::append(&mut transaction, &event).await?;

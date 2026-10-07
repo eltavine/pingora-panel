@@ -112,6 +112,9 @@ impl Configuration for ConfigurationTransport {
                     request.bypass_incident,
                 ));
             }
+            if !request.expected_plan.is_empty() {
+                apply = apply.expecting_plan(request.expected_plan);
+            }
             self.port.apply(context, apply).await
         }
         .await;

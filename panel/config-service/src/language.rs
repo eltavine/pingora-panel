@@ -136,6 +136,17 @@ pub(crate) fn content_hash(sources: &Sources) -> ContentHash {
     ContentHash::from_bytes(&bytes)
 }
 
+/// Identifies a plan by what it compares: the files of the active revision
+/// and of the draft.
+pub(crate) fn plan_digest(active: &Sources, draft: &Sources) -> ContentHash {
+    let mut bytes = Vec::new();
+    for hash in [content_hash(active), content_hash(draft)] {
+        bytes.extend_from_slice(hash.as_str().as_bytes());
+        bytes.push(b'\n');
+    }
+    ContentHash::from_bytes(&bytes)
+}
+
 /// Files with their paths checked, from a JSON object of path to text.
 pub(crate) fn sources(files: BTreeMap<String, String>) -> Result<Sources> {
     Sources::new(files).map_err(|path| {

@@ -205,6 +205,7 @@ impl ConfigurationService {
                         dry_run: request.dry_run,
                         code: error.code.as_str().to_owned(),
                         message: error.message.clone(),
+                        expected_plan: request.expected_plan.clone().unwrap_or_default(),
                     },
                 )
                 .await;
@@ -214,12 +215,19 @@ impl ConfigurationService {
 
     /// The model and files of the active revision; empty before the first.
     async fn active(&self) -> Result<(ConfigModel, Sources)> {
+        let (_, model, sources) = self.active_revision().await?;
+        Ok((model, sources))
+    }
+
+    /// The number, model and files of the active revision; none and empty
+    /// before the first.
+    async fn active_revision(&self) -> Result<(Option<u64>, ConfigModel, Sources)> {
         match self.revisions.active().await? {
-            Some((_, sources)) => {
+            Some((revision, sources)) => {
                 let lowered = language::read(&sources, None, Utc::now());
-                Ok((lowered.model, sources))
+                Ok((Some(revision.id), lowered.model, sources))
             }
-            None => Ok((ConfigModel::default(), Sources::default())),
+            None => Ok((None, ConfigModel::default(), Sources::default())),
         }
     }
 
@@ -332,11 +340,16 @@ impl ConfigurationService {
                 String::new(),
             ),
             LanguageQuery::Plan => {
-                let (model, sources) = self.active().await?;
-                json_output(
-                    &changes((&model, &sources), (&draft.model, &draft.sources)),
-                    String::new(),
-                )
+                let (revision, model, sources) = self.active_revision().await?;
+                let mut plan = serde_json::to_value(changes(
+                    (&model, &sources),
+                    (&draft.model, &draft.sources),
+                ))
+                .expect("API values serialize");
+                plan["digest"] = json!(language::plan_digest(&sources, &draft.sources).as_str());
+                plan["draft_version"] = json!(draft.version);
+                plan["active_revision"] = json!(revision);
+                json_output(&plan, String::new())
             }
             LanguageQuery::Lua { revision } => {
                 let sources = match revision {
@@ -467,6 +480,16 @@ impl ConfigurationService {
         self.revisions
             .settle(status.active_hash().map(ContentHash::as_str))
             .await?;
+        let active = self.revisions.active().await?.map(|(_, sources)| sources);
+        let plan = language::plan_digest(&active.unwrap_or_default(), &draft.sources);
+        if let Some(expected) = request.expected_plan.as_deref() {
+            if expected != plan.as_str() {
+                return Err(PanelError::conflict(format!(
+                    "the plan changed since it was reviewed: review plan {} instead of {expected}",
+                    plan.as_str()
+                )));
+            }
+        }
         let note = request
             .note
             .as_deref()
@@ -599,7 +622,14 @@ impl ConfigurationService {
         }
         let draft = self
             .drafts
-            .mark_applied(draft.version, id, note, &context.scope(), context.actor())
+            .mark_applied(
+                draft.version,
+                id,
+                note,
+                plan.as_str(),
+                &context.scope(),
+                context.actor(),
+            )
             .await?;
         Ok((draft, Applied::Activated(activated, id)))
     }

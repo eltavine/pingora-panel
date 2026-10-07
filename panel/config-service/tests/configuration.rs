@@ -11,12 +11,14 @@ use panel_config_api::{
     RevisionQuery,
 };
 use panel_config_model::SiteQuery;
+use panel_contracts::cloudevents::v1::{cloud_event, CloudEvent};
 use panel_control_runtime::{ProcessSettings, RunningProcess, NATS_URL_ENV};
 use panel_engine::{EngineCapability, FakeGatewayEngine};
 use panel_errors::ErrorCode;
 use panel_health::HealthStatus;
 use panel_jetstream::testing::{TestBroker, NATS_URL_ENV as TEST_NATS_URL_ENV};
 use panel_service::Environment;
+use prost::Message;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use std::{collections::HashMap, ffi::OsString, net::SocketAddr, sync::Arc, time::Duration};
@@ -311,6 +313,111 @@ http {
     }
 }
 ";
+
+async fn plan(client: &ConfigPublicationClient) -> Value {
+    let plan = client
+        .read(scope(), LanguageQuery::Plan.into())
+        .await
+        .unwrap();
+    json(&plan.content)
+}
+
+/// The data of the latest recorded `event_type` event, in the Proto3 JSON
+/// mapping.
+async fn latest(harness: &Harness, event_type: &str) -> Value {
+    let encoded: Vec<u8> = sqlx::query_scalar(
+        "SELECT cloudevent FROM outbox WHERE event_type = ?1 ORDER BY position DESC LIMIT 1",
+    )
+    .bind(format!("io.github.eltavine.pingora-panel.{event_type}.v1"))
+    .fetch_one(harness.process.database().pool())
+    .await
+    .unwrap();
+    match CloudEvent::decode(encoded.as_slice()).unwrap().data {
+        Some(cloud_event::Data::TextData(data)) => serde_json::from_str(&data).unwrap(),
+        other => panic!("{event_type} carries no JSON data: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn applying_names_the_plan_it_reviewed() {
+    let Some(harness) = start().await else { return };
+    let client = &harness.client;
+    let mut shop = change(LanguageChange::ReplaceSource { files: main(SHOP) });
+    shop.if_match = Some("*".into());
+    client.change(command("shop"), shop).await.unwrap();
+    let reviewed = plan(client).await;
+    assert_eq!(reviewed["draft_version"], 1);
+    assert_eq!(reviewed["active_revision"], Value::Null);
+    assert_eq!(reviewed["resources"].as_array().unwrap().len(), 3);
+    let digest = reviewed["digest"].as_str().unwrap().to_owned();
+
+    let other = "0".repeat(64);
+    let refused = client
+        .apply(
+            command("other-plan"),
+            ApplyRequest::new(1).expecting_plan(&other),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code.as_str(), ErrorCode::CONFLICT);
+    assert!(refused.message.contains(&digest), "{}", refused.message);
+    let failed = latest(&harness, "config.apply.failed").await;
+    assert_eq!(failed["expected_plan"], other);
+    let revisions = client
+        .read(
+            scope(),
+            RevisionQuery::Revisions {
+                before: None,
+                limit: None,
+            }
+            .into(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(json(&revisions.content)["items"], json!([]));
+
+    let first = match client
+        .apply(
+            command("reviewed"),
+            ApplyRequest::new(1).expecting_plan(&digest),
+        )
+        .await
+        .unwrap()
+    {
+        ApplyOutcome::Applied { revision, .. } => revision,
+        other => panic!("expected an applied draft, got {other:?}"),
+    };
+    let applied = latest(&harness, "config.draft.applied").await;
+    assert_eq!(applied["revision"], first.to_string());
+    assert_eq!(applied["plan"], digest);
+    let settled = plan(client).await;
+    assert_eq!(settled["active_revision"], first);
+    assert_eq!(settled["resources"], json!([]));
+    assert_ne!(settled["digest"], reviewed["digest"]);
+
+    // A rename reviewed against the first revision cannot be applied once
+    // another revision runs, though the draft's version is still the one
+    // reviewed.
+    let mut rename = change(LanguageChange::ReplaceSource {
+        files: main(SHOP.replace("shop.example", "store.example")),
+    });
+    rename.if_match = Some("\"draft-1\"".into());
+    client.change(command("rename"), rename).await.unwrap();
+    let renaming = plan(client).await;
+    assert_eq!(renaming["draft_version"], 2);
+    client
+        .apply(command("elsewhere"), ApplyRequest::new(2))
+        .await
+        .unwrap();
+    let stale = client
+        .apply(
+            command("stale"),
+            ApplyRequest::new(2).expecting_plan(renaming["digest"].as_str().unwrap()),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(stale.code.as_str(), ErrorCode::CONFLICT);
+}
 
 #[tokio::test]
 async fn the_draft_is_text_and_every_apply_is_a_revision() {
