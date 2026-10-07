@@ -87390,6 +87390,13 @@
           "action": {
             "$ref": "#/components/schemas/Action"
           },
+          "cache_policy_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What caches the responses of the route's proxied requests in place of\nits site's policy."
+          },
           "enabled": {
             "type": "boolean"
           },
@@ -87438,6 +87445,10 @@
               "null"
             ],
             "description": "A named location (`location @name`): no request path reaches the\nroute, only an internal redirect to `@name` such as\n`ngx.exec(\"@name\")`, and its match is not used."
+          },
+          "no_cache": {
+            "type": "boolean",
+            "description": "Whether the route's responses stay out of the cache whatever its site\nnames."
           },
           "priority": {
             "type": "integer",
@@ -87745,6 +87756,13 @@
           "action": {
             "$ref": "#/components/schemas/Action"
           },
+          "cache_policy_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What caches the route's responses in place of its site's policy;\n`null` follows the site's and absent keeps the current policy."
+          },
           "enabled": {
             "type": "boolean"
           },
@@ -87789,6 +87807,13 @@
               "string",
               "null"
             ]
+          },
+          "no_cache": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the route's responses stay out of the cache whatever its site\nnames; absent keeps the current setting."
           },
           "priority": {
             "type": "integer",
@@ -88546,6 +88571,13 @@
             "$ref": "#/components/schemas/Action",
             "description": "What the site does for requests no route claims; also its type."
           },
+          "cache_policy_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What caches the responses of the site's proxied requests."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -88914,6 +88946,13 @@
           },
           "action": {
             "$ref": "#/components/schemas/Action"
+          },
+          "cache_policy_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What caches the site's responses; `null` caches none and absent keeps\nthe current policy."
           },
           "domains": {
             "type": "array",

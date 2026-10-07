@@ -41,6 +41,7 @@ pub fn validate(model: &ConfigModel) -> Vec<Diagnostic> {
     let tls_profiles = validate_tls_profiles(model, &mut report);
     let policies = validate_security_policies(model, &mut report);
     let http_policies = validate_http_policies(model, &mut report);
+    let cache_policies = validate_cache(model, &mut report);
     let upstreams = validate_upstreams(model, &mut report);
     let live_sites: BTreeSet<Uuid> = model
         .sites
@@ -137,6 +138,13 @@ pub fn validate(model: &ConfigModel) -> Vec<Diagnostic> {
         {
             report.error(&resource, format!("HTTP policy {policy} does not exist"));
         }
+        if let Some(policy) = site
+            .cache_policy_id
+            .as_deref()
+            .filter(|policy| !cache_policies.contains(policy))
+        {
+            report.error(&resource, format!("cache policy {policy} does not exist"));
+        }
         validate_domains(site, &resource, &tls_profiles, &mut hosts, &mut report);
         if site.hsts.is_some_and(|hsts| {
             hsts.preload && (!hsts.include_subdomains || hsts.max_age_seconds < PRELOAD_MAX_AGE)
@@ -192,6 +200,17 @@ pub fn validate(model: &ConfigModel) -> Vec<Diagnostic> {
                     format!("{resource}/routes/{}", route.id),
                     format!("HTTP policy {policy} does not exist"),
                 );
+            }
+            match route.cache_policy_id.as_deref() {
+                Some(_) if route.no_cache => report.error(
+                    format!("{resource}/routes/{}", route.id),
+                    "the route names a cache policy and keeps out of the cache",
+                ),
+                Some(policy) if !cache_policies.contains(policy) => report.error(
+                    format!("{resource}/routes/{}", route.id),
+                    format!("cache policy {policy} does not exist"),
+                ),
+                _ => {}
             }
         }
     }
@@ -281,6 +300,45 @@ fn validate_http_policies<'a>(model: &'a ConfigModel, report: &mut Report) -> BT
         for problem in policy.problems() {
             report.error(&resource, problem);
         }
+    }
+    ids
+}
+
+fn validate_cache<'a>(model: &'a ConfigModel, report: &mut Report) -> BTreeSet<&'a str> {
+    use panel_engine::{LEAST_CACHE_BYTES, MOST_CACHE_BYTES, MOST_CACHE_POLICIES};
+    if model.cache_policies.len() > MOST_CACHE_POLICIES {
+        report.error(
+            "cache-policies",
+            format!(
+                "there are {} cache policies, more than {MOST_CACHE_POLICIES}",
+                model.cache_policies.len()
+            ),
+        );
+    }
+    let mut ids = BTreeSet::new();
+    for policy in &model.cache_policies {
+        let resource = format!("cache-policies/{}", policy.id);
+        if !is_token(&policy.id) || !ids.insert(policy.id.as_str()) {
+            report.error(
+                &resource,
+                format!("cache policy id {:?} is invalid or duplicated", policy.id),
+            );
+        }
+        for problem in panel_engine::cache_policy_problems(&policy.compile()) {
+            report.error(&resource, format!("the policy {problem}"));
+        }
+    }
+    if let Some(bytes) = model
+        .cache
+        .max_bytes
+        .filter(|bytes| !(LEAST_CACHE_BYTES..=MOST_CACHE_BYTES).contains(bytes))
+    {
+        report.error(
+            "cache",
+            format!(
+                "the cache store of {bytes} bytes is not between {LEAST_CACHE_BYTES} and {MOST_CACHE_BYTES}"
+            ),
+        );
     }
     ids
 }
@@ -1217,6 +1275,7 @@ mod tests {
 
     pub(crate) fn site(name: &str, hosts: &[&str], action: Action) -> Site {
         Site {
+            cache_policy_id: None,
             error_pages: Default::default(),
             maintenance: None,
             robots: None,
@@ -1645,6 +1704,8 @@ mod tests {
         shop.domains[0].primary = true;
         shop.domains[1].redirect = true;
         shop.routes.push(Route {
+            cache_policy_id: None,
+            no_cache: false,
             error_pages: None,
             lua: Default::default(),
             named: None,
@@ -1728,6 +1789,8 @@ mod tests {
             path: "favicon.ico".into(),
         });
         let mut hidden = Route {
+            cache_policy_id: None,
+            no_cache: false,
             error_pages: Some(ErrorPages {
                 pages: vec![ErrorPage {
                     statuses: [404].into(),

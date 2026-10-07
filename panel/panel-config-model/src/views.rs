@@ -5,7 +5,7 @@ use crate::{
     model::{ConfigModel, Domain, Listener, Route, Site, SiteKind, Upstream},
     query::{serves_https, site_status, SiteStatus},
 };
-use crate::{HttpPolicy, SecurityPolicy, TlsProfile};
+use crate::{CachePolicy, HttpPolicy, SecurityPolicy, TlsProfile};
 use panel_domain::NormalizedHost;
 use panel_errors::Diagnostic;
 use serde::{Deserialize, Serialize};
@@ -219,6 +219,41 @@ impl SecurityPolicyView {
                         .routes
                         .iter()
                         .any(|route| route.security_policy_id.as_deref() == id)
+            })
+            .map(|site| site.id)
+            .collect();
+        Self {
+            etag: crate::entity_tag(policy),
+            policy: policy.clone(),
+            used_by,
+        }
+    }
+}
+
+/// A cache policy with the live sites whose responses it caches.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CachePolicyView {
+    #[serde(flatten)]
+    pub policy: CachePolicy,
+    /// Live sites that cache some of their responses with the policy.
+    pub used_by: Vec<Uuid>,
+    pub etag: String,
+}
+
+impl CachePolicyView {
+    pub fn new(model: &ConfigModel, policy: &CachePolicy) -> Self {
+        let id = Some(policy.id.as_str());
+        let used_by = model
+            .sites
+            .iter()
+            .filter(|site| !site.is_deleted())
+            .filter(|site| {
+                site.cache_policy_id.as_deref() == id
+                    || site
+                        .routes
+                        .iter()
+                        .any(|route| route.cache_policy_id.as_deref() == id)
             })
             .map(|site| site.id)
             .collect();

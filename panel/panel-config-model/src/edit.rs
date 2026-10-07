@@ -3,6 +3,7 @@
 //! as a whole.
 
 use crate::{
+    cache::CachePolicy,
     http::HttpPolicy,
     model::{
         Action, ConfigModel, Domain, Favicon, Listener, Robots, Route, RouteMatch, Site,
@@ -70,6 +71,15 @@ pub struct SiteInput {
     /// Field changes, CORS and compression for the site's requests.
     #[serde(default)]
     pub http_policy_id: Option<String>,
+    /// What caches the site's responses; `null` caches none and absent keeps
+    /// the current policy.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
+    pub cache_policy_id: Option<Option<String>>,
     /// How the site's requests are logged; absent keeps the current settings.
     #[serde(default)]
     pub access_log: Option<AccessLog>,
@@ -138,6 +148,19 @@ pub struct RouteInput {
     /// Field changes, CORS and compression for the route's requests.
     #[serde(default)]
     pub http_policy_id: Option<String>,
+    /// What caches the route's responses in place of its site's policy;
+    /// `null` follows the site's and absent keeps the current policy.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<String>))]
+    pub cache_policy_id: Option<Option<String>>,
+    /// Whether the route's responses stay out of the cache whatever its site
+    /// names; absent keeps the current setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_cache: Option<bool>,
     /// How the route's requests are logged; absent keeps the current settings.
     #[serde(default)]
     pub access_log: Option<AccessLog>,
@@ -283,6 +306,12 @@ fn routes_from(inputs: Vec<RouteInput>, existing: &[Route]) -> Vec<Route> {
                 action: input.action,
                 security_policy_id: input.security_policy_id,
                 http_policy_id: input.http_policy_id,
+                cache_policy_id: input
+                    .cache_policy_id
+                    .unwrap_or_else(|| kept.and_then(|route| route.cache_policy_id.clone())),
+                no_cache: input
+                    .no_cache
+                    .unwrap_or_else(|| kept.is_some_and(|route| route.no_cache)),
                 access_log: input.access_log.unwrap_or_else(|| {
                     kept.map(|route| route.access_log.clone())
                         .unwrap_or_default()
@@ -368,6 +397,7 @@ impl ConfigModel {
             hsts: input.hsts,
             security_policy_id: input.security_policy_id,
             http_policy_id: input.http_policy_id,
+            cache_policy_id: input.cache_policy_id.flatten(),
             access_log: input.access_log.unwrap_or_default(),
             rewrites: input.rewrites.unwrap_or_default(),
             error_pages: input.error_pages.unwrap_or_default(),
@@ -403,6 +433,9 @@ impl ConfigModel {
             hsts: input.hsts,
             security_policy_id: input.security_policy_id,
             http_policy_id: input.http_policy_id,
+            cache_policy_id: input
+                .cache_policy_id
+                .unwrap_or_else(|| site.cache_policy_id.take()),
             access_log: input.access_log.unwrap_or_else(|| site.access_log.clone()),
             rewrites: input
                 .rewrites
@@ -598,6 +631,10 @@ impl ConfigModel {
             action: input.action,
             security_policy_id: input.security_policy_id,
             http_policy_id: input.http_policy_id,
+            cache_policy_id: input
+                .cache_policy_id
+                .unwrap_or_else(|| slot.cache_policy_id.take()),
+            no_cache: input.no_cache.unwrap_or(slot.no_cache),
             access_log,
             rewrites: input
                 .rewrites
@@ -912,6 +949,43 @@ impl ConfigModel {
         Ok(())
     }
 
+    pub fn put_cache_policy(&mut self, policy: CachePolicy) -> bool {
+        match self
+            .cache_policies
+            .iter_mut()
+            .find(|item| item.id == policy.id)
+        {
+            Some(slot) => {
+                *slot = policy;
+                false
+            }
+            None => {
+                self.cache_policies.push(policy);
+                true
+            }
+        }
+    }
+
+    pub fn delete_cache_policy(&mut self, id: &str) -> Result<()> {
+        if !self.cache_policies.iter().any(|policy| policy.id == id) {
+            return Err(not_found("cache policy", id));
+        }
+        let used = self.sites.iter().any(|site| {
+            site.cache_policy_id.as_deref() == Some(id)
+                || site
+                    .routes
+                    .iter()
+                    .any(|route| route.cache_policy_id.as_deref() == Some(id))
+        });
+        if used {
+            return Err(PanelError::conflict(format!(
+                "cache policy {id} is still in use"
+            )));
+        }
+        self.cache_policies.retain(|policy| policy.id != id);
+        Ok(())
+    }
+
     pub fn delete_tls_profile(&mut self, id: &str) -> Result<()> {
         if !self.tls_profiles.iter().any(|profile| profile.id == id) {
             return Err(not_found("TLS profile", id));
@@ -1072,6 +1146,7 @@ mod tests {
 
     fn input(name: &str, hosts: &[&str], action: Action) -> SiteInput {
         SiteInput {
+            cache_policy_id: None,
             error_pages: None,
             maintenance: None,
             robots: None,
@@ -1108,6 +1183,8 @@ mod tests {
 
     fn replaced_route(route: &Route) -> RouteInput {
         RouteInput {
+            cache_policy_id: None,
+            no_cache: None,
             error_pages: None,
             id: Some(route.id),
             name: route.name.clone(),
@@ -1171,6 +1248,8 @@ mod tests {
             ..AccessLog::default()
         });
         created.routes.push(RouteInput {
+            cache_policy_id: None,
+            no_cache: None,
             error_pages: None,
             id: None,
             name: Some("api".into()),
@@ -1204,6 +1283,8 @@ mod tests {
         let mut replaced = input("shop", &["shop.example.com"], maintenance());
         let route = &site.routes[0];
         replaced.routes.push(RouteInput {
+            cache_policy_id: None,
+            no_cache: None,
             error_pages: None,
             id: Some(route.id),
             name: route.name.clone(),
@@ -1302,6 +1383,8 @@ mod tests {
             now,
         );
         let route = |path: &str| RouteInput {
+            cache_policy_id: None,
+            no_cache: None,
             error_pages: None,
             id: None,
             name: None,
@@ -1442,11 +1525,13 @@ mod tests {
             "maintenance": {"allow": ["10.0.0.0/8"]},
             "robots": {"kind": "disallow_all"},
             "favicon": {"kind": "no_content"},
+            "cache_policy_id": "pages",
             "routes": [{
                 "priority": 1,
                 "match": {"kind": "prefix", "path": "/api"},
                 "action": {"type": "respond", "status": 200},
-                "error_pages": {"pages": []}
+                "error_pages": {"pages": []},
+                "no_cache": true
             }]
         }))
         .unwrap();
@@ -1459,6 +1544,8 @@ mod tests {
         assert_eq!(site.robots, Some(Robots::DisallowAll));
         assert_eq!(site.favicon, Some(Favicon::NoContent));
         assert_eq!(site.routes[0].error_pages, Some(ErrorPages::default()));
+        assert_eq!(site.cache_policy_id.as_deref(), Some("pages"));
+        assert!(site.routes[0].no_cache);
 
         let kept: SiteInput = serde_json::from_value(serde_json::json!({
             "name": "shop",
@@ -1477,6 +1564,8 @@ mod tests {
         assert_eq!(site.error_pages.pages.len(), 1);
         assert!(site.maintenance.is_some() && site.robots.is_some() && site.favicon.is_some());
         assert_eq!(site.routes[0].error_pages, Some(ErrorPages::default()));
+        assert_eq!(site.cache_policy_id.as_deref(), Some("pages"));
+        assert!(site.routes[0].no_cache);
 
         let cleared: SiteInput = serde_json::from_value(serde_json::json!({
             "name": "shop",
@@ -1485,12 +1574,14 @@ mod tests {
             "maintenance": null,
             "robots": null,
             "favicon": null,
+            "cache_policy_id": null,
             "routes": [{
                 "id": route,
                 "priority": 1,
                 "match": {"kind": "prefix", "path": "/api"},
                 "action": {"type": "respond", "status": 200},
-                "error_pages": null
+                "error_pages": null,
+                "no_cache": false
             }]
         }))
         .unwrap();
@@ -1506,6 +1597,7 @@ mod tests {
         assert!(site.error_pages.is_empty());
         assert!(site.maintenance.is_none() && site.robots.is_none() && site.favicon.is_none());
         assert_eq!(site.routes[0].error_pages, None);
+        assert!(site.cache_policy_id.is_none() && !site.routes[0].no_cache);
     }
 
     fn kept_input() -> SiteInput {

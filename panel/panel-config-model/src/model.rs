@@ -1,5 +1,6 @@
 //! The editable configuration document.
 
+use crate::cache::{CachePolicy, CacheSettings};
 use crate::http::HttpPolicy;
 use crate::lua::{LuaCode, LuaConfig, LuaScope};
 use crate::security::SecurityPolicy;
@@ -40,6 +41,11 @@ pub struct ConfigModel {
     pub security_policies: Vec<SecurityPolicy>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub http_policies: Vec<HttpPolicy>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cache_policies: Vec<CachePolicy>,
+    /// The gateway's cache store.
+    #[serde(default, skip_serializing_if = "CacheSettings::is_default")]
+    pub cache: CacheSettings,
     #[serde(default)]
     pub upstreams: Vec<Upstream>,
     #[serde(default)]
@@ -237,6 +243,9 @@ pub struct Site {
     /// their route's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http_policy_id: Option<String>,
+    /// What caches the responses of the site's proxied requests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_policy_id: Option<String>,
     /// How the site's requests are logged, over the settings for every site.
     #[serde(default, skip_serializing_if = "AccessLog::is_unset")]
     pub access_log: AccessLog,
@@ -343,6 +352,14 @@ pub struct Route {
     /// the site's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http_policy_id: Option<String>,
+    /// What caches the responses of the route's proxied requests in place of
+    /// its site's policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_policy_id: Option<String>,
+    /// Whether the route's responses stay out of the cache whatever its site
+    /// names.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_cache: bool,
     /// How the route's requests are logged, over its site's settings.
     #[serde(default, skip_serializing_if = "AccessLog::is_unset")]
     pub access_log: AccessLog,

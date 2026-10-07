@@ -8,6 +8,7 @@
 //! representation of it rather than a migration.
 
 mod approvals;
+mod cache;
 mod compile;
 mod edit;
 mod http;
@@ -25,6 +26,7 @@ pub use approvals::{
     MAX_APPROVALS, MAX_VALID_MINUTES, MAX_WINDOWS, MIN_VALID_MINUTES, REQUEST_LIFETIME,
     RESOURCE_KINDS,
 };
+pub use cache::{CachePolicy, CacheSettings};
 pub use compile::compile;
 pub use edit::{checked, NodeInput, RouteInput, SiteBundle, SiteInput, UpstreamInput};
 pub use http::{FieldChanges, HttpPolicy};
@@ -49,9 +51,9 @@ pub use revisions::{Revision, RevisionDetail, RevisionList, RevisionOutcome};
 pub use security::{SecurityPolicy, MAX_BODY_TIMEOUT_SECONDS, MAX_RATE_PERIOD_SECONDS};
 pub use validate::{validate, MAX_HEAD_TIMEOUT_SECONDS};
 pub use views::{
-    BatchAction, BatchRequest, DomainCheck, DomainOwner, DomainView, HttpPolicyView, ListenerView,
-    RouteView, SecurityPolicyView, SiteList, SiteView, TlsProfileView, UpstreamView,
-    ValidationResult,
+    BatchAction, BatchRequest, CachePolicyView, DomainCheck, DomainOwner, DomainView,
+    HttpPolicyView, ListenerView, RouteView, SecurityPolicyView, SiteList, SiteView,
+    TlsProfileView, UpstreamView, ValidationResult,
 };
 
 /// Identifies the document format in storage, exports and imports.

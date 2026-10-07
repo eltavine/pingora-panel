@@ -341,6 +341,7 @@ mod tests {
 
     fn site(name: &str, host: &str, action: Action) -> Site {
         Site {
+            cache_policy_id: None,
             error_pages: Default::default(),
             maintenance: None,
             robots: None,

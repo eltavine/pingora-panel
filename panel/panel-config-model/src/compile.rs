@@ -16,7 +16,7 @@ use panel_ir::{
     RouteAction, RouteMatcher, RouteSpec, RuntimeSnapshot, SiteSpec, StaticContentPolicy,
     UpstreamEndpoint, UpstreamPoolSpec, WwwRedirect, ERROR_PAGES_CAPABILITY,
     HTTP_POLICIES_CAPABILITY, LISTING_CAPABILITY, LUA_SCRIPTS_CAPABILITY, MAINTENANCE_CAPABILITY,
-    MEDIA_TYPES_CAPABILITY, REWRITE_CAPABILITY, STATIC_CACHE_CAPABILITY,
+    MEDIA_TYPES_CAPABILITY, PROXY_CACHE_CAPABILITY, REWRITE_CAPABILITY, STATIC_CACHE_CAPABILITY,
 };
 use panel_ir::{
     REQUEST_HEAD_TIMEOUT_CAPABILITY, REQUEST_SECURITY_CAPABILITY, ROUTE_CONDITIONS_CAPABILITY,
@@ -120,6 +120,31 @@ pub fn compile(
     if !http_policies.is_empty() {
         compiler.capabilities.insert(HTTP_POLICIES_CAPABILITY);
     }
+    let cache_policies: BTreeSet<&str> = live
+        .iter()
+        .flat_map(|site| {
+            site.cache_policy_id.as_deref().into_iter().chain(
+                site.routes
+                    .iter()
+                    .filter_map(|route| route.cache_policy_id.as_deref()),
+            )
+        })
+        .collect();
+    compiler.snapshot.cache_policies = model
+        .cache_policies
+        .iter()
+        .filter(|policy| cache_policies.contains(policy.id.as_str()))
+        .map(crate::CachePolicy::compile)
+        .collect();
+    if compiler
+        .snapshot
+        .cache_policies
+        .iter()
+        .any(|policy| policy.enabled)
+    {
+        compiler.capabilities.insert(PROXY_CACHE_CAPABILITY);
+    }
+    compiler.snapshot.cache_max_bytes = model.cache.max_bytes;
     for site in live {
         compiler.site(site);
     }
@@ -282,6 +307,7 @@ impl Compiler<'_> {
             .security_policy_id
             .clone_from(&site.security_policy_id);
         compiled.header_policy_id.clone_from(&site.http_policy_id);
+        compiled.cache_policy_id.clone_from(&site.cache_policy_id);
         compiled.access_log.clone_from(&site.access_log);
         if !site.access_log.is_unset() {
             self.capabilities.insert(LOGGING_CAPABILITY);
@@ -478,6 +504,8 @@ impl Compiler<'_> {
             .security_policy_id
             .clone_from(&route.security_policy_id);
         compiled.header_policy_id.clone_from(&route.http_policy_id);
+        compiled.cache_policy_id.clone_from(&route.cache_policy_id);
+        compiled.no_cache = route.no_cache;
         compiled.access_log.clone_from(&route.access_log);
         if !route.access_log.is_unset() {
             self.capabilities.insert(LOGGING_CAPABILITY);
@@ -777,6 +805,7 @@ mod tests {
             updated_at: Utc::now(),
         };
         let site = Site {
+            cache_policy_id: None,
             error_pages: Default::default(),
             maintenance: None,
             robots: None,
@@ -796,6 +825,8 @@ mod tests {
                 tls_profile_id: None,
             }],
             routes: vec![Route {
+                cache_policy_id: None,
+                no_cache: false,
                 error_pages: None,
                 lua: Default::default(),
                 named: None,
@@ -843,6 +874,8 @@ mod tests {
         };
         let site_id = site.id;
         let model = ConfigModel {
+            cache_policies: Vec::new(),
+            cache: Default::default(),
             lua: Default::default(),
             listeners: vec![Listener {
                 id: "http".into(),
@@ -1215,6 +1248,77 @@ mod tests {
                 "{expected}: {messages:?}"
             );
         }
+    }
+
+    #[test]
+    fn cache_policies_reach_the_snapshot_through_their_users() {
+        let (mut model, _) = model();
+        let mut pages = crate::CachePolicy::new("pages");
+        pages.ttl_seconds = 600;
+        pages.status_ttls.insert(404, 60);
+        pages.vary_headers.insert("Accept-Language".into());
+        assert!(model.put_cache_policy(pages));
+        assert!(model.put_cache_policy(crate::CachePolicy::new("unused")));
+        model.sites[0].cache_policy_id = Some("pages".into());
+        model.sites[0].routes[0].no_cache = true;
+        model.cache.max_bytes = Some(64 << 20);
+
+        let snapshot = compile(&model, RevisionId::new(11)).unwrap();
+        assert!(snapshot
+            .required_capabilities
+            .iter()
+            .any(|capability| capability.name == PROXY_CACHE_CAPABILITY));
+        let ids: Vec<_> = snapshot
+            .cache_policies
+            .iter()
+            .map(|policy| policy.id.as_str())
+            .collect();
+        assert_eq!(ids, ["pages"]);
+        assert_eq!(snapshot.cache_policies[0].fresh_seconds(404), Some(60));
+        assert_eq!(snapshot.cache_policies[0].fresh_seconds(200), Some(600));
+        assert!(snapshot.cache_policies[0]
+            .vary_headers
+            .contains("accept-language"));
+        assert_eq!(snapshot.sites[0].cache_policy_id.as_deref(), Some("pages"));
+        assert!(snapshot.routes[0].no_cache);
+        assert_eq!(snapshot.cache_max_bytes, Some(64 << 20));
+        assert!(model.clone().delete_cache_policy("pages").is_err());
+        assert!(model.clone().delete_cache_policy("unused").is_ok());
+
+        model.sites[0].routes[0].cache_policy_id = Some("unused".into());
+        model.cache_policies[0].key = Some(String::new());
+        model.cache.max_bytes = Some(1024);
+        let messages: Vec<String> = crate::validate(&model)
+            .into_iter()
+            .map(|diagnostic| diagnostic.message)
+            .collect();
+        for expected in [
+            "the route names a cache policy and keeps out of the cache",
+            "the policy has a key of 0 bytes",
+            "the cache store of 1024 bytes is not between",
+        ] {
+            assert!(
+                messages.iter().any(|message| message.starts_with(expected)),
+                "{expected}: {messages:?}"
+            );
+        }
+        model.sites[0].routes[0].no_cache = false;
+        model.sites[0].routes[0].cache_policy_id = Some("missing".into());
+        let messages: Vec<String> = crate::validate(&model)
+            .into_iter()
+            .map(|diagnostic| diagnostic.message)
+            .collect();
+        assert!(messages.contains(&"cache policy missing does not exist".to_string()));
+
+        model.sites[0].routes[0].cache_policy_id = None;
+        model.cache_policies[0].key = None;
+        model.cache_policies[0].enabled = false;
+        model.cache.max_bytes = None;
+        let snapshot = compile(&model, RevisionId::new(12)).unwrap();
+        assert!(!snapshot
+            .required_capabilities
+            .iter()
+            .any(|capability| capability.name == PROXY_CACHE_CAPABILITY));
     }
 
     #[test]
