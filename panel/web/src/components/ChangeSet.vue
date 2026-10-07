@@ -2,8 +2,10 @@
 import type { Component } from 'vue'
 import {
   ArrowLeftRight,
+  DatabaseZap,
   FileCode2,
   Globe,
+  HardDrive,
   Minus,
   Network,
   PenLine,
@@ -28,11 +30,13 @@ const kinds: Record<string, Component> = {
   'tls-profiles': ShieldCheck,
   'security-policies': ShieldBan,
   'http-policies': ArrowLeftRight,
+  'cache-policies': DatabaseZap,
+  cache: HardDrive,
 }
 const changeIcons: Record<Change, Component> = { added: Plus, changed: PenLine, removed: Minus }
 
 const BLOCK =
-  /^[ +-]\s*(?:server|upstream|listener|tls_profile|security_policy|http_policy)\s+(\S+)\s*\{/
+  /^[ +-]\s*(?:server|upstream|listener|tls_profile|security_policy|http_policy|cache_policy)\s+(\S+)\s*\{/
 
 /** The resource's name from the first line of its block, else its path. */
 function label(change: ResourceChange): string {

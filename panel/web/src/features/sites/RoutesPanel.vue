@@ -6,6 +6,7 @@ import {
   ArrowLeftRight,
   ChevronDown,
   ChevronUp,
+  DatabaseZap,
   Filter,
   FlaskConical,
   GripVertical,
@@ -325,6 +326,14 @@ function target(route: RouteView): string {
               >
                 <ArrowLeftRight class="size-3.5" aria-hidden="true" />
                 {{ route.http_policy_id }}
+              </span>
+              <span
+                v-if="route.no_cache || route.cache_policy_id"
+                class="text-muted-foreground inline-flex items-center gap-1 font-mono text-xs"
+                :title="t('cache.select.label')"
+              >
+                <DatabaseZap class="size-3.5" aria-hidden="true" />
+                {{ route.no_cache ? t('cache.select.offShort') : route.cache_policy_id }}
               </span>
             </TableCell>
             <TableCell class="max-w-64">

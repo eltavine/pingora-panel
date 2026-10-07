@@ -40,6 +40,7 @@ import {
   plainHeaders,
   useRefreshConfiguration,
 } from '@/lib/configuration'
+import CachePolicySelect from '@/components/CachePolicySelect.vue'
 import HttpPolicySelect from '@/components/HttpPolicySelect.vue'
 import SecurityPolicySelect from '@/components/SecurityPolicySelect.vue'
 import AccessLogFields from './AccessLogFields.vue'
@@ -284,6 +285,12 @@ function submit() {
             id="site-http-policy"
             v-model="form.httpPolicyId"
             :hint="t('httpPolicies.select.siteHint')"
+          />
+
+          <CachePolicySelect
+            id="site-cache-policy"
+            v-model="form.cachePolicyId"
+            :hint="t('cache.select.siteHint')"
           />
 
           <fieldset class="flex flex-col gap-2">

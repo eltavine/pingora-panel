@@ -106,6 +106,7 @@ const facts = computed(() => {
     { label: t('sites.form.tlsProfile'), value: value.tls_profile_id ?? none },
     { label: t('security.select.label'), value: value.security_policy_id ?? none },
     { label: t('httpPolicies.select.label'), value: value.http_policy_id ?? none },
+    { label: t('cache.select.label'), value: value.cache_policy_id ?? none },
     { label: t('sites.form.group'), value: value.group ?? none },
     { label: t('sites.form.note'), value: value.note ?? none },
     { label: t('sites.columns.updated'), value: d(new Date(value.updated_at), 'datetime') },

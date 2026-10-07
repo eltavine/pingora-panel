@@ -2,6 +2,7 @@ import { alertsFeature } from './alerts'
 import { approvalsFeature } from './approvals'
 import { auditFeature } from './audit'
 import { backupsFeature } from './backups'
+import { cacheFeature } from './cache'
 import { certificatesFeature } from './certificates'
 import { configStudioFeature } from './config-studio'
 import { containersFeature } from './containers'
@@ -40,6 +41,7 @@ export const features: readonly FeatureModule[] = [
   listenersFeature,
   securityFeature,
   httpPoliciesFeature,
+  cacheFeature,
   certificatesFeature,
   configStudioFeature,
   luaFeature,

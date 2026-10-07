@@ -112,6 +112,12 @@ describe('audit presentation', () => {
     expect(summaryOf(event('gateway.reloaded', { generation: 3, workers: 2 }), t)).toBe(
       'audit.summary.generation{"generation":"3","workers":"2"}',
     )
+    expect(summaryOf(event('gateway.cache.purged', { all: true }), t)).toBe(
+      'audit.summary.everything',
+    )
+    expect(
+      summaryOf(event('gateway.cache.purged', { urls: ['https://shop.example/'], keys: '2' }), t),
+    ).toBe('https://shop.example/ · audit.summary.keys{"count":2}')
     expect(summaryOf(event('other.event', { a: 1 }), t)).toBe('{"a":1}')
     expect(
       summaryOf(event('container.stopped', { engine: 'docker', id: 'b2', name: 'shop-web-1' }), t),

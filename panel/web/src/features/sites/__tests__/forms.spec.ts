@@ -26,6 +26,8 @@ const route: Route = {
   rewrites: [{ kind: 'strip_prefix', prefix: '/api' }],
   internal: false,
   error_pages: null,
+  cache_policy_id: 'pages',
+  no_cache: false,
 }
 
 const site: SiteView = {

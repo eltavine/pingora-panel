@@ -33,6 +33,7 @@ import {
   plainHeaders,
   useRefreshConfiguration,
 } from '@/lib/configuration'
+import CachePolicySelect from '@/components/CachePolicySelect.vue'
 import HttpPolicySelect from '@/components/HttpPolicySelect.vue'
 import SecurityPolicySelect from '@/components/SecurityPolicySelect.vue'
 import AccessLogFields from './AccessLogFields.vue'
@@ -232,6 +233,13 @@ function submit() {
             id="route-http-policy"
             v-model="form.httpPolicyId"
             :hint="t('httpPolicies.select.routeHint')"
+          />
+
+          <CachePolicySelect
+            id="route-cache-policy"
+            v-model="form.cachePolicy"
+            route
+            :hint="t('cache.select.routeHint')"
           />
 
           <SwitchField id="route-enabled" v-model="form.enabled" :label="t('common.enabled')" />

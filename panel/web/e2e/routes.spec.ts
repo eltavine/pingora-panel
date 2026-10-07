@@ -200,3 +200,21 @@ test('static routes list directories, map media types and set cache headers', as
     ],
   })
 })
+
+test('a route stays out of its site cache or names a policy of its own', async ({ page }) => {
+  const seen = await setUp(page)
+  await page.route('**/api/v1/cache-policies', (handled) =>
+    handled.fulfill({ json: [{ id: 'pages', used_by: [SITE_ID], etag: '"c1"' }] }),
+  )
+  await page.goto(`/sites/${SITE_ID}`)
+  await page.getByRole('tab', { name: 'Routes' }).click()
+  await page.getByRole('button', { name: 'Add route' }).first().click()
+  const sheet = page.getByRole('dialog')
+  await sheet.getByLabel('Path').fill('/live/')
+  await sheet.getByRole('combobox', { name: 'Cache policy' }).click()
+  await expect(page.getByRole('option', { name: 'pages' })).toBeVisible()
+  await page.getByRole('option', { name: 'No caching' }).click()
+  await sheet.getByRole('button', { name: 'Create' }).click()
+  await expect.poll(() => seen.created.length).toBe(1)
+  expect(seen.created[0]!.postDataJSON()).toMatchObject({ cache_policy_id: null, no_cache: true })
+})

@@ -126,6 +126,7 @@ export interface SiteForm {
   tlsProfileId: string
   securityPolicyId: string
   httpPolicyId: string
+  cachePolicyId: string
   group: string
   tags: string
   note: string
@@ -149,6 +150,8 @@ export interface RouteForm {
   action: ActionForm
   securityPolicyId: string
   httpPolicyId: string
+  /** A cache policy, empty for the site's, or `off` to stay out of the cache. */
+  cachePolicy: string
   accessLog: AccessLogForm
   /** Rules the route's requests run once it is chosen, in order. */
   rewrites: RewriteForm[]
@@ -311,6 +314,7 @@ export function siteForm(site?: SiteView): SiteForm {
     tlsProfileId: site?.tls_profile_id ?? '',
     securityPolicyId: site?.security_policy_id ?? '',
     httpPolicyId: site?.http_policy_id ?? '',
+    cachePolicyId: site?.cache_policy_id ?? '',
     group: site?.group ?? '',
     tags: (site?.tags ?? []).join(', '),
     note: site?.note ?? '',
@@ -351,6 +355,7 @@ export function siteInput(form: SiteForm, site?: SiteView): SiteInput {
     tls_profile_id: optionalText(form.tlsProfileId),
     security_policy_id: optionalText(form.securityPolicyId),
     http_policy_id: optionalText(form.httpPolicyId),
+    cache_policy_id: optionalText(form.cachePolicyId),
     group: optionalText(form.group),
     tags: splitList(form.tags),
     note: optionalText(form.note),
@@ -373,6 +378,8 @@ export function routeInputOf(route: Route): RouteInput {
     action: route.action,
     security_policy_id: route.security_policy_id ?? null,
     http_policy_id: route.http_policy_id ?? null,
+    cache_policy_id: route.cache_policy_id ?? null,
+    no_cache: route.no_cache ?? false,
     access_log: route.access_log ?? null,
     rewrites: route.rewrites ?? [],
     internal: route.internal ?? false,
@@ -392,6 +399,7 @@ export function routeForm(route: Route | undefined, priority: number): RouteForm
     action: actionForm(route?.action),
     securityPolicyId: route?.security_policy_id ?? '',
     httpPolicyId: route?.http_policy_id ?? '',
+    cachePolicy: route?.no_cache ? 'off' : (route?.cache_policy_id ?? ''),
     accessLog: accessLogForm(route?.access_log),
     rewrites: (route?.rewrites ?? []).map(rewriteForm),
     internal: route?.internal ?? false,
@@ -415,6 +423,8 @@ export function routeInput(form: RouteForm, id?: string): RouteInput {
     action: toAction(form.action),
     security_policy_id: optionalText(form.securityPolicyId),
     http_policy_id: optionalText(form.httpPolicyId),
+    cache_policy_id: form.cachePolicy === 'off' ? null : optionalText(form.cachePolicy),
+    no_cache: form.cachePolicy === 'off',
     access_log: toAccessLog(form.accessLog),
     rewrites: form.rewrites.map(toRewrite),
     internal: form.internal,

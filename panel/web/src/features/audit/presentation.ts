@@ -22,6 +22,7 @@ export const KNOWN_TYPES = [
   'gateway.endpoint.restored',
   'gateway.operation.refused',
   'gateway.logs.deleted',
+  'gateway.cache.purged',
   'identity.account.created',
   'identity.account.updated',
   'identity.password.changed',
@@ -214,6 +215,18 @@ export function summaryOf(event: AuditEvent, t: Translate): string {
       return text(data.endpoint)
     case 'gateway.logs.deleted':
       return text(data.site) || t('audit.summary.everySite')
+    case 'gateway.cache.purged': {
+      const keys = Number(data.keys ?? 0)
+      return data.all === true
+        ? t('audit.summary.everything')
+        : [
+            list(data.site_ids),
+            list(data.urls),
+            keys > 0 && t('audit.summary.keys', { count: keys }, keys),
+          ]
+            .filter(Boolean)
+            .join(' · ')
+    }
     case 'identity.account.created':
       return `${text(data.username)} · ${list(data.roles)}`
     case 'identity.account.updated':
