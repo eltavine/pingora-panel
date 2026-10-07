@@ -387,7 +387,7 @@ jobs:
             | python3 -c "import json, sys; print(json.load(sys.stdin)['id'])")
           ppanel listener set edge --address 127.0.0.1:18080
           ppanel site create --name console --domain console.test --proxy "$upstream"
-          ppanel config apply
+          ppanel config apply --yes
           ppanel gateway status
           auth="Authorization: Bearer $PPANEL_TOKEN"
           for _ in $(seq 1 30); do
@@ -414,7 +414,7 @@ jobs:
           ppanel -o json container links \
             | python3 -c "import json, sys; links = [l for l in json.load(sys.stdin)['links'] if l['container'] == 'panel-ci-web']; assert [(l['site'], l['node'], l['route']) for l in links] == [('panel-ci-web', '127.0.0.1:18222', 'published')], links"
           ppanel container links
-          ppanel config apply
+          ppanel config apply --yes
           for _ in $(seq 1 30); do
             if curl --fail --silent --output /dev/null --header 'Host: web.test' \
               http://127.0.0.1:18080/varz; then
@@ -439,7 +439,7 @@ jobs:
           ppanel files ls ci-static
           test "$(ppanel files cat ci-static/index.html)" = '<h1>From the panel</h1>'
           ppanel site create --name ci-static --domain static.test --static ci-static
-          ppanel config apply
+          ppanel config apply --yes
           served() { curl --fail --silent --show-error --header 'Host: static.test' http://127.0.0.1:18080/; }
           for _ in $(seq 1 30); do
             if served 2>/dev/null | grep -q 'From the panel'; then
@@ -488,7 +488,7 @@ jobs:
           ppanel -o json route test --host routes.test --target /api/items \
             | python3 -c "import json, sys; r = json.load(sys.stdin); assert not r['routes'][0]['matched'] and 'x-canary' in r['routes'][0]['reason'], r"
           ppanel route test --host routes.test --target /api/items
-          ppanel config apply
+          ppanel config apply --yes
           served() {
             curl --fail --silent --show-error --header 'Host: routes.test' "$@" \
               http://127.0.0.1:18080/api/items
@@ -503,7 +503,7 @@ jobs:
           test "$(served)" = stable
           test "$(served --request POST --header 'X-Canary: 1')" = stable
           ppanel site delete "$site" --permanent
-          ppanel config apply
+          ppanel config apply --yes
 
       - name: Change fields, answer CORS and compress with an HTTP policy
         run: |
@@ -517,7 +517,7 @@ jobs:
             --proxy "$upstream" --http-policy ci-headers \
             | python3 -c "import json, sys; print(json.load(sys.stdin)['id'])")
           ppanel http-policy list
-          ppanel config apply
+          ppanel config apply --yes
           fetch() {
             curl --fail --silent --show-error --header 'Host: policies.test' --dump-header - \
               --output /dev/null "$@" http://127.0.0.1:18080/api/v1/openapi.json
@@ -549,7 +549,7 @@ jobs:
           grep -qi '^access-control-max-age: 600' <<<"$preflight"
           ppanel site delete "$site" --permanent
           ppanel http-policy delete ci-headers
-          ppanel config apply
+          ppanel config apply --yes
 
       - name: Rewrite paths and redirect internally
         run: |
@@ -563,7 +563,7 @@ jobs:
             --rewrite 'set_uri /api/v1/openapi.json'
           ppanel route add "$site" --name hidden --match prefix:/hidden --respond 204 --internal
           ppanel route add "$site" --name via --match prefix:/via --internal-redirect /hidden
-          ppanel config apply
+          ppanel config apply --yes
           status() {
             curl --silent --output /dev/null --write-out '%{http_code}' \
               --header 'Host: rewrites.test' "http://127.0.0.1:18080$1"
@@ -585,7 +585,7 @@ jobs:
           grep -q '^HTTP/1.1 301' <<<"$moved"
           grep -qi '^location: /api/v1/openapi.json' <<<"$moved"
           ppanel site delete "$site" --permanent
-          ppanel config apply
+          ppanel config apply --yes
 
       - name: Answer errors with pages and keep a site in maintenance
         run: |
@@ -599,7 +599,7 @@ jobs:
             --page '503 "body=Back soon"'
           ppanel site robots "$site" disallow-all
           ppanel site favicon "$site" no-content
-          ppanel config apply
+          ppanel config apply --yes
           fetch() {
             curl --silent --show-error --header 'Host: pages.test' "http://127.0.0.1:18080$1"
           }
@@ -624,7 +624,7 @@ jobs:
           grep -q 'Back soon' <<<"$soon"
           # This host is not in the allowlist, so it gets the maintenance response.
           ppanel site maintenance "$site" on --allow 192.0.2.0/24 --retry-after 120
-          ppanel config apply
+          ppanel config apply --yes
           for _ in $(seq 1 30); do
             if [ "$(status /)" = 503 ]; then
               break
@@ -637,7 +637,7 @@ jobs:
           grep -qi '^retry-after: 120' <<<"$closed"
           grep -q 'Back soon' <<<"$closed"
           ppanel site maintenance "$site" off
-          ppanel config apply
+          ppanel config apply --yes
           for _ in $(seq 1 30); do
             if [ "$(status /)" = 200 ]; then
               break
@@ -646,7 +646,7 @@ jobs:
           done
           test "$(fetch /)" = open
           ppanel site delete "$site" --permanent
-          ppanel config apply
+          ppanel config apply --yes
 
       - name: List directories, map media types and set cache headers on static files
         run: |
@@ -657,7 +657,7 @@ jobs:
             --static ci-listing --autoindex json --media-type wasm=application/wasm \
             --cache-control 'max_age=1y immutable for=css' \
             | python3 -c "import json, sys; print(json.load(sys.stdin)['id'])")
-          ppanel config apply
+          ppanel config apply --yes
           listed() {
             curl --fail --silent --show-error --header 'Host: listing.test' http://127.0.0.1:18080/
           }
@@ -677,7 +677,7 @@ jobs:
           headers /app.wasm | grep -qi '^content-type: application/wasm'
           ppanel site delete "$site" --permanent
           ppanel files rm ci-listing --recursive --yes
-          ppanel config apply
+          ppanel config apply --yes
 
       - name: Cache proxied responses, show their Cache-Status and purge them
         run: |
@@ -692,7 +692,7 @@ jobs:
           ppanel route add "$site" --name live --match prefix:/api/v1/gateway --proxy "$upstream" \
             --no-cache
           ppanel cache-policy list
-          ppanel config apply
+          ppanel config apply --yes
           status() {
             curl --fail --silent --show-error --dump-header - --output /dev/null \
               --header 'Host: cache.test' "$@" http://127.0.0.1:18080/api/v1/openapi.json \
@@ -727,7 +727,7 @@ jobs:
           ppanel site delete "$site" --permanent
           ppanel cache-policy delete ci-pages
           ppanel cache store --default
-          ppanel config apply
+          ppanel config apply --yes
 
       - name: Move the configuration between installations as a bundle
         run: |
@@ -761,7 +761,7 @@ jobs:
           ppanel certificate generate console --name console.test --days 30
           ppanel tls-profile set console --certificate-id console
           ppanel listener set edge-tls --address 127.0.0.1:18443 --tls-profile console
-          ppanel config apply
+          ppanel config apply --yes
           auth="Authorization: Bearer $PPANEL_TOKEN"
           for _ in $(seq 1 30); do
             if curl --fail --silent --show-error --insecure --header "$auth" \

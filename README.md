@@ -58,7 +58,7 @@ The web console, the `ppanel` command line and your own automation use the same 
    ppanel listener set public --address 0.0.0.0:80
    ppanel upstream create --name app --node 10.0.0.11:8080
    ppanel site create --name shop --domain shop.example --proxy <upstream-id>
-   ppanel config apply
+   ppanel config apply --yes
    ```
 
 To manage the host and its containers as well, install the host agent with `panel/deploy/ops-agent/install.sh` and add `-f panel/deploy/compose.ops-agent.yaml` to the Compose commands.

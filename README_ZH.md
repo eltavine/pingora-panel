@@ -58,7 +58,7 @@ Web 控制台、`ppanel` 命令行和你自己的自动化都使用同一套 RES
    ppanel listener set public --address 0.0.0.0:80
    ppanel upstream create --name app --node 10.0.0.11:8080
    ppanel site create --name shop --domain shop.example --proxy <upstream-id>
-   ppanel config apply
+   ppanel config apply --yes
    ```
 
 如需同时管理主机及其容器，先用 `panel/deploy/ops-agent/install.sh` 安装主机代理，再在 Compose 命令中加上 `-f panel/deploy/compose.ops-agent.yaml`。

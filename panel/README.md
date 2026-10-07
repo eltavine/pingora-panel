@@ -327,7 +327,14 @@ converts the documented NGINX subset — `server`, `listen`, `server_name`,
 not carry over at its
 position. Every apply records a revision with its files, author, note and
 outcome under `/api/v1/revisions`; a revision can be compared with another,
-the active one or the draft, annotated, and restored into the draft.
+the active one or the draft, annotated, and restored into the draft. A plan
+is named by a digest of the active revision's files and the draft's, and
+applying it names that digest, so a plan reviewed before the draft or the
+active revision changed is refused with nothing changed
+([decision](../docs/adr/0045-surface-parity.md)): `ppanel config apply`
+prints the plan and asks before applying it, `--yes` applies it without
+asking, as scripts do, and `--plan <digest>` applies only a plan reviewed
+earlier. The console asks the same way.
 
 ```sh
 ppanel config export --dir conf
@@ -338,6 +345,7 @@ ppanel config import conf --expected-version 3
 ppanel config plan
 ppanel config apply --dry-run
 ppanel config apply --note "launch the shop"
+ppanel config apply --plan <digest> --note "launch the shop"
 ppanel revision list
 ppanel revision diff 4 --against active
 ppanel config rollback --to 3 --reason "errors after launch"
@@ -943,7 +951,7 @@ ppanel login --username admin
 ppanel whoami
 ppanel account create ops --role operator --with-password
 ppanel token create ci --permission config.read --permission config.apply --days 30
-PPANEL_TOKEN=ppat_... ppanel config apply
+PPANEL_TOKEN=ppat_... ppanel config apply --yes
 ppanel token rotate <token-id>
 ppanel role create deployer --name Deployer --permission config.read --permission config.apply
 ppanel account end-sessions ops
@@ -1014,7 +1022,7 @@ ppanel workload-identity set shop --account deployer \
   --subject "repo:shop/site:ref:refs/heads/main"
 # in the job, with its ID token for the audience pingora-panel in $ID_TOKEN:
 export PPANEL_TOKEN=$(printf %s "$ID_TOKEN" | ppanel workload-identity exchange --token-file -)
-ppanel config apply
+ppanel config apply --yes
 ```
 
 Accounts can be marked as break-glass, and `/api/v1/sign-in-policy` can then

@@ -11,6 +11,7 @@ use reqwest::{Method, StatusCode};
 use serde_json::{json, Map, Value};
 use std::{
     collections::BTreeSet,
+    io::{IsTerminal, Write},
     path::{Component, Path, PathBuf},
 };
 
@@ -102,9 +103,11 @@ pub(crate) enum ConfigCommand {
     },
     /// The runtime snapshot the saved draft compiles to, as JSON.
     Ir,
-    /// What applying the draft would change on the gateway.
+    /// What applying the draft would change on the gateway, and the digest
+    /// that names the plan.
     Plan,
-    /// Compiles the draft and activates it on the gateway.
+    /// Prints the plan, asks, and applies it: compiles the draft and
+    /// activates it on the gateway.
     Apply {
         /// Refuse if the draft changed since this version.
         #[arg(long)]
@@ -123,6 +126,13 @@ pub(crate) enum ConfigCommand {
         /// The incident a bypass answers, such as a ticket reference.
         #[arg(long, requires = "bypass_reason")]
         incident: Option<String>,
+        /// Applies the plan as it is now without asking, as scripts do.
+        #[arg(long, conflicts_with = "plan")]
+        yes: bool,
+        /// Applies only while the plan is the one with this digest, as
+        /// `ppanel config plan` printed it.
+        #[arg(long, value_name = "DIGEST", conflicts_with = "dry_run")]
+        plan: Option<String>,
     },
     /// Restores a revision into the draft and applies it.
     Rollback {
@@ -326,6 +336,47 @@ pub(crate) fn print_changes(output: &Output, changes: &Value) {
     for file in changes["files"].as_array().into_iter().flatten() {
         println!();
         print!("{}", text(&file["diff"]));
+    }
+}
+
+/// The plan's changes, then what it compares and the digest naming it.
+fn print_plan(output: &Output, plan: &Value) {
+    print_changes(output, plan);
+    if output.quiet || output.format == Format::Json {
+        return;
+    }
+    let against = match plan["active_revision"].as_u64() {
+        Some(revision) => format!("revision {revision}"),
+        None => "nothing applied yet".to_owned(),
+    };
+    println!();
+    println!(
+        "Plan {} for version {} against {against}",
+        text(&plan["digest"]),
+        text(&plan["draft_version"])
+    );
+}
+
+/// Asks on the terminal whether to apply the plan printed above.
+fn confirm_apply(output: &Output) -> Result<()> {
+    let terminal = std::io::stdin().is_terminal() && std::io::stderr().is_terminal();
+    if !terminal || output.quiet || output.format == Format::Json {
+        return Err(CliError::Usage(
+            "applying asks first: pass --yes to apply the plan as it is now, or --plan with \
+             a digest `ppanel config plan` printed"
+                .into(),
+        ));
+    }
+    eprint!("Apply this plan to the gateway? [y/N] ");
+    let _ = std::io::stderr().flush();
+    let mut answer = String::new();
+    std::io::stdin()
+        .read_line(&mut answer)
+        .map_err(|error| CliError::Transport(format!("cannot read the answer: {error}")))?;
+    if matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+        Ok(())
+    } else {
+        Err(CliError::Failed("nothing was applied".into()))
     }
 }
 
@@ -749,7 +800,7 @@ pub async fn run(api: &Api, output: &Output, command: ConfigCommand) -> Result<(
         }
         ConfigCommand::Plan => {
             let plan = api.get("/api/v1/config/plan", &[]).await?.body;
-            print_changes(output, &plan);
+            print_plan(output, &plan);
         }
         ConfigCommand::Apply {
             expected_version,
@@ -757,6 +808,8 @@ pub async fn run(api: &Api, output: &Output, command: ConfigCommand) -> Result<(
             dry_run,
             bypass_reason,
             incident,
+            yes,
+            plan,
         } => {
             if dry_run {
                 let checked = api
@@ -777,7 +830,24 @@ pub async fn run(api: &Api, output: &Output, command: ConfigCommand) -> Result<(
                     &checked,
                 );
             } else {
-                let mut body = json!({ "expected_version": expected_version, "note": note });
+                let expected_plan = match plan {
+                    Some(digest) => digest,
+                    None => {
+                        let reviewed = api.get("/api/v1/config/plan", &[]).await?.body;
+                        if output.format != Format::Json {
+                            print_plan(output, &reviewed);
+                        }
+                        if !yes {
+                            confirm_apply(output)?;
+                        }
+                        text(&reviewed["digest"])
+                    }
+                };
+                let mut body = json!({
+                    "expected_version": expected_version,
+                    "note": note,
+                    "expected_plan": expected_plan,
+                });
                 if let (Some(reason), Some(incident)) = (bypass_reason, incident) {
                     body["bypass"] = json!({ "reason": reason, "incident": incident });
                 }

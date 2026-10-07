@@ -353,9 +353,14 @@ async fn api(
             Json(json!({"files": {"main.conf": "language_version 1;\n"}, "diagnostics": []}))
                 .into_response()
         }
-        ("GET", "/api/v1/config/plan") | ("GET", "/api/v1/revisions/3/diff") => {
-            Json(changes).into_response()
+        ("GET", "/api/v1/config/plan") => {
+            let mut plan = changes;
+            plan["digest"] = json!(PLAN);
+            plan["draft_version"] = json!(6);
+            plan["active_revision"] = json!(5);
+            Json(plan).into_response()
         }
+        ("GET", "/api/v1/revisions/3/diff") => Json(changes).into_response(),
         ("POST", "/api/v1/config/import/nginx") => Json(json!({
             "files": {"main.conf": MAIN},
             "report": [{
@@ -2404,6 +2409,9 @@ fn alert_rules_and_channels_are_set_from_the_command_line() {
     );
 }
 
+/// The digest of the plan the stub reports.
+const PLAN: &str = "5e1f0c3a9b7d2e4f6a8c0b1d3e5f7a9c2b4d6e8f0a1c3e5b7d9f1a3c5e7b9d0f";
+
 #[test]
 fn applying_rolling_back_and_revisions() {
     let stub = Stub::start();
@@ -2411,19 +2419,38 @@ fn applying_rolling_back_and_revisions() {
     let planned = stub.ppanel(&["config", "plan"]);
     assert!(stdout(&planned).contains("changed  sites/shop"));
     assert!(stdout(&planned).contains("+++ b/sites/shop.conf"));
+    assert!(stdout(&planned).contains(&format!("Plan {PLAN} for version 6 against revision 5")));
     let dry = stub.ppanel(&["config", "apply", "--dry-run"]);
     assert!(stdout(&dry).contains("Version 6 passed every check"));
     assert!(stub.requests("POST", "/api/v1/config/apply").is_empty());
 
-    let applied = stub.ppanel(&["config", "apply", "--note", "launch"]);
+    let unasked = stub.ppanel(&["config", "apply", "--note", "launch"]);
+    assert_eq!(unasked.status.code(), Some(2));
+    assert!(
+        stderr(&unasked).contains("pass --yes"),
+        "{}",
+        stderr(&unasked)
+    );
+    assert!(stub.requests("POST", "/api/v1/config/apply").is_empty());
+    let applied = stub.ppanel(&["config", "apply", "--note", "launch", "--yes"]);
     assert!(
         stdout(&applied).contains("as revision 7"),
         "{}",
         stdout(&applied)
     );
+    assert!(stdout(&applied).contains(&format!("Plan {PLAN}")));
+    let sent = &stub.requests("POST", "/api/v1/config/apply")[0].body;
     assert_eq!(
-        stub.requests("POST", "/api/v1/config/apply")[0].body["note"],
-        "launch"
+        (&sent["note"], &sent["expected_plan"]),
+        (&json!("launch"), &json!(PLAN))
+    );
+    let reviewed = stub.requests("GET", "/api/v1/config/plan").len();
+    let named = stub.ppanel(&["config", "apply", "--plan", "f00d"]);
+    assert!(named.status.success(), "{}", stderr(&named));
+    assert_eq!(stub.requests("GET", "/api/v1/config/plan").len(), reviewed);
+    assert_eq!(
+        stub.requests("POST", "/api/v1/config/apply")[1].body["expected_plan"],
+        "f00d"
     );
 
     let rolled = stub.ppanel(&["config", "rollback", "--to", "3", "--reason", "errors"]);
@@ -2433,7 +2460,7 @@ fn applying_rolling_back_and_revisions() {
         1
     );
     assert_eq!(
-        stub.requests("POST", "/api/v1/config/apply")[1].body,
+        stub.requests("POST", "/api/v1/config/apply")[2].body,
         json!({"expected_version": 6, "note": "errors"})
     );
 
@@ -3283,6 +3310,7 @@ fn covered_changes_wait_for_approval_from_the_command_line() {
         "apply",
         "--note",
         "covered",
+        "--yes",
     ]);
     assert!(waiting.status.success(), "{}", stderr(&waiting));
     let said = String::from_utf8_lossy(&waiting.stdout);
@@ -3300,6 +3328,7 @@ fn covered_changes_wait_for_approval_from_the_command_line() {
         "checkout is down for everyone",
         "--incident",
         "INC-7",
+        "--yes",
     ]);
     assert!(bypassed.status.success(), "{}", stderr(&bypassed));
     assert_eq!(
