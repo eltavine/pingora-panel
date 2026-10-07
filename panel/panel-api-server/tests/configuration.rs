@@ -33,8 +33,11 @@ async fn gateway() -> SocketAddr {
             "listener.http",
             "listener.http2",
             "request.security",
+            "response.error-pages",
+            "route.exact-path",
             "route.path-prefix",
             "route.rewrite",
+            "site.maintenance",
             "upstream.http",
             "upstream.resilience",
         ]
@@ -1217,6 +1220,137 @@ async fn rewrites_and_internal_redirects_go_through_the_api() {
     assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
     let problem: Value = refused.json().await.unwrap();
     assert!(problem.to_string().contains("/v2/"), "{problem}");
+
+    let (draft, _) = api
+        .json(api.get("/api/v1/config/draft"), StatusCode::OK)
+        .await;
+    let (applied, _) = api
+        .json(
+            api.mutate(Method::POST, "/api/v1/config/apply", "apply")
+                .json(&json!({"expected_version": draft["version"]})),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(applied["draft"]["pending"], false);
+
+    stack.stop().await;
+}
+
+#[tokio::test]
+async fn error_pages_maintenance_and_site_files_go_through_the_api() {
+    let Some(stack) = stack().await else {
+        return;
+    };
+    let api = &stack.api;
+    use reqwest::Method;
+
+    api.json(
+        api.mutate(Method::PUT, "/api/v1/listeners/http", "listener")
+            .json(&json!({"id": "http", "address": "0.0.0.0:8080"})),
+        StatusCode::OK,
+    )
+    .await;
+    let written = json!({
+        "name": "Shop",
+        "action": {"type": "respond", "status": 204},
+        "domains": [{"host": "shop.example.com", "primary": true}],
+        "error_pages": {
+            "pages": [
+                {"statuses": [404], "response": {"kind": "body", "body": "<h1>No $uri here</h1>"}},
+                {"statuses": [502, 503], "response": {"kind": "file", "path": "errors/50x.html"}}
+            ],
+            "intercept": true
+        },
+        "maintenance": {"allow": ["10.0.0.0/8"], "retry_after_seconds": 60},
+        "robots": {"kind": "disallow_all"},
+        "favicon": {"kind": "no_content"}
+    });
+    let (site, _) = api
+        .json(
+            api.mutate(Method::POST, "/api/v1/sites", "site")
+                .json(&written),
+            StatusCode::CREATED,
+        )
+        .await;
+    assert_eq!(site["error_pages"]["pages"][1]["response"]["kind"], "file");
+    assert_eq!(site["error_pages"]["intercept"], true);
+    assert_eq!(site["maintenance"]["enabled"], true);
+    assert_eq!(site["maintenance"]["status"], 503);
+    assert_eq!(site["robots"]["kind"], "disallow_all");
+    assert_eq!(site["favicon"]["kind"], "no_content");
+    let site_path = format!("/api/v1/sites/{}", site["id"].as_str().unwrap());
+    let (route, _) = api
+        .json(
+            api.mutate(Method::POST, &format!("{site_path}/routes"), "api")
+                .json(&json!({
+                    "priority": 10,
+                    "match": {"kind": "prefix", "path": "/api"},
+                    "action": {"type": "respond", "status": 200},
+                    "error_pages": {"pages": [{
+                        "statuses": [404],
+                        "response": {"kind": "redirect", "location": "https://$host/", "status": 301}
+                    }]}
+                })),
+            StatusCode::CREATED,
+        )
+        .await;
+    assert_eq!(route["error_pages"]["pages"][0]["response"]["status"], 301);
+
+    let mut kept = written.clone();
+    for field in ["error_pages", "maintenance", "robots", "favicon"] {
+        kept.as_object_mut().unwrap().remove(field);
+    }
+    kept["routes"] = json!([{
+        "id": route["id"],
+        "priority": 10,
+        "match": {"kind": "prefix", "path": "/api"},
+        "action": {"type": "respond", "status": 200}
+    }]);
+    let (_, headers) = api.json(api.get(&site_path), StatusCode::OK).await;
+    let (replaced, headers) = api
+        .json(
+            api.mutate(Method::PUT, &site_path, "replace")
+                .header("if-match", headers["etag"].to_str().unwrap())
+                .json(&kept),
+            StatusCode::OK,
+        )
+        .await;
+    assert_eq!(replaced["maintenance"]["allow"][0], "10.0.0.0/8");
+    assert_eq!(replaced["robots"]["kind"], "disallow_all");
+    assert_eq!(
+        replaced["routes"][0]["error_pages"]["pages"][0]["statuses"][0],
+        404
+    );
+    let mut cleared = kept.clone();
+    cleared["robots"] = Value::Null;
+    let (replaced, _) = api
+        .json(
+            api.mutate(Method::PUT, &site_path, "clear")
+                .header("if-match", headers["etag"].to_str().unwrap())
+                .json(&cleared),
+            StatusCode::OK,
+        )
+        .await;
+    assert!(
+        replaced.get("robots").is_none_or(Value::is_null),
+        "{replaced}"
+    );
+    assert_eq!(replaced["favicon"]["kind"], "no_content");
+
+    let refused = api
+        .mutate(Method::POST, &format!("{site_path}/routes"), "broken")
+        .json(&json!({
+            "priority": 20,
+            "match": {"kind": "prefix", "path": "/broken"},
+            "action": {"type": "respond", "status": 200},
+            "error_pages": {"pages": [{"statuses": [302], "response": {"kind": "body", "body": "x"}}]}
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+    let problem: Value = refused.json().await.unwrap();
+    assert!(problem.to_string().contains("302"), "{problem}");
 
     let (draft, _) = api
         .json(api.get("/api/v1/config/draft"), StatusCode::OK)
