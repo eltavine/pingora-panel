@@ -25,15 +25,17 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/panel/target \
     cargo build --manifest-path panel/Cargo.toml --release --locked \
         --bin gatewayd --bin panel-control --bin panel-bootstrap --bin ppanel --bin ops-agent \
+        --bin pingora-panel-reference-plugin \
  && mkdir -p /out/bin \
- && for binary in gatewayd panel-control panel-bootstrap ppanel ops-agent; do \
+ && for binary in gatewayd panel-control panel-bootstrap ppanel ops-agent \
+        pingora-panel-reference-plugin; do \
         cp "panel/target/release/$binary" /out/bin/; \
     done
 # Directories that named volumes mount over; volumes inherit their owner
 # and mode. The gateway runs as root and keeps its state in its own.
-RUN for directory in control gateway-secrets pki credentials/panel-api \
+RUN for directory in control plugins gateway-secrets pki credentials/panel-api \
         credentials/config-service credentials/automation-service credentials/observability-service \
-        credentials/audit-service credentials/gatewayd; do \
+        credentials/audit-service credentials/plugins-service credentials/gatewayd; do \
         mkdir -p "/out/state/$directory"; \
     done \
  && chmod 700 /out/state/control \

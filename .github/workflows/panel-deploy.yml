@@ -63,7 +63,7 @@ jobs:
             fi
             sleep 5
           done
-          for port in 9180 9181 9182 9183 9184; do
+          for port in 9180 9181 9182 9183 9184 9186; do
             curl --fail --silent --show-error "http://127.0.0.1:${port}/readyz" >/dev/null
           done
 
@@ -93,7 +93,7 @@ jobs:
           services=$(curl --fail --silent --show-error --header "$auth" \
             http://127.0.0.1:8080/api/v1/platform/services \
             | python3 -c "import json, sys; print(len(json.load(sys.stdin)['services']))")
-          test "$services" -eq 5
+          test "$services" -eq 6
           curl --fail --silent --show-error --output /dev/null http://127.0.0.1:8080/
 
       - name: Reach the host agent through the API
@@ -839,6 +839,76 @@ jobs:
           ppanel -o json audit list --type tls.certificate.created --actor-id ci \
             | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"
           ppanel audit verify
+
+      - name: Run a signed plugin and use the ports it provides
+        run: |
+          ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
+          package() {
+            docker compose exec -T control pingora-panel-reference-plugin package \
+              /var/lib/pingora-panel/plugins "$1"
+          }
+          audited() {
+            for _ in $(seq 1 30); do
+              if ppanel -o json audit list --type "$1" --actor-id ci \
+                | python3 -c "import json, sys; sys.exit(0 if json.load(sys.stdin)['items'] else 1)"; then
+                return 0
+              fi
+              sleep 1
+            done
+            return 1
+          }
+          # A package is found, but nothing it holds runs until its publisher
+          # is trusted and it is granted what it asks for.
+          key=$(package 1.0.0)
+          ppanel -o json plugin discover \
+            | python3 -c "import json, sys; p = json.load(sys.stdin)['plugins'][0]; assert p['versions'][0]['problems'], p"
+          ppanel plugin key add reference --public-key "$key" --comment "CI publisher"
+          ppanel -o json plugin show reference \
+            | python3 -c "import json, sys; p = json.load(sys.stdin); assert not p['versions'][0]['problems'] and p['state'] == 'disabled', p"
+          ppanel plugin grant reference dns01,secrets,notifications,backups,containers,gateway,secret-references
+          printf 's3cret\n' | ppanel plugin secret set token --from -
+          ppanel plugin configure reference --set token=vault:token \
+            --set 'containers=[{"name": "web", "image": "nginx:1.29"}]'
+          ppanel plugin limit reference --concurrency 4
+          ppanel plugin enable reference
+          ppanel -o json plugin health reference \
+            | python3 -c "import json, sys; h = json.load(sys.stdin); assert h['health']['status'] == 'serving', h"
+          # Alerts notify through the plugin's notification port.
+          ppanel alert channel create chat --plugin reference --plugin-channel '#ops'
+          ppanel alert channel test chat
+          ppanel alert channel delete chat
+          # The plugin's container engine joins the agent's.
+          ppanel -o json container list --engine reference.main \
+            | python3 -c "import json, sys; c = json.load(sys.stdin)['containers']; assert any('web' in n for x in c for n in x['names']), c"
+          # A backup's copy kept by the plugin comes back as a backup.
+          id=$(ppanel -o json backup create --with configuration --wait \
+            | python3 -c "import json, sys; print(json.load(sys.stdin)['id'])")
+          ppanel backup copy "$id" --to reference
+          ppanel -o json backup target ls reference \
+            | python3 -c "import json, sys; assert any(a['name'] == 'pingora-panel-backup-$id.tar.zst' for a in json.load(sys.stdin))"
+          imported=$(ppanel -o json backup target import reference "pingora-panel-backup-$id.tar.zst" \
+            | python3 -c "import json, sys; b = json.load(sys.stdin); assert b['state'] == 'completed', b; print(b['id'])")
+          ppanel backup target rm reference "pingora-panel-backup-$id.tar.zst" --yes
+          ppanel backup rm "$imported" --yes
+          ppanel backup rm "$id" --yes
+          # Another version, signed by another key, replaces the one that runs
+          # and gives way to it again.
+          next=$(package 1.1.0)
+          ppanel plugin key add reference-next --public-key "$next"
+          ppanel plugin upgrade reference 1.1.0
+          ppanel -o json plugin health reference \
+            | python3 -c "import json, sys; h = json.load(sys.stdin); assert h['health']['version'] == '1.1.0', h"
+          ppanel plugin rollback reference
+          ppanel -o json plugin health reference \
+            | python3 -c "import json, sys; h = json.load(sys.stdin); assert h['health']['version'] == '1.0.0', h"
+          for type in plugins.key.trusted plugins.plugin.granted plugins.plugin.configured \
+            plugins.plugin.enabled plugins.plugin.upgraded plugins.plugin.rolled_back \
+            plugins.secret.sealed backup.archive.copied backup.archive.imported; do
+            audited "$type"
+          done
+          ppanel plugin disable reference
+          ppanel -o json plugin list \
+            | python3 -c "import json, sys; assert json.load(sys.stdin)['plugins'][0]['state'] == 'disabled'"
 
       - name: Back up the installation and restore from the backups
         run: |

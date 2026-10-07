@@ -38,7 +38,7 @@ x-pki: &pki
     PINGORA_PANEL_PKI_DIR: /var/lib/pingora-panel/pki
     PINGORA_PANEL_TRUST_DOMAIN: pingora-panel.internal
     PINGORA_PANEL_PKI_CREDENTIALS: >-
-      panel-api=/var/lib/pingora-panel/credentials/panel-api,config-service=/var/lib/pingora-panel/credentials/config-service,automation-service=/var/lib/pingora-panel/credentials/automation-service,observability-service=/var/lib/pingora-panel/credentials/observability-service,audit-service=/var/lib/pingora-panel/credentials/audit-service,gatewayd=/var/lib/pingora-panel/credentials/gatewayd
+      panel-api=/var/lib/pingora-panel/credentials/panel-api,config-service=/var/lib/pingora-panel/credentials/config-service,automation-service=/var/lib/pingora-panel/credentials/automation-service,observability-service=/var/lib/pingora-panel/credentials/observability-service,audit-service=/var/lib/pingora-panel/credentials/audit-service,plugins-service=/var/lib/pingora-panel/credentials/plugins-service,gatewayd=/var/lib/pingora-panel/credentials/gatewayd
   volumes:
     - pki-authority:/var/lib/pingora-panel/pki
     - credentials-panel-api:/var/lib/pingora-panel/credentials/panel-api
@@ -46,6 +46,7 @@ x-pki: &pki
     - credentials-automation-service:/var/lib/pingora-panel/credentials/automation-service
     - credentials-observability-service:/var/lib/pingora-panel/credentials/observability-service
     - credentials-audit-service:/var/lib/pingora-panel/credentials/audit-service
+    - credentials-plugins-service:/var/lib/pingora-panel/credentials/plugins-service
     - credentials-gatewayd:/var/lib/pingora-panel/credentials/gatewayd
 
 services:
@@ -190,8 +191,10 @@ services:
         condition: service_completed_successfully
 
   # The control plane: the API with the configuration, automation,
-  # observability and audit modules in one process. Each module keeps its own
-  # credentials, SQLite file and operational listener on 127.0.0.1:9180-9184.
+  # observability, audit and plugins modules in one process. Each module
+  # keeps its own credentials, SQLite file and operational listener on
+  # 127.0.0.1:9180-9184 and 9186. Signed plugins in the plugins volume run as
+  # its child processes once trusted and enabled.
   control:
     <<: *panel
     command: ["/usr/local/bin/panel-control"]
@@ -210,9 +213,14 @@ services:
       PINGORA_PANEL_BOOTSTRAP_TOKEN_FILE: /run/secrets/bootstrap-token
       # Keys password hashes; replacing it invalidates every password.
       PINGORA_PANEL_PASSWORD_PEPPER_FILE: /run/secrets/password-pepper
-      # Seals certificate keys, identity provider secrets, refresh tokens and
-      # alert channel secrets; losing them loses every sealed value.
+      # Seals certificate keys, identity provider secrets, refresh tokens,
+      # alert channel secrets and plugins' secrets; losing them loses every
+      # sealed value.
       PINGORA_PANEL_MASTER_KEYS_FILE: /run/secrets/master-keys
+      # Signed plugin packages, as <name>/<version>/ directories.
+      PINGORA_PANEL_PLUGINS_DIR: /var/lib/pingora-panel/plugins
+      # gatewayd, or plugin:<name> for the gateway engine a plugin provides.
+      PINGORA_PANEL_GATEWAY_ENGINE: ${PINGORA_PANEL_GATEWAY_ENGINE:-gatewayd}
     secrets: [bootstrap-token, password-pepper, master-keys]
     volumes:
       - control-data:/var/lib/pingora-panel/control
@@ -223,6 +231,8 @@ services:
       - credentials-automation-service:/var/lib/pingora-panel/credentials/automation-service:ro
       - credentials-observability-service:/var/lib/pingora-panel/credentials/observability-service:ro
       - credentials-audit-service:/var/lib/pingora-panel/credentials/audit-service:ro
+      - credentials-plugins-service:/var/lib/pingora-panel/credentials/plugins-service:ro
+      - plugins:/var/lib/pingora-panel/plugins
     healthcheck:
       test: ["CMD", "/usr/local/bin/panel-control", "healthcheck"]
       interval: 5s
@@ -255,4 +265,7 @@ volumes:
   credentials-automation-service:
   credentials-observability-service:
   credentials-audit-service:
+  credentials-plugins-service:
   credentials-gatewayd:
+  # Signed plugin packages the control plane may run.
+  plugins:

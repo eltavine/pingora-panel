@@ -9,7 +9,7 @@
 # only the control plane mounts the agent's socket.
 
 x-pki-credentials: &pki-credentials >-
-  panel-api=/var/lib/pingora-panel/credentials/panel-api,config-service=/var/lib/pingora-panel/credentials/config-service,automation-service=/var/lib/pingora-panel/credentials/automation-service,observability-service=/var/lib/pingora-panel/credentials/observability-service,audit-service=/var/lib/pingora-panel/credentials/audit-service,gatewayd=/var/lib/pingora-panel/credentials/gatewayd,ops-agent=/var/lib/pingora-panel/credentials/ops-agent
+  panel-api=/var/lib/pingora-panel/credentials/panel-api,config-service=/var/lib/pingora-panel/credentials/config-service,automation-service=/var/lib/pingora-panel/credentials/automation-service,observability-service=/var/lib/pingora-panel/credentials/observability-service,audit-service=/var/lib/pingora-panel/credentials/audit-service,plugins-service=/var/lib/pingora-panel/credentials/plugins-service,gatewayd=/var/lib/pingora-panel/credentials/gatewayd,ops-agent=/var/lib/pingora-panel/credentials/ops-agent
 
 x-ops-agent-credentials: &ops-agent-credentials
   /var/lib/pingora-panel/ops-agent/credentials:/var/lib/pingora-panel/credentials/ops-agent
