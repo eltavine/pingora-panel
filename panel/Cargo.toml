@@ -252,7 +252,7 @@ tonic-health = "=0.14.6"
 tonic-prost = "=0.14.6"
 tonic-prost-build = "=0.14.6"
 unicode-normalization = "=0.1.25"
-uuid = { version = "=1.18.1", features = ["serde", "v4", "v7"] }
+uuid = { version = "=1.27.0", features = ["serde", "v4", "v7"] }
 walkdir = "=2.5.0"
 x509-parser = "=0.16.0"
 zeroize = "=1.9.0"
