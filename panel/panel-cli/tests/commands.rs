@@ -2768,6 +2768,25 @@ fn acme_accounts_register_and_certificates_renew() {
         json!({"id": "wild.example.com", "account": "letsencrypt", "names": ["*.example.com"],
                "challenge": "dns-01", "dns_provider": "primary-ns"})
     );
+    run(&[
+        "certificate",
+        "request",
+        "cloud.example.com",
+        "--account",
+        "letsencrypt",
+        "--name",
+        "*.cloud.example.com",
+        "--challenge",
+        "dns-01",
+        "--dns-plugin",
+        "cloud-dns",
+    ]);
+    assert_eq!(
+        stub.requests("POST", "/api/v1/acme-certificates")[2].body,
+        json!({"id": "cloud.example.com", "account": "letsencrypt",
+               "names": ["*.cloud.example.com"], "challenge": "dns-01",
+               "dns_plugin": "cloud-dns"})
+    );
 }
 
 #[test]

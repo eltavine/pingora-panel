@@ -140,6 +140,10 @@ pub(crate) struct AutomaticCertificate {
     challenge: AcmeChallenge,
     /// The DNS provider that publishes DNS-01 records.
     dns_provider: Option<String>,
+    /// The plugin whose DNS-01 port publishes the records in place of a DNS
+    /// provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    dns_plugin: Option<String>,
     state: IssuanceState,
     /// When it is issued next.
     renew_after: DateTime<Utc>,
@@ -186,9 +190,13 @@ pub(crate) struct NewAutomaticCertificate {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     challenge: Option<AcmeChallenge>,
     /// The DNS provider that publishes the records of `dns-01`, which
-    /// requires one; wildcard names need `dns-01`.
+    /// requires one or a plugin; wildcard names need `dns-01`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     dns_provider: Option<String>,
+    /// The plugin whose DNS-01 port publishes the records of `dns-01` in
+    /// place of a DNS provider; it needs the `dns01` grant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    dns_plugin: Option<String>,
 }
 
 /// The kind of a DNS provider.
@@ -363,6 +371,7 @@ impl NewAutomaticCertificate {
                 Some(AcmeChallenge::Dns01) => Challenge::Dns01,
             },
             dns_provider: self.dns_provider,
+            dns_plugin: self.dns_plugin,
         })
     }
 }

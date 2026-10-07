@@ -187,8 +187,12 @@ pub(crate) enum AutomaticCommand {
         #[arg(long, value_enum, default_value_t = Challenge::Http01)]
         challenge: Challenge,
         /// The DNS provider that publishes the records of dns-01.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "dns_plugin")]
         dns_provider: Option<String>,
+        /// The plugin whose DNS-01 port publishes the records of dns-01, in
+        /// place of a DNS provider.
+        #[arg(long)]
+        dns_plugin: Option<String>,
     },
     /// Issues an automatic certificate again now.
     Renew { id: String },
@@ -284,6 +288,7 @@ const AUTOMATIC_DETAIL: &[Column] = &[
     ("DNS PROVIDER", |certificate| {
         text(&certificate["dns_provider"])
     }),
+    ("DNS PLUGIN", |certificate| text(&certificate["dns_plugin"])),
     ("RENEW AFTER", |certificate| {
         text(&certificate["renew_after"])
     }),
@@ -385,6 +390,7 @@ async fn automatic(api: &Api, output: &Output, command: AutomaticCommand) -> Res
             names,
             challenge,
             dns_provider,
+            dns_plugin,
         } => {
             let mut body = json!({
                 "id": id,
@@ -394,6 +400,9 @@ async fn automatic(api: &Api, output: &Output, command: AutomaticCommand) -> Res
             });
             if let Some(provider) = dns_provider {
                 body["dns_provider"] = json!(provider);
+            }
+            if let Some(plugin) = dns_plugin {
+                body["dns_plugin"] = json!(plugin);
             }
             let certificate = api
                 .change(Method::POST, "/api/v1/acme-certificates", Some(&body), None)

@@ -104,9 +104,13 @@ pub struct NewAutomaticCertificate {
     #[serde(default)]
     pub challenge: Challenge,
     /// The DNS provider that publishes the records of DNS-01, which needs
-    /// one.
+    /// one or a plugin.
     #[serde(default)]
     pub dns_provider: Option<String>,
+    /// The plugin whose DNS-01 port publishes the records, in place of a
+    /// DNS provider.
+    #[serde(default)]
+    pub dns_plugin: Option<String>,
 }
 
 /// The kind of a DNS provider.

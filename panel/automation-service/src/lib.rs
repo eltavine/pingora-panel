@@ -52,7 +52,7 @@ use panel_jobs::{
 use panel_platform::{Capability, ServiceName};
 use panel_platform_codec::protocol_range;
 use panel_secrets::{EnvelopeVault, SecretVault};
-use panel_service::Environment;
+use panel_service::{loopback_channel, Environment};
 use panel_sqlite::{EventLog, SchemaMigration};
 use std::{future::Future, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio_util::sync::CancellationToken;
@@ -65,6 +65,12 @@ pub const MODULE: &str = "automation";
 pub const MASTER_KEYS_ENV: &str = "PINGORA_PANEL_MASTER_KEYS";
 /// The gateway's secret directory, where certificates are delivered.
 pub const GATEWAY_SECRET_DIR_ENV: &str = "PINGORA_PANEL_GATEWAY_SECRET_DIR";
+/// `plugins-service`, whose plugins publish DNS-01 records and keep backup
+/// copies.
+pub const PLUGINS_URL_ENV: &str = "PINGORA_PANEL_PLUGINS_URL";
+const DEFAULT_PLUGINS_URL: &str = "http://127.0.0.1:50066";
+const PLUGINS_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const PLUGINS_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const SCHEDULER_INTERVAL: Duration = Duration::from_secs(5);
 /// How often delivered certificates are compared with the inventory.
 const RECONCILE_INTERVAL: Duration = Duration::from_secs(60);
@@ -92,6 +98,11 @@ pub const MIGRATIONS: &[SchemaMigration] = &[
         10_300,
         "backups",
         include_str!("../migrations/10300_backups.sql"),
+    ),
+    SchemaMigration::rebuilding(
+        10_400,
+        "DNS-01 records published by plugins",
+        include_str!("../migrations/10400_dns_plugins.sql"),
     ),
 ];
 
@@ -144,10 +155,22 @@ pub fn process(
         })
         .transpose()?
         .unwrap_or(DEFAULT_KEPT);
+    let plugins_url = env
+        .string(PLUGINS_URL_ENV)?
+        .unwrap_or_else(|| DEFAULT_PLUGINS_URL.to_owned());
     let data_directory = settings.data_directory().to_owned();
     let service = ServiceName::new(SERVICE)?;
     let process =
         ControlPlaneProcess::new(service.clone(), env!("CARGO_PKG_VERSION"), settings, MODULE)?;
+    let plugins = match process.peer_channel(&plugins_url, ServiceName::new("plugins-service")?)? {
+        Some(channel) => channel,
+        None => loopback_channel(
+            "plugins service",
+            plugins_url,
+            PLUGINS_CONNECT_TIMEOUT,
+            PLUGINS_REQUEST_TIMEOUT,
+        )?,
+    };
     let store = Arc::new(SqliteJobStore::new(process.database(), service.clone()));
     let secret_directory = directory
         .as_ref()
@@ -160,7 +183,8 @@ pub fn process(
         events.clone(),
         vault.clone(),
         Arc::new(StandardDnsProviders),
-    );
+    )
+    .with_plugins(plugins);
     let acme = AcmeAutomation::new(
         process.database(),
         events,

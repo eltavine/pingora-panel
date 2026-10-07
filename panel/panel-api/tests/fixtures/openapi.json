@@ -86713,6 +86713,13 @@
             "type": "string",
             "format": "date-time"
           },
+          "dns_plugin": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The plugin whose DNS-01 port publishes the records in place of a DNS\nprovider."
+          },
           "dns_provider": {
             "type": [
               "string",
@@ -93650,12 +93657,19 @@
               }
             ]
           },
+          "dns_plugin": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The plugin whose DNS-01 port publishes the records of `dns-01` in\nplace of a DNS provider; it needs the `dns01` grant."
+          },
           "dns_provider": {
             "type": [
               "string",
               "null"
             ],
-            "description": "The DNS provider that publishes the records of `dns-01`, which\nrequires one; wildcard names need `dns-01`."
+            "description": "The DNS provider that publishes the records of `dns-01`, which\nrequires one or a plugin; wildcard names need `dns-01`."
           },
           "id": {
             "type": "string",

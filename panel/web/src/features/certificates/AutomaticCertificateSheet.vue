@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
 import { useMutation } from '@tanstack/vue-query'
-import { CalendarSync, Globe, Info, Network } from '@lucide/vue'
+import { CalendarSync, Globe, Info, Network, Puzzle, Server } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import type { AcmeAccountView, AcmeChallenge, DnsProviderView } from '@/api/generated'
 import { createAutomaticCertificateMutation } from '@/api/generated/@tanstack/vue-query.gen'
+import ChoiceCards, { type Choice } from '@/components/ChoiceCards.vue'
 import FormField from '@/components/FormField.vue'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -48,8 +49,16 @@ const form = reactive({
   id: '',
   idEdited: false,
   challenge: 'http-01' as AcmeChallenge,
+  publisher: 'provider' as Publisher,
   provider: '',
+  plugin: '',
 })
+type Publisher = 'provider' | 'plugin'
+const publishers: readonly Choice<Publisher>[] = [
+  { value: 'provider', label: t('certificates.dns.byProvider'), icon: Server },
+  { value: 'plugin', label: t('certificates.dns.byPlugin'), icon: Puzzle },
+]
+const PLUGIN_NAME = /^[a-z0-9][a-z0-9-]*$/
 watch(open, (isOpen) => {
   if (isOpen) {
     Object.assign(form, {
@@ -58,7 +67,9 @@ watch(open, (isOpen) => {
       id: '',
       idEdited: false,
       challenge: 'http-01',
+      publisher: 'provider',
       provider: props.providers[0]?.id ?? '',
+      plugin: '',
     })
   }
 })
@@ -90,7 +101,8 @@ const ready = computed(
     namesError.value === null &&
     form.id !== '' &&
     idError.value === null &&
-    (form.challenge === 'http-01' || form.provider !== ''),
+    (form.challenge === 'http-01' ||
+      (form.publisher === 'provider' ? form.provider !== '' : PLUGIN_NAME.test(form.plugin))),
 )
 
 function submit() {
@@ -101,7 +113,11 @@ function submit() {
         account: form.account,
         names: names.value,
         challenge: form.challenge,
-        ...(form.challenge === 'dns-01' ? { dns_provider: form.provider } : {}),
+        ...(form.challenge !== 'dns-01'
+          ? {}
+          : form.publisher === 'plugin'
+            ? { dns_plugin: form.plugin }
+            : { dns_provider: form.provider }),
       },
       headers: plainHeaders(),
     },
@@ -190,8 +206,28 @@ function submit() {
               </TabsList>
             </Tabs>
           </div>
-          <FormField
+          <ChoiceCards
             v-if="form.challenge === 'dns-01'"
+            v-model="form.publisher"
+            :label="t('certificates.dns.publisher')"
+            :choices="publishers"
+          />
+          <FormField
+            v-if="form.challenge === 'dns-01' && form.publisher === 'plugin'"
+            id="automatic-plugin"
+            :label="t('certificates.dns.plugin')"
+            :hint="t('certificates.dns.pluginHint')"
+          >
+            <Input
+              id="automatic-plugin"
+              v-model="form.plugin"
+              class="font-mono text-xs"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </FormField>
+          <FormField
+            v-else-if="form.challenge === 'dns-01'"
             id="automatic-provider"
             :label="t('certificates.dns.provider')"
             :hint="providers.length === 0 ? t('certificates.dns.noneYet') : undefined"

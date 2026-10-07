@@ -408,7 +408,7 @@ dependencies = [
 
 [[package]]
 name = "automation-service"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -432,12 +432,14 @@ dependencies = [
  "panel-secrets",
  "panel-service",
  "panel-sqlite",
+ "plugin-contracts",
  "serde",
  "serde_json",
  "sha2 0.11.0",
  "sqlx",
  "tempfile",
  "tokio",
+ "tokio-stream",
  "tokio-util",
  "tonic",
  "tracing",
@@ -3438,7 +3440,7 @@ dependencies = [
 
 [[package]]
 name = "panel-certificate-api"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "panel-application",

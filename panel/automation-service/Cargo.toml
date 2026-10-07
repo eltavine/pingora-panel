@@ -1,6 +1,6 @@
 [package]
 name = "automation-service"
-version = "0.2.0"
+version = "0.3.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -29,6 +29,7 @@ panel-platform-codec.workspace = true
 panel-sqlite.workspace = true
 panel-secrets.workspace = true
 panel-service.workspace = true
+plugin-contracts.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -47,3 +48,4 @@ async-trait.workspace = true
 panel-acme = { workspace = true, features = ["test-support"] }
 panel-context.workspace = true
 panel-sqlite = { workspace = true, features = ["test-support"] }
+tokio-stream.workspace = true

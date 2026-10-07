@@ -12,10 +12,15 @@ use panel_event_contracts::tls::v1 as event;
 use panel_events::EventData;
 use panel_secrets::{Sealed, SecretVault};
 use panel_sqlite::{storage_error, EventLog, ServiceDatabase, SqliteOutbox};
+use plugin_contracts::{
+    v1::{dns01_provider_client::Dns01ProviderClient, AddTxtRequest, RemoveTxtRequest},
+    Plugin,
+};
 use serde::Serialize;
 use serde_json::Value;
 use sqlx::{sqlite::SqliteRow, Row, SqliteConnection};
 use std::{sync::Arc, time::Duration};
+use tonic::{codegen::InterceptedService, transport::Channel};
 use zeroize::Zeroizing;
 
 const AGGREGATE: &str = "dns_provider";
@@ -138,6 +143,70 @@ fn check_propagation(seconds: u32) -> Result<()> {
     Ok(())
 }
 
+/// Publishes DNS-01 records through a plugin's DNS-01 port (ADR 0044).
+struct PluginDns {
+    client: Dns01ProviderClient<InterceptedService<Channel, Plugin>>,
+    plugin: String,
+}
+
+/// How long a plugin may take to publish or remove a record.
+const PLUGIN_TIMEOUT: Duration = Duration::from_secs(60);
+
+impl PluginDns {
+    fn failed(&self, what: &str, name: &str, status: &tonic::Status) -> PanelError {
+        let message = format!(
+            "plugin {} did not {what} the record at {name}: {}",
+            self.plugin,
+            status.message()
+        );
+        match status.code() {
+            tonic::Code::InvalidArgument => PanelError::validation_failed(message),
+            tonic::Code::DeadlineExceeded => PanelError::deadline_exceeded(message),
+            _ => PanelError::unavailable(message),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl DnsProvider for PluginDns {
+    async fn add_txt(&self, name: &str, value: &str) -> Result<()> {
+        let mut request = tonic::Request::new(AddTxtRequest {
+            name: name.to_owned(),
+            value: value.to_owned(),
+        });
+        request.set_timeout(PLUGIN_TIMEOUT);
+        self.client
+            .clone()
+            .add_txt(request)
+            .await
+            .map(|_| ())
+            .map_err(|status| self.failed("publish", name, &status))
+    }
+
+    async fn remove_txt(&self, name: &str, value: &str) -> Result<()> {
+        let mut request = tonic::Request::new(RemoveTxtRequest {
+            name: name.to_owned(),
+            value: value.to_owned(),
+        });
+        request.set_timeout(PLUGIN_TIMEOUT);
+        self.client
+            .clone()
+            .remove_txt(request)
+            .await
+            .map(|_| ())
+            .map_err(|status| self.failed("remove", name, &status))
+    }
+}
+
+/// Whether `name` can name a plugin: lowercase letters, digits and hyphens.
+pub(crate) fn is_plugin_name(name: &str) -> bool {
+    name.len() <= 64
+        && name.starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
 /// DNS providers in the module's database. Changes write their
 /// `tls.acme.dns_provider.*` events in the same transaction.
 #[derive(Clone)]
@@ -146,6 +215,7 @@ pub struct DnsProviders {
     events: EventLog,
     vault: Option<Arc<dyn SecretVault>>,
     factory: Arc<dyn DnsProviderFactory>,
+    plugins: Option<Channel>,
 }
 
 impl DnsProviders {
@@ -160,7 +230,32 @@ impl DnsProviders {
             events,
             vault,
             factory,
+            plugins: None,
         }
+    }
+
+    /// Publishes the records of certificates that name a plugin through the
+    /// plugins module at `plugins`.
+    pub fn with_plugins(mut self, plugins: Channel) -> Self {
+        self.plugins = Some(plugins);
+        self
+    }
+
+    /// The DNS-01 solver of a plugin's DNS-01 port, which answers once its
+    /// records are served, so nothing more is waited for.
+    pub(crate) fn plugin_solver(&self, plugin: &str) -> Result<Dns01> {
+        let plugins = self.plugins.clone().ok_or_else(|| {
+            PanelError::unavailable("plugins cannot be reached from the automation module")
+        })?;
+        let named = Plugin::named(plugin)
+            .map_err(|status| PanelError::invalid_argument(status.message().to_owned()))?;
+        Ok(Dns01::new(
+            Arc::new(PluginDns {
+                client: Dns01ProviderClient::with_interceptor(plugins, named),
+                plugin: plugin.to_owned(),
+            }),
+            Duration::ZERO,
+        ))
     }
 
     fn vault(&self) -> Result<&dyn SecretVault> {

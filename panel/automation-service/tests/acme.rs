@@ -24,6 +24,13 @@ use panel_jobs::{JobStore, Worker, WorkerOptions};
 use panel_platform::ServiceName;
 use panel_secrets::{EnvelopeVault, SecretVault};
 use panel_sqlite::{testing::TestDatabase, EventLog, ServiceDatabase};
+use plugin_contracts::{
+    v1::{
+        dns01_provider_server::{Dns01Provider, Dns01ProviderServer},
+        AddTxtRequest, AddTxtResponse, RemoveTxtRequest, RemoveTxtResponse,
+    },
+    PLUGIN_METADATA,
+};
 use serde_json::Value;
 use std::{
     sync::{Arc, LazyLock},
@@ -72,6 +79,7 @@ fn automatic(certificate: &str, names: &[&str]) -> NewAutomaticCertificate {
         names: names.iter().map(|name| (*name).to_owned()).collect(),
         challenge: Challenge::Http01,
         dns_provider: None,
+        dns_plugin: None,
     }
 }
 
@@ -89,6 +97,66 @@ impl DnsProviderFactory for PebbleDns {
         StandardDnsProviders.build(kind, settings, secret)?;
         Ok(Arc::new(self.0.clone()))
     }
+}
+
+/// A plugin's DNS-01 port that publishes through Pebble's DNS test server,
+/// answering only calls that name the plugin `dns`.
+#[derive(Clone)]
+struct PluginDns(TestDns);
+
+#[tonic::async_trait]
+impl Dns01Provider for PluginDns {
+    async fn add_txt(
+        &self,
+        request: tonic::Request<AddTxtRequest>,
+    ) -> Result<tonic::Response<AddTxtResponse>, tonic::Status> {
+        named_dns(&request)?;
+        let record = request.into_inner();
+        self.0
+            .add_txt(&record.name, &record.value)
+            .await
+            .map_err(|error| tonic::Status::unavailable(error.message))?;
+        Ok(tonic::Response::new(AddTxtResponse {}))
+    }
+
+    async fn remove_txt(
+        &self,
+        request: tonic::Request<RemoveTxtRequest>,
+    ) -> Result<tonic::Response<RemoveTxtResponse>, tonic::Status> {
+        named_dns(&request)?;
+        let record = request.into_inner();
+        self.0
+            .remove_txt(&record.name, &record.value)
+            .await
+            .map_err(|error| tonic::Status::unavailable(error.message))?;
+        Ok(tonic::Response::new(RemoveTxtResponse {}))
+    }
+}
+
+fn named_dns<T>(request: &tonic::Request<T>) -> Result<(), tonic::Status> {
+    match request.metadata().get(PLUGIN_METADATA) {
+        Some(name) if name == "dns" => Ok(()),
+        _ => Err(tonic::Status::failed_precondition(
+            "no such plugin is enabled",
+        )),
+    }
+}
+
+/// The plugins module's DNS-01 port, served by `plugin` on a free port.
+fn plugins_stand_in(plugin: PluginDns) -> tonic::transport::Channel {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+        tonic::transport::Server::builder()
+            .add_service(Dns01ProviderServer::new(plugin))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+            .await
+    });
+    tonic::transport::Endpoint::from_shared(format!("http://{address}"))
+        .unwrap()
+        .connect_lazy()
 }
 
 fn rfc2136(zone: &str) -> Rfc2136Config {
@@ -127,7 +195,8 @@ fn fixture(service: &ServiceDatabase, pebble: &Pebble, secrets: &std::path::Path
         events.clone(),
         Some(Arc::clone(&vault)),
         Arc::new(PebbleDns(pebble.dns())),
-    );
+    )
+    .with_plugins(plugins_stand_in(PluginDns(pebble.dns())));
     let acme = AcmeAutomation::new(
         service,
         events,
@@ -424,4 +493,85 @@ async fn wildcard_certificates_are_issued_through_a_dns_provider() {
         .unwrap();
     dns.delete(cause(&scope), "zone", Some(2)).await.unwrap();
     assert!(dns.list().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn wildcard_certificates_are_issued_through_a_plugin() {
+    let Some(pebble) = Pebble::from_env() else {
+        return;
+    };
+    let (_database, service) = database().await;
+    let secrets = tempfile::tempdir().unwrap();
+    let Fixture {
+        acme, inventory, ..
+    } = fixture(&service, &pebble, secrets.path());
+    let scope = RequestScope::new(RequestId::new("request-3").unwrap());
+    register(&acme, &pebble, &scope).await;
+
+    let request = |plugin: Option<&str>, provider: Option<&str>| {
+        let mut certificate = automatic("plugged.test", &["plugged.test", "*.plugged.test"]);
+        certificate.challenge = Challenge::Dns01;
+        certificate.dns_plugin = plugin.map(str::to_owned);
+        certificate.dns_provider = provider.map(str::to_owned);
+        certificate
+    };
+    for (refused, code) in [
+        (
+            request(Some("dns"), Some("zone")),
+            ErrorCode::VALIDATION_FAILED,
+        ),
+        (request(Some("No Such"), None), ErrorCode::INVALID_ARGUMENT),
+    ] {
+        let error = acme
+            .create_certificate(cause(&scope), refused)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code.as_str(), code);
+    }
+    let mut http = automatic("http.test", &["http.test"]);
+    http.dns_plugin = Some("dns".into());
+    assert_eq!(
+        acme.create_certificate(cause(&scope), http)
+            .await
+            .unwrap_err()
+            .code
+            .as_str(),
+        ErrorCode::VALIDATION_FAILED
+    );
+
+    let created = acme
+        .create_certificate(cause(&scope), request(Some("dns"), None))
+        .await
+        .unwrap();
+    assert_eq!(created.dns_plugin.as_deref(), Some("dns"));
+    assert_eq!(created.dns_provider, None);
+    acme.issue(&scope, &id("plugged.test")).await.unwrap();
+    let issued = acme.certificate(&id("plugged.test")).await.unwrap();
+    assert_eq!(issued.state, IssuanceState::Issued, "{issued:?}");
+    assert_eq!(
+        inventory
+            .get(&id("plugged.test"))
+            .await
+            .unwrap()
+            .details
+            .names,
+        ["plugged.test", "*.plugged.test"]
+    );
+
+    let mut unknown = request(Some("absent"), None);
+    unknown.id = id("absent.test");
+    unknown.names = vec!["absent.test".into()];
+    acme.create_certificate(cause(&scope), unknown)
+        .await
+        .unwrap();
+    let failed = acme.issue(&scope, &id("absent.test")).await.unwrap_err();
+    assert!(
+        failed.message.contains("plugin absent"),
+        "{}",
+        failed.message
+    );
+    assert_eq!(
+        acme.certificate(&id("absent.test")).await.unwrap().state,
+        IssuanceState::Failing
+    );
 }

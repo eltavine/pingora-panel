@@ -278,3 +278,27 @@ test('wildcard certificates are requested over DNS-01', async ({ page }) => {
     dns_provider: 'primary-ns',
   })
 })
+
+test('DNS-01 records can be published by a plugin', async ({ page }) => {
+  const changes: Request[] = []
+  await mockAcme(page, [account], changes)
+  await mockProviders(page, [provider], [])
+  await page.goto('/certificates?tab=automatic')
+  await page.getByRole('button', { name: 'Request certificate' }).click()
+  const sheet = page.getByRole('dialog')
+  await sheet.getByLabel('Names').fill('*.example.com')
+  await sheet.getByRole('tab', { name: 'DNS-01' }).click()
+  await sheet.getByRole('radio', { name: 'Plugin' }).click()
+  const request = sheet.getByRole('button', { name: 'Request certificate' })
+  await expect(request).toBeDisabled()
+  await sheet.getByLabel('Plugin', { exact: true }).fill('cloud-dns')
+  await request.click()
+  await expect.poll(() => changes.length).toBe(1)
+  expect(changes[0]!.postDataJSON()).toEqual({
+    id: 'example.com',
+    account: 'letsencrypt',
+    names: ['*.example.com'],
+    challenge: 'dns-01',
+    dns_plugin: 'cloud-dns',
+  })
+})

@@ -388,9 +388,38 @@ async fn automatic_certificates_map_onto_the_automation_port() {
                 names: vec!["example.com".into(), "www.example.com".into()],
                 challenge: api::Challenge::Http01,
                 dns_provider: None,
+                dns_plugin: None,
             },
         })
     );
+}
+
+#[tokio::test]
+async fn dns_01_certificates_can_name_a_plugin_to_publish_their_records() {
+    let automation = Arc::new(FakeAutomation::default());
+    let app = app(&automation);
+    let order = json!({
+        "id": "example.com",
+        "account": "letsencrypt",
+        "names": ["*.example.com"],
+        "challenge": "dns-01",
+        "dns_plugin": "cloud-dns",
+    });
+    let (status, _, _) = send(
+        &app,
+        request("POST", "/api/v1/acme-certificates", None, Some(order)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let calls = automation.calls.lock().unwrap();
+    match &calls[0].3 {
+        Some(CertificateCommand::CreateAutomaticCertificate { certificate }) => {
+            assert_eq!(certificate.challenge, api::Challenge::Dns01);
+            assert_eq!(certificate.dns_plugin.as_deref(), Some("cloud-dns"));
+            assert_eq!(certificate.dns_provider, None);
+        }
+        other => panic!("{other:?}"),
+    }
 }
 
 #[tokio::test]

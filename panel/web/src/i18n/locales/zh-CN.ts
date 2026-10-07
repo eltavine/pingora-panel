@@ -1765,6 +1765,11 @@ const zhCN = {
       stopped: '已停止自动续期 {id}',
     },
     dns: {
+      publisher: '发布方',
+      byProvider: 'DNS 服务商',
+      byPlugin: '插件',
+      plugin: '插件',
+      pluginHint: '一个已启用、提供 DNS-01 端口并已获得 dns01 授权的插件；记录生效后它才会应答。',
       add: '添加 DNS 服务商',
       edit: '编辑 DNS 服务商 {id}',
       addDetail:

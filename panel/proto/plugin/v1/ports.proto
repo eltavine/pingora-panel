@@ -5,7 +5,9 @@ package pingora.panel.plugin.v1;
 // Publishes and withdraws the TXT records of ACME's DNS-01 challenges
 // (RFC 8555 §8.4). Port `dns01`.
 service Dns01Provider {
-  // Adds a TXT record beside any records already at the name.
+  // Adds a TXT record beside any records already at the name, answering
+  // once the zone's authoritative servers serve it: the host asks the CA to
+  // look as soon as it answers.
   rpc AddTxt(AddTxtRequest) returns (AddTxtResponse);
   // Removes the TXT record with the value, leaving others; removing one
   // that is not there succeeds.

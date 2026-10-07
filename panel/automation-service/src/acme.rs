@@ -3,7 +3,7 @@
 
 use crate::{
     certificates::{Cause, CertificateInventory},
-    dns::DnsProviders,
+    dns::{is_plugin_name, DnsProviders},
     events::refused,
 };
 use async_trait::async_trait;
@@ -117,6 +117,13 @@ pub struct LastError {
     pub at: DateTime<Utc>,
 }
 
+/// What publishes a DNS-01 certificate's records.
+#[derive(Clone, Copy)]
+enum Publisher<'a> {
+    Provider(&'a str),
+    Plugin(&'a str),
+}
+
 /// A certificate the service obtains from an ACME CA and renews, by the ID
 /// of the inventory certificate it produces.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -127,6 +134,9 @@ pub struct AutomaticCertificate {
     pub challenge: ChallengeKind,
     /// The provider that publishes DNS-01 records.
     pub dns_provider: Option<String>,
+    /// The plugin that publishes DNS-01 records in place of a provider.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dns_plugin: Option<String>,
     pub state: IssuanceState,
     /// When it is issued next.
     pub renew_after: DateTime<Utc>,
@@ -159,7 +169,8 @@ macro_rules! account_columns {
 /// `acme_certificates a` joined with the inventory as `c`.
 macro_rules! automatic_columns {
     () => {
-        "a.certificate_id, a.account_id, a.names, a.challenge, a.dns_provider_id, a.renew_after, \
+        "a.certificate_id, a.account_id, a.names, a.challenge, a.dns_provider_id, a.dns_plugin, \
+         a.renew_after, \
          a.window_explanation_url, a.failures, a.last_error_code, a.last_error_message, \
          a.last_attempt_at, a.version, a.created_at, a.updated_at, \
          (c.source = 'acme') AS issued"
@@ -236,6 +247,7 @@ fn automatic(row: &SqliteRow) -> Result<AutomaticCertificate> {
                 .map_err(storage_error)?,
         )?,
         dns_provider: row.try_get("dns_provider_id").map_err(storage_error)?,
+        dns_plugin: row.try_get("dns_plugin").map_err(storage_error)?,
         state: if failures > 0 {
             IssuanceState::Failing
         } else if issued == Some(true) {
@@ -618,25 +630,41 @@ impl AcmeAutomation {
         };
         let result = async {
             let names = requested_names(&body.names)?;
-            if challenge == ChallengeKind::Http01
-                && names.iter().any(|name| name.starts_with("*."))
+            if challenge == ChallengeKind::Http01 && names.iter().any(|name| name.starts_with("*."))
             {
                 return Err(PanelError::validation_failed(
                     "wildcard names can only be validated with DNS-01",
                 ));
             }
-            match (challenge, body.dns_provider.as_deref()) {
-                (ChallengeKind::Dns01, Some(provider)) => {
-                    self.dns.get(provider).await?;
-                }
-                (ChallengeKind::Dns01, None) => {
+            match (
+                challenge,
+                body.dns_provider.as_deref(),
+                body.dns_plugin.as_deref(),
+            ) {
+                (ChallengeKind::Dns01, Some(_), Some(_)) => {
                     return Err(PanelError::validation_failed(
-                        "DNS-01 needs a DNS provider to publish its records",
+                        "a DNS-01 certificate names a DNS provider or a plugin, not both",
                     ))
                 }
-                (_, Some(_)) => {
+                (ChallengeKind::Dns01, Some(provider), None) => {
+                    self.dns.get(provider).await?;
+                }
+                (ChallengeKind::Dns01, None, Some(plugin)) => {
+                    if !is_plugin_name(plugin) {
+                        return Err(PanelError::invalid_argument(format!(
+                            "{plugin:?} is not a plugin name: lowercase letters, digits and \
+                             hyphens"
+                        )));
+                    }
+                }
+                (ChallengeKind::Dns01, None, None) => {
                     return Err(PanelError::validation_failed(
-                        "only DNS-01 certificates name a DNS provider",
+                        "DNS-01 needs a DNS provider or a plugin to publish its records",
+                    ))
+                }
+                (_, Some(_), _) | (_, _, Some(_)) => {
+                    return Err(PanelError::validation_failed(
+                        "only DNS-01 certificates name a DNS provider or a plugin",
                     ))
                 }
                 _ => {}
@@ -646,14 +674,16 @@ impl AcmeAutomation {
             let mut transaction = self.database.begin().await?;
             let inserted = sqlx::query(
                 "INSERT INTO acme_certificates (certificate_id, account_id, names, challenge, \
-                 dns_provider_id, renew_after, version, created_at, updated_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?6, ?6) ON CONFLICT (certificate_id) DO NOTHING",
+                 dns_provider_id, dns_plugin, renew_after, version, created_at, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?7, ?7) \
+                 ON CONFLICT (certificate_id) DO NOTHING",
             )
             .bind(id.as_str())
             .bind(body.account.as_str())
             .bind(Json(&names))
             .bind(challenge.as_str())
             .bind(&body.dns_provider)
+            .bind(&body.dns_plugin)
             .bind(now)
             .execute(&mut *transaction)
             .await
@@ -674,6 +704,7 @@ impl AcmeAutomation {
                     names: names.clone(),
                     challenge: challenge.as_str().to_owned(),
                     dns_provider: body.dns_provider.clone(),
+                    dns_plugin: body.dns_plugin.clone(),
                 },
             )
             .await?;
@@ -808,7 +839,7 @@ impl AcmeAutomation {
         let Some(row) = sqlx::query(
             "UPDATE acme_certificates SET issuing_until = ?2 WHERE certificate_id = ?1 \
              AND renew_after <= ?3 AND (issuing_until IS NULL OR issuing_until < ?3) \
-             RETURNING account_id, names, challenge, dns_provider_id, failures",
+             RETURNING account_id, names, challenge, dns_provider_id, dns_plugin, failures",
         )
         .bind(id.as_str())
         .bind(now + ISSUING_LEASE)
@@ -830,13 +861,19 @@ impl AcmeAutomation {
                 .map_err(storage_error)?,
         )?;
         let provider: Option<String> = row.try_get("dns_provider_id").map_err(storage_error)?;
+        let plugin: Option<String> = row.try_get("dns_plugin").map_err(storage_error)?;
         let failures: i32 = row.try_get("failures").map_err(storage_error)?;
         let cause = Cause {
             scope,
             principal: &SYSTEM,
         };
+        let publisher = match (provider.as_deref(), plugin.as_deref()) {
+            (Some(provider), _) => Some(Publisher::Provider(provider)),
+            (None, Some(plugin)) => Some(Publisher::Plugin(plugin)),
+            (None, None) => None,
+        };
         match self
-            .order(cause, id, &account, &names, challenge, provider.as_deref())
+            .order(cause, id, &account, &names, challenge, publisher)
             .await
         {
             Ok(renew_after) => {
@@ -901,7 +938,7 @@ impl AcmeAutomation {
         account: &AccountId,
         names: &[String],
         challenge: ChallengeKind,
-        provider: Option<&str>,
+        publisher: Option<Publisher<'_>>,
     ) -> Result<DateTime<Utc>> {
         let (directory, credentials) = self.credentials(account).await?;
         let solver: Box<dyn ChallengeSolver> = match challenge {
@@ -912,15 +949,15 @@ impl AcmeAutomation {
                     )
                 })?))
             }
-            _ => Box::new(
-                self.dns
-                    .solver(provider.ok_or_else(|| {
-                        PanelError::validation_failed(
-                            "DNS-01 needs a DNS provider to publish its records",
-                        )
-                    })?)
-                    .await?,
-            ),
+            _ => Box::new(match publisher {
+                Some(Publisher::Provider(provider)) => self.dns.solver(provider).await?,
+                Some(Publisher::Plugin(plugin)) => self.dns.plugin_solver(plugin)?,
+                None => {
+                    return Err(PanelError::validation_failed(
+                        "DNS-01 needs a DNS provider or a plugin to publish its records",
+                    ))
+                }
+            }),
         };
         let replaces = match self.inventory.chain(id).await? {
             Some((CertificateSource::Acme, chain)) => renewal_identifier(&chain).ok().flatten(),

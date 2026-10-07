@@ -1832,6 +1832,12 @@ const en: Messages = {
       stopped: 'Stopped renewing {id}',
     },
     dns: {
+      publisher: 'Published by',
+      byProvider: 'DNS provider',
+      byPlugin: 'Plugin',
+      plugin: 'Plugin',
+      pluginHint:
+        'An enabled plugin that provides DNS-01 and has been granted dns01; it answers once its records are served.',
       add: 'Add DNS provider',
       edit: 'Edit the DNS provider {id}',
       addDetail:

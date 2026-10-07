@@ -85,6 +85,8 @@ message AcmeCertificateCreated {
   // `http-01` or `dns-01`.
   string challenge = 4;
   optional string dns_provider = 5;
+  // The plugin that publishes DNS-01 records in place of a DNS provider.
+  optional string dns_plugin = 6;
 }
 
 // `tls.acme.certificate.renewal_requested`
