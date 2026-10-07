@@ -16,4 +16,8 @@ export const auditFeature: FeatureModule = {
   navigation: [
     { id: 'audit', title: 'nav.audit', icon: ScrollText, to: '/audit', navigationBar: 60 },
   ],
+  messages: {
+    'zh-CN': () => import('./locales/zh-CN'),
+    en: () => import('./locales/en'),
+  },
 }
