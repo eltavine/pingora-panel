@@ -234,6 +234,19 @@ fn fill(template: &str, exchange: &Exchange) -> String {
                 })
             }),
             RequestVariable::Lua(name) => exchange.variables.get(&name).cloned(),
+            RequestVariable::RequestUri => Some(request.request_uri.clone()),
+            RequestVariable::Args => request.args.clone(),
+            RequestVariable::IsArgs => request
+                .args
+                .as_deref()
+                .filter(|args| !args.is_empty())
+                .map(|_| "?".to_owned()),
+            RequestVariable::Arg(name) => request.args.as_deref().and_then(|args| {
+                args.split('&').find_map(|pair| {
+                    let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+                    key.eq_ignore_ascii_case(&name).then(|| value.to_owned())
+                })
+            }),
             _ => None,
         };
         out.push_str(value.as_deref().unwrap_or_default());
