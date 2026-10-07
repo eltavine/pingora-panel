@@ -551,6 +551,42 @@ jobs:
           ppanel http-policy delete ci-headers
           ppanel config apply
 
+      - name: Rewrite paths and redirect internally
+        run: |
+          ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
+          upstream=$(ppanel -o json upstream list \
+            | python3 -c "import json, sys; print(next(u['id'] for u in json.load(sys.stdin) if u['name'] == 'console'))")
+          site=$(ppanel -o json site create --name ci-rewrites --domain rewrites.test \
+            --respond 200 --body site --rewrite "rewrite ^/old/(.*)\$ /api/v1/\$1 permanent" \
+            | python3 -c "import json, sys; print(json.load(sys.stdin)['id'])")
+          ppanel route add "$site" --name docs --match prefix:/docs --proxy "$upstream" \
+            --rewrite 'set_uri /api/v1/openapi.json'
+          ppanel route add "$site" --name hidden --match prefix:/hidden --respond 204 --internal
+          ppanel route add "$site" --name via --match prefix:/via --internal-redirect /hidden
+          ppanel config apply
+          status() {
+            curl --silent --output /dev/null --write-out '%{http_code}' \
+              --header 'Host: rewrites.test' "http://127.0.0.1:18080$1"
+          }
+          for _ in $(seq 1 30); do
+            if [ "$(status /hidden)" = 404 ]; then
+              break
+            fi
+            sleep 1
+          done
+          # An internal route answers only requests sent to it from inside.
+          test "$(status /hidden)" = 404
+          test "$(status /via)" = 204
+          curl --fail --silent --show-error --header 'Host: rewrites.test' \
+            http://127.0.0.1:18080/docs \
+            | python3 -c "import json, sys; assert 'openapi' in json.load(sys.stdin)"
+          moved=$(curl --silent --show-error --dump-header - --output /dev/null \
+            --header 'Host: rewrites.test' http://127.0.0.1:18080/old/openapi.json)
+          grep -q '^HTTP/1.1 301' <<<"$moved"
+          grep -qi '^location: /api/v1/openapi.json' <<<"$moved"
+          ppanel site delete "$site" --permanent
+          ppanel config apply
+
       - name: Move the configuration between installations as a bundle
         run: |
           ppanel() { docker compose exec -T -e PPANEL_TOKEN control ppanel "$@"; }
