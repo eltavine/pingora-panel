@@ -503,6 +503,25 @@ async fn the_installation_and_unknown_actions_are_refused() {
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+
+    let (status, list) = get(
+        &engines,
+        "/api/v1/container-engines/reference.main/containers",
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "a plugin's engine is named after it: {list}"
+    );
+    for wrong in ["Docker", "a.b.c", "reference.", ".main", "reference.Main"] {
+        let (status, problem) = get(
+            &engines,
+            &format!("/api/v1/container-engines/{wrong}/containers"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{wrong}: {problem}");
+    }
 }
 
 #[tokio::test]

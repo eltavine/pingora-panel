@@ -51,7 +51,24 @@ const DEFAULT_BACKLOG: u32 = 100;
 
 /// An engine's name as a path names it: lowercase letters only.
 pub(crate) fn engine(name: String) -> Result<String, ApiError> {
-    if !name.is_empty() && name.len() <= 32 && name.bytes().all(|byte| byte.is_ascii_lowercase()) {
+    let part = |part: &str| {
+        !part.is_empty()
+            && part.len() <= 64
+            && part
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    };
+    // The agent's engines, such as `docker`, and those plugins provide,
+    // named `<plugin>.<engine>`.
+    let valid = match name.split_once('.') {
+        None => {
+            !name.is_empty()
+                && name.len() <= 32
+                && name.bytes().all(|byte| byte.is_ascii_lowercase())
+        }
+        Some((plugin, engine)) => part(plugin) && part(engine),
+    };
+    if valid {
         Ok(name)
     } else {
         Err(ApiError::new(PanelError::invalid_argument(format!(
