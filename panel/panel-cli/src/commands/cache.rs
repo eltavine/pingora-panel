@@ -90,7 +90,7 @@ pub(crate) enum CacheCommand {
         #[arg(long = "site", value_name = "ID")]
         sites: Vec<String>,
         /// A URL whose stored responses are purged, such as
-        /// https://shop.example/; repeatable.
+        /// `https://shop.example/`; repeatable.
         #[arg(long = "url", value_name = "URL")]
         urls: Vec<String>,
     },
