@@ -227,7 +227,8 @@ A service whose degrading dependency is down keeps serving reads and refuses
 changes with `503 Service Unavailable`, `Retry-After` and a retryable
 `UNAVAILABLE` problem; a failing required dependency makes it unavailable.
 `GET /api/v1/platform/services` lists live instances with their versions,
-protocol revisions and capabilities.
+protocol revisions and capabilities, as `ppanel services` and the console's
+overview do.
 
 ## Configuration, command line and gateway operations
 
@@ -245,7 +246,12 @@ checks the draft or chosen sites, and `POST /api/v1/config/apply` compiles
 the expected draft version and activates it with compare-and-swap.
 `/api/v1/gateway/data-plane`, `/reload`, `/workers` and `/shutdown`, together
 with `/api/v1/upstreams/health` and node `drain`, operate the running
-gateway.
+gateway, and the console's upstreams page draws how live sites and their
+routes reach pools and their nodes, with the health the gateway reports.
+A snapshot can also be published as it is, apart from the draft:
+`/api/v1/gateway/validate`, `/prepare`, `/activate` with compare-and-swap
+on the active hash and `/abort`, with each command's outcome kept under
+`/api/v1/gateway/receipts/{key}` by its idempotency key.
 
 `ppanel` covers the same operations from a shell. It reads the API address
 from `--api` or `PPANEL_API` and authenticates with the session
@@ -259,6 +265,9 @@ ppanel site create --name shop --domain shop.example --proxy <upstream-id>
 ppanel route add <site-id> --match exact:/healthz --respond 204
 ppanel config apply
 ppanel upstream health
+ppanel gateway snapshot prepare snapshot.json
+ppanel gateway snapshot activate <token> --expected-active-hash <hash>
+ppanel gateway receipt <idempotency-key>
 ```
 
 A route takes requests by path and, optionally, by conditions that must
@@ -293,6 +302,14 @@ route canary {
 completion script. Exit codes distinguish usage errors (2), missing resources
 (3), conflicts and failed preconditions (4), rejected changes (5), an
 unavailable service (6) and denied requests (7) from other failures (1).
+
+Every operation of the OpenAPI document is offered by `ppanel` and the
+console alike, unless its meaning belongs to some surfaces only
+([decision](../docs/adr/0045-surface-parity.md)). [`surfaces.json`](surfaces.json)
+names the command and the console route of each operation, or why it has
+fewer; CI checks that it covers the document exactly, `ppanel`'s tests that
+the commands exist, and the console's that the routes exist and call the
+operations, so a new operation fails until both surfaces offer it.
 
 
 ## Configuration language and revisions
@@ -955,6 +972,8 @@ PPANEL_TOKEN=ppat_... ppanel config apply --yes
 ppanel token rotate <token-id>
 ppanel role create deployer --name Deployer --permission config.read --permission config.apply
 ppanel account end-sessions ops
+ppanel session list
+ppanel session end <session-id>
 ppanel logout --everywhere
 ```
 
