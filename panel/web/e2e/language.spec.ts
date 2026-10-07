@@ -57,6 +57,7 @@ const changes = {
     },
   ],
 }
+const plan = { ...changes, digest: 'd'.repeat(64), draft_version: 5, active_revision: 7 }
 
 function revision(id: number, outcome: string, note: string | null = null) {
   return {
@@ -166,7 +167,7 @@ test('configuration files are checked as they are edited, saved and applied', as
         : { valid: true, diagnostics: [] },
     })
   })
-  await page.route('**/api/v1/config/plan', (route) => route.fulfill({ json: changes }))
+  await page.route('**/api/v1/config/plan', (route) => route.fulfill({ json: plan }))
   await page.route('**/api/v1/config/ast', (route) =>
     route.fulfill({
       json: {
@@ -256,8 +257,86 @@ test('configuration files are checked as they are edited, saved and applied', as
   await expect(page.getByText('Dry run passed: draft v5 can be applied')).toBeVisible()
   await sheet.getByLabel('Revision note').fill('Rename the shop')
   await sheet.getByRole('button', { name: 'Apply v5' }).click()
+  const confirmation = page.getByRole('alertdialog', { name: 'Apply v5 to the gateway?' })
+  await expect(confirmation).toContainText('These changes replace revision #7 on the gateway.')
+  await expect(confirmation.getByRole('list', { name: 'What changes' })).toContainText('1 changed')
+  await expect(confirmation).toContainText('1 file differs')
+  await expect(confirmation).toContainText(`Plan ${'d'.repeat(64)}`)
+  expect(applied).toHaveLength(0)
+  await confirmation.getByRole('button', { name: 'Apply v5' }).click()
   await expect(page.getByText('Applied as revision #8')).toBeVisible()
-  expect(applied[0]!.postDataJSON()).toEqual({ expected_version: 5, note: 'Rename the shop' })
+  expect(applied[0]!.postDataJSON()).toEqual({
+    expected_version: 5,
+    expected_plan: 'd'.repeat(64),
+    note: 'Rename the shop',
+  })
+})
+
+test('a plan that changed meanwhile is shown again before it is applied', async ({ page }) => {
+  await mockDraft(page)
+  await page.route('**/api/v1/config/source', (route) =>
+    route.fulfill({
+      json: {
+        language_version: 1,
+        version: 5,
+        etag: '"draft-5"',
+        files: { 'main.conf': MAIN, 'sites/shop.conf': SHOP },
+        diagnostics: [],
+      },
+    }),
+  )
+  await page.route('**/api/v1/config/check', (route) =>
+    route.fulfill({ json: { valid: true, diagnostics: [] } }),
+  )
+  const plans = [plan, { ...plan, digest: 'e'.repeat(64), active_revision: 8 }]
+  let reviewed = 0
+  await page.route('**/api/v1/config/plan', (route) =>
+    route.fulfill({ json: plans[Math.min(reviewed++, 1)] }),
+  )
+  const applied: Request[] = []
+  await page.route('**/api/v1/config/apply', (route) => {
+    applied.push(route.request())
+    if (route.request().postDataJSON().expected_plan === 'd'.repeat(64)) {
+      return route.fulfill({
+        status: 409,
+        contentType: 'application/problem+json',
+        json: {
+          type: 'about:blank',
+          title: 'Conflict',
+          status: 409,
+          code: 'CONFLICT',
+          detail: 'the plan changed since it was reviewed',
+        },
+      })
+    }
+    return route.fulfill({
+      json: {
+        draft: { version: 5, pending: false, applied_version: 5 },
+        revision: 9,
+        revision_id: 13,
+        content_hash: 'c'.repeat(64),
+      },
+    })
+  })
+
+  await page.goto('/config')
+  await page.getByRole('button', { name: 'Review changes' }).click()
+  const sheet = page.getByRole('dialog')
+  await sheet.getByRole('button', { name: 'Apply v5' }).click()
+  const confirmation = page.getByRole('alertdialog', { name: 'Apply v5 to the gateway?' })
+  await expect(confirmation).toContainText('revision #7')
+  await confirmation.getByRole('button', { name: 'Apply v5' }).click()
+  await expect(sheet.getByRole('alert')).toContainText('The plan changed since it was shown')
+  await expectNoHorizontalOverflow(page)
+
+  await sheet.getByRole('button', { name: 'Apply v5' }).click()
+  await expect(confirmation).toContainText('revision #8')
+  await confirmation.getByRole('button', { name: 'Apply v5' }).click()
+  await expect(page.getByText('Applied as revision #9')).toBeVisible()
+  expect(applied.map((request) => request.postDataJSON().expected_plan)).toEqual([
+    'd'.repeat(64),
+    'e'.repeat(64),
+  ])
 })
 
 test('revisions are compared, annotated and rolled back', async ({ page }) => {
