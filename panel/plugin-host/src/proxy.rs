@@ -23,7 +23,7 @@ use tonic::{body::Body, server::NamedService, Status};
 use tower::ServiceExt;
 
 /// The metadata that names the plugin a call is for.
-pub const PLUGIN_HEADER: &str = "x-pingora-panel-plugin";
+pub const PLUGIN_HEADER: &str = plugin_contracts::PLUGIN_METADATA;
 const TIMEOUT_HEADER: &str = "grpc-timeout";
 /// How close to its deadline a failed call counts as one that ran out of
 /// time.

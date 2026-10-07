@@ -38,6 +38,35 @@ pub const PORTS: [&str; 6] = [
 /// The capability to receive the secrets a plugin's settings reference.
 pub const SECRETS_CAPABILITY: &str = "secret-references";
 
+/// The request metadata naming the plugin a port's call is for, which the
+/// host routes by and removes before the call reaches the plugin.
+pub const PLUGIN_METADATA: &str = "x-pingora-panel-plugin";
+
+/// Sends each call of a port's client to one plugin, as a tonic
+/// interceptor: `Dns01ProviderClient::with_interceptor(channel, plugin)`.
+#[derive(Clone, Debug)]
+pub struct Plugin(tonic::metadata::AsciiMetadataValue);
+
+impl Plugin {
+    pub fn named(name: &str) -> Result<Self, tonic::Status> {
+        name.parse()
+            .map(Self)
+            .map_err(|_| tonic::Status::invalid_argument(format!("{name:?} is not a plugin name")))
+    }
+}
+
+impl tonic::service::Interceptor for Plugin {
+    fn call(
+        &mut self,
+        mut request: tonic::Request<()>,
+    ) -> Result<tonic::Request<()>, tonic::Status> {
+        request
+            .metadata_mut()
+            .insert(PLUGIN_METADATA, self.0.clone());
+        Ok(request)
+    }
+}
+
 /// The JSON Schema format of a setting that names a secret.
 pub const SECRET_REFERENCE_FORMAT: &str = "secret-reference";
 
