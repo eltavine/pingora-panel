@@ -26,6 +26,8 @@ on:
       - ".github/policies/openapi-severity-levels.txt"
       - ".github/scripts/check-panel-migrations-append-only.sh"
       - ".github/scripts/check-panel-migration-contractions.py"
+      - ".github/scripts/install-syft.sh"
+      - ".github/scripts/install-cargo-about.sh"
       - ".github/policies/migration-contractions.json"
       - ".github/scripts/check-panel-docs.py"
       - ".github/scripts/check-panel-feature-matrix.py"
@@ -80,6 +82,8 @@ on:
       - ".github/policies/openapi-severity-levels.txt"
       - ".github/scripts/check-panel-migrations-append-only.sh"
       - ".github/scripts/check-panel-migration-contractions.py"
+      - ".github/scripts/install-syft.sh"
+      - ".github/scripts/install-cargo-about.sh"
       - ".github/policies/migration-contractions.json"
       - ".github/scripts/check-panel-docs.py"
       - ".github/scripts/check-panel-feature-matrix.py"
@@ -381,6 +385,48 @@ jobs:
 
       - name: Reject contractions no earlier release prepared for
         run: python3 .github/scripts/check-panel-migration-contractions.py
+
+  rust-sbom:
+    name: Rust dependency SBOM and licenses
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30
+        with:
+          toolchain: 1.98.0
+
+      - name: Install Syft and cargo-about
+        run: |
+          bash .github/scripts/install-syft.sh "$RUNNER_TEMP/evidence-bin"
+          bash .github/scripts/install-cargo-about.sh "$RUNNER_TEMP/evidence-bin"
+          printf '%s\n' "$RUNNER_TEMP/evidence-bin" >> "$GITHUB_PATH"
+
+      - name: Describe the crates in an SBOM
+        run: |
+          evidence="$RUNNER_TEMP/evidence"
+          mkdir -p "$evidence"
+          panel/scripts/supply-chain.sh sbom rust "$evidence/rust.cdx.json"
+          python3 -c "import json, sys; purls = [c.get('purl', '') for c in json.load(open(sys.argv[1]))['components']]; assert sum(p.startswith('pkg:cargo/') for p in purls) > 100, 'the SBOM lists too few crates'" \
+            "$evidence/rust.cdx.json"
+
+      - name: Write the licenses of the crates, refusing any deny.toml does not allow
+        run: |
+          cargo-about generate --locked --manifest-path panel/Cargo.toml \
+            --config panel/about.toml --output-file "$RUNNER_TEMP/evidence/third-party-notices-rust.md" \
+            panel/about.hbs
+
+      - name: Keep the crates' SBOM and licenses
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rust-evidence
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: error
 
   rust-api:
     name: Rust public API compatibility

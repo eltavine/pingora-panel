@@ -7,12 +7,24 @@ on:
       - "panel/web/**"
       - "panel/panel-api/tests/fixtures/openapi.json"
       - "panel/surfaces.json"
+      - "panel/scripts/supply-chain.sh"
+      - ".github/scripts/install-syft.sh"
+      - ".github/scripts/install-grype.sh"
+      - ".github/scripts/check-vulnerability-leases.py"
+      - ".github/scripts/test-vulnerability-leases.py"
+      - ".github/policies/vulnerability-leases.json"
       - ".github/workflows/panel-web.yml"
   pull_request:
     paths:
       - "panel/web/**"
       - "panel/panel-api/tests/fixtures/openapi.json"
       - "panel/surfaces.json"
+      - "panel/scripts/supply-chain.sh"
+      - ".github/scripts/install-syft.sh"
+      - ".github/scripts/install-grype.sh"
+      - ".github/scripts/check-vulnerability-leases.py"
+      - ".github/scripts/test-vulnerability-leases.py"
+      - ".github/policies/vulnerability-leases.json"
       - ".github/workflows/panel-web.yml"
 
 permissions:
@@ -69,6 +81,37 @@ jobs:
 
       - name: Build
         run: pnpm build-only
+
+      - name: Self-test the vulnerability lease guard
+        working-directory: .
+        run: python3 .github/scripts/test-vulnerability-leases.py
+
+      - name: Install the SBOM and vulnerability tools
+        working-directory: .
+        run: |
+          bash .github/scripts/install-syft.sh "$RUNNER_TEMP/evidence-bin"
+          bash .github/scripts/install-grype.sh "$RUNNER_TEMP/evidence-bin"
+          printf '%s\n' "$RUNNER_TEMP/evidence-bin" >> "$GITHUB_PATH"
+
+      - name: Describe the console's packages in an SBOM and scan them
+        working-directory: .
+        run: |
+          evidence="$RUNNER_TEMP/evidence"
+          mkdir -p "$evidence"
+          panel/scripts/supply-chain.sh sbom web "$evidence/web.cdx.json"
+          panel/scripts/supply-chain.sh scan "$evidence/web.cdx.json" "$evidence/web.grype.json"
+          python3 .github/scripts/check-vulnerability-leases.py --scope web "$evidence/web.grype.json"
+
+      - name: Write the licenses of the console's packages
+        run: node scripts/third-party-notices.ts > "$RUNNER_TEMP/evidence/third-party-notices-web.md"
+
+      - name: Keep the console's supply-chain evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: console-evidence
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: error
 
   e2e:
     name: Playwright (desktop and mobile)

@@ -1,0 +1,24 @@
+# Third-party notices
+
+Pingora Panel is licensed under the Apache License 2.0. It is built from the
+third-party software below, each under the license shown with its text.
+
+## Pingora
+
+Pingora Panel includes Pingora (https://github.com/cloudflare/pingora),
+Copyright Cloudflare, Inc., licensed under the Apache License 2.0, whose text
+follows among the Rust crates' licenses. The local changes made to it are
+listed in `UPSTREAM-PATCHES.md` beside this file.
+
+## Rust crates
+
+{{#each licenses}}
+### {{{name}}}
+
+Used by {{#each used_by}}{{{crate.name}}} {{{crate.version}}}{{#unless @last}}, {{/unless}}{{/each}}.
+
+```text
+{{{text}}}
+```
+
+{{/each}}
