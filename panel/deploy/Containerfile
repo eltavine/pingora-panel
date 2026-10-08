@@ -6,7 +6,8 @@
 
 FROM docker.io/library/node:26.9.0-bookworm-slim@sha256:582460f614631b59b824ac6020533b9bf339c7fdf3a6d7db31abb6b4065f0212 AS web
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-RUN corepack enable
+# Node 25 and later no longer ship Corepack, which picks pnpm from package.json.
+RUN npm install --global corepack@0.36.0 && corepack enable
 WORKDIR /panel/web
 COPY panel/web/package.json panel/web/pnpm-lock.yaml panel/web/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
