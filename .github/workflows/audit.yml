@@ -118,7 +118,7 @@ jobs:
       # a stale registry selection cannot retain a vulnerable `time` release.
       - name: Install resolver toolchain
         if: matrix.workspace == 'upstream'
-        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master 2026-08-30
         with:
           toolchain: 1.98.0
 
@@ -163,7 +163,7 @@ jobs:
           persist-credentials: false
 
       - name: Install pinned Rust
-        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master 2026-08-30
         with:
           toolchain: 1.98.0
 
@@ -232,7 +232,7 @@ jobs:
 
       - name: Install resolver toolchain
         if: matrix.generate_lockfile
-        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master 2026-08-30
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master 2026-08-30
         with:
           toolchain: 1.98.0
 
