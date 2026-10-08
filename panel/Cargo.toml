@@ -143,7 +143,7 @@ http-body-util = "=0.1.5"
 httpdate = "=1.0.3"
 humantime = "=2.4.0"
 hyper = { version = "=1.11.1", features = ["client", "http1"] }
-hyper-util = { version = "=0.1.20", features = ["tokio"] }
+hyper-util = { version = "=0.1.21", features = ["tokio"] }
 hyper-rustls = { version = "=0.27.10", default-features = false, features = ["http1", "http2", "ring", "tls12"] }
 hmac = "=0.13.0"
 idna = "=1.1.0"
