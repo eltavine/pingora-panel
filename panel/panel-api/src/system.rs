@@ -26,7 +26,7 @@ use panel_application::{
 use panel_config_api::{ConfigurationQuery, ModelQuery, RevisionQuery};
 use panel_config_model::SiteSummary;
 use panel_errors::{ErrorCode, PanelError, Result as PanelResult};
-use panel_health::{HealthStatus, HealthWatch};
+use panel_health::{HealthStatus, HealthWatch, Impact};
 use panel_identity::{Access as HeldAccess, Permission};
 use panel_plugin_api::{PluginHealth, PluginList, PluginQuery, PluginState};
 use serde::{Deserialize, Serialize};
@@ -447,19 +447,27 @@ fn modules_check(health: Option<&HealthWatch>) -> ReadinessCheck {
         );
     };
     let report = health.current();
-    let with = |wanted: HealthStatus| -> Vec<&str> {
+    // What the control plane serves or changes depends on: a failure holds
+    // an upgrade back; a failure only reported, or a warning, does not.
+    let with = |held_back: bool| -> Vec<&str> {
         report
             .checks()
             .iter()
             .filter(|(_, components)| {
-                components
-                    .iter()
-                    .any(|component| component.status() == wanted)
+                components.iter().any(|component| {
+                    let failed = component.status() == HealthStatus::Fail;
+                    let reported = matches!(component.impact(), Impact::Informational);
+                    if held_back {
+                        failed && !reported
+                    } else {
+                        (failed && reported) || component.status() == HealthStatus::Warn
+                    }
+                })
             })
             .map(|(name, _)| name.as_str())
             .collect()
     };
-    let failing = with(HealthStatus::Fail);
+    let failing = with(true);
     if !failing.is_empty() {
         return ReadinessCheck::new(
             "modules",
@@ -467,7 +475,7 @@ fn modules_check(health: Option<&HealthWatch>) -> ReadinessCheck {
             format!("failing: {}; bring them back first", failing.join(", ")),
         );
     }
-    let warning = with(HealthStatus::Warn);
+    let warning = with(false);
     if !warning.is_empty() {
         return ReadinessCheck::new(
             "modules",
