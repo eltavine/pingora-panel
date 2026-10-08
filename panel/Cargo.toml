@@ -275,7 +275,7 @@ zstd = "=0.14.0"
 zxcvbn = { version = "=3.1.1", default-features = false }
 libc = "=0.2.190"
 minisign-verify = "=0.3.0"
-rustix = "=1.1.4"
+rustix = "=1.1.5"
 semver = "=1.0.28"
 tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "fmt", "json"] }
