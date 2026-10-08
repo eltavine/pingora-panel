@@ -1203,6 +1203,41 @@ async fn api(
             }]
         }))
         .into_response(),
+        ("GET", "/api/v1/system/versions") => Json(json!({
+            "observed_at": "2026-10-08T10:00:00Z", "release": "0.9.0", "commit": "0123abc",
+            "api": "v1", "language": 1, "ir_schema": "1.0.0",
+            "modules": [{
+                "service": "config-service", "instance_id": "i-1", "build_version": "0.3.0",
+                "started_at": "2026-10-08T08:00:00Z", "schema_version": "20",
+                "protocols": [{"name": "pingora.panel.config.v1", "min_revision": 1, "max_revision": 2}],
+                "capabilities": []
+            }],
+            "gateway": {"gateway": "0.9.0", "engine": "0.9.0", "adapter": "pingora"},
+            "deployment": {
+                "changed_at": "2026-10-08T09:00:00Z", "action": "upgrade", "engine": "podman",
+                "project": "pingora-panel", "previous": "0.8.0",
+                "images": [{"service": "control", "image": "ghcr.io/example/pingora-panel:0.9.0",
+                            "digest": "sha256:11"}]
+            },
+            "problems": ["the host agent cannot be read: it does not answer"]
+        }))
+        .into_response(),
+        ("GET", "/api/v1/system/preflight") => Json(json!({
+            "observed_at": "2026-10-08T10:00:00Z", "ready": false,
+            "checks": [
+                {"name": "modules", "state": "pass", "detail": "every module is healthy"},
+                {"name": "gateway", "state": "fail",
+                 "detail": "snapshots prepared and not activated: 1; activate or abort them first"},
+                {"name": "backup", "state": "warn",
+                 "detail": "no backup was taken yet; the upgrade takes one first"}
+            ]
+        }))
+        .into_response(),
+        ("GET", "/api/v1/system/diagnostics") => Json(json!({
+            "generated_at": "2026-10-08T10:00:00Z", "versions": {"release": "0.9.0"},
+            "withheld": ["audit: audit.read"], "problems": []
+        }))
+        .into_response(),
         _ => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -2535,6 +2570,57 @@ fn own_sessions_raw_snapshots_and_services() {
         "{}",
         stdout(&services)
     );
+}
+
+#[test]
+fn versions_preflight_and_the_diagnostic_bundle() {
+    let stub = Stub::start();
+
+    let versions = stub.ppanel(&["system", "versions"]);
+    assert!(versions.status.success(), "{}", stderr(&versions));
+    let printed = stdout(&versions);
+    assert!(printed.contains("0.9.0 (0123abc)"), "{printed}");
+    assert!(
+        printed.contains("upgrade by podman at 2026-10-08T09:00:00Z, from 0.8.0"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains("pingora.panel.config.v1 1..2"),
+        "{printed}"
+    );
+    assert!(
+        printed.contains("ghcr.io/example/pingora-panel:0.9.0"),
+        "{printed}"
+    );
+    assert!(stderr(&versions).contains("the host agent cannot be read"));
+
+    let preflight = stub.ppanel(&["system", "preflight"]);
+    assert_eq!(preflight.status.code(), Some(1));
+    assert!(
+        stdout(&preflight).contains("activate or abort them first"),
+        "{}",
+        stdout(&preflight)
+    );
+    assert!(
+        stderr(&preflight).contains("an upgrade cannot start: gateway failed"),
+        "{}",
+        stderr(&preflight)
+    );
+
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("bundle.json");
+    let written = stub.ppanel(&["system", "diagnostics", "--to", file.to_str().unwrap()]);
+    assert!(written.status.success(), "{}", stderr(&written));
+    let bundle: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(bundle["withheld"], json!(["audit: audit.read"]));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&file).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+    let streamed = stub.ppanel(&["system", "diagnostics", "--to", "-"]);
+    assert!(stdout(&streamed).contains("\"generated_at\""));
 }
 
 /// The digest of the plan the stub reports.

@@ -35,6 +35,7 @@ pub enum Permission {
     BackupsRead,
     BackupsManage,
     PlatformRead,
+    PlatformDiagnose,
     IdentityRead,
     IdentityManage,
     ConfigLua,
@@ -177,7 +178,12 @@ const CATALOG: &[(Permission, &str, &str)] = &[
     (
         Permission::PlatformRead,
         "platform.read",
-        "Read the services of the control plane.",
+        "Read the services of the control plane, the versions of what runs and whether an upgrade can start.",
+    ),
+    (
+        Permission::PlatformDiagnose,
+        "platform.diagnose",
+        "Download the diagnostic bundle: versions, health, recent failures and audit events, with secrets removed.",
     ),
     (
         Permission::IdentityRead,

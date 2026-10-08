@@ -977,6 +977,18 @@
       "cli": "gateway snapshot status",
       "console": "/publish"
     },
+    "system_diagnostics": {
+      "cli": "system diagnostics",
+      "console": "/system"
+    },
+    "system_preflight": {
+      "cli": "system preflight",
+      "console": "/system"
+    },
+    "system_versions": {
+      "cli": "system versions",
+      "console": "/system"
+    },
     "tail_container_logs": {
       "cli": "container logs",
       "console": "/containers"

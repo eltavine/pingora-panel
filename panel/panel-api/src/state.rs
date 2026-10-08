@@ -1,6 +1,7 @@
 use crate::{
     access::{AccessAudit, AccessSettings, Gate},
     sign_in::ProviderAccess,
+    system::SystemInfo,
 };
 use panel_application::{
     AlertsPort, AuditPort, BackupsPort, ComposePort, ContainersPort, EngineResourcesPort,
@@ -43,6 +44,7 @@ pub struct ApiState<U> {
     pub(crate) providers: Option<Arc<ProviderAccess>>,
     pub(crate) workloads: Option<Arc<WorkloadIdentity>>,
     pub(crate) access_audit: Option<Arc<dyn AccessAudit>>,
+    pub(crate) system: Arc<SystemInfo>,
 }
 
 impl<U> Clone for ApiState<U> {
@@ -73,6 +75,7 @@ impl<U> Clone for ApiState<U> {
             providers: self.providers.clone(),
             workloads: self.workloads.clone(),
             access_audit: self.access_audit.clone(),
+            system: Arc::clone(&self.system),
         }
     }
 }
@@ -105,7 +108,14 @@ impl<U> ApiState<U> {
             providers: None,
             workloads: None,
             access_audit: None,
+            system: Arc::new(SystemInfo::default()),
         }
+    }
+
+    /// Reports the release and deployment under `/api/v1/system`.
+    pub fn with_system(mut self, system: SystemInfo) -> Self {
+        self.system = Arc::new(system);
+        self
     }
 
     /// Manages identity providers, and signs people in through them once

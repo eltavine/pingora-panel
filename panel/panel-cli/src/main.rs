@@ -208,6 +208,10 @@ enum Command {
     /// The control-plane modules running now: their versions, protocol
     /// revisions and capabilities.
     Services,
+    /// The versions of what runs, whether an upgrade can start, and the
+    /// diagnostic bundle.
+    #[command(subcommand)]
+    System(commands::system::SystemCommand),
     /// Prints a shell completion script.
     Completion {
         #[arg(value_enum)]
@@ -326,6 +330,7 @@ async fn main() -> ExitCode {
             Command::Plugin(command) => commands::plugins::run(&api, &output, command).await,
             Command::Gateway(command) => commands::gateway::gateway(&api, &output, command).await,
             Command::Services => commands::gateway::services(&api, &output).await,
+            Command::System(command) => commands::system::run(&api, &output, command).await,
             Command::Completion { .. } => Ok(()),
         }
     }

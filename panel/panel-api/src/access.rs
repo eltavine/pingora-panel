@@ -231,6 +231,13 @@ pub(crate) static ROUTES: &[(&str, &str, Access)] = &[
         Requires(GatewayOperate),
     ),
     ("GET", "/api/v1/platform/services", Requires(PlatformRead)),
+    ("GET", "/api/v1/system/versions", Requires(PlatformRead)),
+    ("GET", "/api/v1/system/preflight", Requires(PlatformRead)),
+    (
+        "GET",
+        "/api/v1/system/diagnostics",
+        Requires(PlatformDiagnose),
+    ),
     ("GET", "/api/v1/sites", Requires(ConfigRead)),
     ("POST", "/api/v1/sites", Requires(ConfigWrite)),
     ("GET", "/api/v1/sites/summary", Requires(ConfigRead)),

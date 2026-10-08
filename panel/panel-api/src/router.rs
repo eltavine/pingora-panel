@@ -4,7 +4,7 @@ use crate::{
     alerts, approvals, audit, backups, certificates, compose, configuration as config,
     container_sites, containers, engine_resources, gateway_runtime as runtime, grants, host,
     host_agent, identity, images, language, logs, lua, middleware, plugins, route_test, routes,
-    sign_in, site_files, tls_checks, traffic, workload, ApiConfig, ApiState,
+    sign_in, site_files, system, tls_checks, traffic, workload, ApiConfig, ApiState,
 };
 use axum::{
     extract::DefaultBodyLimit,
@@ -57,6 +57,15 @@ pub fn router_with_config<U: GatewayUseCases + 'static>(
         )
         .route("/api/v1/gateway/receipts/{key}", get(routes::receipt::<U>))
         .route("/api/v1/platform/services", get(routes::services::<U>))
+        .route("/api/v1/system/versions", get(system::system_versions::<U>))
+        .route(
+            "/api/v1/system/preflight",
+            get(system::system_preflight::<U>),
+        )
+        .route(
+            "/api/v1/system/diagnostics",
+            get(system::system_diagnostics::<U>),
+        )
         .route(
             "/api/v1/sites",
             get(config::list_sites::<U>).post(config::create_site::<U>),

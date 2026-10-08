@@ -221,6 +221,9 @@ services:
       PINGORA_PANEL_PLUGINS_DIR: /var/lib/pingora-panel/plugins
       # gatewayd, or plugin:<name> for the gateway engine a plugin provides.
       PINGORA_PANEL_GATEWAY_ENGINE: ${PINGORA_PANEL_GATEWAY_ENGINE:-gatewayd}
+      # The images pingora-panel deployed and how, as the versions report
+      # names them; empty for an installation started by hand.
+      PINGORA_PANEL_DEPLOYMENT: ${PINGORA_PANEL_DEPLOYMENT:-}
     secrets: [bootstrap-token, password-pepper, master-keys]
     volumes:
       - control-data:/var/lib/pingora-panel/control

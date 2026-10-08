@@ -46,6 +46,7 @@ const PERMISSIONS = [
   'containers.inspect',
   'containers.manage',
   'platform.read',
+  'platform.diagnose',
   'identity.read',
   'identity.manage',
   'plugins.read',

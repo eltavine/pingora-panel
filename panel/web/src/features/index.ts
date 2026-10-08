@@ -20,6 +20,7 @@ import { revisionsFeature } from './revisions'
 import { securityFeature } from './security'
 import { siteFilesFeature } from './site-files'
 import { sitesFeature } from './sites'
+import { systemFeature } from './system'
 import { trafficFeature } from './traffic'
 import type { FeatureModule, NavigationGroup } from './types'
 import { upstreamsFeature } from './upstreams'
@@ -49,6 +50,7 @@ export const features: readonly FeatureModule[] = [
   siteFilesFeature,
   backupsFeature,
   pluginsFeature,
+  systemFeature,
   identityFeature,
 ]
 

@@ -14,6 +14,8 @@ mod tests;
     paths(
         crate::routes::validate, crate::routes::prepare, crate::routes::activate, crate::routes::abort,
         crate::routes::status, crate::routes::receipt, crate::routes::services, crate::routes::openapi,
+        crate::system::system_versions, crate::system::system_preflight,
+        crate::system::system_diagnostics,
         crate::configuration::list_sites, crate::configuration::create_site, crate::configuration::site_summary,
         crate::configuration::export_sites, crate::configuration::import_sites, crate::configuration::batch_sites,
         crate::configuration::get_site, crate::configuration::replace_site, crate::configuration::delete_site,
@@ -166,7 +168,8 @@ mod tests;
         (name = "audit", description = "Every change and every refused or failed attempt, in a tamper-evident hash chain"),
         (name = "certificates", description = "Server certificates whose private keys stay sealed with the panel and are delivered to the gateway, and the ACME accounts and automatic certificates that keep some of them issued and renewed"),
         (name = "plugins", description = "Signed external plugins that provide DNS-01, secret, notification, backup target, container engine and gateway engine ports, run as child processes with the capabilities, settings and limits granted them"),
-        (name = "identity", description = "Setup, login sessions, API tokens, accounts, roles and permissions")
+        (name = "identity", description = "Setup, login sessions, API tokens, accounts, roles and permissions"),
+        (name = "system", description = "The versions of what runs, whether an upgrade can start, and a diagnostic bundle with its secrets removed")
     ),
     modifiers(&HttpConventions),
     components(schemas(

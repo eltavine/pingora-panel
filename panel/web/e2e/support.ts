@@ -29,6 +29,7 @@ export const ALL_PERMISSIONS = [
   'backups.read',
   'backups.manage',
   'platform.read',
+  'platform.diagnose',
   'identity.read',
   'identity.manage',
   'plugins.read',

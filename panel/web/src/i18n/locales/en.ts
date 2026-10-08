@@ -24,6 +24,7 @@ const en: Messages = {
     siteFiles: 'Site files',
     backups: 'Backups',
     plugins: 'Plugins',
+    system: 'System',
     revisions: 'Revisions',
     audit: 'Audit log',
     traffic: 'Traffic',

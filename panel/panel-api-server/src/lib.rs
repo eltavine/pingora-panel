@@ -26,7 +26,7 @@ use identity_sqlite::SqliteIdentityStore;
 pub use identity_sqlite::MIGRATIONS;
 use observability_grpc_client::ObservabilityClient;
 use ops_grpc_client::OpsAgentClient;
-use panel_api::{router_with_config, AccessSettings, ApiConfig, ApiState};
+use panel_api::{router_with_config, AccessSettings, ApiConfig, ApiState, SystemInfo};
 use panel_application::{
     ContainersPort, RecordedBackups, RecordedCompose, RecordedContainers, RecordedEngineResources,
     RecordedHostAgent, RecordedImages, RecordedLogs, RecordedRuntime, RecordedSiteFiles,
@@ -96,6 +96,12 @@ pub const PUBLIC_ORIGINS_ENV: &str = "PINGORA_PANEL_PUBLIC_ORIGINS";
 /// base64-encoded 256-bit key per line; the first seals new values. Usually
 /// given as `_FILE`.
 pub const MASTER_KEYS_ENV: &str = "PINGORA_PANEL_MASTER_KEYS";
+/// The release the image was built as, such as `0.9.0`, and its commit;
+/// the image sets both.
+pub const VERSION_ENV: &str = "PINGORA_PANEL_VERSION";
+pub const COMMIT_ENV: &str = "PINGORA_PANEL_COMMIT";
+/// The record, as JSON, of the images the lifecycle tool deployed and how.
+pub const DEPLOYMENT_ENV: &str = "PINGORA_PANEL_DEPLOYMENT";
 /// How long one request to an identity provider may take.
 const PROVIDER_TIMEOUT: Duration = Duration::from_secs(10);
 /// How often sessions due to be rechecked with their provider are looked for.
@@ -184,6 +190,15 @@ pub fn process(
         .secret(MASTER_KEYS_ENV)?
         .map(|keys| EnvelopeVault::from_keys(&keys))
         .transpose()?;
+    let system = SystemInfo::new(
+        env.string(VERSION_ENV)?.unwrap_or_else(|| "dev".into()),
+        env.string(COMMIT_ENV)?.unwrap_or_else(|| "unknown".into()),
+    )
+    .with_data_directory(settings.data_directory());
+    let system = match env.string(DEPLOYMENT_ENV)? {
+        Some(record) => system.with_deployment(record),
+        None => system,
+    };
     // Bound now so a taken address fails the start before anything else runs.
     let listener = PublicListener::bind(HTTP_ADDRESS_ENV, &http_address)?;
     let mut process = ControlPlaneProcess::new(
@@ -328,6 +343,7 @@ pub fn process(
                 .with_alerts(Arc::new(observability))
                 .with_tls_probe(Arc::new(RustlsProbe::default()))
                 .with_identity(identity, access)
+                .with_system(system)
                 .with_operation_log(operations.clone())
                 .with_access_audit(operations)
                 .with_health(running.health())

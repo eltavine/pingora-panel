@@ -25,9 +25,10 @@ upgrades, rolls back, restores and uninstalls, on Docker or Podman, detected
 or named with `--engine`. Podman runs the same Compose file through its
 socket; CI runs every lifecycle step on both engines. What the command needs
 to remember, the engine, the project, the images in use and the previous
-ones, it keeps in `/etc/pingora-panel/installation.env`. Each run writes the
-deployed images, with their digests, to a manifest the control plane mounts
-read-only.
+ones, it keeps in `/etc/pingora-panel/installation.env`. Each run passes a
+record of the change and the deployed images, with their digests, to the
+control plane in `PINGORA_PANEL_DEPLOYMENT`; an installation started by hand
+runs without one.
 
 **Preflight.** `pingora-panel preflight` reads and changes nothing: a Linux
 host with systemd and cgroup v2, an engine and Compose new enough, the ports
@@ -45,7 +46,7 @@ the age of the newest backup and the space left for another.
 and commit, each module's version and protocol revisions, each database's
 schema, the IR and language versions, the gateway's and the engine's
 versions, the agent's when it answers, and the deployed images with their
-digests from the manifest, with when it was read.
+digests from that record, with when it was read.
 
 **Migrations.** A migration may expand a schema at any time; removing or
 renaming a table or column, narrowing a type, or requiring a value of
@@ -85,7 +86,8 @@ answers, the configuration's counts and the latest audit events. Every field
 passes redaction first: values under names of secrets, tokens, passwords,
 keys, cookies or authorization are replaced, and PEM blocks and token-shaped
 values masked wherever they appear. It needs `platform.diagnose`, which only
-Administrators hold.
+Administrators hold, and leaves out, naming them, the sections whose read
+permission the caller lacks.
 
 **Uninstall.** `pingora-panel uninstall` removes the containers, networks
 and the agent's service and keeps the volumes, secrets and host backups, so

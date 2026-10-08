@@ -401,7 +401,7 @@ async fn download(api: &Api, id: &str, to: PathBuf, output: &Output) -> Result<(
 
 /// A file only its owner reads, since an archive holds password hashes and
 /// sealed keys.
-fn private_file(path: &PathBuf) -> Result<File> {
+pub(crate) fn private_file(path: &PathBuf) -> Result<File> {
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
     #[cfg(unix)]

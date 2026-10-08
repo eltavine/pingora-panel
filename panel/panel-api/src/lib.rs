@@ -43,6 +43,7 @@ mod routes;
 mod sign_in;
 mod site_files;
 mod state;
+mod system;
 mod tail;
 mod time;
 mod tls_checks;
@@ -75,6 +76,7 @@ pub use sign_in::{
     PasswordSignInMode, SignInOptionResponse, SignInPolicy,
 };
 pub use state::ApiState;
+pub use system::SystemInfo;
 pub use workload::{
     WorkloadExchange, WorkloadIdentityInput, WorkloadIdentityResponse, WorkloadSession,
 };

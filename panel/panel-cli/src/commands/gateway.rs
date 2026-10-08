@@ -179,26 +179,30 @@ const SERVICES: &[Column] = &[
     ("INSTANCE", |instance| text(&instance["instance_id"])),
     ("VERSION", |instance| text(&instance["build_version"])),
     ("STARTED", |instance| text(&instance["started_at"])),
-    ("PROTOCOLS", |instance| {
-        instance["protocols"]
-            .as_array()
-            .map(|protocols| {
-                protocols
-                    .iter()
-                    .map(|protocol| {
-                        format!(
-                            "{} {}..{}",
-                            text(&protocol["name"]),
-                            text(&protocol["min_revision"]),
-                            text(&protocol["max_revision"])
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            })
-            .unwrap_or_default()
-    }),
+    ("PROTOCOLS", protocols),
 ];
+
+/// The protocol revisions a service instance serves, such as
+/// `pingora.panel 1..4`.
+pub(crate) fn protocols(instance: &Value) -> String {
+    instance["protocols"]
+        .as_array()
+        .map(|protocols| {
+            protocols
+                .iter()
+                .map(|protocol| {
+                    format!(
+                        "{} {}..{}",
+                        text(&protocol["name"]),
+                        text(&protocol["min_revision"]),
+                        text(&protocol["max_revision"])
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default()
+}
 
 fn yes_no(value: &Value) -> String {
     if value.as_bool().unwrap_or_default() {

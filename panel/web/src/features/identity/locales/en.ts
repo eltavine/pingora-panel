@@ -103,7 +103,10 @@ const en: IdentityMessages = {
     containers_inspect:
       "Read containers' logs and details and Compose files, which can hold secrets",
     containers_manage: 'Enable engines and start, stop, remove and prune what runs on them',
-    platform_read: 'Read the services of the control plane',
+    platform_read:
+      'Read the services of the control plane, the versions of what runs and whether an upgrade can start',
+    platform_diagnose:
+      'Download the diagnostic bundle: versions, health, recent failures and audit events, with secrets removed',
     identity_read: 'Read accounts, roles and sessions',
     identity_manage: 'Create, change, disable and unlock accounts, grant roles and end sessions',
     approval_manage:

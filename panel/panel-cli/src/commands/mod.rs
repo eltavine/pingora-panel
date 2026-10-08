@@ -26,6 +26,7 @@ pub mod revisions;
 pub mod routes;
 pub mod security;
 pub mod sites;
+pub mod system;
 pub mod traffic;
 pub mod upstreams;
 pub mod windows;

@@ -24,6 +24,7 @@ const zhCN = {
     siteFiles: '网站文件',
     backups: '备份',
     plugins: '插件',
+    system: '系统',
     revisions: '配置版本',
     audit: '审计日志',
     traffic: '流量',

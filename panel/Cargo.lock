@@ -3314,6 +3314,8 @@ dependencies = [
  "panel-plugin-api",
  "panel-routing",
  "panel-schedule",
+ "regex",
+ "rustix",
  "rustls-pki-types",
  "serde",
  "serde_json",

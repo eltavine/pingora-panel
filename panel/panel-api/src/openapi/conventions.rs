@@ -31,6 +31,7 @@ const EXTENSIBLE_ENUMS: &[&str] = &[
     "KeyAlgorithm",
     "PasswordSignInMode",
     "PluginState",
+    "ReadinessState",
     "TsigAlgorithm",
 ];
 
