@@ -273,7 +273,7 @@ x509-parser = "=0.16.0"
 zeroize = "=1.9.0"
 zstd = "=0.14.0"
 zxcvbn = { version = "=3.1.1", default-features = false }
-libc = "=0.2.189"
+libc = "=0.2.190"
 minisign-verify = "=0.3.0"
 rustix = "=1.1.4"
 semver = "=1.0.28"
