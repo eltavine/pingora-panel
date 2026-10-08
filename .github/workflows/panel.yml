@@ -25,6 +25,8 @@ on:
       - ".github/scripts/check-panel-openapi-breaking.sh"
       - ".github/policies/openapi-severity-levels.txt"
       - ".github/scripts/check-panel-migrations-append-only.sh"
+      - ".github/scripts/check-panel-migration-contractions.py"
+      - ".github/policies/migration-contractions.json"
       - ".github/scripts/check-panel-docs.py"
       - ".github/scripts/check-panel-feature-matrix.py"
       - ".github/scripts/test-panel-feature-matrix.py"
@@ -45,6 +47,7 @@ on:
       - ".github/scripts/test-panel-proto-breaking.sh"
       - ".github/scripts/test-panel-openapi-breaking.sh"
       - ".github/scripts/test-panel-migrations-append-only.sh"
+      - ".github/scripts/test-panel-migration-contractions.py"
       - ".github/scripts/test-panel-docs.py"
       - ".github/scripts/test-panel-rust-api-breaking.sh"
       - "README.md"
@@ -76,6 +79,8 @@ on:
       - ".github/scripts/check-panel-openapi-breaking.sh"
       - ".github/policies/openapi-severity-levels.txt"
       - ".github/scripts/check-panel-migrations-append-only.sh"
+      - ".github/scripts/check-panel-migration-contractions.py"
+      - ".github/policies/migration-contractions.json"
       - ".github/scripts/check-panel-docs.py"
       - ".github/scripts/check-panel-feature-matrix.py"
       - ".github/scripts/test-panel-feature-matrix.py"
@@ -96,6 +101,7 @@ on:
       - ".github/scripts/test-panel-proto-breaking.sh"
       - ".github/scripts/test-panel-openapi-breaking.sh"
       - ".github/scripts/test-panel-migrations-append-only.sh"
+      - ".github/scripts/test-panel-migration-contractions.py"
       - ".github/scripts/test-panel-docs.py"
       - ".github/scripts/test-panel-rust-api-breaking.sh"
       - "README.md"
@@ -369,6 +375,12 @@ jobs:
         env:
           BASELINE_REF: ${{ steps.migration-baseline.outputs.ref }}
         run: bash .github/scripts/check-panel-migrations-append-only.sh "$BASELINE_REF"
+
+      - name: Self-test migration contraction guard
+        run: python3 .github/scripts/test-panel-migration-contractions.py
+
+      - name: Reject contractions no earlier release prepared for
+        run: python3 .github/scripts/check-panel-migration-contractions.py
 
   rust-api:
     name: Rust public API compatibility
