@@ -78,7 +78,7 @@ jobs:
       - name: Cache OpenResty
         if: matrix.build_openresty
         id: cache-openresty
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.local/openresty
           key: openresty-${{ runner.os }}-${{ runner.arch }}-${{ env.OPENRESTY_VERSION }}-${{ env.OPENRESTY_SHA256 }}-v1
