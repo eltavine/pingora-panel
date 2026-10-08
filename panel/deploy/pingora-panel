@@ -682,10 +682,14 @@ command_uninstall() {
   if [[ $purge -eq 1 && $yes -ne 1 ]]; then
     die "--purge removes every database, certificate, backup and secret; pass --yes as well"
   fi
+  local image=${state[IMAGE]:-$default_image}
   if [[ $purge -eq 1 ]]; then
-    compose down --volumes --rmi all --remove-orphans
+    PINGORA_PANEL_IMAGE=$image compose down --volumes --rmi all --remove-orphans
+    if [[ -n ${state[PREVIOUS_IMAGE]:-} ]]; then
+      "$engine" image rm "${state[PREVIOUS_IMAGE]}" >/dev/null 2>&1 || true
+    fi
   else
-    compose down --remove-orphans
+    PINGORA_PANEL_IMAGE=$image compose down --remove-orphans
   fi
   [[ -z ${state[AGENT]:-} ]] || remove_agent
   if [[ $purge -eq 1 ]]; then

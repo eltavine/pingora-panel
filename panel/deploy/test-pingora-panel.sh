@@ -67,7 +67,8 @@ case "$1 ${2:-}" in
         ;;
       config) printf '%s\n' nats bootstrap pki-init pki gatewayd control ;;
       stop) printf 'stop %s\n' "$2" >>"$fake/switches" ;;
-      create | down) ;;
+      down) printf 'down %s\n' "$(image_name "${PINGORA_PANEL_IMAGE:-none}")" >>"$fake/switches" ;;
+      create) ;;
     esac
     exit 0
     ;;
@@ -203,8 +204,10 @@ expect_state IMAGE localhost/pingora-panel:new
 up new all
 verify new"*"--revision 7 --hash sha256:aa"* ]] || fail "the restore: $(switches)"
 
+: >"$work/fake/switches"
 tool uninstall --purge --yes >/dev/null
 grep -q -- 'down --volumes --rmi all --remove-orphans' "$work/fake/calls" || fail "purge kept the volumes"
+[[ $(switches) == "down new" ]] || fail "purge removed the images of $(switches)"
 [[ ! -e $work/secrets && ! -e $PINGORA_PANEL_STATE_DIR && ! -e $work/backups ]] ||
   fail "purge left secrets, state or backups"
 printf 'pingora-panel lifecycle verified against a fake engine\n'
