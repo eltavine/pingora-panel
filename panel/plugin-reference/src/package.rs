@@ -12,7 +12,7 @@ use ring::{
     rand::{SecureRandom, SystemRandom},
     signature::{Ed25519KeyPair, KeyPair},
 };
-use sha2::{Digest as _, Sha256};
+use sha2::Sha256;
 use std::path::{Path, PathBuf};
 
 pub const NAME: &str = "reference";
