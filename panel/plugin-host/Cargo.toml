@@ -32,6 +32,6 @@ tracing.workspace = true
 rustix = { workspace = true, features = ["process"] }
 
 [dev-dependencies]
-blake2 = "=0.10.6"
+blake2 = "=0.11.0"
 ring.workspace = true
 tempfile.workspace = true
