@@ -337,8 +337,8 @@ test('upstream nodes show live health and can be drained', async ({ page }) => {
   await expectNoHorizontalOverflow(page)
 })
 
-const API_ID = '8f2a1d4b-6c3e-4d9f-a071-2b3c4d5e6f70'
-const API_NODE_ID = '4d3c2b1a-9f8e-4d7c-b6a5-1f2e3d4c5b6a'
+const ROUTED_ID = '8f2a1d4b-6c3e-4d9f-a071-2b3c4d5e6f70'
+const ROUTED_NODE_ID = '4d3c2b1a-9f8e-4d7c-b6a5-1f2e3d4c5b6a'
 
 /** Shop sends /api to its own pool and everything else to shop-backend. */
 async function mockTopology(page: Page) {
@@ -356,7 +356,7 @@ async function mockTopology(page: Page) {
                 priority: 1,
                 name: 'api',
                 match: { kind: 'prefix', path: '/api' },
-                action: { type: 'proxy', upstream_id: API_ID },
+                action: { type: 'proxy', upstream_id: ROUTED_ID },
               },
             ],
           },
@@ -372,9 +372,9 @@ async function mockTopology(page: Page) {
         upstream,
         {
           ...upstream,
-          id: API_ID,
+          id: ROUTED_ID,
           name: 'api-backend',
-          nodes: [{ id: API_NODE_ID, host: '10.0.0.21', port: 9000, enabled: true }],
+          nodes: [{ id: ROUTED_NODE_ID, host: '10.0.0.21', port: 9000, enabled: true }],
           health_check: null,
         },
       ],

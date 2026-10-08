@@ -5,7 +5,7 @@ import { topology } from '../topology'
 const SHOP = '0b9d6c52-2f47-4d0e-9a1b-6f3c2d1e0a01'
 const BLOG = '1c8e7d63-3058-4e1f-8b2c-7a4d3e2f1b02'
 const APP = '7e1f0c3a-5b2d-4c8e-9f60-1a2b3c4d5e6f'
-const API = '8f2a1d4b-6c3e-4d9f-a071-2b3c4d5e6f70'
+const ROUTED = '8f2a1d4b-6c3e-4d9f-a071-2b3c4d5e6f70'
 const IDLE = '9a3b2e5c-7d4f-4ea0-b182-3c4d5e6f7081'
 
 function site(id: string, name: string, extra: Partial<SiteView>): SiteView {
@@ -48,7 +48,7 @@ describe('upstream topology', () => {
       { id: 'a1', host: '10.0.0.11', port: 8080, enabled: true },
       { id: 'a2', host: '::1', port: 8080, enabled: true, backup: true },
     ] as UpstreamView['nodes']),
-    pool(API, 'api', [
+    pool(ROUTED, 'api', [
       { id: 'p1', host: '10.0.0.21', port: 9000, enabled: false },
     ] as UpstreamView['nodes']),
     pool(IDLE, 'idle', []),
@@ -58,20 +58,20 @@ describe('upstream topology', () => {
     const sites = [
       site(SHOP, 'shop', {
         action: { type: 'proxy', upstream_id: APP },
-        routes: [route('r1', API), route('r2', API, false)],
+        routes: [route('r1', ROUTED), route('r2', ROUTED, false)],
       }),
       site(BLOG, 'blog', {}),
     ]
     const graph = topology(sites, upstreams)
     expect(graph.sites.map((item) => [item.name, item.pool])).toEqual([['shop', APP]])
-    expect(graph.routes.map((item) => [item.id, item.pool])).toEqual([['r1', API]])
+    expect(graph.routes.map((item) => [item.id, item.pool])).toEqual([['r1', ROUTED]])
     expect(graph.edges).toEqual([
       [`site:${SHOP}`, `pool:${APP}`],
       [`site:${SHOP}`, 'route:r1'],
-      ['route:r1', `pool:${API}`],
+      ['route:r1', `pool:${ROUTED}`],
       [`pool:${APP}`, `node:${APP}/a1`],
       [`pool:${APP}`, `node:${APP}/a2`],
-      [`pool:${API}`, `node:${API}/p1`],
+      [`pool:${ROUTED}`, `node:${ROUTED}/p1`],
     ])
     expect(graph.pools.map((item) => [item.name, item.used])).toEqual([
       ['app', true],

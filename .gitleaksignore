@@ -45,3 +45,7 @@ d2a7049383badcbc28c8ff954b788ad39b6eae93:panel/panel-lua/tests/runtime.rs:generi
 # Redaction tests that held only the armor line of a PEM private key.
 760596ba739e4250336dcaf233bd633aa62b46d8:panel/panel-certificate-api/src/operations.rs:private-key:99
 760596ba739e4250336dcaf233bd633aa62b46d8:panel/panel-certificate-api/src/secret.rs:private-key:39
+
+# Fixed UUIDs in the console's topology tests, under constant names that held API.
+320014843375a0ccefd6d92817dd1b56f83a4e4c:panel/web/e2e/configuration.spec.ts:generic-api-key:328
+320014843375a0ccefd6d92817dd1b56f83a4e4c:panel/web/src/features/upstreams/__tests__/topology.spec.ts:generic-api-key:8

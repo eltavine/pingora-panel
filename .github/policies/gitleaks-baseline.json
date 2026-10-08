@@ -79,6 +79,15 @@
         "760596ba739e4250336dcaf233bd633aa62b46d8:panel/panel-certificate-api/src/operations.rs:private-key:99",
         "760596ba739e4250336dcaf233bd633aa62b46d8:panel/panel-certificate-api/src/secret.rs:private-key:39"
       ]
+    },
+    {
+      "owner": "pingora-panel-platform",
+      "reason": "False positives: fixed UUIDs of an upstream pool and its node in the console's topology tests, under constant names that held API; the generic-api-key rule reads them as keys. They name test fixtures and grant nothing.",
+      "expires_on": "2027-03-01",
+      "fingerprints": [
+        "320014843375a0ccefd6d92817dd1b56f83a4e4c:panel/web/e2e/configuration.spec.ts:generic-api-key:328",
+        "320014843375a0ccefd6d92817dd1b56f83a4e4c:panel/web/src/features/upstreams/__tests__/topology.spec.ts:generic-api-key:8"
+      ]
     }
   ]
 }
