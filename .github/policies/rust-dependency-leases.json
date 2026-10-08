@@ -295,6 +295,16 @@
           "expires_on": "2027-03-01"
         },
         {
+          "crate": "tokio-tungstenite",
+          "versions": [
+            "0.29.0",
+            "0.30.0"
+          ],
+          "owner": "pingora-panel-platform",
+          "reason": "axum 0.8.9, its latest release, serves WebSockets with tokio-tungstenite 0.29, while ppanel follows logs and the tests open WebSockets with 0.30; no binary but the tests links both. 0.29.0 via axum; 0.30.0 via the workspace.",
+          "expires_on": "2027-03-01"
+        },
+        {
           "crate": "tower-http",
           "versions": [
             "0.6.11",
@@ -302,6 +312,16 @@
           ],
           "owner": "pingora-panel-platform",
           "reason": "Inherited transitive duplicate with no unified release line: 0.6.11 via reqwest in the ppanel command line; 0.7.1 via panel-api and panel-api-server.",
+          "expires_on": "2027-03-01"
+        },
+        {
+          "crate": "tungstenite",
+          "versions": [
+            "0.29.0",
+            "0.30.0"
+          ],
+          "owner": "pingora-panel-platform",
+          "reason": "Follows tokio-tungstenite: 0.29.0 via tokio-tungstenite 0.29 in axum 0.8.9, its latest release; 0.30.0 via tokio-tungstenite 0.30 in ppanel and the tests.",
           "expires_on": "2027-03-01"
         },
         {
