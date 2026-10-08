@@ -142,6 +142,65 @@ async fn check(copy: &Path, module: &str, migrations: &[SchemaMigration]) -> Res
     }
 }
 
+/// Puts the sites' directory `archive` holds in place of what `sites`
+/// holds, keeping that in `sites/.replaced-STAMP`; nothing when the archive
+/// holds no sites.
+pub fn restore_sites(archive: &Path, sites: &Path) -> Result<Option<panel_backup::Extraction>> {
+    let manifest = panel_backup::manifest(archive)?;
+    if !manifest
+        .directories
+        .iter()
+        .any(|directory| directory == "sites")
+    {
+        return Ok(None);
+    }
+    let stamp = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+    let staging = sites.join(format!(".{RESTORING}-{stamp}"));
+    let extraction = panel_backup::extract(archive, "sites", &staging)?;
+    let kept = sites.join(format!(".replaced-{stamp}"));
+    let moved = (|| {
+        for entry in fs::read_dir(sites)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with(".replaced-") || name.starts_with(&format!(".{RESTORING}-")) {
+                continue;
+            }
+            fs::create_dir_all(&kept)?;
+            fs::rename(entry.path(), kept.join(entry.file_name()))?;
+        }
+        for entry in fs::read_dir(&staging)? {
+            let entry = entry?;
+            fs::rename(entry.path(), sites.join(entry.file_name()))?;
+        }
+        fs::remove_dir(&staging)
+    })();
+    moved.map_err(failure)?;
+    Ok(Some(extraction))
+}
+
+/// The revision the configuration's database wants the gateway to run,
+/// with the hash of its snapshot; none before anything was applied.
+pub async fn desired(data_directory: &Path) -> Result<Option<(u64, String)>> {
+    let path = data_directory.join(format!("{}.db", config_service::MODULE));
+    let options = SqliteConnectOptions::new().filename(&path).read_only(true);
+    let mut connection = SqliteConnection::connect_with(&options)
+        .await
+        .map_err(|error| damaged(config_service::MODULE, error))?;
+    let row: Option<(i64, String)> = sqlx::query_as(
+        "SELECT p.revision_id, p.content_hash FROM desired_configuration d \
+         JOIN prepared_deployments p ON p.prepare_token = d.prepare_token",
+    )
+    .fetch_optional(&mut connection)
+    .await
+    .map_err(|error| damaged(config_service::MODULE, error))?;
+    connection
+        .close()
+        .await
+        .map_err(|error| damaged(config_service::MODULE, error))?;
+    Ok(row.map(|(revision, hash)| (u64::try_from(revision).unwrap_or_default(), hash)))
+}
+
 /// Fails when any of `addresses` answers: the control plane is running.
 pub fn stopped(addresses: impl IntoIterator<Item = SocketAddr>) -> Result<()> {
     for address in addresses {

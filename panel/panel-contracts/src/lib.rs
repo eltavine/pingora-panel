@@ -145,6 +145,19 @@ pub const PLUGINS_V1: ProtocolRevisions = ProtocolRevisions {
     max: 1,
 };
 
+/// Every protocol package this build speaks, so that a release can be
+/// checked against the one it replaces.
+pub const PROTOCOLS: &[ProtocolRevisions] = &[
+    AUDIT_V1,
+    AUTOMATION_V1,
+    CONFIG_V1,
+    GATEWAY_V1,
+    OBSERVABILITY_V1,
+    OPS_V1,
+    PLATFORM_V1,
+    PLUGINS_V1,
+];
+
 impl From<&panel_errors::Diagnostic> for common::v1::Diagnostic {
     fn from(value: &panel_errors::Diagnostic) -> Self {
         let severity = match value.severity {
@@ -279,7 +292,7 @@ mod tests {
 
     #[test]
     fn protocol_revisions_name_generated_packages() {
-        for (revisions, service) in [
+        let named = [
             (AUDIT_V1, audit::v1::audit_query_server::SERVICE_NAME),
             (
                 AUTOMATION_V1,
@@ -294,10 +307,15 @@ mod tests {
             (OPS_V1, ops::v1::agent_server::SERVICE_NAME),
             (PLATFORM_V1, platform::v1::service_info_server::SERVICE_NAME),
             (PLUGINS_V1, plugins::v1::plugins_server::SERVICE_NAME),
-        ] {
+        ];
+        for (revisions, service) in named {
             assert_eq!(service.rsplit_once('.').unwrap().0, revisions.package);
             assert!(1 <= revisions.min && revisions.min <= revisions.max);
         }
+        assert_eq!(
+            PROTOCOLS.to_vec(),
+            named.map(|(revisions, _)| revisions).to_vec()
+        );
     }
 
     #[test]

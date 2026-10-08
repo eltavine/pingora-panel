@@ -15,10 +15,13 @@ config-service.workspace = true
 observability-service.workspace = true
 panel-api-server.workspace = true
 panel-backup.workspace = true
+panel-contracts.workspace = true
 panel-control-runtime.workspace = true
 panel-errors.workspace = true
 panel-sqlite.workspace = true
 plugins-service.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 sqlx.workspace = true
 tokio.workspace = true
 

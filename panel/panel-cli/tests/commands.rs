@@ -979,6 +979,12 @@ async fn api(
             Json(json!({"username": "ops", "disabled": body["disabled"]})).into_response()
         }
         ("PUT", "/api/v1/tls-profiles/edge") => Json(body.clone()).into_response(),
+        ("GET", "/api/v1/tls-profiles") => Json(json!([
+            {"id": "edge", "certificate_id": "example.com", "etag": "\"1\""},
+            {"id": "secrets", "certificate_id": null, "etag": "\"1\""},
+            {"id": "legacy", "certificate_id": "old.example.com", "etag": "\"1\""}
+        ]))
+        .into_response(),
         ("PUT", "/api/v1/security-policies/office") => Json(body.clone()).into_response(),
         ("PUT", "/api/v1/http-policies/headers") => Json(body.clone()).into_response(),
         ("GET", "/api/v1/http-policies") => Json(json!([
@@ -2621,6 +2627,53 @@ fn versions_preflight_and_the_diagnostic_bundle() {
     }
     let streamed = stub.ppanel(&["system", "diagnostics", "--to", "-"]);
     assert!(stdout(&streamed).contains("\"generated_at\""));
+
+    let verified = stub.ppanel(&[
+        "system",
+        "verify",
+        "--revision",
+        "9",
+        "--hash",
+        "sha256:cc",
+        "--wait",
+        "0",
+        "-o",
+        "json",
+    ]);
+    assert_eq!(verified.status.code(), Some(1));
+    let report: Value = serde_json::from_str(&stdout(&verified)).unwrap();
+    let states: Vec<(&str, &str)> = report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|check| {
+            (
+                check["name"].as_str().unwrap(),
+                check["state"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        states,
+        [
+            ("gateway", "pass"),
+            ("certificates", "fail"),
+            ("audit", "pass"),
+            ("modules", "fail")
+        ],
+        "{report}"
+    );
+    assert_eq!(
+        report["checks"][1]["detail"],
+        "not kept: legacy names old.example.com"
+    );
+    let elsewhere = stub.ppanel(&["system", "verify", "--revision", "8", "--wait", "0"]);
+    assert!(
+        stdout(&elsewhere).contains("ready: true, revision 9"),
+        "{}",
+        stdout(&elsewhere)
+    );
+    assert!(stderr(&elsewhere).contains("does not verify"));
 }
 
 /// The digest of the plan the stub reports.

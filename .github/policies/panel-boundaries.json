@@ -762,6 +762,7 @@
         "observability-service",
         "panel-api-server",
         "panel-backup",
+        "panel-contracts",
         "panel-control-runtime",
         "panel-errors",
         "panel-health",

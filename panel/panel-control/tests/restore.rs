@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use chrono::Utc;
-use panel_control::restore::{restore, stopped, Installed};
+use panel_control::restore::{desired, restore, restore_sites, stopped, Installed};
 use panel_sqlite::SchemaMigration;
 use sqlx::{sqlite::SqliteConnectOptions, Connection, SqliteConnection};
 use std::{fs, path::Path};
@@ -148,6 +148,93 @@ async fn newer_damaged_or_unknown_databases_replace_nothing() {
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
     assert_eq!(names, ["config.db"], "nothing is left behind");
+}
+
+#[test]
+fn sites_replace_what_the_directory_holds_and_keep_it() {
+    let staging = tempfile::tempdir().unwrap();
+    fs::create_dir_all(staging.path().join("sites/shop/css")).unwrap();
+    fs::create_dir_all(staging.path().join("sites/empty")).unwrap();
+    fs::write(staging.path().join("sites/shop/index.html"), b"backed up").unwrap();
+    fs::write(staging.path().join("sites/shop/css/site.css"), b"body{}").unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let backup = out.path().join("backup.tar.zst");
+    panel_backup::write(&backup, staging.path(), "1.2.3", &["sites"], Utc::now()).unwrap();
+    let sites = tempfile::tempdir().unwrap();
+    fs::create_dir(sites.path().join("blog")).unwrap();
+    fs::write(sites.path().join("blog/index.html"), b"before").unwrap();
+
+    let extraction = restore_sites(&backup, sites.path()).unwrap().unwrap();
+    assert_eq!(extraction.files, 2);
+    assert_eq!(
+        fs::read(sites.path().join("shop/index.html")).unwrap(),
+        b"backed up"
+    );
+    assert!(sites.path().join("empty").is_dir());
+    let mut names: Vec<String> = fs::read_dir(sites.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(names.len(), 3, "{names:?}");
+    assert!(names[0].starts_with(".replaced-"), "{names:?}");
+    assert_eq!(
+        fs::read(sites.path().join(&names[0]).join("blog/index.html")).unwrap(),
+        b"before"
+    );
+
+    let databases_only = out.path().join("databases.tar.zst");
+    let staging = tempfile::tempdir().unwrap();
+    fs::create_dir(staging.path().join("databases")).unwrap();
+    fs::write(staging.path().join("databases/config.db"), b"x").unwrap();
+    panel_backup::write(
+        &databases_only,
+        staging.path(),
+        "1.2.3",
+        &["databases"],
+        Utc::now(),
+    )
+    .unwrap();
+    assert!(restore_sites(&databases_only, sites.path())
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
+async fn the_desired_revision_is_read_from_the_configuration() {
+    let data = tempfile::tempdir().unwrap();
+    let options = SqliteConnectOptions::new()
+        .filename(data.path().join("config.db"))
+        .create_if_missing(true);
+    let mut connection = SqliteConnection::connect_with(&options).await.unwrap();
+    for statement in [
+        "CREATE TABLE prepared_deployments (prepare_token TEXT PRIMARY KEY, revision_id INTEGER, content_hash TEXT)",
+        "CREATE TABLE desired_configuration (prepare_token TEXT)",
+    ] {
+        sqlx::query(statement).execute(&mut connection).await.unwrap();
+    }
+    assert_eq!(
+        {
+            connection.close().await.unwrap();
+            desired(data.path()).await.unwrap()
+        },
+        None
+    );
+    let mut connection = SqliteConnection::connect_with(&options).await.unwrap();
+    for statement in [
+        "INSERT INTO prepared_deployments VALUES ('p-1', 6, 'sha256:aa'), ('p-2', 7, 'sha256:bb')",
+        "INSERT INTO desired_configuration VALUES ('p-2')",
+    ] {
+        sqlx::query(statement)
+            .execute(&mut connection)
+            .await
+            .unwrap();
+    }
+    connection.close().await.unwrap();
+    assert_eq!(
+        desired(data.path()).await.unwrap(),
+        Some((7, "sha256:bb".to_owned()))
+    );
 }
 
 #[test]
