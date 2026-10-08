@@ -179,6 +179,8 @@ Initial Foundation 历史验证基线（检查日期：2026-08-30；仓库提交
 
 0.8 三端完整度按 ADR 0045 实现：`panel/surfaces.json` 为 OpenAPI 文档中的每个操作写明提供它的 `ppanel` 命令与控制台路由，只属于部分表现形式的操作写明原因与所在的表现形式（API 自身的描述、浏览器的身份提供方登录跳转与登录页选项、工作负载的令牌交换）；控制台从列表展示单个资源的，写明所读的列表操作。CI 检查声明与 OpenAPI 文档一一对应、每个共享操作同时有命令与控制台路由，`ppanel` 的测试检查所写命令存在，控制台的测试检查所写路由存在且确实调用该操作（经生成的客户端或其路径），因此非 Surface-specific 操作的 API/CLI/GUI 对应率为 100%（254 个共享操作，5 个只属于部分表现形式），新增操作在两端都提供之前无法通过。补齐对应时新增了 `ppanel session list|end`（本人的会话）、`ppanel gateway snapshot status|validate|prepare|activate|abort`（不经草稿发布快照，与控制台的发布页一致）、`ppanel gateway receipt`（按幂等键读取快照命令的结果）与 `ppanel services`，控制台总览页新增控制面服务卡片。发布确认（`GUI-009`）：计划以生效版本与草稿文件内容哈希的摘要命名，`GET /api/v1/config/plan` 返回摘要、草稿版本与所比较的生效版本，`POST /api/v1/config/apply` 的 `expected_plan` 使应用在计划已变化时以 `409` 拒绝且不改变任何状态，检查与读取草稿和生效版本在同一处进行，激活仍按生效哈希比较并交换；拒绝记录为写明所期望计划的 `config.apply.failed`，成功的 `config.draft.applied` 记录所应用的计划。`ppanel config plan` 打印计划摘要，`ppanel config apply` 打印计划并在终端上询问后才应用该计划，`--yes` 不询问地应用所打印的计划，`--plan <摘要>` 只应用此前审阅的计划，无终端时二者必选其一；控制台的审阅与各页面顶部的应用按钮在应用前都弹出确认，列出新增、修改、删除的资源数、有差异的文件数、被替换的版本与计划摘要，并随请求发送摘要，计划变化时重新获取并要求再次审阅。配置编辑器（`GUI-001`）在文件为空时说明入口文件与被 include 的文件各写什么、提供 NGINX 配置转换并显示占位提示，加载、读取失败重试与空文件状态由桌面与移动端的浏览器测试覆盖。上游拓扑视图（`GUI-005`）位于上游页面，与列表并列（`?view=topology`）：在线网站、发往上游的路由、它们到达的节点池以及节点和网关报告的健康状态分四列展示，宽屏以连接线相连并在悬停时突出相关连线，每项都以文字写明发往何处，因此窄屏与辅助技术无需图形也能读懂；单色调色板下节点状态以图标与文字区分，加载、读取失败与无网站的状态均可验证。
 
+0.9 加固按 ADR 0046 与 ADR 0047 实现。供应链证据：每次变更都用 Syft 为 Rust 依赖、Web 依赖与容器镜像生成 CycloneDX SBOM（`SUPPLY-001`～`SUPPLY-003`），镜像中的二进制以 cargo-auditable 记录构建所用的 crate；Grype 扫描 Web 依赖与镜像（`SUPPLY-009`、`SUPPLY-012`），Critical 与 High 发现必须修复，或在 `.github/policies/vulnerability-leases.json` 中写明负责人、原因与到期日后租用，过期或已无对应发现的租用同样使 CI 失败；cargo-about 与 Web 包的许可证报告只接受 `deny.toml` 允许的许可证，生成的第三方许可证声明连同 LICENSE 与上游补丁记录随镜像（`/usr/share/doc/pingora-panel`）与每次发布提供（`SUPPLY-013`）。`vX.Y.Z` 标签触发的发布流程构建 linux/amd64 与 linux/arm64 镜像并按摘要推送为多架构索引，以 Sigstore cosign 无密钥签名镜像与每个发布资产（`SUPPLY-004`、`SUPPLY-005`），并以 GitHub 构件证明为镜像与资产附加 SLSA 构建 Provenance 与 SBOM 证明（`SUPPLY-006`），发布说明与 `panel/README.md` 写明 `cosign verify`、`gh attestation verify` 与校验和的验证方法。安装生命周期：主机命令 `panel/deploy/pingora-panel` 在 Docker 上，或经 Podman 的 socket 以同一份 Compose 文件运行安装（`OPS-002`）；`preflight` 只读地检查 Linux、systemd、cgroup v2、引擎与 Compose 版本、内存、镜像卷与备份的空间、安装绑定的端口与密钥（`OPS-003`），给出镜像时还以新镜像的 `panel-control preflight` 在每个数据库的一致快照副本上执行迁移，报告起止 schema 与收缩、拒绝更新版本写入的数据库，并检查新版本的协议修订与运行中版本是否重叠。`GET /api/v1/system/versions`、`ppanel system versions` 与控制台的系统页列出发行版与提交、各模块的构建、数据库 schema 与协议修订、IR 与配置语言版本、网关、引擎、适配器与主机代理的版本，以及主机命令在 `PINGORA_PANEL_DEPLOYMENT` 中记录的已部署镜像与摘要（`OPS-004`）；`GET /api/v1/system/preflight` 与 `ppanel system preflight` 报告当前安装能否开始升级：各模块健康、网关上没有已准备或正在应用的内容、最近一次备份的时间与再做一次备份的空间。迁移门禁在 CI 中对每个模块逐个迁移文件比较 schema，删除表或列、改变列类型或要求已有行取值的收缩，只有 `.github/policies/migration-contractions.json` 记录早一个版本已不再使用时才允许（`OPS-006`）。`upgrade` 先经 API 备份全部数据库与网站目录，校验摘要后保存在主机上（`OPS-007`），再按服务端先于客户端的顺序切换主机代理、网关与控制面，每步等待就绪，最后校验安装，任一步失败时放回之前的版本（`OPS-008`）；`rollback` 以客户端先行的顺序回到之前的镜像，升级的迁移包含收缩时只能以 `--restore` 先恢复那份备份（`OPS-011`）。`restore` 在空主机上以安装的密钥用 `panel-control restore` 在首次启动前恢复数据库与网站目录，启动后以 `ppanel system verify` 校验网关运行的修订与哈希与归档中配置期望的一致、TLS 配置引用的证书仍在、审计链完整、各模块提供其协议修订（`OPS-012`）。`GET /api/v1/system/diagnostics`、`ppanel system diagnostics` 与控制台下载脱敏诊断包：按名称与形态移除机密，需要只有管理员拥有的 `platform.diagnose` 权限，调用者缺少读取权限的部分被省略并注明（`OPS-013`）。`uninstall` 移除容器、网络与主机代理的服务而保留卷、密钥与主机上的备份，再次安装即可继续（`OPS-014`）；`uninstall --purge --yes` 另删除卷、镜像、主机代理的程序与用户组、`/var/lib/pingora-panel`、密钥与 `/etc/pingora-panel`（`OPS-015`）。主机命令的每个子命令在 CI 中先对模拟引擎检查，再在 Docker 与 Podman 上依次执行安装、对下一版本的 preflight、升级、回滚、保留数据的卸载与重新安装、彻底清除与从备份恢复，并在每步后检查网站仍被网关提供。
+
 ### 3.2 目标仓库边界
 
 Pingora 上游 crates 继续保留在根 workspace，以便固定版本、审计源码、紧急打补丁和进行兼容测试。产品代码统一进入 `panel/` 边界。只有 `panel/gateway-pingora` 可以在 `Cargo.toml` 中依赖 `pingora-*`；其他产品 crate 只能依赖稳定的 `GatewayEngine` port 与 Engine-neutral IR。
@@ -1435,36 +1437,36 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | EXT-018 | - | Backup Target Port | 0.7 | A/C/G/I | Administrator | plugin-host | 执行“Backup Target Port”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | EXT-019 | - | Container Engine Port | 0.7 | A/C/G/I | Administrator | plugin-host | 执行“Container Engine Port”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | EXT-020 | - | Gateway Engine Port | 0.7 | A/C/G/I | Administrator | plugin-host | 执行“Gateway Engine Port”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
-| SUPPLY-001 | - | Rust 依赖 SBOM | 0.9 | I | Administrator | CI/release | 执行“Rust 依赖 SBOM”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SUPPLY-002 | - | Web 依赖 SBOM | 0.9 | I | Administrator | CI/release | 执行“Web 依赖 SBOM”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SUPPLY-003 | - | 容器镜像 SBOM | 0.9 | I | Administrator | CI/release | 执行“容器镜像 SBOM”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SUPPLY-004 | - | Release Artifact 签名 | 0.9 | I | Administrator | CI/release | 执行“Release Artifact 签名”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SUPPLY-005 | - | 容器镜像签名 | 0.9 | I | Administrator | CI/release | 执行“容器镜像签名”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SUPPLY-006 | - | 构建 Provenance | 0.9 | I | Administrator | CI/release | 执行“构建 Provenance”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| SUPPLY-001 | - | Rust 依赖 SBOM | 0.9 | I | Administrator | CI/release | 执行“Rust 依赖 SBOM”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SUPPLY-002 | - | Web 依赖 SBOM | 0.9 | I | Administrator | CI/release | 执行“Web 依赖 SBOM”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SUPPLY-003 | - | 容器镜像 SBOM | 0.9 | I | Administrator | CI/release | 执行“容器镜像 SBOM”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SUPPLY-004 | - | Release Artifact 签名 | 0.9 | I | Administrator | CI/release | 执行“Release Artifact 签名”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SUPPLY-005 | - | 容器镜像签名 | 0.9 | I | Administrator | CI/release | 执行“容器镜像签名”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SUPPLY-006 | - | 构建 Provenance | 0.9 | I | Administrator | CI/release | 执行“构建 Provenance”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | SUPPLY-007 | - | Rust 漏洞扫描 | 0.9 | I | Administrator | CI/release | 执行“Rust 漏洞扫描”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | SUPPLY-008 | - | 依赖许可证策略 | 0.9 | I | Administrator | CI/release | 执行“依赖许可证策略”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
-| SUPPLY-009 | - | Web 依赖漏洞扫描 | 0.9 | I | Administrator | CI/release | 执行“Web 依赖漏洞扫描”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| SUPPLY-009 | - | Web 依赖漏洞扫描 | 0.9 | I | Administrator | CI/release | 执行“Web 依赖漏洞扫描”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | SUPPLY-010 | - | SAST 扫描 | 0.9 | I | Administrator | CI/release | 执行“SAST 扫描”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | SUPPLY-011 | - | Secret 扫描 | 0.9 | I | Administrator | CI/release | 执行“Secret 扫描”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
-| SUPPLY-012 | - | 容器镜像漏洞扫描 | 0.9 | I | Administrator | CI/release | 执行“容器镜像漏洞扫描”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| SUPPLY-013 | - | 第三方许可证报告 | 0.9 | I | Administrator | CI/release | 执行“第三方许可证报告”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| SUPPLY-012 | - | 容器镜像漏洞扫描 | 0.9 | I | Administrator | CI/release | 执行“容器镜像漏洞扫描”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| SUPPLY-013 | - | 第三方许可证报告 | 0.9 | I | Administrator | CI/release | 执行“第三方许可证报告”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | SUPPLY-014 | - | 安全例外到期机制 | 0.9 | I | Administrator | CI/release | 执行“安全例外到期机制”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | SUPPLY-015 | - | Pingora Security Advisory 监控 | 0.9 | I | Administrator | CI/release | 执行“Pingora Security Advisory 监控”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | OPS-001 | - | Docker Compose 安装 | 0.9 | A/C/G/I | Administrator | deployment | 执行“Docker Compose 安装”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
-| OPS-002 | - | Podman Compose 安装 | 0.9 | A/C/G/I | Administrator | deployment | 执行“Podman Compose 安装”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| OPS-003 | - | 安装前 Preflight | 0.9 | A/C/G/I | Administrator | deployment | 执行“安装前 Preflight”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| OPS-004 | - | 部署版本清单 | 0.9 | A/C/G/I | Administrator | deployment | 查询“部署版本清单”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
+| OPS-002 | - | Podman Compose 安装 | 0.9 | A/C/G/I | Administrator | deployment | 执行“Podman Compose 安装”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| OPS-003 | - | 安装前 Preflight | 0.9 | A/C/G/I | Administrator | deployment | 执行“安装前 Preflight”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| OPS-004 | - | 部署版本清单 | 0.9 | A/C/G/I | Administrator | deployment | 查询“部署版本清单”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
 | OPS-005 | - | 数据库 Migration 执行器 | 0.9 | A/C/G/I | Administrator | deployment | 执行“数据库 Migration 执行器”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
-| OPS-006 | - | Expand/Contract Migration 门禁 | 0.9 | A/C/G/I | Administrator | deployment | 执行“Expand/Contract Migration 门禁”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| OPS-007 | - | 升级前自动备份 | 0.9 | A/C/G/I | Administrator | deployment | 执行“升级前自动备份”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| OPS-008 | - | 控制服务兼容顺序升级 | 0.9 | A/C/G/I | Administrator | deployment | 执行“控制服务兼容顺序升级”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| OPS-006 | - | Expand/Contract Migration 门禁 | 0.9 | A/C/G/I | Administrator | deployment | 执行“Expand/Contract Migration 门禁”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| OPS-007 | - | 升级前自动备份 | 0.9 | A/C/G/I | Administrator | deployment | 执行“升级前自动备份”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| OPS-008 | - | 控制服务兼容顺序升级 | 0.9 | A/C/G/I | Administrator | deployment | 执行“控制服务兼容顺序升级”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 | OPS-009 | - | Gateway Adapter 固定版本测试 | 0.9 | A/C/G/I | Administrator | deployment | 查询“Gateway Adapter 固定版本测试”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
 | OPS-010 | - | Pingora Upstream Main Canary | 0.9 | A/C/G/I | Administrator | deployment | 执行“Pingora Upstream Main Canary”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
-| OPS-011 | - | 旧镜像快速回退 | 0.9 | A/C/G/I | Administrator | deployment | 执行“旧镜像快速回退”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| OPS-012 | - | 空主机恢复演练 | 0.9 | A/C/G/I | Administrator | deployment | 执行“空主机恢复演练”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| OPS-013 | - | 脱敏诊断包 | 0.9 | A/C/G/I | Administrator | deployment | 查询“脱敏诊断包”返回授权范围内的确定结果，并包含数据时间或版本。 | Planned | No |
-| OPS-014 | - | 数据保留卸载 | 0.9 | A/C/G/I | Administrator | deployment | 执行“数据保留卸载”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
-| OPS-015 | - | 完全清理卸载 | 0.9 | A/C/G/I | Administrator | deployment | 执行“完全清理卸载”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Planned | No |
+| OPS-011 | - | 旧镜像快速回退 | 0.9 | A/C/G/I | Administrator | deployment | 执行“旧镜像快速回退”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| OPS-012 | - | 空主机恢复演练 | 0.9 | A/C/G/I | Administrator | deployment | 执行“空主机恢复演练”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| OPS-013 | - | 脱敏诊断包 | 0.9 | A/C/G/I | Administrator | deployment | 查询“脱敏诊断包”返回授权范围内的确定结果，并包含数据时间或版本。 | Implemented | No |
+| OPS-014 | - | 数据保留卸载 | 0.9 | A/C/G/I | Administrator | deployment | 执行“数据保留卸载”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
+| OPS-015 | - | 完全清理卸载 | 0.9 | A/C/G/I | Administrator | deployment | 执行“完全清理卸载”后状态符合契约；拒绝与失败路径不产生部分状态，并记录审计。 | Implemented | No |
 
 ### 15.3 目录统计
 
@@ -1474,7 +1476,7 @@ Gateway 请求路径不得同步依赖控制面数据库、NATS、Prometheus 或
 | 新增团队/平台需求 | 121 |
 | 总 Feature ID | 701 |
 | 当前 `Verified` | 3（Initial Foundation：`PLAT-028`、`PLAT-029`、`PLAT-030`） |
-| 当前 `Implemented` | 678（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-001`～`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-025`、`HTTP-001`～`HTTP-028`、`UP-001`～`UP-056`；高级流量：`CONTENT-001`～`CONTENT-031`；缓存：`CACHE-001`～`CACHE-010`；插件：`EXT-001`～`EXT-020`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-006`；身份：`IAM-001`～`IAM-038`；证书：`TLS-001`～`TLS-033`；安全：`SEC-001`～`SEC-035`；可观测：`OBS-001`～`OBS-053`；主机：`HOST-001`～`HOST-018`；容器：`CTR-001`～`CTR-038`；文件与备份：`BACKUP-001`～`BACKUP-012`；Lua：`LUA-001`～`LUA-063`；三端：`API-001`～`API-005`、`CLI-001`～`CLI-028`；加固：`OPS-001`、`OPS-005`、`OPS-009`、`OPS-010`、`SUPPLY-007`、`SUPPLY-008`、`SUPPLY-010`、`SUPPLY-011`、`SUPPLY-014`、`SUPPLY-015`） |
+| 当前 `Implemented` | 698（Durable Gateway：`PLAT-001`、`PLAT-026`、`PLAT-027`；Platform：`PLAT-002`～`PLAT-025`；GUI：`GUI-001`～`GUI-012`；网关核心：`SITE-001`～`SITE-033`、`GATE-001`～`GATE-007`、`DOM-001`～`DOM-028`、`ROUTE-001`～`ROUTE-025`、`HTTP-001`～`HTTP-028`、`UP-001`～`UP-056`；高级流量：`CONTENT-001`～`CONTENT-031`；缓存：`CACHE-001`～`CACHE-010`；插件：`EXT-001`～`EXT-020`；配置事务：`SITE-034`～`SITE-045`、`DSL-001`～`DSL-050`；审计：`AUDIT-001`～`AUDIT-006`；身份：`IAM-001`～`IAM-038`；证书：`TLS-001`～`TLS-033`；安全：`SEC-001`～`SEC-035`；可观测：`OBS-001`～`OBS-053`；主机：`HOST-001`～`HOST-018`；容器：`CTR-001`～`CTR-038`；文件与备份：`BACKUP-001`～`BACKUP-012`；Lua：`LUA-001`～`LUA-063`；三端：`API-001`～`API-005`、`CLI-001`～`CLI-028`；加固：`OPS-001`～`OPS-015`、`SUPPLY-001`～`SUPPLY-015`） |
 | 1.0 要求 `Verified` | 701 |
 
 分类计数：`API` 5、`AUDIT` 6、`BACKUP` 12、`CACHE` 10、`CLI` 28、`CONTENT` 31、`CTR` 38、`DOM` 28、`DSL` 50、`EXT` 20、`GATE` 7、`GUI` 12、`HOST` 18、`HTTP` 28、`IAM` 38、`LUA` 63、`OBS` 53、`OPS` 15、`PLAT` 30、`ROUTE` 25、`SEC` 35、`SITE` 45、`SUPPLY` 15、`TLS` 33、`UP` 56。

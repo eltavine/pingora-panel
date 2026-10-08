@@ -35,22 +35,22 @@ Web 控制台、`ppanel` 命令行和你自己的自动化都使用同一套 RES
 
 # 快速开始
 
-1. **准备一台 Linux 主机**，安装 Docker Engine 与 Compose v2，或带 Compose 的 Podman，然后克隆本仓库。安装过程从源码构建镜像，目前还没有发布的镜像或版本。
-2. **生成密钥**到 `panel/deploy/secrets/`（不会提交到仓库）：一次性引导令牌、密码 pepper，以及封存证书私钥的主密钥。
+1. **准备一台 Linux 主机**，安装 Docker Engine 24 与 Compose v2.20 或更高版本，或 Podman 4.4 或更高版本（启用其 socket）与 Compose 命令行，然后克隆本仓库。目前还没有发布的版本，请从源码构建镜像：
 
    ```bash
-   panel/deploy/generate-secrets.sh
+   docker compose -f panel/deploy/compose.yaml build
+   ```
+
+2. **检查主机并安装**。主机命令把密钥生成到 `panel/deploy/secrets/`（不会提交到仓库）：一次性引导令牌、密码 pepper，以及封存证书私钥的主密钥。`--agent` 同时安装主机代理，用于管理主机及其容器。
+
+   ```bash
+   sudo panel/deploy/pingora-panel preflight
+   sudo panel/deploy/pingora-panel install --agent directories,listeners
    ```
 
    请把主密钥和 `control-data` 卷一起备份；没有它，已保存的私钥无法打开。
-3. **构建并启动**。所有容器使用主机网络并绑定回环地址；网关按监听的配置对外监听。
-
-   ```bash
-   docker compose -f panel/deploy/compose.yaml up -d --build
-   ```
-
-4. **打开控制台** <http://127.0.0.1:8080>；从其他机器访问时，使用 `ssh -L 8080:127.0.0.1:8080 <host>` 建立隧道。首次访问会要求输入 `panel/deploy/secrets/bootstrap-token` 中的引导令牌，并创建第一个管理员。
-5. **发布一个网站**：在控制台中操作，或在控制台为你的账号创建 API 令牌后使用命令行：
+3. **打开控制台** <http://127.0.0.1:8080>；从其他机器访问时，使用 `ssh -L 8080:127.0.0.1:8080 <host>` 建立隧道。首次访问会要求输入 `panel/deploy/secrets/bootstrap-token` 中的引导令牌，并创建第一个管理员。所有容器使用主机网络并绑定回环地址；网关按监听的配置对外监听。
+4. **发布一个网站**：在控制台中操作，或在控制台为你的账号创建 API 令牌后使用命令行：
 
    ```bash
    export PPANEL_TOKEN=ppat_...
@@ -61,7 +61,7 @@ Web 控制台、`ppanel` 命令行和你自己的自动化都使用同一套 RES
    ppanel config apply --yes
    ```
 
-如需同时管理主机及其容器，先用 `panel/deploy/ops-agent/install.sh` 安装主机代理，再在 Compose 命令中加上 `-f panel/deploy/compose.ops-agent.yaml`。
+5. **升级、回滚与卸载**使用同一个命令，并在 `PPANEL_TOKEN` 中提供 API 令牌：`upgrade --image <image>` 先在主机上保存一份备份，任一步失败时放回之前的版本；`rollback`、在空主机上 `restore <archive>`、保留数据的 `uninstall`，以及 `uninstall --purge --yes`。
 
 ## 一次变更如何到达网关
 
@@ -77,7 +77,7 @@ Web 控制台、`ppanel` 命令行和你自己的自动化都使用同一套 RES
 
 当前的功能领域，每项都链接到说明它做什么、为什么这样做以及不做什么的决策记录：
 
-[`网关`](./docs/adr/0010-pingora-data-plane.md) · [`网站与应用`](./docs/adr/0011-configuration-model-and-apply.md) · [`配置语言`](./docs/adr/0012-configuration-language-and-revisions.md) · [`路由条件`](./docs/adr/0036-route-conditions.md) · [`HTTP 策略`](./docs/adr/0037-http-policies.md) · [`改写与内部重定向`](./docs/adr/0040-rewrites-and-internal-redirects.md) · [`错误页与维护`](./docs/adr/0041-error-pages-and-maintenance.md) · [`静态内容`](./docs/adr/0042-directory-listings-media-types-and-cache-headers.md) · [`代理缓存`](./docs/adr/0043-proxy-cache.md) · [`插件`](./docs/adr/0044-external-plugins-and-provider-ports.md) · [`三端一致`](./docs/adr/0045-surface-parity.md) · [`上游韧性`](./docs/adr/0038-upstream-resilience-and-streams.md) · [`安全策略`](./docs/adr/0017-request-security-policies.md) · [`证书`](./docs/adr/0015-certificates-and-secret-material.md) · [`ACME`](./docs/adr/0016-acme-issuance-and-renewal.md) · [`账号与权限`](./docs/adr/0014-identity-and-access.md) · [`单点登录`](./docs/adr/0018-identity-provider-sign-in.md) · [`服务账号`](./docs/adr/0020-service-accounts-and-workload-identity.md) · [`限定授权`](./docs/adr/0021-scoped-and-conditional-grants.md) · [`审批`](./docs/adr/0019-change-approvals.md) · [`审计日志`](./docs/adr/0013-audit-trail.md) · [`指标、日志与追踪`](./docs/adr/0022-metrics-logs-and-traces.md) · [`访问日志`](./docs/adr/0025-access-and-error-logs.md) · [`日志搜索`](./docs/adr/0026-log-search-tail-and-deletion.md) · [`告警`](./docs/adr/0027-alerts.md) · [`主机与容器`](./docs/adr/0028-host-and-container-operations.md) · [`主机代理`](./docs/adr/0030-ops-agent.md) · [`容器`](./docs/adr/0031-containers.md) · [`容器网站`](./docs/adr/0033-sites-in-front-of-containers.md) · [`站点文件`](./docs/adr/0034-site-files.md) · [`备份`](./docs/adr/0035-backups.md) · [`基准测试`](./docs/adr/0024-gateway-benchmarks.md)
+[`网关`](./docs/adr/0010-pingora-data-plane.md) · [`网站与应用`](./docs/adr/0011-configuration-model-and-apply.md) · [`配置语言`](./docs/adr/0012-configuration-language-and-revisions.md) · [`路由条件`](./docs/adr/0036-route-conditions.md) · [`HTTP 策略`](./docs/adr/0037-http-policies.md) · [`改写与内部重定向`](./docs/adr/0040-rewrites-and-internal-redirects.md) · [`错误页与维护`](./docs/adr/0041-error-pages-and-maintenance.md) · [`静态内容`](./docs/adr/0042-directory-listings-media-types-and-cache-headers.md) · [`代理缓存`](./docs/adr/0043-proxy-cache.md) · [`插件`](./docs/adr/0044-external-plugins-and-provider-ports.md) · [`三端一致`](./docs/adr/0045-surface-parity.md) · [`上游韧性`](./docs/adr/0038-upstream-resilience-and-streams.md) · [`安全策略`](./docs/adr/0017-request-security-policies.md) · [`证书`](./docs/adr/0015-certificates-and-secret-material.md) · [`ACME`](./docs/adr/0016-acme-issuance-and-renewal.md) · [`账号与权限`](./docs/adr/0014-identity-and-access.md) · [`单点登录`](./docs/adr/0018-identity-provider-sign-in.md) · [`服务账号`](./docs/adr/0020-service-accounts-and-workload-identity.md) · [`限定授权`](./docs/adr/0021-scoped-and-conditional-grants.md) · [`审批`](./docs/adr/0019-change-approvals.md) · [`审计日志`](./docs/adr/0013-audit-trail.md) · [`指标、日志与追踪`](./docs/adr/0022-metrics-logs-and-traces.md) · [`访问日志`](./docs/adr/0025-access-and-error-logs.md) · [`日志搜索`](./docs/adr/0026-log-search-tail-and-deletion.md) · [`告警`](./docs/adr/0027-alerts.md) · [`主机与容器`](./docs/adr/0028-host-and-container-operations.md) · [`主机代理`](./docs/adr/0030-ops-agent.md) · [`容器`](./docs/adr/0031-containers.md) · [`容器网站`](./docs/adr/0033-sites-in-front-of-containers.md) · [`站点文件`](./docs/adr/0034-site-files.md) · [`备份`](./docs/adr/0035-backups.md) · [`供应链`](./docs/adr/0046-supply-chain-evidence.md) · [`安装生命周期`](./docs/adr/0047-installation-lifecycle.md) · [`基准测试`](./docs/adr/0024-gateway-benchmarks.md)
 
 [`panel/README.md`](./panel/README.md) 说明每个领域的 API、命令行与配置语言，[`PRODUCT_SPEC.md`](./PRODUCT_SPEC.md) 列出每项已编目功能及其状态。
 
@@ -95,7 +95,7 @@ Web 控制台、`ppanel` 命令行和你自己的自动化都使用同一套 RES
 
 | 领域 | 说明 |
 | :--- | :--- |
-| **主机** | 安装 Docker Engine 与 Compose v2 或 Podman 的 Linux。镜像与运行中的安装在 CI 中于 Linux x86_64 上构建并检查。 |
+| **主机** | 带 systemd 与 cgroup v2 的 Linux，安装 Docker Engine 24 与 Compose v2.20，或经 socket 使用 Podman 4.4。镜像在 CI 中于 Linux x86_64 上构建，从安装到空主机恢复的每个安装步骤都在两种引擎上检查。 |
 | **协议** | HTTP/1.1 与 HTTP/2（TLS 上经 ALPN 协商，明文监听上为 h2c），支持 WebSocket 升级、Server-Sent Events 与 gRPC。HTTP/3 已预留，目前会被拒绝。 |
 | **TLS** | 基于 rustls，支持 TLS 1.2 与 1.3、按 SNI 为每个主机选择证书，以及 HSTS。证书可以上传，也可以通过 ACME（RFC 8555）用 HTTP-01，或经 RFC 2136 或插件用 DNS-01 签发，支持外部账号绑定。 |
 | **控制台** | 当前的桌面与移动浏览器；端到端测试在 Chromium 与 WebKit 中运行。支持英文与简体中文，以及浅色与深色主题。 |

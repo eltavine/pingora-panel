@@ -870,8 +870,11 @@ Every database is restored with the control plane stopped, from an archive
 in its data directory or anywhere else: `panel-control restore` refuses to
 run while the control plane answers, checks the archive and each database's
 integrity, refuses databases at a schema newer than the release reaches, and
-keeps the files it replaces beside the new ones. The next start migrates
-them forward.
+keeps the files it replaces beside the new ones. With `--sites DIRECTORY`
+it also puts back the sites' directory, keeping what it replaces in
+`.replaced-STAMP`, and its last lines name the revision and hash the
+configuration wants the gateway to run, as `desired_revision=` and
+`desired_hash=`. The next start migrates the databases forward.
 
 ```sh
 docker compose stop control
@@ -2079,6 +2082,149 @@ certificates into the `gateway-secrets` volume, which the gateway mounts
 read-only.
 The `panel-deploy` workflow builds the image and checks the running
 installation through its API.
+
+### Installation lifecycle
+
+`deploy/pingora-panel` installs, checks, upgrades, rolls back, restores and
+uninstalls the installation, run as root on the host, on Docker or on
+Podman, detected or named with `--engine`
+([decision](../docs/adr/0047-installation-lifecycle.md)). Podman runs the
+same Compose file through its socket (`systemctl enable --now
+podman.socket`). What the command needs to remember, the engine, the
+project, the images in use and the ones before them, the host agent's
+capabilities and the last backup, it keeps in
+`/etc/pingora-panel/installation.env`, and the backups it takes in
+`/var/lib/pingora-panel/backups`, owner only.
+
+```sh
+sudo panel/deploy/pingora-panel preflight
+sudo panel/deploy/pingora-panel install --agent directories,listeners
+export PPANEL_TOKEN=ppat_...
+sudo --preserve-env=PPANEL_TOKEN panel/deploy/pingora-panel preflight --version 0.9.1
+sudo --preserve-env=PPANEL_TOKEN panel/deploy/pingora-panel upgrade --version 0.9.1
+sudo --preserve-env=PPANEL_TOKEN panel/deploy/pingora-panel rollback
+sudo panel/deploy/pingora-panel status
+sudo panel/deploy/pingora-panel uninstall
+```
+
+`preflight` reads and changes nothing. It checks for Linux with systemd and
+cgroup v2, Docker 24 or Podman 4.4 with Compose 2.20, the memory, the space
+for images, volumes and backups, the ports the installation binds and the
+secrets. Given an image, it also runs that image's `panel-control
+preflight` on the live data: each database is copied as one consistent
+snapshot and the copy migrated, reporting the schema it migrates from and
+to and what a migration contracts, and refusing a database a later release
+wrote; and the protocol revisions the new release speaks are compared with
+those the running one prints with `panel-control protocols`.
+`--ignore-preflight` reports the host's failed checks as warnings instead.
+
+`--version VERSION` names a release of `ghcr.io/eltavine/pingora-panel`,
+which is pulled, checked with cosign against the release workflow's
+identity and pinned by digest. `--image` names any image; images below
+`localhost/` are local builds and are not checked. A release's files name
+that release in `RELEASE`, so their `install` installs it.
+
+`upgrade` checks that the installation can be upgraded (`ppanel system
+preflight`), runs the preflight above, takes a backup of every database and
+the sites' directory through the API and keeps it on the host once `ppanel`
+has checked its digest. It then switches servers before their clients: the
+host agent's binary, the gateway and then the control plane, each waiting
+for readiness, and verifies the result; a step that fails puts the previous
+release back. `rollback` returns to the images in use before, clients
+first. When the upgrade's migrations contracted a schema only `rollback
+--restore` does, restoring that backup first. Upgrades, rollbacks with
+`--restore` and restores call the API with an Administrator's token in
+`PPANEL_TOKEN` or in the file `--token-file` names.
+
+`restore ARCHIVE` recovers an emptied host from a backup. With the
+installation's secrets put back in `deploy/secrets/`, it creates the
+volumes, installs the databases and the sites' directory with
+`panel-control restore` before the first start, starts, and verifies with
+`ppanel system verify` that the gateway runs the revision and hash the
+archive's configuration wants, that every TLS profile's certificate is
+kept, that the audit chain is intact and that every module serves its
+protocols.
+
+`uninstall` removes the containers, networks and the host agent's service
+and keeps the volumes, secrets and backups, so installing again resumes;
+`uninstall --purge --yes` also removes the volumes, images, the agent's
+binary and group, `/var/lib/pingora-panel`, the secrets and
+`/etc/pingora-panel`. `logs` prints the services' logs. CI runs every
+command against a fake engine, and every step on both engines: install,
+the preflight of the next release, upgrade, rollback, uninstall and
+reinstall, then purge and recovery from the backup.
+
+### Versions, readiness and diagnostics
+
+`GET /api/v1/system/versions` reports what runs: the release and commit
+the image was built as (`PINGORA_PANEL_VERSION`, `PINGORA_PANEL_COMMIT`),
+each module's build, database schema and protocol revisions, the IR and
+configuration language versions, the gateway's, engine's and adapter's
+versions, the host agent's, and the record the host command passes in
+`PINGORA_PANEL_DEPLOYMENT`: the action, the engine, the project, the
+release before, and each service's image with its digest.
+`GET /api/v1/system/preflight` reports whether an upgrade can start: every
+module healthy, nothing prepared or being applied on the gateway, the
+newest backup no older than a day, and the space in the data directory for
+another backup and the migrations; warnings do not hold an upgrade back.
+Both need `platform.read`.
+
+`GET /api/v1/system/diagnostics` answers one JSON attachment for
+diagnosing the installation: the versions, readiness and health, the
+gateway's status and data plane, the host, the configuration's counts with
+the revisions being applied, failed or rejected, the newest backups, alert
+rules that are pending, firing or failing, the plugins and the newest audit
+events. Every field passes redaction: values under the names of secrets,
+tokens, passwords, keys, cookies, sessions or authorization are replaced,
+and PEM blocks, bearer credentials, the panel's tokens, JSON Web Tokens and
+passwords or secrets in URLs are masked wherever they appear. It needs
+`platform.diagnose`, which only Administrators hold, and leaves out, naming
+them, the sections whose read permission the caller lacks.
+
+```sh
+ppanel system versions
+ppanel system preflight
+ppanel system diagnostics --to bundle.json
+ppanel system verify --revision 12 --hash sha256:...
+```
+
+The console's System page shows the versions and the readiness and
+downloads the bundle.
+
+## Releases and supply-chain evidence
+
+Every change builds CycloneDX SBOMs with Syft for the Rust and web
+dependencies and for the image, whose binaries embed the crates they were
+built from through cargo-auditable, and scans them with Grype; RustSec
+advisories are checked by cargo-deny
+([decision](../docs/adr/0046-supply-chain-evidence.md)). A Critical or High
+finding fails CI unless `.github/policies/vulnerability-leases.json` leases
+it with an owner, a reason and an expiry; an expired or unused lease fails
+too. The third-party license notices, from cargo-about and the web
+packages, accept only the licenses `deny.toml` allows and ship with
+LICENSE and the record of upstream patches in the image's
+`/usr/share/doc/pingora-panel` and with each release.
+
+A tag `vX.Y.Z` releases a multi-architecture image (linux/amd64 and
+linux/arm64) to `ghcr.io/eltavine/pingora-panel`, `ppanel` for Linux and
+macOS, the SBOMs, the notices and the deployment files. The image and every
+asset are signed without keys with Sigstore cosign and carry SLSA build
+provenance and SBOM attestations:
+
+```sh
+identity='^https://github.com/eltavine/pingora-panel/\.github/workflows/release\.yml@refs/tags/v'
+issuer=https://token.actions.githubusercontent.com
+cosign verify ghcr.io/eltavine/pingora-panel:0.9.0 \
+  --certificate-oidc-issuer "$issuer" --certificate-identity-regexp "$identity"
+gh attestation verify oci://ghcr.io/eltavine/pingora-panel:0.9.0 --repo eltavine/pingora-panel
+cosign verify-blob SHA256SUMS --bundle SHA256SUMS.sigstore.json \
+  --certificate-oidc-issuer "$issuer" --certificate-identity-regexp "$identity"
+sha256sum --check --ignore-missing SHA256SUMS
+```
+
+`panel/scripts/supply-chain.sh` writes the same SBOMs, scans and notices
+locally: `sbom rust|web FILE`, `sbom image IMAGE FILE`, `scan SBOM REPORT`
+and `notices FILE`.
 
 ## Web console
 

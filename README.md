@@ -35,22 +35,22 @@ The web console, the `ppanel` command line and your own automation use the same 
 
 # Quick start
 
-1. **Prepare a Linux host** with Docker Engine and Compose v2, or Podman with Compose, and clone this repository. The installation builds its image from source; there is no published image or release yet.
-2. **Generate the secrets** into `panel/deploy/secrets/`, which is never committed: the one-time bootstrap token, the password pepper and the master key that seals certificate keys.
+1. **Prepare a Linux host** with Docker Engine 24 and Compose v2.20 or later, or Podman 4.4 or later with its socket enabled and the Compose CLI, and clone this repository. No release is published yet, so build the image from source:
 
    ```bash
-   panel/deploy/generate-secrets.sh
+   docker compose -f panel/deploy/compose.yaml build
+   ```
+
+2. **Check the host and install** with the host command. It generates the secrets into `panel/deploy/secrets/`, which is never committed: the one-time bootstrap token, the password pepper and the master key that seals certificate keys. `--agent` also installs the host agent, which manages the host and its containers.
+
+   ```bash
+   sudo panel/deploy/pingora-panel preflight
+   sudo panel/deploy/pingora-panel install --agent directories,listeners
    ```
 
    Back the master key up together with the `control-data` volume; stored private keys cannot be opened without it.
-3. **Build and start** the installation. Every container uses the host network and binds loopback addresses; the gateway listens where its listeners say.
-
-   ```bash
-   docker compose -f panel/deploy/compose.yaml up -d --build
-   ```
-
-4. **Open the console** at <http://127.0.0.1:8080>, from another machine through `ssh -L 8080:127.0.0.1:8080 <host>`. The first visit asks for the bootstrap token in `panel/deploy/secrets/bootstrap-token` and creates the first Administrator.
-5. **Serve a site** from the console, or from the command line with an API token created under your account in the console:
+3. **Open the console** at <http://127.0.0.1:8080>, from another machine through `ssh -L 8080:127.0.0.1:8080 <host>`. The first visit asks for the bootstrap token in `panel/deploy/secrets/bootstrap-token` and creates the first Administrator. Every container uses the host network and binds loopback addresses; the gateway listens where its listeners say.
+4. **Serve a site** from the console, or from the command line with an API token created under your account in the console:
 
    ```bash
    export PPANEL_TOKEN=ppat_...
@@ -61,7 +61,7 @@ The web console, the `ppanel` command line and your own automation use the same 
    ppanel config apply --yes
    ```
 
-To manage the host and its containers as well, install the host agent with `panel/deploy/ops-agent/install.sh` and add `-f panel/deploy/compose.ops-agent.yaml` to the Compose commands.
+5. **Upgrade, roll back and remove** with the same command and the API token in `PPANEL_TOKEN`: `upgrade --image <image>` keeps a backup on the host first and puts the previous release back when a step fails; `rollback`, `restore <archive>` on an empty host, `uninstall`, which keeps the data, and `uninstall --purge --yes`.
 
 ## How a change reaches the gateway
 
@@ -77,7 +77,7 @@ To manage the host and its containers as well, install the host agent with `pane
 
 Current feature areas, each linked to the decision record that explains what it does, why, and what it leaves out:
 
-[`Gateway`](./docs/adr/0010-pingora-data-plane.md) · [`Sites and apply`](./docs/adr/0011-configuration-model-and-apply.md) · [`Configuration language`](./docs/adr/0012-configuration-language-and-revisions.md) · [`Route conditions`](./docs/adr/0036-route-conditions.md) · [`HTTP policies`](./docs/adr/0037-http-policies.md) · [`Rewrites`](./docs/adr/0040-rewrites-and-internal-redirects.md) · [`Error pages`](./docs/adr/0041-error-pages-and-maintenance.md) · [`Static content`](./docs/adr/0042-directory-listings-media-types-and-cache-headers.md) · [`Proxy cache`](./docs/adr/0043-proxy-cache.md) · [`Plugins`](./docs/adr/0044-external-plugins-and-provider-ports.md) · [`Surface parity`](./docs/adr/0045-surface-parity.md) · [`Upstream resilience`](./docs/adr/0038-upstream-resilience-and-streams.md) · [`Security policies`](./docs/adr/0017-request-security-policies.md) · [`Certificates`](./docs/adr/0015-certificates-and-secret-material.md) · [`ACME`](./docs/adr/0016-acme-issuance-and-renewal.md) · [`Accounts and access`](./docs/adr/0014-identity-and-access.md) · [`Single sign-on`](./docs/adr/0018-identity-provider-sign-in.md) · [`Service accounts`](./docs/adr/0020-service-accounts-and-workload-identity.md) · [`Scoped grants`](./docs/adr/0021-scoped-and-conditional-grants.md) · [`Approvals`](./docs/adr/0019-change-approvals.md) · [`Audit trail`](./docs/adr/0013-audit-trail.md) · [`Metrics, logs and traces`](./docs/adr/0022-metrics-logs-and-traces.md) · [`Access logs`](./docs/adr/0025-access-and-error-logs.md) · [`Log search`](./docs/adr/0026-log-search-tail-and-deletion.md) · [`Alerts`](./docs/adr/0027-alerts.md) · [`Host and containers`](./docs/adr/0028-host-and-container-operations.md) · [`Host agent`](./docs/adr/0030-ops-agent.md) · [`Containers`](./docs/adr/0031-containers.md) · [`Sites for containers`](./docs/adr/0033-sites-in-front-of-containers.md) · [`Site files`](./docs/adr/0034-site-files.md) · [`Backups`](./docs/adr/0035-backups.md) · [`Benchmarks`](./docs/adr/0024-gateway-benchmarks.md)
+[`Gateway`](./docs/adr/0010-pingora-data-plane.md) · [`Sites and apply`](./docs/adr/0011-configuration-model-and-apply.md) · [`Configuration language`](./docs/adr/0012-configuration-language-and-revisions.md) · [`Route conditions`](./docs/adr/0036-route-conditions.md) · [`HTTP policies`](./docs/adr/0037-http-policies.md) · [`Rewrites`](./docs/adr/0040-rewrites-and-internal-redirects.md) · [`Error pages`](./docs/adr/0041-error-pages-and-maintenance.md) · [`Static content`](./docs/adr/0042-directory-listings-media-types-and-cache-headers.md) · [`Proxy cache`](./docs/adr/0043-proxy-cache.md) · [`Plugins`](./docs/adr/0044-external-plugins-and-provider-ports.md) · [`Surface parity`](./docs/adr/0045-surface-parity.md) · [`Upstream resilience`](./docs/adr/0038-upstream-resilience-and-streams.md) · [`Security policies`](./docs/adr/0017-request-security-policies.md) · [`Certificates`](./docs/adr/0015-certificates-and-secret-material.md) · [`ACME`](./docs/adr/0016-acme-issuance-and-renewal.md) · [`Accounts and access`](./docs/adr/0014-identity-and-access.md) · [`Single sign-on`](./docs/adr/0018-identity-provider-sign-in.md) · [`Service accounts`](./docs/adr/0020-service-accounts-and-workload-identity.md) · [`Scoped grants`](./docs/adr/0021-scoped-and-conditional-grants.md) · [`Approvals`](./docs/adr/0019-change-approvals.md) · [`Audit trail`](./docs/adr/0013-audit-trail.md) · [`Metrics, logs and traces`](./docs/adr/0022-metrics-logs-and-traces.md) · [`Access logs`](./docs/adr/0025-access-and-error-logs.md) · [`Log search`](./docs/adr/0026-log-search-tail-and-deletion.md) · [`Alerts`](./docs/adr/0027-alerts.md) · [`Host and containers`](./docs/adr/0028-host-and-container-operations.md) · [`Host agent`](./docs/adr/0030-ops-agent.md) · [`Containers`](./docs/adr/0031-containers.md) · [`Sites for containers`](./docs/adr/0033-sites-in-front-of-containers.md) · [`Site files`](./docs/adr/0034-site-files.md) · [`Backups`](./docs/adr/0035-backups.md) · [`Supply chain`](./docs/adr/0046-supply-chain-evidence.md) · [`Installation lifecycle`](./docs/adr/0047-installation-lifecycle.md) · [`Benchmarks`](./docs/adr/0024-gateway-benchmarks.md)
 
 [`panel/README.md`](./panel/README.md) documents each area's API, command line and configuration language, and [`PRODUCT_SPEC.md`](./PRODUCT_SPEC.md) lists every catalogued feature with its status.
 
@@ -95,7 +95,7 @@ Current feature areas, each linked to the decision record that explains what it 
 
 | Area | Details |
 | :--- | :--- |
-| **Host** | Linux with Docker Engine and Compose v2, or Podman. The image and the running installation are built and checked in CI on Linux x86_64. |
+| **Host** | Linux with systemd and cgroup v2, and Docker Engine 24 with Compose v2.20, or Podman 4.4 through its socket. The image is built and every installation step, from install to recovery on an empty host, is checked in CI on Linux x86_64 with both engines. |
 | **Protocols** | HTTP/1.1 and HTTP/2, over TLS by ALPN or as h2c on plaintext listeners, with WebSocket upgrades, Server-Sent Events and gRPC. HTTP/3 is reserved and refused. |
 | **TLS** | rustls with TLS 1.2 and 1.3 and a certificate per host by SNI, plus HSTS. Certificates are uploaded or issued through ACME (RFC 8555) with HTTP-01, or DNS-01 through RFC 2136 or a plugin, external account binding included. |
 | **Console** | Current desktop and mobile browsers; end-to-end tests run in Chromium and WebKit. English and Simplified Chinese, light and dark themes. |
