@@ -278,7 +278,7 @@ minisign-verify = "=0.3.0"
 rustix = "=1.1.4"
 semver = "=1.0.28"
 tracing = "=0.1.44"
-tracing-subscriber = { version = "=0.3.20", features = ["env-filter", "fmt", "json"] }
+tracing-subscriber = { version = "=0.3.23", features = ["env-filter", "fmt", "json"] }
 
 [profile.release]
 codegen-units = 1
