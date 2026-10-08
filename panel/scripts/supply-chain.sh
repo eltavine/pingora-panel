@@ -60,6 +60,8 @@ notices() {
   web=$(mktemp)
   trap 'rm -f "$web"' RETURN
   (cd "$panel/web" && node scripts/third-party-notices.ts >"$web")
+  # cargo-about reads every package the lockfile names, other platforms' too.
+  cargo fetch --locked --manifest-path "$panel/Cargo.toml"
   cargo-about generate --locked --offline --manifest-path "$panel/Cargo.toml" \
     --config "$panel/about.toml" --output-file "$output" "$panel/about.hbs"
   cat "$web" >>"$output"

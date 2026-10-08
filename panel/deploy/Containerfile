@@ -29,10 +29,13 @@ WORKDIR /src
 COPY . .
 COPY --from=web /panel/third-party-notices.md /tmp/third-party-notices.md
 # cargo-auditable embeds the crates each binary is built from, so the image's
-# SBOM and scans see them (ADR 0046).
+# SBOM and scans see them (ADR 0046). cargo-about reads every package the
+# lockfile names, other platforms' included, which the build alone does not
+# download.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/panel/target \
-    cargo auditable build --manifest-path panel/Cargo.toml --release --locked \
+    cargo fetch --locked --manifest-path panel/Cargo.toml \
+ && cargo auditable build --manifest-path panel/Cargo.toml --release --locked \
         --bin gatewayd --bin panel-control --bin panel-bootstrap --bin ppanel --bin ops-agent \
         --bin pingora-panel-reference-plugin \
  && mkdir -p /out/bin /out/doc \
