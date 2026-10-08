@@ -103,7 +103,7 @@ cap-std = "=4.0.3"
 cbc = { version = "=0.2.1", features = ["alloc", "block-padding"] }
 cfb-mode = "=0.9.1"
 cfb8 = "=0.9.1"
-clap = { version = "=4.6.6", features = ["derive", "env"] }
+clap = { version = "=4.6.7", features = ["derive", "env"] }
 clap_complete = "=4.6.11"
 chrono = { version = "=0.4.45", default-features = false, features = ["clock", "serde", "std"] }
 form_urlencoded = "=1.2.2"
