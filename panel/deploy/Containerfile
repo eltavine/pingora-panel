@@ -56,9 +56,16 @@ RUN for directory in control plugins gateway-secrets pki credentials/panel-api \
  && chmod 700 /out/gateway
 
 FROM gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
+# The release and commit the image was built from; the control plane reports them.
+ARG PINGORA_PANEL_VERSION=dev
+ARG PINGORA_PANEL_COMMIT=unknown
 LABEL org.opencontainers.image.title="Pingora Panel" \
       org.opencontainers.image.source="https://github.com/eltavine/pingora-panel" \
-      org.opencontainers.image.licenses="Apache-2.0"
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.version="${PINGORA_PANEL_VERSION}" \
+      org.opencontainers.image.revision="${PINGORA_PANEL_COMMIT}"
+ENV PINGORA_PANEL_VERSION=${PINGORA_PANEL_VERSION} \
+    PINGORA_PANEL_COMMIT=${PINGORA_PANEL_COMMIT}
 COPY --from=build /out/bin/ /usr/local/bin/
 COPY --from=build /out/doc/ /usr/share/doc/pingora-panel/
 COPY --from=web /panel/web/dist/ /usr/share/pingora-panel/web/

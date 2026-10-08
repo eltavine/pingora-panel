@@ -91,6 +91,44 @@
         }
       }
     },
+    ".github/workflows/release.yml": {
+      "cancel_in_progress": false,
+      "permissions": {
+        "contents": "read"
+      },
+      "job_permissions": {
+        "image": {
+          "owner": "pingora-panel-security",
+          "reason": "Each platform's image is pushed to GHCR by digest so the index job can join, sign and attest exactly those digests.",
+          "expires_on": "2027-03-01",
+          "permissions": {
+            "contents": "read",
+            "packages": "write"
+          }
+        },
+        "index": {
+          "owner": "pingora-panel-security",
+          "reason": "The image index is pushed to GHCR, signed without keys through the workflow's OIDC identity, and given provenance and SBOM attestations stored beside it.",
+          "expires_on": "2027-03-01",
+          "permissions": {
+            "attestations": "write",
+            "contents": "read",
+            "id-token": "write",
+            "packages": "write"
+          }
+        },
+        "release": {
+          "owner": "pingora-panel-security",
+          "reason": "The release is created with its assets, each signed without keys through the workflow's OIDC identity and given a provenance attestation.",
+          "expires_on": "2027-03-01",
+          "permissions": {
+            "attestations": "write",
+            "contents": "write",
+            "id-token": "write"
+          }
+        }
+      }
+    },
     ".github/workflows/secret-scan.yml": {
       "cancel_in_progress": true,
       "permissions": {
