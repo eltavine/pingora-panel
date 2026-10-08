@@ -17,3 +17,4 @@ __pycache__/
 
 # Passwords generated for a Compose installation.
 panel/deploy/secrets/
+panel/deploy/RELEASE

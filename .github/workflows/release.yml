@@ -293,8 +293,11 @@ jobs:
           panel/scripts/supply-chain.sh sbom rust "$assets/pingora-panel-$version-rust.cdx.json"
           panel/scripts/supply-chain.sh sbom web "$assets/pingora-panel-$version-web.cdx.json"
           panel/scripts/supply-chain.sh notices "$assets/THIRD-PARTY-NOTICES.md"
+          # The host command installs and verifies the release it came with.
+          printf '%s\n' "$version" > panel/deploy/RELEASE
           tar -czf "$assets/pingora-panel-deploy-$version.tar.gz" \
-            --exclude=panel/deploy/secrets panel/deploy LICENSE
+            --exclude=panel/deploy/secrets --exclude=panel/deploy/test-pingora-panel.sh \
+            panel/deploy LICENSE
 
       - name: Keep them for the release
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

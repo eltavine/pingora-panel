@@ -1,0 +1,759 @@
+#!/usr/bin/env bash
+# Installs, checks, upgrades, rolls back, restores and uninstalls the Pingora
+# Panel Compose installation beside this script, on Docker or Podman (ADR
+# 0047). Run it as root on the host:
+#
+#   pingora-panel preflight [--image IMAGE | --version VERSION]
+#   pingora-panel install [--image IMAGE | --version VERSION] [--agent CAPABILITIES]
+#   pingora-panel upgrade --image IMAGE | --version VERSION
+#   pingora-panel rollback [--restore]
+#   pingora-panel restore ARCHIVE [--image IMAGE | --version VERSION]
+#   pingora-panel uninstall [--purge --yes]
+#   pingora-panel status
+#   pingora-panel logs [SERVICE...]
+#
+# --engine docker|podman picks the engine, detected otherwise; Podman runs
+# the same Compose file through its socket. --version VERSION names a
+# release of PINGORA_PANEL_REGISTRY, whose signature cosign checks before
+# anything runs it; images below localhost/ are local builds and are not.
+# Upgrades, rollbacks with --restore and restores call the API with the
+# token in PPANEL_TOKEN or in the file --token-file names, an
+# Administrator's. --ignore-preflight reports the host's failed checks as
+# warnings and goes on.
+set -euo pipefail
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+state_dir=${PINGORA_PANEL_STATE_DIR:-/etc/pingora-panel}
+state_file=$state_dir/installation.env
+backup_dir=${PINGORA_PANEL_BACKUP_DIR:-/var/lib/pingora-panel/backups}
+agent_bin=${PINGORA_PANEL_AGENT_BIN:-/usr/local/bin/ops-agent}
+registry=${PINGORA_PANEL_REGISTRY:-ghcr.io/eltavine/pingora-panel}
+repository=${PINGORA_PANEL_REPOSITORY:-eltavine/pingora-panel}
+gateway_ops=${PINGORA_PANEL_GATEWAY_OPS:-127.0.0.1:9185}
+timeout=${PINGORA_PANEL_TIMEOUT:-300}
+secrets=${PINGORA_PANEL_SECRETS_DIR:-$here/secrets}
+api=${PPANEL_API:-http://127.0.0.1:8080}
+# A release's files name it in RELEASE; a checkout runs its local build.
+default_image=localhost/pingora-panel:dev
+if [[ -f $here/RELEASE ]]; then
+  default_image=$registry:$(<"$here/RELEASE")
+fi
+# Services that run the panel's image; the others pin theirs by digest.
+panel_services=(control gatewayd pki)
+# What the installation binds on the host's loopback, and the gateway's
+# listeners on every address.
+loopback_ports=(8080 4222 8222 9090 9100 3100 9180 9181 9182 9183 9184 9185 9186
+  50051 50060 50061 50062 50063 50064 50066)
+public_ports=(80 443)
+# The exit status of a preflight whose migrations contract a schema.
+contracts_status=3
+
+declare -A state=()
+engine=
+project=
+image_option=
+version_option=
+token_file=
+agent_option=
+purge=0
+yes=0
+restore_option=0
+skip_verify=0
+ignore_preflight=0
+failures=0
+
+say() { printf '%s\n' "$*"; }
+die() {
+  printf 'pingora-panel: %s\n' "$*" >&2
+  exit 1
+}
+usage() {
+  awk 'NR > 1 && /^set -euo/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}" >&2
+  exit 2
+}
+
+# The state the last run left, as KEY=value lines of known keys.
+read_state() {
+  [[ -f $state_file ]] || return 0
+  local key value
+  while IFS='=' read -r key value; do
+    case $key in
+      ENGINE | PROJECT | IMAGE | RELEASE | PREVIOUS_IMAGE | PREVIOUS_RELEASE | AGENT | \
+        CONTRACTED | BACKUP | ACTION | CHANGED_AT)
+        state[$key]=$value
+        ;;
+    esac
+  done <"$state_file"
+}
+
+write_state() {
+  mkdir -p "$state_dir"
+  local key temporary=$state_file.new
+  {
+    printf '# Written by pingora-panel; read by its next run.\n'
+    for key in ENGINE PROJECT IMAGE RELEASE PREVIOUS_IMAGE PREVIOUS_RELEASE AGENT CONTRACTED \
+      BACKUP ACTION CHANGED_AT; do
+      printf '%s=%s\n' "$key" "${state[$key]:-}"
+    done
+  } >"$temporary"
+  chmod 0644 "$temporary"
+  mv "$temporary" "$state_file"
+}
+
+installed() { [[ -n ${state[IMAGE]:-} ]]; }
+
+now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+# Whether version $1 is at least $2.
+at_least() { [[ $(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n 1) == "$2" ]]; }
+
+choose_engine() {
+  engine=${engine:-${state[ENGINE]:-}}
+  if [[ -z $engine ]]; then
+    if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+      engine=docker
+    elif command -v podman >/dev/null 2>&1; then
+      engine=podman
+    else
+      die "neither Docker nor Podman is installed"
+    fi
+  fi
+  case $engine in
+    docker | podman) ;;
+    *) die "--engine is docker or podman, not $engine" ;;
+  esac
+  project=${project:-${state[PROJECT]:-pingora-panel}}
+  [[ $project =~ ^[a-z0-9][a-z0-9_-]*$ ]] || die "$project is not a Compose project name"
+}
+
+podman_socket() {
+  local socket
+  socket=$(podman info --format '{{.Host.RemoteSocket.Path}}' 2>/dev/null) || return 1
+  socket=${socket#unix://}
+  [[ -S $socket ]] || return 1
+  printf 'unix://%s\n' "$socket"
+}
+
+compose_command=()
+find_compose() {
+  if docker compose version >/dev/null 2>&1; then
+    compose_command=(docker compose)
+  elif command -v docker-compose >/dev/null 2>&1; then
+    compose_command=(docker-compose)
+  else
+    return 1
+  fi
+}
+
+compose() {
+  [[ ${#compose_command[@]} -gt 0 ]] || find_compose || die "Compose v2 is needed: the docker compose plugin or docker-compose"
+  local files=(-f "$here/compose.yaml")
+  [[ -n ${state[AGENT]:-} ]] && files+=(-f "$here/compose.ops-agent.yaml")
+  if [[ $engine == podman ]]; then
+    local socket
+    socket=$(podman_socket) || die "Podman's socket is not running: systemctl enable --now podman.socket"
+    DOCKER_HOST=$socket "${compose_command[@]}" -p "$project" "${files[@]}" "$@"
+  else
+    "${compose_command[@]}" -p "$project" "${files[@]}" "$@"
+  fi
+}
+
+token() {
+  if [[ -n $token_file ]]; then
+    PPANEL_TOKEN=$(<"$token_file")
+    export PPANEL_TOKEN
+  fi
+  [[ -n ${PPANEL_TOKEN:-} ]] || die "set PPANEL_TOKEN or pass --token-file to call the API"
+}
+
+# Runs ppanel of image $1 against the API on the host.
+ppanel() {
+  local image=$1
+  shift
+  "$engine" run --rm --network host --env PPANEL_TOKEN --env PPANEL_API="$api" \
+    "$image" /usr/local/bin/ppanel "$@"
+}
+
+label() {
+  "$engine" image inspect --format "{{ index .Config.Labels \"$2\" }}" "$1" 2>/dev/null || true
+}
+
+# The image the options name, pulled, verified and pinned by digest.
+resolve_image() {
+  local image
+  if [[ -n $image_option ]]; then
+    image=$image_option
+  elif [[ -n $version_option ]]; then
+    image=$registry:$version_option
+  else
+    image=${state[IMAGE]:-$default_image}
+  fi
+  [[ $image =~ ^[A-Za-z0-9][A-Za-z0-9._/:@-]*$ ]] || die "$image is not an image reference"
+  if [[ $image == localhost/* ]]; then
+    "$engine" image inspect "$image" >/dev/null 2>&1 || die "the local image $image is missing; build it first"
+  else
+    "$engine" pull "$image" >&2 || die "cannot pull $image"
+    if [[ $skip_verify -eq 1 ]]; then
+      say "not verifying $image, as --skip-verify asks" >&2
+    else
+      command -v cosign >/dev/null 2>&1 || die "cosign is needed to verify $image; install it or pass --skip-verify"
+      cosign verify "$image" \
+        --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+        --certificate-identity-regexp "^https://github.com/$repository/\.github/workflows/release\.yml@refs/tags/v" \
+        >/dev/null || die "$image is not signed by a release of $repository"
+    fi
+    local pinned
+    pinned=$("$engine" image inspect --format '{{index .RepoDigests 0}}' "$image" 2>/dev/null) || true
+    [[ -n $pinned ]] && image=$pinned
+  fi
+  printf '%s\n' "$image"
+}
+
+release_of() {
+  local release
+  release=$(label "$1" org.opencontainers.image.version)
+  printf '%s\n' "${release:-unknown}"
+}
+
+# The record the versions report shows, as JSON.
+deployment() {
+  local action=$1 image=$2 previous=${3:-} digest=null entries=() service
+  if [[ $image == *@sha256:* ]]; then
+    digest="\"${image##*@}\""
+  fi
+  for service in "${panel_services[@]}"; do
+    entries+=("{\"service\":\"$service\",\"image\":\"$image\",\"digest\":$digest}")
+  done
+  [[ -n ${state[AGENT]:-} ]] && entries+=("{\"service\":\"ops-agent\",\"image\":\"$image\",\"digest\":$digest}")
+  local images
+  images=$(
+    IFS=,
+    printf '%s' "${entries[*]}"
+  )
+  local before=
+  [[ -n $previous ]] && before="\"previous\":\"$previous\","
+  printf '{"changed_at":"%s","action":"%s","engine":"%s","project":"%s",%s"images":[%s]}' \
+    "$(now)" "$action" "$engine" "$project" "$before" "$images"
+}
+
+# Brings the services named, all when none are, up on image $1.
+run_on() {
+  local image=$1 record=$2
+  shift 2
+  if [[ $# -gt 0 ]]; then
+    PINGORA_PANEL_IMAGE=$image PINGORA_PANEL_DEPLOYMENT=$record compose up -d --no-deps "$@"
+  else
+    PINGORA_PANEL_IMAGE=$image PINGORA_PANEL_DEPLOYMENT=$record compose up -d
+  fi
+}
+
+# Whether an HTTP GET of $2 at $1 answers 200, without curl; a subshell, so
+# a refused connection fails the check rather than the script.
+http_ok() (
+  host=${1%:*}
+  port=${1##*:}
+  exec 3<>"/dev/tcp/$host/$port"
+  printf 'GET %s HTTP/1.0\r\nHost: %s\r\n\r\n' "$2" "$host" >&3
+  IFS= read -r -t 5 line <&3
+  [[ $line == "HTTP/1."?" 200"* ]]
+)
+
+wait_for() {
+  local what=$1 deadline=$((SECONDS + timeout))
+  shift
+  until "$@" 2>/dev/null; do
+    ((SECONDS < deadline)) || return 1
+    sleep 2
+  done
+  say "$what is ready"
+}
+
+control_healthy() { [[ $(compose ps --format '{{.Health}}' control) == healthy ]]; }
+gateway_ready() { http_ok "$gateway_ops" /readyz; }
+
+wait_ready() {
+  wait_for "the gateway" gateway_ready || return 1
+  wait_for "the control plane" control_healthy
+}
+
+check() {
+  local verdict=$1
+  [[ $verdict != fail || $ignore_preflight -eq 0 ]] || verdict=warn
+  printf '%s %s: %s\n' "$verdict" "$2" "$3"
+  [[ $verdict != fail ]] || failures=$((failures + 1))
+}
+
+secrets_check() {
+  local required=$1 name missing=()
+  for name in bootstrap-token password-pepper master-keys; do
+    [[ -s $secrets/$name ]] || missing+=("$name")
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    if [[ $required -eq 1 ]]; then
+      check fail secrets "missing in $secrets: ${missing[*]}"
+    else
+      check pass secrets "created on install in $secrets"
+    fi
+    return
+  fi
+  if [[ $(wc -c <"$secrets/password-pepper") -lt 16 ]]; then
+    check fail secrets "the password pepper has fewer than 16 bytes"
+    return
+  fi
+  local key
+  while IFS= read -r key; do
+    [[ -n $key ]] || continue
+    if [[ $(printf '%s' "$key" | base64 -d 2>/dev/null | wc -c) -ne 32 ]]; then
+      check fail secrets "a master key is not 32 bytes of base64"
+      return
+    fi
+  done <"$secrets/master-keys"
+  check pass secrets "present and well formed in $secrets"
+}
+
+port_taken() { (exec 3<>"/dev/tcp/$1/$2") 2>/dev/null; }
+
+free_kib() { df -Pk "$1" 2>/dev/null | awk 'NR == 2 { print $4 }'; }
+
+host_checks() {
+  local installing=$1 version kernel
+  kernel=$(uname -s)
+  if [[ $kernel == Linux ]]; then
+    check pass system "Linux $(uname -r)"
+  else
+    check fail system "$kernel is not Linux"
+  fi
+  if [[ -d /run/systemd/system ]]; then
+    check pass systemd "running"
+  else
+    check warn systemd "not running; the host agent needs it"
+  fi
+  if [[ -f /sys/fs/cgroup/cgroup.controllers ]]; then
+    check pass cgroup "version 2"
+  else
+    check fail cgroup "cgroup version 2 is required"
+  fi
+  case $engine in
+    docker)
+      version=$(docker version --format '{{.Server.Version}}' 2>/dev/null) || version=
+      if [[ -n $version ]] && at_least "$version" 24.0; then
+        check pass engine "Docker $version"
+      else
+        check fail engine "Docker 24.0 or later must be running, found ${version:-none}"
+      fi
+      ;;
+    podman)
+      version=$(podman version --format '{{.Client.Version}}' 2>/dev/null) || version=
+      if [[ -n $version ]] && at_least "$version" 4.4; then
+        check pass engine "Podman $version"
+      else
+        check fail engine "Podman 4.4 or later is required, found ${version:-none}"
+      fi
+      if podman_socket >/dev/null; then
+        check pass socket "Podman's socket answers"
+      else
+        check fail socket "Podman's socket is not running: systemctl enable --now podman.socket"
+      fi
+      ;;
+  esac
+  version=
+  if find_compose; then
+    version=$("${compose_command[@]}" version --short 2>/dev/null) || version=
+  fi
+  version=${version#v}
+  if [[ -n $version ]] && at_least "$version" 2.20; then
+    check pass compose "Compose $version"
+  else
+    check fail compose "Compose 2.20 or later is required, found ${version:-none}"
+  fi
+  local available
+  available=$(awk '/^MemAvailable:/ { print $2 }' /proc/meminfo 2>/dev/null) || available=
+  if [[ -z $available ]]; then
+    check warn memory "the available memory cannot be read"
+  elif ((available >= 1048576)); then
+    check pass memory "$((available / 1024)) MiB available"
+  elif ((available >= 524288)); then
+    check warn memory "$((available / 1024)) MiB available; 1 GiB is recommended"
+  else
+    check fail memory "$((available / 1024)) MiB available; at least 512 MiB is needed"
+  fi
+  local root free
+  if [[ $engine == docker ]]; then
+    root=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null) || root=
+  else
+    root=$(podman info --format '{{.Store.GraphRoot}}' 2>/dev/null) || root=
+  fi
+  free=$(free_kib "${root:-/}")
+  if [[ -z $free ]]; then
+    check warn space "the engine's free space cannot be read"
+  elif ((free >= 4194304)); then
+    check pass space "$((free / 1048576)) GiB free for images and volumes"
+  else
+    check fail space "$((free / 1024)) MiB free for images and volumes; 4 GiB is needed"
+  fi
+  local nearest=$backup_dir
+  while [[ ! -d $nearest ]]; do nearest=$(dirname "$nearest"); done
+  free=$(free_kib "$nearest")
+  if [[ -n $free ]] && ((free < 2097152)); then
+    check warn backups "$((free / 1024)) MiB free in $backup_dir for backups"
+  else
+    check pass backups "${free:+$((free / 1048576)) GiB free in }$backup_dir"
+  fi
+  if [[ $installing -eq 1 ]]; then
+    local port taken=()
+    for port in "${loopback_ports[@]}"; do
+      if port_taken 127.0.0.1 "$port"; then taken+=("$port"); fi
+    done
+    if [[ ${#taken[@]} -gt 0 ]]; then
+      check fail ports "taken on 127.0.0.1: ${taken[*]}"
+    else
+      check pass ports "the loopback ports the installation binds are free"
+    fi
+    taken=()
+    for port in "${public_ports[@]}"; do
+      if port_taken 127.0.0.1 "$port"; then taken+=("$port"); fi
+    done
+    if [[ ${#taken[@]} -gt 0 ]]; then
+      check warn listeners "taken: ${taken[*]}; the gateway's listeners need other ports"
+    else
+      check pass listeners "80 and 443 are free for the gateway"
+    fi
+  fi
+  secrets_check "$((1 - installing))"
+}
+
+# Checks image $1 against the live databases and the running release;
+# returns the preflight's status: 0, or $contracts_status when a migration
+# contracts a schema.
+image_preflight() {
+  local image=$1 current=${state[IMAGE]} peers status=0
+  peers=$(mktemp)
+  # Releases before the protocols command answer with the versions report;
+  # they would start the control plane instead, which the timeout ends.
+  if ! timeout 60 "$engine" run --rm --network none "$current" \
+    /usr/local/bin/panel-control protocols >"$peers" 2>/dev/null; then
+    ppanel "$current" system versions -o json >"$peers"
+  fi
+  "$engine" run --rm -i --network none \
+    -v "${project}_control-data:/var/lib/pingora-panel/control" \
+    "$image" /usr/local/bin/panel-control preflight --peers /dev/stdin <"$peers" || status=$?
+  rm -f "$peers"
+  case $status in
+    0) return 0 ;;
+    "$contracts_status") return "$contracts_status" ;;
+    *) die "$image cannot take over this installation" ;;
+  esac
+}
+
+take_backup() {
+  local image=$1 id file
+  mkdir -p "$backup_dir"
+  chmod 0700 "$backup_dir"
+  id=$(ppanel "$image" backup create --with databases,sites --wait -o json |
+    sed -n 's/^  "id": "\([A-Za-z0-9-]*\)",\{0,1\}$/\1/p' | head -n 1)
+  [[ -n $id ]] || die "the backup was not taken"
+  file=$backup_dir/pingora-panel-backup-$id.tar.zst
+  if ! ppanel "$image" backup download "$id" --to - >"$file.partial"; then
+    rm -f "$file.partial"
+    die "the backup $id could not be downloaded intact"
+  fi
+  chmod 0600 "$file.partial"
+  mv "$file.partial" "$file"
+  printf '%s\n' "$file"
+}
+
+# Puts the host agent of image $1 in place, keeping the one it replaces.
+switch_agent() {
+  local image=$1 container
+  container=$("$engine" create "$image" /usr/local/bin/ops-agent)
+  "$engine" cp "$container:/usr/local/bin/ops-agent" "$agent_bin.new"
+  "$engine" rm --force "$container" >/dev/null
+  chmod 0755 "$agent_bin.new"
+  [[ -f $agent_bin ]] && cp -p "$agent_bin" "$agent_bin.previous"
+  mv "$agent_bin.new" "$agent_bin"
+  systemctl restart pingora-panel-ops-agent.service
+}
+
+restore_agent() {
+  [[ -f $agent_bin.previous ]] || return 0
+  mv "$agent_bin.previous" "$agent_bin"
+  systemctl restart pingora-panel-ops-agent.service
+}
+
+# Installs the databases and sites of archive $2 with image $1 while the
+# control plane is stopped, printing the revision and hash it wants. The
+# image's user reads a copy only it and root may read.
+restore_archive() {
+  local image=$1 archive=$2 staged status=0
+  staged=$(mktemp -d)
+  chmod 0700 "$staged"
+  cp "$archive" "$staged/archive.tar.zst"
+  chown 65532:65532 "$staged/archive.tar.zst" 2>/dev/null || chmod 0644 "$staged/archive.tar.zst"
+  "$engine" run --rm --network host \
+    -v "${project}_control-data:/var/lib/pingora-panel/control" \
+    -v "${project}_sites:/srv/pingora-panel/sites" \
+    -v "$staged/archive.tar.zst:/run/pingora-panel-restore.tar.zst:ro,z" \
+    "$image" /usr/local/bin/panel-control restore /run/pingora-panel-restore.tar.zst \
+    --sites /srv/pingora-panel/sites || status=$?
+  rm -rf "$staged"
+  return "$status"
+}
+
+field() { sed -n "s/^$1=//p" | tail -n 1; }
+
+command_preflight() {
+  choose_engine
+  host_checks "$(installed && echo 0 || echo 1)"
+  if [[ -n $image_option$version_option ]] && installed; then
+    local image status=0
+    image=$(resolve_image)
+    image_preflight "$image" || status=$?
+    if [[ $status -eq $contracts_status ]]; then
+      check warn migrations "$image contracts a schema; rolling it back needs its backup"
+    else
+      check pass migrations "$image takes over the live data"
+    fi
+  fi
+  ((failures == 0)) || die "the host is not ready: $failures checks failed"
+}
+
+command_install() {
+  installed && die "an installation runs here already; upgrade it instead"
+  choose_engine
+  host_checks 1
+  ((failures == 0)) || die "the host is not ready: $failures checks failed"
+  "$here/generate-secrets.sh" "$secrets" >/dev/null
+  local image
+  image=$(resolve_image)
+  state[ENGINE]=$engine
+  state[PROJECT]=$project
+  state[AGENT]=$agent_option
+  if [[ -n $agent_option ]]; then
+    local capabilities
+    IFS=, read -r -a capabilities <<<"$agent_option"
+    PINGORA_PANEL_IMAGE=$image CONTAINER_ENGINE=$engine PINGORA_PANEL_PROJECT=$project \
+      "$here/ops-agent/install.sh" "${capabilities[@]}"
+  fi
+  run_on "$image" "$(deployment install "$image")"
+  state[IMAGE]=$image
+  state[RELEASE]=$(release_of "$image")
+  state[CONTRACTED]=0
+  state[ACTION]=install
+  state[CHANGED_AT]=$(now)
+  write_state
+  wait_ready || die "the installation did not become ready; see: pingora-panel status"
+  say "installed ${state[RELEASE]}; the console is at http://127.0.0.1:8080"
+  say "create the first account with the token in $secrets/bootstrap-token"
+}
+
+command_upgrade() {
+  installed || die "nothing is installed here"
+  [[ -n $image_option$version_option ]] || die "name the release with --version or the image with --image"
+  choose_engine
+  token
+  local current=${state[IMAGE]} image status=0 backup
+  image=$(resolve_image)
+  [[ $image != "$current" ]] || {
+    say "$current runs already"
+    return 0
+  }
+  host_checks 0
+  ((failures == 0)) || die "the host is not ready: $failures checks failed"
+  ppanel "$current" system preflight || die "the installation is not ready to upgrade"
+  image_preflight "$image" || status=$?
+  backup=$(take_backup "$current")
+  say "kept a backup in $backup"
+  local release previous_release=${state[RELEASE]:-unknown} record
+  release=$(release_of "$image")
+  record=$(deployment upgrade "$image" "$previous_release")
+  # Servers before their clients: the agent, the gateway, the control plane.
+  if ! {
+    { [[ -z ${state[AGENT]:-} ]] || switch_agent "$image"; } &&
+      run_on "$image" "$record" gatewayd &&
+      wait_for "the gateway" gateway_ready &&
+      run_on "$image" "$record" &&
+      wait_ready &&
+      ppanel "$image" system verify --wait 60
+  }; then
+    say "the upgrade failed; returning to $current" >&2
+    [[ -z ${state[AGENT]:-} ]] || restore_agent
+    run_on "$current" "$(deployment rollback "$current" "$release")"
+    wait_ready || die "the previous release did not become ready either; restore $backup"
+    die "upgrading to $release failed; $current runs again"
+  fi
+  state[PREVIOUS_IMAGE]=$current
+  state[PREVIOUS_RELEASE]=$previous_release
+  state[IMAGE]=$image
+  state[RELEASE]=$release
+  state[CONTRACTED]=$((status == contracts_status ? 1 : 0))
+  state[BACKUP]=$backup
+  state[ACTION]=upgrade
+  state[CHANGED_AT]=$(now)
+  write_state
+  say "upgraded from $previous_release to $release"
+}
+
+command_rollback() {
+  installed || die "nothing is installed here"
+  local previous=${state[PREVIOUS_IMAGE]:-} current=${state[IMAGE]}
+  [[ -n $previous ]] || die "no earlier release ran here"
+  choose_engine
+  if [[ ${state[CONTRACTED]:-0} -eq 1 && $restore_option -ne 1 ]]; then
+    die "the last upgrade contracted a schema; roll back with --restore, which restores ${state[BACKUP]:-its backup}"
+  fi
+  local record release=${state[RELEASE]:-unknown}
+  record=$(deployment rollback "$previous" "$release")
+  local services=()
+  mapfile -t services < <(compose config --services | grep -vx gatewayd)
+  if [[ $restore_option -eq 1 ]]; then
+    token
+    [[ -f ${state[BACKUP]:-} ]] || die "the backup ${state[BACKUP]:-} is missing"
+    compose stop control
+    local restored
+    restored=$(restore_archive "$previous" "${state[BACKUP]}") || die "the backup could not be restored"
+    say "$restored"
+  fi
+  # Clients before their servers: the control plane, the gateway, the agent.
+  run_on "$previous" "$record" "${services[@]}"
+  wait_for "the control plane" control_healthy || die "the control plane of $previous did not become ready"
+  run_on "$previous" "$record" gatewayd
+  wait_for "the gateway" gateway_ready || die "the gateway of $previous did not become ready"
+  [[ -z ${state[AGENT]:-} ]] || restore_agent
+  state[IMAGE]=$previous
+  state[RELEASE]=${state[PREVIOUS_RELEASE]:-unknown}
+  state[PREVIOUS_IMAGE]=$current
+  state[PREVIOUS_RELEASE]=$release
+  state[CONTRACTED]=0
+  state[ACTION]=rollback
+  state[CHANGED_AT]=$(now)
+  write_state
+  say "rolled back to ${state[RELEASE]}"
+}
+
+command_restore() {
+  local archive=${1:-}
+  [[ -n $archive ]] || usage
+  [[ -f $archive ]] || die "$archive is not a file"
+  archive=$(cd "$(dirname "$archive")" && pwd)/$(basename "$archive")
+  installed && die "an installation runs here; uninstall it first, which keeps its data, or roll back with --restore"
+  choose_engine
+  token
+  host_checks 0
+  ((failures == 0)) || die "the host is not ready: $failures checks failed"
+  local image restored revision hash
+  image=$(resolve_image)
+  state[ENGINE]=$engine
+  state[PROJECT]=$project
+  PINGORA_PANEL_IMAGE=$image compose create >/dev/null
+  restored=$(restore_archive "$image" "$archive") || die "the archive could not be restored"
+  say "$restored"
+  revision=$(field desired_revision <<<"$restored")
+  hash=$(field desired_hash <<<"$restored")
+  run_on "$image" "$(deployment restore "$image")"
+  state[IMAGE]=$image
+  state[RELEASE]=$(release_of "$image")
+  state[CONTRACTED]=0
+  state[BACKUP]=$archive
+  state[ACTION]=restore
+  state[CHANGED_AT]=$(now)
+  write_state
+  wait_ready || die "the restored installation did not become ready; see: pingora-panel status"
+  local expected=()
+  [[ -n $revision ]] && expected+=(--revision "$revision")
+  [[ -n $hash ]] && expected+=(--hash "$hash")
+  ppanel "$image" system verify "${expected[@]}" --wait "$timeout" ||
+    die "the restored installation does not verify"
+  say "restored $archive and verified it"
+}
+
+remove_agent() {
+  command -v systemctl >/dev/null 2>&1 || return 0
+  systemctl disable --now pingora-panel-ops-agent.service \
+    pingora-panel-ops-agent-credentials.path >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/pingora-panel-ops-agent.service \
+    /etc/systemd/system/pingora-panel-ops-agent-credentials.service \
+    /etc/systemd/system/pingora-panel-ops-agent-credentials.path
+  rm -rf /etc/systemd/system/pingora-panel-ops-agent.service.d
+  systemctl daemon-reload
+}
+
+command_uninstall() {
+  choose_engine
+  if [[ $purge -eq 1 && $yes -ne 1 ]]; then
+    die "--purge removes every database, certificate, backup and secret; pass --yes as well"
+  fi
+  if [[ $purge -eq 1 ]]; then
+    compose down --volumes --rmi all --remove-orphans
+  else
+    compose down --remove-orphans
+  fi
+  [[ -z ${state[AGENT]:-} ]] || remove_agent
+  if [[ $purge -eq 1 ]]; then
+    rm -f "$agent_bin" "$agent_bin.previous" /etc/sysusers.d/pingora-panel.conf \
+      /etc/tmpfiles.d/pingora-panel-ops-agent.conf
+    getent group pingora-panel >/dev/null 2>&1 && groupdel pingora-panel 2>/dev/null || true
+    rm -rf "$backup_dir" /var/lib/pingora-panel /run/pingora-panel-ops "$secrets" "$state_dir"
+    say "removed the installation and all of its data"
+  else
+    rm -f "$state_file"
+    say "removed the installation; its volumes, secrets and backups stay, so installing again resumes"
+  fi
+}
+
+command_status() {
+  installed || {
+    say "nothing is installed here"
+    return 0
+  }
+  choose_engine
+  local key
+  for key in RELEASE IMAGE PREVIOUS_RELEASE AGENT ACTION CHANGED_AT BACKUP; do
+    [[ -n ${state[$key]:-} ]] && printf '%-17s %s\n' "$key" "${state[$key]}"
+  done
+  compose ps
+}
+
+command_logs() {
+  choose_engine
+  compose logs --no-color "$@"
+}
+
+main() {
+  local command=${1:-}
+  [[ -n $command ]] || usage
+  shift
+  local arguments=()
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --engine) engine=${2:?--engine needs docker or podman}; shift ;;
+      --project) project=${2:?--project needs a name}; shift ;;
+      --image) image_option=${2:?--image needs a reference}; shift ;;
+      --version) version_option=${2:?--version needs a release}; shift ;;
+      --token-file) token_file=${2:?--token-file needs a file}; shift ;;
+      --agent) agent_option=${2:?--agent needs capabilities}; shift ;;
+      --purge) purge=1 ;;
+      --yes) yes=1 ;;
+      --restore) restore_option=1 ;;
+      --skip-verify) skip_verify=1 ;;
+      --ignore-preflight) ignore_preflight=1 ;;
+      -h | --help) usage ;;
+      -*) die "unknown option $1" ;;
+      *) arguments+=("$1") ;;
+    esac
+    shift
+  done
+  read_state
+  case $command in
+    preflight) command_preflight ;;
+    install) command_install ;;
+    upgrade) command_upgrade ;;
+    rollback) command_rollback ;;
+    restore) command_restore "${arguments[@]}" ;;
+    uninstall) command_uninstall ;;
+    status) command_status ;;
+    logs) command_logs "${arguments[@]}" ;;
+    *) usage ;;
+  esac
+}
+
+main "$@"
