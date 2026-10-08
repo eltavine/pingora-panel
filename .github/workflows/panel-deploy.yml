@@ -7,11 +7,28 @@ on:
     paths:
       - "panel/**"
       - ".dockerignore"
+      - "LICENSE"
+      - "docs/upstream-patches.md"
+      - ".github/scripts/install-cargo-about.sh"
+      - ".github/scripts/install-syft.sh"
+      - ".github/scripts/install-grype.sh"
+      - ".github/scripts/check-vulnerability-leases.py"
+      - ".github/policies/vulnerability-leases.json"
       - ".github/workflows/panel-deploy.yml"
   pull_request:
     paths:
       - "panel/deploy/**"
+      - "panel/scripts/supply-chain.sh"
+      - "panel/about.toml"
+      - "panel/about.hbs"
       - ".dockerignore"
+      - "LICENSE"
+      - "docs/upstream-patches.md"
+      - ".github/scripts/install-cargo-about.sh"
+      - ".github/scripts/install-syft.sh"
+      - ".github/scripts/install-grype.sh"
+      - ".github/scripts/check-vulnerability-leases.py"
+      - ".github/policies/vulnerability-leases.json"
       - ".github/workflows/panel-deploy.yml"
 
 permissions:
@@ -42,6 +59,44 @@ jobs:
 
       - name: Build the image
         run: docker compose build
+
+      - name: Install the SBOM and vulnerability tools
+        run: |
+          bash .github/scripts/install-syft.sh "$RUNNER_TEMP/evidence-bin"
+          bash .github/scripts/install-grype.sh "$RUNNER_TEMP/evidence-bin"
+          printf '%s\n' "$RUNNER_TEMP/evidence-bin" >> "$GITHUB_PATH"
+
+      - name: Describe the image in an SBOM and scan it
+        run: |
+          evidence="$RUNNER_TEMP/evidence"
+          mkdir -p "$evidence"
+          panel/scripts/supply-chain.sh sbom image docker:localhost/pingora-panel:dev \
+            "$evidence/image.cdx.json"
+          # The binaries name the crates they were built from.
+          python3 -c "import json, sys; purls = [c.get('purl', '') for c in json.load(open(sys.argv[1]))['components']]; assert any(p.startswith('pkg:cargo/tokio@') for p in purls), 'no crates found in the binaries'" \
+            "$evidence/image.cdx.json"
+          panel/scripts/supply-chain.sh scan "$evidence/image.cdx.json" "$evidence/image.grype.json"
+          python3 .github/scripts/check-vulnerability-leases.py --scope image "$evidence/image.grype.json"
+
+      - name: Read the licenses the image carries
+        run: |
+          evidence="$RUNNER_TEMP/evidence"
+          container=$(docker create localhost/pingora-panel:dev /usr/local/bin/ppanel)
+          docker cp "$container:/usr/share/doc/pingora-panel" "$evidence/doc"
+          docker rm "$container" >/dev/null
+          for section in '## Pingora' '## Rust crates' '## JavaScript packages'; do
+            grep -qx "$section" "$evidence/doc/THIRD-PARTY-NOTICES.md"
+          done
+          test -s "$evidence/doc/LICENSE"
+          test -s "$evidence/doc/UPSTREAM-PATCHES.md"
+
+      - name: Keep the image's supply-chain evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: image-evidence
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: error
 
       - name: Install the host agent
         run: |
