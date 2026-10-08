@@ -8,11 +8,14 @@ updates:
 
   # One entry per Cargo workspace root. check-dependabot-coverage.py fails the
   # build when a workspace is added without a matching entry here.
+  # The root workspace is upstream Pingora, changed only for security or
+  # correctness fixes (docs/upstream-patches.md): a limit of zero stops its
+  # version updates and keeps its security updates.
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
 
   - package-ecosystem: cargo
     directory: /panel
