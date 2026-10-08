@@ -50,19 +50,19 @@ impl Modify for HttpConventions {
             }
         }
         for (path, item) in &mut document.paths.paths {
-            item.parameters.get_or_insert_default().push(ParameterBuilder::new()
+            item.parameters.get_or_insert_default().push(RefOr::T(ParameterBuilder::new()
                 .name(REQUEST_ID_HEADER).parameter_in(ParameterIn::Header)
                 .required(Required::False)
                 .description(Some("Optional request identity (1..=256 visible ASCII bytes). Missing, invalid or repeated values are replaced with a generated UUID."))
                 .schema(Some(ObjectBuilder::new().schema_type(Type::String).min_length(Some(1)).max_length(Some(256))))
-                .build());
-            item.parameters.get_or_insert_default().push(ParameterBuilder::new()
+                .build()));
+            item.parameters.get_or_insert_default().push(RefOr::T(ParameterBuilder::new()
                 .name(TRACEPARENT_HEADER).parameter_in(ParameterIn::Header)
                 .required(Required::False)
                 .description(Some("W3C Trace Context parent of the caller's trace. Invalid values are ignored."))
                 .schema(Some(ObjectBuilder::new().schema_type(Type::String).min_length(Some(55)).max_length(Some(512))))
-                .build());
-            item.parameters.get_or_insert_default().push(
+                .build()));
+            item.parameters.get_or_insert_default().push(RefOr::T(
                 ParameterBuilder::new()
                     .name(TRACESTATE_HEADER)
                     .parameter_in(ParameterIn::Header)
@@ -76,7 +76,7 @@ impl Modify for HttpConventions {
                             .max_length(Some(512)),
                     ))
                     .build(),
-            );
+            ));
             for operation in [
                 &mut item.get,
                 &mut item.post,
@@ -118,11 +118,21 @@ impl Modify for HttpConventions {
                             .insert(status.to_string(), response.build().into());
                     }
                 }
-                for response in operation.responses.responses.values_mut() {
+                for (status, response) in &mut operation.responses.responses {
                     if let RefOr::T(response) = response {
+                        // OpenAPI 3.1 requires every response to describe itself.
+                        if response.description.is_empty() {
+                            response.description = status
+                                .parse::<u16>()
+                                .ok()
+                                .and_then(|status| axum::http::StatusCode::from_u16(status).ok())
+                                .and_then(|status| status.canonical_reason())
+                                .unwrap_or("Response")
+                                .to_owned();
+                        }
                         response
                             .headers
-                            .insert(REQUEST_ID_HEADER.into(), Header::default());
+                            .insert(REQUEST_ID_HEADER.into(), RefOr::T(Header::default()));
                     }
                 }
             }

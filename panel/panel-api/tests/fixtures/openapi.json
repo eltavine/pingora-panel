@@ -63,7 +63,7 @@
         },
         "responses": {
           "204": {
-            "description": "",
+            "description": "No Content",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -361,7 +361,7 @@
         "operationId": "own_sessions",
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -633,7 +633,7 @@
         "operationId": "end_other_sessions",
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -950,7 +950,7 @@
         ],
         "responses": {
           "204": {
-            "description": "",
+            "description": "No Content",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -1248,7 +1248,7 @@
         "operationId": "own_tokens",
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -1530,7 +1530,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -1847,7 +1847,7 @@
         ],
         "responses": {
           "204": {
-            "description": "",
+            "description": "No Content",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -2157,7 +2157,7 @@
         ],
         "responses": {
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -2462,7 +2462,7 @@
         "operationId": "list_accounts",
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -2744,7 +2744,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -3061,7 +3061,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -3352,7 +3352,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -3669,7 +3669,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -3963,7 +3963,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -4290,7 +4290,7 @@
         ],
         "responses": {
           "204": {
-            "description": "",
+            "description": "No Content",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -4610,7 +4610,7 @@
         },
         "responses": {
           "204": {
-            "description": "",
+            "description": "No Content",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -4920,7 +4920,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -5204,7 +5204,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -5531,7 +5531,7 @@
         ],
         "responses": {
           "204": {
-            "description": "",
+            "description": "No Content",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -5841,7 +5841,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -6135,7 +6135,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -6462,7 +6462,7 @@
         ],
         "responses": {
           "204": {
-            "description": "",
+            "description": "No Content",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -6776,7 +6776,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -7100,7 +7100,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "ETag": {
                 "schema": {
@@ -7435,7 +7435,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -7769,7 +7769,7 @@
         ],
         "responses": {
           "204": {
-            "description": "",
+            "description": "No Content",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -8083,7 +8083,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -8407,7 +8407,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "ETag": {
                 "schema": {
@@ -8742,7 +8742,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -9076,7 +9076,7 @@
         ],
         "responses": {
           "204": {
-            "description": "",
+            "description": "No Content",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -9425,7 +9425,7 @@
         ],
         "responses": {
           "202": {
-            "description": "",
+            "description": "Accepted",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -9746,7 +9746,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -10070,7 +10070,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "ETag": {
                 "schema": {
@@ -10439,7 +10439,7 @@
         ],
         "responses": {
           "204": {
-            "description": "",
+            "description": "No Content",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -10806,7 +10806,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -11166,7 +11166,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -11516,7 +11516,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -11840,7 +11840,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -12220,7 +12220,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -12242,7 +12242,7 @@
             }
           },
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "ETag": {
                 "schema": {
@@ -12575,7 +12575,7 @@
         ],
         "responses": {
           "204": {
-            "description": "",
+            "description": "No Content",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -12889,7 +12889,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -13222,7 +13222,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -13552,7 +13552,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -13569,7 +13569,7 @@
             }
           },
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -13889,7 +13889,7 @@
         ],
         "responses": {
           "204": {
-            "description": "",
+            "description": "No Content",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -14224,7 +14224,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -14555,7 +14555,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -14912,7 +14912,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -15279,7 +15279,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -15636,7 +15636,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -15993,7 +15993,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -16390,7 +16390,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -16733,7 +16733,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -17065,7 +17065,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -18045,7 +18045,7 @@
         "operationId": "sign_in_options",
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -18363,7 +18363,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -18693,7 +18693,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -19060,7 +19060,7 @@
         ],
         "responses": {
           "204": {
-            "description": "",
+            "description": "No Content",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -19417,7 +19417,7 @@
         ],
         "responses": {
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "Location": {
                 "schema": {
@@ -19743,7 +19743,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -20064,7 +20064,7 @@
         },
         "responses": {
           "202": {
-            "description": "",
+            "description": "Accepted",
             "headers": {
               "Location": {
                 "schema": {
@@ -20398,7 +20398,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -20717,7 +20717,7 @@
         ],
         "responses": {
           "204": {
-            "description": "",
+            "description": "No Content",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -21039,7 +21039,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "Content-Disposition": {
                 "schema": {
@@ -21419,7 +21419,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -21796,7 +21796,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -22117,7 +22117,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -22449,7 +22449,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -22796,7 +22796,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -23124,7 +23124,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -23438,7 +23438,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -23771,7 +23771,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -24086,7 +24086,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -24407,7 +24407,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -24731,7 +24731,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "ETag": {
                 "schema": {
@@ -25066,7 +25066,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -25410,7 +25410,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -25744,7 +25744,7 @@
         ],
         "responses": {
           "204": {
-            "description": "",
+            "description": "No Content",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -26076,7 +26076,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -26433,7 +26433,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -26781,7 +26781,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -27102,7 +27102,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "Content-Disposition": {
                 "schema": {
@@ -27445,7 +27445,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -27781,7 +27781,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -28102,7 +28102,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -28459,7 +28459,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -28790,7 +28790,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -29121,7 +29121,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -29452,7 +29452,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -30105,7 +30105,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -30426,7 +30426,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -30783,7 +30783,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -31104,7 +31104,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -31435,7 +31435,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -31756,7 +31756,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -32077,7 +32077,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -32415,7 +32415,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -32750,7 +32750,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -33071,7 +33071,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -33401,7 +33401,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -33740,7 +33740,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -34100,7 +34100,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -34474,7 +34474,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -34823,7 +34823,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -35162,7 +35162,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -35509,7 +35509,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -35869,7 +35869,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -36597,7 +36597,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -36936,7 +36936,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -37310,7 +37310,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -37666,7 +37666,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -37996,7 +37996,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -38352,7 +38352,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -38718,7 +38718,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -39057,7 +39057,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -39396,7 +39396,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -39734,7 +39734,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -40064,7 +40064,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -40430,7 +40430,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -40778,7 +40778,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -41108,7 +41108,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -41438,7 +41438,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -41768,7 +41768,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -42089,7 +42089,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -42413,7 +42413,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "ETag": {
                 "schema": {
@@ -42748,7 +42748,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -43092,7 +43092,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -43426,7 +43426,7 @@
         ],
         "responses": {
           "204": {
-            "description": "",
+            "description": "No Content",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -43758,7 +43758,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -44092,7 +44092,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -44451,7 +44451,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -44819,7 +44819,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -45146,7 +45146,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -45503,7 +45503,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -45824,7 +45824,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -46145,7 +46145,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -46501,7 +46501,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -46828,7 +46828,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -46851,7 +46851,7 @@
             }
           },
           "202": {
-            "description": "",
+            "description": "Accepted",
             "headers": {
               "Retry-After": {
                 "schema": {
@@ -47214,7 +47214,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -47561,7 +47561,7 @@
         ],
         "responses": {
           "202": {
-            "description": "",
+            "description": "Accepted",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -47893,7 +47893,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -48245,7 +48245,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -48602,7 +48602,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -48923,7 +48923,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -49244,7 +49244,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -49565,7 +49565,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -49886,7 +49886,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -50242,7 +50242,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -50573,7 +50573,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -50894,7 +50894,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -51226,7 +51226,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -51573,7 +51573,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -51901,7 +51901,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -52199,7 +52199,7 @@
         "operationId": "list_identity_providers",
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -52518,7 +52518,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -52808,7 +52808,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -52825,7 +52825,7 @@
             }
           },
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -53105,7 +53105,7 @@
         ],
         "responses": {
           "204": {
-            "description": "",
+            "description": "No Content",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -53419,7 +53419,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -53751,7 +53751,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -54098,7 +54098,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -54426,7 +54426,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -54847,7 +54847,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -55168,7 +55168,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -55489,7 +55489,7 @@
         },
         "responses": {
           "202": {
-            "description": "",
+            "description": "Accepted",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -55917,7 +55917,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -56697,7 +56697,7 @@
         "operationId": "permissions",
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -57021,7 +57021,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -57342,7 +57342,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -57666,7 +57666,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -58022,7 +58022,7 @@
         ],
         "responses": {
           "204": {
-            "description": "",
+            "description": "No Content",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -58336,7 +58336,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -58705,7 +58705,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -59025,7 +59025,7 @@
         ],
         "responses": {
           "204": {
-            "description": "",
+            "description": "No Content",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -59339,7 +59339,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -59686,7 +59686,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -60016,7 +60016,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -60389,7 +60389,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -60766,10 +60766,10 @@
               "schema": {
                 "oneOf": [
                   {
-                    "type": "null"
+                    "$ref": "#/components/schemas/PluginEnable"
                   },
                   {
-                    "$ref": "#/components/schemas/PluginEnable"
+                    "type": "null"
                   }
                 ]
               }
@@ -60778,7 +60778,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -61161,7 +61161,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -61544,7 +61544,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -61917,7 +61917,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -62300,7 +62300,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -62683,7 +62683,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -63031,7 +63031,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -63363,7 +63363,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -63704,7 +63704,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -64072,7 +64072,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -64430,7 +64430,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -64740,7 +64740,7 @@
         "operationId": "list_roles",
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -65022,7 +65022,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -65348,7 +65348,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -65628,7 +65628,7 @@
         ],
         "responses": {
           "204": {
-            "description": "",
+            "description": "No Content",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -65952,7 +65952,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -66297,7 +66297,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -66627,7 +66627,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -66941,7 +66941,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -67273,7 +67273,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -67620,7 +67620,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -67948,7 +67948,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -68246,7 +68246,7 @@
         "operationId": "session",
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -68525,7 +68525,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "Set-Cookie": {
                 "schema": {
@@ -68799,7 +68799,7 @@
         "operationId": "logout",
         "responses": {
           "204": {
-            "description": "",
+            "description": "No Content",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -69097,7 +69097,7 @@
         "operationId": "setup_status",
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -69376,7 +69376,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -69681,7 +69681,7 @@
         "operationId": "get_sign_in_policy",
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -69960,7 +69960,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -70290,7 +70290,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -70619,7 +70619,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -72058,7 +72058,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -72379,7 +72379,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "ETag": {
                 "schema": {
@@ -72741,7 +72741,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -73074,7 +73074,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -73431,7 +73431,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -73752,7 +73752,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -74083,7 +74083,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -74428,7 +74428,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -74767,7 +74767,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -75134,7 +75134,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -75503,7 +75503,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -75873,7 +75873,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -76257,7 +76257,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -76595,7 +76595,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -76964,7 +76964,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -77333,7 +77333,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -77702,7 +77702,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -78033,7 +78033,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -78367,7 +78367,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -78734,7 +78734,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -79106,7 +79106,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -79427,7 +79427,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "Content-Disposition": {
                 "schema": {
@@ -79754,7 +79754,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -80075,7 +80075,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -80390,7 +80390,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -80711,7 +80711,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -81043,7 +81043,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -81390,7 +81390,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -81718,7 +81718,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -82061,7 +82061,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -82422,7 +82422,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -82743,7 +82743,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -83067,7 +83067,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -83388,7 +83388,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -83719,7 +83719,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "ETag": {
                 "schema": {
@@ -84064,7 +84064,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -84394,7 +84394,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -84754,7 +84754,7 @@
         },
         "responses": {
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -85138,7 +85138,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -85476,7 +85476,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -85842,7 +85842,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -86172,7 +86172,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -86477,7 +86477,7 @@
         "operationId": "list_workload_identities",
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -86796,7 +86796,7 @@
         ],
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -87086,7 +87086,7 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "OK",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -87103,7 +87103,7 @@
             }
           },
           "201": {
-            "description": "",
+            "description": "Created",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -87383,7 +87383,7 @@
         ],
         "responses": {
           "204": {
-            "description": "",
+            "description": "No Content",
             "headers": {
               "x-request-id": {
                 "schema": {
@@ -87687,10 +87687,10 @@
           "format": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/AccessLogFormat"
               },
               {
-                "$ref": "#/components/schemas/AccessLogFormat"
+                "type": "null"
               }
             ]
           }
@@ -88620,11 +88620,11 @@
           "bypass": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/ApplyBypass",
                 "description": "Applies without the approvals policies ask for; needs\n`approval.bypass` and is recorded."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -89160,10 +89160,10 @@
           "last_error": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/IssuanceError"
               },
               {
-                "$ref": "#/components/schemas/IssuanceError"
+                "type": "null"
               }
             ]
           },
@@ -89252,10 +89252,10 @@
           "failure": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/BackupFailure"
               },
               {
-                "$ref": "#/components/schemas/BackupFailure"
+                "type": "null"
               }
             ]
           },
@@ -90116,11 +90116,11 @@
           "project": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/ComposeProjectView",
                 "description": "The project afterwards; absent once it is down."
+              },
+              {
+                "type": "null"
               }
             ]
           }
@@ -90160,11 +90160,11 @@
           "error": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/LogTailError",
                 "description": "Why it could not be read."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -90481,10 +90481,10 @@
           "sites": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/SiteSummary"
               },
               {
-                "$ref": "#/components/schemas/SiteSummary"
+                "type": "null"
               }
             ]
           },
@@ -90544,11 +90544,11 @@
           "container": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/ContainerView",
                 "description": "The container afterwards; absent once removed."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -90753,10 +90753,10 @@
           "info": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/EngineInfoView"
               },
               {
-                "$ref": "#/components/schemas/EngineInfoView"
+                "type": "null"
               }
             ]
           },
@@ -90770,10 +90770,10 @@
           "version": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/EngineVersionView"
               },
               {
-                "$ref": "#/components/schemas/EngineVersionView"
+                "type": "null"
               }
             ]
           }
@@ -90848,10 +90848,10 @@
           "error": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/LogTailError"
               },
               {
-                "$ref": "#/components/schemas/LogTailError"
+                "type": "null"
               }
             ]
           },
@@ -91028,11 +91028,11 @@
           "endpoint": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/EndpointBody",
                 "description": "One of the container's endpoints; by default its first for the port\nits labels declare, or for its only TCP port, published first."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -91177,11 +91177,11 @@
           "network": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/ContainerNetworkStatsView",
                 "description": "Absent for a container without a network of its own, such as one\non the host's."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -91246,11 +91246,11 @@
           "declared_site": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/DeclaredSiteView",
                 "description": "The site its labels declare, if they name a valid host."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -91434,11 +91434,11 @@
           "session": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/SessionView",
                 "description": "The login session, unless an API token authenticated the request."
+              },
+              {
+                "type": "null"
               }
             ]
           }
@@ -91711,30 +91711,30 @@
           "configuration": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ConfigurationDiagnosis"
               },
               {
-                "$ref": "#/components/schemas/ConfigurationDiagnosis"
+                "type": "null"
               }
             ]
           },
           "data_plane": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/DataPlaneResponse"
               },
               {
-                "$ref": "#/components/schemas/DataPlaneResponse"
+                "type": "null"
               }
             ]
           },
           "gateway": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/GatewayStatusResponse"
               },
               {
-                "$ref": "#/components/schemas/GatewayStatusResponse"
+                "type": "null"
               }
             ]
           },
@@ -91752,10 +91752,10 @@
           "host": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/HostSummaryView"
               },
               {
-                "$ref": "#/components/schemas/HostSummaryView"
+                "type": "null"
               }
             ]
           },
@@ -91838,11 +91838,11 @@
           "block": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/Context",
                 "description": "The context its block opens, for block directives."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -91855,10 +91855,10 @@
           "deprecated": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/Deprecation"
               },
               {
-                "$ref": "#/components/schemas/Deprecation"
+                "type": "null"
               }
             ]
           },
@@ -92144,11 +92144,11 @@
           "owner": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/DomainOwner",
                 "description": "The site already serving this host, if any."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -93779,22 +93779,22 @@
           "compression": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/CompressionPolicy",
                 "description": "Responses compressed with a coding the client accepts."
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "cors": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/CorsPolicy",
                 "description": "Cross-origin requests allowed, with preflights the gateway answers."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -93882,10 +93882,10 @@
           "claims": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ClaimNamesBody"
               },
               {
-                "$ref": "#/components/schemas/ClaimNamesBody"
+                "type": "null"
               }
             ]
           },
@@ -94154,10 +94154,10 @@
           "credentials": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/RegistryCredentialsBody"
               },
               {
-                "$ref": "#/components/schemas/RegistryCredentialsBody"
+                "type": "null"
               }
             ]
           },
@@ -94907,10 +94907,10 @@
           "error": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/LogTailError"
               },
               {
-                "$ref": "#/components/schemas/LogTailError"
+                "type": "null"
               }
             ]
           },
@@ -95225,31 +95225,31 @@
           "access": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/LuaCode",
                 "description": "After security policies."
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "allow": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/LuaPermissions"
               },
               {
-                "$ref": "#/components/schemas/LuaPermissions"
+                "type": "null"
               }
             ]
           },
           "body_filter": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/LuaCode"
               },
               {
-                "$ref": "#/components/schemas/LuaCode"
+                "type": "null"
               }
             ]
           },
@@ -95270,30 +95270,30 @@
           "header_filter": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/LuaCode"
               },
               {
-                "$ref": "#/components/schemas/LuaCode"
+                "type": "null"
               }
             ]
           },
           "log": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/LuaCode"
               },
               {
-                "$ref": "#/components/schemas/LuaCode"
+                "type": "null"
               }
             ]
           },
           "log_level": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/LuaLogLevel"
               },
               {
-                "$ref": "#/components/schemas/LuaLogLevel"
+                "type": "null"
               }
             ]
           },
@@ -95307,65 +95307,65 @@
           "on_error": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/LuaFallback"
               },
               {
-                "$ref": "#/components/schemas/LuaFallback"
+                "type": "null"
               }
             ]
           },
           "precontent": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/LuaCode",
                 "description": "After access, before the action."
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "proxy_ssl_cert": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/LuaCode",
                 "description": "As a request's TLS connection to its upstream chooses the\ncertificate it presents when asked for one."
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "proxy_ssl_verify": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/LuaCode",
                 "description": "As a request's new TLS connection to its upstream is judged by the\ncertificate the upstream presented."
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "rewrite": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/LuaCode",
                 "description": "After the route is chosen, before security policies."
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "server_rewrite": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/LuaCode",
                 "description": "Before the route is chosen; `http` and sites only."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -95442,11 +95442,11 @@
           "ssl_cert": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/LuaCode",
                 "description": "As a TLS handshake chooses the certificate it presents; `http` and\nsites only."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -95477,11 +95477,11 @@
           "ssl_client_hello": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/LuaCode",
                 "description": "As a TLS handshake's hello arrives, for the site its server name\nselects; `http` and sites only."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -95717,21 +95717,21 @@
           "script": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/LuaTestScript"
               },
               {
-                "$ref": "#/components/schemas/LuaTestScript"
+                "type": "null"
               }
             ]
           },
           "upstream": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/LuaTestUpstream",
                 "description": "The answer of the upstream a proxied request goes to; 200 with an\nempty body when absent."
+              },
+              {
+                "type": "null"
               }
             ]
           }
@@ -95923,20 +95923,20 @@
           "request": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/LuaTestRequestState"
               },
               {
-                "$ref": "#/components/schemas/LuaTestRequestState"
+                "type": "null"
               }
             ]
           },
           "response": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/LuaTestReply"
               },
               {
-                "$ref": "#/components/schemas/LuaTestReply"
+                "type": "null"
               }
             ]
           },
@@ -95980,10 +95980,10 @@
           "failure": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/LuaTestFailure"
               },
               {
-                "$ref": "#/components/schemas/LuaTestFailure"
+                "type": "null"
               }
             ]
           },
@@ -96156,11 +96156,11 @@
           "code": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/LuaCode",
                 "description": "The `set_by_lua` script whose result it is set to."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -96251,10 +96251,10 @@
           "external_account": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ExternalAccountBinding"
               },
               {
-                "$ref": "#/components/schemas/ExternalAccountBinding"
+                "type": "null"
               }
             ]
           },
@@ -96328,11 +96328,11 @@
           "challenge": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/AcmeChallenge",
                 "description": "`http-01` unless given."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -96522,11 +96522,11 @@
           "scope": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/GrantScopeBody",
                 "description": "Everything when absent."
+              },
+              {
+                "type": "null"
               }
             ]
           }
@@ -96881,10 +96881,10 @@
           "health": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/PluginHealth"
               },
               {
-                "$ref": "#/components/schemas/PluginHealth"
+                "type": "null"
               }
             ]
           },
@@ -97110,11 +97110,11 @@
           "effective_limits": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/PluginLimits",
                 "description": "What the active version, or else the newest valid one, runs under."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -97138,10 +97138,10 @@
           "health": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/PluginHealth"
               },
               {
-                "$ref": "#/components/schemas/PluginHealth"
+                "type": "null"
               }
             ]
           },
@@ -97470,11 +97470,11 @@
           "error": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/LogTailError",
                 "description": "Why it stayed; absent once it is gone."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -98326,11 +98326,11 @@
           "error_pages": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/ErrorPages",
                 "description": "Pages answering the route's errors in place of its site's; an empty\nlist answers them without pages."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -98668,11 +98668,11 @@
           "access_log": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/AccessLog",
                 "description": "How the route's requests are logged; absent keeps the current settings."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -98692,11 +98692,11 @@
           "error_pages": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/ErrorPages",
                 "description": "Pages answering the route's errors in place of its site's; `null`\nanswers them with the site's and absent keeps the current ones."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -98780,11 +98780,11 @@
           "host": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/NormalizedHost",
                 "description": "Restricts a prefix route to one of the site's hosts."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -99053,11 +99053,11 @@
           "basic_auth": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/BasicAuth",
                 "description": "Requires a user from an htpasswd file in the gateway's secret\ndirectory, with bcrypt or Argon2 hashes."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -99098,11 +99098,11 @@
           "limited_response": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/LimitedResponse",
                 "description": "The answer to requests over a limit, instead of 429."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -99143,11 +99143,11 @@
           "referer": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/RefererRule",
                 "description": "Which pages may link to the resources (hotlink protection)."
+              },
+              {
+                "type": "null"
               }
             ]
           }
@@ -99559,11 +99559,11 @@
           "favicon": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/Favicon",
                 "description": "How the site answers `/favicon.ico` itself, ahead of its routes."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -99579,11 +99579,11 @@
           "hsts": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/StrictTransportSecurity",
                 "description": "Sent with HTTPS responses for the site's hosts."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -99616,10 +99616,10 @@
           "maintenance": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/SiteMaintenance"
               },
               {
-                "$ref": "#/components/schemas/SiteMaintenance"
+                "type": "null"
               }
             ]
           },
@@ -99642,11 +99642,11 @@
           "robots": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/Robots",
                 "description": "How the site answers `/robots.txt` itself, ahead of its routes."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -99889,11 +99889,11 @@
           "access_log": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/AccessLog",
                 "description": "How the site's requests are logged; absent keeps the current settings."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -99919,22 +99919,22 @@
           "error_pages": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/ErrorPages",
                 "description": "Pages answering the site's errors; absent keeps the current ones."
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "favicon": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/Favicon",
                 "description": "`null` leaves `/favicon.ico` to the routes; absent keeps the current\nanswer."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -99950,11 +99950,11 @@
           "hsts": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/StrictTransportSecurity",
                 "description": "Sent with HTTPS responses for the site's hosts."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -99978,11 +99978,11 @@
           "maintenance": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/SiteMaintenance",
                 "description": "`null` takes the site out of maintenance for good; absent keeps the\ncurrent settings."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -100008,11 +100008,11 @@
           "robots": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/Robots",
                 "description": "`null` leaves `/robots.txt` to the routes; absent keeps the current\nanswer."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -100647,21 +100647,21 @@
           "certificate": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/CertificateDetails",
                 "description": "The presented certificate, when it could be read."
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "certificate_status": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/CertificateStatus"
               },
               {
-                "$ref": "#/components/schemas/CertificateStatus"
+                "type": "null"
               }
             ]
           },
@@ -100751,11 +100751,11 @@
           "certificate_id": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/CertificateId",
                 "description": "A certificate of the inventory, which the panel delivers to the gateway."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -100814,10 +100814,10 @@
           "certificate_id": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/CertificateId"
               },
               {
-                "$ref": "#/components/schemas/CertificateId"
+                "type": "null"
               }
             ]
           },
@@ -101192,11 +101192,11 @@
           "balancer": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/LuaCode",
                 "description": "Chooses the endpoint of each attempt, as `balancer_by_lua` does; it\nruns on the terms set for every site."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -101206,11 +101206,11 @@
           "circuit_breaker": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/CircuitBreaker",
                 "description": "Answers requests at once with 503 while too many of them fail."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -101224,10 +101224,10 @@
           "health_check": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ActiveHealthCheck"
               },
               {
-                "$ref": "#/components/schemas/ActiveHealthCheck"
+                "type": "null"
               }
             ]
           },
@@ -101269,32 +101269,32 @@
           "passive_health": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/PassiveHealthPolicy"
               },
               {
-                "$ref": "#/components/schemas/PassiveHealthPolicy"
+                "type": "null"
               }
             ]
           },
           "queue": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/UpstreamQueue",
                 "description": "Where requests over `max_requests` wait instead of getting 503."
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "retry": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/UpstreamRetry",
                 "description": "What failed requests are retried, how often and within what budget."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -101471,10 +101471,10 @@
           "circuit_breaker": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/CircuitBreaker"
               },
               {
-                "$ref": "#/components/schemas/CircuitBreaker"
+                "type": "null"
               }
             ]
           },
@@ -101484,10 +101484,10 @@
           "health_check": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/ActiveHealthCheck"
               },
               {
-                "$ref": "#/components/schemas/ActiveHealthCheck"
+                "type": "null"
               }
             ]
           },
@@ -101523,30 +101523,30 @@
           "passive_health": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/PassiveHealthPolicy"
               },
               {
-                "$ref": "#/components/schemas/PassiveHealthPolicy"
+                "type": "null"
               }
             ]
           },
           "queue": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/UpstreamQueue"
               },
               {
-                "$ref": "#/components/schemas/UpstreamQueue"
+                "type": "null"
               }
             ]
           },
           "retry": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/UpstreamRetry"
               },
               {
-                "$ref": "#/components/schemas/UpstreamRetry"
+                "type": "null"
               }
             ]
           },
@@ -101659,10 +101659,10 @@
           "budget": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/RetryBudget"
               },
               {
-                "$ref": "#/components/schemas/RetryBudget"
+                "type": "null"
               }
             ]
           },
@@ -101982,11 +101982,11 @@
           "agent": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/AgentVersions",
                 "description": "The host agent; absent without one or while it does not answer."
+              },
+              {
+                "type": "null"
               }
             ]
           },
@@ -102001,21 +102001,21 @@
           "deployment": {
             "oneOf": [
               {
-                "type": "null"
-              },
-              {
                 "$ref": "#/components/schemas/DeploymentRecord",
                 "description": "How the lifecycle tool deployed the installation; absent when it\ndid not."
+              },
+              {
+                "type": "null"
               }
             ]
           },
           "gateway": {
             "oneOf": [
               {
-                "type": "null"
+                "$ref": "#/components/schemas/GatewayVersions"
               },
               {
-                "$ref": "#/components/schemas/GatewayVersions"
+                "type": "null"
               }
             ]
           },
