@@ -39,26 +39,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  compose:
-    name: Build the image and run the Compose installation
+  image:
+    name: Build the image and describe what it holds
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    env:
-      COMPOSE_FILE: panel/deploy/compose.yaml:panel/deploy/compose.ops-agent.yaml
     steps:
       - name: Checkout sources
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
-      - name: Generate installation secrets
-        run: panel/deploy/generate-secrets.sh
-
       - name: Validate the Compose file
-        run: docker compose config --quiet
+        run: |
+          panel/deploy/generate-secrets.sh
+          docker compose -f panel/deploy/compose.yaml config --quiet
 
       - name: Build the image
-        run: docker compose build
+        run: docker compose -f panel/deploy/compose.yaml build
 
       - name: Install the SBOM and vulnerability tools
         run: |
@@ -97,6 +94,44 @@ jobs:
           name: image-evidence
           path: ${{ runner.temp }}/evidence
           if-no-files-found: error
+
+      - name: Save the image
+        run: |
+          mkdir -p "$RUNNER_TEMP/image"
+          docker save localhost/pingora-panel:dev | zstd -T0 -3 -o "$RUNNER_TEMP/image/pingora-panel.tar.zst"
+
+      - name: Keep the image for the installations
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: panel-image
+          path: ${{ runner.temp }}/image
+          retention-days: 1
+          if-no-files-found: error
+
+  compose:
+    name: Run the Compose installation
+    needs: image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      COMPOSE_FILE: panel/deploy/compose.yaml:panel/deploy/compose.ops-agent.yaml
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Fetch the image
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: panel-image
+          path: ${{ runner.temp }}/image
+
+      - name: Load the image
+        run: zstd --decompress --stdout "$RUNNER_TEMP/image/pingora-panel.tar.zst" | docker load
+
+      - name: Generate installation secrets
+        run: panel/deploy/generate-secrets.sh
 
       - name: Install the host agent
         run: |
@@ -1024,3 +1059,165 @@ jobs:
       - name: Remove the installation
         if: always()
         run: docker compose down --volumes
+
+  lifecycle:
+    name: Install, upgrade, roll back, recover and remove on ${{ matrix.engine }}
+    needs: image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [docker, podman]
+    env:
+      ENGINE: ${{ matrix.engine }}
+      TOOL: panel/deploy/pingora-panel
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Check the host command against a fake engine
+        run: panel/deploy/test-pingora-panel.sh
+
+      - name: Fetch the image
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: panel-image
+          path: ${{ runner.temp }}/image
+
+      - name: Prepare the engine and two releases of the image
+        run: |
+          if [ "$ENGINE" = podman ]; then
+            # Nothing may reach Docker: Compose talks to Podman's socket.
+            sudo systemctl stop docker.socket docker.service
+            sudo systemctl enable --now podman.socket
+          fi
+          releases() {
+            zstd --decompress --stdout "$RUNNER_TEMP/image/pingora-panel.tar.zst" | sudo "$ENGINE" load
+            mkdir -p "$RUNNER_TEMP/context"
+            for release in old:0.0.1 new:0.0.2; do
+              printf 'FROM localhost/pingora-panel:dev\nLABEL org.opencontainers.image.version=%s\nENV PINGORA_PANEL_VERSION=%s\n' \
+                "${release#*:}" "${release#*:}" > "$RUNNER_TEMP/context/Containerfile"
+              sudo "$ENGINE" build --quiet --tag "localhost/pingora-panel:${release%%:*}" \
+                --file "$RUNNER_TEMP/context/Containerfile" "$RUNNER_TEMP/context"
+            done
+          }
+          declare -f releases > "$RUNNER_TEMP/releases.sh"
+          releases
+
+      - name: Check the host before installing
+        run: sudo "$TOOL" preflight --engine "$ENGINE"
+
+      - name: Install the first release with the host agent
+        run: |
+          sudo "$TOOL" install --engine "$ENGINE" --image localhost/pingora-panel:old \
+            --agent directories,listeners
+          test -n "$(sudo "$ENGINE" ps --quiet --filter label=com.docker.compose.project=pingora-panel)"
+          systemctl is-enabled pingora-panel-ops-agent.service
+          curl --fail --silent --show-error --output /dev/null http://127.0.0.1:8080/
+
+      - name: Create the first account, an API token and a site
+        run: |
+          password=$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | cut -c1-32)
+          echo "::add-mask::$password"
+          bootstrap=$(sudo cat panel/deploy/secrets/bootstrap-token)
+          echo "::add-mask::$bootstrap"
+          curl --fail --silent --show-error --output /dev/null --header 'content-type: application/json' \
+            --data "{\"token\": \"$bootstrap\", \"username\": \"ci\", \"password\": \"$password\"}" \
+            http://127.0.0.1:8080/api/v1/setup
+          session=$(curl --fail --silent --show-error --header 'content-type: application/json' \
+            --data "{\"username\": \"ci\", \"password\": \"$password\", \"transport\": \"bearer\"}" \
+            http://127.0.0.1:8080/api/v1/session \
+            | python3 -c "import json, sys; print(json.load(sys.stdin)['secret'])")
+          echo "::add-mask::$session"
+          ppanel() {
+            sudo --preserve-env=PPANEL_TOKEN "$ENGINE" run --rm --network host --env PPANEL_TOKEN \
+              localhost/pingora-panel:old /usr/local/bin/ppanel "$@"
+          }
+          token=$(PPANEL_TOKEN=$session ppanel -o json token create ci --days 1 \
+            | python3 -c "import json, sys; print(json.load(sys.stdin)['secret'])")
+          echo "::add-mask::$token"
+          echo "PPANEL_TOKEN=$token" >> "$GITHUB_ENV"
+          export PPANEL_TOKEN=$token
+          upstream=$(ppanel -o json upstream create --name console --node 127.0.0.1:8080 \
+            | python3 -c "import json, sys; print(json.load(sys.stdin)['id'])")
+          ppanel listener set edge --address 127.0.0.1:18080
+          ppanel site create --name console --domain console.test --proxy "$upstream"
+          ppanel config apply --yes
+
+      - name: Check the next release against the live data
+        run: sudo --preserve-env=PPANEL_TOKEN "$TOOL" preflight --image localhost/pingora-panel:new
+
+      - name: Upgrade, keeping a backup on the host
+        run: |
+          sudo --preserve-env=PPANEL_TOKEN "$TOOL" upgrade --image localhost/pingora-panel:new
+          sudo ls -l /var/lib/pingora-panel/backups
+          deployed() {
+            sudo --preserve-env=PPANEL_TOKEN "$ENGINE" run --rm --network host --env PPANEL_TOKEN \
+              localhost/pingora-panel:new /usr/local/bin/ppanel -o json system versions \
+              | python3 -c "import json, sys; v = json.load(sys.stdin); d = v['deployment']; print(v['release'], d['action'], d['engine'], d.get('previous', '-'))"
+          }
+          test "$(deployed)" = "0.0.2 upgrade $ENGINE 0.0.1"
+          curl --fail --silent --show-error --output /dev/null --header 'Host: console.test' \
+            --header "Authorization: Bearer $PPANEL_TOKEN" http://127.0.0.1:18080/api/v1/gateway/status
+
+      - name: Roll back to the release before
+        run: |
+          sudo --preserve-env=PPANEL_TOKEN "$TOOL" rollback
+          release=$(sudo --preserve-env=PPANEL_TOKEN "$ENGINE" run --rm --network host --env PPANEL_TOKEN \
+            localhost/pingora-panel:old /usr/local/bin/ppanel -o json system versions \
+            | python3 -c "import json, sys; v = json.load(sys.stdin); print(v['release'], v['deployment']['action'])")
+          test "$release" = "0.0.1 rollback"
+          curl --fail --silent --show-error --output /dev/null --header 'Host: console.test' \
+            --header "Authorization: Bearer $PPANEL_TOKEN" http://127.0.0.1:18080/api/v1/gateway/status
+
+      - name: Uninstall keeping the data, and install again
+        run: |
+          sudo "$TOOL" uninstall
+          test -z "$(sudo "$ENGINE" ps --all --quiet --filter label=com.docker.compose.project=pingora-panel)"
+          test -n "$(sudo "$ENGINE" volume ls --quiet --filter label=com.docker.compose.project=pingora-panel)"
+          sudo test -s panel/deploy/secrets/master-keys
+          if systemctl is-enabled pingora-panel-ops-agent.service; then exit 1; fi
+          sudo "$TOOL" install --engine "$ENGINE" --image localhost/pingora-panel:old \
+            --agent directories,listeners
+          sudo --preserve-env=PPANEL_TOKEN "$ENGINE" run --rm --network host --env PPANEL_TOKEN \
+            localhost/pingora-panel:old /usr/local/bin/ppanel site list | grep -q console.test
+
+      - name: Recover on an emptied host from the backup
+        run: |
+          backup=$(sudo sh -c 'ls -t /var/lib/pingora-panel/backups/*.tar.zst | head -n 1')
+          sudo cp "$backup" "$RUNNER_TEMP/backup.tar.zst"
+          sudo cp -r panel/deploy/secrets "$RUNNER_TEMP/secrets"
+          sudo "$TOOL" uninstall --purge --yes
+          test -z "$(sudo "$ENGINE" volume ls --quiet --filter label=com.docker.compose.project=pingora-panel)"
+          if sudo test -e /etc/pingora-panel || sudo test -e panel/deploy/secrets \
+            || test -e /usr/local/bin/ops-agent || getent group pingora-panel; then
+            exit 1
+          fi
+          # Purging removed the images; the operator brings the release back.
+          source "$RUNNER_TEMP/releases.sh"
+          releases
+          sudo cp -r "$RUNNER_TEMP/secrets" panel/deploy/secrets
+          sudo --preserve-env=PPANEL_TOKEN "$TOOL" restore "$RUNNER_TEMP/backup.tar.zst" \
+            --engine "$ENGINE" --image localhost/pingora-panel:old
+          for _ in $(seq 1 30); do
+            if curl --fail --silent --show-error --output /dev/null --header 'Host: console.test' \
+              --header "Authorization: Bearer $PPANEL_TOKEN" http://127.0.0.1:18080/api/v1/gateway/status; then
+              break
+            fi
+            sleep 2
+          done
+          curl --fail --silent --show-error --output /dev/null --header 'Host: console.test' \
+            --header "Authorization: Bearer $PPANEL_TOKEN" http://127.0.0.1:18080/api/v1/gateway/status
+
+      - name: Show the installation's logs
+        if: failure()
+        run: |
+          sudo "$TOOL" status || true
+          sudo "$TOOL" logs || true
+
+      - name: Remove everything
+        if: always()
+        run: sudo "$TOOL" uninstall --purge --yes || true
