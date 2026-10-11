@@ -1,3 +1,43 @@
+-- Portions adapted from openresty/lua-resty-mysql.
+-- Upstream source references:
+-- https://github.com/openresty/lua-resty-mysql/blob/64effe8ff8dd968b7621d8468d06994513576076/lib/resty/mysql.lua
+--
+-- Modifications: Packet encoding, authentication and result handling adapted
+-- to Luau cosockets and string packing.
+--
+-- License source:
+-- https://github.com/openresty/lua-resty-mysql/blob/64effe8ff8dd968b7621d8468d06994513576076/README.markdown#copyright-and-license
+--
+-- Upstream license: BSD-2-Clause. The following notices apply to the upstream
+-- portions; local modifications are covered by the repository LICENSE.
+--
+-- Copyright (C) 2012-2018, by Yichun "agentzh" Zhang (章亦春)
+-- <agentzh@gmail.com>, OpenResty Inc.
+--
+-- All rights reserved.
+--
+-- Redistribution and use in source and binary forms, with or without
+-- modification, are permitted provided that the following conditions are met:
+--
+-- * Redistributions of source code must retain the above copyright notice,
+-- this list of conditions and the following disclaimer.
+--
+-- * Redistributions in binary form must reproduce the above copyright notice,
+-- this list of conditions and the following disclaimer in the documentation
+-- and/or other materials provided with the distribution.
+--
+-- THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-- AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-- IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+-- ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+-- LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+-- CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+-- SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+-- INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+-- CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+-- ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+-- POSSIBILITY OF SUCH DAMAGE.
+
 -- resty.mysql: lua-resty-mysql's client of the MySQL and MariaDB text
 -- protocol on cosockets: the v10 handshake with TLS, the native password,
 -- caching_sha2_password and sha256_password plugins, result sets, OK and

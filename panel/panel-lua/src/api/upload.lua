@@ -1,3 +1,43 @@
+-- Portions adapted from openresty/lua-resty-upload.
+-- Upstream source references:
+-- https://github.com/openresty/lua-resty-upload/blob/340830a678e94530701df9cf7a8845957d180550/lib/resty/upload.lua
+--
+-- Modifications: Multipart streaming and body preservation adapted to the
+-- panel request socket.
+--
+-- License source:
+-- https://github.com/openresty/lua-resty-upload/blob/340830a678e94530701df9cf7a8845957d180550/README.markdown#copyright-and-license
+--
+-- Upstream license: BSD-2-Clause. The following notices apply to the upstream
+-- portions; local modifications are covered by the repository LICENSE.
+--
+-- Copyright (C) 2012-2017, by Yichun "agentzh" Zhang (章亦春)
+-- <agentzh@gmail.com>, OpenResty Inc.
+--
+-- All rights reserved.
+--
+-- Redistribution and use in source and binary forms, with or without
+-- modification, are permitted provided that the following conditions are met:
+--
+-- * Redistributions of source code must retain the above copyright notice,
+-- this list of conditions and the following disclaimer.
+--
+-- * Redistributions in binary form must reproduce the above copyright notice,
+-- this list of conditions and the following disclaimer in the documentation
+-- and/or other materials provided with the distribution.
+--
+-- THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-- AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-- IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+-- ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+-- LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+-- CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+-- SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+-- INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+-- CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+-- ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+-- POSSIBILITY OF SUCH DAMAGE.
+
 -- resty.upload: lua-resty-upload's streaming reader of multipart request
 -- bodies (RFC 2046 §5.1, RFC 7578), over the request socket.
 local match, lower, sub, find = string.match, string.lower, string.sub, string.find
