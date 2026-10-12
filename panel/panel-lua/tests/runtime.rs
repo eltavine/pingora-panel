@@ -890,6 +890,8 @@ async fn cosockets_verify_certificates_unless_told_not_to() {
     for (index, expected) in [(0, "HELLO\n"), (1, "nil handshake failed")] {
         let mut granted = handler(lua.handlers[index], Phase::Content);
         granted.permissions.network = true;
+        // Allow system trust-store initialization and TLS handshakes on busy runners.
+        granted.limits.time = Duration::from_secs(5);
         let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
         assert_eq!(run(&mut scripts, granted).await, Outcome::Respond);
         let body = String::from_utf8(scripts.exchange().response.body.clone()).unwrap();
@@ -2921,6 +2923,8 @@ async fn cosockets_present_the_client_certificate_set_for_them() {
     let lua = start(1, handlers(&[&script]));
     let mut granted = handler(lua.handlers[0], Phase::Content);
     granted.permissions.network = true;
+    // Allow system trust-store initialization and both TLS handshakes on busy runners.
+    granted.limits.time = Duration::from_secs(5);
     let mut scripts = lua.runtime.scripts(request("GET", "/", &[]));
     let outcome = run(&mut scripts, granted).await;
     assert_eq!(outcome, Outcome::Respond, "{:?}", scripts.exchange().logs);
