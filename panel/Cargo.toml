@@ -270,7 +270,7 @@ unicode-normalization = "=0.1.25"
 uuid = { version = "=1.27.0", features = ["serde", "v4", "v7"] }
 walkdir = "=2.5.0"
 x509-parser = "=0.16.0"
-zeroize = "=1.9.0"
+zeroize = "=1.9.1"
 zstd = "=0.14.0"
 zxcvbn = { version = "=3.1.1", default-features = false }
 libc = "=0.2.190"
