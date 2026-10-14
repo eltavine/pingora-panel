@@ -133,8 +133,8 @@ importers:
         specifier: ~1.86.0
         version: 1.86.0(oxlint@1.86.0)
       eslint-plugin-playwright:
-        specifier: ^2.12.0
-        version: 2.12.0(eslint@10.12.0(jiti@2.7.0))
+        specifier: ^2.12.1
+        version: 2.12.1(eslint@10.12.0(jiti@2.7.0))
       eslint-plugin-vue:
         specifier: ~10.11.0
         version: 10.11.1(@typescript-eslint/parser@8.71.0(eslint@10.12.0(jiti@2.7.0))(typescript@6.0.3))(eslint@10.12.0(jiti@2.7.0))(vue-eslint-parser@10.4.1(eslint@10.12.0(jiti@2.7.0)))
@@ -1443,8 +1443,8 @@ packages:
     peerDependencies:
       oxlint: ~1.86.0
 
-  eslint-plugin-playwright@2.12.0:
-    resolution: {integrity: sha512-7HpSKR/D2oCH4RKRauFskcrnDrHvLQKopW7Nen8lqrFZtx/SB+FgqVaH+zyQd32noZSZy9Lrsa+DsYrVUpn6hg==}
+  eslint-plugin-playwright@2.12.1:
+    resolution: {integrity: sha512-JhavNuYBIq7SE/Zg9Esf9RGHkXoDbzrEKS383cowzMyvZ4JMbmdNCN6CoW+RU1Cjzwcoea1tou0je58uXmT/9A==}
     engines: {node: '>=16.9.0'}
     peerDependencies:
       eslint: '>=8.40.0'
@@ -3756,7 +3756,7 @@ snapshots:
       jsonc-parser: 3.3.1
       oxlint: 1.86.0
 
-  eslint-plugin-playwright@2.12.0(eslint@10.12.0(jiti@2.7.0)):
+  eslint-plugin-playwright@2.12.1(eslint@10.12.0(jiti@2.7.0)):
     dependencies:
       eslint: 10.12.0(jiti@2.7.0)
       globals: 17.13.0
