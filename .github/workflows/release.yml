@@ -73,7 +73,7 @@ jobs:
           printf '%s\n' "$DIGEST" > "$RUNNER_TEMP/digests/$ARCH"
 
       - name: Upload the platform's digest
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: digest-${{ matrix.arch }}
           path: ${{ runner.temp }}/digests/${{ matrix.arch }}
@@ -195,7 +195,7 @@ jobs:
           push-to-registry: true
 
       - name: Keep the images' SBOMs for the release
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: assets-image
           path: ${{ runner.temp }}/assets
@@ -242,7 +242,7 @@ jobs:
           tar -C "$RUNNER_TEMP/package" -czf "$RUNNER_TEMP/assets/$name.tar.gz" "$name"
 
       - name: Keep the package for the release
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: assets-cli-${{ matrix.target }}
           path: ${{ runner.temp }}/assets
@@ -300,7 +300,7 @@ jobs:
             panel/deploy LICENSE
 
       - name: Keep them for the release
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: assets-evidence
           path: ${{ runner.temp }}/assets
