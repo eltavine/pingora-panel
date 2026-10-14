@@ -17,7 +17,7 @@ serde.workspace = true
 [build-dependencies]
 pbjson-build.workspace = true
 prost-build.workspace = true
-protoc-bin-vendored = "=3.2.0"
+protoc-bin-vendored = "=3.3.0"
 
 [dev-dependencies]
 serde_json.workspace = true

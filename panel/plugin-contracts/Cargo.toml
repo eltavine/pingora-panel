@@ -17,7 +17,7 @@ tonic-prost.workspace = true
 
 [build-dependencies]
 pbjson-build.workspace = true
-protoc-bin-vendored = "=3.2.0"
+protoc-bin-vendored = "=3.3.0"
 tonic-prost-build.workspace = true
 
 [dev-dependencies]
