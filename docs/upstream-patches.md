@@ -17,6 +17,42 @@ upstream has taken it, fails the canary.
 
 ## Patches
 
+### Patched rustls release floor
+
+- **Change:** `pingora-rustls` and `pingora-core`'s test client require
+  rustls 0.23.46 or newer in the 0.23 release line.
+- **Why:** 0.23.46 fixes session-secret disclosure in `Debug` output,
+  buffered data sent after ECH rejection, excessive Brotli certificate
+  decompression allocation and unauthenticated key-exchange hints
+  ([release](https://github.com/rustls/rustls/releases/tag/v%2F0.23.46)).
+- **Upstream:** [rustls's fixes](https://github.com/rustls/rustls/releases/tag/v%2F0.23.46);
+  no Pingora source API change is needed.
+- **Affected versions:** every Pingora release through 0.9.0 permits an
+  affected rustls 0.23 release.
+- **Tests:** `pingora-rustls` tests, `pingora-core`'s rustls listener tests,
+  and the Panel TLS and gateway tests; both workspaces' dependency audits.
+- **Goes when:** an upstream release requires at least rustls 0.23.46.
+
+### Maintained YAML configuration parser
+
+- **Change:** `pingora-core` and the `pingora-proxy` response-conversion
+  example use `yaml_serde` 0.10.7 under the existing `serde_yaml` import.
+- **Why:** `serde_yaml` depends on the archived `unsafe-libyaml`
+  ([RUSTSEC-2024-0449](https://rustsec.org/advisories/RUSTSEC-2024-0449)).
+  The YAML organization's maintained fork preserves the Serde API and
+  uses `libyaml-rs` instead. Its Rust 1.82 minimum fits the upstream
+  workspace's Rust 1.85 minimum; `serde-saphyr` 2.0 requires Rust 1.89.
+  `yaml_serde` is MIT OR Apache-2.0; `libyaml-rs` is MIT.
+- **Upstream:** [#779](https://github.com/cloudflare/pingora/issues/779)
+  tracks replacing or making the YAML dependency configurable.
+- **Affected versions:** every release through 0.9.0.
+- **Tests:** the configuration tests in `pingora-core`, including
+  `test_yaml_aliases_and_roundtrip` and
+  `test_yaml_rejects_invalid_and_ambiguous_configuration`; the
+  `pingora-proxy` response-conversion example build; both workspaces'
+  dependency audits.
+- **Goes when:** an upstream release replaces the unmaintained parser.
+
 ### TLS settings from a rustls server configuration
 
 - **Change:** `TlsSettings::from_server_config` and

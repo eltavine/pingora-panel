@@ -255,7 +255,7 @@ ring = "=0.17.14"
 rcgen = { version = "=0.14.10", default-features = false, features = ["crypto", "ring"] }
 reqwest = { version = "=0.13.5", default-features = false, features = ["json"] }
 rrule = "=0.14.0"
-rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std"] }
+rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std"] }
 rustls-pki-types = { version = "=1.15.1", features = ["std"] }
 rustls-webpki = { version = "=0.103.15", default-features = false, features = ["ring", "std"] }
 rustls-platform-verifier = "=0.7.1"

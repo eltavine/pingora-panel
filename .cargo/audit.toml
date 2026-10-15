@@ -17,4 +17,9 @@ ignore = [
     # h2 0.3.27 is pulled in only by the optional worker-s3 dependency chain.
     # The feature is disabled by default, but users who enable it remain affected.
     "RUSTSEC-2026-0258", # h2: unbounded empty DATA frames
+    # The optional worker-s3 legacy client uses rustls 0.21's built-in session
+    # cache and classical-only key exchange groups. These scoped exceptions
+    # expire on 2026-12-15; Panel uses patched rustls 0.23.46.
+    "RUSTSEC-2026-0346", # no session-value Debug logging in the legacy client
+    "RUSTSEC-2026-0349", # no post-quantum group in rustls 0.21
 ]

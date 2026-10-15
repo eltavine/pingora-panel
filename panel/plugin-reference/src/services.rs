@@ -256,6 +256,9 @@ impl NotificationProvider for State {
         file.write_all(format!("{line}\n").as_bytes())
             .await
             .map_err(internal)?;
+        // Tokio may still have a blocking write pending after write_all.
+        // Acknowledge only once the entire record is visible to readers.
+        file.flush().await.map_err(internal)?;
         Ok(Response::new(NotifyResponse {}))
     }
 }
@@ -562,5 +565,61 @@ impl Containers for State {
         _: Request<ops::ContainersStatsRequest>,
     ) -> Result<Response<ops::ContainersStatsResponse>, Status> {
         Err(unoffered("statistics"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{future::poll_fn, future::Future, sync::mpsc, task::Poll};
+
+    #[test]
+    fn notifications_wait_for_pending_file_writes() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .max_blocking_threads(1)
+            .build()
+            .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let state = State::new(directory.path().to_owned());
+        runtime.block_on(async {
+            let block_worker = || {
+                let (entered, blocked) = mpsc::channel();
+                let (release, wait) = mpsc::channel();
+                let task = tokio::task::spawn_blocking(move || {
+                    entered.send(()).unwrap();
+                    let _ = wait.recv();
+                });
+                (release, blocked, task)
+            };
+            let (open_gate, open_blocked, open_task) = block_worker();
+            open_blocked.recv_timeout(Duration::from_secs(15)).unwrap();
+            let mut notify = Box::pin(state.notify(Request::new(NotifyRequest {
+                channel: "ops".into(),
+                ..NotifyRequest::default()
+            })));
+
+            // Queue the file open behind the first gate, then a second gate
+            // behind the open. Once it starts, opening has completed and
+            // the file worker cannot execute the notification's write.
+            assert!(poll_fn(|cx| Poll::Ready(notify.as_mut().poll(cx)))
+                .await
+                .is_pending());
+            let (write_gate, write_blocked, write_task) = block_worker();
+            open_gate.send(()).unwrap();
+            write_blocked.recv_timeout(Duration::from_secs(15)).unwrap();
+            let response = poll_fn(|cx| Poll::Ready(notify.as_mut().poll(cx))).await;
+            write_gate.send(()).unwrap();
+            assert!(response.is_pending(), "acknowledged an unfinished write");
+
+            notify.await.unwrap();
+            open_task.await.unwrap();
+            write_task.await.unwrap();
+            let recorded =
+                std::fs::read_to_string(directory.path().join("notifications.jsonl")).unwrap();
+            assert!(recorded.ends_with('\n'), "{recorded}");
+            assert_eq!(recorded.lines().count(), 1);
+            let notification: Value = serde_json::from_str(&recorded).unwrap();
+            assert_eq!(notification["channel"], "ops");
+        });
     }
 }

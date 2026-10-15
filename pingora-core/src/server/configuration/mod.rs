@@ -529,6 +529,48 @@ client_bind_to_ipv6: []
     }
 
     #[test]
+    fn test_yaml_aliases_and_roundtrip() {
+        let conf = ServerConf::from_yaml(
+            r#"
+version: 1
+pid_file: &path "/tmp/pingora: #1.pid"
+upgrade_sock: *path
+user: "1234"
+threads: 3
+work_stealing: false
+client_bind_to_ipv4: ["127.0.0.1", "192.0.2.1"]
+client_bind_to_ipv6: ["::1"]
+"#,
+        )
+        .unwrap();
+        assert_eq!(conf.pid_file, "/tmp/pingora: #1.pid");
+        assert_eq!(conf.upgrade_sock, conf.pid_file);
+        assert_eq!(conf.user.as_deref(), Some("1234"));
+        assert_eq!(conf.threads, 3);
+        assert!(!conf.work_stealing);
+        assert_eq!(conf.client_bind_to_ipv4, ["127.0.0.1", "192.0.2.1"]);
+        assert_eq!(conf.client_bind_to_ipv6, ["::1"]);
+
+        let reloaded = ServerConf::from_yaml(&conf.to_yaml()).unwrap();
+        assert_eq!(
+            serde_yaml::to_value(&conf).unwrap(),
+            serde_yaml::to_value(&reloaded).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_yaml_rejects_invalid_and_ambiguous_configuration() {
+        for yaml in [
+            "version: [1, 2]",
+            "version: 1\nthreads: 2\nthreads: 3",
+            "version: 1\nclient_bind_to_ipv4: [",
+            "version: 1\n---\nversion: 2",
+        ] {
+            assert!(ServerConf::from_yaml(yaml).is_err(), "{yaml}");
+        }
+    }
+
+    #[test]
     fn test_default() {
         init_log();
         let conf_str = r#"
