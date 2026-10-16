@@ -134,7 +134,7 @@ jobs:
           - profile: msrv
             toolchain: 1.94.0 # rust-msrv-policy: panel-msrv
           - profile: stable
-            toolchain: 1.98.0
+            toolchain: 1.99.0
           - profile: canary
             toolchain: nightly # rust-toolchain-policy: panel-canary
     steps:
@@ -189,7 +189,7 @@ jobs:
       - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master 2026-10-09
         with:
-          toolchain: 1.98.0
+          toolchain: 1.99.0
 
       # Service containers cannot pass server arguments, so NATS is started
       # here with JetStream enabled.
@@ -246,7 +246,7 @@ jobs:
       - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master 2026-10-09
         with:
-          toolchain: 1.98.0
+          toolchain: 1.99.0
 
       - name: Install cargo-hack 0.6.45
         run: cargo install --locked --version 0.6.45 cargo-hack
@@ -399,7 +399,7 @@ jobs:
       - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master 2026-10-09
         with:
-          toolchain: 1.98.0
+          toolchain: 1.99.0
 
       - name: Install Syft and cargo-about
         run: |
@@ -448,7 +448,7 @@ jobs:
       - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master 2026-10-09
         with:
-          toolchain: 1.98.0
+          toolchain: 1.99.0
 
       - name: Install cargo-semver-checks 0.50.0
         run: cargo install --locked --version 0.50.0 cargo-semver-checks
@@ -489,7 +489,7 @@ jobs:
       - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master 2026-10-09
         with:
-          toolchain: 1.98.0
+          toolchain: 1.99.0
 
       - name: Self-test Panel workspace dependency catalog
         run: python3 .github/scripts/test-panel-workspace-dependencies.py
@@ -561,7 +561,7 @@ jobs:
       - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master 2026-10-09
         with:
-          toolchain: 1.98.0
+          toolchain: 1.99.0
 
       - name: Self-test workspace dependency scanner
         run: bash .github/scripts/test-cargo-machete-workspace.sh
@@ -591,7 +591,7 @@ jobs:
       - name: Install pinned Rust target
         uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master 2026-10-09
         with:
-          toolchain: 1.98.0
+          toolchain: 1.99.0
           targets: ${{ matrix.target }}
 
       - name: Check snapshot store portability

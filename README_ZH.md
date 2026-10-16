@@ -134,7 +134,7 @@ pingora-panel/
 
 ## 环境要求
 
-- Rust 1.94 或更高版本；CI 还会用 1.98 与 nightly 构建
+- Rust 1.94 或更高版本；CI 还会用 1.99 与 nightly 构建
 - 控制台需要 Node.js 22.18 或更高（或 24.12 或更高）以及 pnpm 11.22
 - 构建镜像需要 Docker 或 Podman
 - 可选：带 JetStream 的 NATS 服务，用于启动完整控制面的测试

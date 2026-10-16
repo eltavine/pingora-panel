@@ -134,7 +134,7 @@ Console features register their own routes and navigation and may not import eac
 
 ## Requirements
 
-- Rust 1.94 or later; CI also builds with 1.98 and nightly
+- Rust 1.94 or later; CI also builds with 1.99 and nightly
 - Node.js 22.18 or later, or 24.12 or later, and pnpm 11.22 for the console
 - Docker or Podman for the image
 - Optionally a NATS server with JetStream for the tests that start the whole control plane
