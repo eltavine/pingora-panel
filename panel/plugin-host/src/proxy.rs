@@ -11,6 +11,7 @@ use http::{HeaderMap, HeaderValue, Request, Response};
 use http_body::{Frame, SizeHint};
 use std::{
     convert::Infallible,
+    fmt::Display,
     future::Future,
     marker::PhantomData,
     pin::Pin,
@@ -19,7 +20,7 @@ use std::{
     time::Duration,
 };
 use tokio::{sync::OwnedSemaphorePermit, time::Sleep};
-use tonic::{body::Body, server::NamedService, Status};
+use tonic::{body::Body, server::NamedService, Code, Status};
 use tower::ServiceExt;
 
 /// The metadata that names the plugin a call is for.
@@ -158,6 +159,16 @@ async fn forward<P: Port>(
     };
     let idle = streaming.then_some(timeout);
     let request = request.map(|body| Body::new(Watched::new(body, idle, None)));
+    let response = answer(&name, channel.oneshot(request), wait).await?;
+    Ok(response.map(|body| Body::new(Watched::new(body, idle, Some(permit)))))
+}
+
+/// Plugin `name`'s answer to `call`, which runs out of time at `wait`.
+async fn answer<B, E: Display>(
+    name: &str,
+    call: impl Future<Output = Result<Response<B>, E>>,
+    wait: Option<Duration>,
+) -> Result<Response<B>, Status> {
     let late = |wait: Duration| {
         Status::deadline_exceeded(format!(
             "plugin {name} did not answer within {} ms",
@@ -165,7 +176,6 @@ async fn forward<P: Port>(
         ))
     };
     let started = tokio::time::Instant::now();
-    let call = channel.oneshot(request);
     let response = match wait {
         Some(wait) => tokio::time::timeout(wait, call)
             .await
@@ -177,7 +187,21 @@ async fn forward<P: Port>(
         Some(wait) if started.elapsed() + DEADLINE_SLACK >= wait => late(wait),
         _ => Status::unavailable(format!("plugin {name} cannot be reached: {error}")),
     })?;
-    Ok(response.map(|body| Body::new(Watched::new(body, idle, Some(permit)))))
+    match wait {
+        // The plugin's own answer for giving up can win the race with the
+        // host's timer.
+        Some(wait) if started.elapsed() + DEADLINE_SLACK >= wait && gave_up(&response) => {
+            Err(late(wait))
+        }
+        _ => Ok(response),
+    }
+}
+
+/// Whether `response` is the status a gRPC server answers with alone once
+/// a call's deadline passes.
+fn gave_up<B>(response: &Response<B>) -> bool {
+    Status::from_header_map(response.headers())
+        .is_some_and(|status| matches!(status.code(), Code::Cancelled | Code::DeadlineExceeded))
 }
 
 /// The caller's `grpc-timeout`, when it sets one the host can read.
@@ -283,5 +307,28 @@ mod tests {
         assert_eq!(read("m"), None);
         assert_eq!(encode(Duration::from_secs(60)), "60000m");
         assert_eq!(encode(Duration::from_nanos(1)), "1m");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_plugin_that_gives_up_at_the_deadline_has_run_out_of_time() {
+        let wait = Duration::from_millis(200);
+        let gave_up =
+            || Ok::<_, Infallible>(Status::cancelled("Timeout expired").into_http::<Body>());
+        let at_deadline = async {
+            tokio::time::sleep(wait).await;
+            gave_up()
+        };
+        let late = answer("reference", at_deadline, Some(wait))
+            .await
+            .unwrap_err();
+        assert_eq!(late.code(), Code::DeadlineExceeded, "{late:?}");
+
+        let early = answer("reference", async { gave_up() }, Some(wait))
+            .await
+            .unwrap();
+        assert_eq!(
+            Status::from_header_map(early.headers()).map(|status| status.code()),
+            Some(Code::Cancelled)
+        );
     }
 }
