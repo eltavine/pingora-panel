@@ -30,7 +30,7 @@ jobs:
           persist-credentials: false
 
       - name: Install pinned nightly Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master 2026-10-01
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master 2026-10-09
         with:
           toolchain: nightly # rust-toolchain-policy: fuzz-canary
 

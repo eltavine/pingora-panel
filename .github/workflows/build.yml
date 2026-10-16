@@ -112,7 +112,7 @@ jobs:
           "$HOME/.local/openresty/bin/openresty" -V
 
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master 2026-10-01
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master 2026-10-09
         with:
           toolchain: ${{ matrix.toolchain }}
           components: rustfmt, clippy
