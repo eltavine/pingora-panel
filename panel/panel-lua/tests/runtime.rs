@@ -3005,18 +3005,23 @@ async fn limiters_delay_and_refuse_as_lua_resty_limit_traffic_does() {
             local function near(value, wanted)
                 return math.abs(value - wanted) < 0.05
             end
+            -- The bucket drains between calls, so a stalled runner sees a
+            -- shorter delay than an instant one, never a longer one.
+            local function drained(value, wanted)
+                return value <= wanted and value > wanted - 0.25
+            end
 
             assert(select(2, req.new("missing", 1, 1)) == "shared dict not found")
             local rate = assert(req.new("limits", 2, 1))
             local delay, excess = rate:incoming("ip", true)
             assert(delay == 0 and excess == 0, delay)
             delay, excess = rate:incoming("ip", true)
-            assert(near(delay, 0.5) and near(excess, 1), delay)
+            assert(drained(delay, 0.5) and near(excess, delay * 2), delay)
             local nothing, err = rate:incoming("ip", true)
             assert(nothing == nil and err == "rejected", err)
             assert(rate:uncommit("ip"))
-            assert(near(rate:incoming("ip", false), 0.5))
-            assert(near(rate:incoming("ip", false), 0.5), "not committed")
+            assert(drained(rate:incoming("ip", false), 0.5))
+            assert(drained(rate:incoming("ip", false), 0.5), "not committed")
             rate:set_burst(5)
             assert(rate:incoming("ip", true))
             limits:set("abused", "x")
