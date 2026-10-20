@@ -95,7 +95,7 @@ axum = "=0.8.9"
 async-nats = { version = "=0.50.0", default-features = false, features = ["jetstream", "kv", "nuid", "ring", "server_2_10", "server_2_11", "server_2_12", "server_2_14"] }
 async-trait = "=0.1.92"
 backon = { version = "=1.6.0", default-features = false, features = ["std"] }
-base64 = "=0.22.1"
+base64 = "=0.23.1"
 bollard = { version = "=0.21.1", default-features = false, features = ["pipe"] }
 bcrypt = { version = "=0.19.3", default-features = false, features = ["std"] }
 bytes = "=1.12.1"

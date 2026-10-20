@@ -356,7 +356,7 @@ version = "0.1.0"
 dependencies = [
  "async-nats",
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "hex",
  "panel-contracts",
@@ -1336,7 +1336,7 @@ name = "dns-rfc2136"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "getrandom 0.4.3",
  "hex",
  "hickory-proto",
@@ -1743,7 +1743,7 @@ dependencies = [
  "arc-swap",
  "argon2",
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bcrypt",
  "bytes",
  "chrono",
@@ -2378,7 +2378,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "chrono",
  "identity-oidc",
@@ -3089,7 +3089,7 @@ name = "observability-service"
 version = "0.2.0"
 dependencies = [
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "getrandom 0.4.3",
  "ipnet",
@@ -3184,7 +3184,7 @@ name = "ops-agent"
 version = "0.1.0"
 dependencies = [
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bollard",
  "bytes",
  "chrono",
@@ -3271,7 +3271,7 @@ name = "panel-acme"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "chrono",
  "getrandom 0.4.3",
@@ -3299,7 +3299,7 @@ version = "0.4.0"
 dependencies = [
  "async-trait",
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "cookie",
  "futures-util",
@@ -3467,7 +3467,7 @@ dependencies = [
 name = "panel-certificates"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "getrandom 0.4.3",
  "hex",
@@ -3491,7 +3491,7 @@ name = "panel-cli"
 version = "0.1.0"
 dependencies = [
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "clap",
  "clap_complete",
@@ -3569,7 +3569,7 @@ dependencies = [
 name = "panel-config-model"
 version = "0.14.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "panel-domain",
  "panel-engine",
@@ -3731,7 +3731,7 @@ dependencies = [
 name = "panel-event-codec"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "mediatype",
  "panel-contracts",
@@ -3807,7 +3807,7 @@ version = "0.1.0"
 dependencies = [
  "argon2",
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "getrandom 0.4.3",
  "hmac",
@@ -3890,7 +3890,7 @@ dependencies = [
  "aes",
  "aes-gcm",
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "cbc",
  "cfb-mode",
@@ -3927,7 +3927,7 @@ name = "panel-lua-ir"
 version = "0.6.0"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "http",
  "panel-domain",
@@ -4063,7 +4063,7 @@ name = "panel-secrets"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "panel-errors",
  "ring",
  "sha2 0.11.0",
@@ -4582,7 +4582,7 @@ dependencies = [
 name = "plugin-host"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "blake2 0.11.0",
  "bytes",
  "hex",
@@ -4611,7 +4611,7 @@ dependencies = [
 name = "plugin-reference"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "blake2 0.11.0",
  "gateway-grpc",
  "gateway-grpc-client",
