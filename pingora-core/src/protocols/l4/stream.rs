@@ -31,7 +31,7 @@ use std::task::{Context, Poll};
 use std::time::{Duration, Instant, SystemTime};
 #[cfg(target_os = "linux")]
 use tokio::io::Interest;
-use tokio::io::{self, AsyncRead, AsyncWrite, AsyncWriteExt, BufStream, ReadBuf};
+use tokio::io::{self, AsyncRead, AsyncWrite, AsyncWriteExt, BufStream, BufWriter, ReadBuf};
 use tokio::net::TcpStream;
 #[cfg(unix)]
 use tokio::net::UnixStream;
@@ -373,8 +373,6 @@ pub const DEFAULT_L4_WRITE_BUFFER_SIZE: usize = 1460;
 ///
 /// Leaving either side as `None` preserves Pingora's default for that side.
 /// Setting either side to `Some(0)` disables buffering for that direction.
-/// With read buffering disabled and write buffering enabled, Tokio requires
-/// a one-byte read buffer, which cannot read ahead of a nonempty caller buffer.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct L4BufferSettings {
     /// Read buffer size in bytes. `None` uses [`DEFAULT_L4_READ_BUFFER_SIZE`].
@@ -423,21 +421,21 @@ impl L4BufferSettings {
 #[derive(Debug)]
 enum StreamType {
     Buffered(BufStream<RawStreamWrapper>),
-    Unbuffered(RawStreamWrapper),
+    ReadUnbuffered(BufWriter<RawStreamWrapper>),
 }
 
 impl StreamType {
     fn get_ref(&self) -> &RawStreamWrapper {
         match self {
             Self::Buffered(stream) => stream.get_ref(),
-            Self::Unbuffered(stream) => stream,
+            Self::ReadUnbuffered(stream) => stream.get_ref(),
         }
     }
 
     fn get_mut(&mut self) -> &mut RawStreamWrapper {
         match self {
             Self::Buffered(stream) => stream.get_mut(),
-            Self::Unbuffered(stream) => stream,
+            Self::ReadUnbuffered(stream) => stream.get_mut(),
         }
     }
 }
@@ -450,7 +448,7 @@ impl AsyncRead for StreamType {
     ) -> Poll<io::Result<()>> {
         match self.get_mut() {
             Self::Buffered(stream) => Pin::new(stream).poll_read(cx, buf),
-            Self::Unbuffered(stream) => Pin::new(stream).poll_read(cx, buf),
+            Self::ReadUnbuffered(stream) => Pin::new(stream).poll_read(cx, buf),
         }
     }
 }
@@ -463,21 +461,21 @@ impl AsyncWrite for StreamType {
     ) -> Poll<io::Result<usize>> {
         match self.get_mut() {
             Self::Buffered(stream) => Pin::new(stream).poll_write(cx, buf),
-            Self::Unbuffered(stream) => Pin::new(stream).poll_write(cx, buf),
+            Self::ReadUnbuffered(stream) => Pin::new(stream).poll_write(cx, buf),
         }
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         match self.get_mut() {
             Self::Buffered(stream) => Pin::new(stream).poll_flush(cx),
-            Self::Unbuffered(stream) => Pin::new(stream).poll_flush(cx),
+            Self::ReadUnbuffered(stream) => Pin::new(stream).poll_flush(cx),
         }
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         match self.get_mut() {
             Self::Buffered(stream) => Pin::new(stream).poll_shutdown(cx),
-            Self::Unbuffered(stream) => Pin::new(stream).poll_shutdown(cx),
+            Self::ReadUnbuffered(stream) => Pin::new(stream).poll_shutdown(cx),
         }
     }
 
@@ -488,14 +486,14 @@ impl AsyncWrite for StreamType {
     ) -> Poll<io::Result<usize>> {
         match self.get_mut() {
             Self::Buffered(stream) => Pin::new(stream).poll_write_vectored(cx, bufs),
-            Self::Unbuffered(stream) => Pin::new(stream).poll_write_vectored(cx, bufs),
+            Self::ReadUnbuffered(stream) => Pin::new(stream).poll_write_vectored(cx, bufs),
         }
     }
 
     fn is_write_vectored(&self) -> bool {
         match self {
             Self::Buffered(stream) => stream.is_write_vectored(),
-            Self::Unbuffered(stream) => stream.is_write_vectored(),
+            Self::ReadUnbuffered(stream) => stream.is_write_vectored(),
         }
     }
 }
@@ -616,13 +614,16 @@ impl Stream {
         let stream = stream.map(|s| {
             let raw_stream = match s {
                 StreamType::Buffered(stream) => stream.into_inner(),
-                StreamType::Unbuffered(stream) => stream,
+                StreamType::ReadUnbuffered(stream) => stream.into_inner(),
             };
-            if buffer.read == Some(0) && buffer.write == Some(0) {
-                StreamType::Unbuffered(raw_stream)
+            if buffer.read_capacity() == 0 {
+                StreamType::ReadUnbuffered(BufWriter::with_capacity(
+                    buffer.write_capacity(),
+                    raw_stream,
+                ))
             } else {
                 StreamType::Buffered(BufStream::with_capacity(
-                    buffer.read_capacity().max(1),
+                    buffer.read_capacity(),
                     buffer.write_capacity(),
                     raw_stream,
                 ))
@@ -635,8 +636,9 @@ impl Stream {
 impl From<TcpStream> for Stream {
     fn from(s: TcpStream) -> Self {
         Stream {
-            stream: Some(StreamType::Unbuffered(RawStreamWrapper::new(
-                RawStream::Tcp(s),
+            stream: Some(StreamType::ReadUnbuffered(BufWriter::with_capacity(
+                0,
+                RawStreamWrapper::new(RawStream::Tcp(s)),
             ))),
             rewind_read_buf: Vec::new(),
             buffer_write: true,
@@ -656,8 +658,9 @@ impl From<TcpStream> for Stream {
 impl From<virt::VirtualSocketStream> for Stream {
     fn from(s: virt::VirtualSocketStream) -> Self {
         Stream {
-            stream: Some(StreamType::Unbuffered(RawStreamWrapper::new(
-                RawStream::Virtual(s),
+            stream: Some(StreamType::ReadUnbuffered(BufWriter::with_capacity(
+                0,
+                RawStreamWrapper::new(RawStream::Virtual(s)),
             ))),
             rewind_read_buf: Vec::new(),
             buffer_write: true,
@@ -678,8 +681,9 @@ impl From<virt::VirtualSocketStream> for Stream {
 impl From<UnixStream> for Stream {
     fn from(s: UnixStream) -> Self {
         Stream {
-            stream: Some(StreamType::Unbuffered(RawStreamWrapper::new(
-                RawStream::Unix(s),
+            stream: Some(StreamType::ReadUnbuffered(BufWriter::with_capacity(
+                0,
+                RawStreamWrapper::new(RawStream::Unix(s)),
             ))),
             rewind_read_buf: Vec::new(),
             buffer_write: true,
