@@ -1,6 +1,7 @@
 //! Accounts, orders and renewal information over RFC 8555.
 
 use crate::challenges::{Challenge, ChallengeKind, ChallengeSolver};
+use backon::{ExponentialBuilder, Retryable};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use hyper_rustls::HttpsConnectorBuilder;
@@ -147,6 +148,15 @@ fn acme_error(error: AcmeError) -> PanelError {
         }
         other => PanelError::internal(format!("ACME failed: {other}")),
     }
+}
+
+// A CA may publish a certificate before its replacement-order index is ready.
+// Retry explicit server failures only; rate limits and validation refusals keep
+// their existing scheduling and error semantics. The issuance deadline covers
+// these attempts and their backoff.
+fn transient_order_error(error: &AcmeError) -> bool {
+    matches!(error, AcmeError::Api(problem)
+        if problem.r#type.as_deref() == Some("urn:ietf:params:acme:error:serverInternal"))
 }
 
 fn problem_error(problem: &Problem) -> PanelError {
@@ -363,20 +373,31 @@ impl AcmeClient {
         let identifiers: Vec<Identifier> =
             request.names.iter().map(|name| identifier(name)).collect();
         let replaces = request.replaces.map(certificate_identifier).transpose()?;
-        let mut order = match replaces {
-            Some(replaces) => {
-                match account
-                    .new_order(&NewOrder::new(&identifiers).replaces(replaces))
-                    .await
-                {
-                    Err(AcmeError::Unsupported(_)) => {
-                        account.new_order(&NewOrder::new(&identifiers)).await
+        let mut order = (|| async {
+            match replaces.clone() {
+                Some(replaces) => {
+                    match account
+                        .new_order(&NewOrder::new(&identifiers).replaces(replaces))
+                        .await
+                    {
+                        Err(AcmeError::Unsupported(_)) => {
+                            account.new_order(&NewOrder::new(&identifiers)).await
+                        }
+                        other => other,
                     }
-                    other => other,
                 }
+                None => account.new_order(&NewOrder::new(&identifiers)).await,
             }
-            None => account.new_order(&NewOrder::new(&identifiers)).await,
-        }
+        })
+        .retry(
+            ExponentialBuilder::default()
+                .with_min_delay(Duration::from_millis(100))
+                .with_max_delay(Duration::from_secs(1))
+                .with_max_times(4),
+        )
+        .sleep(tokio::time::sleep)
+        .when(transient_order_error)
+        .await
         .map_err(acme_error)?;
 
         let kind = match request.challenge {
@@ -534,6 +555,29 @@ mod tests {
             window.pick(at("2026-04-01T00:00:00Z")),
             at("2026-04-01T00:00:00Z")
         );
+    }
+
+    #[test]
+    fn only_server_internal_order_failures_are_retried() {
+        for (kind, status, retry) in [
+            ("serverInternal", 500, true),
+            ("rateLimited", 429, false),
+            ("alreadyReplaced", 409, false),
+            ("unauthorized", 403, false),
+            ("malformed", 400, false),
+        ] {
+            let problem = serde_json::from_value(serde_json::json!({
+                "type": format!("urn:ietf:params:acme:error:{kind}"),
+                "status": status,
+            }))
+            .unwrap();
+            assert_eq!(
+                transient_order_error(&AcmeError::Api(problem)),
+                retry,
+                "{kind}"
+            );
+        }
+        assert!(!transient_order_error(&AcmeError::Unsupported("ARI")));
     }
 
     #[test]
