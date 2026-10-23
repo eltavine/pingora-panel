@@ -257,7 +257,7 @@ reqwest = { version = "=0.13.5", default-features = false, features = ["json"] }
 rrule = "=0.14.0"
 rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std"] }
 rustls-pki-types = { version = "=1.15.1", features = ["std"] }
-rustls-webpki = { version = "=0.103.15", default-features = false, features = ["ring", "std"] }
+rustls-webpki = { version = "=0.103.16", default-features = false, features = ["ring", "std"] }
 rustls-platform-verifier = "=0.7.1"
 tower-http = { version = "=0.7.1", features = ["fs", "request-id", "set-header", "trace"] }
 url = "=2.5.8"
