@@ -241,7 +241,7 @@
             "0.28.0"
           ],
           "owner": "pingora-panel-platform",
-          "reason": "The vendored Pingora 0.9 tree is on strum 0.26 while jsonschema 0.59, which validates plugin settings, is on 0.28. 0.26.3 via pingora-cache and pingora-core; 0.28.0 via jsonschema.",
+          "reason": "The vendored Pingora 0.9 tree is on strum 0.26 while jsonschema 0.58, which validates plugin settings, is on 0.28. 0.26.3 via pingora-cache and pingora-core; 0.28.0 via jsonschema.",
           "expires_on": "2027-03-01"
         },
         {
@@ -251,7 +251,7 @@
             "0.28.0"
           ],
           "owner": "pingora-panel-platform",
-          "reason": "Follows strum: 0.26.4 via the vendored Pingora 0.9 tree; 0.28.0 via jsonschema 0.59.",
+          "reason": "Follows strum: 0.26.4 via the vendored Pingora 0.9 tree; 0.28.0 via jsonschema 0.58.",
           "expires_on": "2027-03-01"
         },
         {
@@ -268,10 +268,10 @@
           "crate": "synstructure",
           "versions": [
             "0.13.2",
-            "0.14.3"
+            "0.14.0"
           ],
           "owner": "pingora-panel-platform",
-          "reason": "Inherited transitive duplicate with no unified release line: 0.13.2 via asn1-rs-derive for x509-parser in Pingora's rustls backend; 0.14.3 via yoke-derive and zerofrom-derive in the IDNA data crates.",
+          "reason": "Inherited transitive duplicate with no unified release line: 0.13.2 via asn1-rs-derive for x509-parser in Pingora's rustls backend; 0.14.0 via yoke-derive and zerofrom-derive in the IDNA data crates.",
           "expires_on": "2027-03-01"
         },
         {

@@ -55,7 +55,7 @@ jobs:
             run_tests: false
             run_quality: false
           - profile: stable
-            toolchain: 1.99.0
+            toolchain: 1.99.1
             build_openresty: true
             run_tests: true
             run_quality: true
