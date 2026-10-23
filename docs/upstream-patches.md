@@ -181,6 +181,25 @@ upstream has taken it, fails the canary.
 - **Goes when:** an upstream release supports zero-buffer settings without
   constructing a zero-capacity Tokio read buffer.
 
+### Dial9 S3 uploads without the legacy TLS client
+
+- **Change:** `pingora-runtime` uses Dial9 0.5.5's recorder and Tokio attach
+  API. The AWS client enables the current HTTPS connector explicitly instead
+  of the deprecated Rustls connector in its default features.
+- **Why:** Dial9 0.3's transfer manager retains Rustls 0.21 and
+  rustls-webpki 0.101.7, including RUSTSEC-2026-0382. The maintained uploader
+  uses the AWS SDK directly; six obsolete advisory exceptions are removed.
+- **Upstream:** [dial9-rs/dial9#668](https://github.com/dial9-rs/dial9/pull/668)
+  removes the transfer manager. Pingora 0.9.0 still uses Dial9 0.3.
+- **Compatibility:** existing runtime and S3 settings are mapped into the
+  recorder. The optional runtime guard type changes to `dial9::Recorder`;
+  new trace segments live under `<trace_path>.segments/` and existing trace
+  files are preserved. The runtime stops before the recorder drains.
+- **Tests:** the dedicated telemetry CI job checks all optional features and
+  tests recorder startup, legacy-file preservation and shutdown. Both
+  workspaces retain the same advisory policy and version bans.
+- **Goes when:** an upstream release uses the maintained Dial9 uploader.
+
 ## Test and documentation changes
 
 These change no behaviour, so they have no upstream issue; they go with

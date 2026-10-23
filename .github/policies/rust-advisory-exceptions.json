@@ -3,59 +3,13 @@
   "exceptions": [
     {
       "advisory_id": "RUSTSEC-2024-0436",
-      "workspaces": ["Cargo.toml"],
+      "workspaces": [
+        "Cargo.toml"
+      ],
       "expires_on": "2027-02-01",
       "owner": "pingora-panel-security",
       "reason": "No tikv-jemalloc-ctl release drops the archived paste macro yet; its main branch removed it in tikv/jemallocator#189, and foundations must adopt that release.",
       "scope": "Compile-time proc-macro only, reached through pingora-foundations' optional Linux memory-profiling feature via foundations and tikv-jemalloc-ctl; no runtime code."
-    },
-    {
-      "advisory_id": "RUSTSEC-2026-0098",
-      "workspaces": ["Cargo.toml"],
-      "expires_on": "2027-02-01",
-      "owner": "pingora-panel-security",
-      "reason": "No patched rustls-webpki 0.101.x release exists for the inherited legacy Rustls chain.",
-      "scope": "Optional worker-s3 dependency path through aws-sdk-s3-transfer-manager; CRL parsing is not used."
-    },
-    {
-      "advisory_id": "RUSTSEC-2026-0099",
-      "workspaces": ["Cargo.toml"],
-      "expires_on": "2027-02-01",
-      "owner": "pingora-panel-security",
-      "reason": "No patched rustls-webpki 0.101.x release exists for the inherited legacy Rustls chain.",
-      "scope": "Optional worker-s3 dependency path through aws-sdk-s3-transfer-manager; certificate verification is TLS-client-only."
-    },
-    {
-      "advisory_id": "RUSTSEC-2026-0104",
-      "workspaces": ["Cargo.toml"],
-      "expires_on": "2027-02-01",
-      "owner": "pingora-panel-security",
-      "reason": "No patched rustls-webpki 0.101.x release exists for the inherited legacy Rustls chain.",
-      "scope": "Optional worker-s3 dependency path through aws-sdk-s3-transfer-manager; CRL parsing is not used."
-    },
-    {
-      "advisory_id": "RUSTSEC-2026-0258",
-      "workspaces": ["Cargo.toml"],
-      "expires_on": "2027-02-01",
-      "owner": "pingora-panel-security",
-      "reason": "The affected h2 0.3.27 release is retained only by the optional legacy worker-s3 dependency chain.",
-      "scope": "worker-s3 is disabled by default; deployments enabling it remain in the documented affected scope."
-    },
-    {
-      "advisory_id": "RUSTSEC-2026-0346",
-      "workspaces": ["Cargo.toml"],
-      "expires_on": "2026-12-15",
-      "owner": "pingora-panel-security",
-      "reason": "No patched rustls 0.21 release exists. Remove after Pingora migrates from dial9-tokio-telemetry 0.3 to the release line that dropped aws-sdk-s3-transfer-manager (dial9-rs/dial9#668).",
-      "scope": "Only the optional worker-s3 legacy client through aws-smithy-http-client/hyper-rustls 0.24. The connector builds a default rustls ClientConfig with its built-in ClientSessionMemoryCache; it does not format client session values or install a custom session store. Panel uses patched rustls 0.23.46."
-    },
-    {
-      "advisory_id": "RUSTSEC-2026-0349",
-      "workspaces": ["Cargo.toml"],
-      "expires_on": "2026-12-15",
-      "owner": "pingora-panel-security",
-      "reason": "No patched rustls 0.21 release exists. Remove after Pingora migrates from dial9-tokio-telemetry 0.3 to the release line that dropped aws-sdk-s3-transfer-manager (dial9-rs/dial9#668).",
-      "scope": "Only the optional worker-s3 legacy client through aws-smithy-http-client/hyper-rustls 0.24. It selects rustls 0.21's safe default groups: X25519, secp256r1 and secp384r1. This version offers no post-quantum group to downgrade to classical key exchange. Panel uses patched rustls 0.23.46."
     }
   ]
 }
