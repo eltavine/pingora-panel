@@ -26,10 +26,11 @@ once_cell = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 thread_local = "1"
 log = { workspace = true }
-dial9-tokio-telemetry = { version = "0.3", optional = true }
-aws-sdk-s3 = { version = "1", optional = true }
+dial9 = { version = "0.5.5", features = ["tokio"], optional = true }
+aws-sdk-s3 = { version = "1", default-features = false, features = ["default-https-client", "http-1x", "rt-tokio", "sigv4a"], optional = true }
 
 [dev-dependencies]
+tempfile = "3"
 tokio = { workspace = true, features = ["io-util", "net"] }
 
 [[bench]]
@@ -38,10 +39,10 @@ harness = false
 
 [features]
 default = []
-dial9 = ["dep:dial9-tokio-telemetry"]
+dial9 = ["dep:dial9"]
 dial9-worker-s3 = [
     "dial9",
     "dep:aws-sdk-s3",
-    "dial9-tokio-telemetry/worker-s3",
+    "dial9/worker-s3",
 ]
-dial9-cpu-profiling = ["dial9", "dial9-tokio-telemetry/cpu-profiling"]
+dial9-cpu-profiling = ["dial9", "dial9/cpu-profiling"]

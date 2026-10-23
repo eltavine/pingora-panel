@@ -240,7 +240,7 @@ pub enum Runtime {
     Steal {
         runtime: tokio::runtime::Runtime,
         #[cfg(feature = "dial9")]
-        dial9_guard: Option<dial9_tokio_telemetry::telemetry::TelemetryGuard>,
+        dial9_guard: Option<dial9::Recorder>,
     },
     NoSteal(NoStealRuntime),
 }
@@ -308,11 +308,10 @@ fn build_dial9_runtime(
     builder: Builder,
     runtime_name: &str,
     opts: &Dial9RuntimeOpts,
-) -> std::io::Result<(
-    tokio::runtime::Runtime,
-    dial9_tokio_telemetry::telemetry::TelemetryGuard,
-)> {
-    use dial9_tokio_telemetry::telemetry::{RotatingWriter, TracedRuntime};
+) -> std::io::Result<(tokio::runtime::Runtime, dial9::Recorder)> {
+    #[cfg(feature = "dial9-worker-s3")]
+    use dial9::RecorderPipelineExt;
+    use dial9::{Dial9HandleTokioExt, DiskBuffer, TokioAttachOptions};
     use std::io::{Error, ErrorKind};
 
     if opts.max_file_size == 0 {
@@ -344,51 +343,61 @@ fn build_dial9_runtime(
         std::fs::create_dir_all(parent)?;
     }
 
-    let writer = RotatingWriter::builder()
-        .base_path(opts.trace_path.clone())
+    // Keep existing trace files separate from the new directory-based format.
+    let mut segment_directory = opts.trace_path.as_os_str().to_os_string();
+    segment_directory.push(".segments");
+    let writer = DiskBuffer::builder()
+        .base_path(PathBuf::from(segment_directory))
         .max_file_size(opts.max_file_size)
         .max_total_size(opts.max_total_size)
         .maybe_rotation_period(opts.rotation_period)
         .build()?;
-
-    let mut traced = TracedRuntime::builder()
-        .with_trace_path(opts.trace_path.clone())
-        .with_runtime_name(runtime_name)
-        .with_task_tracking(opts.task_tracking);
+    let mut recorder = dial9::recorder(writer);
     if let Some(worker_poll_interval) = opts.worker_poll_interval {
-        traced = traced.with_worker_poll_interval(worker_poll_interval);
+        recorder = recorder.worker_poll_interval(worker_poll_interval);
     }
 
     #[cfg(feature = "dial9-worker-s3")]
     if let Some(s3_upload) = &opts.s3_upload {
         if s3_upload.bucket.trim().is_empty() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
                 "dial9 s3 bucket must not be empty",
             ));
         }
         if s3_upload.service_name.trim().is_empty() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
                 "dial9 s3 service_name must not be empty",
             ));
         }
-        let s3_config = dial9_tokio_telemetry::background_task::s3::S3Config::builder()
+        let s3_config = dial9::s3::S3Config::builder()
             .bucket(s3_upload.bucket.clone())
             .service_name(s3_upload.service_name.clone())
             .maybe_prefix(s3_upload.prefix.clone())
             .maybe_region(s3_upload.region.clone())
-            .maybe_instance_path(s3_upload.instance_path.clone());
-        let traced = traced.with_s3_uploader(s3_config.build());
-        if let Some(client) = s3_upload.client.clone() {
-            return traced
-                .with_s3_client(client)
-                .build_and_start(builder, writer);
-        }
-        return traced.build_and_start(builder, writer);
+            .maybe_instance_path(
+                s3_upload
+                    .instance_path
+                    .clone()
+                    .map(dial9::s3::InstanceIdentity::from),
+            )
+            .build();
+        recorder = match s3_upload.client.clone() {
+            Some(client) => recorder.with_s3_uploader_client(s3_config, client),
+            None => recorder.with_s3_uploader(s3_config),
+        };
     }
 
-    traced.build_and_start(builder, writer)
+    let recorder = recorder.build();
+    let runtime = recorder.handle().attach_tokio_runtime(
+        builder,
+        TokioAttachOptions::builder()
+            .runtime_name(runtime_name)
+            .task_tracking_enabled(opts.task_tracking)
+            .build(),
+    )?;
+    Ok((runtime, recorder))
 }
 
 /// Builder for constructing a [`Runtime`].
@@ -557,8 +566,12 @@ impl Runtime {
                 dial9_guard,
             } => {
                 #[cfg(feature = "dial9")]
-                drop(dial9_guard);
+                let started = std::time::Instant::now();
                 runtime.shutdown_timeout(timeout);
+                #[cfg(feature = "dial9")]
+                if let Some(recorder) = dial9_guard {
+                    recorder.graceful_shutdown(timeout.saturating_sub(started.elapsed()));
+                }
             }
             Self::NoSteal(r) => r.shutdown_timeout(timeout),
         }
@@ -778,5 +791,32 @@ fn test_dial9_zero_worker_poll_interval_is_rejected() {
     assert_eq!(
         err.to_string(),
         "dial9 worker_poll_interval must be greater than zero"
+    );
+}
+
+#[cfg(feature = "dial9")]
+#[test]
+fn test_dial9_records_segments_without_replacing_legacy_traces() {
+    let directory = tempfile::tempdir().unwrap();
+    let trace_path = directory.path().join("trace.bin");
+    std::fs::write(&trace_path, b"legacy trace").unwrap();
+    let opts = Dial9RuntimeOpts::new(&trace_path);
+    let mut builder = Builder::new_multi_thread();
+    builder.worker_threads(1).enable_all();
+    let (runtime, recorder) = build_dial9_runtime(builder, "recording-test", &opts).unwrap();
+    runtime.block_on(async { tokio::task::yield_now().await });
+    Runtime::Steal {
+        runtime,
+        dial9_guard: Some(recorder),
+    }
+    .shutdown_timeout(Duration::from_secs(2));
+    assert_eq!(std::fs::read(trace_path).unwrap(), b"legacy trace");
+    assert!(
+        std::fs::read_dir(directory.path().join("trace.bin.segments"))
+            .unwrap()
+            .any(|entry| entry
+                .unwrap()
+                .metadata()
+                .is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0))
     );
 }

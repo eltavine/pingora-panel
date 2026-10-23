@@ -87,6 +87,7 @@ mod tests {
         content: Vec<u8>,
         read_pos: usize,
         write_buf: Arc<Mutex<Vec<u8>>>,
+        bytes_read: Arc<std::sync::atomic::AtomicUsize>,
     }
 
     impl AsyncRead for StaticVirtualSocket {
@@ -105,6 +106,8 @@ mod tests {
             let to_read = std::cmp::min(remaining, buf.remaining());
             buf.put_slice(&self.content[self.read_pos..self.read_pos + to_read]);
             self.read_pos += to_read;
+            self.bytes_read
+                .fetch_add(to_read, std::sync::atomic::Ordering::Relaxed);
 
             Poll::Ready(Ok(()))
         }
@@ -142,20 +145,37 @@ mod tests {
     /// Mostly just ensures that construction works and the plumbing is correct.
     #[tokio::test]
     async fn test_stream_virtual() {
-        let content = b"hello virtual world";
-        let write_buf = Arc::new(Mutex::new(Vec::new()));
-        let mut stream = Stream::from(VirtualSocketStream::new(Box::new(StaticVirtualSocket {
-            content: content.to_vec(),
-            read_pos: 0,
-            write_buf: write_buf.clone(),
-        })));
-
-        let mut buf = Vec::new();
-        let out = stream.read_to_end(&mut buf).await.unwrap();
-        assert_eq!(out, content.len());
-        assert_eq!(buf, content);
-
-        stream.write_all(content).await.unwrap();
-        assert_eq!(write_buf.lock().unwrap().as_slice(), content);
+        for settings in [
+            None,
+            Some(super::super::stream::L4BufferSettings::default()),
+            Some(super::super::stream::L4BufferSettings::new(0, 64)),
+            Some(super::super::stream::L4BufferSettings::new(64, 0)),
+            Some(super::super::stream::L4BufferSettings::unbuffered()),
+        ] {
+            let content = b"hello virtual world";
+            let write_buf = Arc::new(Mutex::new(Vec::new()));
+            let bytes_read = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let mut stream =
+                Stream::from(VirtualSocketStream::new(Box::new(StaticVirtualSocket {
+                    content: content.to_vec(),
+                    read_pos: 0,
+                    write_buf: write_buf.clone(),
+                    bytes_read: bytes_read.clone(),
+                })));
+            if let Some(settings) = settings {
+                stream.set_buffer(settings);
+            }
+            if settings.is_none_or(|settings| settings.read_capacity() == 0) {
+                assert_eq!(stream.read(&mut []).await.unwrap(), 0);
+                assert_eq!(bytes_read.load(std::sync::atomic::Ordering::Relaxed), 0);
+            }
+            let mut buf = Vec::new();
+            let out = stream.read_to_end(&mut buf).await.unwrap();
+            assert_eq!(out, content.len());
+            assert_eq!(buf, content);
+            stream.write_all(content).await.unwrap();
+            stream.flush().await.unwrap();
+            assert_eq!(write_buf.lock().unwrap().as_slice(), content);
+        }
     }
 }

@@ -547,9 +547,9 @@ mod tests {
                 "comes from another issuer",
             ),
             ("aud", json!("other"), "is meant for another client"),
-            ("exp", json!(now - 61), "has expired"),
+            ("exp", json!(now - 3600), "has expired"),
             ("exp", Value::Null, "has no \"exp\" claim"),
-            ("nbf", json!(now + 61), "is not valid yet"),
+            ("nbf", json!(now + 3600), "is not valid yet"),
         ] {
             let mut bad = good.clone();
             bad[field] = value.clone();

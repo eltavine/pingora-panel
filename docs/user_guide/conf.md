@@ -130,6 +130,15 @@ impl Service for MyService {
 }
 ```
 
+Telemetry uses Dial9 0.5.5. `trace_path` remains a logical trace prefix:
+`trace.bin` writes the new trace format into `trace.bin.segments/`. Existing
+trace files are retained and are outside the new directory's retention limit;
+archive or remove them separately when upgrading. The segment size, total
+size, rotation and worker-poll settings continue to apply to the new recorder.
+During shutdown the runtime stops first, then the recorder drains with the
+remaining shutdown budget. `Runtime::Steal::dial9_guard` now owns a
+`dial9::Recorder` instead of the removed telemetry guard type.
+
 The S3 client is optional. When omitted, dial9 uses the AWS SDK default
 configuration chain and its bucket-region detection.
 

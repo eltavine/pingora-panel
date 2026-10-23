@@ -19,12 +19,6 @@ all-features = true
 yanked = "deny"
 ignore = [
     "RUSTSEC-2024-0436",
-    "RUSTSEC-2026-0098",
-    "RUSTSEC-2026-0099",
-    "RUSTSEC-2026-0104",
-    "RUSTSEC-2026-0258",
-    "RUSTSEC-2026-0346",
-    "RUSTSEC-2026-0349",
 ]
 
 [licenses]
@@ -65,6 +59,11 @@ external-default-features = "allow"
 # repository-specific dependency scanner is needed.
 deny = [
     { crate = "time:<0.3.47", reason = "RUSTSEC-2026-0009 is fixed in time 0.3.47 and later" },
+    { crate = "rustls-webpki:<0.103.16", reason = "RUSTSEC-2026-0382 requires rejecting distrusted emSign intermediates" },
+    { crate = "webpki-roots:<0.26.11", reason = "RUSTSEC-2026-0381: older releases contain an independent affected trust store" },
+    { crate = "webpki-roots:>=0.26.12, <1.0.10", reason = "RUSTSEC-2026-0381 removes the distrusted emSign root; 0.26.11 re-exports its separately checked 1.x dependency" },
+    { crate = "webpki-root-certs:<0.26.11", reason = "RUSTSEC-2026-0383: older releases contain an independent affected trust store" },
+    { crate = "webpki-root-certs:>=0.26.12, <1.0.10", reason = "RUSTSEC-2026-0383 removes the distrusted emSign root; 0.26.11 re-exports its separately checked 1.x dependency" },
 ]
 
 [sources]

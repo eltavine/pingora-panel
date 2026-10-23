@@ -17,24 +17,49 @@ fn main() -> Result<(), GatewaydError> {
         .worker_threads(MANAGEMENT_THREADS)
         .enable_all()
         .build()?;
-    executor.block_on(serve_gatewayd(config, shutdown_signal()))
+    executor.block_on(async {
+        // Register handlers before startup can publish readiness.
+        let shutdown = shutdown_signal()?;
+        serve_gatewayd(config, shutdown).await
+    })
 }
 
 #[cfg(unix)]
-async fn shutdown_signal() {
+fn shutdown_signal() -> std::io::Result<impl std::future::Future<Output = ()>> {
     use tokio::signal::unix::{signal, SignalKind};
 
-    let Ok(mut terminate) = signal(SignalKind::terminate()) else {
-        let _ = tokio::signal::ctrl_c().await;
-        return;
-    };
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => {}
-        _ = terminate.recv() => {}
-    }
+    let mut terminate = signal(SignalKind::terminate())?;
+    let mut interrupt = signal(SignalKind::interrupt())?;
+    Ok(async move {
+        tokio::select! {
+            _ = interrupt.recv() => {}
+            _ = terminate.recv() => {}
+        }
+    })
 }
 
 #[cfg(not(unix))]
-async fn shutdown_signal() {
-    let _ = tokio::signal::ctrl_c().await;
+fn shutdown_signal() -> std::io::Result<impl std::future::Future<Output = ()>> {
+    Ok(async {
+        let _ = tokio::signal::ctrl_c().await;
+    })
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn signals_are_captured_before_the_shutdown_future_is_polled() {
+        let shutdown = shutdown_signal().unwrap();
+        let status = std::process::Command::new("kill")
+            .arg("-TERM")
+            .arg(std::process::id().to_string())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        tokio::time::timeout(std::time::Duration::from_secs(5), shutdown)
+            .await
+            .expect("SIGTERM must remain pending until shutdown starts polling");
+    }
 }

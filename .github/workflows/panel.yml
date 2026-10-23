@@ -134,7 +134,7 @@ jobs:
           - profile: msrv
             toolchain: 1.94.0 # rust-msrv-policy: panel-msrv
           - profile: stable
-            toolchain: 1.99.0
+            toolchain: 1.99.1
           - profile: canary
             toolchain: nightly # rust-toolchain-policy: panel-canary
     steps:
@@ -147,7 +147,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y build-essential cmake --no-install-recommends
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master 2026-10-09
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-10-16
         with:
           toolchain: ${{ matrix.toolchain }}
           components: rustfmt, clippy
@@ -187,16 +187,16 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y build-essential cmake --no-install-recommends
 
       - name: Install pinned Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master 2026-10-09
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-10-16
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
 
       # Service containers cannot pass server arguments, so NATS is started
       # here with JetStream enabled.
       - name: Start NATS with JetStream
         run: |
           docker run --detach --name nats --publish 4222:4222 \
-            nats:2.15.0-alpine@sha256:ac8f88a6494bffc2c2a5289a0ca61cb28a9145c11ba5677cf24265d07f46d8d4 \
+            nats:2.15.1-alpine@sha256:2ae57dfba3063d5e25fecb75256118c0882a1a2d2cf7d0fba17a7c701df956f6 \
             --jetstream
           for _ in $(seq 1 30); do
             nc -z 127.0.0.1 4222 && exit 0
@@ -244,9 +244,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y build-essential cmake --no-install-recommends
 
       - name: Install pinned Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master 2026-10-09
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-10-16
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
 
       - name: Install cargo-hack 0.6.45
         run: cargo install --locked --version 0.6.45 cargo-hack
@@ -397,9 +397,9 @@ jobs:
           persist-credentials: false
 
       - name: Install pinned Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master 2026-10-09
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-10-16
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
 
       - name: Install Syft and cargo-about
         run: |
@@ -446,9 +446,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y build-essential cmake --no-install-recommends
 
       - name: Install pinned Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master 2026-10-09
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-10-16
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
 
       - name: Install cargo-semver-checks 0.50.0
         run: cargo install --locked --version 0.50.0 cargo-semver-checks
@@ -487,9 +487,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y jq --no-install-recommends
 
       - name: Install pinned Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master 2026-10-09
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-10-16
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
 
       - name: Self-test Panel workspace dependency catalog
         run: python3 .github/scripts/test-panel-workspace-dependencies.py
@@ -559,9 +559,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y jq --no-install-recommends
 
       - name: Install pinned Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master 2026-10-09
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-10-16
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
 
       - name: Self-test workspace dependency scanner
         run: bash .github/scripts/test-cargo-machete-workspace.sh
@@ -589,9 +589,9 @@ jobs:
           persist-credentials: false
 
       - name: Install pinned Rust target
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master 2026-10-09
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-10-16
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
           targets: ${{ matrix.target }}
 
       - name: Check snapshot store portability

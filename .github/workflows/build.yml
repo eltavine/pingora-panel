@@ -55,7 +55,7 @@ jobs:
             run_tests: false
             run_quality: false
           - profile: stable
-            toolchain: 1.99.0
+            toolchain: 1.99.1
             build_openresty: true
             run_tests: true
             run_quality: true
@@ -112,7 +112,7 @@ jobs:
           "$HOME/.local/openresty/bin/openresty" -V
 
       - name: Install toolchain
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master 2026-10-09
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-10-16
         with:
           toolchain: ${{ matrix.toolchain }}
           components: rustfmt, clippy
@@ -155,3 +155,27 @@ jobs:
         run: |
           cargo install --locked --version 0.7.0 cargo-machete
           bash .github/scripts/check-cargo-machete-workspace.sh Cargo.toml
+
+  runtime-telemetry:
+    name: Pingora optional telemetry
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      RUSTFLAGS: --cfg tokio_unstable
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake libclang-dev libelf-dev pkg-config zlib1g-dev --no-install-recommends
+      - name: Install pinned Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master 2026-10-16
+        with:
+          toolchain: 1.99.1
+      - name: Resolve patched dependencies
+        run: bash .github/scripts/resolve-security-lockfile.sh
+      - name: Test recorder lifecycle
+        run: cargo test -p pingora-runtime --features dial9 --locked
+      - name: Check every telemetry feature and test target
+        run: cargo check -p pingora-runtime --all-features --all-targets --locked
