@@ -51,7 +51,7 @@ x-pki: &pki
 
 services:
   nats:
-    image: docker.io/library/nats:2.15.0-alpine@sha256:ac8f88a6494bffc2c2a5289a0ca61cb28a9145c11ba5677cf24265d07f46d8d4
+    image: docker.io/library/nats:2.15.1-alpine@sha256:2ae57dfba3063d5e25fecb75256118c0882a1a2d2cf7d0fba17a7c701df956f6
     network_mode: host
     restart: unless-stopped
     command: ["--jetstream", "--store_dir", "/data", "--addr", "127.0.0.1", "--port", "4222", "--http_port", "8222"]
@@ -116,7 +116,7 @@ services:
   # Ships the gateway's log files to Loki. It runs as the files' owner to
   # read them, without any capability to read other users' files.
   otel-collector:
-    image: docker.io/otel/opentelemetry-collector-contrib:0.162.0@sha256:39923a8e431bd1f57be82411999d389fcfe40857492e4365456d97a4c1f74be6
+    image: docker.io/otel/opentelemetry-collector-contrib:0.163.1@sha256:1175b03003053962012f5a231f5567f66a3e8fdb960c7835c0e48f7aa1555806
     network_mode: host
     restart: unless-stopped
     user: "0:0"

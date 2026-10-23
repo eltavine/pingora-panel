@@ -35,7 +35,7 @@
             "0.23.1"
           ],
           "owner": "pingora-panel-platform",
-          "reason": "instant-acme 0.8 always enables rcgen's PEM support with its ring backend, and pem 4 is on base64 0.23 while tonic, sqlx, reqwest and the vendored Pingora tree are on base64 0.22; standardwebhooks 1.0.1, its latest release, is still on base64 0.21. 0.21.7 via standardwebhooks; 0.22.1 via the workspace; 0.23.1 via pem 4.",
+          "reason": "instant-acme 0.8 always enables rcgen's PEM support with its ring backend, and pem 4 is on base64 0.23 while tonic, sqlx, reqwest and the vendored Pingora tree are on base64 0.22; standardwebhooks 1.0.1, its latest release, is still on base64 0.21. 0.21.7 via standardwebhooks; 0.22.1 via tonic, sqlx, reqwest and Pingora; 0.23.1 via the workspace and pem 4.",
           "expires_on": "2027-03-01"
         },
         {
@@ -95,7 +95,7 @@
             "0.19.2"
           ],
           "owner": "pingora-panel-platform",
-          "reason": "zxcvbn 3.1.1, its latest release, is on fancy-regex 0.18 while jsonschema 0.58, which validates plugin settings, is on 0.19. 0.18.0 via zxcvbn; 0.19.2 via jsonschema.",
+          "reason": "zxcvbn 3.1.1, its latest release, is on fancy-regex 0.18 while jsonschema 0.59, which validates plugin settings, is on 0.19. 0.18.0 via zxcvbn; 0.19.2 via jsonschema.",
           "expires_on": "2027-03-01"
         },
         {
@@ -241,7 +241,7 @@
             "0.28.0"
           ],
           "owner": "pingora-panel-platform",
-          "reason": "The vendored Pingora 0.9 tree is on strum 0.26 while jsonschema 0.58, which validates plugin settings, is on 0.28. 0.26.3 via pingora-cache and pingora-core; 0.28.0 via jsonschema.",
+          "reason": "The vendored Pingora 0.9 tree is on strum 0.26 while jsonschema 0.59, which validates plugin settings, is on 0.28. 0.26.3 via pingora-cache and pingora-core; 0.28.0 via jsonschema.",
           "expires_on": "2027-03-01"
         },
         {
@@ -251,7 +251,7 @@
             "0.28.0"
           ],
           "owner": "pingora-panel-platform",
-          "reason": "Follows strum: 0.26.4 via the vendored Pingora 0.9 tree; 0.28.0 via jsonschema 0.58.",
+          "reason": "Follows strum: 0.26.4 via the vendored Pingora 0.9 tree; 0.28.0 via jsonschema 0.59.",
           "expires_on": "2027-03-01"
         },
         {
@@ -268,10 +268,10 @@
           "crate": "synstructure",
           "versions": [
             "0.13.2",
-            "0.14.0"
+            "0.14.3"
           ],
           "owner": "pingora-panel-platform",
-          "reason": "Inherited transitive duplicate with no unified release line: 0.13.2 via asn1-rs-derive for x509-parser in Pingora's rustls backend; 0.14.0 via yoke-derive and zerofrom-derive in the IDNA data crates.",
+          "reason": "Inherited transitive duplicate with no unified release line: 0.13.2 via asn1-rs-derive for x509-parser in Pingora's rustls backend; 0.14.3 via yoke-derive and zerofrom-derive in the IDNA data crates.",
           "expires_on": "2027-03-01"
         },
         {
@@ -338,20 +338,20 @@
           "crate": "zstd",
           "versions": [
             "0.13.3",
-            "0.14.0"
+            "0.14.3"
           ],
           "owner": "pingora-panel-platform",
-          "reason": "Inherited transitive duplicate with no unified release line: 0.13.3 via pingora-header-serde in pingora-cache; 0.14.0 via pingora-core compression.",
+          "reason": "Inherited transitive duplicate with no unified release line: 0.13.3 via pingora-header-serde in pingora-cache; 0.14.3 via pingora-core compression.",
           "expires_on": "2027-03-01"
         },
         {
           "crate": "zstd-safe",
           "versions": [
             "7.3.0",
-            "8.0.0"
+            "8.2.0"
           ],
           "owner": "pingora-panel-platform",
-          "reason": "Inherited transitive duplicate with no unified release line: 7.3.0 via zstd 0.13 in pingora-header-serde; 8.0.0 via zstd 0.14 in pingora-core.",
+          "reason": "Inherited transitive duplicate with no unified release line: 7.3.0 via zstd 0.13 in pingora-header-serde; 8.2.0 via zstd 0.14 in pingora-core.",
           "expires_on": "2027-03-01"
         }
       ]

@@ -95,7 +95,7 @@ axum = "=0.8.9"
 async-nats = { version = "=0.50.0", default-features = false, features = ["jetstream", "kv", "nuid", "ring", "server_2_10", "server_2_11", "server_2_12", "server_2_14"] }
 async-trait = "=0.1.92"
 backon = { version = "=1.6.0", default-features = false, features = ["std"] }
-base64 = "=0.22.1"
+base64 = "=0.23.1"
 bollard = { version = "=0.21.1", default-features = false, features = ["pipe"] }
 bcrypt = { version = "=0.19.3", default-features = false, features = ["std"] }
 bytes = "=1.12.1"
@@ -142,7 +142,7 @@ http-body = "=1.1.0"
 http-body-util = "=0.1.5"
 httpdate = "=1.0.3"
 humantime = "=2.4.0"
-hyper = { version = "=1.11.1", features = ["client", "http1"] }
+hyper = { version = "=1.12.0", features = ["client", "http1"] }
 hyper-util = { version = "=0.1.21", features = ["tokio"] }
 hyper-rustls = { version = "=0.27.10", default-features = false, features = ["http1", "http2", "ring", "tls12"] }
 hmac = "=0.13.0"
@@ -151,7 +151,7 @@ instant-acme = { version = "=0.8.5", default-features = false, features = ["hype
 ipnet = "=2.12.2"
 jsonwebtoken = { version = "=11.1.0", default-features = false }
 iri-string = "=0.7.14"
-jsonschema = { version = "=0.58.6", default-features = false }
+jsonschema = { version = "=0.59.0", default-features = false }
 lru = "=0.18.5"
 mediatype = "=0.23.0"
 md-5 = "=0.11.0"
@@ -271,9 +271,9 @@ uuid = { version = "=1.27.0", features = ["serde", "v4", "v7"] }
 walkdir = "=2.5.0"
 x509-parser = "=0.16.0"
 zeroize = "=1.9.1"
-zstd = "=0.14.0"
+zstd = "=0.14.3"
 zxcvbn = { version = "=3.1.1", default-features = false }
-libc = "=0.2.190"
+libc = "=0.2.191"
 minisign-verify = "=0.3.0"
 rustix = "=1.1.5"
 semver = "=1.0.28"
