@@ -142,20 +142,31 @@ mod tests {
     /// Mostly just ensures that construction works and the plumbing is correct.
     #[tokio::test]
     async fn test_stream_virtual() {
-        let content = b"hello virtual world";
-        let write_buf = Arc::new(Mutex::new(Vec::new()));
-        let mut stream = Stream::from(VirtualSocketStream::new(Box::new(StaticVirtualSocket {
-            content: content.to_vec(),
-            read_pos: 0,
-            write_buf: write_buf.clone(),
-        })));
-
-        let mut buf = Vec::new();
-        let out = stream.read_to_end(&mut buf).await.unwrap();
-        assert_eq!(out, content.len());
-        assert_eq!(buf, content);
-
-        stream.write_all(content).await.unwrap();
-        assert_eq!(write_buf.lock().unwrap().as_slice(), content);
+        for settings in [
+            None,
+            Some(super::super::stream::L4BufferSettings::default()),
+            Some(super::super::stream::L4BufferSettings::new(0, 64)),
+            Some(super::super::stream::L4BufferSettings::new(64, 0)),
+            Some(super::super::stream::L4BufferSettings::unbuffered()),
+        ] {
+            let content = b"hello virtual world";
+            let write_buf = Arc::new(Mutex::new(Vec::new()));
+            let mut stream =
+                Stream::from(VirtualSocketStream::new(Box::new(StaticVirtualSocket {
+                    content: content.to_vec(),
+                    read_pos: 0,
+                    write_buf: write_buf.clone(),
+                })));
+            if let Some(settings) = settings {
+                stream.set_buffer(settings);
+            }
+            let mut buf = Vec::new();
+            let out = stream.read_to_end(&mut buf).await.unwrap();
+            assert_eq!(out, content.len());
+            assert_eq!(buf, content);
+            stream.write_all(content).await.unwrap();
+            stream.flush().await.unwrap();
+            assert_eq!(write_buf.lock().unwrap().as_slice(), content);
+        }
     }
 }

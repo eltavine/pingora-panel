@@ -372,8 +372,9 @@ pub const DEFAULT_L4_WRITE_BUFFER_SIZE: usize = 1460;
 /// L4 [`BufStream`] buffer sizing.
 ///
 /// Leaving either side as `None` preserves Pingora's default for that side.
-/// Setting either side to `Some(0)` disables `BufStream` buffering for that
-/// direction.
+/// Setting either side to `Some(0)` disables buffering for that direction.
+/// With read buffering disabled and write buffering enabled, Tokio requires
+/// a one-byte read buffer, which cannot read ahead of a nonempty caller buffer.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct L4BufferSettings {
     /// Read buffer size in bytes. `None` uses [`DEFAULT_L4_READ_BUFFER_SIZE`].
@@ -391,7 +392,7 @@ impl L4BufferSettings {
         }
     }
 
-    /// Create settings that disable both read and write `BufStream` buffering.
+    /// Create settings that disable both read and write buffering.
     pub fn unbuffered() -> Self {
         Self::new(0, 0)
     }
@@ -419,6 +420,86 @@ impl L4BufferSettings {
     }
 }
 
+#[derive(Debug)]
+enum StreamType {
+    Buffered(BufStream<RawStreamWrapper>),
+    Unbuffered(RawStreamWrapper),
+}
+
+impl StreamType {
+    fn get_ref(&self) -> &RawStreamWrapper {
+        match self {
+            Self::Buffered(stream) => stream.get_ref(),
+            Self::Unbuffered(stream) => stream,
+        }
+    }
+
+    fn get_mut(&mut self) -> &mut RawStreamWrapper {
+        match self {
+            Self::Buffered(stream) => stream.get_mut(),
+            Self::Unbuffered(stream) => stream,
+        }
+    }
+}
+
+impl AsyncRead for StreamType {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        match self.get_mut() {
+            Self::Buffered(stream) => Pin::new(stream).poll_read(cx, buf),
+            Self::Unbuffered(stream) => Pin::new(stream).poll_read(cx, buf),
+        }
+    }
+}
+
+impl AsyncWrite for StreamType {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        match self.get_mut() {
+            Self::Buffered(stream) => Pin::new(stream).poll_write(cx, buf),
+            Self::Unbuffered(stream) => Pin::new(stream).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match self.get_mut() {
+            Self::Buffered(stream) => Pin::new(stream).poll_flush(cx),
+            Self::Unbuffered(stream) => Pin::new(stream).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match self.get_mut() {
+            Self::Buffered(stream) => Pin::new(stream).poll_shutdown(cx),
+            Self::Unbuffered(stream) => Pin::new(stream).poll_shutdown(cx),
+        }
+    }
+
+    fn poll_write_vectored(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[std::io::IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        match self.get_mut() {
+            Self::Buffered(stream) => Pin::new(stream).poll_write_vectored(cx, bufs),
+            Self::Unbuffered(stream) => Pin::new(stream).poll_write_vectored(cx, bufs),
+        }
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        match self {
+            Self::Buffered(stream) => stream.is_write_vectored(),
+            Self::Unbuffered(stream) => stream.is_write_vectored(),
+        }
+    }
+}
+
 // NOTE: with writer buffering, users need to call flush() to make sure the data is actually
 // sent. Otherwise data could be stuck in the buffer forever or get lost when stream is closed.
 
@@ -426,7 +507,7 @@ impl L4BufferSettings {
 #[derive(Debug)]
 pub struct Stream {
     // Use `Option` to be able to swap to adjust the buffer size. Always safe to unwrap
-    stream: Option<BufStream<RawStreamWrapper>>,
+    stream: Option<StreamType>,
     // the data put back at the front of the read buffer, in order to replay the read
     rewind_read_buf: Vec<Vec<u8>>,
     buffer_write: bool,
@@ -445,11 +526,11 @@ pub struct Stream {
 }
 
 impl Stream {
-    fn stream(&self) -> &BufStream<RawStreamWrapper> {
+    fn stream(&self) -> &StreamType {
         self.stream.as_ref().expect("stream should always be set")
     }
 
-    fn stream_mut(&mut self) -> &mut BufStream<RawStreamWrapper> {
+    fn stream_mut(&mut self) -> &mut StreamType {
         self.stream.as_mut().expect("stream should always be set")
     }
 
@@ -530,14 +611,22 @@ impl Stream {
     pub(crate) fn set_buffer(&mut self, buffer: L4BufferSettings) {
         use std::mem;
         // Since BufStream doesn't provide an API to adjust the buf directly,
-        // we take the raw stream out of it and put it in a new BufStream with the size we want
+        // take the raw stream out and put it in a new variant with the requested size.
         let stream = mem::take(&mut self.stream);
         let stream = stream.map(|s| {
-            BufStream::with_capacity(
-                buffer.read_capacity(),
-                buffer.write_capacity(),
-                s.into_inner(),
-            )
+            let raw_stream = match s {
+                StreamType::Buffered(stream) => stream.into_inner(),
+                StreamType::Unbuffered(stream) => stream,
+            };
+            if buffer.read == Some(0) && buffer.write == Some(0) {
+                StreamType::Unbuffered(raw_stream)
+            } else {
+                StreamType::Buffered(BufStream::with_capacity(
+                    buffer.read_capacity().max(1),
+                    buffer.write_capacity(),
+                    raw_stream,
+                ))
+            }
         });
         let _ = mem::replace(&mut self.stream, stream);
     }
@@ -546,11 +635,9 @@ impl Stream {
 impl From<TcpStream> for Stream {
     fn from(s: TcpStream) -> Self {
         Stream {
-            stream: Some(BufStream::with_capacity(
-                0,
-                0,
-                RawStreamWrapper::new(RawStream::Tcp(s)),
-            )),
+            stream: Some(StreamType::Unbuffered(RawStreamWrapper::new(
+                RawStream::Tcp(s),
+            ))),
             rewind_read_buf: Vec::new(),
             buffer_write: true,
             established_ts: SystemTime::now(),
@@ -569,11 +656,9 @@ impl From<TcpStream> for Stream {
 impl From<virt::VirtualSocketStream> for Stream {
     fn from(s: virt::VirtualSocketStream) -> Self {
         Stream {
-            stream: Some(BufStream::with_capacity(
-                0,
-                0,
-                RawStreamWrapper::new(RawStream::Virtual(s)),
-            )),
+            stream: Some(StreamType::Unbuffered(RawStreamWrapper::new(
+                RawStream::Virtual(s),
+            ))),
             rewind_read_buf: Vec::new(),
             buffer_write: true,
             established_ts: SystemTime::now(),
@@ -593,11 +678,9 @@ impl From<virt::VirtualSocketStream> for Stream {
 impl From<UnixStream> for Stream {
     fn from(s: UnixStream) -> Self {
         Stream {
-            stream: Some(BufStream::with_capacity(
-                0,
-                0,
-                RawStreamWrapper::new(RawStream::Unix(s)),
-            )),
+            stream: Some(StreamType::Unbuffered(RawStreamWrapper::new(
+                RawStream::Unix(s),
+            ))),
             rewind_read_buf: Vec::new(),
             buffer_write: true,
             established_ts: SystemTime::now(),
@@ -868,6 +951,71 @@ impl AccumulatedDuration {
             }
             _ => self.start(),
         }
+    }
+}
+
+#[cfg(test)]
+mod buffer_tests {
+    use super::*;
+    use tokio::io::AsyncReadExt;
+
+    async fn exchange(mut stream: Stream, mut peer: impl AsyncRead + AsyncWrite + Unpin) {
+        for settings in [
+            None,
+            Some(L4BufferSettings::default()),
+            Some(L4BufferSettings::new(0, 64)),
+            Some(L4BufferSettings::new(64, 0)),
+            Some(L4BufferSettings::unbuffered()),
+            Some(L4BufferSettings::new(1, 1)),
+            Some(L4BufferSettings::unbuffered()),
+        ] {
+            if let Some(settings) = settings {
+                stream.set_buffer(settings);
+            }
+            peer.write_all(b"ab").await.unwrap();
+            let mut byte = [0];
+            stream.read_exact(&mut byte).await.unwrap();
+            assert_eq!(&byte, b"a");
+            stream.rewind(b"x");
+            stream.read_exact(&mut byte).await.unwrap();
+            assert_eq!(&byte, b"x");
+            stream.read_exact(&mut byte).await.unwrap();
+            assert_eq!(&byte, b"b");
+
+            let slices = [std::io::IoSlice::new(b"c"), std::io::IoSlice::new(b"d")];
+            let written = stream.write_vectored(&slices).await.unwrap();
+            assert!(written > 0 && written <= 2);
+            stream.write_all(&b"cd"[written..]).await.unwrap();
+            stream.flush().await.unwrap();
+            let mut reply = [0; 2];
+            peer.read_exact(&mut reply).await.unwrap();
+            assert_eq!(&reply, b"cd");
+        }
+        AsyncWriteExt::shutdown(&mut stream).await.unwrap();
+        assert_eq!(peer.read(&mut [0]).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn tcp_buffer_modes_preserve_io() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let client = TcpStream::connect(listener.local_addr().unwrap())
+                .await
+                .unwrap();
+            let (peer, _) = listener.accept().await.unwrap();
+            exchange(client.into(), peer).await;
+        })
+        .await
+        .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn unix_buffer_modes_preserve_io() {
+        let (client, peer) = UnixStream::pair().unwrap();
+        tokio::time::timeout(Duration::from_secs(5), exchange(client.into(), peer))
+            .await
+            .unwrap();
     }
 }
 

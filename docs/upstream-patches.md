@@ -161,6 +161,25 @@ upstream has taken it, fails the canary.
 - **Goes when:** an upstream release keeps the tunnel open whichever of
   the two comes first.
 
+### Unbuffered L4 streams with Tokio 1.54
+
+- **Change:** L4 streams start with a raw stream variant instead of a
+  zero-capacity `BufStream`. Explicitly unbuffered settings retain that
+  variant; other settings use at least one byte for Tokio's read buffer.
+  The public settings and capacity accessors still report the requested size.
+- **Why:** Tokio 1.54 rejects a zero-capacity read buffer, so accepting or
+  opening TCP, Unix and virtual streams otherwise panics. A one-byte read
+  buffer cannot read ahead of a nonempty caller buffer; zero write capacity
+  still bypasses write buffering.
+- **Upstream:** [#1059](https://github.com/cloudflare/pingora/issues/1059)
+  and [#1060](https://github.com/cloudflare/pingora/pull/1060). The variant
+  layout follows the proposed fix, with safe pin projection.
+- **Affected versions:** Pingora 0.9.0 with Tokio 1.54 or later.
+- **Tests:** L4 buffer settings, TCP, Unix and virtual stream tests in
+  `pingora-core`, including transitions between buffered and raw streams.
+- **Goes when:** an upstream release supports zero-buffer settings without
+  constructing a zero-capacity Tokio read buffer.
+
 ## Test and documentation changes
 
 These change no behaviour, so they have no upstream issue; they go with
