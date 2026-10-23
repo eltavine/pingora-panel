@@ -12,6 +12,7 @@ on:
       - "pingora*/**"
       - "tinyufo/**"
       - ".github/scripts/check-cargo-machete-workspace.sh"
+      - ".github/scripts/resolve-security-lockfile.sh"
       - ".github/workflows/build.yml"
   pull_request:
     paths:
@@ -23,6 +24,7 @@ on:
       - "pingora*/**"
       - "tinyufo/**"
       - ".github/scripts/check-cargo-machete-workspace.sh"
+      - ".github/scripts/resolve-security-lockfile.sh"
       - ".github/workflows/build.yml"
 
 permissions:
