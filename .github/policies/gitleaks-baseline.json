@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "max_fingerprints": 32,
+  "max_fingerprints": 40,
   "leases": [
     {
       "owner": "pingora-panel-security",
@@ -87,6 +87,22 @@
       "fingerprints": [
         "320014843375a0ccefd6d92817dd1b56f83a4e4c:panel/web/e2e/configuration.spec.ts:generic-api-key:328",
         "320014843375a0ccefd6d92817dd1b56f83a4e4c:panel/web/src/features/upstreams/__tests__/topology.spec.ts:generic-api-key:8"
+      ]
+    },
+    {
+      "owner": "pingora-panel-security",
+      "reason": "Public, synthetic AWS signing fixtures distributed in aws-sigv4 1.6.3: static session tokens, signature digests and an intentionally varied EXAMPLE access-key identifier. They are offline test inputs, not operational credentials; the source archive checksum and removal criteria are recorded in docs/upstream-patches.md. Each exception is restricted to its exact import commit, path, rule and line.",
+      "expires_on": "2027-03-01",
+      "fingerprints": [
+        "d0c96120a3a17c226d79d6490a5a71edcdcd90e9:vendor/aws-sigv4/aws-signing-test-suite/v4/get-vanilla-with-session-token/context.json:generic-api-key:5",
+        "d0c96120a3a17c226d79d6490a5a71edcdcd90e9:vendor/aws-sigv4/aws-signing-test-suite/v4/get-vanilla-with-session-token/header-canonical-request.txt:generic-api-key:6",
+        "d0c96120a3a17c226d79d6490a5a71edcdcd90e9:vendor/aws-sigv4/aws-signing-test-suite/v4/get-vanilla-with-session-token/header-signed-request.txt:generic-api-key:3",
+        "d0c96120a3a17c226d79d6490a5a71edcdcd90e9:vendor/aws-sigv4/aws-signing-test-suite/v4/get-vanilla-with-session-token/header-signed-request.txt:generic-api-key:5",
+        "d0c96120a3a17c226d79d6490a5a71edcdcd90e9:vendor/aws-sigv4/aws-signing-test-suite/v4/post-sts-header-before/header-signed-request.txt:generic-api-key:5",
+        "d0c96120a3a17c226d79d6490a5a71edcdcd90e9:vendor/aws-sigv4/aws-signing-test-suite/v4a/get-vanilla-with-session-token/context.json:generic-api-key:5",
+        "d0c96120a3a17c226d79d6490a5a71edcdcd90e9:vendor/aws-sigv4/aws-signing-test-suite/v4a/get-vanilla-with-session-token/header-canonical-request.txt:generic-api-key:7",
+        "d0c96120a3a17c226d79d6490a5a71edcdcd90e9:vendor/aws-sigv4/aws-signing-test-suite/v4a/get-vanilla-with-session-token/header-signed-request.txt:generic-api-key:3",
+        "d0c96120a3a17c226d79d6490a5a71edcdcd90e9:vendor/aws-sigv4/src/sign/v4a.rs:aws-access-token:330"
       ]
     }
   ]
