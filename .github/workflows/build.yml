@@ -11,6 +11,7 @@ on:
       - "clippy.toml"
       - "pingora*/**"
       - "tinyufo/**"
+      - "vendor/aws-sigv4/**"
       - ".github/scripts/check-cargo-machete-workspace.sh"
       - ".github/scripts/resolve-security-lockfile.sh"
       - ".github/workflows/build.yml"
@@ -23,6 +24,7 @@ on:
       - "clippy.toml"
       - "pingora*/**"
       - "tinyufo/**"
+      - "vendor/aws-sigv4/**"
       - ".github/scripts/check-cargo-machete-workspace.sh"
       - ".github/scripts/resolve-security-lockfile.sh"
       - ".github/workflows/build.yml"
@@ -179,5 +181,9 @@ jobs:
         run: bash .github/scripts/resolve-security-lockfile.sh
       - name: Test recorder lifecycle
         run: cargo test -p pingora-runtime --features dial9 --locked
+      - name: Test patched S3 signing
+        run: |
+          cargo generate-lockfile --manifest-path vendor/aws-sigv4/Cargo.toml --ignore-rust-version
+          cargo test --manifest-path vendor/aws-sigv4/Cargo.toml --target-dir target --all-features --locked
       - name: Check every telemetry feature and test target
         run: cargo check -p pingora-runtime --all-features --all-targets --locked

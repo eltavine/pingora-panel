@@ -58,6 +58,10 @@ external-default-features = "allow"
 # temporarily stale. cargo-deny owns version-range enforcement here, so no
 # repository-specific dependency scanner is needed.
 deny = [
+    { crate = "ctutils:<0.4.4", reason = "RUSTSEC-2026-0385 fixes constant-time mask generation and u128 comparisons" },
+    { crate = "crypto-bigint:<0.7.6", reason = "RUSTSEC-2026-0387 fixes secret-dependent arithmetic branches" },
+    { crate = "tokio:>=0.3.2, <1.51.6", reason = "RUSTSEC-2026-0386 fixes AsyncFd I/O safety" },
+    { crate = "tokio:>=1.52.0, <1.53.3", reason = "RUSTSEC-2026-0386 fixes AsyncFd I/O safety" },
     { crate = "time:<0.3.47", reason = "RUSTSEC-2026-0009 is fixed in time 0.3.47 and later" },
     { crate = "rustls-webpki:<0.103.16", reason = "RUSTSEC-2026-0382 requires rejecting distrusted emSign intermediates" },
     { crate = "webpki-roots:<0.26.11", reason = "RUSTSEC-2026-0381: older releases contain an independent affected trust store" },

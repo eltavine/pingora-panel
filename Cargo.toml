@@ -5,6 +5,7 @@
 
 [workspace]
 resolver = "2"
+exclude = ["vendor/aws-sigv4"]
 members = [
     "pingora",
     "pingora-core",
@@ -34,7 +35,7 @@ members = [
 
 [workspace.dependencies]
 bstr = "1.12.0"
-tokio = "1"
+tokio = "1.53.3"
 tokio-stream = { version = "0.1" }
 tokio-util = { version = "0.7.12", features = ["rt"] }
 async-trait = "0.1.42"
@@ -54,3 +55,6 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tokio_unstable)'] }
 
 [profile.bench]
 debug = true
+
+[patch.crates-io]
+aws-sigv4 = { path = "vendor/aws-sigv4" }
