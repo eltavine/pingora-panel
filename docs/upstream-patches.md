@@ -1,6 +1,6 @@
 # Local changes to the vendored Pingora
 
-The root workspace vendors Pingora 0.9.0, upstream commit `4487f7b2`. The
+The root workspace vendors Pingora 0.9.0, upstream commit `623e163d`. The
 product specification (§3.2) allows changing the upstream crates only to
 fix security or correctness problems, and only with a record here: the
 upstream issue or pull request, the affected versions and the tests that
@@ -8,7 +8,7 @@ hold the change. A change goes once an upstream release carries an
 equivalent fix. Every current difference shows with
 
 ```sh
-git diff 4487f7b2 HEAD -- 'pingora*' tinyufo
+git diff 623e163d HEAD -- 'pingora*' tinyufo
 ```
 
 The weekly canary applies that difference to Pingora's main and checks
@@ -194,7 +194,9 @@ upstream has taken it, fails the canary.
 - **Compatibility:** existing runtime and S3 settings are mapped into the
   recorder. The optional runtime guard type changes to `dial9::Recorder`;
   new trace segments live under `<trace_path>.segments/` and existing trace
-  files are preserved. The runtime stops before the recorder drains.
+  files are preserved. The runtime stops before the recorder drains. CPU
+  profiling and scheduler-event options use Dial9's recorder sources, with
+  their public configuration types re-exported from `dial9::cpu`.
 - **Tests:** the dedicated telemetry CI job checks all optional features and
   tests recorder startup, legacy-file preservation and shutdown. Both
   workspaces retain the same advisory policy and version bans.
@@ -209,7 +211,6 @@ the next upstream merge that makes them unnecessary.
 |---|---|---|
 | `pingora-load-balancing/src/health_check.rs` tests | TCP and HTTP checks probe a local listener instead of `1.1.1.1` | The tests pass without internet access |
 | `pingora-proxy/tests` | The client binds `127.0.0.1` instead of `127.0.0.2`; a cache range test compares origin request identifiers the origin's `nginx.conf` counts, instead of timestamps | macOS has no `127.0.0.2` alias; two requests can share a timestamp |
-| `pingora-core/src/protocols/http/v2/server.rs` tests | The two conflicting `Content-Length` tests also accept h2 resetting the stream before Pingora sees it, which then never surfaces nor counts against the malformed-stream budget | h2 0.4.20 rejects duplicate `Content-Length` values that differ itself |
 | `pingora-ketama/test-data/trace.sh` | Unused loop variable and missing final newline | ShellCheck |
 | Rustdoc in `pingora-cache`, `pingora-core`, `pingora-foundations`, `pingora-pool` and `pingora-proxy` | Links to private or feature-gated items written as code | Documentation builds with warnings denied |
 | `pingora-cache/src/key.rs` | A block comment written as line comments | Rustfmt nightlies format it alike |

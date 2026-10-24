@@ -4344,7 +4344,6 @@ dependencies = [
  "bytes",
  "hex",
  "http",
- "httparse",
  "httpdate",
  "indexmap 1.9.3",
  "log",
@@ -4355,6 +4354,7 @@ dependencies = [
  "pingora-error",
  "pingora-header-serde",
  "pingora-http",
+ "pingora-http-parser",
  "pingora-lru",
  "pingora-timeout",
  "rand 0.8.8",
@@ -4384,7 +4384,6 @@ dependencies = [
  "futures",
  "h2",
  "http",
- "httparse",
  "httpdate",
  "libc",
  "log",
@@ -4396,6 +4395,7 @@ dependencies = [
  "percent-encoding",
  "pingora-error",
  "pingora-http",
+ "pingora-http-parser",
  "pingora-pool",
  "pingora-runtime",
  "pingora-rustls",
@@ -4428,9 +4428,9 @@ version = "0.9.0"
 dependencies = [
  "bytes",
  "http",
- "httparse",
  "pingora-error",
  "pingora-http",
+ "pingora-http-parser",
  "thread_local",
  "zstd 0.13.3",
  "zstd-safe 7.3.0",
@@ -4443,6 +4443,14 @@ dependencies = [
  "bytes",
  "http",
  "pingora-error",
+ "pingora-http-parser",
+]
+
+[[package]]
+name = "pingora-http-parser"
+version = "0.9.0"
+dependencies = [
+ "httparse",
 ]
 
 [[package]]

@@ -402,7 +402,7 @@ impl HttpSession {
     ///
     /// This convenience wrapper uses a fresh malformed-stream counter on every
     /// call. It preserves the public API, but does not enforce the
-    /// `MAX_MALFORMED_STREAMS_PER_CONN` budget across repeated calls by an
+    /// [`MAX_MALFORMED_STREAMS_PER_CONN`] budget across repeated calls by an
     /// external accept loop. Pingora's built-in downstream accept loop uses the
     /// internal budgeted helper to share one counter for the connection lifetime.
     pub async fn from_h2_conn(
@@ -821,6 +821,12 @@ impl HttpSession {
     /// Return the written response header. `None` if it is not written yet.
     pub fn response_written(&self) -> Option<&ResponseHeader> {
         self.response_written.as_deref()
+    }
+
+    /// Whether the whole response is written: END_STREAM was sent with the final header, the
+    /// last body chunk, the trailers or [`Self::finish`].
+    pub fn is_response_complete(&self) -> bool {
+        self.ended
     }
 
     /// Give up the stream abruptly.
@@ -1836,9 +1842,8 @@ mod test {
                 .unwrap();
 
             let (response, mut req_body) = h2.send_request(request, false).unwrap();
-            // Send a body matching the first Content-Length value so the h2
-            // codec accepts the stream and Pingora's duplicate-CL validation is
-            // what rejects the request.
+            // Match the first value so older h2 versions reach Pingora's
+            // duplicate-CL validation. Newer codecs reject the headers first.
             req_body.reserve_capacity(5);
             req_body.send_data("abcde".into(), true).unwrap();
 
@@ -1852,32 +1857,31 @@ mod test {
         let mut connection = handshake(Box::new(server), None).await.unwrap();
         let digest = Arc::new(Digest::default());
 
-        // The malformed stream is reset during acceptance, so it is reported as
-        // rejected rather than surfaced to the application as a session. From
-        // 0.4.20 on, h2 resets it before Pingora sees it, and only the
-        // connection's close is reported.
-        loop {
-            let accepted = timeout(
-                Duration::from_secs(1),
-                HttpSession::from_h2_conn(&mut connection, digest.clone()),
-            )
+        // Pingora reports its own rejection, while h2 versions that reject the
+        // headers internally return None after the client closes. Neither path
+        // may surface the malformed request as an application session.
+        let accepted = HttpSession::from_h2_conn(&mut connection, digest.clone())
             .await
-            .expect("from_h2_conn hung after rejecting malformed request")
-            .expect("from_h2_conn returned an error after rejecting malformed request");
-            match accepted {
-                Some(H2Accept::Rejected) => {}
-                Some(H2Accept::Session(_)) => {
-                    panic!("malformed request must not surface as a session")
-                }
-                None => break,
-            }
-        }
+            .unwrap();
+        assert!(
+            !matches!(accepted, Some(H2Accept::Session(_))),
+            "malformed request must not surface as a session"
+        );
+
+        let done = timeout(
+            Duration::from_secs(1),
+            HttpSession::from_h2_conn(&mut connection, digest),
+        )
+        .await
+        .expect("from_h2_conn hung after rejecting malformed request")
+        .expect("from_h2_conn returned an error after rejecting malformed request");
+        assert!(done.is_none(), "connection should close after rejection");
 
         client_task.await.unwrap();
     }
 
     #[tokio::test]
-    async fn test_req_malformed_stream_budget_exhausted() {
+    async fn test_req_duplicate_host_exhausts_malformed_stream_budget() {
         let (client, server) = duplex(65536);
 
         let client_task = tokio::spawn(async move {
@@ -1887,28 +1891,25 @@ mod test {
             });
             let mut h2 = h2.ready().await.unwrap();
 
+            // Duplicate Host fields reach Pingora's authority validation even
+            // when the h2 codec rejects conflicting Content-Length itself.
             let request = Request::builder()
                 .method(Method::GET)
                 .uri("https://www.example.com/")
-                .header("content-length", "5")
-                .header("content-length", "6")
+                .header(header::HOST, "www.example.com")
+                .header(header::HOST, "www.example.com")
                 .body(())
                 .unwrap();
 
-            let (response, mut req_body) = h2.send_request(request, false).unwrap();
-            req_body.reserve_capacity(5);
-            req_body.send_data("abcde".into(), true).unwrap();
-            let err = response.await.unwrap_err();
-            if let Some(reason) = err.reason() {
-                assert_eq!(reason, h2::Reason::PROTOCOL_ERROR);
-            }
+            let (response, _) = h2.send_request(request, true).unwrap();
+            let _ = response.await;
         });
 
         let mut connection = handshake(Box::new(server), None).await.unwrap();
         let digest = Arc::new(Digest::default());
         let mut malformed_streams = MAX_MALFORMED_STREAMS_PER_CONN - 1;
 
-        match HttpSession::from_h2_conn_with_malformed_budget(
+        let err = match HttpSession::from_h2_conn_with_malformed_budget(
             &mut connection,
             digest,
             &mut malformed_streams,
@@ -1916,14 +1917,12 @@ mod test {
         .await
         {
             Ok(Some(_)) => panic!("malformed request must not surface as a session"),
-            // From 0.4.20 on, h2 resets the stream before Pingora sees it, so
-            // it costs nothing of the budget.
-            Ok(None) => assert_eq!(malformed_streams, MAX_MALFORMED_STREAMS_PER_CONN - 1),
-            Err(err) => {
-                assert_eq!(err.etype(), &ErrorType::H2Error);
-                assert_eq!(malformed_streams, MAX_MALFORMED_STREAMS_PER_CONN);
-            }
-        }
+            Ok(None) => panic!("connection ended before malformed budget was exhausted"),
+            Err(err) => err,
+        };
+
+        assert_eq!(err.etype(), &ErrorType::H2Error);
+        assert_eq!(malformed_streams, MAX_MALFORMED_STREAMS_PER_CONN);
 
         drop(connection);
         client_task.await.unwrap();
