@@ -4,7 +4,7 @@
 # Build from the repository root:
 #   docker build -f panel/deploy/Containerfile -t pingora-panel .
 
-FROM docker.io/library/node:26.12.0-bookworm-slim@sha256:298992629d69bbd5b2b03ad57094d8e4fcb3a8eeb7c4e25d29de656519568913 AS web
+FROM docker.io/library/node:26.12.1-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe AS web
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 # Node 25 and later no longer ship Corepack, which picks pnpm from package.json.
 RUN npm install --global corepack@0.36.0 && corepack enable
@@ -16,7 +16,7 @@ COPY panel/panel-api/tests/fixtures/openapi.json /panel/panel-api/tests/fixtures
 RUN pnpm codegen && pnpm build-only \
  && node scripts/third-party-notices.ts >/panel/third-party-notices.md
 
-FROM docker.io/library/rust:1.99.1-bookworm@sha256:e12566d5abc17a0da741628782cdb504b68b8961f5bfcf677936bf3e8b32de29 AS build
+FROM docker.io/library/rust:1.99.1-bookworm@sha256:48b7f435b8fc6378ce43b44f15e3a47fd8919b2825f835c39bd4bd3da50af5b8 AS build
 # pingora-core compresses with zlib-ng, which builds with CMake.
 RUN apt-get update \
  && apt-get install --yes --no-install-recommends cmake \
@@ -59,7 +59,7 @@ RUN for directory in control plugins gateway-secrets pki credentials/panel-api \
  && mkdir -p /out/gateway /out/sites \
  && chmod 700 /out/gateway
 
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:e792ab3d241a468a4fd7519ddbbebe66b49b5f365771716ea688ad40b6c6f1c2
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:3ee00291cf386ec52a552e6a858d555debd74776eb4bfa53fa3df2cd6677515e
 # The release and commit the image was built from; the control plane reports them.
 ARG PINGORA_PANEL_VERSION=dev
 ARG PINGORA_PANEL_COMMIT=unknown
