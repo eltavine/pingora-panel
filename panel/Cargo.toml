@@ -151,7 +151,7 @@ instant-acme = { version = "=0.8.5", default-features = false, features = ["hype
 ipnet = "=2.12.2"
 jsonwebtoken = { version = "=11.1.0", default-features = false }
 iri-string = "=0.7.14"
-jsonschema = { version = "=0.59.0", default-features = false }
+jsonschema = { version = "=0.60.1", default-features = false }
 lru = "=0.18.5"
 mediatype = "=0.23.0"
 md-5 = "=0.11.0"
