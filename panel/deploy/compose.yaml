@@ -51,7 +51,7 @@ x-pki: &pki
 
 services:
   nats:
-    image: docker.io/library/nats:2.15.1-alpine@sha256:2ae57dfba3063d5e25fecb75256118c0882a1a2d2cf7d0fba17a7c701df956f6
+    image: docker.io/library/nats:2.15.1-alpine@sha256:7ae34c25dfd6fe2e01c6483eabef20d796690fdcac6c4d94ca780a6cf9877fde
     network_mode: host
     restart: unless-stopped
     command: ["--jetstream", "--store_dir", "/data", "--addr", "127.0.0.1", "--port", "4222", "--http_port", "8222"]
@@ -65,7 +65,7 @@ services:
 
   # Keeps the gateway's metrics; only the control plane queries it.
   prometheus:
-    image: docker.io/prom/prometheus:v3.15.0-distroless@sha256:b2a413d5a03ea6a76782a508d1c7947440bba3b973931a25676e278431891b01
+    image: docker.io/prom/prometheus:v3.15.1-distroless@sha256:451a845bae1d51622b41af1780eb2ad911bbb79a9855bc8e9bb67fabbc03f934
     network_mode: host
     restart: unless-stopped
     read_only: true
@@ -99,7 +99,7 @@ services:
   # Keeps the gateway's access and error logs; only the control plane
   # queries it.
   loki:
-    image: docker.io/grafana/loki:3.7.8@sha256:1107dd5274e0ada47e42472b7a7e71f3b2a2fe878878108f3e2f9e51528f0193
+    image: docker.io/grafana/loki:3.7.9@sha256:0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28
     network_mode: host
     restart: unless-stopped
     read_only: true
@@ -116,7 +116,7 @@ services:
   # Ships the gateway's log files to Loki. It runs as the files' owner to
   # read them, without any capability to read other users' files.
   otel-collector:
-    image: docker.io/otel/opentelemetry-collector-contrib:0.163.1@sha256:1175b03003053962012f5a231f5567f66a3e8fdb960c7835c0e48f7aa1555806
+    image: docker.io/otel/opentelemetry-collector-contrib:0.163.2-386@sha256:bd0aac7fc525d8016b7bba1e35287b1f3a43c1e2d52e2426e2496d8d45668784
     network_mode: host
     restart: unless-stopped
     user: "0:0"

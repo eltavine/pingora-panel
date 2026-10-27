@@ -333,26 +333,6 @@
           "owner": "pingora-panel-platform",
           "reason": "Inherited transitive duplicate with no unified release line: 0.59.0 via pingora-core; 0.61.2 via anstyle-query, anstyle-wincon, errno.",
           "expires_on": "2027-03-01"
-        },
-        {
-          "crate": "zstd",
-          "versions": [
-            "0.13.3",
-            "0.14.3"
-          ],
-          "owner": "pingora-panel-platform",
-          "reason": "Inherited transitive duplicate with no unified release line: 0.13.3 via pingora-header-serde in pingora-cache; 0.14.3 via pingora-core compression.",
-          "expires_on": "2027-03-01"
-        },
-        {
-          "crate": "zstd-safe",
-          "versions": [
-            "7.3.0",
-            "8.2.0"
-          ],
-          "owner": "pingora-panel-platform",
-          "reason": "Inherited transitive duplicate with no unified release line: 7.3.0 via zstd 0.13 in pingora-header-serde; 8.2.0 via zstd 0.14 in pingora-core.",
-          "expires_on": "2027-03-01"
         }
       ]
     }
