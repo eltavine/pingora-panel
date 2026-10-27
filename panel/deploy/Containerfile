@@ -4,7 +4,7 @@
 # Build from the repository root:
 #   docker build -f panel/deploy/Containerfile -t pingora-panel .
 
-FROM docker.io/library/node:26.12.0-bookworm-slim@sha256:298992629d69bbd5b2b03ad57094d8e4fcb3a8eeb7c4e25d29de656519568913 AS web
+FROM docker.io/library/node:26.12.1-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe AS web
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 # Node 25 and later no longer ship Corepack, which picks pnpm from package.json.
 RUN npm install --global corepack@0.36.0 && corepack enable
