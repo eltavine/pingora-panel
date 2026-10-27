@@ -116,7 +116,7 @@ services:
   # Ships the gateway's log files to Loki. It runs as the files' owner to
   # read them, without any capability to read other users' files.
   otel-collector:
-    image: docker.io/otel/opentelemetry-collector-contrib:0.163.1@sha256:1175b03003053962012f5a231f5567f66a3e8fdb960c7835c0e48f7aa1555806
+    image: docker.io/otel/opentelemetry-collector-contrib:0.163.2-386@sha256:bd0aac7fc525d8016b7bba1e35287b1f3a43c1e2d52e2426e2496d8d45668784
     network_mode: host
     restart: unless-stopped
     user: "0:0"
