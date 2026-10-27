@@ -4,12 +4,38 @@ on:
   schedule:
     - cron: '47 4 * * 6'
   workflow_dispatch:
+  push:
+    paths:
+      - "fuzz/**"
+      - "panel/Cargo.toml"
+      - "panel/panel-config-domain/**"
+      - "panel/panel-config-state-codec/**"
+      - "panel/panel-domain/**"
+      - "panel/panel-engine/**"
+      - "panel/panel-errors/**"
+      - "panel/panel-ir/**"
+      - "panel/snapshot-store-fs/**"
+      - ".cargo/**"
+      - ".github/workflows/fuzz.yml"
+  pull_request:
+    paths:
+      - "fuzz/**"
+      - "panel/Cargo.toml"
+      - "panel/panel-config-domain/**"
+      - "panel/panel-config-state-codec/**"
+      - "panel/panel-domain/**"
+      - "panel/panel-engine/**"
+      - "panel/panel-errors/**"
+      - "panel/panel-ir/**"
+      - "panel/snapshot-store-fs/**"
+      - ".cargo/**"
+      - ".github/workflows/fuzz.yml"
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -36,6 +62,9 @@ jobs:
 
       - name: Install cargo-fuzz 0.13.2
         run: cargo install --locked --version 0.13.2 cargo-fuzz
+
+      - name: Check the committed fuzz dependency resolution
+        run: cargo check --manifest-path fuzz/Cargo.toml --bins --locked
 
       - name: Run bounded fuzz target
         working-directory: fuzz
