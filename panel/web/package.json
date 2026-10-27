@@ -20,7 +20,7 @@
     "format:check": "prettier --check --experimental-cli src/ e2e/"
   },
   "dependencies": {
-    "@codemirror/autocomplete": "^6.20.3",
+    "@codemirror/autocomplete": "^6.20.4",
     "@codemirror/commands": "^6.11.1",
     "@codemirror/language": "^6.12.4",
     "@codemirror/legacy-modes": "^6.5.4",
