@@ -8,7 +8,7 @@ hold the change. A change goes once an upstream release carries an
 equivalent fix. Every current difference shows with
 
 ```sh
-git diff 84f21ee9 HEAD -- 'pingora*' tinyufo
+git diff 84f21ee9 HEAD -- Cargo.toml 'pingora*' tinyufo vendor/aws-sigv4
 ```
 
 The weekly canary applies that difference to Pingora's main and checks
@@ -16,6 +16,23 @@ and tests the adapter there, so a change that no longer applies, as when
 upstream has taken it, fails the canary.
 
 ## Patches
+
+### Patched Zstandard context and dictionary handling
+
+- **Change:** `pingora-header-serde` requires zstd 0.14.3 and zstd-safe
+  8.2.0. Both workspaces reject older releases through `deny.toml`.
+- **Why:** [RUSTSEC-2026-0391](https://rustsec.org/advisories/RUSTSEC-2026-0391.html)
+  covers stream data leaking across reused contexts; RUSTSEC-2026-0395
+  through RUSTSEC-2026-0406 cover dictionary lifetimes, buffer bounds,
+  cloning, training and unfinished multithreaded streams. The maintained
+  releases support Rust 1.64 and use BSD-3-Clause, already allowed by the
+  repository's license policy.
+- **Upstream:** [#1072](https://github.com/cloudflare/pingora/issues/1072)
+  tracks the header serializer's affected dependency requirements.
+- **Affected versions:** Pingora through 0.9.0 allows zstd-safe 7.x.
+- **Tests:** header serialization, dictionary compression and training tests;
+  cache and gateway adapter suites; both workspaces' dependency audits.
+- **Goes when:** an upstream release requires these patched releases.
 
 ### Patched rustls release floor
 

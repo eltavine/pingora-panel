@@ -58,6 +58,8 @@ external-default-features = "allow"
 # temporarily stale. cargo-deny owns version-range enforcement here, so no
 # repository-specific dependency scanner is needed.
 deny = [
+    { crate = "zstd:<0.14.3", reason = "RUSTSEC-2026-0391 fixes state reuse after abandoned streams" },
+    { crate = "zstd-safe:<8.2.0", reason = "RUSTSEC-2026-0395 through RUSTSEC-2026-0406 fix memory safety" },
     { crate = "ctutils:<0.4.4", reason = "RUSTSEC-2026-0385 fixes constant-time mask generation and u128 comparisons" },
     { crate = "crypto-bigint:<0.7.6", reason = "RUSTSEC-2026-0387 fixes secret-dependent arithmetic branches" },
     { crate = "tokio:>=0.3.2, <1.51.6", reason = "RUSTSEC-2026-0386 fixes AsyncFd I/O safety" },
