@@ -1,6 +1,6 @@
 # Local changes to the vendored Pingora
 
-The root workspace vendors Pingora 0.9.0, upstream commit `623e163d`. The
+The root workspace vendors Pingora 0.9.0, upstream commit `84f21ee9`. The
 product specification (§3.2) allows changing the upstream crates only to
 fix security or correctness problems, and only with a record here: the
 upstream issue or pull request, the affected versions and the tests that
@@ -8,7 +8,7 @@ hold the change. A change goes once an upstream release carries an
 equivalent fix. Every current difference shows with
 
 ```sh
-git diff 623e163d HEAD -- 'pingora*' tinyufo
+git diff 84f21ee9 HEAD -- 'pingora*' tinyufo
 ```
 
 The weekly canary applies that difference to Pingora's main and checks
@@ -176,26 +176,6 @@ upstream has taken it, fails the canary.
 - **Goes when:** an upstream release keeps the tunnel open whichever of
   the two comes first.
 
-### Unbuffered L4 streams with Tokio 1.54
-
-- **Change:** L4 streams start with a zero-capacity `BufWriter` variant
-  instead of a zero-capacity `BufStream`. A zero read capacity keeps this
-  write-only wrapper, with independent write buffering; positive read
-  capacities use `BufStream`. Public settings retain their existing meaning.
-- **Why:** Tokio 1.54 rejects a zero-capacity read buffer, so accepting or
-  opening TCP, Unix and virtual streams otherwise panics. `BufWriter`
-  supports zero write capacity and delegates reads directly, preserving
-  disabled read buffering even for empty reads.
-- **Upstream:** [#1059](https://github.com/cloudflare/pingora/issues/1059)
-  and [#1060](https://github.com/cloudflare/pingora/pull/1060). The variant
-  layout follows the proposed fix, with safe pin projection and a
-  `BufWriter` variant to preserve independently disabled read buffering.
-- **Affected versions:** Pingora 0.9.0 with Tokio 1.54 or later.
-- **Tests:** L4 buffer settings, TCP, Unix and virtual stream tests in
-  `pingora-core`, including transitions between buffered and raw streams.
-- **Goes when:** an upstream release supports zero-buffer settings without
-  constructing a zero-capacity Tokio read buffer.
-
 ### Dial9 S3 uploads without the legacy TLS client
 
 - **Change:** `pingora-runtime` uses Dial9 0.5.5's recorder and Tokio attach
@@ -267,6 +247,10 @@ workspace's full-feature dependency audit and MRAP signing tests before
 removing the backport.
 
 ## Removed
+
+- Local unbuffered L4 stream implementation: upstream commit `5b30d71d`
+  preserves zero-capacity read settings with Tokio 1.54. The TCP and Unix
+  buffer-mode regression tests remain.
 
 - Custom L4 connectors bounded by `connection_timeout` (`ab927042`):
   reverted to upstream, which bounds them by `total_connection_timeout`
