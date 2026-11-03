@@ -265,7 +265,7 @@ utoipa = { version = "=6.0.0", features = ["chrono", "uuid"] }
 tonic = { version = "=0.14.6", default-features = false, features = ["codegen", "router", "transport"] }
 tonic-health = "=0.14.6"
 tonic-prost = "=0.14.6"
-tonic-prost-build = "=0.14.6"
+tonic-prost-build = "=0.14.9"
 unicode-normalization = "=0.1.26"
 uuid = { version = "=1.29.0", features = ["serde", "v4", "v7"] }
 walkdir = "=2.5.0"
