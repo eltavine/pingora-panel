@@ -51,7 +51,7 @@ x-pki: &pki
 
 services:
   nats:
-    image: docker.io/library/nats:2.15.1-alpine@sha256:7ae34c25dfd6fe2e01c6483eabef20d796690fdcac6c4d94ca780a6cf9877fde
+    image: docker.io/library/nats:2.15.2-alpine@sha256:823e7f1d6d8ffe3b30dbd73d4a06bbb939acf94929f7fdf224404da7a05bafb5
     network_mode: host
     restart: unless-stopped
     command: ["--jetstream", "--store_dir", "/data", "--addr", "127.0.0.1", "--port", "4222", "--http_port", "8222"]
