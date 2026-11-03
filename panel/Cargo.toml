@@ -125,7 +125,7 @@ config-grpc-client = { version = "=0.2.0", path = "config-grpc-client" }
 config-proto-codec = { version = "=0.2.0", path = "config-proto-codec" }
 config-service = { version = "=0.3.0", path = "config-service" }
 cookie = { version = "=0.18.2", default-features = false }
-crc32fast = "=1.5.2"
+crc32fast = "=1.5.3"
 ctr = "=0.10.1"
 ecb = { version = "=0.2.1", features = ["alloc", "block-padding"] }
 gateway-grpc = { version = "=0.1.0", path = "gateway-grpc" }
