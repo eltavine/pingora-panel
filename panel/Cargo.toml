@@ -89,7 +89,7 @@ publish = false
 [workspace.dependencies]
 aes = "=0.9.3"
 aes-gcm = { version = "=0.11.1", default-features = false }
-arc-swap = "=1.9.2"
+arc-swap = "=1.9.3"
 argon2 = { version = "=0.6.0", default-features = false, features = ["alloc", "getrandom", "password-hash"] }
 axum = "=0.8.9"
 async-nats = { version = "=0.50.0", default-features = false, features = ["jetstream", "kv", "nuid", "ring", "server_2_10", "server_2_11", "server_2_12", "server_2_14"] }
