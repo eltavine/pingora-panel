@@ -606,7 +606,6 @@ pub struct PeerOptions {
     ///
     /// [`X509StoreContextRef::chain`]: crate::tls::x509::X509StoreContextRef::chain
     #[cfg(feature = "openssl_derived")]
-    #[derivative(Debug = "ignore")]
     pub upstream_tls_verify_callback: Option<VerifyCallback>,
 }
 
