@@ -267,8 +267,7 @@ impl DataPlane {
         }
         if hard_switch {
             // A socket being removed occupies the port, so it must close first.
-            drop(fresh);
-            fresh = BTreeMap::new();
+            fresh.clear();
             if let Some(previous) = state.current.take() {
                 previous.retire(self.options.drain_timeout).await;
             }
