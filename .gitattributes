@@ -1,0 +1,2 @@
+# Preserve the upstream Rustdoc hard line breaks in this vendored file.
+vendor/sqlx-sqlite/src/connection/deserialize.rs whitespace=-blank-at-eol
