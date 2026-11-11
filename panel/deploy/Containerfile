@@ -4,7 +4,7 @@
 # Build from the repository root:
 #   docker build -f panel/deploy/Containerfile -t pingora-panel .
 
-FROM docker.io/library/node:26.12.1-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe AS web
+FROM docker.io/library/node:26.13.0-bookworm-slim@sha256:bc0a2afd3b74ce12222fc8bab99271e66257f021078f5f4a5d687a77d280c1d9 AS web
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 # Node 25 and later no longer ship Corepack, which picks pnpm from package.json.
 RUN npm install --global corepack@0.36.0 && corepack enable
@@ -16,7 +16,7 @@ COPY panel/panel-api/tests/fixtures/openapi.json /panel/panel-api/tests/fixtures
 RUN pnpm codegen && pnpm build-only \
  && node scripts/third-party-notices.ts >/panel/third-party-notices.md
 
-FROM docker.io/library/rust:1.99.1-bookworm@sha256:48b7f435b8fc6378ce43b44f15e3a47fd8919b2825f835c39bd4bd3da50af5b8 AS build
+FROM docker.io/library/rust:1.99.1-bookworm@sha256:9181b56c2a21ab1d5e73cffe04fc762426d30aa7fac3c91141dd033f49a7fc8b AS build
 # pingora-core compresses with zlib-ng, which builds with CMake.
 RUN apt-get update \
  && apt-get install --yes --no-install-recommends cmake \
@@ -59,7 +59,7 @@ RUN for directory in control plugins gateway-secrets pki credentials/panel-api \
  && mkdir -p /out/gateway /out/sites \
  && chmod 700 /out/gateway
 
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:3ee00291cf386ec52a552e6a858d555debd74776eb4bfa53fa3df2cd6677515e
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:cc66d222f0a7ec996b78a99fe76a969bc80b539a5016ad866c14d1949bc6d0ab
 # The release and commit the image was built from; the control plane reports them.
 ARG PINGORA_PANEL_VERSION=dev
 ARG PINGORA_PANEL_COMMIT=unknown
@@ -68,8 +68,10 @@ LABEL org.opencontainers.image.title="Pingora Panel" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="${PINGORA_PANEL_VERSION}" \
       org.opencontainers.image.revision="${PINGORA_PANEL_COMMIT}"
+# The C locale disables glibc message catalog lookup (CVE-2026-84243).
 ENV PINGORA_PANEL_VERSION=${PINGORA_PANEL_VERSION} \
-    PINGORA_PANEL_COMMIT=${PINGORA_PANEL_COMMIT}
+    PINGORA_PANEL_COMMIT=${PINGORA_PANEL_COMMIT} \
+    LC_ALL=C
 COPY --from=build /out/bin/ /usr/local/bin/
 COPY --from=build /out/doc/ /usr/share/doc/pingora-panel/
 COPY --from=web /panel/web/dist/ /usr/share/pingora-panel/web/

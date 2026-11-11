@@ -2567,11 +2567,9 @@ async fn proxy_certificate_handlers_choose_what_the_upstream_connection_presents
     let mut scripts = lua
         .runtime
         .scripts(request("GET", "/", &[("host", "shop.example")]));
-    let outcome = run(
-        &mut scripts,
-        handler(lua.handlers[0], Phase::ProxySslCertificate),
-    )
-    .await;
+    let mut certificate_handler = handler(lua.handlers[0], Phase::ProxySslCertificate);
+    certificate_handler.limits.time = Duration::from_secs(2);
+    let outcome = run(&mut scripts, certificate_handler).await;
     assert_eq!(outcome, Outcome::Continue, "{:?}", scripts.exchange().logs);
     let exchange = scripts.exchange();
     assert_eq!(

@@ -1,2 +1,0 @@
-# HTTP signing fixtures retain their upstream canonical whitespace.
-vendor/aws-sigv4/aws-signing-test-suite/** -whitespace

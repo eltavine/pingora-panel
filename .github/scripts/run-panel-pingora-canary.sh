@@ -34,14 +34,14 @@ git -C "$repo_root" fetch --quiet "$upstream_url" "$upstream_sha"
 vendored_sha="$(git -C "$repo_root" merge-base HEAD "$upstream_sha")"
 readonly vendored_sha
 local_changes="$operation_root/local-changes.patch"
-git -C "$repo_root" diff --binary "$vendored_sha" HEAD -- Cargo.toml 'pingora*' tinyufo vendor/aws-sigv4 >"$local_changes"
+git -C "$repo_root" diff --binary "$vendored_sha" HEAD -- Cargo.toml 'pingora*' tinyufo >"$local_changes"
 if [[ -s "$local_changes" ]] && ! git -C "$upstream_root" apply "$local_changes"; then
   printf 'The local changes to Pingora since %s no longer apply to its main at %s.\n' \
     "$vendored_sha" "$upstream_sha" >&2
   exit 1
 fi
 
-git -C "$repo_root" archive HEAD panel .cargo | tar -x -C "$workspace_root"
+git -C "$repo_root" archive HEAD panel .cargo vendor/sqlx-sqlite | tar -x -C "$workspace_root"
 ln -s "$upstream_root/Cargo.toml" "$workspace_root/Cargo.toml"
 for package_path in "$upstream_root"/pingora-* "$upstream_root/tinyufo"; do
   [[ -d "$package_path" ]] || continue

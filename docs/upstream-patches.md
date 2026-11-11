@@ -8,7 +8,7 @@ hold the change. A change goes once an upstream release carries an
 equivalent fix. Every current difference shows with
 
 ```sh
-git diff 3f87e92c HEAD -- Cargo.toml 'pingora*' tinyufo vendor/aws-sigv4
+git diff 3f87e92c HEAD -- Cargo.toml 'pingora*' tinyufo
 ```
 
 The weekly canary applies that difference to Pingora's main and checks
@@ -214,39 +214,12 @@ the next upstream merge that makes them unnecessary.
 (`192.0.2.1`) to be dropped, as on CI runners; a host whose proxy answers
 for that range sees the connection succeed instead.
 
-## Vendored SigV4a dependency
-
-`vendor/aws-sigv4` contains the published `aws-sigv4` 1.6.3 source with
-its existing copyright and Apache-2.0 license. The crates.io archive's
-SHA-256 is `9d3d48355cb86b15ccbb38b8bc6b87500c824ee4ed8cbc10a961b435242b5e16`;
-its source revision is `3a3f39bd932690cab6d2321b677e97a24b687753` in
-`awslabs/aws-sdk-rust`, under `sdk/aws-sigv4`.
-
-The root workspace applies a local Cargo patch that raises the signer's
-optional `crypto-bigint` dependency from 0.5.4 to 0.7.6, matching
-[smithy-rs#4958](https://github.com/smithy-lang/smithy-rs/pull/4958)
-at `5c1c4bca2ea7af97496e077c9f1a718eaac64bf8`. The signing implementation
-is unchanged. This removes both affected bigint versions from the
-optional Dial9 S3 graph without disabling SigV4a or Multi-Region Access
-Points. RUSTSEC-2026-0387 has no patched 0.5 release; the shared dependency
-policy rejects all bigint releases before 0.7.6.
-
-The package retains its upstream signing vectors and adds the proposal's
-offline MRAP signing and presigning tests, with explicit test targets in
-its manifest. Git preserves the HTTP vectors' canonical whitespace.
-`runtime-telemetry` runs that standalone package's full
-feature suite and the runtime's full feature compilation. Cargo's local
-registry bookkeeping and the published package's unused original manifest
-and lockfile are omitted. The package is excluded from root workspace
-membership because its optional S3 dependency chain has a higher Rust
-minimum than Pingora's default build.
-
-Remove the local Cargo patch and vendor directory when a published AWS
-signer enforces the patched bigint dependency. Confirm the root
-workspace's full-feature dependency audit and MRAP signing tests before
-removing the backport.
-
 ## Removed
+
+- The vendored SigV4a signer has been retired. Published `aws-sigv4` 1.6.5
+  requires `crypto-bigint` 0.7.10 or later for SigV4a and includes the MRAP
+  signing and presigning tests. The shared policy still rejects releases
+  affected by RUSTSEC-2026-0387.
 
 - The local Zstandard minimums are now provided by upstream commit
   `8d1adda2`. Both workspaces still enforce those minimums in `deny.toml`.

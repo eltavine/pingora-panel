@@ -5,7 +5,7 @@
 
 [workspace]
 resolver = "2"
-exclude = ["vendor/aws-sigv4"]
+exclude = ["vendor/sqlx-sqlite"]
 members = [
     "pingora",
     "pingora-core",
@@ -55,6 +55,3 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tokio_unstable)'] }
 
 [profile.bench]
 debug = true
-
-[patch.crates-io]
-aws-sigv4 = { path = "vendor/aws-sigv4" }

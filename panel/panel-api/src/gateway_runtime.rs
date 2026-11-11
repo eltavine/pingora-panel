@@ -284,7 +284,11 @@ impl From<SiteCacheStats> for SiteCacheStatsResponse {
         let answered = site.hits + site.stale + site.updating + site.revalidated;
         let looked_up = answered + site.misses + site.expired + site.uncacheable;
         Self {
-            hit_ratio: (looked_up > 0).then(|| answered as f64 / looked_up as f64),
+            hit_ratio: if looked_up > 0 {
+                Some(answered as f64 / looked_up as f64)
+            } else {
+                None
+            },
             site_id: site.site_id,
             hits: site.hits,
             stale: site.stale,

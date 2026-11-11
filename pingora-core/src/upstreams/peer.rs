@@ -646,14 +646,15 @@ impl std::fmt::Debug for PeerOptions {
             curves,
             second_keyshare,
             tcp_fast_open,
+            tls_write_coalescing,
             tracer,
             custom_l4,
             upstream_tcp_sock_tweak_hook: _,
             proxy_digest_user_data_hook: _,
             #[cfg(feature = "openssl_derived")]
-            upstream_tls_handshake_complete_hook: _,
+                upstream_tls_handshake_complete_hook: _,
             #[cfg(feature = "openssl_derived")]
-            upstream_tls_verify_callback: _,
+                upstream_tls_verify_callback: _,
         } = self;
         let mut debug = f.debug_struct("PeerOptions");
         debug
@@ -693,6 +694,7 @@ impl std::fmt::Debug for PeerOptions {
             .field("curves", curves)
             .field("second_keyshare", second_keyshare)
             .field("tcp_fast_open", tcp_fast_open)
+            .field("tls_write_coalescing", tls_write_coalescing)
             .field("tracer", tracer)
             .field("custom_l4", custom_l4)
             .finish_non_exhaustive()
