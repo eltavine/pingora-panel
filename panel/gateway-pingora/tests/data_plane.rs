@@ -604,7 +604,16 @@ async fn default_site_failover_reload_and_h2c() {
     assert!(health[0].endpoints[0].failures >= 1);
     assert!(health[0].endpoints[1].requests >= 3);
 
-    let before = gateway.plane.status().generation;
+    // Traffic can arrive before the first generation is published to status.
+    let mut startup = gateway.plane.subscribe();
+    let before = tokio::time::timeout(
+        Duration::from_secs(5),
+        startup.wait_for(|status| status.generation > 0),
+    )
+    .await
+    .expect("initial generation was not published")
+    .expect("data plane stopped publishing status")
+    .generation;
     let status = gateway.plane.reload().await.unwrap();
     assert_eq!(status.generation, before + 1);
     assert_eq!(get(listen, Some("example.com"), "/", "").await.status, 200);
