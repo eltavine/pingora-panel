@@ -549,7 +549,8 @@ impl UpstreamPool {
             .map_or((false, String::new()), |endpoint| {
                 (endpoint.tls, endpoint.sni.clone())
             });
-        let mut peer = HttpPeer::new(address, tls, sni);
+        let mut peer = HttpPeer::new(address, tls, sni)
+            .expect("an IP socket address always resolves to itself");
         self.peer.apply(&mut peer.options, tls);
         if upgrade {
             peer.options.alpn = ALPN::H1;
@@ -559,7 +560,8 @@ impl UpstreamPool {
 
     pub(crate) fn peer(&self, endpoint: usize, upgrade: bool) -> HttpPeer {
         let endpoint = &self.endpoints[endpoint];
-        let mut peer = HttpPeer::new(endpoint.address, endpoint.tls, endpoint.sni.clone());
+        let mut peer = HttpPeer::new(endpoint.address, endpoint.tls, endpoint.sni.clone())
+            .expect("an IP socket address always resolves to itself");
         self.peer.apply(&mut peer.options, endpoint.tls);
         if upgrade {
             peer.options.alpn = ALPN::H1;
