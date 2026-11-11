@@ -1,6 +1,6 @@
 # Local changes to the vendored Pingora
 
-The root workspace vendors Pingora 0.9.0, upstream commit `84f21ee9`. The
+The root workspace vendors Pingora 0.9.0, upstream commit `3f87e92c`. The
 product specification (§3.2) allows changing the upstream crates only to
 fix security or correctness problems, and only with a record here: the
 upstream issue or pull request, the affected versions and the tests that
@@ -8,7 +8,7 @@ hold the change. A change goes once an upstream release carries an
 equivalent fix. Every current difference shows with
 
 ```sh
-git diff 84f21ee9 HEAD -- Cargo.toml 'pingora*' tinyufo vendor/aws-sigv4
+git diff 3f87e92c HEAD -- Cargo.toml 'pingora*' tinyufo vendor/aws-sigv4
 ```
 
 The weekly canary applies that difference to Pingora's main and checks
@@ -16,23 +16,6 @@ and tests the adapter there, so a change that no longer applies, as when
 upstream has taken it, fails the canary.
 
 ## Patches
-
-### Patched Zstandard context and dictionary handling
-
-- **Change:** `pingora-header-serde` requires zstd 0.14.3 and zstd-safe
-  8.2.0. Both workspaces reject older releases through `deny.toml`.
-- **Why:** [RUSTSEC-2026-0391](https://rustsec.org/advisories/RUSTSEC-2026-0391.html)
-  covers stream data leaking across reused contexts; RUSTSEC-2026-0395
-  through RUSTSEC-2026-0406 cover dictionary lifetimes, buffer bounds,
-  cloning, training and unfinished multithreaded streams. The maintained
-  releases support Rust 1.64 and use BSD-3-Clause, already allowed by the
-  repository's license policy.
-- **Upstream:** [#1072](https://github.com/cloudflare/pingora/issues/1072)
-  tracks the header serializer's affected dependency requirements.
-- **Affected versions:** Pingora through 0.9.0 allows zstd-safe 7.x.
-- **Tests:** header serialization, dictionary compression and training tests;
-  cache and gateway adapter suites; both workspaces' dependency audits.
-- **Goes when:** an upstream release requires these patched releases.
 
 ### Patched rustls release floor
 
@@ -264,6 +247,9 @@ workspace's full-feature dependency audit and MRAP signing tests before
 removing the backport.
 
 ## Removed
+
+- The local Zstandard minimums are now provided by upstream commit
+  `8d1adda2`. Both workspaces still enforce those minimums in `deny.toml`.
 
 - Local unbuffered L4 stream implementation: upstream commit `5b30d71d`
   preserves zero-capacity read settings with Tokio 1.54. The TCP and Unix
