@@ -59,7 +59,7 @@ RUN for directory in control plugins gateway-secrets pki credentials/panel-api \
  && mkdir -p /out/gateway /out/sites \
  && chmod 700 /out/gateway
 
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:cc66d222f0a7ec996b78a99fe76a969bc80b539a5016ad866c14d1949bc6d0ab
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:cb87acc574abe719b6e5c547384defa2f7b1f24af9605d3f618cf852495d8be2
 # The release and commit the image was built from; the control plane reports them.
 ARG PINGORA_PANEL_VERSION=dev
 ARG PINGORA_PANEL_COMMIT=unknown
