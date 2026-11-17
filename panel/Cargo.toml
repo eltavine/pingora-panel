@@ -231,7 +231,7 @@ rpassword = "=7.5.4"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.154"
 sha1 = "=0.11.0"
-sha2 = "=0.11.0"
+sha2 = "=0.11.1"
 subtle = "=2.6.1"
 similar = "=3.2.0"
 snapshot-store-fs = { version = "=0.2.0", path = "snapshot-store-fs" }
