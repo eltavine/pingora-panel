@@ -334,6 +334,24 @@
           "reason": "Inherited transitive duplicate with no unified release line: 0.59.0 via pingora-core; 0.61.2 via anstyle-query, anstyle-wincon, errno.",
           "expires_on": "2027-03-01"
         }
+      ],
+      "unmaintained": [
+        {
+          "advisory_id": "RUSTSEC-2026-0542",
+          "crate": "humantime",
+          "versions": ["2.4.0"],
+          "owner": "pingora-panel-security",
+          "reason": "Only ppanel uses humantime. Its replacement must preserve the existing duration syntax and output for CLI flags and scripts.",
+          "expires_on": "2026-12-18"
+        },
+        {
+          "advisory_id": "RUSTSEC-2026-0555",
+          "crate": "chrono-tz",
+          "versions": ["0.10.4"],
+          "owner": "pingora-panel-security",
+          "reason": "panel-schedule inherits chrono-tz through rrule 0.14.0. Replacing it requires retaining IANA time zone and daylight-saving behavior for existing recurrence schedules.",
+          "expires_on": "2026-12-18"
+        }
       ]
     }
   }

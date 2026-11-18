@@ -1,7 +1,7 @@
-# The remaining exception is a compile-time macro reached through foundations'
-# optional Linux memory-profiling feature via tikv-jemalloc-ctl. Its owner,
-# scope and expiry are recorded in rust-advisory-exceptions.json.
+# Exception owners, workspace scope and expiry are recorded in
+# .github/policies/rust-advisory-exceptions.json.
 [advisories]
 ignore = [
     "RUSTSEC-2024-0436", # paste: no longer maintained
+    "RUSTSEC-2026-0543", # chrono: no longer maintained
 ]

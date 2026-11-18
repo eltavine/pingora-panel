@@ -10,6 +10,17 @@
       "owner": "pingora-panel-security",
       "reason": "No tikv-jemalloc-ctl release drops the archived paste macro yet; its main branch removed it in tikv/jemallocator#189, and foundations must adopt that release.",
       "scope": "Compile-time proc-macro only, reached through pingora-foundations' optional Linux memory-profiling feature via foundations and tikv-jemalloc-ctl; no runtime code."
+    },
+    {
+      "advisory_id": "RUSTSEC-2026-0543",
+      "workspaces": [
+        "Cargo.toml",
+        "panel/Cargo.toml"
+      ],
+      "expires_on": "2026-12-18",
+      "owner": "pingora-panel-security",
+      "reason": "RustSec marks all Chrono releases unmaintained. Replacing it requires checking HTTP date handling in Pingora and the Panel's stored timestamps, API serialization, and recurrence schedules.",
+      "scope": "This informational advisory applies to pingora-core and slog-term in the root workspace and to the Panel's direct Chrono use and transitive use through SQLx, pbjson-types, and rrule."
     }
   ]
 }
