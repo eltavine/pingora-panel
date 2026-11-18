@@ -374,7 +374,7 @@ async fn a_worker_runs_jobs_from_its_database() {
     assert_eq!(finished.progress.unwrap().message(), "done");
     let published = events(&service).await;
     assert_eq!(published.first().map(String::as_str), Some("queued"));
-    assert!(published.contains(&"retrying".to_owned()));
+    assert!(published.iter().any(|state| state == "retrying"));
     assert_eq!(published.last().map(String::as_str), Some("succeeded"));
 
     service.close().await;
