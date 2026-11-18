@@ -10,32 +10,7 @@ use serde_json::{json, Value};
 #[derive(Subcommand)]
 pub(crate) enum SiteCommand {
     /// Lists sites, newest page first when sorted descending.
-    List {
-        /// Matches names, domains, notes, groups and tags.
-        #[arg(long = "search", short = 's', value_name = "TEXT")]
-        q: Option<String>,
-        #[arg(long, value_enum)]
-        status: Option<Status>,
-        #[arg(long, value_enum)]
-        kind: Option<Kind>,
-        #[arg(long)]
-        domain: Option<String>,
-        #[arg(long)]
-        tag: Option<String>,
-        #[arg(long)]
-        group: Option<String>,
-        #[arg(long)]
-        favorite: bool,
-        #[arg(long, value_enum, default_value_t = Sort::Name)]
-        sort: Sort,
-        #[arg(long)]
-        descending: bool,
-        #[arg(long, default_value_t = 50)]
-        limit: usize,
-        /// Follows cursors until every matching site is listed.
-        #[arg(long)]
-        all: bool,
-    },
+    List(ListSites),
     /// Counts sites by status, type and HTTPS.
     Summary,
     /// Shows a site with its domains, routes and state.
@@ -159,6 +134,34 @@ pub(crate) enum SiteCommand {
         #[arg(required_if_eq_any([("answer", "file"), ("answer", "redirect")]))]
         target: Option<String>,
     },
+}
+
+#[derive(clap::Args)]
+pub(crate) struct ListSites {
+    /// Matches names, domains, notes, groups and tags.
+    #[arg(long = "search", short = 's', value_name = "TEXT")]
+    q: Option<String>,
+    #[arg(long, value_enum)]
+    status: Option<Status>,
+    #[arg(long, value_enum)]
+    kind: Option<Kind>,
+    #[arg(long)]
+    domain: Option<String>,
+    #[arg(long)]
+    tag: Option<String>,
+    #[arg(long)]
+    group: Option<String>,
+    #[arg(long)]
+    favorite: bool,
+    #[arg(long, value_enum, default_value_t = Sort::Name)]
+    sort: Sort,
+    #[arg(long)]
+    descending: bool,
+    #[arg(long, default_value_t = 50)]
+    limit: usize,
+    /// Follows cursors until every matching site is listed.
+    #[arg(long)]
+    all: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -369,7 +372,7 @@ const DETAIL: &[Column] = &[
 
 pub async fn run(api: &Api, output: &Output, command: SiteCommand) -> Result<()> {
     match command {
-        SiteCommand::List {
+        SiteCommand::List(ListSites {
             q,
             status,
             kind,
@@ -381,7 +384,7 @@ pub async fn run(api: &Api, output: &Output, command: SiteCommand) -> Result<()>
             descending,
             limit,
             all,
-        } => {
+        }) => {
             let mut query = vec![
                 ("sort", name(sort)),
                 ("descending", descending.to_string()),
