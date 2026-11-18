@@ -61,15 +61,17 @@ RUN for directory in control plugins gateway-secrets pki credentials/panel-api \
  && mkdir -p /out/gateway /out/sites \
  && chmod 700 /out/gateway
 
-# Rust uses libgcc for unwinding. Copy it with its Debian package records and
-# notices so the runtime can use base-nossl and the SBOM still identifies libgcc.
+# Rust unwinding and Luau's C++ runtime need these GCC libraries. Keep the
+# Debian package records and notices so the SBOM identifies both libraries.
 RUN --mount=type=bind,from=runtime-cc,target=/runtime \
     mkdir -p /out/runtime \
  && cd /runtime \
- && cp --archive --parents "usr/lib/$(gcc -print-multiarch)/libgcc_s.so.1" \
-        usr/share/doc/libgcc-s1 usr/share/doc/gcc-14-base \
+ && lib_dir="usr/lib/$(gcc -print-multiarch)" \
+ && cp --archive --parents "$lib_dir/libgcc_s.so.1" "$lib_dir"/libstdc++.so.6* \
+        usr/share/doc/libgcc-s1 usr/share/doc/libstdc++6 usr/share/doc/gcc-14-base \
         usr/share/lintian/overrides/libgcc-s1 \
         var/lib/dpkg/status.d/libgcc-s1* var/lib/dpkg/status.d/gcc-14-base* \
+        var/lib/dpkg/status.d/libstdc++6* \
         /out/runtime/
 
 FROM gcr.io/distroless/base-nossl-debian13:nonroot@sha256:89815d620ac01d8de13cdaf04d19ed874447ca2296d4985b14b818f6e5e47854
