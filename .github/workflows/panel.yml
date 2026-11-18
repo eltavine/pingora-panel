@@ -282,6 +282,7 @@ jobs:
         uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
         with:
           version: 1.47.2
+          github_token: ${{ github.token }}
 
       - name: Lint contracts
         working-directory: panel
