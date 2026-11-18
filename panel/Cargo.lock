@@ -371,7 +371,7 @@ dependencies = [
  "panel-sqlite",
  "prost-types",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "sqlx",
  "tempfile",
  "tokio",
@@ -435,7 +435,7 @@ dependencies = [
  "plugin-contracts",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "sqlx",
  "tempfile",
  "tokio",
@@ -1182,9 +1182,9 @@ checksum = "217698eaf96b4a3f0bc4f3662aaa55bdf913cd54d7204591faa790070c6d0853"
 
 [[package]]
 name = "crc32fast"
-version = "1.5.3"
+version = "1.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ba106e844045ddc02c20768ac4b0b7cb45f2cc2ecbd833ac9f5dacb183c2055"
+checksum = "2b929dd2a135771f40afabd1073f85eed59c800b7c61901e5c254270497dad64"
 dependencies = [
  "cfg-if",
 ]
@@ -1830,7 +1830,7 @@ dependencies = [
  "rustls-platform-verifier",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "socket2",
  "tempfile",
  "tokio",
@@ -2726,12 +2726,12 @@ dependencies = [
 
 [[package]]
 name = "jsonwebtoken"
-version = "11.1.0"
+version = "12.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e75fe14a82d81e5f5af639997db37d8b96045938a7ac6ab18cdbe1c7467e05e1"
+checksum = "f347a975eb5fa8f5c4eadce6c1152c11c326cf32cf839fb64ff12d5cb8f4ce8b"
 dependencies = [
- "base64 0.22.1",
- "getrandom 0.2.17",
+ "base64 0.23.1",
+ "getrandom 0.4.3",
  "js-sys",
  "serde",
  "serde_json",
@@ -3377,7 +3377,7 @@ dependencies = [
  "rustls-pki-types",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "tokio",
  "tokio-tungstenite 0.30.0",
  "tower",
@@ -3477,7 +3477,7 @@ dependencies = [
  "panel-errors",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "tar",
  "tempfile",
  "walkdir",
@@ -3530,7 +3530,7 @@ dependencies = [
  "rustls-pki-types",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "time",
  "utoipa",
  "x509-parser 0.16.0",
@@ -3553,7 +3553,7 @@ dependencies = [
  "rpassword",
  "rustls",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "tempfile",
  "tokio",
  "tokio-rustls",
@@ -3737,7 +3737,7 @@ dependencies = [
  "ipnet",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "thiserror 2.0.21",
  "utoipa",
 ]
@@ -3872,7 +3872,7 @@ dependencies = [
  "panel-secrets",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "subtle",
  "tokio",
  "unicode-normalization",
@@ -3967,7 +3967,7 @@ dependencies = [
  "rustls-platform-verifier",
  "serde_json",
  "sha1 0.11.0",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "tokio",
  "tokio-rustls",
  "uuid",
@@ -4117,7 +4117,7 @@ dependencies = [
  "base64 0.23.1",
  "panel-errors",
  "ring",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "tokio",
  "zeroize",
 ]
@@ -4655,7 +4655,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -4690,7 +4690,7 @@ dependencies = [
  "prost-types",
  "ring",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "sqlx",
  "tempfile",
  "tokio",
@@ -4925,9 +4925,9 @@ dependencies = [
 
 [[package]]
 name = "prost"
-version = "0.14.4"
+version = "0.14.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "528ac67416ff8646872a3c02cad9cc4ee5dc9f9540c9b10771855c95cb2e5ae1"
+checksum = "3ef0b569d1d907ab3a28596aee62cf1f61dacb0529a4bedcd8e7460e2d5228b4"
 dependencies = [
  "bytes",
  "prost-derive",
@@ -4956,9 +4956,9 @@ dependencies = [
 
 [[package]]
 name = "prost-derive"
-version = "0.14.4"
+version = "0.14.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
+checksum = "1ad9c5423459fa2f729b8d9235fab810aa29628b171467744fc86d21460ad70d"
 dependencies = [
  "anyhow",
  "itertools",
@@ -5727,9 +5727,9 @@ dependencies = [
 
 [[package]]
 name = "sha2"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4"
+checksum = "47d7069beb7d6ac7b9acd1039986e73443f24234f41074da099d6f994ac9ad19"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.3.1",
@@ -5763,11 +5763,11 @@ dependencies = [
 
 [[package]]
 name = "signature"
-version = "2.2.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
+checksum = "28d567dcbaf0049cb8ac2608a76cd95ff9e4412e1899d389ee400918ca7537f5"
 dependencies = [
- "rand_core 0.6.4",
+ "rand_core 0.10.1",
 ]
 
 [[package]]
@@ -5788,9 +5788,9 @@ checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
 name = "similar"
-version = "3.2.0"
+version = "3.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f66ca1f7aca2474dc10c942eb22feffc897735f54cd1db90138c2fddb490987"
+checksum = "d2f8bec09ae8fae0f4f265a4559a9334be3929d8504e9b536df0a41302bd1733"
 dependencies = [
  "bstr",
 ]
@@ -5810,7 +5810,7 @@ dependencies = [
  "hex",
  "panel-application",
  "panel-errors",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "tempfile",
  "tokio",
 ]
@@ -5982,7 +5982,7 @@ dependencies = [
  "percent-encoding",
  "serde",
  "sha1 0.11.0",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "sqlx-core",
  "thiserror 2.0.21",
  "tracing",
@@ -6016,7 +6016,7 @@ dependencies = [
  "rand 0.10.3",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.11.1",
  "smallvec",
  "sqlx-core",
  "stringprep",
