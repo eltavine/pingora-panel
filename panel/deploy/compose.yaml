@@ -51,7 +51,7 @@ x-pki: &pki
 
 services:
   nats:
-    image: docker.io/library/nats:2.15.2-alpine@sha256:823e7f1d6d8ffe3b30dbd73d4a06bbb939acf94929f7fdf224404da7a05bafb5
+    image: docker.io/library/nats:2.15.3-alpine@sha256:558394a23dd3c36f2d3a64b51865fd09908010e80a542cea5e75c2af543ed62a
     network_mode: host
     restart: unless-stopped
     command: ["--jetstream", "--store_dir", "/data", "--addr", "127.0.0.1", "--port", "4222", "--http_port", "8222"]
@@ -99,7 +99,7 @@ services:
   # Keeps the gateway's access and error logs; only the control plane
   # queries it.
   loki:
-    image: docker.io/grafana/loki:3.7.9@sha256:0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28
+    image: docker.io/grafana/loki:3.7.10@sha256:b43c257ccfc925d4a50b8717cac61a3b51df8c48d01847936057e5c4075a24a7
     network_mode: host
     restart: unless-stopped
     read_only: true

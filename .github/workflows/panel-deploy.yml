@@ -57,6 +57,13 @@ jobs:
       - name: Build the image
         run: docker compose -f panel/deploy/compose.yaml build
 
+      - name: Resolve native libraries in the final image
+        run: |
+          for binary in gatewayd panel-control panel-bootstrap ppanel ops-agent pingora-panel-reference-plugin; do
+            docker run --rm --entrypoint /lib64/ld-linux-x86-64.so.2 \
+              localhost/pingora-panel:dev --list "/usr/local/bin/$binary"
+          done
+
       - name: Install the SBOM and vulnerability tools
         run: |
           bash .github/scripts/install-syft.sh "$RUNNER_TEMP/evidence-bin"

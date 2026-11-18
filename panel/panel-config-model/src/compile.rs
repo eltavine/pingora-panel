@@ -1306,11 +1306,9 @@ mod tests {
         }
         model.sites[0].routes[0].no_cache = false;
         model.sites[0].routes[0].cache_policy_id = Some("missing".into());
-        let messages: Vec<String> = crate::validate(&model)
-            .into_iter()
-            .map(|diagnostic| diagnostic.message)
-            .collect();
-        assert!(messages.contains(&"cache policy missing does not exist".to_string()));
+        assert!(crate::validate(&model)
+            .iter()
+            .any(|diagnostic| diagnostic.message == "cache policy missing does not exist"));
 
         model.sites[0].routes[0].cache_policy_id = None;
         model.cache_policies.pop();
