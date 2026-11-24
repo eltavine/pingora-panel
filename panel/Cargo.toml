@@ -152,7 +152,7 @@ ipnet = "=2.12.2"
 jsonwebtoken = { version = "=12.0.0", default-features = false }
 iri-string = "=0.7.14"
 jsonschema = { version = "=0.60.1", default-features = false }
-lru = "=0.18.5"
+lru = "=0.19.1"
 mediatype = "=0.23.0"
 md-5 = "=0.11.0"
 mlua = { version = "=0.12.2", features = ["async", "luau", "luau-jit", "send", "serde"] }
