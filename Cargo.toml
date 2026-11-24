@@ -47,7 +47,7 @@ log = "0.4"
 futures = "0.3"
 h2 = ">=0.4.16"
 once_cell = "1"
-lru = "0.18.2"
+lru = "0.19.1"
 ahash = ">=0.8.9"
 
 [workspace.lints.rust]
